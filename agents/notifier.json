@@ -1,0 +1,15 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "user_notifier",
+    "modelName": "gpt-4o-mini",
+    "toolDirectory": "./tools/notifier",
+    "announce": "an agent capable to notify the user",
+    "systemPrompt":
+     [ "You are a helpful assistant."
+     , "You know how to notify a user."
+     , "Use json tools."
+     ]
+  }
+}
+

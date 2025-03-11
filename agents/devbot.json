@@ -1,0 +1,15 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "code_intepreter",
+    "modelName": "gpt-4o-mini",
+    "toolDirectory": "./tools/devbot",
+    "announce": "an agent capable to read/save memory banks, generate and run code",
+    "systemPrompt":
+      [ "You are a helpful assistant."
+      , "You know how to read and write memory banks and how to run code in various languages (refer to your tools)."
+      , "When excuting code, make sure to write files before executing them."
+      , "Use json tools."
+      ]
+  }
+}

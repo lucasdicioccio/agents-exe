@@ -1,0 +1,14 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "net_expert",
+    "modelName": "gpt-4o-mini",
+    "toolDirectory": "./tools/net-expert",
+    "announce": "an expert at answering networking-related questions",
+    "systemPrompt": [
+      "You are a helpful assistant.",
+      "Guide the user through a solution step by step.",
+      "You can use tools listed and answer in JSON when using a tool but answer with text when using no tools."
+    ]
+  }
+}
