@@ -1,0 +1,10 @@
+FROM docker.io/haskell:9.8.4
+RUN apt-get update && apt-get install -y git-core && mkdir /opt/build && cabal update
+WORKDIR /opt/build
+RUN git clone https://github.com/lucasdicioccio/agents-exe.git && cd agents-exe && cabal build
+RUN mkdir /opt/bin && cd agents-exe && cabal install --installdir=/opt/bin --install-method=copy
+
+# finally copy
+FROM docker.io/ubuntu:latest
+COPY --from=0 /opt/bin/agents-exe /bin/agents-exe
+RUN apt-get update && apt-get install -y vim

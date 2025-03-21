@@ -165,9 +165,45 @@ Coding style follows these guidelines:
 - no monad-tower, run in IO, library users can then pick their monad-tower or effect-system
 - use contravariant tracer to surface logs, be generous with traces
 
+# Build and run
+
+## Directly build from source using Haskell tools
+
+```console
+git clone https://github.com/lucasdicioccio/agents-exe
+cd agents-exe
+cabal run -- agents-exe --help
+cabal run -- agents-exe init
+cabal run -- agents-exe cli
+```
+
+If you are on a linux machine with some tools like `ping` an `notify-send`
+installed, you should be able to run the example tools.
+
+```console
+cabal run -- agents-exe run --prompt "can you report the latency to github.com"
+```
+
+## Building from the Containerfile
+
+With [Podman](https://podman.io), for [Docker](https://docker.com), replace with `docker`.
+
+```console
+git clone https://github.com/lucasdicioccio/agents-exe
+cd agents-exe/bundling
+podman build -f Containerfile.build -t agents-exe
+podman run -it --entrypoint=bash agents-exe:latest
+```
+
+And then from inside the container.
+
+```console
+agents-exe init
+agents-exe cli
+```
+
 # Unordered Roadmap
 
-- podman image
 - more LLM-API providers (e.g., vLLM, Mistral, llama)
 - MCP support
   - server: reloads/notifications
