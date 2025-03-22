@@ -26,7 +26,9 @@
       "{ \"slug\": \"notify-send\"\n, \"description\": \"notify the user with some message on the desktop\"\n, \"args\":\n  [ { \"name\": \"message\"\n    , \"description\": \"the message to put in the notification\"\n    , \"type\": \"message\"\n    , \"backing_type\": \"string\"\n    , \"arity\": \"single\"\n    , \"mode\": \"positional\"\n    }\n  ]\n}",
       "",
       "example3:",
-      "{ \"slug\": \"get-date\"\n, \"description\": \"get current date\"\n, \"args\":\n  [ ]\n}"
+      "{ \"slug\": \"get-date\"\n, \"description\": \"get current date\"\n, \"args\":\n  [ ]\n}",
+      "",
+      "on 'run' he bash scripts actually executes the command"
     ]
   }
 }
