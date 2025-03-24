@@ -10,7 +10,6 @@ import Control.Monad.Reader (runReaderT)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as Aeson
 import Data.Conduit.Combinators (sinkHandleFlush)
-import Data.Foldable (for_)
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text

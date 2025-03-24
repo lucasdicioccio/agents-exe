@@ -14,7 +14,9 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import GHC.IO.Handle (Handle)
 import Prod.Tracer (Tracer (..), contramap, silent, traceBoth)
+import System.IO (stderr, stdout)
 
 import System.Agents.Base (AgentSlug)
 import qualified System.Agents.FileLoader as FileLoader
@@ -232,6 +234,13 @@ augmentMainAgentPromptWithSubAgents agents base =
 traceSilent :: Tracer IO Trace
 traceSilent = silent
 
+traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
+traceWaitingOpenAIRateLimits lims onWait = Tracer f
+  where
+    f (AgentTrace _ (Agent.OpenAITrace tr)) =
+        runTracer (OpenAI.waitRateLimit lims onWait) tr
+    f _ = pure ()
+
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
   where
@@ -249,15 +258,21 @@ tracePrintingTextResponses = Tracer f
     g _ _ = pure ()
 
 traceUsefulPromptStdout :: Tracer IO Trace
-traceUsefulPromptStdout = Tracer f
+traceUsefulPromptStdout = traceUsefulPromptHandle stdout
+
+traceUsefulPromptStderr :: Tracer IO Trace
+traceUsefulPromptStderr = traceUsefulPromptHandle stderr
+
+traceUsefulPromptHandle :: Handle -> Tracer IO Trace
+traceUsefulPromptHandle h = Tracer f
   where
     f (AgentTrace slug tr) =
-        Text.putStrLn $
+        Text.hPutStrLn h $
             Text.unlines
                 [ mconcat ["@", slug, ":"]
                 , renderAgentTrace tr
                 ]
-    f (DataLoadingTrace x) = print x
+    f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
 
 renderAgentTrace :: Agent.Trace -> Text
 renderAgentTrace tr = case tr of

@@ -11,8 +11,10 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.CLI.InitProject as InitProject
 import qualified System.Agents.CLI.Prompt as Prompt
 import qualified System.Agents.FileLoader.Base as Agents
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.Tools.Bash as Bash
+import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import Options.Applicative
 
@@ -133,6 +135,8 @@ parseProgOptions =
 
 main :: IO ()
 main = do
+    hSetBuffering stderr LineBuffering
+    hSetBuffering stdout LineBuffering
     prog =<< execParser infoProg
   where
     infoProg =
@@ -165,7 +169,10 @@ main = do
                         , Prompt.interactiveTracer =
                             Prod.traceBoth
                                 Prompt.traceUsefulPromptStdout
-                                Prompt.tracePrintingTextResponses
+                                ( Prod.traceBoth
+                                    Prompt.tracePrintingTextResponses
+                                    (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 500) print)
+                                )
                         }
             OneShot opts -> do
                 prompt <-
@@ -179,7 +186,7 @@ main = do
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer = Prompt.traceSilent
+                        , Prompt.interactiveTracer = Prompt.traceUsefulPromptStderr
                         }
             SelfDescribe ->
                 Aeson.encodeFile "/dev/stdout" $
@@ -194,7 +201,10 @@ main = do
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer = Prod.silent
+                        , Prompt.interactiveTracer =
+                            Prod.traceBoth
+                                Prompt.traceUsefulPromptStderr
+                                (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 500) (\_ -> pure ()))
                         }
             Initialize ->
                 let o =

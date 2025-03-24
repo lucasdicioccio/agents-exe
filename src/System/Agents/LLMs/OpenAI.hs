@@ -2,10 +2,12 @@
 
 module System.Agents.LLMs.OpenAI where
 
+import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LByteString
 import Data.HashMap.Strict as HashMap
 import Data.List.NonEmpty (NonEmpty)
@@ -15,9 +17,13 @@ import Data.Monoid (Last (..))
 import Data.Sequence (Seq)
 import Data.String (IsString)
 import Data.Text (Text)
-import Data.Text.Encoding as Text
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import Data.Text.IO as Text
-import Prod.Tracer (Tracer, contramap, runTracer)
+import Data.Text.Read as Text
+import qualified Network.HTTP.Client as NetHttpClient
+import Prod.Tracer (Tracer (..), contramap, runTracer)
+import Text.Read (readMaybe)
 
 import qualified System.Agents.HttpClient as HttpClient
 
@@ -27,6 +33,127 @@ data Trace
     | GotChatCompletion !Aeson.Value
     | HttpClientTrace !HttpClient.Trace
     deriving (Show)
+
+-------------------------------------------------------------------------------
+
+type Remaining = Int
+type Reset = Text
+
+extractRequestRateLimitFromResponse :: NetHttpClient.Response body -> (Maybe Remaining, Maybe Reset)
+extractRequestRateLimitFromResponse rsp =
+    let
+        remaining = Prelude.lookup "x-ratelimit-remaining-requests" (NetHttpClient.responseHeaders rsp) >>= readMaybe . C8.unpack :: Maybe Int
+        resetStr = Prelude.lookup "x-ratelimit-reset-requests" (NetHttpClient.responseHeaders rsp) >>= pure . Text.decodeUtf8
+     in
+        (remaining, resetStr)
+
+extractTokenRateLimitFromResponse :: NetHttpClient.Response body -> (Maybe Remaining, Maybe Reset)
+extractTokenRateLimitFromResponse rsp =
+    let
+        remaining = Prelude.lookup "x-ratelimit-remaining-tokens" (NetHttpClient.responseHeaders rsp) >>= readMaybe . C8.unpack :: Maybe Int
+        resetStr = Prelude.lookup "x-ratelimit-reset-tokens" (NetHttpClient.responseHeaders rsp) >>= pure . Text.decodeUtf8
+     in
+        (remaining, resetStr)
+
+data ApiLimits = ApiLimits
+    { requestCushion :: Remaining
+    , tokenCushion :: Remaining
+    }
+
+data WaitAction
+    = WaitOnTokens Int
+    | WaitOnRequests Int
+    deriving (Show, Ord, Eq)
+
+evalWaitAction :: ApiLimits -> NetHttpClient.Response a -> Maybe WaitAction
+evalWaitAction lims rsp =
+    let
+        (r0, rst0) = extractRequestRateLimitFromResponse rsp
+        (r1, rst1) = extractTokenRateLimitFromResponse rsp
+        p0 = maybe False (< lims.requestCushion) r0
+        p1 = maybe False (< lims.tokenCushion) r1
+        delay0 = maybe (-1) parseRateLimitDelay rst0
+        delay1 = maybe (-1) parseRateLimitDelay rst1
+     in
+        doWait p0 delay0 p1 delay1
+  where
+    doWait True d0 True d1
+        | d1 > d0 = Just $ WaitOnTokens d1
+        | otherwise = Just $ WaitOnRequests d0
+    doWait True d0 False _ = Just $ WaitOnRequests d0
+    doWait False _ True d1 = Just $ WaitOnTokens d1
+    doWait False _ False _ = Nothing
+
+{- | Parses the ratelimit reset header syntaxes.
+https://community.openai.com/t/what-is-new-field-in-rate-limits-x-ratelimit-reset-tokens-usage-based/541210
+I've not found a grammar for the format so I made up examples found, data seen, and hallucinated.
+-}
+parseRateLimitDelay :: Text -> Int
+parseRateLimitDelay t0 =
+    let
+        (d, t1) = getDays t0
+        (h, t2) = getHours t1
+        (m, t3) = getMin t2
+        (ms, rms) = getMsec t3
+        (s, rs) = getSec t3
+        secs = if ms > 0 then 1 else s
+     in
+        secs + 60 * (m + 60 * (h + 24 * d))
+  where
+    getDays, getHours, getMin, getSec :: Text -> (Int, Text)
+    getDays = breakInt "d"
+    getHours = breakInt "h"
+    -- special handling of `ms` confusing minutes
+    getMin t =
+        let (val, rest) = breakInt "m" t
+         in if "s" `Text.isPrefixOf` rest then (0, t) else (val, rest)
+    getSec t =
+        let (val, rest) = breakFloat "s" t
+         in (ceiling val, rest)
+    getMsec = breakInt "ms"
+
+    -- special handling of sub-seconds: we'll wait for a whole second anyway,
+    -- so we round-up the value during parsing
+    breakInt :: Text -> Text -> (Int, Text)
+    breakInt char txt =
+        let (val, rest) = Text.breakOn char txt
+         in if rest == ""
+                then (0, txt)
+                else (readDecimalOrZero val, Text.drop (Text.length char) rest)
+
+    breakFloat :: Text -> Text -> (Float, Text)
+    breakFloat char txt =
+        let (val, rest) = Text.breakOn char txt
+         in if rest == ""
+                then (0, txt)
+                else (readFloatOrZero val, Text.drop (Text.length char) rest)
+
+    readDecimalOrZero :: Text -> Int
+    readDecimalOrZero txt =
+        case Text.decimal txt of
+            Right (v, _) -> v
+            Left _ -> 0
+
+    readFloatOrZero :: Text -> Float
+    readFloatOrZero txt =
+        case Text.rational txt of
+            Right (v, _) -> v
+            Left _ -> 0
+
+waitRateLimit :: ApiLimits -> (WaitAction -> IO ()) -> Tracer IO Trace
+waitRateLimit lims onWait = Tracer go
+  where
+    go :: Trace -> IO ()
+    go (HttpClientTrace (HttpClient.RunRequest _ rsp)) = do
+        case evalWaitAction lims rsp of
+            Nothing -> pure ()
+            (Just w@(WaitOnTokens n)) -> do
+                onWait w
+                threadDelay (1000000 * n)
+            (Just w@(WaitOnRequests n)) -> do
+                onWait w
+                threadDelay (1000000 * n)
+    go _ = pure ()
 
 -------------------------------------------------------------------------------
 newtype ToolName = ToolName {getToolName :: Text}
