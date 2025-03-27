@@ -35,6 +35,17 @@ data Trace
     deriving (Show)
 
 -------------------------------------------------------------------------------
+newtype ApiBaseUrl
+    = ApiBaseUrl {getBaseUrl :: Text}
+    deriving (Show, Eq, Ord)
+
+openAIv1Endpoint :: ApiBaseUrl
+openAIv1Endpoint = ApiBaseUrl "https://api.openai.com/v1"
+
+mistralLaPlateformV1Endpoint :: ApiBaseUrl
+mistralLaPlateformV1Endpoint = ApiBaseUrl "https://api.mistral.ai/v1"
+
+-------------------------------------------------------------------------------
 
 type Remaining = Int
 type Reset = Text
@@ -189,7 +200,6 @@ instance ToJSON Tool where
                             , "required" .= fmap propertyKey t.toolParamProperties
                             ]
                     ]
-            , "strict" .= True
             ]
       where
         toPair :: ParamProperty -> (Text, Value)
@@ -268,17 +278,34 @@ newtype ApiKey = ApiKey {revealApiKey :: ByteString}
 makeApiKey :: ByteString -> ApiKey
 makeApiKey = ApiKey
 
+data ModelFlavor
+    = OpenAIv1
+    | MistralV1
+    deriving (Show, Eq, Ord)
+
 data Model = Model
-    { modelName :: Text
+    { modelFlavor :: ModelFlavor
+    , modelBaseUrl :: ApiBaseUrl
+    , modelName :: Text
     , modelSystemPrompt :: SystemPrompt
     }
     deriving (Show, Eq, Ord)
 
+defaultFlavor :: ModelFlavor
+defaultFlavor = OpenAIv1
+
+parseFlavor :: Text -> Maybe ModelFlavor
+parseFlavor "OpenAIv1" = Just OpenAIv1
+parseFlavor "MistralV1" = Just MistralV1
+parseFlavor "openai-v1" = Just OpenAIv1
+parseFlavor "mistral-v1" = Just MistralV1
+parseFlavor _ = Nothing
+
 gpt4Turbo :: SystemPrompt -> Model
-gpt4Turbo = Model "gpt-4-turbo"
+gpt4Turbo = Model OpenAIv1 openAIv1Endpoint "gpt-4-turbo"
 
 gpt4oMini :: SystemPrompt -> Model
-gpt4oMini = Model "gpt-4o-mini"
+gpt4oMini = Model OpenAIv1 openAIv1Endpoint "gpt-4o-mini"
 
 simplePayload ::
     Model ->
@@ -287,26 +314,38 @@ simplePayload ::
     Maybe Text ->
     Aeson.Value
 simplePayload model tools hist prompt =
-    Aeson.object
-        [ "model" .= model.modelName
-        , "messages"
-            .= makeMessages model.modelSystemPrompt hist prompt
-        , "tools" .= tools
-        -- todo:
-        -- allow to tune json format with something like
-        -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
-        ]
+    case model.modelFlavor of
+        OpenAIv1 ->
+            Aeson.object
+                [ "model" .= model.modelName
+                , "messages"
+                    .= makeMessages model.modelSystemPrompt hist prompt
+                , "tools" .= tools
+                -- todo:
+                -- allow to tune json format with something like
+                -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
+                ]
+        MistralV1 ->
+            Aeson.object
+                [ "model" .= model.modelName
+                , "messages"
+                    .= makeMessages model.modelSystemPrompt hist prompt
+                , "tools" .= tools
+                , "tool_choice" .= ("any" :: Text)
+                , "parallel_tool_calls" .= True
+                ]
 
 callLLMPayload ::
     (ToJSON payload) =>
     Tracer IO Trace ->
     HttpClient.Runtime ->
+    ApiBaseUrl ->
     payload ->
     IO (Either String Value)
-callLLMPayload tracer rt payload = do
+callLLMPayload tracer rt (ApiBaseUrl baseUrl) payload = do
     let payloadVal = Aeson.toJSON payload
     runTracer tracer (CallChatCompletion payloadVal)
-    httpRsp <- rt.post (contramap HttpClientTrace tracer) "https://api.openai.com/v1/chat/completions" (Just payloadVal)
+    httpRsp <- rt.post (contramap HttpClientTrace tracer) (baseUrl <> "/chat/completions") (Just payloadVal)
     case httpRsp of
         Left (HttpClient.SomeError err) -> do
             pure $ Left err
@@ -339,7 +378,7 @@ data ToolCall
     = ToolCall
     { rawToolCall :: Aeson.Object
     , toolCallId :: Text
-    , toolCallType :: Text
+    , toolCallType :: Maybe Text
     , toolCallFunction :: ToolCallFunction
     }
     deriving (Show)
@@ -350,7 +389,7 @@ instance FromJSON ToolCall where
             ToolCall
                 <$> pure v
                 <*> v .: "id"
-                <*> v .: "type"
+                <*> v .:? "type"
                 <*> v .: "function"
 
 data Response

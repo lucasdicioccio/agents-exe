@@ -2,6 +2,8 @@
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "toolsmith",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
     "modelName": "gpt-4o-mini",
     "toolDirectory": "./tools/toolsmith",
     "announce": "an agent capable to enumerate and create bash tools",

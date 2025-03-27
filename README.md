@@ -132,7 +132,7 @@ rights or when you want to run across container boundaries.
 
 Agents defined in `agents-exe` can call to other agents much like tools (and
 indeed, sub-agents are exposed as "expert tools" to LLMs).  All agents and
-sub-agents share a same `openai-key` although it may change in the future.
+sub-agents share a same API-key although it may change in the future.
 
 At this point, sub-agents cannot have further agents themselves, however
 sub-agents can have their own tools. If you really want to experiment with a
@@ -204,14 +204,30 @@ agents-exe cli
 
 # Unordered Roadmap
 
-- more LLM-API providers (e.g., vLLM, Mistral, llama)
-- MCP support
-  - server: reloads/notifications
-  - server: expose completion/prompt/resources, somehow
-  - client mode as a consumer of tools
-  - networked transport
+## LLM-providers Support
+
+At this point I do not have the resources to enable and test many LLM-provider
+although we'll get there eventually.  By order of precedence I plan to be
+compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
+
+- [ ] Mixed-API keys between agents and sub-agents
+- [x] OpenAI
+- [x] Mistral
+- [ ] vLLM
+- [ ] Ollama
+
+## MCP support
+
+- server: reloads/notifications
+- server: expose completion/prompt/resources, somehow
+- client mode as a consumer of tools
+- networked transport
+
+## Framework features
+
 - internal machinery
   - metrics and prodapi-endpoints
   - we need to allow an orchestrator to introspect what happened
   - some storage
+
 - consider allowing sub-agents to also call other agents

@@ -2,6 +2,8 @@
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "agentsmith",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
     "modelName": "gpt-4o-mini",
     "toolDirectory": "./tools/agentsmith",
     "announce": "an agent capable to enumerate and create agents",

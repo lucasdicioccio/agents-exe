@@ -2,6 +2,8 @@
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "user_notifier",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
     "modelName": "gpt-4o-mini",
     "toolDirectory": "./tools/notifier",
     "announce": "an agent capable to notify the user",

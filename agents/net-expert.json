@@ -2,6 +2,8 @@
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "net_expert",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
     "modelName": "gpt-4o-mini",
     "toolDirectory": "./tools/net-expert",
     "announce": "an expert at answering networking-related questions",

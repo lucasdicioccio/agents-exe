@@ -19,7 +19,7 @@ import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import Options.Applicative
 
 data Prog = Prog
-    { openAiKeyFile :: FilePath
+    { apiKeyFile :: FilePath
     , logFile :: FilePath
     , agentFile :: FilePath
     , agentsDir :: FilePath
@@ -97,11 +97,11 @@ parseProgOptions :: Parser Prog
 parseProgOptions =
     Prog
         <$> strOption
-            ( long "open-ai-key"
-                <> metavar "OPENAI-KEY"
-                <> help "path to open-ai-key"
+            ( long "api-key"
+                <> metavar "AGENTS-KEY"
+                <> help "path to API key (openAI or mistral)"
                 <> showDefault
-                <> value "open-ai.key"
+                <> value "agents-exe.key"
             )
         <*> strOption
             ( long "log-file"
@@ -153,7 +153,7 @@ main = do
             Check ->
                 Prompt.mainPrintAgent $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.openAiKeyFile
+                        { Prompt.openApiKeyFile = args.apiKeyFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
@@ -162,7 +162,7 @@ main = do
             InteractiveCommandLine ->
                 Prompt.mainInteractiveAgent $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.openAiKeyFile
+                        { Prompt.openApiKeyFile = args.apiKeyFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
@@ -171,7 +171,7 @@ main = do
                                 Prompt.traceUsefulPromptStdout
                                 ( Prod.traceBoth
                                     Prompt.tracePrintingTextResponses
-                                    (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 500) print)
+                                    (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                                 )
                         }
             OneShot opts -> do
@@ -182,7 +182,7 @@ main = do
                 let oneShot = flip Prompt.mainOneShotText
                 oneShot prompt $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.openAiKeyFile
+                        { Prompt.openApiKeyFile = args.apiKeyFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
@@ -197,19 +197,21 @@ main = do
             McpServer ->
                 McpServer.mainAgentServer $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.openAiKeyFile
+                        { Prompt.openApiKeyFile = args.apiKeyFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
                         , Prompt.interactiveTracer =
                             Prod.traceBoth
                                 Prompt.traceUsefulPromptStderr
-                                (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 500) (\_ -> pure ()))
+                                (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                         }
             Initialize ->
                 let o =
                         Agents.OpenAIAgent
                             { Agents.slug = "main-agent"
+                            , Agents.flavor = "OpenAIv1"
+                            , Agents.modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
                             , Agents.modelName = "gpt-4-turbo"
                             , Agents.announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
                             , Agents.toolDirectory = "."
@@ -226,4 +228,4 @@ main = do
                  in do
                         InitProject.initOpenAIAgent o args.agentFile
                         InitProject.initAgentsDir args.agentsDir
-                        InitProject.initOpenAIKey args.openAiKeyFile
+                        InitProject.initOpenAIKey args.apiKeyFile

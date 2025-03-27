@@ -18,6 +18,8 @@ instance FromJSON AgentDescription
 data OpenAIAgent
     = OpenAIAgent
     { slug :: Text
+    , flavor :: Text
+    , modelUrl :: Text
     , modelName :: Text
     , announce :: Text
     , systemPrompt :: [Text]

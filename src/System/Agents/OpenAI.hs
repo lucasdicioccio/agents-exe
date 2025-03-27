@@ -167,7 +167,7 @@ stepWith (Runtime _ _ tracer httpRt model tools _) functions next hist pendingQu
     registeredTools <- tools
     let openAITools = fmap declareTool registeredTools
     let payload = OpenAI.simplePayload model openAITools hist query
-    llmResponse <- OpenAI.callLLMPayload (contramap OpenAITrace tracer) httpRt payload
+    llmResponse <- OpenAI.callLLMPayload (contramap OpenAITrace tracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither OpenAI.parseLLMResponse =<< llmResponse of
         Right rsp -> do
             runTracer tracer (StepTrace $ GotResponse rsp)
