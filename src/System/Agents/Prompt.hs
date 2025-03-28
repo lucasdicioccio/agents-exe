@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Agents.CLI.Prompt where
+module System.Agents.Prompt where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -15,7 +15,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
 import GHC.IO.Handle (Handle)
-import Prod.Tracer (Tracer (..), contramap, silent, traceBoth)
+import Prod.Tracer (Tracer (..), contramap, silent)
 import System.IO (stderr, stdout)
 
 import System.Agents.Base (AgentSlug)
@@ -26,7 +26,7 @@ import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
 
-import System.Agents.CLI.Base
+import System.Agents.ApiKeys
 
 data Trace
     = AgentTrace AgentSlug Agent.Trace
@@ -35,7 +35,7 @@ data Trace
 
 data Props
     = Props
-    { openApiKeyFile :: FilePath
+    { apiKeysFile :: FilePath
     , mainAgentFile :: FilePath
     , helperAgentsDir :: FilePath
     , interactiveTracer :: Tracer IO Trace
@@ -56,8 +56,7 @@ data Continue
 
 withAgentRuntime :: Props -> (Continue -> IO a) -> IO a
 withAgentRuntime props continue = do
-    logFileTracer <- makeShowLogFileTracer props.rawLogFile
-    let tracer = traceBoth props.interactiveTracer logFileTracer
+    let tracer = props.interactiveTracer
     loadedBoss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.mainAgentFile
     case loadedBoss of
         Left err ->
@@ -67,8 +66,8 @@ withAgentRuntime props continue = do
             case NonEmpty.nonEmpty errs of
                 Just xs -> continue $ LoadingErrors xs
                 Nothing -> do
-                    key <- readOpenApiKeyFile props.openApiKeyFile
-                    agentRuntimes <- traverse (initAgent tracer key id []) loadedAgents.agents
+                    keys <- readOpenApiKeysFile props.apiKeysFile
+                    agentRuntimes <- traverse (initAgent tracer keys id []) loadedAgents.agents
                     let (koRuntimes, okRuntimes) = Either.partitionEithers agentRuntimes
                     case NonEmpty.nonEmpty koRuntimes of
                         Just xs -> continue $ OtherErrors xs
@@ -76,7 +75,7 @@ withAgentRuntime props continue = do
                             mainAgent <-
                                 initAgent
                                     tracer
-                                    key
+                                    keys
                                     (augmentMainAgentPromptWithSubAgents okRuntimes)
                                     okRuntimes
                                     mainAgentDescription
@@ -88,16 +87,19 @@ type PromptModifier = Text -> Text
 
 initAgent ::
     Tracer IO Trace ->
-    OpenAI.ApiKey ->
+    [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
     [Agent.Runtime] ->
     FileLoader.AgentDescription ->
     IO (Either String Agent.Runtime)
 initAgent _ _ _ _ (FileLoader.Unspecified _) = pure $ Left "unspecified agent unsupported"
-initAgent tracer key modifyPrompt helperAgents (FileLoader.OpenAIAgentDescription desc) = do
-    case OpenAI.parseFlavor desc.flavor of
-        Nothing -> pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
-        Just flavor ->
+initAgent tracer keys modifyPrompt helperAgents (FileLoader.OpenAIAgentDescription desc) = do
+    case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
+        (_, Nothing) ->
+            pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
+        (Nothing, _) ->
+            pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
+        (Just key, Just flavor) ->
             Agent.newRuntime
                 desc.slug
                 desc.announce
@@ -306,3 +308,15 @@ renderAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+
+readApiKeys :: FilePath -> IO (Maybe ApiKeys)
+readApiKeys path =
+    Aeson.decode <$> LByteString.readFile path
+
+flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
+flattenOpenAIKeys (ApiKeys keys) =
+    [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
+
+readOpenApiKeysFile :: FilePath -> IO [(Text, OpenAI.ApiKey)]
+readOpenApiKeysFile path =
+    maybe [] flattenOpenAIKeys <$> readApiKeys path
