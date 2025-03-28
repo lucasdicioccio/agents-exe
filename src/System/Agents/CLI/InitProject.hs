@@ -52,9 +52,12 @@ initOpenAIKey path = do
         else do
             putStrLn $ "You need to initialize an OpenAI Key."
             putStrLn $ ""
-            putStrLn $ "Visit https://platform.openai.com/api-keys to generate a key, for this project agents."
+            putStrLn $ "For OpenAI:"
+            putStrLn $ "- visit https://platform.openai.com/api-keys to generate a key, for this project agents."
+            putStrLn $ "For MistralAI:"
+            putStrLn $ "- visit https://console.mistral.ai/api-keys to generate a key, for this project agents."
             putStrLn $ ""
-            putStrLn $ "Note: you should restrict the key to Model capabilities."
+            putStrLn $ "Note: whenever applicable you should restrict the key to Model capabilities and bind the key to a budget-limited API while you experiment."
             putStrLn $ ""
             putStrLn $ "press ENTER to continue and edit the key with editor:"
             withEditor print

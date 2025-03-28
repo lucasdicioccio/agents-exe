@@ -2,6 +2,8 @@
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "boss",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
     "modelName": "gpt-4-turbo",
     "toolDirectory": "./tools/boss",
     "announce": "The main agent, capable of reasoning and orchestrating other expert agents.",

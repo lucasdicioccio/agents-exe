@@ -81,7 +81,7 @@ httpsClientApi token manager =
             [ ("Authorization", "Bearer " <> Text.encodeUtf8 tokval)
             ]
     defaultHeaders =
-        [ ("User-Agent", "haskell-http-client")
+        [ ("User-Agent", "haskell-http-client+agents-exe")
         , ("Content-Type", "application/json")
         ]
     addHeaders extra req =

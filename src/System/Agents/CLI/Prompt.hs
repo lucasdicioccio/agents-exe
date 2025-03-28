@@ -95,20 +95,25 @@ initAgent ::
     IO (Either String Agent.Runtime)
 initAgent _ _ _ _ (FileLoader.Unspecified _) = pure $ Left "unspecified agent unsupported"
 initAgent tracer key modifyPrompt helperAgents (FileLoader.OpenAIAgentDescription desc) = do
-    Agent.newRuntime
-        desc.slug
-        desc.announce
-        (contramap (AgentTrace desc.slug) tracer)
-        key
-        ( OpenAI.Model
-            desc.modelName
-            ( OpenAI.SystemPrompt $
-                modifyPrompt $
-                    Text.unlines desc.systemPrompt
-            )
-        )
-        desc.toolDirectory
-        [Agent.turnAgentRuntimeIntoIOTool desc.slug rt | rt <- helperAgents]
+    case OpenAI.parseFlavor desc.flavor of
+        Nothing -> pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
+        Just flavor ->
+            Agent.newRuntime
+                desc.slug
+                desc.announce
+                (contramap (AgentTrace desc.slug) tracer)
+                key
+                ( OpenAI.Model
+                    flavor
+                    (OpenAI.ApiBaseUrl desc.modelUrl)
+                    desc.modelName
+                    ( OpenAI.SystemPrompt $
+                        modifyPrompt $
+                            Text.unlines desc.systemPrompt
+                    )
+                )
+                desc.toolDirectory
+                [Agent.turnAgentRuntimeIntoIOTool desc.slug rt | rt <- helperAgents]
 
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
