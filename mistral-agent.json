@@ -4,6 +4,7 @@
     "slug": "boss",
     "flavor": "MistralV1",
     "modelUrl": "https://api.mistral.ai/v1",
+    "apiKeyId": "mistral",
     "modelName": "open-codestral-mamba",
     "toolDirectory": "./tools/boss",
     "announce": "The main agent, capable of reasoning and orchestrating other expert agents.",

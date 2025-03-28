@@ -10,6 +10,7 @@ import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.Environment (lookupEnv)
 import System.Process as Process
 
+import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
 import System.Agents.FileLoader.Base (AgentDescription (..), OpenAIAgent (..))
 
 data InitializeError
@@ -43,8 +44,8 @@ initAgentsDir path = do
     createDirectoryIfMissing True path
     putStrLn $ unwords ["agents dir:", path, "ok"]
 
-initOpenAIKey :: FilePath -> IO ()
-initOpenAIKey path = do
+initOpenAIKeys :: FilePath -> IO ()
+initOpenAIKeys path = do
     exist <- doesFileExist path
     if exist
         then do
@@ -61,6 +62,7 @@ initOpenAIKey path = do
             putStrLn $ ""
             putStrLn $ "press ENTER to continue and edit the key with editor:"
             withEditor print
+            LByteString.writeFile path $ Aeson.encodePretty (ApiKeys [ApiKey "main-key" "<insert-api-key>"])
             _ <- getLine
             openFileWithEditor path
 

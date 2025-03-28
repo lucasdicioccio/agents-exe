@@ -8,6 +8,7 @@ import qualified Data.List as List
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
+import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -19,7 +20,7 @@ import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import Options.Applicative
 
 data Prog = Prog
-    { apiKeyFile :: FilePath
+    { apiKeysFile :: FilePath
     , logFile :: FilePath
     , agentFile :: FilePath
     , agentsDir :: FilePath
@@ -97,11 +98,11 @@ parseProgOptions :: Parser Prog
 parseProgOptions =
     Prog
         <$> strOption
-            ( long "api-key"
+            ( long "api-keys"
                 <> metavar "AGENTS-KEY"
-                <> help "path to API key (openAI or mistral)"
+                <> help "path to json-file containing API keys"
                 <> showDefault
-                <> value "agents-exe.key"
+                <> value "agents-exe.keys"
             )
         <*> strOption
             ( long "log-file"
@@ -148,30 +149,35 @@ main = do
             )
 
     prog :: Prog -> IO ()
-    prog args =
+    prog args = do
+        baseTracer <- makeShowLogFileTracer args.logFile
         case args.mainCommand of
             Check ->
                 Prompt.mainPrintAgent $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.apiKeyFile
+                        { Prompt.apiKeysFile = args.apiKeysFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer = Prompt.traceUsefulPromptStdout
+                        , Prompt.interactiveTracer =
+                            Prod.traceBoth baseTracer Prompt.traceUsefulPromptStdout
                         }
             InteractiveCommandLine ->
                 Prompt.mainInteractiveAgent $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.apiKeyFile
+                        { Prompt.apiKeysFile = args.apiKeysFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
                         , Prompt.interactiveTracer =
                             Prod.traceBoth
-                                Prompt.traceUsefulPromptStdout
+                                baseTracer
                                 ( Prod.traceBoth
-                                    Prompt.tracePrintingTextResponses
-                                    (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                    Prompt.traceUsefulPromptStdout
+                                    ( Prod.traceBoth
+                                        Prompt.tracePrintingTextResponses
+                                        (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                    )
                                 )
                         }
             OneShot opts -> do
@@ -182,11 +188,14 @@ main = do
                 let oneShot = flip Prompt.mainOneShotText
                 oneShot prompt $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.apiKeyFile
+                        { Prompt.apiKeysFile = args.apiKeysFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer = Prompt.traceUsefulPromptStderr
+                        , Prompt.interactiveTracer =
+                            Prod.traceBoth
+                                baseTracer
+                                Prompt.traceUsefulPromptStderr
                         }
             SelfDescribe ->
                 Aeson.encodeFile "/dev/stdout" $
@@ -197,19 +206,23 @@ main = do
             McpServer ->
                 McpServer.mainAgentServer $
                     Prompt.Props
-                        { Prompt.openApiKeyFile = args.apiKeyFile
+                        { Prompt.apiKeysFile = args.apiKeysFile
                         , Prompt.rawLogFile = args.logFile
                         , Prompt.mainAgentFile = args.agentFile
                         , Prompt.helperAgentsDir = args.agentsDir
                         , Prompt.interactiveTracer =
                             Prod.traceBoth
-                                Prompt.traceUsefulPromptStderr
-                                (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                baseTracer
+                                ( Prod.traceBoth
+                                    Prompt.traceUsefulPromptStderr
+                                    (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                )
                         }
             Initialize ->
                 let o =
                         Agents.OpenAIAgent
                             { Agents.slug = "main-agent"
+                            , Agents.apiKeyId = "main-key"
                             , Agents.flavor = "OpenAIv1"
                             , Agents.modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
                             , Agents.modelName = "gpt-4-turbo"
@@ -228,4 +241,4 @@ main = do
                  in do
                         InitProject.initOpenAIAgent o args.agentFile
                         InitProject.initAgentsDir args.agentsDir
-                        InitProject.initOpenAIKey args.apiKeyFile
+                        InitProject.initOpenAIKeys args.apiKeysFile

@@ -25,6 +25,8 @@ will guide you into writing a `agent.json` and its tools directory
 An agent embodies a repeatable, parameterized LLM.
 
 An agent thus requires: 
+- an LLM endpoint
+- an API key for the endpoint
 - a model
 - a system-prompt
 - a set of command line tools
@@ -131,12 +133,42 @@ rights or when you want to run across container boundaries.
 ### Adding new agents
 
 Agents defined in `agents-exe` can call to other agents much like tools (and
-indeed, sub-agents are exposed as "expert tools" to LLMs).  All agents and
-sub-agents share a same API-key although it may change in the future.
+indeed, sub-agents are exposed as "expert tools" to LLMs).  Agents and
+sub-agents can share a same API-key but they do not have to.
 
 At this point, sub-agents cannot have further agents themselves, however
 sub-agents can have their own tools. If you really want to experiment with a
 tree of agents, you can simulate that by using `agents-exe` itself as a tool.
+
+### API Keys
+
+Agents need an API key to authenticate against the LLM endpoint.
+By default `agents-exe` locates the keys file in `agents-exe.keys` but you can override this path as an argument.
+
+The content of the keys file is as follows:
+
+```json
+{
+  "keys": [
+    {
+      "id": "my-mistral-1",
+      "value": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    },
+    {
+      "id": "my-mistral-2",
+      "value": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    },
+    {
+      "id": "openai",
+      "value": "sk-proj-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    }
+  ]
+}
+```
+
+The key `id` field is the one that has to match the `apiKeyId` field in agents
+JSON description.
+
 
 ### environment variables
 
@@ -210,7 +242,7 @@ At this point I do not have the resources to enable and test many LLM-provider
 although we'll get there eventually.  By order of precedence I plan to be
 compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
 
-- [ ] Mixed-API keys between agents and sub-agents
+- [x] Mixed-API keys between agents and sub-agents
 - [x] OpenAI
 - [x] Mistral
 - [ ] vLLM
