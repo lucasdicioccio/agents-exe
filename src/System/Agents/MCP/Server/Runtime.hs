@@ -18,8 +18,8 @@ import qualified Data.List as List
 import qualified Network.JSONRPC as Rpc
 import UnliftIO (Async, IORef, MonadIO, MonadUnliftIO, async, atomicModifyIORef, atomically, cancel, liftIO, newIORef, readIORef, wait, withAsync)
 
-import qualified System.Agents.CLI.Prompt as Prompt
 import System.Agents.MCP.Base as Mcp
+import qualified System.Agents.Prompt as Prompt
 
 data Runtime = Runtime
     { agentInfo :: Prompt.AgentInfo

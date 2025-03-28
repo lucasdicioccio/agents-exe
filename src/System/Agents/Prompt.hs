@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Agents.CLI.Prompt where
+module System.Agents.Prompt where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson

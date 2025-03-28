@@ -72,10 +72,10 @@ library agents-lib
                     , System.Agents.HttpClient
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.InitProject
-                    , System.Agents.CLI.Prompt
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
+                    , System.Agents.Prompt
     build-depends:    base ^>=4.19.1.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,

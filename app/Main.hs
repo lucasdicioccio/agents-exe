@@ -9,10 +9,10 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.CLI.InitProject as InitProject
-import qualified System.Agents.CLI.Prompt as Prompt
 import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
+import qualified System.Agents.Prompt as Prompt
 import qualified System.Agents.Tools.Bash as Bash
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
