@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module System.Agents.OpenAI where
+module System.Agents.Agent where
 
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (STM, atomically)

@@ -18,10 +18,10 @@ import GHC.IO.Handle (Handle)
 import Prod.Tracer (Tracer (..), contramap, silent)
 import System.IO (stderr, stdout)
 
+import qualified System.Agents.Agent as Agent
 import System.Agents.Base (AgentSlug)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.OpenAI as Agent
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools

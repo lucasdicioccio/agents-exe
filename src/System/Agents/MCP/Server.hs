@@ -16,10 +16,10 @@ import qualified Data.Text as Text
 import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
+import qualified System.Agents.Agent as Agent
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
-import qualified System.Agents.OpenAI as Agent
 import qualified System.Agents.Prompt as Prompt
 
 import System.Agents.MCP.Server.Runtime

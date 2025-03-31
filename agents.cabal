@@ -60,6 +60,7 @@ library agents-lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     exposed-modules:  System.Agents
+                    , System.Agents.Agent
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.FileLoader
@@ -75,7 +76,6 @@ library agents-lib
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
-                    , System.Agents.OpenAI
                     , System.Agents.Prompt
     build-depends:    base ^>=4.19.1.0,
                       aeson >=2.2.0.0,
