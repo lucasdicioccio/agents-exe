@@ -90,6 +90,7 @@ library agents-lib
                       stm,
                       text,
                       unix,
+                      uuid,
                       containers,
                       unordered-containers,
                       http-client,

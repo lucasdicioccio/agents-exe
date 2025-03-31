@@ -19,7 +19,6 @@ import Prod.Tracer (Tracer (..), contramap, silent)
 import System.IO (stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (AgentSlug)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Tools as Tools
@@ -29,7 +28,7 @@ import qualified System.Agents.Tools.IO as Tools
 import System.Agents.ApiKeys
 
 data Trace
-    = AgentTrace AgentSlug Agent.Trace
+    = AgentTrace Agent.Trace
     | DataLoadingTrace FileLoader.Trace
     deriving (Show)
 
@@ -103,7 +102,7 @@ initAgent tracer keys modifyPrompt helperAgents (FileLoader.OpenAIAgentDescripti
             Agent.newRuntime
                 desc.slug
                 desc.announce
-                (contramap (AgentTrace desc.slug) tracer)
+                (contramap AgentTrace tracer)
                 key
                 ( OpenAI.Model
                     flavor
@@ -115,7 +114,7 @@ initAgent tracer keys modifyPrompt helperAgents (FileLoader.OpenAIAgentDescripti
                     )
                 )
                 desc.toolDirectory
-                [Agent.turnAgentRuntimeIntoIOTool desc.slug rt | rt <- helperAgents]
+                [Agent.turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
 
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
@@ -244,14 +243,14 @@ traceSilent = silent
 traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
 traceWaitingOpenAIRateLimits lims onWait = Tracer f
   where
-    f (AgentTrace _ (Agent.OpenAITrace tr)) =
+    f (AgentTrace (Agent.AgentTrace _ _ (Agent.OpenAITrace tr))) =
         runTracer (OpenAI.waitRateLimit lims onWait) tr
     f _ = pure ()
 
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
   where
-    f (AgentTrace slug trace) =
+    f (AgentTrace (Agent.AgentTrace slug _ trace)) =
         g [slug] trace
     f _ = pure ()
 
@@ -260,7 +259,7 @@ tracePrintingTextResponses = Tracer f
             Left _ -> pure ()
             Right rsp ->
                 Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent]
-    g pfx (Agent.ChildrenTrace childSlug sub) =
+    g pfx (Agent.ChildrenTrace (Agent.AgentTrace childSlug _ sub)) =
         g (childSlug : pfx) sub
     g _ _ = pure ()
 
@@ -273,16 +272,16 @@ traceUsefulPromptStderr = traceUsefulPromptHandle stderr
 traceUsefulPromptHandle :: Handle -> Tracer IO Trace
 traceUsefulPromptHandle h = Tracer f
   where
-    f (AgentTrace slug tr) =
+    f (AgentTrace (Agent.AgentTrace slug _ tr)) =
         Text.hPutStrLn h $
             Text.unlines
                 [ mconcat ["@", slug, ":"]
-                , renderAgentTrace tr
+                , renderBaseAgentTrace tr
                 ]
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
 
-renderAgentTrace :: Agent.Trace -> Text
-renderAgentTrace tr = case tr of
+renderBaseAgentTrace :: Agent.BaseTrace -> Text
+renderBaseAgentTrace tr = case tr of
     Agent.ReloadToolsTrace _ -> "(reload-tools...)"
     Agent.BashToolsLoadingTrace _ -> "(reload-tools...)"
     Agent.RunToolTrace (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
@@ -303,8 +302,8 @@ renderAgentTrace tr = case tr of
         Text.unwords ["from: open-ai", jsonTxt x]
     Agent.StepTrace (Agent.GotResponse rsp) ->
         Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
-    Agent.ChildrenTrace slug sub ->
-        Text.unwords ["(", slug, ")", renderAgentTrace sub]
+    Agent.ChildrenTrace (Agent.AgentTrace slug _ sub) ->
+        Text.unwords ["(", slug, ")", renderBaseAgentTrace sub]
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
