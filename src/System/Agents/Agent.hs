@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module System.Agents.OpenAI where
+module System.Agents.Agent where
 
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent.STM (STM, atomically)
@@ -27,12 +27,16 @@ import qualified System.Agents.Tools.IO as IOTools
 -------------------------------------------------------------------------------
 
 data Trace
+    = AgentTrace !AgentSlug !AgentId !BaseTrace
+    deriving (Show)
+
+data BaseTrace
     = OpenAITrace !OpenAI.Trace
     | StepTrace !TraceStep
     | BashToolsLoadingTrace !BashTools.LoadTrace
     | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
     | RunToolTrace !ToolTrace
-    | ChildrenTrace !AgentSlug Trace
+    | ChildrenTrace !Trace
     deriving (Show)
 
 data TraceStep
@@ -44,6 +48,7 @@ data TraceStep
 data Runtime
     = Runtime
     { agentSlug :: AgentSlug
+    , agentId :: AgentId
     , agentAnnounce :: AgentAnnounce
     , agentTracer :: Tracer IO Trace
     , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
@@ -61,7 +66,7 @@ type BackgroundTools =
     )
 
 backgroundToolDir ::
-    Tracer IO Trace ->
+    Tracer IO BaseTrace ->
     FilePath ->
     IO (Either String BackgroundTools)
 backgroundToolDir tracer tooldir = do
@@ -104,10 +109,12 @@ newRuntime ::
     OpenAI.ApiKey ->
     OpenAI.Model ->
     FilePath ->
-    [Registration OpenAI.Tool OpenAI.ToolCall] ->
+    [AgentSlug -> AgentId -> Registration OpenAI.Tool OpenAI.ToolCall] ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model tooldir ioTools = do
-    toolz <- backgroundToolDir tracer tooldir
+newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
+    uid <- newAgentId
+    let ioTools = [mk slug uid | mk <- mkIoTools]
+    toolz <- backgroundToolDir (contramap (AgentTrace slug uid) tracer) tooldir
     case toolz of
         Left err -> pure $ Left err
         Right (bkgTools, triggerReloadTools) -> do
@@ -117,7 +124,7 @@ newRuntime slug announce tracer apiKey model tooldir ioTools = do
             let registerTools xs = fmap registerBashToolInOpenAI xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) bkgTools
             let readTools = Background.readBackgroundVal bkgToolsWithIOTools
-            let rt = Runtime slug announce tracer httpRt model readTools triggerReloadTools
+            let rt = Runtime slug uid announce tracer httpRt model readTools triggerReloadTools
             pure $ Right rt
 
 data AgentFunctions r
@@ -162,15 +169,16 @@ stepWith ::
     PendingQuery ->
     IO r
 stepWith _ _ next hist Done = next $ OnDone hist
-stepWith (Runtime _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
+stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
+    let baseTracer = contramap (AgentTrace rt.agentSlug rt.agentId) tracer
     let query = getQuery pendingQuery
     registeredTools <- tools
     let openAITools = fmap declareTool registeredTools
     let payload = OpenAI.simplePayload model openAITools hist query
-    llmResponse <- OpenAI.callLLMPayload (contramap OpenAITrace tracer) httpRt model.modelBaseUrl payload
+    llmResponse <- OpenAI.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . OpenAITrace) tracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither OpenAI.parseLLMResponse =<< llmResponse of
         Right rsp -> do
-            runTracer tracer (StepTrace $ GotResponse rsp)
+            runTracer baseTracer (StepTrace $ GotResponse rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
                 [] -> do
                     nextQuery <- functions.waitAdditionalQuery
@@ -179,7 +187,7 @@ stepWith (Runtime _ _ tracer httpRt model tools _) functions next hist pendingQu
                             (maybe Done SomeQuery nextQuery)
                             (hist <> Seq.singleton (OpenAI.PromptAnswered query rsp))
                 toolcalls -> do
-                    responses <- mapConcurrently (openAICallTool tracer registeredTools) toolcalls
+                    responses <- mapConcurrently (openAICallTool baseTracer registeredTools) toolcalls
                     let toolResults = fmap OpenAI.ToolCalled $ yankResults responses
                     next $
                         PromptMore
@@ -189,7 +197,7 @@ stepWith (Runtime _ _ tracer httpRt model tools _) functions next hist pendingQu
             next $ OnError err
 
 openAICallTool ::
-    Tracer IO Trace ->
+    Tracer IO BaseTrace ->
     [Registration OpenAI.Tool OpenAI.ToolCall] ->
     OpenAI.ToolCall ->
     IO (CallResult OpenAI.ToolCall)
@@ -283,8 +291,8 @@ instance Aeson.FromJSON PromptOtherAgent where
         PromptOtherAgent
             <$> v Aeson..: "what"
 
-turnAgentRuntimeIntoIOTool :: AgentSlug -> Runtime -> Registration OpenAI.Tool OpenAI.ToolCall
-turnAgentRuntimeIntoIOTool callerSlug rt =
+turnAgentRuntimeIntoIOTool :: Runtime -> AgentSlug -> AgentId -> Registration OpenAI.Tool OpenAI.ToolCall
+turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     registerIOScriptInOpenAI io props
   where
     props =
@@ -305,8 +313,8 @@ turnAgentRuntimeIntoIOTool callerSlug rt =
     runSubAgent txt =
         openAIAgent (nestTracer rt) agentFunctions txt
 
-    nestTracer baseRuntime =
-        baseRuntime{agentTracer = contramap (ChildrenTrace callerSlug) baseRuntime.agentTracer}
+    nestTracer childRuntime =
+        childRuntime{agentTracer = contramap (AgentTrace callerSlug callerId . ChildrenTrace) childRuntime.agentTracer}
 
     agentFunctions =
         AgentFunctions
