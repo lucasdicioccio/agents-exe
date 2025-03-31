@@ -7,7 +7,7 @@
     "apiKeyId": "openai",
     "modelName": "gpt-4o-mini",
     "toolDirectory": "./tools/web-news",
-    "announce": "an agent that collects and summarizes web news articles",
+    "announce": "an agent that collects and summarizes web news articles and manages the list of news sources.",
     "systemPrompt": [
       "You are an agent specialized in aggregating news from the web.",
       "Retrieve the latest news articles based on user queries.",
