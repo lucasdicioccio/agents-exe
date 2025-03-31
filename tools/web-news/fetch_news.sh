@@ -24,7 +24,7 @@ if [[ "$1" == "run" ]]; then
     echo "Fetching news from: $url"
     # Replace with actual news fetching logic here
     # For now, we can simulate this with curl or wget
-    curl -s "$url" | pandoc --from html --to markdown
+    curl -s "$url" | pandoc --from html --to markdown | grep -v '^:::' | grep -v 'data:image'
   done
 fi
 
