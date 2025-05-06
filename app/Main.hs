@@ -4,13 +4,17 @@
 module Main where
 
 import qualified Data.Aeson as Aeson
+import Data.Functor.Contravariant.Divisible (choose)
 import qualified Data.List as List
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
+import qualified System.Agents.Agent as Agent
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import qualified System.Agents.FileLoader.Base as Agents
+import qualified System.Agents.HttpClient as HttpClient
+import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.Prompt as Prompt
@@ -22,6 +26,7 @@ import Options.Applicative
 data Prog = Prog
     { apiKeysFile :: FilePath
     , logFile :: FilePath
+    , logHttp :: Maybe String
     , agentFile :: FilePath
     , agentsDir :: FilePath
     , mainCommand :: Command
@@ -111,6 +116,14 @@ parseProgOptions =
                 <> showDefault
                 <> value "agents-logfile"
             )
+        <*> optional
+            ( strOption
+                ( long "log-http"
+                    <> metavar "LOGHTTP"
+                    <> help "http log sink"
+                    <> showDefault
+                )
+            )
         <*> strOption
             ( long "agent-file"
                 <> metavar "AGENTFILE"
@@ -150,7 +163,13 @@ main = do
 
     prog :: Prog -> IO ()
     prog args = do
-        baseTracer <- makeShowLogFileTracer args.logFile
+        showFileTracer <- makeShowLogFileTracer args.logFile
+        baseHttpTracer1 <- traverse (makeHttpJsonTrace . Text.pack) args.logHttp
+        let httpTracer =
+                case baseHttpTracer1 of
+                    Nothing -> Nothing
+                    Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
+        let baseTracer = maybe showFileTracer (Prod.traceBoth showFileTracer) httpTracer
         case args.mainCommand of
             Check ->
                 Prompt.mainPrintAgent $
@@ -242,3 +261,29 @@ main = do
                         InitProject.initOpenAIAgent o args.agentFile
                         InitProject.initAgentsDir args.agentsDir
                         InitProject.initOpenAIKeys args.apiKeysFile
+
+-------------------------------------------------------------------------------
+
+maybeToEither :: Maybe a -> Either () a
+maybeToEither Nothing = Left ()
+maybeToEither (Just v) = Right v
+
+toJsonTrace :: Prompt.Trace -> Maybe Aeson.Value
+toJsonTrace x = case x of
+    Prompt.DataLoadingTrace _ -> Nothing
+    Prompt.AgentTrace (Agent.AgentTrace _ _ (Agent.BashToolsLoadingTrace _)) -> Nothing
+    Prompt.AgentTrace (Agent.AgentTrace _ _ (Agent.ReloadToolsTrace _)) -> Nothing
+    Prompt.AgentTrace (Agent.AgentTrace s i _) ->
+        Just $
+            Aeson.object
+                [ "e"
+                    Aeson..= Aeson.object
+                        [ "s" Aeson..= (s :: Text.Text)
+                        , "id" Aeson..= i
+                        ]
+                ]
+
+makeHttpJsonTrace :: Text.Text -> IO (Prod.Tracer IO Aeson.Value)
+makeHttpJsonTrace url = do
+    rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
+    pure $ HttpLogger.httpTracer rt Prod.silent
