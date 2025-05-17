@@ -3,6 +3,7 @@
 
 module Main where
 
+import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
 import qualified Data.List as List
@@ -10,15 +11,20 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
+import qualified System.Agents.Agent as BaseAgent
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
+import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.Prompt as Prompt
+import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
+import qualified System.Agents.Tools.Bash as ToolsTrace
+import qualified System.Agents.Tools.IO as ToolsTrace
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import Options.Applicative
@@ -271,17 +277,88 @@ maybeToEither (Just v) = Right v
 toJsonTrace :: Prompt.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
     Prompt.DataLoadingTrace _ -> Nothing
-    Prompt.AgentTrace (Agent.AgentTrace _ _ (Agent.BashToolsLoadingTrace _)) -> Nothing
-    Prompt.AgentTrace (Agent.AgentTrace _ _ (Agent.ReloadToolsTrace _)) -> Nothing
-    Prompt.AgentTrace (Agent.AgentTrace s i _) ->
+    Prompt.AgentTrace v -> encodeAgentTrace v
+  where
+    encodeAgentTrace :: BaseAgent.Trace -> Maybe Aeson.Value
+    encodeAgentTrace (Agent.AgentTrace s i bt) = do
+        baseVal <- encodeBaseTrace bt
         Just $
             Aeson.object
                 [ "e"
-                    Aeson..= Aeson.object
-                        [ "s" Aeson..= (s :: Text.Text)
-                        , "id" Aeson..= i
+                    .= Aeson.object
+                        [ "s" .= (s :: Text.Text)
+                        , "id" .= i
+                        , "x" .= baseVal
                         ]
                 ]
+
+    encodeBaseTrace :: BaseAgent.BaseTrace -> Maybe Aeson.Value
+    encodeBaseTrace bt =
+        case bt of
+            (BaseAgent.BashToolsLoadingTrace _) -> Nothing
+            (BaseAgent.ReloadToolsTrace _) -> Nothing
+            (BaseAgent.StepTrace _) ->
+                Nothing
+            (BaseAgent.OpenAITrace (LLMTrace.HttpClientTrace _)) ->
+                Nothing
+            (BaseAgent.OpenAITrace (LLMTrace.CallChatCompletion val)) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("llm" :: Text.Text)
+                        , "a" .= ("call" :: Text.Text)
+                        , "v" .= val
+                        ]
+            (BaseAgent.OpenAITrace (LLMTrace.GotChatCompletion val)) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("llm" :: Text.Text)
+                        , "a" .= ("result" :: Text.Text)
+                        , "v" .= val
+                        ]
+            (BaseAgent.RunToolTrace (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("run-tool" :: Text.Text)
+                        , "flavor" .= ("bash" :: Text.Text)
+                        , "action" .= ("start" :: Text.Text)
+                        , "cmd" .= cmd
+                        , "args" .= args
+                        ]
+            (BaseAgent.RunToolTrace (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("run-tool" :: Text.Text)
+                        , "flavor" .= ("bash" :: Text.Text)
+                        , "action" .= ("stop" :: Text.Text)
+                        , "code-str" .= show code -- todo: code
+                        , "cmd" .= cmd
+                        , "args" .= args
+                        ]
+            (BaseAgent.RunToolTrace (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("run-tool" :: Text.Text)
+                        , "flavor" .= ("io" :: Text.Text)
+                        , "action" .= ("start" :: Text.Text)
+                        , "tool" .= desc.ioSlug
+                        , "input" .= input
+                        ]
+            (BaseAgent.RunToolTrace (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("run-tool" :: Text.Text)
+                        , "flavor" .= ("io" :: Text.Text)
+                        , "action" .= ("stop" :: Text.Text)
+                        , "tool" .= desc.ioSlug
+                        , "input" .= input
+                        -- , "output" .= output
+                        ]
+            (BaseAgent.ChildrenTrace sub) ->
+                case encodeAgentTrace sub of
+                    Nothing ->
+                        Just $ Aeson.object ["x" .= ("child" :: Text.Text)]
+                    Just v ->
+                        Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= v]
 
 makeHttpJsonTrace :: Text.Text -> IO (Prod.Tracer IO Aeson.Value)
 makeHttpJsonTrace url = do
