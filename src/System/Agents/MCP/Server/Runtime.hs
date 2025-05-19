@@ -21,12 +21,17 @@ import UnliftIO (Async, IORef, MonadIO, MonadUnliftIO, async, atomicModifyIORef,
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Prompt as Prompt
 
+data MappedTool
+    = ExpertAgentAsPrompt Mcp.Name Prompt.AgentInfo
+
+type MappedTools = [MappedTool]
+
 data Runtime = Runtime
-    { agentInfo :: Prompt.AgentInfo -- todo: replace into mapped tools
+    { mappedTools :: MappedTools
     , actions :: IORef [(Rpc.Request, Async ())]
     }
 
-initRuntime :: Prompt.AgentInfo -> IO Runtime
+initRuntime :: MappedTools -> IO Runtime
 initRuntime ai =
     Runtime ai <$> newIORef []
 
@@ -75,8 +80,8 @@ instance MonadReader Runtime McpStack where
 askRuntime :: Rpc.JSONRPCT McpStack Runtime
 askRuntime = lift ask
 
-askAgentInfo :: Rpc.JSONRPCT McpStack Prompt.AgentInfo
-askAgentInfo = agentInfo <$> lift ask
+askMappedTools :: Rpc.JSONRPCT McpStack MappedTools
+askMappedTools = mappedTools <$> lift ask
 
 -- A modified runJSONRPCT that allows to flush and add a carriage return after
 -- every full json payload (the original code only allows bytestrings).

@@ -3,6 +3,7 @@
 
 module Main where
 
+import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
@@ -33,7 +34,7 @@ data Prog = Prog
     { apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
-    , agentFile :: FilePath
+    , agentFiles :: [FilePath]
     , agentsDir :: FilePath
     , mainCommand :: Command
     }
@@ -130,12 +131,15 @@ parseProgOptions =
                     <> showDefault
                 )
             )
-        <*> strOption
-            ( long "agent-file"
-                <> metavar "AGENTFILE"
-                <> help "main agent description file"
-                <> showDefault
-                <> value "agent.json"
+        <*> fmap
+            addDefaultSomeAgentFile
+            ( many
+                ( strOption
+                    ( long "agent-file"
+                        <> metavar "AGENTFILE"
+                        <> help (unlines ["root agent(s) description files", "defaults to 'agent.json'", "multi-support vary from command to command"])
+                    )
+                )
             )
         <*> strOption
             ( long "helper-agents-dir"
@@ -152,6 +156,11 @@ parseProgOptions =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
             )
+
+-- | helper to make agent-file entirely optional whilst using the 'many' combinator
+addDefaultSomeAgentFile :: [FilePath] -> [FilePath]
+addDefaultSomeAgentFile [] = ["agent.json"]
+addDefaultSomeAgentFile xs = xs
 
 main :: IO ()
 main = do
@@ -177,72 +186,76 @@ main = do
                     Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
         let baseTracer = maybe showFileTracer (Prod.traceBoth showFileTracer) httpTracer
         case args.mainCommand of
-            Check ->
-                Prompt.mainPrintAgent $
-                    Prompt.Props
-                        { Prompt.apiKeysFile = args.apiKeysFile
-                        , Prompt.rawLogFile = args.logFile
-                        , Prompt.mainAgentFile = args.agentFile
-                        , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer =
-                            Prod.traceBoth baseTracer Prompt.traceUsefulPromptStdout
-                        }
+            Check -> do
+                forM_ args.agentFiles $ \agentFile -> do
+                    Prompt.mainPrintAgent $
+                        Prompt.Props
+                            { Prompt.apiKeysFile = args.apiKeysFile
+                            , Prompt.rawLogFile = args.logFile
+                            , Prompt.mainAgentFile = agentFile
+                            , Prompt.helperAgentsDir = args.agentsDir
+                            , Prompt.interactiveTracer =
+                                Prod.traceBoth baseTracer Prompt.traceUsefulPromptStdout
+                            }
             InteractiveCommandLine ->
-                Prompt.mainInteractiveAgent $
-                    Prompt.Props
-                        { Prompt.apiKeysFile = args.apiKeysFile
-                        , Prompt.rawLogFile = args.logFile
-                        , Prompt.mainAgentFile = args.agentFile
-                        , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer =
-                            Prod.traceBoth
-                                baseTracer
-                                ( Prod.traceBoth
-                                    Prompt.traceUsefulPromptStdout
+                forM_ (take 1 args.agentFiles) $ \agentFile -> do
+                    Prompt.mainInteractiveAgent $
+                        Prompt.Props
+                            { Prompt.apiKeysFile = args.apiKeysFile
+                            , Prompt.rawLogFile = args.logFile
+                            , Prompt.mainAgentFile = agentFile
+                            , Prompt.helperAgentsDir = args.agentsDir
+                            , Prompt.interactiveTracer =
+                                Prod.traceBoth
+                                    baseTracer
                                     ( Prod.traceBoth
-                                        Prompt.tracePrintingTextResponses
-                                        (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                        Prompt.traceUsefulPromptStdout
+                                        ( Prod.traceBoth
+                                            Prompt.tracePrintingTextResponses
+                                            (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                        )
                                     )
-                                )
-                        }
+                            }
             OneShot opts -> do
-                prompt <-
-                    if "@" `List.isPrefixOf` opts.fileOrPromptArg
-                        then Text.readFile (drop 1 opts.fileOrPromptArg)
-                        else pure $ Text.pack opts.fileOrPromptArg
-                let oneShot = flip Prompt.mainOneShotText
-                oneShot prompt $
-                    Prompt.Props
-                        { Prompt.apiKeysFile = args.apiKeysFile
-                        , Prompt.rawLogFile = args.logFile
-                        , Prompt.mainAgentFile = args.agentFile
-                        , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer =
-                            Prod.traceBoth
-                                baseTracer
-                                Prompt.traceUsefulPromptStderr
-                        }
+                forM_ (take 1 args.agentFiles) $ \agentFile -> do
+                    prompt <-
+                        if "@" `List.isPrefixOf` opts.fileOrPromptArg
+                            then Text.readFile (drop 1 opts.fileOrPromptArg)
+                            else pure $ Text.pack opts.fileOrPromptArg
+                    let oneShot = flip Prompt.mainOneShotText
+                    oneShot prompt $
+                        Prompt.Props
+                            { Prompt.apiKeysFile = args.apiKeysFile
+                            , Prompt.rawLogFile = args.logFile
+                            , Prompt.mainAgentFile = agentFile
+                            , Prompt.helperAgentsDir = args.agentsDir
+                            , Prompt.interactiveTracer =
+                                Prod.traceBoth
+                                    baseTracer
+                                    Prompt.traceUsefulPromptStderr
+                            }
             SelfDescribe ->
                 Aeson.encodeFile "/dev/stdout" $
                     Bash.ScriptInfo
                         []
                         "self-introspect"
                         "introspect a version of yourself"
-            McpServer ->
-                McpServer.mainAgentServer $
-                    Prompt.Props
-                        { Prompt.apiKeysFile = args.apiKeysFile
-                        , Prompt.rawLogFile = args.logFile
-                        , Prompt.mainAgentFile = args.agentFile
-                        , Prompt.helperAgentsDir = args.agentsDir
-                        , Prompt.interactiveTracer =
-                            Prod.traceBoth
-                                baseTracer
-                                ( Prod.traceBoth
-                                    Prompt.traceUsefulPromptStderr
-                                    (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
-                                )
-                        }
+            McpServer -> do
+                let oneAgent agentFile =
+                        Prompt.Props
+                            { Prompt.apiKeysFile = args.apiKeysFile
+                            , Prompt.rawLogFile = args.logFile
+                            , Prompt.mainAgentFile = agentFile
+                            , Prompt.helperAgentsDir = args.agentsDir
+                            , Prompt.interactiveTracer =
+                                Prod.traceBoth
+                                    baseTracer
+                                    ( Prod.traceBoth
+                                        Prompt.traceUsefulPromptStderr
+                                        (Prompt.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                    )
+                            }
+                McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
             Initialize ->
                 let o =
                         Agents.OpenAIAgent
@@ -264,9 +277,10 @@ main = do
                                 ]
                             }
                  in do
-                        InitProject.initOpenAIAgent o args.agentFile
-                        InitProject.initAgentsDir args.agentsDir
-                        InitProject.initOpenAIKeys args.apiKeysFile
+                        forM_ (take 1 args.agentFiles) $ \agentFile -> do
+                            InitProject.initOpenAIAgent o agentFile
+                            InitProject.initAgentsDir args.agentsDir
+                            InitProject.initOpenAIKeys args.apiKeysFile
 
 -------------------------------------------------------------------------------
 

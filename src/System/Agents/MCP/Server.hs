@@ -10,9 +10,13 @@ import Control.Monad.Reader (runReaderT)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as Aeson
 import Data.Conduit.Combinators (sinkHandleFlush)
+import Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Lazy as LText
+import Formatting ((%))
+import qualified Formatting as Format
 import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
@@ -26,15 +30,33 @@ import System.Agents.MCP.Server.Runtime
 
 mainAgentServer :: Prompt.Props -> IO ()
 mainAgentServer props = do
+    multiAgentsServer [props]
+
+multiAgentsServer :: [Prompt.Props] -> IO ()
+multiAgentsServer xs = multiAgentsServer' 0 xs []
+
+multiAgentsServer' :: Int -> [Prompt.Props] -> MappedTools -> IO ()
+multiAgentsServer' _ [] [] = do
+    print ("no agent definitions" :: Text)
+multiAgentsServer' _ [] mtools = do
+    rt <- initRuntime mtools
+    runLoggingT (runReaderT (runMcpStack mainMcp) rt) logTrace
+  where
+    logTrace =
+        defaultOutput stderr
+multiAgentsServer' idx (props : xs) mtools = do
     Prompt.withAgentRuntime props go
   where
     go (Prompt.Initialized ai) = do
-        rt <- initRuntime ai
-        runLoggingT (runReaderT (runMcpStack mainMcp) rt) logTrace
-    go _ =
+        case ai.agentDescription of
+            (FileLoader.Unspecified _) -> do
+                print ("cannot expose over MCP an agent with unspecified description" :: Text)
+            (FileLoader.OpenAIAgentDescription oai) -> do
+                let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
+                let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
+                multiAgentsServer' (succ idx) xs (tool : mtools)
+    go _ = do
         print ("failed to initialize" :: Text)
-    logTrace =
-        defaultOutput stderr
 
 mainMcp :: McpStack ()
 mainMcp = do
@@ -136,11 +158,11 @@ handleMsg req (ListResourcesRequestMsg _) = do
                 (Mcp.ListResourcesResult [] Nothing)
     Rpc.sendResponse rsp
 handleMsg req (ListToolsRequestMsg _) = do
-    agent <- askAgentInfo
+    toolset <- askMappedTools
     let rsp =
             respond
                 req
-                (Mcp.ListToolsResult (Maybe.catMaybes [callExpertTool agent]) Nothing)
+                (Mcp.ListToolsResult (makeMappedTools toolset) Nothing)
     Rpc.sendResponse rsp
 handleMsg req (ListPromptsRequestMsg _) = do
     let rsp =
@@ -154,35 +176,44 @@ handleMsg req (CallToolRequestMsg callTool) = do
                 (pure Nothing)
                 (\err -> pure $ Left err)
                 (\hist -> pure $ maybe (Left "no answer") Right $ OpenAI.lastAnswerMaybe hist)
-    ai <- askAgentInfo
-    res <- case extractPrompt callTool of
-        Nothing -> pure $ Left "no prompt given"
-        (Just query) -> do
-            liftIO $ Agent.openAIAgent ai.agentRuntime agentFunctions query
+    mappedTool <- askMappedTools
+    res <- case lookupMappedTools mappedTool callTool.name of
+        Just (ExpertAgentAsPrompt _ ai) -> do
+            case extractPrompt callTool of
+                Nothing -> pure $ Left "no prompt given"
+                (Just query) -> do
+                    liftIO $ Agent.openAIAgent ai.agentRuntime agentFunctions query
+        Nothing -> do
+            pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =
             respond
                 req
                 (Mcp.CallToolResult [toolCallContent res] Nothing)
     Rpc.sendResponse rsp
 
+lookupMappedTools :: MappedTools -> Mcp.Name -> Maybe MappedTool
+lookupMappedTools xs mcpName =
+    List.find f xs
+  where
+    f :: MappedTool -> Bool
+    f (ExpertAgentAsPrompt n _) = n == mcpName
+
 -------------------------------------------------------------------------------
 
-extractPrompt :: Mcp.CallToolRequest -> Maybe Text
-extractPrompt (Mcp.CallToolRequest _ Nothing) = Nothing
-extractPrompt (Mcp.CallToolRequest _ (Just arg)) =
-    Aeson.lookup "prompt" arg >>= f
+makeMappedTools :: MappedTools -> [Mcp.Tool]
+makeMappedTools = Maybe.catMaybes . fmap adapt
   where
-    f (Aeson.String txt) = Just txt
-    f _ = Nothing
+    adapt :: MappedTool -> Maybe Mcp.Tool
+    adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
 
-callExpertTool :: Prompt.AgentInfo -> Maybe Mcp.Tool
-callExpertTool ai =
+callExpertTool :: Mcp.Name -> Prompt.AgentInfo -> Maybe Mcp.Tool
+callExpertTool mcpName ai =
     case ai.agentDescription of
         (FileLoader.Unspecified _) -> Nothing
         (FileLoader.OpenAIAgentDescription oai) ->
             Just $
                 Mcp.Tool
-                    ("ask_" <> oai.slug)
+                    mcpName
                     (Just oai.announce)
                     ( Mcp.InputSchema
                         (Just ["prompt"])
@@ -196,6 +227,14 @@ callExpertTool ai =
                                 ]
                         )
                     )
+
+extractPrompt :: Mcp.CallToolRequest -> Maybe Text
+extractPrompt (Mcp.CallToolRequest _ Nothing) = Nothing
+extractPrompt (Mcp.CallToolRequest _ (Just arg)) =
+    Aeson.lookup "prompt" arg >>= f
+  where
+    f (Aeson.String txt) = Just txt
+    f _ = Nothing
 
 toolCallContent :: Either String OpenAI.Response -> Mcp.Content
 toolCallContent (Left err) =

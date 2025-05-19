@@ -86,6 +86,7 @@ library agents-lib
                       contravariant,
                       directory,
                       filepath,
+                      formatting,
                       process,
                       process-extras,
                       prodapi,
