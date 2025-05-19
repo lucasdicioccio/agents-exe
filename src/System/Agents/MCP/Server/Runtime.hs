@@ -22,7 +22,7 @@ import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Prompt as Prompt
 
 data Runtime = Runtime
-    { agentInfo :: Prompt.AgentInfo
+    { agentInfo :: Prompt.AgentInfo -- todo: replace into mapped tools
     , actions :: IORef [(Rpc.Request, Async ())]
     }
 
