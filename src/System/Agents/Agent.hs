@@ -19,7 +19,7 @@ import Prod.Tracer (Tracer, contramap, runTracer)
 import qualified System.Agents.HttpClient as HttpClient
 
 import System.Agents.Base
-import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.LLMs.OpenAI as LLM
 import System.Agents.Tools
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
@@ -31,7 +31,7 @@ data Trace
     deriving (Show)
 
 data BaseTrace
-    = OpenAITrace !OpenAI.Trace
+    = LLMTrace !LLM.Trace
     | StepTrace !TraceStep
     | BashToolsLoadingTrace !BashTools.LoadTrace
     | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
@@ -40,7 +40,7 @@ data BaseTrace
     deriving (Show)
 
 data TraceStep
-    = GotResponse !OpenAI.Response
+    = GotResponse !LLM.Response
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -52,8 +52,8 @@ data Runtime
     , agentAnnounce :: AgentAnnounce
     , agentTracer :: Tracer IO Trace
     , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
-    , agentModel :: OpenAI.Model
-    , agentTools :: IO [Registration OpenAI.Tool OpenAI.ToolCall]
+    , agentModel :: LLM.Model
+    , agentTools :: IO [Registration LLM.Tool LLM.ToolCall]
     , agentTriggerRefreshTools :: STM Bool
     }
 
@@ -106,10 +106,10 @@ newRuntime ::
     AgentSlug ->
     AgentAnnounce ->
     Tracer IO Trace ->
-    OpenAI.ApiKey ->
-    OpenAI.Model ->
+    LLM.ApiKey ->
+    LLM.Model ->
     FilePath ->
-    [AgentSlug -> AgentId -> Registration OpenAI.Tool OpenAI.ToolCall] ->
+    [AgentSlug -> AgentId -> Registration LLM.Tool LLM.ToolCall] ->
     IO (Either String Runtime)
 newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
     uid <- newAgentId
@@ -118,10 +118,10 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
     case toolz of
         Left err -> pure $ Left err
         Right (bkgTools, triggerReloadTools) -> do
-            let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey
+            let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ LLM.revealApiKey apiKey
             httpRt <- HttpClient.newRuntime auth
             let appendIOTools xs = ioTools <> xs
-            let registerTools xs = fmap registerBashToolInOpenAI xs
+            let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) bkgTools
             let readTools = Background.readBackgroundVal bkgToolsWithIOTools
             let rt = Runtime slug uid announce tracer httpRt model readTools triggerReloadTools
@@ -131,7 +131,7 @@ data AgentFunctions r
     = AgentFunctions
     { waitAdditionalQuery :: IO (Maybe Text)
     , onError :: String -> IO r
-    , onDone :: OpenAI.History -> IO r
+    , onDone :: LLM.History -> IO r
     }
 
 data PendingQuery
@@ -143,9 +143,9 @@ getQuery :: PendingQuery -> Maybe Text
 getQuery (SomeQuery t) = Just t
 getQuery _ = Nothing
 
-openAIAgent :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
-openAIAgent rt functions startingPrompt =
-    let step :: OpenAI.History -> PendingQuery -> IO r
+llmAgent :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
+llmAgent rt functions startingPrompt =
+    let step :: LLM.History -> PendingQuery -> IO r
         step = stepWith rt functions continue
 
         continue :: ContinueFunction r
@@ -157,15 +157,15 @@ openAIAgent rt functions startingPrompt =
 type ContinueFunction r = ContinueD -> IO r
 
 data ContinueD
-    = PromptMore !PendingQuery !OpenAI.History
-    | OnDone !OpenAI.History
+    = PromptMore !PendingQuery !LLM.History
+    | OnDone !LLM.History
     | OnError !String
 
 stepWith ::
     Runtime ->
     AgentFunctions r ->
     ContinueFunction r ->
-    OpenAI.History ->
+    LLM.History ->
     PendingQuery ->
     IO r
 stepWith _ _ next hist Done = next $ OnDone hist
@@ -173,10 +173,10 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
     let baseTracer = contramap (AgentTrace rt.agentSlug rt.agentId) tracer
     let query = getQuery pendingQuery
     registeredTools <- tools
-    let openAITools = fmap declareTool registeredTools
-    let payload = OpenAI.simplePayload model openAITools hist query
-    llmResponse <- OpenAI.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . OpenAITrace) tracer) httpRt model.modelBaseUrl payload
-    case Aeson.parseEither OpenAI.parseLLMResponse =<< llmResponse of
+    let llmTools = fmap declareTool registeredTools
+    let payload = LLM.simplePayload model llmTools hist query
+    llmResponse <- LLM.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . LLMTrace) tracer) httpRt model.modelBaseUrl payload
+    case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
             runTracer baseTracer (StepTrace $ GotResponse rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
@@ -185,23 +185,23 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
                     next $
                         PromptMore
                             (maybe Done SomeQuery nextQuery)
-                            (hist <> Seq.singleton (OpenAI.PromptAnswered query rsp))
+                            (hist <> Seq.singleton (LLM.PromptAnswered query rsp))
                 toolcalls -> do
-                    responses <- mapConcurrently (openAICallTool baseTracer registeredTools) toolcalls
-                    let toolResults = fmap OpenAI.ToolCalled $ yankResults responses
+                    responses <- mapConcurrently (llmCallTool baseTracer registeredTools) toolcalls
+                    let toolResults = fmap LLM.ToolCalled $ yankResults responses
                     next $
                         PromptMore
                             GaveToolAnswers
-                            (hist <> Seq.singleton (OpenAI.PromptAnswered query rsp) <> Seq.fromList toolResults)
+                            (hist <> Seq.singleton (LLM.PromptAnswered query rsp) <> Seq.fromList toolResults)
         Left err ->
             next $ OnError err
 
-openAICallTool ::
+llmCallTool ::
     Tracer IO BaseTrace ->
-    [Registration OpenAI.Tool OpenAI.ToolCall] ->
-    OpenAI.ToolCall ->
-    IO (CallResult OpenAI.ToolCall)
-openAICallTool tracer registrations call =
+    [Registration LLM.Tool LLM.ToolCall] ->
+    LLM.ToolCall ->
+    IO (CallResult LLM.ToolCall)
+llmCallTool tracer registrations call =
     let
         script =
             Maybe.listToMaybe $
@@ -215,72 +215,72 @@ openAICallTool tracer registrations call =
                 ret <- t.toolRun (contramap RunToolTrace tracer) v
                 pure $ mapCallResult (const call) ret
 
-registerBashToolInOpenAI ::
+registerBashToolInLLM ::
     BashTools.ScriptDescription ->
-    Registration OpenAI.Tool OpenAI.ToolCall
-registerBashToolInOpenAI script =
+    Registration LLM.Tool LLM.ToolCall
+registerBashToolInLLM script =
     let
-        bash2OpenAIName :: BashTools.ScriptDescription -> OpenAI.ToolName
-        bash2OpenAIName bash = OpenAI.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlug])
+        bash2LLMName :: BashTools.ScriptDescription -> LLM.ToolName
+        bash2LLMName bash = LLM.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlug])
 
-        matchName :: BashTools.ScriptDescription -> OpenAI.ToolCall -> Bool
-        matchName bash call = bash2OpenAIName bash == call.toolCallFunction.toolCallFunctionName
+        matchName :: BashTools.ScriptDescription -> LLM.ToolCall -> Bool
+        matchName bash call = bash2LLMName bash == call.toolCallFunction.toolCallFunctionName
 
-        mapToolDescriptionBash2OpenAI :: BashTools.ScriptDescription -> OpenAI.Tool
-        mapToolDescriptionBash2OpenAI bash =
-            OpenAI.Tool
-                { OpenAI.toolName = bash2OpenAIName bash
-                , OpenAI.toolDescription = bash.scriptInfo.scriptDescription
-                , OpenAI.toolParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
+        mapToolDescriptionBash2LLM :: BashTools.ScriptDescription -> LLM.Tool
+        mapToolDescriptionBash2LLM bash =
+            LLM.Tool
+                { LLM.toolName = bash2LLMName bash
+                , LLM.toolDescription = bash.scriptInfo.scriptDescription
+                , LLM.toolParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
                 }
 
-        mapArg :: BashTools.ScriptArg -> OpenAI.ParamProperty
+        mapArg :: BashTools.ScriptArg -> LLM.ParamProperty
         mapArg arg =
-            OpenAI.ParamProperty
-                { OpenAI.propertyKey = arg.argName
-                , OpenAI.propertyType = arg.argBackingTypeString
-                , OpenAI.propertyDescription = arg.argDescription
+            LLM.ParamProperty
+                { LLM.propertyKey = arg.argName
+                , LLM.propertyType = arg.argBackingTypeString
+                , LLM.propertyDescription = arg.argDescription
                 }
 
         tool :: Tool ()
         tool = bashTool script
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: LLM.ToolCall -> Maybe (Tool LLM.ToolCall)
         find call = if matchName script call then Just (mapToolCall (const call) tool) else Nothing
      in
-        Registration tool (mapToolDescriptionBash2OpenAI script) find
+        Registration tool (mapToolDescriptionBash2LLM script) find
 
 {- | registers an IO Script, since we have not yet decided on a way to capture the
 shape of the tool for IOScript (ideally some generics or something like Data.Aeson.Encoding) we take the whole Tool definition
 -}
-registerIOScriptInOpenAI ::
+registerIOScriptInLLM ::
     (Aeson.FromJSON a) =>
     IOTools.IOScript a ByteString ->
-    [OpenAI.ParamProperty] ->
-    Registration OpenAI.Tool OpenAI.ToolCall
-registerIOScriptInOpenAI script openAIProps =
+    [LLM.ParamProperty] ->
+    Registration LLM.Tool LLM.ToolCall
+registerIOScriptInLLM script llmProps =
     let
-        io2OpenAIName :: IOTools.IOScript a b -> OpenAI.ToolName
-        io2OpenAIName io = OpenAI.ToolName (mconcat ["io_", io.description.ioSlug])
+        io2LLMName :: IOTools.IOScript a b -> LLM.ToolName
+        io2LLMName io = LLM.ToolName (mconcat ["io_", io.description.ioSlug])
 
-        matchName :: IOTools.IOScript a b -> OpenAI.ToolCall -> Bool
-        matchName io call = io2OpenAIName io == call.toolCallFunction.toolCallFunctionName
+        matchName :: IOTools.IOScript a b -> LLM.ToolCall -> Bool
+        matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
 
         tool :: Tool ()
         tool = ioTool script
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: LLM.ToolCall -> Maybe (Tool LLM.ToolCall)
         find call = if matchName script call then Just (mapToolCall (const call) tool) else Nothing
 
-        openAITool :: OpenAI.Tool
-        openAITool =
-            OpenAI.Tool
-                { OpenAI.toolName = io2OpenAIName script
-                , OpenAI.toolDescription = script.description.ioDescription
-                , OpenAI.toolParamProperties = openAIProps
+        llmTool :: LLM.Tool
+        llmTool =
+            LLM.Tool
+                { LLM.toolName = io2LLMName script
+                , LLM.toolDescription = script.description.ioDescription
+                , LLM.toolParamProperties = llmProps
                 }
      in
-        Registration tool openAITool find
+        Registration tool llmTool find
 
 -------------------------------------------------------------------------------
 data PromptOtherAgent
@@ -291,15 +291,15 @@ instance Aeson.FromJSON PromptOtherAgent where
         PromptOtherAgent
             <$> v Aeson..: "what"
 
-turnAgentRuntimeIntoIOTool :: Runtime -> AgentSlug -> AgentId -> Registration OpenAI.Tool OpenAI.ToolCall
+turnAgentRuntimeIntoIOTool :: Runtime -> AgentSlug -> AgentId -> Registration LLM.Tool LLM.ToolCall
 turnAgentRuntimeIntoIOTool rt callerSlug callerId =
-    registerIOScriptInOpenAI io props
+    registerIOScriptInLLM io props
   where
     props =
-        [ OpenAI.ParamProperty
-            { OpenAI.propertyKey = "what"
-            , OpenAI.propertyType = "string"
-            , OpenAI.propertyDescription = "the prompt to the other agent"
+        [ LLM.ParamProperty
+            { LLM.propertyKey = "what"
+            , LLM.propertyType = "string"
+            , LLM.propertyDescription = "the prompt to the other agent"
             }
         ]
     io =
@@ -311,7 +311,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (\(PromptOtherAgent txt) -> runSubAgent txt)
 
     runSubAgent txt =
-        openAIAgent (nestTracer rt) agentFunctions txt
+        llmAgent (nestTracer rt) agentFunctions txt
 
     nestTracer childRuntime =
         childRuntime{agentTracer = contramap (AgentTrace callerSlug callerId . ChildrenTrace) childRuntime.agentTracer}
@@ -322,7 +322,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
             (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ locateResponse done)
 
-    locateResponse :: OpenAI.History -> Maybe Text
+    locateResponse :: LLM.History -> Maybe Text
     locateResponse hist = do
         rsp <-
             Maybe.listToMaybe $
@@ -331,8 +331,8 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
                         Seq.reverse hist
         rsp.rspContent
       where
-        viewResponse :: OpenAI.HistoryItem -> Maybe OpenAI.Response
-        viewResponse (OpenAI.PromptAnswered _ rsp) = Just rsp
+        viewResponse :: LLM.HistoryItem -> Maybe LLM.Response
+        viewResponse (LLM.PromptAnswered _ rsp) = Just rsp
         viewResponse _ = Nothing
 
 -- TODO: improve on message handling here so that yankResults or default values are agent-specific

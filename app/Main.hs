@@ -313,16 +313,16 @@ toJsonTrace x = case x of
             (BaseAgent.ReloadToolsTrace _) -> Nothing
             (BaseAgent.StepTrace _) ->
                 Nothing
-            (BaseAgent.OpenAITrace (LLMTrace.HttpClientTrace _)) ->
+            (BaseAgent.LLMTrace (LLMTrace.HttpClientTrace _)) ->
                 Nothing
-            (BaseAgent.OpenAITrace (LLMTrace.CallChatCompletion val)) ->
+            (BaseAgent.LLMTrace (LLMTrace.CallChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
                         , "a" .= ("call" :: Text.Text)
                         , "v" .= val
                         ]
-            (BaseAgent.OpenAITrace (LLMTrace.GotChatCompletion val)) ->
+            (BaseAgent.LLMTrace (LLMTrace.GotChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)

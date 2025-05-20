@@ -138,7 +138,7 @@ mainOneShotText props query = do
             (\err -> putStrLn $ unlines ["execution error", err])
             (\hist -> OpenAI.printLastAnswer hist)
     runMainAgent rt = do
-        Agent.openAIAgent rt agentFunctions query
+        Agent.llmAgent rt agentFunctions query
 
 mainInteractiveAgent :: Props -> IO ()
 mainInteractiveAgent props = do
@@ -159,7 +159,7 @@ mainInteractiveAgent props = do
     runMainAgent ai = do
         let nextQuery = askQuery ai
         query <- nextQuery
-        Agent.openAIAgent ai.agentRuntime (agentFunctions nextQuery) query
+        Agent.llmAgent ai.agentRuntime (agentFunctions nextQuery) query
 
     askQuery :: AgentInfo -> IO Text
     askQuery ai = do
@@ -244,7 +244,7 @@ traceSilent = silent
 traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
 traceWaitingOpenAIRateLimits lims onWait = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace _ _ (Agent.OpenAITrace tr))) =
+    f (AgentTrace (Agent.AgentTrace _ _ (Agent.LLMTrace tr))) =
         runTracer (OpenAI.waitRateLimit lims onWait) tr
     f _ = pure ()
 
@@ -255,7 +255,7 @@ tracePrintingTextResponses = Tracer f
         g [slug] trace
     f _ = pure ()
 
-    g pfx (Agent.OpenAITrace (OpenAI.GotChatCompletion x)) =
+    g pfx (Agent.LLMTrace (OpenAI.GotChatCompletion x)) =
         case Aeson.parseEither OpenAI.parseLLMResponse x of
             Left _ -> pure ()
             Right rsp ->
@@ -296,11 +296,11 @@ renderBaseAgentTrace tr = case tr of
         Text.unwords ["io-tool", desc.ioSlug, "start"]
     Agent.RunToolTrace (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "stop"]
-    Agent.OpenAITrace (OpenAI.HttpClientTrace _) -> "(http)"
-    Agent.OpenAITrace (OpenAI.CallChatCompletion _) ->
-        Text.unwords ["to: open-ai"]
-    Agent.OpenAITrace (OpenAI.GotChatCompletion x) ->
-        Text.unwords ["from: open-ai", jsonTxt x]
+    Agent.LLMTrace (OpenAI.HttpClientTrace _) -> "(http)"
+    Agent.LLMTrace (OpenAI.CallChatCompletion _) ->
+        Text.unwords ["to: llm"]
+    Agent.LLMTrace (OpenAI.GotChatCompletion x) ->
+        Text.unwords ["from: llm", jsonTxt x]
     Agent.StepTrace (Agent.GotResponse rsp) ->
         Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
     Agent.ChildrenTrace (Agent.AgentTrace slug _ sub) ->
