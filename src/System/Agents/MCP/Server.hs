@@ -21,21 +21,21 @@ import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
+import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
-import qualified System.Agents.Prompt as Prompt
 
 import System.Agents.MCP.Server.Runtime
 
-mainAgentServer :: Prompt.Props -> IO ()
+mainAgentServer :: Conversation.Props -> IO ()
 mainAgentServer props = do
     multiAgentsServer [props]
 
-multiAgentsServer :: [Prompt.Props] -> IO ()
+multiAgentsServer :: [Conversation.Props] -> IO ()
 multiAgentsServer xs = multiAgentsServer' 0 xs []
 
-multiAgentsServer' :: Int -> [Prompt.Props] -> MappedTools -> IO ()
+multiAgentsServer' :: Int -> [Conversation.Props] -> MappedTools -> IO ()
 multiAgentsServer' _ [] [] = do
     print ("no agent definitions" :: Text)
 multiAgentsServer' _ [] mtools = do
@@ -45,9 +45,9 @@ multiAgentsServer' _ [] mtools = do
     logTrace =
         defaultOutput stderr
 multiAgentsServer' idx (props : xs) mtools = do
-    Prompt.withAgentRuntime props go
+    Conversation.withAgentRuntime props go
   where
-    go (Prompt.Initialized ai) = do
+    go (Conversation.Initialized ai) = do
         case ai.agentDescription of
             (FileLoader.Unspecified _) -> do
                 print ("cannot expose over MCP an agent with unspecified description" :: Text)
@@ -206,7 +206,7 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
     adapt :: MappedTool -> Maybe Mcp.Tool
     adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
 
-callExpertTool :: Mcp.Name -> Prompt.AgentInfo -> Maybe Mcp.Tool
+callExpertTool :: Mcp.Name -> Conversation.AgentInfo -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     case ai.agentDescription of
         (FileLoader.Unspecified _) -> Nothing
