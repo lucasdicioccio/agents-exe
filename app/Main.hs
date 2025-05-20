@@ -294,25 +294,41 @@ toJsonTrace x = case x of
     Prompt.AgentTrace v -> encodeAgentTrace v
   where
     encodeAgentTrace :: BaseAgent.Trace -> Maybe Aeson.Value
-    encodeAgentTrace (Agent.AgentTrace s i bt) = do
-        baseVal <- encodeBaseTrace bt
+    encodeAgentTrace tr = do
+        baseVal <- encodeBaseTrace tr
         Just $
             Aeson.object
                 [ "e"
                     .= Aeson.object
-                        [ "s" .= (s :: Text.Text)
-                        , "id" .= i
+                        [ "s" .= Agent.traceAgentSlug tr
+                        , "id" .= Agent.traceAgentId tr
                         , "x" .= baseVal
                         ]
                 ]
 
-    encodeBaseTrace :: BaseAgent.BaseTrace -> Maybe Aeson.Value
-    encodeBaseTrace bt =
+    encodeBaseTrace :: BaseAgent.Trace -> Maybe Aeson.Value
+    encodeBaseTrace (BaseAgent.AgentTrace_Loading _ _ tr) =
+        encodeBaseTrace_Loading tr
+    encodeBaseTrace (BaseAgent.AgentTrace_Info _ _ tr) =
+        encodeBaseTrace_Info tr
+    encodeBaseTrace (BaseAgent.AgentTrace_Conversation _ _ tr) =
+        encodeBaseTrace_Conversation tr
+
+    encodeBaseTrace_Loading :: BaseAgent.LoadingTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Loading bt =
         case bt of
             (BaseAgent.BashToolsLoadingTrace _) -> Nothing
             (BaseAgent.ReloadToolsTrace _) -> Nothing
-            (BaseAgent.InfoTrace _) ->
+
+    encodeBaseTrace_Info :: BaseAgent.InfoTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Info bt =
+        case bt of
+            (BaseAgent.GotResponse _) ->
                 Nothing
+
+    encodeBaseTrace_Conversation :: BaseAgent.ConversationTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Conversation bt =
+        case bt of
             (BaseAgent.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
             (BaseAgent.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->

@@ -244,14 +244,14 @@ traceSilent = silent
 traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
 traceWaitingOpenAIRateLimits lims onWait = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace _ _ (Agent.LLMTrace _ tr))) =
+    f (AgentTrace (Agent.AgentTrace_Conversation _ _ (Agent.LLMTrace _ tr))) =
         runTracer (OpenAI.waitRateLimit lims onWait) tr
     f _ = pure ()
 
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace slug _ trace)) =
+    f (AgentTrace (Agent.AgentTrace_Conversation slug _ trace)) =
         g [slug] trace
     f _ = pure ()
 
@@ -260,7 +260,7 @@ tracePrintingTextResponses = Tracer f
             Left _ -> pure ()
             Right rsp ->
                 Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent]
-    g pfx (Agent.ChildrenTrace (Agent.AgentTrace childSlug _ sub)) =
+    g pfx (Agent.ChildrenTrace (Agent.AgentTrace_Conversation childSlug _ sub)) =
         g (childSlug : pfx) sub
     g _ _ = pure ()
 
@@ -273,18 +273,39 @@ traceUsefulPromptStderr = traceUsefulPromptHandle stderr
 traceUsefulPromptHandle :: Handle -> Tracer IO Trace
 traceUsefulPromptHandle h = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace slug _ tr)) =
-        Text.hPutStrLn h $
-            Text.unlines
-                [ mconcat ["@", slug, ":"]
-                , renderBaseAgentTrace tr
-                ]
+    f (AgentTrace tr) =
+        Text.hPutStrLn h $ renderAgentTrace tr
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
 
-renderBaseAgentTrace :: Agent.BaseTrace -> Text
-renderBaseAgentTrace tr = case tr of
+renderAgentTrace :: Agent.Trace -> Text
+renderAgentTrace (Agent.AgentTrace_Loading slug _ tr) =
+    Text.unlines
+        [ mconcat ["@", slug, ":"]
+        , renderLoadingAgentTrace tr
+        ]
+renderAgentTrace (Agent.AgentTrace_Conversation slug _ tr) =
+    Text.unlines
+        [ mconcat ["@", slug, ":"]
+        , renderConversationAgentTrace tr
+        ]
+renderAgentTrace (Agent.AgentTrace_Info slug _ tr) =
+    Text.unlines
+        [ mconcat ["@", slug, ":"]
+        , renderInfoAgentTrace tr
+        ]
+
+renderLoadingAgentTrace :: Agent.LoadingTrace -> Text
+renderLoadingAgentTrace tr = case tr of
     Agent.ReloadToolsTrace _ -> "(reload-tools...)"
     Agent.BashToolsLoadingTrace _ -> "(reload-tools...)"
+
+renderInfoAgentTrace :: Agent.InfoTrace -> Text
+renderInfoAgentTrace tr = case tr of
+    Agent.GotResponse rsp ->
+        Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
+
+renderConversationAgentTrace :: Agent.ConversationTrace -> Text
+renderConversationAgentTrace tr = case tr of
     Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
         Text.unwords ["bash-tool", "start", Text.pack p, Text.unwords $ map Text.pack args]
     Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->
@@ -301,10 +322,8 @@ renderBaseAgentTrace tr = case tr of
         Text.unwords ["to: llm"]
     Agent.LLMTrace _ (OpenAI.GotChatCompletion x) ->
         Text.unwords ["from: llm", jsonTxt x]
-    Agent.InfoTrace (Agent.GotResponse rsp) ->
-        Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
-    Agent.ChildrenTrace (Agent.AgentTrace slug _ sub) ->
-        Text.unwords ["(", slug, ")", renderBaseAgentTrace sub]
+    Agent.ChildrenTrace sub ->
+        Text.unwords ["(", Agent.traceAgentSlug sub, ")", renderAgentTrace sub]
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode

@@ -30,26 +30,42 @@ import qualified System.Agents.Tools.IO as IOTools
 
 -- problem here: AgentTrace generally is selected at runtime initialization
 -- meanwhile a conversation can occur multiple time for a same initialization
--- so we need to introduce a separation in trace between:
+-- so we need have a separation in trace between:
 -- per-initialized agent
 -- per-conversation
 -- this will help case like
 --  boss > expert1 (prompt-abc)
 --  boss > expert1 (prompt-def)
+-- todo: add conversationId to AgentTrace_Conversation
+type ConversationId = UUID
+
 data Trace
-    = AgentTrace !AgentSlug !AgentId !BaseTrace
+    = AgentTrace_Loading !AgentSlug !AgentId !LoadingTrace
+    | AgentTrace_Info !AgentSlug !AgentId !InfoTrace
+    | AgentTrace_Conversation !AgentSlug !AgentId !ConversationTrace
     deriving (Show)
 
-data BaseTrace
+traceAgentSlug :: Trace -> AgentSlug
+traceAgentSlug (AgentTrace_Loading slug _ _) = slug
+traceAgentSlug (AgentTrace_Conversation slug _ _) = slug
+traceAgentSlug (AgentTrace_Info slug _ _) = slug
+
+traceAgentId :: Trace -> AgentId
+traceAgentId (AgentTrace_Loading _ aId _) = aId
+traceAgentId (AgentTrace_Conversation _ aId _) = aId
+traceAgentId (AgentTrace_Info _ aId _) = aId
+
+data ConversationTrace
     = LLMTrace !UUID !LLM.Trace
     | RunToolTrace !UUID !ToolTrace
     | ChildrenTrace !Trace
-    | BashToolsLoadingTrace !BashTools.LoadTrace
-    | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
-    | InfoTrace !InfoTrace
     deriving (Show)
 
--- | for traces that do not add much over BaseTrace but are handy for getting a special notification bit out
+data LoadingTrace
+    = BashToolsLoadingTrace !BashTools.LoadTrace
+    | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
+    deriving (Show)
+
 data InfoTrace
     = GotResponse !LLM.Response
     deriving (Show)
@@ -77,7 +93,7 @@ type BackgroundTools =
     )
 
 backgroundToolDir ::
-    Tracer IO BaseTrace ->
+    Tracer IO LoadingTrace ->
     FilePath ->
     IO (Either String BackgroundTools)
 backgroundToolDir tracer tooldir = do
@@ -125,7 +141,7 @@ newRuntime ::
 newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
-    toolz <- backgroundToolDir (contramap (AgentTrace slug uid) tracer) tooldir
+    toolz <- backgroundToolDir (contramap (AgentTrace_Loading slug uid) tracer) tooldir
     case toolz of
         Left err -> pure $ Left err
         Right (bkgTools, triggerReloadTools) -> do
@@ -181,16 +197,17 @@ stepWith ::
     IO r
 stepWith _ _ next hist Done = next $ OnDone hist
 stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
-    let baseTracer = contramap (AgentTrace rt.agentSlug rt.agentId) tracer
+    let convTracer = contramap (AgentTrace_Conversation rt.agentSlug rt.agentId) tracer
+    let infoTracer = contramap (AgentTrace_Info rt.agentSlug rt.agentId) tracer
     let query = getQuery pendingQuery
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
     let payload = LLM.simplePayload model llmTools hist query
     llmcallUUID <- UUID.nextRandom
-    llmResponse <- LLM.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . LLMTrace llmcallUUID) tracer) httpRt model.modelBaseUrl payload
+    llmResponse <- LLM.callLLMPayload (contramap (LLMTrace llmcallUUID) convTracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
-            runTracer baseTracer (InfoTrace $ GotResponse rsp)
+            runTracer infoTracer (GotResponse rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
                 [] -> do
                     nextQuery <- functions.waitAdditionalQuery
@@ -199,7 +216,7 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
                             (maybe Done SomeQuery nextQuery)
                             (hist <> Seq.singleton (LLM.PromptAnswered query rsp))
                 toolcalls -> do
-                    responses <- mapConcurrently (llmCallTool baseTracer registeredTools) toolcalls
+                    responses <- mapConcurrently (llmCallTool convTracer registeredTools) toolcalls
                     let toolResults = fmap LLM.ToolCalled $ yankResults responses
                     next $
                         PromptMore
@@ -209,7 +226,7 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
             next $ OnError err
 
 llmCallTool ::
-    Tracer IO BaseTrace ->
+    Tracer IO ConversationTrace ->
     [Registration LLM.Tool LLM.ToolCall] ->
     LLM.ToolCall ->
     IO (CallResult LLM.ToolCall)
@@ -327,7 +344,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
         handleConversation (nestTracer rt) agentFunctions txt
 
     nestTracer childRuntime =
-        childRuntime{agentTracer = contramap (AgentTrace callerSlug callerId . ChildrenTrace) childRuntime.agentTracer}
+        childRuntime{agentTracer = contramap (AgentTrace_Conversation callerSlug callerId . ChildrenTrace) childRuntime.agentTracer}
 
     agentFunctions =
         AgentFunctions
