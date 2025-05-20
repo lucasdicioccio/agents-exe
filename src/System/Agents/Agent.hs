@@ -28,20 +28,29 @@ import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
 
+-- problem here: AgentTrace generally is selected at runtime initialization
+-- meanwhile a conversation can occur multiple time for a same initialization
+-- so we need to introduce a separation in trace between:
+-- per-initialized agent
+-- per-conversation
+-- this will help case like
+--  boss > expert1 (prompt-abc)
+--  boss > expert1 (prompt-def)
 data Trace
     = AgentTrace !AgentSlug !AgentId !BaseTrace
     deriving (Show)
 
 data BaseTrace
     = LLMTrace !UUID !LLM.Trace
-    | StepTrace !TraceStep
-    | BashToolsLoadingTrace !BashTools.LoadTrace
-    | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
     | RunToolTrace !UUID !ToolTrace
     | ChildrenTrace !Trace
+    | BashToolsLoadingTrace !BashTools.LoadTrace
+    | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
+    | InfoTrace !InfoTrace
     deriving (Show)
 
-data TraceStep
+-- | for traces that do not add much over BaseTrace but are handy for getting a special notification bit out
+data InfoTrace
     = GotResponse !LLM.Response
     deriving (Show)
 
@@ -145,8 +154,8 @@ getQuery :: PendingQuery -> Maybe Text
 getQuery (SomeQuery t) = Just t
 getQuery _ = Nothing
 
-llmAgent :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
-llmAgent rt functions startingPrompt =
+handleConversation :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
+handleConversation rt functions startingPrompt =
     let step :: LLM.History -> PendingQuery -> IO r
         step = stepWith rt functions continue
 
@@ -181,7 +190,7 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
     llmResponse <- LLM.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . LLMTrace llmcallUUID) tracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
-            runTracer baseTracer (StepTrace $ GotResponse rsp)
+            runTracer baseTracer (InfoTrace $ GotResponse rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
                 [] -> do
                     nextQuery <- functions.waitAdditionalQuery
@@ -315,7 +324,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (\(PromptOtherAgent txt) -> runSubAgent txt)
 
     runSubAgent txt =
-        llmAgent (nestTracer rt) agentFunctions txt
+        handleConversation (nestTracer rt) agentFunctions txt
 
     nestTracer childRuntime =
         childRuntime{agentTracer = contramap (AgentTrace callerSlug callerId . ChildrenTrace) childRuntime.agentTracer}

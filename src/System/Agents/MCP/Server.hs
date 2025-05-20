@@ -182,7 +182,7 @@ handleMsg req (CallToolRequestMsg callTool) = do
             case extractPrompt callTool of
                 Nothing -> pure $ Left "no prompt given"
                 (Just query) -> do
-                    liftIO $ Agent.llmAgent ai.agentRuntime agentFunctions query
+                    liftIO $ Agent.handleConversation ai.agentRuntime agentFunctions query
         Nothing -> do
             pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =

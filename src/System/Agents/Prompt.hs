@@ -138,7 +138,7 @@ mainOneShotText props query = do
             (\err -> putStrLn $ unlines ["execution error", err])
             (\hist -> OpenAI.printLastAnswer hist)
     runMainAgent rt = do
-        Agent.llmAgent rt agentFunctions query
+        Agent.handleConversation rt agentFunctions query
 
 mainInteractiveAgent :: Props -> IO ()
 mainInteractiveAgent props = do
@@ -159,7 +159,7 @@ mainInteractiveAgent props = do
     runMainAgent ai = do
         let nextQuery = askQuery ai
         query <- nextQuery
-        Agent.llmAgent ai.agentRuntime (agentFunctions nextQuery) query
+        Agent.handleConversation ai.agentRuntime (agentFunctions nextQuery) query
 
     askQuery :: AgentInfo -> IO Text
     askQuery ai = do
@@ -301,7 +301,7 @@ renderBaseAgentTrace tr = case tr of
         Text.unwords ["to: llm"]
     Agent.LLMTrace _ (OpenAI.GotChatCompletion x) ->
         Text.unwords ["from: llm", jsonTxt x]
-    Agent.StepTrace (Agent.GotResponse rsp) ->
+    Agent.InfoTrace (Agent.GotResponse rsp) ->
         Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
     Agent.ChildrenTrace (Agent.AgentTrace slug _ sub) ->
         Text.unwords ["(", slug, ")", renderBaseAgentTrace sub]

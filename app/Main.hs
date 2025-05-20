@@ -311,7 +311,7 @@ toJsonTrace x = case x of
         case bt of
             (BaseAgent.BashToolsLoadingTrace _) -> Nothing
             (BaseAgent.ReloadToolsTrace _) -> Nothing
-            (BaseAgent.StepTrace _) ->
+            (BaseAgent.InfoTrace _) ->
                 Nothing
             (BaseAgent.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
