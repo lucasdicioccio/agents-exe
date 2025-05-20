@@ -14,6 +14,8 @@ import qualified Data.Maybe as Maybe
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
+import Data.UUID (UUID)
+import qualified Data.UUID.V4 as UUID
 import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap, runTracer)
 import qualified System.Agents.HttpClient as HttpClient
@@ -31,7 +33,7 @@ data Trace
     deriving (Show)
 
 data BaseTrace
-    = LLMTrace !LLM.Trace
+    = LLMTrace !UUID !LLM.Trace
     | StepTrace !TraceStep
     | BashToolsLoadingTrace !BashTools.LoadTrace
     | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
@@ -175,7 +177,8 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
     let payload = LLM.simplePayload model llmTools hist query
-    llmResponse <- LLM.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . LLMTrace) tracer) httpRt model.modelBaseUrl payload
+    llmcallUUID <- UUID.nextRandom
+    llmResponse <- LLM.callLLMPayload (contramap (AgentTrace rt.agentSlug rt.agentId . LLMTrace llmcallUUID) tracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
             runTracer baseTracer (StepTrace $ GotResponse rsp)

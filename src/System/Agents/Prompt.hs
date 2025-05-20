@@ -244,7 +244,7 @@ traceSilent = silent
 traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
 traceWaitingOpenAIRateLimits lims onWait = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace _ _ (Agent.LLMTrace tr))) =
+    f (AgentTrace (Agent.AgentTrace _ _ (Agent.LLMTrace _ tr))) =
         runTracer (OpenAI.waitRateLimit lims onWait) tr
     f _ = pure ()
 
@@ -255,7 +255,7 @@ tracePrintingTextResponses = Tracer f
         g [slug] trace
     f _ = pure ()
 
-    g pfx (Agent.LLMTrace (OpenAI.GotChatCompletion x)) =
+    g pfx (Agent.LLMTrace _ (OpenAI.GotChatCompletion x)) =
         case Aeson.parseEither OpenAI.parseLLMResponse x of
             Left _ -> pure ()
             Right rsp ->
@@ -296,10 +296,10 @@ renderBaseAgentTrace tr = case tr of
         Text.unwords ["io-tool", desc.ioSlug, "start"]
     Agent.RunToolTrace (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "stop"]
-    Agent.LLMTrace (OpenAI.HttpClientTrace _) -> "(http)"
-    Agent.LLMTrace (OpenAI.CallChatCompletion _) ->
+    Agent.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
+    Agent.LLMTrace _ (OpenAI.CallChatCompletion _) ->
         Text.unwords ["to: llm"]
-    Agent.LLMTrace (OpenAI.GotChatCompletion x) ->
+    Agent.LLMTrace _ (OpenAI.GotChatCompletion x) ->
         Text.unwords ["from: llm", jsonTxt x]
     Agent.StepTrace (Agent.GotResponse rsp) ->
         Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
