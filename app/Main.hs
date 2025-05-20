@@ -300,9 +300,9 @@ toJsonTrace x = case x of
             Aeson.object
                 [ "e"
                     .= Aeson.object
-                        [ "s" .= Agent.traceAgentSlug tr
-                        , "id" .= Agent.traceAgentId tr
-                        , "x" .= baseVal
+                        [ "slug" .= Agent.traceAgentSlug tr
+                        , "agent-id" .= Agent.traceAgentId tr
+                        , "val" .= baseVal
                         ]
                 ]
 
@@ -315,8 +315,8 @@ toJsonTrace x = case x of
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
             Aeson.object
-                [ "c" .= convId
-                , "v" .= baseVal
+                [ "conv-id" .= convId
+                , "val" .= baseVal
                 ]
 
     encodeBaseTrace_Loading :: BaseAgent.LoadingTrace -> Maybe Aeson.Value
@@ -340,23 +340,23 @@ toJsonTrace x = case x of
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
-                        , "a" .= ("call" :: Text.Text)
-                        , "v" .= val
-                        , "u" .= uuid
+                        , "action" .= ("call" :: Text.Text)
+                        , "call-id" .= uuid
+                        , "val" .= val
                         ]
             (BaseAgent.LLMTrace uuid (LLMTrace.GotChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
-                        , "a" .= ("result" :: Text.Text)
-                        , "v" .= val
-                        , "u" .= uuid
+                        , "action" .= ("result" :: Text.Text)
+                        , "call-id" .= uuid
+                        , "val" .= val
                         ]
             (BaseAgent.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
                 Just $
                     Aeson.object
-                        [ "x" .= ("run-tool" :: Text.Text)
-                        , "u" .= uuid
+                        [ "x" .= ("tool" :: Text.Text)
+                        , "run-id" .= uuid
                         , "flavor" .= ("bash" :: Text.Text)
                         , "action" .= ("start" :: Text.Text)
                         , "cmd" .= cmd
@@ -365,8 +365,8 @@ toJsonTrace x = case x of
             (BaseAgent.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
                 Just $
                     Aeson.object
-                        [ "x" .= ("run-tool" :: Text.Text)
-                        , "u" .= uuid
+                        [ "x" .= ("tool" :: Text.Text)
+                        , "run-id" .= uuid
                         , "flavor" .= ("bash" :: Text.Text)
                         , "action" .= ("stop" :: Text.Text)
                         , "code-str" .= show code -- todo: code
@@ -376,8 +376,8 @@ toJsonTrace x = case x of
             (BaseAgent.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
                 Just $
                     Aeson.object
-                        [ "x" .= ("run-tool" :: Text.Text)
-                        , "u" .= uuid
+                        [ "x" .= ("tool" :: Text.Text)
+                        , "run-id" .= uuid
                         , "flavor" .= ("io" :: Text.Text)
                         , "action" .= ("start" :: Text.Text)
                         , "tool" .= desc.ioSlug
@@ -386,20 +386,17 @@ toJsonTrace x = case x of
             (BaseAgent.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
                 Just $
                     Aeson.object
-                        [ "x" .= ("run-tool" :: Text.Text)
-                        , "u" .= uuid
+                        [ "x" .= ("tool" :: Text.Text)
+                        , "run-id" .= uuid
                         , "flavor" .= ("io" :: Text.Text)
                         , "action" .= ("stop" :: Text.Text)
                         , "tool" .= desc.ioSlug
                         , "input" .= input
                         -- , "output" .= output
                         ]
-            (BaseAgent.ChildrenTrace sub) ->
-                case encodeAgentTrace sub of
-                    Nothing ->
-                        Just $ Aeson.object ["x" .= ("child" :: Text.Text)]
-                    Just v ->
-                        Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= v]
+            (BaseAgent.ChildrenTrace sub) -> do
+                subVal <- encodeAgentTrace sub
+                Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= subVal]
 
 makeHttpJsonTrace :: Text.Text -> IO (Prod.Tracer IO Aeson.Value)
 makeHttpJsonTrace url = do

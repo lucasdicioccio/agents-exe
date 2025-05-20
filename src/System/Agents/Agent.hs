@@ -28,15 +28,6 @@ import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
 
--- problem here: AgentTrace generally is selected at runtime initialization
--- meanwhile a conversation can occur multiple time for a same initialization
--- so we need have a separation in trace between:
--- per-initialized agent
--- per-conversation
--- this will help case like
---  boss > expert1 (prompt-abc)
---  boss > expert1 (prompt-def)
--- todo: add conversationId to AgentTrace_Conversation
 type ConversationId = UUID
 
 data Trace
@@ -200,7 +191,7 @@ stepWith ::
     LLM.History ->
     PendingQuery ->
     IO r
-stepWith conversationId _ _ next hist Done = next $ OnDone hist
+stepWith _ _ _ next hist Done = next $ OnDone hist
 stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
     let convTracer = contramap (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId) tracer
     let infoTracer = contramap (AgentTrace_Info rt.agentSlug rt.agentId) tracer
