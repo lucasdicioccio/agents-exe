@@ -37,7 +37,7 @@ data BaseTrace
     | StepTrace !TraceStep
     | BashToolsLoadingTrace !BashTools.LoadTrace
     | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
-    | RunToolTrace !ToolTrace
+    | RunToolTrace !UUID !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
 
@@ -215,7 +215,8 @@ llmCallTool tracer registrations call =
         case spec of
             Nothing -> pure $ ToolNotFound call
             Just (t, v) -> do
-                ret <- t.toolRun (contramap RunToolTrace tracer) v
+                toolcallUUID <- UUID.nextRandom
+                ret <- t.toolRun (contramap (RunToolTrace toolcallUUID) tracer) v
                 pure $ mapCallResult (const call) ret
 
 registerBashToolInLLM ::

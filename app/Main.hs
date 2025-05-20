@@ -331,38 +331,42 @@ toJsonTrace x = case x of
                         , "v" .= val
                         , "u" .= uuid
                         ]
-            (BaseAgent.RunToolTrace (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
+            (BaseAgent.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("run-tool" :: Text.Text)
+                        , "u" .= uuid
                         , "flavor" .= ("bash" :: Text.Text)
                         , "action" .= ("start" :: Text.Text)
                         , "cmd" .= cmd
                         , "args" .= args
                         ]
-            (BaseAgent.RunToolTrace (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
+            (BaseAgent.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("run-tool" :: Text.Text)
+                        , "u" .= uuid
                         , "flavor" .= ("bash" :: Text.Text)
                         , "action" .= ("stop" :: Text.Text)
                         , "code-str" .= show code -- todo: code
                         , "cmd" .= cmd
                         , "args" .= args
                         ]
-            (BaseAgent.RunToolTrace (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
+            (BaseAgent.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("run-tool" :: Text.Text)
+                        , "u" .= uuid
                         , "flavor" .= ("io" :: Text.Text)
                         , "action" .= ("start" :: Text.Text)
                         , "tool" .= desc.ioSlug
                         , "input" .= input
                         ]
-            (BaseAgent.RunToolTrace (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
+            (BaseAgent.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("run-tool" :: Text.Text)
+                        , "u" .= uuid
                         , "flavor" .= ("io" :: Text.Text)
                         , "action" .= ("stop" :: Text.Text)
                         , "tool" .= desc.ioSlug

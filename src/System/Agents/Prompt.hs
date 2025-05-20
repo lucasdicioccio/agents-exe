@@ -285,16 +285,16 @@ renderBaseAgentTrace :: Agent.BaseTrace -> Text
 renderBaseAgentTrace tr = case tr of
     Agent.ReloadToolsTrace _ -> "(reload-tools...)"
     Agent.BashToolsLoadingTrace _ -> "(reload-tools...)"
-    Agent.RunToolTrace (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
+    Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
         Text.unwords ["bash-tool", "start", Text.pack p, Text.unwords $ map Text.pack args]
-    Agent.RunToolTrace (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->
+    Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->
         Text.unlines
             [ Text.unwords ["bash-tool", "stopped", Text.pack p, Text.unwords $ map Text.pack args]
             , Text.pack $ show code
             ]
-    Agent.RunToolTrace (Tools.IOToolsTrace (Tools.IOScriptStarted desc _)) ->
+    Agent.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStarted desc _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "start"]
-    Agent.RunToolTrace (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
+    Agent.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "stop"]
     Agent.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
     Agent.LLMTrace _ (OpenAI.CallChatCompletion _) ->
