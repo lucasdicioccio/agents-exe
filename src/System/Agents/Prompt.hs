@@ -221,6 +221,7 @@ mainInteractiveAgent props = do
     queryOrNothing t = Just t
 
 augmentMainAgentPromptWithSubAgents :: [Agent.Runtime] -> Text -> Text
+augmentMainAgentPromptWithSubAgents [] base = base
 augmentMainAgentPromptWithSubAgents agents base =
     Text.unlines
         [ base

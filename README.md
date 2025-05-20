@@ -179,10 +179,15 @@ A few environment variables may affect somme commands.
 ## Using as an MCP server
 
 The command `agents-exe mcp-server` runs a (stdin/stdout) MCP server exposing
-the agent as a single tool.  It has been shown to work with Claude-desktop.  I
+agents as individual tools.  It has been shown to work with Claude-desktop.  I
 would call the support as still experimental at this point, expect some changes
 and extra features (e.g., exposing just bash-tools without agent files so that
 the MCP-client becomes the agent).
+
+The name of tools exposed over MCP is deterministic across runs provided you
+run the `mcp-server` command with the same `--agent-file` in the same order.
+This can be annoying when reading logs. I suspect I'll eventually make them
+more deterministic.
 
 ## Using as a library
 
