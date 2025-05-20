@@ -25,10 +25,10 @@ data IOScriptDescription
     }
     deriving (Show)
 
-data IOScript a b
+data IOScript rtVal llmArg b
     = IOScript
     { description :: IOScriptDescription
-    , ioRun :: a -> IO b
+    , ioRun :: rtVal -> llmArg -> IO b
     }
 
 data RunError
@@ -36,13 +36,13 @@ data RunError
     | ScriptExecutionError String
     deriving (Show)
 
-runValue :: (FromJSON a) => Tracer IO (Trace a b) -> IOScript a b -> Aeson.Value -> IO (Either RunError b)
-runValue tracer script val = do
+runValue :: (FromJSON llmArg) => Tracer IO (Trace llmArg b) -> IOScript rtVal llmArg b -> rtVal -> Aeson.Value -> IO (Either RunError b)
+runValue tracer script runtimeValue val = do
     case Aeson.parseEither Aeson.parseJSON val of
         Left err ->
             pure $ Left $ SerializeArgumentErrors err
         Right argz -> do
             runTracer tracer (IOScriptStarted script.description argz)
-            out <- script.ioRun argz
+            out <- script.ioRun runtimeValue argz
             runTracer tracer (IOScriptStopped script.description argz out)
             pure $ Right out

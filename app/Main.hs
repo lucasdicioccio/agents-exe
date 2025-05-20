@@ -311,8 +311,13 @@ toJsonTrace x = case x of
         encodeBaseTrace_Loading tr
     encodeBaseTrace (BaseAgent.AgentTrace_Info _ _ tr) =
         encodeBaseTrace_Info tr
-    encodeBaseTrace (BaseAgent.AgentTrace_Conversation _ _ tr) =
-        encodeBaseTrace_Conversation tr
+    encodeBaseTrace (BaseAgent.AgentTrace_Conversation _ _ convId tr) = do
+        baseVal <- encodeBaseTrace_Conversation tr
+        Just $
+            Aeson.object
+                [ "c" .= convId
+                , "v" .= baseVal
+                ]
 
     encodeBaseTrace_Loading :: BaseAgent.LoadingTrace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =

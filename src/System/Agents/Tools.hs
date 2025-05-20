@@ -43,28 +43,29 @@ data ToolDef
     | IOTool !IOTools.IOScriptDescription
     deriving (Show)
 
-data Tool call
+data Tool rtVal call
     = Tool
     { toolDef :: ToolDef
-    , toolRun :: Tracer IO ToolTrace -> Aeson.Value -> IO (CallResult call)
+    , toolRun :: Tracer IO ToolTrace -> rtVal -> Aeson.Value -> IO (CallResult call)
     }
 
-mapToolCall :: (a -> b) -> Tool a -> Tool b
-mapToolCall f (Tool d g) = Tool d (\tracer v -> fmap (mapCallResult f) (g tracer v))
+mapToolCall :: (a -> b) -> Tool x a -> Tool x b
+mapToolCall f (Tool d run) =
+    Tool d (\tracer rtval v -> fmap (mapCallResult f) (run tracer rtval v))
 
-data Registration tool call
+data Registration rtVal tool call
     = Registration
-    { innerTool :: Tool ()
+    { innerTool :: Tool rtVal ()
     , declareTool :: tool
-    , findTool :: call -> Maybe (Tool call)
+    , findTool :: call -> Maybe (Tool rtVal call)
     }
-instance Show (Registration t c) where
+instance Show (Registration x t c) where
     show (Registration d _ _) = Prelude.unwords ["Registration(", show d.toolDef, ")"]
 
 -------------------------------------------------------------------------------
 bashTool ::
     BashTools.ScriptDescription ->
-    Tool ()
+    Tool a ()
 bashTool script =
     Tool
         { toolDef = BashTool script
@@ -72,7 +73,7 @@ bashTool script =
         }
   where
     call = ()
-    run tracer v = do
+    run tracer _ v = do
         ret <- BashTools.runValue (contramap BashToolsTrace tracer) script v
         case ret of
             Left err -> pure $ BashToolError call err
@@ -80,9 +81,9 @@ bashTool script =
 
 -------------------------------------------------------------------------------
 ioTool ::
-    (Aeson.FromJSON a) =>
-    IOTools.IOScript a ByteString ->
-    Tool ()
+    (Aeson.FromJSON llmArg) =>
+    IOTools.IOScript rtVal llmArg ByteString ->
+    Tool rtVal ()
 ioTool script =
     Tool
         { toolDef = IOTool script.description
@@ -90,10 +91,10 @@ ioTool script =
         }
   where
     call = ()
-    run tracer v = do
+    run tracer runtimeValue v = do
         -- we trace the original input object
         let adaptTrace = IOToolsTrace . IOTools.adaptTraceInput (const v)
-        ret <- IOTools.runValue (contramap adaptTrace tracer) script v
+        ret <- IOTools.runValue (contramap adaptTrace tracer) script runtimeValue v
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ ToolSuccess call rsp

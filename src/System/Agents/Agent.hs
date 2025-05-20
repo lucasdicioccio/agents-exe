@@ -42,17 +42,17 @@ type ConversationId = UUID
 data Trace
     = AgentTrace_Loading !AgentSlug !AgentId !LoadingTrace
     | AgentTrace_Info !AgentSlug !AgentId !InfoTrace
-    | AgentTrace_Conversation !AgentSlug !AgentId !ConversationTrace
+    | AgentTrace_Conversation !AgentSlug !AgentId !ConversationId !ConversationTrace
     deriving (Show)
 
 traceAgentSlug :: Trace -> AgentSlug
 traceAgentSlug (AgentTrace_Loading slug _ _) = slug
-traceAgentSlug (AgentTrace_Conversation slug _ _) = slug
+traceAgentSlug (AgentTrace_Conversation slug _ _ _) = slug
 traceAgentSlug (AgentTrace_Info slug _ _) = slug
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
-traceAgentId (AgentTrace_Conversation _ aId _) = aId
+traceAgentId (AgentTrace_Conversation _ aId _ _) = aId
 traceAgentId (AgentTrace_Info _ aId _) = aId
 
 data ConversationTrace
@@ -80,7 +80,7 @@ data Runtime
     , agentTracer :: Tracer IO Trace
     , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
     , agentModel :: LLM.Model
-    , agentTools :: IO [Registration LLM.Tool LLM.ToolCall]
+    , agentTools :: IO [Registration ConversationId LLM.Tool LLM.ToolCall]
     , agentTriggerRefreshTools :: STM Bool
     }
 
@@ -136,7 +136,7 @@ newRuntime ::
     LLM.ApiKey ->
     LLM.Model ->
     FilePath ->
-    [AgentSlug -> AgentId -> Registration LLM.Tool LLM.ToolCall] ->
+    [AgentSlug -> AgentId -> Registration ConversationId LLM.Tool LLM.ToolCall] ->
     IO (Either String Runtime)
 newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
     uid <- newAgentId
@@ -171,15 +171,19 @@ getQuery (SomeQuery t) = Just t
 getQuery _ = Nothing
 
 handleConversation :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
-handleConversation rt functions startingPrompt =
-    let step :: LLM.History -> PendingQuery -> IO r
-        step = stepWith rt functions continue
+handleConversation rt functions startingPrompt = do
+    conversationId <- UUID.nextRandom
+    go conversationId
+  where
+    go conversationId =
+        let step :: LLM.History -> PendingQuery -> IO r
+            step = stepWith conversationId rt functions continue
 
-        continue :: ContinueFunction r
-        continue (PromptMore q h) = step h q
-        continue (OnError err) = functions.onError err
-        continue (OnDone h) = functions.onDone h
-     in step Seq.empty (SomeQuery startingPrompt)
+            continue :: ContinueFunction r
+            continue (PromptMore q h) = step h q
+            continue (OnError err) = functions.onError err
+            continue (OnDone h) = functions.onDone h
+         in step Seq.empty (SomeQuery startingPrompt)
 
 type ContinueFunction r = ContinueD -> IO r
 
@@ -189,15 +193,16 @@ data ContinueD
     | OnError !String
 
 stepWith ::
+    ConversationId ->
     Runtime ->
     AgentFunctions r ->
     ContinueFunction r ->
     LLM.History ->
     PendingQuery ->
     IO r
-stepWith _ _ next hist Done = next $ OnDone hist
-stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
-    let convTracer = contramap (AgentTrace_Conversation rt.agentSlug rt.agentId) tracer
+stepWith conversationId _ _ next hist Done = next $ OnDone hist
+stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
+    let convTracer = contramap (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId) tracer
     let infoTracer = contramap (AgentTrace_Info rt.agentSlug rt.agentId) tracer
     let query = getQuery pendingQuery
     registeredTools <- tools
@@ -216,7 +221,7 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
                             (maybe Done SomeQuery nextQuery)
                             (hist <> Seq.singleton (LLM.PromptAnswered query rsp))
                 toolcalls -> do
-                    responses <- mapConcurrently (llmCallTool convTracer registeredTools) toolcalls
+                    responses <- mapConcurrently (llmCallTool conversationId convTracer registeredTools) toolcalls
                     let toolResults = fmap LLM.ToolCalled $ yankResults responses
                     next $
                         PromptMore
@@ -226,11 +231,12 @@ stepWith rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pend
             next $ OnError err
 
 llmCallTool ::
+    ConversationId ->
     Tracer IO ConversationTrace ->
-    [Registration LLM.Tool LLM.ToolCall] ->
+    [Registration ConversationId LLM.Tool LLM.ToolCall] ->
     LLM.ToolCall ->
     IO (CallResult LLM.ToolCall)
-llmCallTool tracer registrations call =
+llmCallTool conversationId tracer registrations call =
     let
         script =
             Maybe.listToMaybe $
@@ -242,12 +248,12 @@ llmCallTool tracer registrations call =
             Nothing -> pure $ ToolNotFound call
             Just (t, v) -> do
                 toolcallUUID <- UUID.nextRandom
-                ret <- t.toolRun (contramap (RunToolTrace toolcallUUID) tracer) v
+                ret <- t.toolRun (contramap (RunToolTrace toolcallUUID) tracer) conversationId v
                 pure $ mapCallResult (const call) ret
 
 registerBashToolInLLM ::
     BashTools.ScriptDescription ->
-    Registration LLM.Tool LLM.ToolCall
+    Registration ConversationId LLM.Tool LLM.ToolCall
 registerBashToolInLLM script =
     let
         bash2LLMName :: BashTools.ScriptDescription -> LLM.ToolName
@@ -272,10 +278,10 @@ registerBashToolInLLM script =
                 , LLM.propertyDescription = arg.argDescription
                 }
 
-        tool :: Tool ()
+        tool :: Tool ConversationId ()
         tool = bashTool script
 
-        find :: LLM.ToolCall -> Maybe (Tool LLM.ToolCall)
+        find :: LLM.ToolCall -> Maybe (Tool ConversationId LLM.ToolCall)
         find call = if matchName script call then Just (mapToolCall (const call) tool) else Nothing
      in
         Registration tool (mapToolDescriptionBash2LLM script) find
@@ -285,21 +291,21 @@ shape of the tool for IOScript (ideally some generics or something like Data.Aes
 -}
 registerIOScriptInLLM ::
     (Aeson.FromJSON a) =>
-    IOTools.IOScript a ByteString ->
+    IOTools.IOScript ConversationId a ByteString ->
     [LLM.ParamProperty] ->
-    Registration LLM.Tool LLM.ToolCall
+    Registration ConversationId LLM.Tool LLM.ToolCall
 registerIOScriptInLLM script llmProps =
     let
-        io2LLMName :: IOTools.IOScript a b -> LLM.ToolName
+        io2LLMName :: IOTools.IOScript ConversationId a b -> LLM.ToolName
         io2LLMName io = LLM.ToolName (mconcat ["io_", io.description.ioSlug])
 
-        matchName :: IOTools.IOScript a b -> LLM.ToolCall -> Bool
+        matchName :: IOTools.IOScript ConversationId a b -> LLM.ToolCall -> Bool
         matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
 
-        tool :: Tool ()
+        tool :: Tool ConversationId ()
         tool = ioTool script
 
-        find :: LLM.ToolCall -> Maybe (Tool LLM.ToolCall)
+        find :: LLM.ToolCall -> Maybe (Tool ConversationId LLM.ToolCall)
         find call = if matchName script call then Just (mapToolCall (const call) tool) else Nothing
 
         llmTool :: LLM.Tool
@@ -321,7 +327,8 @@ instance Aeson.FromJSON PromptOtherAgent where
         PromptOtherAgent
             <$> v Aeson..: "what"
 
-turnAgentRuntimeIntoIOTool :: Runtime -> AgentSlug -> AgentId -> Registration LLM.Tool LLM.ToolCall
+turnAgentRuntimeIntoIOTool ::
+    Runtime -> AgentSlug -> AgentId -> Registration ConversationId LLM.Tool LLM.ToolCall
 turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     registerIOScriptInLLM io props
   where
@@ -338,13 +345,23 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
                 ("prompt_agent_" <> rt.agentSlug)
                 ("aks a prompt to the expert agent: " <> rt.agentSlug)
             )
-            (\(PromptOtherAgent txt) -> runSubAgent txt)
+            (\conversationId (PromptOtherAgent txt) -> runSubAgent conversationId txt)
 
-    runSubAgent txt =
-        handleConversation (nestTracer rt) agentFunctions txt
+    runSubAgent conversationId txt =
+        handleConversation (nestTracer conversationId rt) agentFunctions txt
 
-    nestTracer childRuntime =
-        childRuntime{agentTracer = contramap (AgentTrace_Conversation callerSlug callerId . ChildrenTrace) childRuntime.agentTracer}
+    nestTracer conversationId childRuntime =
+        childRuntime
+            { agentTracer =
+                contramap
+                    ( AgentTrace_Conversation
+                        callerSlug
+                        callerId
+                        conversationId
+                        . ChildrenTrace
+                    )
+                    childRuntime.agentTracer
+            }
 
     agentFunctions =
         AgentFunctions

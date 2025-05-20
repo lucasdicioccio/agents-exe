@@ -203,12 +203,12 @@ mainInteractiveAgent props = do
         registry <- rt.agentTools
         Text.putStrLn (renderToolRegistry registry)
 
-    renderToolRegistry :: (Aeson.ToJSON a) => [Tools.Registration a b] -> Text
+    renderToolRegistry :: (Aeson.ToJSON b) => [Tools.Registration a b c] -> Text
     renderToolRegistry registry =
         Text.unlines $
             fmap renderRegisteredTool registry
 
-    renderRegisteredTool :: (Aeson.ToJSON a) => Tools.Registration a b -> Text
+    renderRegisteredTool :: (Aeson.ToJSON b) => Tools.Registration a b c -> Text
     renderRegisteredTool reg =
         case reg.innerTool.toolDef of
             Tools.BashTool bashScript ->
@@ -244,14 +244,14 @@ traceSilent = silent
 traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
 traceWaitingOpenAIRateLimits lims onWait = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace_Conversation _ _ (Agent.LLMTrace _ tr))) =
+    f (AgentTrace (Agent.AgentTrace_Conversation _ _ _ (Agent.LLMTrace _ tr))) =
         runTracer (OpenAI.waitRateLimit lims onWait) tr
     f _ = pure ()
 
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace_Conversation slug _ trace)) =
+    f (AgentTrace (Agent.AgentTrace_Conversation slug _ _ trace)) =
         g [slug] trace
     f _ = pure ()
 
@@ -260,7 +260,7 @@ tracePrintingTextResponses = Tracer f
             Left _ -> pure ()
             Right rsp ->
                 Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent]
-    g pfx (Agent.ChildrenTrace (Agent.AgentTrace_Conversation childSlug _ sub)) =
+    g pfx (Agent.ChildrenTrace (Agent.AgentTrace_Conversation childSlug _ _ sub)) =
         g (childSlug : pfx) sub
     g _ _ = pure ()
 
@@ -283,7 +283,7 @@ renderAgentTrace (Agent.AgentTrace_Loading slug _ tr) =
         [ mconcat ["@", slug, ":"]
         , renderLoadingAgentTrace tr
         ]
-renderAgentTrace (Agent.AgentTrace_Conversation slug _ tr) =
+renderAgentTrace (Agent.AgentTrace_Conversation slug _ _ tr) =
     Text.unlines
         [ mconcat ["@", slug, ":"]
         , renderConversationAgentTrace tr
