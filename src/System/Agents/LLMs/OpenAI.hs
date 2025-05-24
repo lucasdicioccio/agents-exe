@@ -230,6 +230,7 @@ toolResponseMessages tc txt =
 data HistoryItem
     = PromptAnswered (Maybe Text) Response
     | ToolCalled (ToolCall, ByteString)
+    deriving (Show)
 
 type History = Seq HistoryItem
 

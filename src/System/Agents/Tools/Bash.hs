@@ -32,15 +32,18 @@ data RunTrace
 -------------------------------------------------------------------------------
 data ScriptArgArity
     = Single
+    | Optional
     deriving (Show, Eq, Ord)
 
 instance ToJSON ScriptArgArity where
     toJSON s = case s of
         Single -> Aeson.String "single"
+        Optional -> Aeson.String "optional"
 
 instance FromJSON ScriptArgArity where
     parseJSON v = case v of
         Aeson.String "single" -> pure Single
+        Aeson.String "optional" -> pure Optional
         _ ->
             fail $
                 List.unlines
@@ -75,6 +78,9 @@ instance FromJSON ScriptArgCallingMode where
                     [ "Invalid mode: " <> show v
                     , "allowed values are:"
                     , "- positional"
+                    , "- stdin"
+                    , "- dashdashspace"
+                    , "- dashdashequal"
                     ]
 
 data ScriptArg

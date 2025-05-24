@@ -70,6 +70,7 @@ library agents-lib
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.IO
                     , System.Agents.LLMs.OpenAI
+                    , System.Agents.Memory
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
                     , System.Agents.CLI
