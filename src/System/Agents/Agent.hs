@@ -64,7 +64,7 @@ data LoadingTrace
 
 data MemorizeTrace
     = Calling !PendingQuery !LLM.History !StepId
-    | GotResponse !LLM.History !StepId !LLM.Response
+    | GotResponse !PendingQuery !LLM.History !StepId !LLM.Response
     | InteractionDone !LLM.History !StepId
     deriving (Show)
 
@@ -225,7 +225,7 @@ stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions
     case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
             let hist02 = hist <> Seq.singleton (LLM.PromptAnswered query rsp)
-            runTracer infoTracer (GotResponse hist02 stepUUID rsp)
+            runTracer infoTracer (GotResponse pendingQuery hist02 stepUUID rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
                 [] -> do
                     nextQuery <- functions.waitAdditionalQuery

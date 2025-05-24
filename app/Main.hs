@@ -354,6 +354,25 @@ extractMemories x = case x of
                     , Memory.parentAgentId = paId
                     }
                 ]
+    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.GotResponse query hist stepId rsp)) =
+        let
+            (pSlug, pcId, paId) = parentInfo stack
+            rId = fromMaybe cId (rootConversationId stack)
+         in
+            Right
+                [ Memory.MemoryItem
+                    { Memory.rootConversationId = rId
+                    , Memory.conversationId = cId
+                    , Memory.agentSlug = aSlug
+                    , Memory.agentId = aId
+                    , Memory.stepId = stepId
+                    , Memory.llmHistory = hist
+                    , Memory.pendingQuery = query
+                    , Memory.parentAgentSlug = pSlug
+                    , Memory.parentConversationId = pcId
+                    , Memory.parentAgentId = paId
+                    }
+                ]
     go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.InteractionDone hist stepId)) =
         let
             (pSlug, pcId, paId) = parentInfo stack
@@ -419,7 +438,7 @@ toJsonTrace x = case x of
         case bt of
             (BaseAgent.Calling _ _ _) ->
                 Nothing
-            (BaseAgent.GotResponse _ _ _) ->
+            (BaseAgent.GotResponse _ _ _ _) ->
                 Nothing
             (BaseAgent.InteractionDone _ _) ->
                 Nothing

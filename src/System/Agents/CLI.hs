@@ -187,7 +187,7 @@ renderMemorizeAgentTrace :: Agent.MemorizeTrace -> Text
 renderMemorizeAgentTrace tr = case tr of
     Agent.Calling _ hist _ ->
         Text.unwords [Text.pack . show $ length hist, ">>>"]
-    Agent.GotResponse hist _ rsp ->
+    Agent.GotResponse _ hist _ rsp ->
         Text.unwords [Text.pack . show $ length hist, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
     Agent.InteractionDone hist _ ->
         Text.unwords [Text.pack . show $ length hist, "<<<"]
