@@ -22,3 +22,4 @@ EOD
     ping -c 3 $2
   ;;
 esac
+

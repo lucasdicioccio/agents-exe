@@ -3,16 +3,18 @@
 
 module Main where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, (>=>))
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
 import qualified Data.List as List
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
 import qualified System.Agents.Agent as BaseAgent
+import System.Agents.Base (AgentId, AgentSlug, ConversationId)
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
@@ -29,12 +31,15 @@ import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.IO as ToolsTrace
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
+import qualified System.Agents.Memory as Memory
+
 import Options.Applicative
 
 data Prog = Prog
     { apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
+    , memoryHttpStore :: Maybe String
     , agentFiles :: [FilePath]
     , agentsDir :: FilePath
     , mainCommand :: Command
@@ -132,6 +137,14 @@ parseProgOptions =
                     <> showDefault
                 )
             )
+        <*> optional
+            ( strOption
+                ( long "memory-http-store"
+                    <> metavar "MEMORYHTTPSTORE"
+                    <> help "http memory sink"
+                    <> showDefault
+                )
+            )
         <*> fmap
             addDefaultSomeAgentFile
             ( many
@@ -177,15 +190,26 @@ main = do
                 <> header "hi"
             )
 
+    traceExtra :: Prod.Tracer IO a -> Maybe (Prod.Tracer IO a) -> Prod.Tracer IO a
+    traceExtra t1 Nothing = t1
+    traceExtra t1 (Just t2) = Prod.traceBoth t1 t2
+
     prog :: Prog -> IO ()
     prog args = do
         showFileTracer <- makeShowLogFileTracer args.logFile
-        baseHttpTracer1 <- traverse (makeHttpJsonTrace . Text.pack) args.logHttp
-        let httpTracer =
+        baseHttpTracer1 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) args.logHttp
+        let logHttpTracer =
                 case baseHttpTracer1 of
                     Nothing -> Nothing
                     Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
-        let baseTracer = maybe showFileTracer (Prod.traceBoth showFileTracer) httpTracer
+        baseHttpTracer2 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) args.memoryHttpStore
+        let memoryHttpTracer =
+                case baseHttpTracer2 of
+                    Nothing -> Nothing
+                    Just t -> Just $ choose extractMemories Prod.silent t
+
+        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer
+
         case args.mainCommand of
             Check -> do
                 forM_ args.agentFiles $ \agentFile -> do
@@ -289,6 +313,89 @@ maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
 
+extractMemories :: Conversation.Trace -> Either () [Memory.MemoryItem]
+extractMemories x = case x of
+    Conversation.AgentTrace tr -> go [] tr
+    _ -> Left ()
+  where
+    parentInfo :: [BaseAgent.Trace] -> (Maybe AgentSlug, Maybe ConversationId, Maybe AgentId)
+    parentInfo ((BaseAgent.AgentTrace_Memorize pSlug paId pcId _) : _) =
+        (Just pSlug, Just pcId, Just paId)
+    parentInfo ((BaseAgent.AgentTrace_Conversation pSlug paId pcId _) : _) =
+        (Just pSlug, Just pcId, Just paId)
+    parentInfo _ =
+        (Nothing, Nothing, Nothing)
+
+    rootConversationId :: [BaseAgent.Trace] -> Maybe ConversationId
+    rootConversationId = rootTrace >=> BaseAgent.traceConversationId
+
+    rootTrace :: [BaseAgent.Trace] -> Maybe BaseAgent.Trace
+    rootTrace [] = Nothing
+    rootTrace (t : []) = Just t
+    rootTrace ts = rootTrace (drop 1 ts)
+
+    go :: [BaseAgent.Trace] -> BaseAgent.Trace -> Either () [Memory.MemoryItem]
+    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.Calling query hist stepId)) =
+        let
+            (pSlug, pcId, paId) = parentInfo stack
+            rId = fromMaybe cId (rootConversationId stack)
+         in
+            Right
+                [ Memory.MemoryItem
+                    { Memory.rootConversationId = rId
+                    , Memory.conversationId = cId
+                    , Memory.agentSlug = aSlug
+                    , Memory.agentId = aId
+                    , Memory.stepId = stepId
+                    , Memory.llmHistory = hist
+                    , Memory.pendingQuery = query
+                    , Memory.parentAgentSlug = pSlug
+                    , Memory.parentConversationId = pcId
+                    , Memory.parentAgentId = paId
+                    }
+                ]
+    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.GotResponse query hist stepId rsp)) =
+        let
+            (pSlug, pcId, paId) = parentInfo stack
+            rId = fromMaybe cId (rootConversationId stack)
+         in
+            Right
+                [ Memory.MemoryItem
+                    { Memory.rootConversationId = rId
+                    , Memory.conversationId = cId
+                    , Memory.agentSlug = aSlug
+                    , Memory.agentId = aId
+                    , Memory.stepId = stepId
+                    , Memory.llmHistory = hist
+                    , Memory.pendingQuery = query
+                    , Memory.parentAgentSlug = pSlug
+                    , Memory.parentConversationId = pcId
+                    , Memory.parentAgentId = paId
+                    }
+                ]
+    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.InteractionDone hist stepId)) =
+        let
+            (pSlug, pcId, paId) = parentInfo stack
+            rId = fromMaybe cId (rootConversationId stack)
+         in
+            Right
+                [ Memory.MemoryItem
+                    { Memory.rootConversationId = rId
+                    , Memory.conversationId = cId
+                    , Memory.agentSlug = aSlug
+                    , Memory.agentId = aId
+                    , Memory.stepId = stepId
+                    , Memory.llmHistory = hist
+                    , Memory.pendingQuery = BaseAgent.Done
+                    , Memory.parentAgentSlug = pSlug
+                    , Memory.parentConversationId = pcId
+                    , Memory.parentAgentId = paId
+                    }
+                ]
+    go xs tr@(BaseAgent.AgentTrace_Conversation _ _ _ (BaseAgent.ChildrenTrace sub)) =
+        go (tr : xs) sub
+    go _ _ = Left ()
+
 toJsonTrace :: Conversation.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
     Conversation.DataLoadingTrace _ -> Nothing
@@ -310,8 +417,8 @@ toJsonTrace x = case x of
     encodeBaseTrace :: BaseAgent.Trace -> Maybe Aeson.Value
     encodeBaseTrace (BaseAgent.AgentTrace_Loading _ _ tr) =
         encodeBaseTrace_Loading tr
-    encodeBaseTrace (BaseAgent.AgentTrace_Info _ _ tr) =
-        encodeBaseTrace_Info tr
+    encodeBaseTrace (BaseAgent.AgentTrace_Memorize _ _ _ tr) =
+        encodeBaseTrace_Memorize tr
     encodeBaseTrace (BaseAgent.AgentTrace_Conversation _ _ convId tr) = do
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
@@ -326,15 +433,24 @@ toJsonTrace x = case x of
             (BaseAgent.BashToolsLoadingTrace _) -> Nothing
             (BaseAgent.ReloadToolsTrace _) -> Nothing
 
-    encodeBaseTrace_Info :: BaseAgent.InfoTrace -> Maybe Aeson.Value
-    encodeBaseTrace_Info bt =
+    encodeBaseTrace_Memorize :: BaseAgent.MemorizeTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Memorize bt =
         case bt of
-            (BaseAgent.GotResponse _) ->
+            (BaseAgent.Calling _ _ _) ->
+                Nothing
+            (BaseAgent.GotResponse _ _ _ _) ->
+                Nothing
+            (BaseAgent.InteractionDone _ _) ->
                 Nothing
 
     encodeBaseTrace_Conversation :: BaseAgent.ConversationTrace -> Maybe Aeson.Value
     encodeBaseTrace_Conversation bt =
         case bt of
+            (BaseAgent.NewConversation) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("new-conversation" :: Text.Text)
+                        ]
             (BaseAgent.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
             (BaseAgent.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
@@ -399,7 +515,7 @@ toJsonTrace x = case x of
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= subVal]
 
-makeHttpJsonTrace :: Text.Text -> IO (Prod.Tracer IO Aeson.Value)
-makeHttpJsonTrace url = do
+makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text.Text -> IO (Prod.Tracer IO a)
+makeHttpJsonTrace baseTracer url = do
     rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
-    pure $ HttpLogger.httpTracer rt Prod.silent
+    pure $ HttpLogger.httpTracer rt baseTracer

@@ -172,10 +172,10 @@ renderAgentTrace (Agent.AgentTrace_Conversation slug _ _ tr) =
         [ mconcat ["@", slug, ":"]
         , renderConversationAgentTrace tr
         ]
-renderAgentTrace (Agent.AgentTrace_Info slug _ tr) =
+renderAgentTrace (Agent.AgentTrace_Memorize slug _ _ tr) =
     Text.unlines
         [ mconcat ["@", slug, ":"]
-        , renderInfoAgentTrace tr
+        , renderMemorizeAgentTrace tr
         ]
 
 renderLoadingAgentTrace :: Agent.LoadingTrace -> Text
@@ -183,13 +183,18 @@ renderLoadingAgentTrace tr = case tr of
     Agent.ReloadToolsTrace _ -> "(reload-tools...)"
     Agent.BashToolsLoadingTrace _ -> "(reload-tools...)"
 
-renderInfoAgentTrace :: Agent.InfoTrace -> Text
-renderInfoAgentTrace tr = case tr of
-    Agent.GotResponse rsp ->
-        Text.unwords [Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
+renderMemorizeAgentTrace :: Agent.MemorizeTrace -> Text
+renderMemorizeAgentTrace tr = case tr of
+    Agent.Calling _ hist _ ->
+        Text.unwords [Text.pack . show $ length hist, ">>>"]
+    Agent.GotResponse _ hist _ rsp ->
+        Text.unwords [Text.pack . show $ length hist, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
+    Agent.InteractionDone hist _ ->
+        Text.unwords [Text.pack . show $ length hist, "<<<"]
 
 renderConversationAgentTrace :: Agent.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of
+    Agent.NewConversation -> ""
     Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
         Text.unwords ["bash-tool", "start", Text.pack p, Text.unwords $ map Text.pack args]
     Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->

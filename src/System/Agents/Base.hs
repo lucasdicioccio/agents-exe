@@ -17,3 +17,10 @@ newtype AgentId = AgentId UUID
 newAgentId :: IO AgentId
 newAgentId =
     AgentId <$> UUID.nextRandom
+
+newtype ConversationId = ConversationId UUID
+    deriving (Show, Ord, Eq, FromJSON, ToJSON)
+
+newConversationId :: IO ConversationId
+newConversationId =
+    ConversationId <$> UUID.nextRandom
