@@ -31,7 +31,8 @@
       "example3:",
       "{ \"slug\": \"get-date\"\n, \"description\": \"get current date\"\n, \"args\":\n  [ ]\n}",
       "",
-      "on 'run' he bash scripts actually executes the command"
+      "on 'run' bash scripts actually execute the command",
+      "on 'run' bash scripts optionally return an extra output line \"operation successful\" if we would expect the command to return no result"
     ]
   }
 }
