@@ -25,10 +25,25 @@ data Trace
     | LoadJsonFileFailure !FilePath String
     deriving (Show)
 
+loadJsonFile :: Tracer IO Trace -> FilePath -> IO (Either InvalidAgentError AgentDescription)
+loadJsonFile tracer path = do
+    runTracer tracer (LoadJsonFile path)
+    ret <- readJsonDescriptionFile path
+    case ret of
+        Right d -> pure $ Right d
+        Left e -> do
+            runTracer tracer (LoadJsonFileFailure path e)
+            pure $ Left $ LoadFailure path e
+
+-------------------------------------------------------------------------------
 data Agents = Agents
     { dir :: FilePath
     , agents :: [AgentDescription]
     }
+
+data InvalidAgentError
+    = LoadFailure FilePath String
+    deriving (Show)
 
 loadDirectory :: Tracer IO Trace -> FilePath -> IO (Agents, [InvalidAgentError])
 loadDirectory tracer path = do
@@ -49,17 +64,3 @@ loadDirectory tracer path = do
 
     isJson :: FilePath -> Bool
     isJson p = takeExtension p == ".json"
-
-data InvalidAgentError
-    = LoadFailure FilePath String
-    deriving (Show)
-
-loadJsonFile :: Tracer IO Trace -> FilePath -> IO (Either InvalidAgentError AgentDescription)
-loadJsonFile tracer path = do
-    runTracer tracer (LoadJsonFile path)
-    ret <- readJsonDescriptionFile path
-    case ret of
-        Right d -> pure $ Right d
-        Left e -> do
-            runTracer tracer (LoadJsonFileFailure path e)
-            pure $ Left $ LoadFailure path e

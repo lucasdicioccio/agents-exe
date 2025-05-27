@@ -25,6 +25,7 @@ import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
+import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
@@ -48,6 +49,7 @@ data Prog = Prog
 data Command
     = Check
     | InteractiveCommandLine
+    | TerminalUI
     | OneShot OneShotOptions
     | SelfDescribe
     | Initialize
@@ -70,6 +72,10 @@ parseCheckCommand =
 parseCliCommand :: Parser Command
 parseCliCommand =
     pure InteractiveCommandLine
+
+parseTuiChatCommand :: Parser Command
+parseTuiChatCommand =
+    pure TerminalUI
 
 parseOneShotTextualCommand :: Parser Command
 parseOneShotTextualCommand =
@@ -165,6 +171,7 @@ parseProgOptions =
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "cli" (info parseCliCommand (idm))
+                <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "describe" (info parseSelfDescribeCommand (idm))
                 <> command "init" (info parseInitializeCommand (idm))
@@ -241,6 +248,19 @@ main = do
                                         )
                                     )
                             }
+            TerminalUI -> do
+                let oneAgent agentFile =
+                        Conversation.Props
+                            { Conversation.apiKeysFile = args.apiKeysFile
+                            , Conversation.rawLogFile = args.logFile
+                            , Conversation.mainAgentFile = agentFile
+                            , Conversation.helperAgentsDir = args.agentsDir
+                            , Conversation.interactiveTracer =
+                                Prod.traceBoth
+                                    baseTracer
+                                    (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                            }
+                TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     prompt <-
@@ -451,6 +471,8 @@ toJsonTrace x = case x of
                     Aeson.object
                         [ "x" .= ("new-conversation" :: Text.Text)
                         ]
+            (BaseAgent.WaitingForPrompt) ->
+                Nothing
             (BaseAgent.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
             (BaseAgent.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
