@@ -48,6 +48,7 @@ data Prog = Prog
 data Command
     = Check
     | InteractiveCommandLine
+    | InteractiveMultiChat
     | OneShot OneShotOptions
     | SelfDescribe
     | Initialize
@@ -70,6 +71,10 @@ parseCheckCommand =
 parseCliCommand :: Parser Command
 parseCliCommand =
     pure InteractiveCommandLine
+
+parseMultiChatCommand :: Parser Command
+parseMultiChatCommand =
+    pure InteractiveMultiChat
 
 parseOneShotTextualCommand :: Parser Command
 parseOneShotTextualCommand =
@@ -165,6 +170,7 @@ parseProgOptions =
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "cli" (info parseCliCommand (idm))
+                <> command "n-chat" (info parseMultiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "describe" (info parseSelfDescribeCommand (idm))
                 <> command "init" (info parseInitializeCommand (idm))
@@ -241,6 +247,25 @@ main = do
                                         )
                                     )
                             }
+            InteractiveMultiChat -> do
+                let oneAgent agentFile =
+                        Conversation.Props
+                            { Conversation.apiKeysFile = args.apiKeysFile
+                            , Conversation.rawLogFile = args.logFile
+                            , Conversation.mainAgentFile = agentFile
+                            , Conversation.helperAgentsDir = args.agentsDir
+                            , Conversation.interactiveTracer =
+                                Prod.traceBoth
+                                    baseTracer
+                                    ( Prod.traceBoth
+                                        CLI.traceUsefulPromptStdout
+                                        ( Prod.traceBoth
+                                            CLI.tracePrintingTextResponses
+                                            (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                        )
+                                    )
+                            }
+                CLI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     prompt <-

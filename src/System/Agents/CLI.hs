@@ -130,6 +130,28 @@ mainInteractiveAgent props = do
     queryOrNothing "" = Nothing
     queryOrNothing t = Just t
 
+mainMultiAgents :: [Props] -> IO ()
+mainMultiAgents xs = mainMultiAgents' 0 xs []
+
+type LoadedAgent = FileLoader.OpenAIAgent
+
+mainMultiAgents' :: Int -> [Props] -> [LoadedAgent] -> IO ()
+mainMultiAgents' _ [] [] = do
+    print ("no agent definitions" :: Text)
+mainMultiAgents' _ [] agents = do
+    print ("todo", agents)
+mainMultiAgents' idx (props : xs) agents = do
+    withAgentRuntime props go
+  where
+    go (Initialized ai) = do
+        case ai.agentDescription of
+            (FileLoader.Unspecified _) -> do
+                print ("cannot load an agent with unspecified description" :: Text)
+            (FileLoader.OpenAIAgentDescription oai) -> do
+                mainMultiAgents' (succ idx) xs (oai : agents)
+    go _ = do
+        print ("failed to initialize" :: Text)
+
 traceSilent :: Tracer IO Trace
 traceSilent = silent
 
