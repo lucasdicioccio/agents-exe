@@ -86,9 +86,6 @@ mainInteractiveAgent props = do
             putStrLn "### Enter query:"
             query <- Text.pack <$> getLine
             case query of
-                "?" -> do
-                    putStrLn helpStr
-                    go
                 "?help" -> do
                     putStrLn helpStr
                     go
@@ -105,7 +102,11 @@ mainInteractiveAgent props = do
                     traverse_ Agent.triggerRefreshTools (ai.agentRuntime : ai.agentSiblingRuntimes)
 
                     go
-                txt -> pure txt
+                txt
+                    | "?" `Text.isPrefixOf` txt -> do
+                        putStrLn helpStr
+                        go
+                    | otherwise -> pure txt
 
     printAgentTools :: Agent.Runtime -> IO ()
     printAgentTools rt = do
