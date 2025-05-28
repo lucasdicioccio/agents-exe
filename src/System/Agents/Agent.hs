@@ -17,7 +17,7 @@ import qualified Data.Text.Encoding as Text
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import qualified Prod.Background as Background
-import Prod.Tracer (Tracer, contramap, runTracer)
+import Prod.Tracer (Tracer, contramap, runTracer, traceBoth)
 import qualified System.Agents.HttpClient as HttpClient
 
 import System.Agents.Base
@@ -84,6 +84,14 @@ data Runtime
     , agentTools :: IO [ToolRegistration]
     , agentTriggerRefreshTools :: STM Bool
     }
+
+{- | Adds an extra tracer to the runtime, hence returning a modified Runtime.
+
+In current implementation (arbitrary) the extra tracer is ran before the
+already-in-place one.
+-}
+addTracer :: Runtime -> (Tracer IO Trace) -> Runtime
+addTracer rt t = rt{agentTracer = traceBoth t rt.agentTracer}
 
 triggerRefreshTools :: Runtime -> IO Bool
 triggerRefreshTools rt = atomically $ rt.agentTriggerRefreshTools

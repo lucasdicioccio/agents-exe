@@ -41,7 +41,7 @@ converse baseRuntime txt = do
     inbox <- newEmptyTMVarIO
     tracesIORef <- newIORef []
     let logTracesInIORef = Prod.Tracer $ \t -> modifyIORef tracesIORef (t :)
-    let adaptedRuntime = addTracer baseRuntime logTracesInIORef
+    let adaptedRuntime = Agent.addTracer baseRuntime logTracesInIORef
     a <- async $ handleConversation adaptedRuntime (agentFunctions inbox) cId txt
     pure $
         ConversationState
@@ -61,6 +61,3 @@ converse baseRuntime txt = do
             (nextQuery inbox)
             (print)
             (print)
-
-    addTracer :: Agent.Runtime -> (Prod.Tracer IO Agent.Trace) -> Agent.Runtime
-    addTracer rt t = rt{Agent.agentTracer = Prod.traceBoth t rt.agentTracer}
