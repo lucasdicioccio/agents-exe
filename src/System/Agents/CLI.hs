@@ -136,13 +136,9 @@ mainInteractiveAgent props = do
 mainMultiAgents :: [Props] -> IO ()
 mainMultiAgents xs = mainMultiAgents' 0 xs []
 
-type LoadedAgent = FileLoader.OpenAIAgent
+type LoadedAgent = (Agent.Runtime, FileLoader.OpenAIAgent)
 
 mainMultiAgents' :: Int -> [Props] -> [LoadedAgent] -> IO ()
-mainMultiAgents' _ [] [] = do
-    print ("no agent definitions" :: Text)
-mainMultiAgents' _ [] agents = do
-    print ("todo", agents)
 mainMultiAgents' idx (props : xs) agents = do
     withAgentRuntime props go
   where
@@ -151,9 +147,39 @@ mainMultiAgents' idx (props : xs) agents = do
             (FileLoader.Unspecified _) -> do
                 print ("cannot load an agent with unspecified description" :: Text)
             (FileLoader.OpenAIAgentDescription oai) -> do
-                mainMultiAgents' (succ idx) xs (oai : agents)
+                mainMultiAgents' (succ idx) xs ((ai.agentRuntime, oai) : agents)
     go _ = do
         print ("failed to initialize" :: Text)
+mainMultiAgents' _ [] agents = do
+    runMultiAgents agents
+
+runMultiAgents :: [LoadedAgent] -> IO ()
+runMultiAgents [] = print "no agents loaded"
+runMultiAgents agents = do
+    go
+  where
+    helpStr = do
+        unlines
+            [ "? or ?help -- show this help"
+            , "agents -- list agents"
+            , "conversations -- list conversations"
+            , "files -- load and review files as variables"
+            , "prompts -- load and review prompts"
+            , "tasks -- create and review tasks"
+            , "@<agent-id|agent-slug> <prompt> -- starts a conversation"
+            ]
+    go = do
+        putStrLn "### Enter query:"
+        query <- Text.pack <$> getLine
+        case query of
+            "agents" -> do
+                print "todo-agents listing"
+            "conversations" -> do
+                print "todo-conversations listing"
+            txt
+                | "@" `Text.isPrefixOf` txt -> do
+                    putStrLn helpStr
+            txt -> putStrLn helpStr
 
 traceSilent :: Tracer IO Trace
 traceSilent = silent
