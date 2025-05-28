@@ -3,10 +3,13 @@
 
 module System.Agents.CLI where
 
+import qualified Control.Concurrent.Async as Async
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
+import qualified Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -20,6 +23,7 @@ import qualified System.Agents.Agent as Agent
 import System.Agents.Base (newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.Party as Party
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
@@ -153,33 +157,69 @@ mainMultiAgents' idx (props : xs) agents = do
 mainMultiAgents' _ [] agents = do
     runMultiAgents agents
 
+data CliState
+    = CliState
+    { conversations :: IORef [Party.ConversationState]
+    }
+
+newCliState :: IO CliState
+newCliState =
+    CliState
+        <$> newIORef []
+
 runMultiAgents :: [LoadedAgent] -> IO ()
 runMultiAgents [] = print "no agents loaded"
 runMultiAgents agents = do
-    go
+    st0 <- newCliState
+    go st0
   where
+    addConversation :: CliState -> Party.ConversationState -> IO ()
+    addConversation st0 conv = do
+        modifyIORef st0.conversations (conv :)
+
+    listConversations :: CliState -> IO [Party.ConversationState]
+    listConversations st0 = do
+        readIORef st0.conversations
+
     helpStr = do
         unlines
             [ "? or ?help -- show this help"
             , "agents -- list agents"
             , "conversations -- list conversations"
-            , "files -- load and review files as variables"
-            , "prompts -- load and review prompts"
-            , "tasks -- create and review tasks"
             , "@<agent-id|agent-slug> <prompt> -- starts a conversation"
             ]
-    go = do
+    go state = do
         putStrLn "### Enter query:"
         query <- Text.pack <$> getLine
         case query of
             "agents" -> do
-                print "todo-agents listing"
+                Text.putStr $
+                    Text.unlines
+                        [ "agents: "
+                        , Text.unlines [Text.unwords ["@" <> agent.slug, ":", agent.announce] | (_, agent) <- agents]
+                        ]
             "conversations" -> do
-                print "todo-conversations listing"
+                convs <- listConversations state
+                Text.putStr $
+                    Text.unlines
+                        [ Text.pack $ show conv.conversationId
+                        | conv <- convs
+                        ]
             txt
                 | "@" `Text.isPrefixOf` txt -> do
-                    putStrLn helpStr
+                    let (atName, spaceCmd) = Text.break ((==) ' ') txt
+                    let name = Text.drop 1 atName
+                    let cmd = Text.drop 1 spaceCmd
+                    let foundAgent = List.find (\(_, agent) -> agent.slug == name) agents
+                    case foundAgent of
+                        Nothing -> print ("no such agent", name)
+                        Just (rt, agent) -> do
+                            if cmd == ""
+                                then print agent
+                                else do
+                                    Party.converse rt cmd >>= addConversation state
             txt -> putStrLn helpStr
+        go state
 
 traceSilent :: Tracer IO Trace
 traceSilent = silent

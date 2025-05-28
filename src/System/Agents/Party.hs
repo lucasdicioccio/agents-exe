@@ -20,13 +20,6 @@ import System.Agents.Agent (AgentFunctions (..), handleConversation)
 import qualified System.Agents.Agent as Agent
 import System.Agents.Base (ConversationId, newConversationId)
 
-{-
-data Party
-    = Party
-    { conversations :: [ConversationState]
-    }
--}
-
 data ConversationState
     = ConversationState
     { conversationId :: ConversationId
