@@ -17,6 +17,7 @@ import Prod.Tracer (Tracer (..), silent)
 import System.IO (stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
+import System.Agents.Base (newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Tools as Tools
@@ -47,7 +48,8 @@ mainOneShotText props query = do
             (\err -> putStrLn $ unlines ["execution error", err])
             (\hist -> OpenAI.printLastAnswer hist)
     runMainAgent rt = do
-        Agent.handleConversation rt agentFunctions query
+        cId <- newConversationId
+        Agent.handleConversation rt agentFunctions cId query
 
 mainInteractiveAgent :: Props -> IO ()
 mainInteractiveAgent props = do
@@ -68,7 +70,8 @@ mainInteractiveAgent props = do
     runMainAgent ai = do
         let nextQuery = askQuery ai
         query <- nextQuery
-        Agent.handleConversation ai.agentRuntime (agentFunctions nextQuery) query
+        cId <- newConversationId
+        Agent.handleConversation ai.agentRuntime (agentFunctions nextQuery) cId query
 
     askQuery :: AgentInfo -> IO Text
     askQuery ai = do

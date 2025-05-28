@@ -21,6 +21,7 @@ import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
+import System.Agents.Base (newConversationId)
 import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -182,7 +183,9 @@ handleMsg req (CallToolRequestMsg callTool) = do
             case extractPrompt callTool of
                 Nothing -> pure $ Left "no prompt given"
                 (Just query) -> do
-                    liftIO $ Agent.handleConversation ai.agentRuntime agentFunctions query
+                    liftIO $ do
+                        cId <- newConversationId
+                        Agent.handleConversation ai.agentRuntime agentFunctions cId query
         Nothing -> do
             pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =

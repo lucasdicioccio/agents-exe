@@ -172,9 +172,8 @@ getQuery :: PendingQuery -> Maybe Text
 getQuery (SomeQuery t) = Just t
 getQuery _ = Nothing
 
-handleConversation :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
-handleConversation rt functions startingPrompt = do
-    conversationId <- newConversationId
+handleConversation :: forall r. Runtime -> AgentFunctions r -> ConversationId -> Text -> IO r
+handleConversation rt functions conversationId startingPrompt = do
     runTracer
         rt.agentTracer
         (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId NewConversation)
@@ -361,8 +360,9 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             )
             (\conversationId (PromptOtherAgent txt) -> runSubAgent conversationId txt)
 
-    runSubAgent conversationId txt =
-        handleConversation (nestTracer conversationId rt) agentFunctions txt
+    runSubAgent conversationId txt = do
+        subConversationId <- newConversationId
+        handleConversation (nestTracer conversationId rt) agentFunctions subConversationId txt
 
     nestTracer conversationId childRuntime =
         childRuntime
