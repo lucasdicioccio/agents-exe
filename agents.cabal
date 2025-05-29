@@ -81,34 +81,39 @@ library agents-lib
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
+                    , System.Agents.TUI
     build-depends:    base ^>=4.19.1.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,
                       async,
+                      brick,
                       bytestring,
+                      case-insensitive,
+                      conduit,
+                      containers,
                       contravariant,
                       directory,
                       filepath,
                       formatting,
+                      http-client,
+                      http-client-tls,
+                      http-types,
+                      json-rpc,
+                      lens,
+                      monad-logger,
+                      mtl,
                       process,
                       process-extras,
                       prodapi,
                       stm,
+                      stm-conduit,
                       text,
                       unix,
-                      uuid,
-                      containers,
-                      unordered-containers,
-                      http-client,
-                      http-client-tls,
-                      http-types,
-                      case-insensitive,
-                      monad-logger,
-                      json-rpc,
-                      conduit,
-                      mtl,
                       unliftio,
-                      stm-conduit
+                      unordered-containers,
+                      uuid,
+                      vector,
+                      vty
                       
 
 executable agents-exe
@@ -117,6 +122,7 @@ executable agents-exe
 
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
+    ghc-options: -threaded
 
     -- Modules included in this executable, other than Main.
     -- other-modules:
