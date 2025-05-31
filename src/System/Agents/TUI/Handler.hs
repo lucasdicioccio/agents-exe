@@ -1,0 +1,114 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module System.Agents.TUI.Handler where
+
+import qualified Control.Concurrent.Async as Async
+import Control.Concurrent.STM (atomically)
+import Control.Monad (void)
+import Control.Monad.IO.Class (liftIO)
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString.Lazy as LByteString
+import Data.Foldable (traverse_)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
+import qualified Data.List as List
+import qualified Data.Maybe as Maybe
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import qualified Data.Text.IO as Text
+import qualified Data.Vector as Vector
+import GHC.IO.Handle (Handle)
+import Prod.Tracer (Tracer (..), silent)
+import System.IO (stderr, stdout)
+
+import qualified System.Agents.Agent as Agent
+import System.Agents.Base (newConversationId)
+import System.Agents.Conversation
+import qualified System.Agents.FileLoader as FileLoader
+import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.Party as Party
+import qualified System.Agents.Tools as Tools
+import qualified System.Agents.Tools.Bash as Tools
+import qualified System.Agents.Tools.IO as Tools
+
+import Brick
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing)
+import Brick.Widgets.Border (borderWithLabel)
+import Brick.Widgets.Edit
+import Brick.Widgets.List
+import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
+import qualified Graphics.Vty as Vty
+
+import System.Agents.TUI.State
+
+refreshStuffFromIOs :: EventM N TuiState ()
+refreshStuffFromIOs = do
+    refreshStuffFromIOs_Conversations
+
+refreshStuffFromIOs_Conversations :: EventM N TuiState ()
+refreshStuffFromIOs_Conversations = do
+    st0 <- get
+    items <- liftIO (listConversations st0)
+    ui . conversationsList .= (list ConversationsList (Vector.fromList items) 0)
+
+tui_appHandleEvent :: BrickEvent N e0 -> EventM N TuiState ()
+tui_appHandleEvent ev = do
+    case ev of
+        VtyEvent (Vty.EvKey Vty.KEsc _) -> halt
+        VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
+            (ui . focus) %= focusNext
+        VtyEvent (Vty.EvKey Vty.KBackTab _) ->
+            (ui . focus) %= focusPrev
+        VtyEvent (Vty.EvKey Vty.KEnter mods)
+            | Vty.MMeta `elem` mods -> do
+                item <- use (ui . agentsList)
+                conv <- use (ui . conversationsList)
+                case listSelectedElement item of
+                    Nothing -> pure ()
+                    (Just (_, (rt, _, oai))) -> do
+                        case listSelectedElement conv of
+                            Nothing -> do
+                                startingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                                conv <- liftIO $ Party.converse rt startingPrompt
+                                st0 <- get
+                                liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
+                            (Just (_, c)) -> do
+                                continuingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                                ok <- liftIO . atomically $ c.conversationState.prompt (Just continuingPrompt)
+                                pure ()
+                        refreshStuffFromIOs_Conversations
+        ev@(VtyEvent vtyEv) -> do
+            currentFocus <- use (ui . focus . to focusGetCurrent)
+            case currentFocus of
+                Nothing -> pure ()
+                (Just AgentsList) ->
+                    zoom (ui . agentsList) $ handleListEvent vtyEv
+                (Just ConversationsList) ->
+                    zoom (ui . conversationsList) $ handleListEvent vtyEv
+                (Just PromptEditor) -> do
+                    zoom (ui . promptEditor) $ handleEditorEvent ev
+                (Just FocusedConversation) -> do
+                    tui_handleViewPortEvent ev
+        _ -> pure ()
+
+tui_handleViewPortEvent :: BrickEvent N e0 -> EventM N TuiState ()
+tui_handleViewPortEvent ev = do
+    case ev of
+        VtyEvent (Vty.EvKey (Vty.KChar 'j') _) -> do
+            let vp = viewportScroll FocusedConversation
+            vScrollBy vp 1
+        VtyEvent (Vty.EvKey (Vty.KChar 'k') _) -> do
+            let vp = viewportScroll FocusedConversation
+            vScrollBy vp (-1)
+        VtyEvent (Vty.EvKey (Vty.KChar 'h') _) -> do
+            let vp = viewportScroll FocusedConversation
+            hScrollBy vp (-1)
+        VtyEvent (Vty.EvKey (Vty.KChar 'l') _) -> do
+            let vp = viewportScroll FocusedConversation
+            hScrollBy vp 1
+        _ -> pure ()
+
+tui_appStartEvent :: EventM a TuiState ()
+tui_appStartEvent = pure ()

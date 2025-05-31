@@ -82,6 +82,9 @@ library agents-lib
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
                     , System.Agents.TUI
+                    , System.Agents.TUI.Handler
+                    , System.Agents.TUI.State
+                    , System.Agents.TUI.Render
     build-depends:    base ^>=4.19.1.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,
