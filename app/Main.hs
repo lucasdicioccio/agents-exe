@@ -258,10 +258,7 @@ main = do
                             , Conversation.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
-                                    ( Prod.traceBoth
-                                        CLI.tracePrintingTextResponses
-                                        (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                                    )
+                                    (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             }
                 TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do

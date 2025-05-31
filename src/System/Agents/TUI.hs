@@ -5,7 +5,9 @@
 module System.Agents.TUI where
 
 import qualified Control.Concurrent.Async as Async
+import Control.Concurrent.STM (atomically)
 import Control.Monad (void)
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
@@ -33,21 +35,28 @@ import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
 
 import Brick
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing)
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit
 import Brick.Widgets.List
-import Control.Lens (makeLenses)
+import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import qualified Graphics.Vty as Vty
 
-type BrickWidgetName = Text
+data BrickWidgetName
+    = AgentsList
+    | ConversationsList
+    | PromptEditor
+    deriving (Show, Eq, Ord)
 type N = BrickWidgetName
 
-type LoadedAgent = (Agent.Runtime, FileLoader.OpenAIAgent)
+type LoadedAgent = (Agent.Runtime, [Agent.ToolRegistration], FileLoader.OpenAIAgent)
 
 data OngoingConversation
     = OngoingConversation
     { conversingAgent :: FileLoader.OpenAIAgent
     , conversationState :: Party.ConversationState
+    , conversationHistory :: [Agent.Trace]
+    , historyChanged :: Bool
     }
 
 data Entities
@@ -58,7 +67,10 @@ makeLenses ''Entities
 
 data UI
     = UI
-    { _promptEditor :: Editor Text N
+    { _focus :: FocusRing N
+    , _promptEditor :: Editor Text N
+    , _agentsList :: List N LoadedAgent
+    , _conversationsList :: List N OngoingConversation
     }
 makeLenses ''UI
 
@@ -69,8 +81,8 @@ data TuiState
     }
 makeLenses ''TuiState
 
-newCliState :: IO TuiState
-newCliState =
+newCliState :: [LoadedAgent] -> IO TuiState
+newCliState agents =
     TuiState
         <$> entities
         <*> ui
@@ -80,22 +92,25 @@ newCliState =
             <$> newIORef []
     ui =
         UI
-            <$> pure (editorText "prompt-editor" (Just 2) "@")
+            <$> pure (focusRing [AgentsList, PromptEditor, ConversationsList])
+            <*> pure (editorText PromptEditor Nothing "@")
+            <*> pure (list AgentsList (Vector.fromList agents) 1)
+            <*> pure (list ConversationsList (Vector.fromList []) 0)
 
 addConversation :: TuiState -> OngoingConversation -> IO ()
 addConversation st0 conv = do
     modifyIORef st0._entities._conversations (conv :)
 
-listConversations :: TuiState -> IO [(OngoingConversation, [Agent.Trace])]
+listConversations :: TuiState -> IO [OngoingConversation]
 listConversations st0 = do
     convs <- readIORef st0._entities._conversations
     traces <- traverse (Party.traces . conversationState) convs
-    pure $ zip convs traces
+    pure $ zipWith (\conv trs -> conv{conversationHistory = trs, historyChanged = length conv.conversationHistory /= length trs}) convs traces
 
 runMultiAgents :: [LoadedAgent] -> IO ()
 runMultiAgents [] = print "no agents loaded"
 runMultiAgents agents = do
-    st0 <- newCliState
+    st0 <- newCliState agents
     let app =
             App
                 { appDraw = tui_appDraw
@@ -108,14 +123,60 @@ runMultiAgents agents = do
     void $ defaultMain app st0
   where
     tui_appChooseCursor :: TuiState -> [CursorLocation N] -> Maybe (CursorLocation N)
-    tui_appChooseCursor _ _ = Nothing
+    tui_appChooseCursor st locs =
+        case focusGetCurrent st._ui._focus of
+            Just PromptEditor -> showCursorNamed PromptEditor locs
+            Just AgentsList -> Nothing
+            Just ConversationsList -> Nothing
+            Nothing -> Nothing
+
+    refreshStuffFromIOs :: EventM N TuiState ()
+    refreshStuffFromIOs = do
+        refreshStuffFromIOs_Conversations
+
+    refreshStuffFromIOs_Conversations :: EventM N TuiState ()
+    refreshStuffFromIOs_Conversations = do
+        st0 <- get
+        items <- liftIO (listConversations st0)
+        ui . conversationsList .= (list ConversationsList (Vector.fromList items) 0)
 
     tui_appHandleEvent :: BrickEvent N e0 -> EventM N TuiState ()
-    tui_appHandleEvent ev =
+    tui_appHandleEvent ev = do
         case ev of
             VtyEvent (Vty.EvKey Vty.KEsc _) -> halt
-            _ -> do
-                zoom (ui . promptEditor) $ handleEditorEvent ev
+            VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
+                (ui . focus) %= focusNext
+            VtyEvent (Vty.EvKey Vty.KBackTab _) ->
+                (ui . focus) %= focusPrev
+            VtyEvent (Vty.EvKey Vty.KEnter mods)
+                | Vty.MMeta `elem` mods -> do
+                    item <- use (ui . agentsList)
+                    conv <- use (ui . conversationsList)
+                    case listSelectedElement item of
+                        Nothing -> pure ()
+                        (Just (_, (rt, _, oai))) -> do
+                            case listSelectedElement conv of
+                                Nothing -> do
+                                    startingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                                    conv <- liftIO $ Party.converse rt startingPrompt
+                                    st0 <- get
+                                    liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
+                                (Just (_, c)) -> do
+                                    continuingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                                    ok <- liftIO . atomically $ c.conversationState.prompt (Just continuingPrompt)
+                                    pure ()
+                            refreshStuffFromIOs_Conversations
+            ev@(VtyEvent vtyEv) -> do
+                currentFocus <- use (ui . focus . to focusGetCurrent)
+                case currentFocus of
+                    Nothing -> pure ()
+                    (Just AgentsList) ->
+                        zoom (ui . agentsList) $ handleListEvent vtyEv
+                    (Just ConversationsList) ->
+                        zoom (ui . conversationsList) $ handleListEvent vtyEv
+                    (Just PromptEditor) -> do
+                        zoom (ui . promptEditor) $ handleEditorEvent ev
+            _ -> pure ()
 
     tui_appStartEvent :: EventM a TuiState ()
     tui_appStartEvent = pure ()
@@ -129,64 +190,89 @@ runMultiAgents agents = do
     render_ui :: TuiState -> Widget N
     render_ui st =
         hBox
-            [ render_agentsList
-            , render_messagesList
+            [ borderWithLabel
+                (txt "agents")
+                (hLimit 18 $ render_agentsList st)
+            , borderWithLabel
+                (txt "conversations")
+                (hLimit 50 $ render_conversationsList st)
+                {-
+                            , borderWithLabel
+                                (txt "info")
+                                (hLimit 60 $ render_focusedAgentInfo st)
+                            , borderWithLabel
+                                (txt "tools")
+                                (hLimit 60 $ render_focusedAgentTools st)
+                -}
             ]
-            <=> hBox
-                [ render_promptEditor st
+            <+> vBox
+                [ borderWithLabel
+                    (txt "chat")
+                    (render_promptEditor st)
+                , borderWithLabel
+                    (txt "conv")
+                    (hLimit 120 $ render_focusedConversation st)
                 ]
 
     render_promptEditor :: TuiState -> Widget N
     render_promptEditor st =
         renderEditor
             (txt . Text.unlines)
-            False
+            (focusGetCurrent st._ui._focus == Just PromptEditor)
             st._ui._promptEditor
 
-    render_agentsList :: Widget N
-    render_agentsList = do
-        let lst = list "agents-list" (Vector.fromList agents) 1 :: List N LoadedAgent
-        borderWithLabel
-            (txt "agents")
-            (renderList render_agentsList_Agent True lst)
+    render_agentsList :: TuiState -> Widget N
+    render_agentsList st =
+        let lst = st._ui._agentsList
+         in renderList render_agentsList_Agent True lst
 
     render_agentsList_Agent :: Bool -> LoadedAgent -> Widget N
-    render_agentsList_Agent _ (_, agent) =
-        txt agent.slug -- borderWithLabel (txt agent.slug) $ txt agent.announce
-    render_messagesList :: Widget N
-    render_messagesList =
-        txt " todo"
+    render_agentsList_Agent True (_, _, agent) =
+        txt ("> " <> agent.slug)
+    render_agentsList_Agent False (_, _, agent) =
+        txt ("  " <> agent.slug)
 
-{-
+    render_conversationsList :: TuiState -> Widget N
+    render_conversationsList st =
+        let lst = st._ui._conversationsList
+         in renderList render_conversationsList_Conversation True lst
 
-    go state = do
-            "conversations" -> do
-                convs <- listConversations state
-                Text.putStr $
-                    Text.unlines
-                        [ Text.unlines
-                            [ Text.pack $ show conv.conversingAgent.slug
-                            , Text.pack $ show conv.conversationState.conversationId
-                            , Text.pack $ show trs
-                            ]
-                        | (conv,trs) <- convs
-                        ]
-            txt
-                | "@" `Text.isPrefixOf` txt -> do
-                    let (atName, spaceCmd) = Text.break ((==) ' ') txt
-                    let name = Text.drop 1 atName
-                    let cmd = Text.drop 1 spaceCmd
-                    let foundAgent = List.find (\(_, agent) -> agent.slug == name) agents
-                    case foundAgent of
-                        Nothing -> print ("no such agent", name)
-                        Just (rt, agent) -> do
-                            if cmd == ""
-                                then print agent
-                                else do
-                                    Party.converse rt cmd >>= addConversation state . (OngoingConversation agent)
-            txt -> putStrLn helpStr
+    render_conversationsList_Conversation :: Bool -> OngoingConversation -> Widget N
+    render_conversationsList_Conversation active conv =
+        txt (flags <> conv.conversingAgent.slug)
+      where
+        flags = activeFlag <> modifiedFlag
+        activeFlag = if active then ">" else " "
+        modifiedFlag = if conv.historyChanged then "*" else " "
 
--}
+    render_focusedAgentInfo :: TuiState -> Widget N
+    render_focusedAgentInfo st =
+        case listSelectedElement st._ui._agentsList of
+            Nothing ->
+                txt "select an agent to show info"
+            Just (_, (rt, _, oai)) ->
+                txt oai.slug
+                    <=> str (show rt.agentId)
+                    <=> txt oai.announce
+                    <=> txt (Text.unlines oai.systemPrompt)
+                    <=> str oai.toolDirectory
+
+    render_focusedAgentTools :: TuiState -> Widget N
+    render_focusedAgentTools st =
+        case listSelectedElement st._ui._agentsList of
+            Nothing ->
+                txt "select an agent to show tools"
+            Just (_, (_, tools, _)) ->
+                txt $ renderToolRegistry tools
+
+    render_focusedConversation :: TuiState -> Widget N
+    render_focusedConversation st =
+        case listSelectedElement st._ui._conversationsList of
+            Nothing ->
+                txt "no history"
+            Just (_, conv) ->
+                str (show (length conv.conversationHistory))
+                    <=> str (show conv.conversationHistory)
 
 -------------------------------------------------------------------------------
 
@@ -199,7 +285,8 @@ mainMultiAgents2 idx (props : xs) agents = do
             (FileLoader.Unspecified _) -> do
                 print ("cannot load an agent with unspecified description" :: Text)
             (FileLoader.OpenAIAgentDescription oai) -> do
-                mainMultiAgents2 (succ idx) xs ((ai.agentRuntime, oai) : agents)
+                tools <- Agent.agentTools ai.agentRuntime
+                mainMultiAgents2 (succ idx) xs ((ai.agentRuntime, tools, oai) : agents)
     go _ = do
         print ("failed to initialize" :: Text)
 mainMultiAgents2 _ [] agents = do
@@ -207,3 +294,16 @@ mainMultiAgents2 _ [] agents = do
 
 mainMultiAgents :: [Props] -> IO ()
 mainMultiAgents xs = mainMultiAgents2 0 xs []
+
+renderToolRegistry :: (Aeson.ToJSON b) => [Tools.Registration a b c] -> Text
+renderToolRegistry registry =
+    Text.unlines $
+        fmap renderRegisteredTool registry
+  where
+    renderRegisteredTool :: (Aeson.ToJSON b) => Tools.Registration a b c -> Text
+    renderRegisteredTool reg =
+        case reg.innerTool.toolDef of
+            Tools.BashTool bashScript ->
+                Text.unwords ["command", Text.pack bashScript.scriptPath, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode reg.declareTool]
+            Tools.IOTool ioScript ->
+                Text.unwords ["io", ioScript.ioSlug, ioScript.ioDescription]
