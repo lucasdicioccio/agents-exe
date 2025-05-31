@@ -56,6 +56,8 @@ refreshStuffFromIOs_Conversations = do
 tui_appHandleEvent :: BrickEvent N e0 -> EventM N TuiState ()
 tui_appHandleEvent ev = do
     case ev of
+        AppEvent _ -> do
+            refreshStuffFromIOs_Conversations
         VtyEvent (Vty.EvKey Vty.KEsc _) -> halt
         VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
             (ui . focus) %= focusNext
@@ -78,7 +80,6 @@ tui_appHandleEvent ev = do
                                 continuingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
                                 ok <- liftIO . atomically $ c.conversationState.prompt (Just continuingPrompt)
                                 pure ()
-                        refreshStuffFromIOs_Conversations
         ev@(VtyEvent vtyEv) -> do
             currentFocus <- use (ui . focus . to focusGetCurrent)
             case currentFocus of

@@ -34,6 +34,7 @@ import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
 
 import Brick
+import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing)
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit
@@ -45,9 +46,9 @@ import System.Agents.TUI.Handler (tui_appHandleEvent, tui_appStartEvent)
 import System.Agents.TUI.Render (tui_appAttrMap, tui_appChooseCursor, tui_appDraw)
 import System.Agents.TUI.State
 
-runMultiAgents :: [LoadedAgent] -> IO ()
-runMultiAgents [] = print "no agents loaded"
-runMultiAgents agents = do
+runMultiAgents :: BChan Agent.Trace -> [LoadedAgent] -> IO ()
+runMultiAgents _ [] = print "no agents loaded"
+runMultiAgents bChan agents = do
     st0 <- newCliState agents
     let app =
             App
@@ -57,12 +58,12 @@ runMultiAgents agents = do
                 , appStartEvent = tui_appStartEvent
                 , appAttrMap = tui_appAttrMap
                 }
-    void $ defaultMain app st0
+    void $ customMainWithDefaultVty (Just bChan) app st0
 
 -------------------------------------------------------------------------------
 
-mainMultiAgents2 :: Int -> [Props] -> [LoadedAgent] -> IO ()
-mainMultiAgents2 idx (props : xs) agents = do
+mainMultiAgents2 :: BChan Agent.Trace -> Int -> [Props] -> [LoadedAgent] -> IO ()
+mainMultiAgents2 bChan idx (props : xs) agents = do
     withAgentRuntime props go
   where
     go (Initialized ai) = do
@@ -70,12 +71,18 @@ mainMultiAgents2 idx (props : xs) agents = do
             (FileLoader.Unspecified _) -> do
                 print ("cannot load an agent with unspecified description" :: Text)
             (FileLoader.OpenAIAgentDescription oai) -> do
-                tools <- Agent.agentTools ai.agentRuntime
-                mainMultiAgents2 (succ idx) xs ((ai.agentRuntime, tools, oai) : agents)
+                let rt = Agent.addTracer ai.agentRuntime (traceInChan bChan)
+                tools <- Agent.agentTools rt
+                mainMultiAgents2 bChan (succ idx) xs ((rt, tools, oai) : agents)
     go _ = do
         print ("failed to initialize" :: Text)
-mainMultiAgents2 _ [] agents = do
-    runMultiAgents agents
+mainMultiAgents2 bChan _ [] agents = do
+    runMultiAgents bChan agents
 
 mainMultiAgents :: [Props] -> IO ()
-mainMultiAgents xs = mainMultiAgents2 0 xs []
+mainMultiAgents xs = do
+    bChan <- newBChan 10
+    mainMultiAgents2 bChan 0 xs []
+
+traceInChan :: BChan Agent.Trace -> Tracer IO Agent.Trace
+traceInChan bChan = Tracer (writeBChan bChan)
