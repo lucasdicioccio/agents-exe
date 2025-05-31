@@ -46,6 +46,7 @@ data BrickWidgetName
     = AgentsList
     | ConversationsList
     | PromptEditor
+    | FocusedConversation
     deriving (Show, Eq, Ord)
 type N = BrickWidgetName
 
@@ -92,7 +93,7 @@ newCliState agents =
             <$> newIORef []
     ui =
         UI
-            <$> pure (focusRing [AgentsList, PromptEditor, ConversationsList])
+            <$> pure (focusRing [AgentsList, PromptEditor, ConversationsList, FocusedConversation])
             <*> pure (editorText PromptEditor Nothing "@")
             <*> pure (list AgentsList (Vector.fromList agents) 1)
             <*> pure (list ConversationsList (Vector.fromList []) 0)
@@ -128,6 +129,7 @@ runMultiAgents agents = do
             Just PromptEditor -> showCursorNamed PromptEditor locs
             Just AgentsList -> Nothing
             Just ConversationsList -> Nothing
+            Just FocusedConversation -> Nothing
             Nothing -> Nothing
 
     refreshStuffFromIOs :: EventM N TuiState ()
@@ -176,6 +178,25 @@ runMultiAgents agents = do
                         zoom (ui . conversationsList) $ handleListEvent vtyEv
                     (Just PromptEditor) -> do
                         zoom (ui . promptEditor) $ handleEditorEvent ev
+                    (Just FocusedConversation) -> do
+                        tui_handleViewPortEvent ev
+            _ -> pure ()
+
+    tui_handleViewPortEvent :: BrickEvent N e0 -> EventM N TuiState ()
+    tui_handleViewPortEvent ev = do
+        case ev of
+            VtyEvent (Vty.EvKey (Vty.KChar 'j') _) -> do
+                let vp = viewportScroll FocusedConversation
+                vScrollBy vp 1
+            VtyEvent (Vty.EvKey (Vty.KChar 'k') _) -> do
+                let vp = viewportScroll FocusedConversation
+                vScrollBy vp (-1)
+            VtyEvent (Vty.EvKey (Vty.KChar 'h') _) -> do
+                let vp = viewportScroll FocusedConversation
+                hScrollBy vp (-1)
+            VtyEvent (Vty.EvKey (Vty.KChar 'l') _) -> do
+                let vp = viewportScroll FocusedConversation
+                hScrollBy vp 1
             _ -> pure ()
 
     tui_appStartEvent :: EventM a TuiState ()
@@ -211,7 +232,10 @@ runMultiAgents agents = do
                     (render_promptEditor st)
                 , borderWithLabel
                     (txt "conv")
-                    (hLimit 120 $ render_focusedConversation st)
+                    ( hLimit 120 $
+                        viewport FocusedConversation Both $
+                            render_focusedConversation st
+                    )
                 ]
 
     render_promptEditor :: TuiState -> Widget N
@@ -271,8 +295,17 @@ runMultiAgents agents = do
             Nothing ->
                 txt "no history"
             Just (_, conv) ->
-                str (show (length conv.conversationHistory))
-                    <=> str (show conv.conversationHistory)
+                vBox $ map (render_focusedConversation_HistoryItem st) conv.conversationHistory
+
+    render_focusedConversation_HistoryItem :: TuiState -> Agent.Trace -> Widget N
+    render_focusedConversation_HistoryItem _ tr =
+        case tr of
+            (Agent.AgentTrace_Loading _ _ _) -> txt "(loading)"
+            (Agent.AgentTrace_Memorize _ _ _ (Agent.GotResponse q _ _ rsp)) ->
+                str (show q)
+                    <=> str (show rsp)
+            (Agent.AgentTrace_Memorize _ _ _ _) -> txt "(memo)"
+            (Agent.AgentTrace_Conversation _ _ _ _) -> txt "(conv)"
 
 -------------------------------------------------------------------------------
 
