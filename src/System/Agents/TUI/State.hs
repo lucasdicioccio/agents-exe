@@ -69,6 +69,7 @@ makeLenses ''Entities
 data UI
     = UI
     { _focus :: FocusRing N
+    , _zoomed :: Bool
     , _promptEditor :: Editor Text N
     , _agentsList :: List N LoadedAgent
     , _conversationsList :: List N OngoingConversation
@@ -93,7 +94,8 @@ newCliState agents =
             <$> newIORef []
     ui =
         UI
-            <$> pure (focusRing [AgentsList, PromptEditor, ConversationsList, FocusedConversation])
+            <$> pure (focusRing [AgentsList, ConversationsList, PromptEditor, FocusedConversation])
+            <*> pure False
             <*> pure (editorText PromptEditor Nothing "@")
             <*> pure (list AgentsList (Vector.fromList agents) 1)
             <*> pure (list ConversationsList (Vector.fromList []) 0)

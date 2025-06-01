@@ -59,7 +59,20 @@ tui_appDraw :: TuiState -> [Widget N]
 tui_appDraw st = [render_ui st]
   where
     render_ui :: TuiState -> Widget N
-    render_ui st =
+    render_ui st
+        | st._ui._zoomed == False =
+            render_ui_general st
+    render_ui st
+        | st._ui._zoomed == True =
+            case (focusGetCurrent st._ui._focus) of
+                Nothing -> render_ui_general st
+                (Just PromptEditor) -> render_promptEditor st
+                (Just FocusedConversation) -> render_focusedConversation st
+                (Just AgentsList) -> render_agentsList st
+                (Just ConversationsList) -> render_conversationsList st
+
+    render_ui_general :: TuiState -> Widget N
+    render_ui_general st =
         hBox
             [ borderWithLabel
                 (txt "agents")

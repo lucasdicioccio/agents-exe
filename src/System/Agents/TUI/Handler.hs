@@ -53,6 +53,24 @@ refreshStuffFromIOs_Conversations = do
     items <- liftIO (listConversations st0)
     ui . conversationsList .= (list ConversationsList (Vector.fromList items) 0)
 
+unZoom :: EventM N TuiState ()
+unZoom =
+    (ui . zoomed) .= False
+
+flipZoom :: EventM N TuiState ()
+flipZoom =
+    (ui . zoomed) %= not
+
+cycleFocusFwd :: EventM N TuiState ()
+cycleFocusFwd = do
+    (ui . focus) %= focusNext
+    unZoom
+
+cycleFocusBwd :: EventM N TuiState ()
+cycleFocusBwd = do
+    (ui . focus) %= focusPrev
+    unZoom
+
 tui_appHandleEvent :: BrickEvent N e0 -> EventM N TuiState ()
 tui_appHandleEvent ev = do
     case ev of
@@ -60,9 +78,27 @@ tui_appHandleEvent ev = do
             refreshStuffFromIOs_Conversations
         VtyEvent (Vty.EvKey Vty.KEsc _) -> halt
         VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
-            (ui . focus) %= focusNext
+            cycleFocusFwd
         VtyEvent (Vty.EvKey Vty.KBackTab _) ->
-            (ui . focus) %= focusPrev
+            cycleFocusBwd
+        ev@(VtyEvent vtyEv) -> do
+            currentFocus <- use (ui . focus . to focusGetCurrent)
+            case currentFocus of
+                Nothing -> pure ()
+                (Just AgentsList) ->
+                    zoom (ui . agentsList) $ handleListEvent vtyEv
+                (Just ConversationsList) ->
+                    zoom (ui . conversationsList) $ handleListEvent vtyEv
+                (Just PromptEditor) -> do
+                    zoom (ui . promptEditor) $ handleEditorEvent ev
+                    tui_handleViewPortEvent_PromptEditor ev
+                (Just FocusedConversation) -> do
+                    tui_handleViewPortEvent_Conversation ev
+        _ -> pure ()
+
+tui_handleViewPortEvent_PromptEditor :: BrickEvent N e0 -> EventM N TuiState ()
+tui_handleViewPortEvent_PromptEditor ev = do
+    case ev of
         VtyEvent (Vty.EvKey Vty.KEnter mods)
             | Vty.MMeta `elem` mods -> do
                 item <- use (ui . agentsList)
@@ -80,35 +116,25 @@ tui_appHandleEvent ev = do
                                 continuingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
                                 ok <- liftIO . atomically $ c.conversationState.prompt (Just continuingPrompt)
                                 pure ()
-        ev@(VtyEvent vtyEv) -> do
-            currentFocus <- use (ui . focus . to focusGetCurrent)
-            case currentFocus of
-                Nothing -> pure ()
-                (Just AgentsList) ->
-                    zoom (ui . agentsList) $ handleListEvent vtyEv
-                (Just ConversationsList) ->
-                    zoom (ui . conversationsList) $ handleListEvent vtyEv
-                (Just PromptEditor) -> do
-                    zoom (ui . promptEditor) $ handleEditorEvent ev
-                (Just FocusedConversation) -> do
-                    tui_handleViewPortEvent ev
         _ -> pure ()
 
-tui_handleViewPortEvent :: BrickEvent N e0 -> EventM N TuiState ()
-tui_handleViewPortEvent ev = do
+tui_handleViewPortEvent_Conversation :: BrickEvent N e0 -> EventM N TuiState ()
+tui_handleViewPortEvent_Conversation ev = do
     case ev of
-        VtyEvent (Vty.EvKey (Vty.KChar 'j') _) -> do
-            let vp = viewportScroll FocusedConversation
-            vScrollBy vp 1
-        VtyEvent (Vty.EvKey (Vty.KChar 'k') _) -> do
+        VtyEvent (Vty.EvKey (Vty.KUp) _) -> do
             let vp = viewportScroll FocusedConversation
             vScrollBy vp (-1)
-        VtyEvent (Vty.EvKey (Vty.KChar 'h') _) -> do
+        VtyEvent (Vty.EvKey (Vty.KDown) _) -> do
+            let vp = viewportScroll FocusedConversation
+            vScrollBy vp 1
+        VtyEvent (Vty.EvKey (Vty.KLeft) _) -> do
             let vp = viewportScroll FocusedConversation
             hScrollBy vp (-1)
-        VtyEvent (Vty.EvKey (Vty.KChar 'l') _) -> do
+        VtyEvent (Vty.EvKey (Vty.KRight) _) -> do
             let vp = viewportScroll FocusedConversation
             hScrollBy vp 1
+        VtyEvent (Vty.EvKey (Vty.KChar 'z') _) -> do
+            flipZoom
         _ -> pure ()
 
 tui_appStartEvent :: EventM a TuiState ()
