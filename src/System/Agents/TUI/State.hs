@@ -45,6 +45,7 @@ import qualified Graphics.Vty as Vty
 data BrickWidgetName
     = AgentsList
     | ConversationsList
+    | UnifiedList
     | PromptEditor
     | FocusedConversation
     deriving (Show, Eq, Ord)
@@ -62,9 +63,14 @@ data OngoingConversation
 
 data Entities
     = Entities
-    { _conversations :: IORef [OngoingConversation]
+    { _loadedAgents :: [LoadedAgent]
+    , _conversations :: IORef [OngoingConversation]
     }
 makeLenses ''Entities
+
+data ConversingEntryPoint
+    = ChatEntryPoint LoadedAgent
+    | ConversationEntryPoint OngoingConversation
 
 data UI
     = UI
@@ -73,6 +79,7 @@ data UI
     , _promptEditor :: Editor Text N
     , _agentsList :: List N LoadedAgent
     , _conversationsList :: List N OngoingConversation
+    , _unifiedList :: List N ConversingEntryPoint
     }
 makeLenses ''UI
 
@@ -91,14 +98,16 @@ newCliState agents =
   where
     entities =
         Entities
-            <$> newIORef []
+            <$> pure agents
+            <*> newIORef []
     ui =
         UI
-            <$> pure (focusRing [AgentsList, ConversationsList, PromptEditor, FocusedConversation])
+            <$> pure (focusRing [UnifiedList, AgentsList, ConversationsList, PromptEditor, FocusedConversation])
             <*> pure False
             <*> pure (editorText PromptEditor Nothing "@")
             <*> pure (list AgentsList (Vector.fromList agents) 1)
             <*> pure (list ConversationsList (Vector.fromList []) 0)
+            <*> pure (list UnifiedList (Vector.fromList $ fmap ChatEntryPoint agents) 0)
 
 addConversation :: TuiState -> OngoingConversation -> IO ()
 addConversation st0 conv = do

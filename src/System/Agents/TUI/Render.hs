@@ -49,6 +49,7 @@ tui_appChooseCursor st locs =
         Just PromptEditor -> showCursorNamed PromptEditor locs
         Just AgentsList -> Nothing
         Just ConversationsList -> Nothing
+        Just UnifiedList -> Nothing
         Just FocusedConversation -> Nothing
         Nothing -> Nothing
 
@@ -70,28 +71,34 @@ tui_appDraw st = [render_ui st]
                 (Just FocusedConversation) -> render_focusedConversation st
                 (Just AgentsList) -> render_agentsList st
                 (Just ConversationsList) -> render_conversationsList st
+                (Just UnifiedList) -> render_unifiedList st
 
     render_ui_general :: TuiState -> Widget N
     render_ui_general st =
         hBox
             [ borderWithLabel
-                (txt "agents")
-                (hLimit 18 $ render_agentsList st)
-            , borderWithLabel
-                (txt "conversations")
-                (hLimit 50 $ render_conversationsList st)
+                (txt "chat")
+                (hLimit 18 $ render_unifiedList st)
                 {-
                             , borderWithLabel
-                                (txt "info")
-                                (hLimit 60 $ render_focusedAgentInfo st)
+                                (txt "agents")
+                                (hLimit 18 $ render_agentsList st)
                             , borderWithLabel
-                                (txt "tools")
-                                (hLimit 60 $ render_focusedAgentTools st)
+                                (txt "conversations")
+                                (hLimit 50 $ render_conversationsList st)
+                                {-
+                                            , borderWithLabel
+                                                (txt "info")
+                                                (hLimit 60 $ render_focusedAgentInfo st)
+                                            , borderWithLabel
+                                                (txt "tools")
+                                                (hLimit 60 $ render_focusedAgentTools st)
+                                -}
                 -}
             ]
             <+> vBox
                 [ borderWithLabel
-                    (txt "chat")
+                    (txt "prompt")
                     (render_promptEditor st)
                 , borderWithLabel
                     (txt "conv")
@@ -107,6 +114,27 @@ tui_appDraw st = [render_ui st]
             (txt . Text.unlines)
             (focusGetCurrent st._ui._focus == Just PromptEditor)
             st._ui._promptEditor
+
+    render_unifiedList :: TuiState -> Widget N
+    render_unifiedList st =
+        let lst = st._ui._unifiedList
+         in renderList render_unifiedList_Item True lst
+
+    render_unifiedList_Item :: Bool -> ConversingEntryPoint -> Widget N
+    render_unifiedList_Item active item =
+        let
+            activeFlag = if active then ">" else " "
+         in
+            case item of
+                ChatEntryPoint (_, _, agent) ->
+                    txt ("> " <> agent.slug)
+                  where
+                    flags = activeFlag <> " "
+                ConversationEntryPoint conv ->
+                    txt (flags <> conv.conversingAgent.slug)
+                  where
+                    flags = activeFlag <> modifiedFlag
+                    modifiedFlag = if conv.historyChanged then "*" else " "
 
     render_agentsList :: TuiState -> Widget N
     render_agentsList st =

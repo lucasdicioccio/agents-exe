@@ -53,6 +53,13 @@ refreshStuffFromIOs_Conversations = do
     items <- liftIO (listConversations st0)
     ui . conversationsList .= (list ConversationsList (Vector.fromList items) 0)
 
+    -- todo: only show conversations if item is selected
+    -- todo: propagate refreshed info if new things happen
+    let unifiedConvs = fmap ConversationEntryPoint items
+    let unifiedAgents = fmap ChatEntryPoint st0._entities._loadedAgents
+    let unifiedItems = unifiedAgents <> unifiedConvs
+    ui . unifiedList .= (list UnifiedList (Vector.fromList unifiedItems) 0)
+
 unZoom :: EventM N TuiState ()
 unZoom =
     (ui . zoomed) .= False
@@ -87,6 +94,8 @@ tui_appHandleEvent ev = do
                 Nothing -> pure ()
                 (Just AgentsList) ->
                     zoom (ui . agentsList) $ handleListEvent vtyEv
+                (Just UnifiedList) ->
+                    zoom (ui . unifiedList) $ handleListEvent vtyEv
                 (Just ConversationsList) ->
                     zoom (ui . conversationsList) $ handleListEvent vtyEv
                 (Just PromptEditor) -> do
