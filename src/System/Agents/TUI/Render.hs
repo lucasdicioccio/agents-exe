@@ -158,17 +158,44 @@ tui_appDraw st = [render_ui st]
             Nothing ->
                 txt "no history"
             Just (_, conv) ->
-                vBox $ map (render_focusedConversation_HistoryItem st) conv.conversationHistory
+                vBox $ Maybe.mapMaybe (render_focusedConversation_HistoryItem st) conv.conversationHistory
 
-    render_focusedConversation_HistoryItem :: TuiState -> Agent.Trace -> Widget N
+    render_focusedConversation_HistoryItem :: TuiState -> Agent.Trace -> Maybe (Widget N)
     render_focusedConversation_HistoryItem _ tr =
         case tr of
-            (Agent.AgentTrace_Loading _ _ _) -> txt "(loading)"
+            (Agent.AgentTrace_Loading _ _ _) -> Nothing
+            (Agent.AgentTrace_Conversation _ _ _ _) -> Nothing
             (Agent.AgentTrace_Memorize _ _ _ (Agent.GotResponse q _ _ rsp)) ->
-                str (show q)
-                    <=> str (show rsp)
-            (Agent.AgentTrace_Memorize _ _ _ _) -> txt "(memo)"
-            (Agent.AgentTrace_Conversation _ _ _ _) -> txt "(conv)"
+                Just $
+                    vBox $
+                        Maybe.catMaybes
+                            [ Just $ separator
+                            , render_focusedConversation_HistoryItem_query q
+                            , Just $ txt ""
+                            , render_focusedConversation_HistoryItem_response_text rsp
+                            , render_focusedConversation_HistoryItem_response_toolcalls rsp
+                            , Just $ txt ""
+                            ]
+            (Agent.AgentTrace_Memorize _ _ _ _) -> Nothing
+
+    render_focusedConversation_HistoryItem_query :: Agent.PendingQuery -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem_query Agent.GaveToolAnswers = Nothing
+    render_focusedConversation_HistoryItem_query Agent.Done = Just $ txt "~~~ done ~~~"
+    render_focusedConversation_HistoryItem_query (Agent.SomeQuery t) = Just $ txt ("> " <> t)
+
+    render_focusedConversation_HistoryItem_response_text :: OpenAI.Response -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem_response_text rsp = do
+        content <- rsp.rspContent
+        pure $ txt ("< " <> content)
+
+    render_focusedConversation_HistoryItem_response_toolcalls :: OpenAI.Response -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem_response_toolcalls rsp = do
+        calls <- rsp.rspToolCalls
+        if length calls == 0
+            then
+                Nothing
+            else
+                pure $ txt ("< tool calls")
 
 renderToolRegistry :: (Aeson.ToJSON b) => [Tools.Registration a b c] -> Text
 renderToolRegistry registry =
@@ -182,3 +209,6 @@ renderToolRegistry registry =
                 Text.unwords ["command", Text.pack bashScript.scriptPath, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode reg.declareTool]
             Tools.IOTool ioScript ->
                 Text.unwords ["io", ioScript.ioSlug, ioScript.ioDescription]
+
+separator :: Widget a
+separator = txt "=============="

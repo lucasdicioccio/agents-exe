@@ -108,4 +108,10 @@ listConversations :: TuiState -> IO [OngoingConversation]
 listConversations st0 = do
     convs <- readIORef st0._entities._conversations
     traces <- traverse (Party.traces . conversationState) convs
-    pure $ zipWith (\conv trs -> conv{conversationHistory = trs, historyChanged = length conv.conversationHistory /= length trs}) convs traces
+    pure $ zipWith update convs traces
+  where
+    update conv trs =
+        conv
+            { conversationHistory = trs
+            , historyChanged = conv.historyChanged || length conv.conversationHistory /= length trs
+            }

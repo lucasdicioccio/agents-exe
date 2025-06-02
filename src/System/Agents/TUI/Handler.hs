@@ -92,8 +92,10 @@ tui_appHandleEvent ev = do
                 (Just PromptEditor) -> do
                     zoom (ui . promptEditor) $ handleEditorEvent ev
                     tui_handleViewPortEvent_PromptEditor ev
+                    setCurrentConversationAsRead
                 (Just FocusedConversation) -> do
                     tui_handleViewPortEvent_Conversation ev
+                    setCurrentConversationAsRead
         _ -> pure ()
 
 tui_handleViewPortEvent_PromptEditor :: BrickEvent N e0 -> EventM N TuiState ()
@@ -108,15 +110,18 @@ tui_handleViewPortEvent_PromptEditor ev = do
                     (Just (_, (rt, _, oai))) -> do
                         case listSelectedElement conv of
                             Nothing -> do
-                                startingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                                startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
                                 conv <- liftIO $ Party.converse rt startingPrompt
                                 st0 <- get
                                 liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
                             (Just (_, c)) -> do
-                                continuingPrompt <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                                continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
                                 ok <- liftIO . atomically $ c.conversationState.prompt (Just continuingPrompt)
                                 pure ()
         _ -> pure ()
+
+textLinesToPrompt :: [Text] -> Text
+textLinesToPrompt = Text.stripEnd . Text.unlines
 
 tui_handleViewPortEvent_Conversation :: BrickEvent N e0 -> EventM N TuiState ()
 tui_handleViewPortEvent_Conversation ev = do
@@ -139,3 +144,15 @@ tui_handleViewPortEvent_Conversation ev = do
 
 tui_appStartEvent :: EventM a TuiState ()
 tui_appStartEvent = pure ()
+
+setCurrentConversationAsRead :: EventM N TuiState ()
+setCurrentConversationAsRead = do
+    st <- get
+    case listSelectedElement st._ui._conversationsList of
+        Nothing ->
+            pure ()
+        Just (_, conv) ->
+            ui . conversationsList . listSelectedElementL %= setRead
+  where
+    setRead :: OngoingConversation -> OngoingConversation
+    setRead conv = conv{historyChanged = False}

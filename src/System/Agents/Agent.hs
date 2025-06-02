@@ -391,18 +391,18 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
             (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ locateResponse done)
 
-    locateResponse :: LLM.History -> Maybe Text
-    locateResponse hist = do
-        rsp <-
-            Maybe.listToMaybe $
-                Maybe.mapMaybe viewResponse $
-                    toList $
-                        Seq.reverse hist
-        rsp.rspContent
-      where
-        viewResponse :: LLM.HistoryItem -> Maybe LLM.Response
-        viewResponse (LLM.PromptAnswered _ rsp) = Just rsp
-        viewResponse _ = Nothing
+locateResponse :: LLM.History -> Maybe Text
+locateResponse hist = do
+    rsp <-
+        Maybe.listToMaybe $
+            Maybe.mapMaybe viewResponse $
+                toList $
+                    Seq.reverse hist
+    rsp.rspContent
+  where
+    viewResponse :: LLM.HistoryItem -> Maybe LLM.Response
+    viewResponse (LLM.PromptAnswered _ rsp) = Just rsp
+    viewResponse _ = Nothing
 
 -- TODO: improve on message handling here so that yankResults or default values are agent-specific
 yankResults :: [CallResult call] -> [(call, ByteString)]
