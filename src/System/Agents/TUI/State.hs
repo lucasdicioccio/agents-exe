@@ -43,15 +43,14 @@ import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import qualified Graphics.Vty as Vty
 
 data BrickWidgetName
-    = AgentsList
-    | ConversationsList
-    | UnifiedList
+    = UnifiedList
     | PromptEditor
     | FocusedConversation
     deriving (Show, Eq, Ord)
 type N = BrickWidgetName
 
-type LoadedAgent = (Agent.Runtime, [Agent.ToolRegistration], FileLoader.OpenAIAgent)
+type LoadedAgent =
+    (Agent.Runtime, [Agent.ToolRegistration], FileLoader.OpenAIAgent)
 
 data OngoingConversation
     = OngoingConversation
@@ -68,7 +67,7 @@ data Entities
     }
 makeLenses ''Entities
 
-data ConversingEntryPoint
+data ChatHandle
     = ChatEntryPoint LoadedAgent
     | ConversationEntryPoint OngoingConversation
 
@@ -77,9 +76,7 @@ data UI
     { _focus :: FocusRing N
     , _zoomed :: Bool
     , _promptEditor :: Editor Text N
-    , _agentsList :: List N LoadedAgent
-    , _conversationsList :: List N OngoingConversation
-    , _unifiedList :: List N ConversingEntryPoint
+    , _unifiedList :: List N ChatHandle
     }
 makeLenses ''UI
 
@@ -102,11 +99,9 @@ newCliState agents =
             <*> newIORef []
     ui =
         UI
-            <$> pure (focusRing [UnifiedList, AgentsList, ConversationsList, PromptEditor, FocusedConversation])
+            <$> pure (focusRing [UnifiedList, PromptEditor, FocusedConversation])
             <*> pure False
             <*> pure (editorText PromptEditor Nothing "@")
-            <*> pure (list AgentsList (Vector.fromList agents) 1)
-            <*> pure (list ConversationsList (Vector.fromList []) 0)
             <*> pure (list UnifiedList (Vector.fromList $ fmap ChatEntryPoint agents) 0)
 
 addConversation :: TuiState -> OngoingConversation -> IO ()

@@ -50,15 +50,38 @@ refreshStuffFromIOs = do
 refreshStuffFromIOs_Conversations :: EventM N TuiState ()
 refreshStuffFromIOs_Conversations = do
     st0 <- get
-    items <- liftIO (listConversations st0)
-    ui . conversationsList .= (list ConversationsList (Vector.fromList items) 0)
-
+    convs <- liftIO (listConversations st0)
     -- todo: only show conversations if item is selected
     -- todo: propagate refreshed info if new things happen
-    let unifiedConvs = fmap ConversationEntryPoint items
-    let unifiedAgents = fmap ChatEntryPoint st0._entities._loadedAgents
-    let unifiedItems = unifiedAgents <> unifiedConvs
-    ui . unifiedList .= (list UnifiedList (Vector.fromList unifiedItems) 0)
+    let handles = orderUnifiedConversations st0._entities._loadedAgents convs
+    ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
+
+orderUnifiedConversations ::
+    [LoadedAgent] ->
+    [OngoingConversation] ->
+    [ChatHandle]
+orderUnifiedConversations las ocs =
+    orderChatHandles allItems
+  where
+    agentItems = fmap ChatEntryPoint las
+    conversationsItems = fmap ConversationEntryPoint ocs
+    allItems = agentItems <> conversationsItems
+
+orderChatHandles :: [ChatHandle] -> [ChatHandle]
+orderChatHandles items =
+    List.sortBy (flip orderByAgent) items
+  where
+    orderByAgent :: ChatHandle -> ChatHandle -> Ordering
+    orderByAgent (ChatEntryPoint (_, _, la1)) (ChatEntryPoint (_, _, la2)) =
+        la1.slug `compare` la2.slug
+    orderByAgent (ConversationEntryPoint c1) (ConversationEntryPoint c2) =
+        c1.conversingAgent.slug `compare` c2.conversingAgent.slug
+    orderByAgent (ConversationEntryPoint c1) (ChatEntryPoint (_, _, la2)) =
+        let cmp = c1.conversingAgent.slug `compare` la2.slug
+         in if cmp == EQ then GT else cmp
+    orderByAgent (ChatEntryPoint (_, _, la1)) (ConversationEntryPoint c2) =
+        let cmp = la1.slug `compare` c2.conversingAgent.slug
+         in if cmp == EQ then LT else cmp
 
 unZoom :: EventM N TuiState ()
 unZoom =
@@ -92,12 +115,8 @@ tui_appHandleEvent ev = do
             currentFocus <- use (ui . focus . to focusGetCurrent)
             case currentFocus of
                 Nothing -> pure ()
-                (Just AgentsList) ->
-                    zoom (ui . agentsList) $ handleListEvent vtyEv
                 (Just UnifiedList) ->
                     zoom (ui . unifiedList) $ handleListEvent vtyEv
-                (Just ConversationsList) ->
-                    zoom (ui . conversationsList) $ handleListEvent vtyEv
                 (Just PromptEditor) -> do
                     zoom (ui . promptEditor) $ handleEditorEvent ev
                     tui_handleViewPortEvent_PromptEditor ev
@@ -112,21 +131,18 @@ tui_handleViewPortEvent_PromptEditor ev = do
     case ev of
         VtyEvent (Vty.EvKey Vty.KEnter mods)
             | Vty.MMeta `elem` mods -> do
-                item <- use (ui . agentsList)
-                conv <- use (ui . conversationsList)
+                item <- use (ui . unifiedList)
                 case listSelectedElement item of
                     Nothing -> pure ()
-                    (Just (_, (rt, _, oai))) -> do
-                        case listSelectedElement conv of
-                            Nothing -> do
-                                startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                                conv <- liftIO $ Party.converse rt startingPrompt
-                                st0 <- get
-                                liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
-                            (Just (_, c)) -> do
-                                continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                                ok <- liftIO . atomically $ c.conversationState.prompt (Just continuingPrompt)
-                                pure ()
+                    (Just (_, (ChatEntryPoint (rt, _, oai)))) -> do
+                        startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
+                        conv <- liftIO $ Party.converse rt startingPrompt
+                        st0 <- get
+                        liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
+                    (Just (_, (ConversationEntryPoint conv))) -> do
+                        continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
+                        ok <- liftIO . atomically $ conv.conversationState.prompt (Just continuingPrompt)
+                        pure ()
         _ -> pure ()
 
 textLinesToPrompt :: [Text] -> Text
@@ -157,11 +173,7 @@ tui_appStartEvent = pure ()
 setCurrentConversationAsRead :: EventM N TuiState ()
 setCurrentConversationAsRead = do
     st <- get
-    case listSelectedElement st._ui._conversationsList of
-        Nothing ->
-            pure ()
-        Just (_, conv) ->
-            ui . conversationsList . listSelectedElementL %= setRead
+    pure ()
   where
     setRead :: OngoingConversation -> OngoingConversation
     setRead conv = conv{historyChanged = False}

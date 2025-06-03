@@ -47,8 +47,6 @@ tui_appChooseCursor :: TuiState -> [CursorLocation N] -> Maybe (CursorLocation N
 tui_appChooseCursor st locs =
     case focusGetCurrent st._ui._focus of
         Just PromptEditor -> showCursorNamed PromptEditor locs
-        Just AgentsList -> Nothing
-        Just ConversationsList -> Nothing
         Just UnifiedList -> Nothing
         Just FocusedConversation -> Nothing
         Nothing -> Nothing
@@ -69,8 +67,6 @@ tui_appDraw st = [render_ui st]
                 Nothing -> render_ui_general st
                 (Just PromptEditor) -> render_promptEditor st
                 (Just FocusedConversation) -> render_focusedConversation st
-                (Just AgentsList) -> render_agentsList st
-                (Just ConversationsList) -> render_conversationsList st
                 (Just UnifiedList) -> render_unifiedList st
 
     render_ui_general :: TuiState -> Widget N
@@ -80,12 +76,6 @@ tui_appDraw st = [render_ui st]
                 (txt "chat")
                 (hLimit 18 $ render_unifiedList st)
                 {-
-                            , borderWithLabel
-                                (txt "agents")
-                                (hLimit 18 $ render_agentsList st)
-                            , borderWithLabel
-                                (txt "conversations")
-                                (hLimit 50 $ render_conversationsList st)
                                 {-
                                             , borderWithLabel
                                                 (txt "info")
@@ -118,9 +108,10 @@ tui_appDraw st = [render_ui st]
     render_unifiedList :: TuiState -> Widget N
     render_unifiedList st =
         let lst = st._ui._unifiedList
-         in renderList render_unifiedList_Item True lst
+            hasFocus = focusGetCurrent st._ui._focus == Just UnifiedList
+         in renderList render_unifiedList_Item hasFocus lst
 
-    render_unifiedList_Item :: Bool -> ConversingEntryPoint -> Widget N
+    render_unifiedList_Item :: Bool -> ChatHandle -> Widget N
     render_unifiedList_Item active item =
         let
             activeFlag = if active then ">" else " "
@@ -136,57 +127,35 @@ tui_appDraw st = [render_ui st]
                     flags = activeFlag <> modifiedFlag
                     modifiedFlag = if conv.historyChanged then "*" else " "
 
-    render_agentsList :: TuiState -> Widget N
-    render_agentsList st =
-        let lst = st._ui._agentsList
-         in renderList render_agentsList_Agent True lst
+    {-
+        render_focusedAgentInfo :: TuiState -> Widget N
+        render_focusedAgentInfo st =
+            case listSelectedElement st._ui._agentsList of
+                Nothing ->
+                    txt "select an agent to show info"
+                Just (_, (rt, _, oai)) ->
+                    txt oai.slug
+                        <=> str (show rt.agentId)
+                        <=> txt oai.announce
+                        <=> txt (Text.unlines oai.systemPrompt)
+                        <=> str oai.toolDirectory
 
-    render_agentsList_Agent :: Bool -> LoadedAgent -> Widget N
-    render_agentsList_Agent True (_, _, agent) =
-        txt ("> " <> agent.slug)
-    render_agentsList_Agent False (_, _, agent) =
-        txt ("  " <> agent.slug)
-
-    render_conversationsList :: TuiState -> Widget N
-    render_conversationsList st =
-        let lst = st._ui._conversationsList
-         in renderList render_conversationsList_Conversation True lst
-
-    render_conversationsList_Conversation :: Bool -> OngoingConversation -> Widget N
-    render_conversationsList_Conversation active conv =
-        txt (flags <> conv.conversingAgent.slug)
-      where
-        flags = activeFlag <> modifiedFlag
-        activeFlag = if active then ">" else " "
-        modifiedFlag = if conv.historyChanged then "*" else " "
-
-    render_focusedAgentInfo :: TuiState -> Widget N
-    render_focusedAgentInfo st =
-        case listSelectedElement st._ui._agentsList of
-            Nothing ->
-                txt "select an agent to show info"
-            Just (_, (rt, _, oai)) ->
-                txt oai.slug
-                    <=> str (show rt.agentId)
-                    <=> txt oai.announce
-                    <=> txt (Text.unlines oai.systemPrompt)
-                    <=> str oai.toolDirectory
-
-    render_focusedAgentTools :: TuiState -> Widget N
-    render_focusedAgentTools st =
-        case listSelectedElement st._ui._agentsList of
-            Nothing ->
-                txt "select an agent to show tools"
-            Just (_, (_, tools, _)) ->
-                txt $ renderToolRegistry tools
+        render_focusedAgentTools :: TuiState -> Widget N
+        render_focusedAgentTools st =
+            case listSelectedElement st._ui._agentsList of
+                Nothing ->
+                    txt "select an agent to show tools"
+                Just (_, (_, tools, _)) ->
+                    txt $ renderToolRegistry tools
+    -}
 
     render_focusedConversation :: TuiState -> Widget N
     render_focusedConversation st =
-        case listSelectedElement st._ui._conversationsList of
-            Nothing ->
-                txt "no history"
-            Just (_, conv) ->
+        case listSelectedElement st._ui._unifiedList of
+            Just (_, (ConversationEntryPoint conv)) ->
                 vBox $ Maybe.mapMaybe (render_focusedConversation_HistoryItem st) conv.conversationHistory
+            _ ->
+                txt "no history"
 
     render_focusedConversation_HistoryItem :: TuiState -> Agent.Trace -> Maybe (Widget N)
     render_focusedConversation_HistoryItem _ tr =
