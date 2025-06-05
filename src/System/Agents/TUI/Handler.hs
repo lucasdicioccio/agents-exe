@@ -93,7 +93,7 @@ tui_handleViewPortEvent_PromptEditor ev = do
                         liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
                     (Just (_, (ConversationEntryPoint conv))) -> do
                         continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        _ <- liftIO . atomically $ conv.conversationState.prompt (Just continuingPrompt)
+                        _ <- liftIO . atomically $ conv.conversationState.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
                         pure ()
         _ -> pure ()
 

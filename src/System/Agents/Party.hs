@@ -19,6 +19,7 @@ import qualified Prod.Tracer as Prod
 import System.Agents.Agent (AgentFunctions (..), handleConversation)
 import qualified System.Agents.Agent as Agent
 import System.Agents.Base (ConversationId, newConversationId)
+import System.Agents.LLMs.OpenAI as LLMs
 
 data ConversationState
     = ConversationState
@@ -52,5 +53,11 @@ converse baseRuntime txt = do
     agentFunctions inbox =
         AgentFunctions
             (nextQuery inbox)
-            (print)
-            (print)
+            endWithError
+            endWithSuccess
+
+    endWithSuccess :: LLMs.History -> IO ()
+    endWithSuccess _ = pure ()
+
+    endWithError :: String -> IO ()
+    endWithError _ = pure ()
