@@ -25,8 +25,12 @@ data BrickWidgetName
     deriving (Show, Eq, Ord)
 type N = BrickWidgetName
 
-type LoadedAgent =
-    (Agent.Runtime, [Agent.ToolRegistration], FileLoader.OpenAIAgent)
+data LoadedAgent
+    = LoadedAgent
+    { loadedAgentRuntime :: Agent.Runtime
+    , loadedAgentTools :: [Agent.ToolRegistration]
+    , loadedAgentInfo :: FileLoader.OpenAIAgent
+    }
 
 data OngoingConversation
     = OngoingConversation
@@ -112,13 +116,13 @@ orderChatHandles items =
     List.sortBy orderByAgent items
   where
     orderByAgent :: ChatHandle -> ChatHandle -> Ordering
-    orderByAgent (ChatEntryPoint (_, _, la1)) (ChatEntryPoint (_, _, la2)) =
-        la1.slug `compare` la2.slug
+    orderByAgent (ChatEntryPoint la1) (ChatEntryPoint la2) =
+        la1.loadedAgentInfo.slug `compare` la2.loadedAgentInfo.slug
     orderByAgent (ConversationEntryPoint c1) (ConversationEntryPoint c2) =
         c1.conversingAgent.slug `compare` c2.conversingAgent.slug
-    orderByAgent (ConversationEntryPoint c1) (ChatEntryPoint (_, _, la2)) =
-        let cmp = c1.conversingAgent.slug `compare` la2.slug
+    orderByAgent (ConversationEntryPoint c1) (ChatEntryPoint la2) =
+        let cmp = c1.conversingAgent.slug `compare` la2.loadedAgentInfo.slug
          in if cmp == EQ then GT else cmp
-    orderByAgent (ChatEntryPoint (_, _, la1)) (ConversationEntryPoint c2) =
-        let cmp = la1.slug `compare` c2.conversingAgent.slug
+    orderByAgent (ChatEntryPoint la1) (ConversationEntryPoint c2) =
+        let cmp = la1.loadedAgentInfo.slug `compare` c2.conversingAgent.slug
          in if cmp == EQ then LT else cmp

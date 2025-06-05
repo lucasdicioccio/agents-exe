@@ -34,7 +34,7 @@ refreshStuffFromIOs_Conversations = do
     ui . unifiedList . listSelectedL .= fmap fst (listSelectedElement st0._ui._unifiedList)
 
 showHandle :: ChatHandle -> String
-showHandle (ChatEntryPoint (_, _, oai)) = Text.unpack $ "(agent)" <> oai.slug
+showHandle (ChatEntryPoint la) = Text.unpack $ "(agent)" <> la.loadedAgentInfo.slug
 showHandle (ConversationEntryPoint oc) = "(conv)" <> show oc.conversationState.conversationId
 
 unZoom :: EventM N TuiState ()
@@ -86,11 +86,11 @@ tui_handleViewPortEvent_PromptEditor ev = do
                 item <- use (ui . unifiedList)
                 case listSelectedElement item of
                     Nothing -> pure ()
-                    (Just (_, (ChatEntryPoint (rt, _, oai)))) -> do
+                    (Just (_, (ChatEntryPoint la))) -> do
                         startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        conv <- liftIO $ Party.converse rt startingPrompt
+                        conv <- liftIO $ Party.converse la.loadedAgentRuntime startingPrompt
                         st0 <- get
-                        liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
+                        liftIO $ addConversation st0 (OngoingConversation la.loadedAgentInfo conv [] False)
                     (Just (_, (ConversationEntryPoint conv))) -> do
                         continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
                         _ <- liftIO . atomically $ conv.conversationState.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)

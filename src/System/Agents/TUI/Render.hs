@@ -126,8 +126,8 @@ tui_appDraw tuiState = [render_ui tuiState]
     render_unifiedList_Item :: Bool -> ChatHandle -> Widget N
     render_unifiedList_Item _ item =
         case item of
-            ChatEntryPoint (_, _, agent) ->
-                txt (" @" <> agent.slug)
+            ChatEntryPoint la ->
+                txt (" @" <> la.loadedAgentInfo.slug)
             ConversationEntryPoint conv ->
                 txt (" -" <> conv.conversingAgent.slug)
               where
@@ -136,20 +136,20 @@ tui_appDraw tuiState = [render_ui tuiState]
     render_focusedAgentInfo :: TuiState -> Widget N
     render_focusedAgentInfo st =
         case listSelectedElement st._ui._unifiedList of
-            Just (_, (ChatEntryPoint (rt, _, oai))) ->
-                txt oai.slug
-                    <=> str (show rt.agentId)
-                    <=> txt oai.announce
-                    <=> txt (Text.unlines oai.systemPrompt)
-                    <=> str oai.toolDirectory
+            Just (_, (ChatEntryPoint la)) ->
+                txt la.loadedAgentInfo.slug
+                    <=> str (show la.loadedAgentRuntime.agentId)
+                    <=> txt la.loadedAgentInfo.announce
+                    <=> txt (Text.unlines la.loadedAgentInfo.systemPrompt)
+                    <=> str la.loadedAgentInfo.toolDirectory
             _ ->
                 txt "select an agent to show info"
 
     render_focusedAgentTools :: TuiState -> Widget N
     render_focusedAgentTools st =
         case listSelectedElement st._ui._unifiedList of
-            Just (_, (ChatEntryPoint (_, tools, _))) ->
-                txt $ renderToolRegistry tools
+            Just (_, (ChatEntryPoint la)) ->
+                txt $ renderToolRegistry la.loadedAgentTools
             _ ->
                 txt "select an agent to show tools"
 

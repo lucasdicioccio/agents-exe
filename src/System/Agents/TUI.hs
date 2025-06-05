@@ -45,7 +45,8 @@ mainMultiAgents2 bChan idx (props : xs) agents = do
             (FileLoader.OpenAIAgentDescription oai) -> do
                 let rt = Agent.addTracer ai.agentRuntime (traceInChan bChan)
                 tools <- Agent.agentTools rt
-                mainMultiAgents2 bChan (succ idx) xs ((rt, tools, oai) : agents)
+                let la = LoadedAgent rt tools oai
+                mainMultiAgents2 bChan (succ idx) xs (la : agents)
     go _ = do
         print ("failed to initialize" :: Text)
 mainMultiAgents2 bChan _ [] agents = do
