@@ -5,7 +5,6 @@ module System.Agents.TUI.Handler where
 
 import Control.Concurrent.STM (atomically)
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -25,45 +24,22 @@ import System.Agents.TUI.State
 
 refreshStuffFromIOs_Conversations :: EventM N TuiState ()
 refreshStuffFromIOs_Conversations = do
-    st0 <- get
-    convs <- liftIO (listConversations st0)
     -- todo: only show conversations if item is selected
     -- todo: propagate refreshed info if new things happen
-    let handles = orderUnifiedConversations st0._entities._loadedAgents convs
-    let printHandle = putStrLn . showHandle
-    _ <- liftIO $ traverse printHandle handles
-    ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
+    st0 <- get
+    convs <- liftIO (listConversations st0)
+    let agents = st0._entities._loadedAgents
+
+    let handles = orderUnifiedConversations agents convs
+    case listSelectedElement st0._ui._unifiedList of
+        Just (oldSelectedIdx, _) -> do
+            ui . unifiedList .= (list UnifiedList (Vector.fromList handles) oldSelectedIdx)
+        Nothing ->
+            ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
 
 showHandle :: ChatHandle -> String
 showHandle (ChatEntryPoint (_, _, oai)) = Text.unpack $ "(agent)" <> oai.slug
 showHandle (ConversationEntryPoint oc) = "(conv)" <> show oc.conversationState.conversationId
-
-orderUnifiedConversations ::
-    [LoadedAgent] ->
-    [OngoingConversation] ->
-    [ChatHandle]
-orderUnifiedConversations las ocs =
-    orderChatHandles allItems
-  where
-    agentItems = fmap ChatEntryPoint las
-    conversationsItems = fmap ConversationEntryPoint ocs
-    allItems = agentItems <> conversationsItems
-
-orderChatHandles :: [ChatHandle] -> [ChatHandle]
-orderChatHandles items =
-    List.sortBy orderByAgent items
-  where
-    orderByAgent :: ChatHandle -> ChatHandle -> Ordering
-    orderByAgent (ChatEntryPoint (_, _, la1)) (ChatEntryPoint (_, _, la2)) =
-        la1.slug `compare` la2.slug
-    orderByAgent (ConversationEntryPoint c1) (ConversationEntryPoint c2) =
-        c1.conversingAgent.slug `compare` c2.conversingAgent.slug
-    orderByAgent (ConversationEntryPoint c1) (ChatEntryPoint (_, _, la2)) =
-        let cmp = c1.conversingAgent.slug `compare` la2.slug
-         in if cmp == EQ then GT else cmp
-    orderByAgent (ChatEntryPoint (_, _, la1)) (ConversationEntryPoint c2) =
-        let cmp = la1.slug `compare` c2.conversingAgent.slug
-         in if cmp == EQ then LT else cmp
 
 unZoom :: EventM N TuiState ()
 unZoom =

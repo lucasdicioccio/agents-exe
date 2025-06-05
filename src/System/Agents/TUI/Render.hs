@@ -69,20 +69,16 @@ tui_appDraw tuiState = [render_ui tuiState]
 
     render_ui_general :: TuiState -> Widget N
     render_ui_general st =
-        hBox
-            [ borderWithFocus
-                st
-                UnifiedList
-                "chat"
-                (hLimit 18 $ render_unifiedList st)
-            ]
-            <+> vBox
-                [ borderWithFocus
+        let
+            chatList =
+                borderWithFocus
                     st
-                    PromptEditor
-                    "prompt"
-                    (render_promptEditor st)
-                , borderWithFocus
+                    UnifiedList
+                    "chat"
+                    (hLimit 18 $ render_unifiedList st)
+
+            ongoingConversation =
+                borderWithFocus
                     st
                     FocusedConversation
                     "conv"
@@ -90,13 +86,28 @@ tui_appDraw tuiState = [render_ui tuiState]
                         viewport FocusedConversation Both $
                             render_focusedConversation st
                     )
-                , borderWithLabel
+            agent_infos =
+                borderWithLabel
                     (txt "info")
                     (hLimit 60 $ render_focusedAgentInfo st)
-                , borderWithLabel
+            agent_tools =
+                borderWithLabel
                     (txt "tools")
                     (hLimit 60 $ render_focusedAgentTools st)
-                ]
+            prompt_input =
+                borderWithFocus
+                    st
+                    PromptEditor
+                    "prompt"
+                    (render_promptEditor st)
+         in
+            case listSelectedElement st._ui._unifiedList of
+                Nothing ->
+                    hBox [chatList]
+                (Just (_, (ChatEntryPoint _))) ->
+                    hBox [chatList] <+> vBox [prompt_input, agent_infos, agent_tools]
+                (Just (_, (ConversationEntryPoint _))) ->
+                    hBox [chatList] <+> vBox [prompt_input, ongoingConversation]
 
     render_promptEditor :: TuiState -> Widget N
     render_promptEditor st =

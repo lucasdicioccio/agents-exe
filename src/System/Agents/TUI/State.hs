@@ -5,6 +5,7 @@
 module System.Agents.TUI.State where
 
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
+import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 
@@ -77,7 +78,7 @@ newCliState agents =
             <$> pure (focusRing [UnifiedList, PromptEditor, FocusedConversation])
             <*> pure False
             <*> pure (editorText PromptEditor Nothing "@")
-            <*> pure (list UnifiedList (Vector.fromList $ fmap ChatEntryPoint agents) 0)
+            <*> pure (list UnifiedList (Vector.fromList (orderUnifiedConversations agents [])) 0)
 
 addConversation :: TuiState -> OngoingConversation -> IO ()
 addConversation st0 conv = do
@@ -94,3 +95,30 @@ listConversations st0 = do
             { conversationHistory = trs
             , historyChanged = conv.historyChanged || length conv.conversationHistory /= length trs
             }
+
+orderUnifiedConversations ::
+    [LoadedAgent] ->
+    [OngoingConversation] ->
+    [ChatHandle]
+orderUnifiedConversations las ocs =
+    orderChatHandles allItems
+  where
+    agentItems = fmap ChatEntryPoint las
+    conversationsItems = fmap ConversationEntryPoint ocs
+    allItems = agentItems <> conversationsItems
+
+orderChatHandles :: [ChatHandle] -> [ChatHandle]
+orderChatHandles items =
+    List.sortBy orderByAgent items
+  where
+    orderByAgent :: ChatHandle -> ChatHandle -> Ordering
+    orderByAgent (ChatEntryPoint (_, _, la1)) (ChatEntryPoint (_, _, la2)) =
+        la1.slug `compare` la2.slug
+    orderByAgent (ConversationEntryPoint c1) (ConversationEntryPoint c2) =
+        c1.conversingAgent.slug `compare` c2.conversingAgent.slug
+    orderByAgent (ConversationEntryPoint c1) (ChatEntryPoint (_, _, la2)) =
+        let cmp = c1.conversingAgent.slug `compare` la2.slug
+         in if cmp == EQ then GT else cmp
+    orderByAgent (ChatEntryPoint (_, _, la1)) (ConversationEntryPoint c2) =
+        let cmp = la1.slug `compare` c2.conversingAgent.slug
+         in if cmp == EQ then LT else cmp
