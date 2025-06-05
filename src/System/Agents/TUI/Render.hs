@@ -3,42 +3,26 @@
 
 module System.Agents.TUI.Render where
 
-import qualified Control.Concurrent.Async as Async
-import Control.Concurrent.STM (atomically)
-import Control.Monad (void)
-import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Foldable (traverse_)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
-import qualified Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import qualified Data.Text.IO as Text
-import qualified Data.Vector as Vector
-import GHC.IO.Handle (Handle)
-import Prod.Tracer (Tracer (..), silent)
-import System.IO (stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (newConversationId)
-import System.Agents.Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Party as Party
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
 
 import Brick
-import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing)
+import Brick.Focus (focusGetCurrent)
+import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit
 import Brick.Widgets.List
-import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import qualified Graphics.Vty as Vty
 
 import System.Agents.TUI.State
@@ -51,16 +35,20 @@ tui_appChooseCursor st locs =
         Just FocusedConversation -> Nothing
         Nothing -> Nothing
 
+blueBg :: AttrName
+blueBg = attrName "blueBg"
+
 tui_appAttrMap :: TuiState -> AttrMap
-tui_appAttrMap _ = attrMap Vty.defAttr []
+tui_appAttrMap _ =
+    attrMap
+        Vty.defAttr
+        [ (blueBg, BrickUtil.bg Vty.blue)
+        ]
 
 tui_appDraw :: TuiState -> [Widget N]
-tui_appDraw st = [render_ui st]
+tui_appDraw tuiState = [render_ui tuiState]
   where
     render_ui :: TuiState -> Widget N
-    render_ui st
-        | st._ui._zoomed == False =
-            render_ui_general st
     render_ui st
         | st._ui._zoomed == True =
             case (focusGetCurrent st._ui._focus) of
@@ -68,34 +56,46 @@ tui_appDraw st = [render_ui st]
                 (Just PromptEditor) -> render_promptEditor st
                 (Just FocusedConversation) -> render_focusedConversation st
                 (Just UnifiedList) -> render_unifiedList st
+    render_ui st
+        | otherwise =
+            render_ui_general st
+
+    borderWithFocus :: TuiState -> N -> Text -> Widget N -> Widget N
+    borderWithFocus st n name
+        | focusGetCurrent st._ui._focus == Just n =
+            borderWithLabel (withAttr blueBg (txt name))
+        | otherwise =
+            borderWithLabel (txt name)
 
     render_ui_general :: TuiState -> Widget N
     render_ui_general st =
         hBox
-            [ borderWithLabel
-                (txt "chat")
+            [ borderWithFocus
+                st
+                UnifiedList
+                "chat"
                 (hLimit 18 $ render_unifiedList st)
-                {-
-                                {-
-                                            , borderWithLabel
-                                                (txt "info")
-                                                (hLimit 60 $ render_focusedAgentInfo st)
-                                            , borderWithLabel
-                                                (txt "tools")
-                                                (hLimit 60 $ render_focusedAgentTools st)
-                                -}
-                -}
             ]
             <+> vBox
-                [ borderWithLabel
-                    (txt "prompt")
+                [ borderWithFocus
+                    st
+                    PromptEditor
+                    "prompt"
                     (render_promptEditor st)
-                , borderWithLabel
-                    (txt "conv")
+                , borderWithFocus
+                    st
+                    FocusedConversation
+                    "conv"
                     ( hLimit 120 $
                         viewport FocusedConversation Both $
                             render_focusedConversation st
                     )
+                , borderWithLabel
+                    (txt "info")
+                    (hLimit 60 $ render_focusedAgentInfo st)
+                , borderWithLabel
+                    (txt "tools")
+                    (hLimit 60 $ render_focusedAgentTools st)
                 ]
 
     render_promptEditor :: TuiState -> Widget N
@@ -118,7 +118,7 @@ tui_appDraw st = [render_ui st]
          in
             case item of
                 ChatEntryPoint (_, _, agent) ->
-                    txt ("> " <> agent.slug)
+                    txt (flags <> agent.slug)
                   where
                     flags = activeFlag <> " "
                 ConversationEntryPoint conv ->
@@ -127,27 +127,25 @@ tui_appDraw st = [render_ui st]
                     flags = activeFlag <> modifiedFlag
                     modifiedFlag = if conv.historyChanged then "*" else " "
 
-    {-
-        render_focusedAgentInfo :: TuiState -> Widget N
-        render_focusedAgentInfo st =
-            case listSelectedElement st._ui._agentsList of
-                Nothing ->
-                    txt "select an agent to show info"
-                Just (_, (rt, _, oai)) ->
-                    txt oai.slug
-                        <=> str (show rt.agentId)
-                        <=> txt oai.announce
-                        <=> txt (Text.unlines oai.systemPrompt)
-                        <=> str oai.toolDirectory
+    render_focusedAgentInfo :: TuiState -> Widget N
+    render_focusedAgentInfo st =
+        case listSelectedElement st._ui._unifiedList of
+            Just (_, (ChatEntryPoint (rt, _, oai))) ->
+                txt oai.slug
+                    <=> str (show rt.agentId)
+                    <=> txt oai.announce
+                    <=> txt (Text.unlines oai.systemPrompt)
+                    <=> str oai.toolDirectory
+            _ ->
+                txt "select an agent to show info"
 
-        render_focusedAgentTools :: TuiState -> Widget N
-        render_focusedAgentTools st =
-            case listSelectedElement st._ui._agentsList of
-                Nothing ->
-                    txt "select an agent to show tools"
-                Just (_, (_, tools, _)) ->
-                    txt $ renderToolRegistry tools
-    -}
+    render_focusedAgentTools :: TuiState -> Widget N
+    render_focusedAgentTools st =
+        case listSelectedElement st._ui._unifiedList of
+            Just (_, (ChatEntryPoint (_, tools, _))) ->
+                txt $ renderToolRegistry tools
+            _ ->
+                txt "select an agent to show tools"
 
     render_focusedConversation :: TuiState -> Widget N
     render_focusedConversation st =

@@ -3,49 +3,25 @@
 
 module System.Agents.TUI.Handler where
 
-import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.STM (atomically)
-import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson
-import qualified Data.ByteString.Lazy as LByteString
-import Data.Foldable (traverse_)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import qualified Data.List as List
-import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Text.IO as Text
-import qualified Data.Vector as Vector
-import GHC.IO.Handle (Handle)
-import Prod.Tracer (Tracer (..), silent)
-import System.IO (stderr, stdout)
 
-import qualified System.Agents.Agent as Agent
-import System.Agents.Base (newConversationId)
-import System.Agents.Conversation
+import qualified Data.Vector as Vector
+
 import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Party as Party
-import qualified System.Agents.Tools as Tools
-import qualified System.Agents.Tools.Bash as Tools
-import qualified System.Agents.Tools.IO as Tools
 
 import Brick
-import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing)
-import Brick.Widgets.Border (borderWithLabel)
+import Brick.Focus (focusGetCurrent, focusNext, focusPrev)
 import Brick.Widgets.Edit
 import Brick.Widgets.List
 import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import qualified Graphics.Vty as Vty
 
 import System.Agents.TUI.State
-
-refreshStuffFromIOs :: EventM N TuiState ()
-refreshStuffFromIOs = do
-    refreshStuffFromIOs_Conversations
 
 refreshStuffFromIOs_Conversations :: EventM N TuiState ()
 refreshStuffFromIOs_Conversations = do
@@ -54,7 +30,13 @@ refreshStuffFromIOs_Conversations = do
     -- todo: only show conversations if item is selected
     -- todo: propagate refreshed info if new things happen
     let handles = orderUnifiedConversations st0._entities._loadedAgents convs
+    let printHandle = putStrLn . showHandle
+    _ <- liftIO $ traverse printHandle handles
     ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
+
+showHandle :: ChatHandle -> String
+showHandle (ChatEntryPoint (_, _, oai)) = Text.unpack $ "(agent)" <> oai.slug
+showHandle (ConversationEntryPoint oc) = "(conv)" <> show oc.conversationState.conversationId
 
 orderUnifiedConversations ::
     [LoadedAgent] ->
@@ -69,7 +51,7 @@ orderUnifiedConversations las ocs =
 
 orderChatHandles :: [ChatHandle] -> [ChatHandle]
 orderChatHandles items =
-    List.sortBy (flip orderByAgent) items
+    List.sortBy orderByAgent items
   where
     orderByAgent :: ChatHandle -> ChatHandle -> Ordering
     orderByAgent (ChatEntryPoint (_, _, la1)) (ChatEntryPoint (_, _, la2)) =
@@ -111,7 +93,7 @@ tui_appHandleEvent ev = do
             cycleFocusFwd
         VtyEvent (Vty.EvKey Vty.KBackTab _) ->
             cycleFocusBwd
-        ev@(VtyEvent vtyEv) -> do
+        (VtyEvent vtyEv) -> do
             currentFocus <- use (ui . focus . to focusGetCurrent)
             case currentFocus of
                 Nothing -> pure ()
@@ -120,10 +102,8 @@ tui_appHandleEvent ev = do
                 (Just PromptEditor) -> do
                     zoom (ui . promptEditor) $ handleEditorEvent ev
                     tui_handleViewPortEvent_PromptEditor ev
-                    setCurrentConversationAsRead
                 (Just FocusedConversation) -> do
                     tui_handleViewPortEvent_Conversation ev
-                    setCurrentConversationAsRead
         _ -> pure ()
 
 tui_handleViewPortEvent_PromptEditor :: BrickEvent N e0 -> EventM N TuiState ()
@@ -141,7 +121,7 @@ tui_handleViewPortEvent_PromptEditor ev = do
                         liftIO $ addConversation st0 (OngoingConversation oai conv [] False)
                     (Just (_, (ConversationEntryPoint conv))) -> do
                         continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        ok <- liftIO . atomically $ conv.conversationState.prompt (Just continuingPrompt)
+                        _ <- liftIO . atomically $ conv.conversationState.prompt (Just continuingPrompt)
                         pure ()
         _ -> pure ()
 
@@ -169,11 +149,3 @@ tui_handleViewPortEvent_Conversation ev = do
 
 tui_appStartEvent :: EventM a TuiState ()
 tui_appStartEvent = pure ()
-
-setCurrentConversationAsRead :: EventM N TuiState ()
-setCurrentConversationAsRead = do
-    st <- get
-    pure ()
-  where
-    setRead :: OngoingConversation -> OngoingConversation
-    setRead conv = conv{historyChanged = False}

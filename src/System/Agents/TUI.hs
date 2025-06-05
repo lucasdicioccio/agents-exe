@@ -3,51 +3,23 @@
 
 module System.Agents.TUI where
 
-import qualified Control.Concurrent.Async as Async
-import Control.Concurrent.STM (atomically)
 import Control.Monad (void)
-import Control.Monad.IO.Class (liftIO)
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson
-import qualified Data.ByteString.Lazy as LByteString
-import Data.Foldable (traverse_)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
-import qualified Data.List as List
-import qualified Data.Maybe as Maybe
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Text.IO as Text
-import qualified Data.Vector as Vector
-import GHC.IO.Handle (Handle)
-import Prod.Tracer (Tracer (..), silent)
-import System.IO (stderr, stdout)
+import Prod.Tracer (Tracer (..))
 
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (newConversationId)
 import System.Agents.Conversation
 import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Party as Party
-import qualified System.Agents.Tools as Tools
-import qualified System.Agents.Tools.Bash as Tools
-import qualified System.Agents.Tools.IO as Tools
 
 import Brick
 import Brick.BChan (BChan, newBChan, writeBChan)
-import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing)
-import Brick.Widgets.Border (borderWithLabel)
-import Brick.Widgets.Edit
-import Brick.Widgets.List
-import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
-import qualified Graphics.Vty as Vty
 
 import System.Agents.TUI.Handler (tui_appHandleEvent, tui_appStartEvent)
 import System.Agents.TUI.Render (tui_appAttrMap, tui_appChooseCursor, tui_appDraw)
 import System.Agents.TUI.State
 
 runMultiAgents :: BChan Agent.Trace -> [LoadedAgent] -> IO ()
-runMultiAgents _ [] = print "no agents loaded"
+runMultiAgents _ [] = putStrLn "no agents loaded"
 runMultiAgents bChan agents = do
     st0 <- newCliState agents
     let app =
