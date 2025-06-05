@@ -77,7 +77,7 @@ newCliState agents =
         UI
             <$> pure (focusRing [UnifiedList, PromptEditor, FocusedConversation])
             <*> pure False
-            <*> pure (editorText PromptEditor Nothing "@")
+            <*> pure (editorText PromptEditor Nothing "")
             <*> pure (list UnifiedList (Vector.fromList (orderUnifiedConversations agents [])) 0)
 
 addConversation :: TuiState -> OngoingConversation -> IO ()

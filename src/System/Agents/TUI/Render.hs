@@ -43,6 +43,7 @@ tui_appAttrMap _ =
     attrMap
         Vty.defAttr
         [ (blueBg, BrickUtil.bg Vty.blue)
+        , (listSelectedAttr, BrickUtil.fg Vty.blue)
         ]
 
 tui_appDraw :: TuiState -> [Widget N]
@@ -105,7 +106,7 @@ tui_appDraw tuiState = [render_ui tuiState]
                 Nothing ->
                     hBox [chatList]
                 (Just (_, (ChatEntryPoint _))) ->
-                    hBox [chatList] <+> vBox [prompt_input, agent_infos, agent_tools]
+                    hBox [chatList] <+> vBox [hBox [agent_infos, agent_tools], prompt_input]
                 (Just (_, (ConversationEntryPoint _))) ->
                     hBox [chatList] <+> vBox [prompt_input, ongoingConversation]
 
@@ -123,20 +124,14 @@ tui_appDraw tuiState = [render_ui tuiState]
          in renderList render_unifiedList_Item hasFocus lst
 
     render_unifiedList_Item :: Bool -> ChatHandle -> Widget N
-    render_unifiedList_Item active item =
-        let
-            activeFlag = if active then ">" else " "
-         in
-            case item of
-                ChatEntryPoint (_, _, agent) ->
-                    txt (flags <> agent.slug)
-                  where
-                    flags = activeFlag <> " "
-                ConversationEntryPoint conv ->
-                    txt (flags <> conv.conversingAgent.slug)
-                  where
-                    flags = activeFlag <> modifiedFlag
-                    modifiedFlag = if conv.historyChanged then "*" else " "
+    render_unifiedList_Item _ item =
+        case item of
+            ChatEntryPoint (_, _, agent) ->
+                txt (" @" <> agent.slug)
+            ConversationEntryPoint conv ->
+                txt (" -" <> conv.conversingAgent.slug)
+              where
+                modifiedFlag = if conv.historyChanged then "*" else " "
 
     render_focusedAgentInfo :: TuiState -> Widget N
     render_focusedAgentInfo st =

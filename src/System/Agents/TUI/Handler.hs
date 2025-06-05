@@ -29,13 +29,9 @@ refreshStuffFromIOs_Conversations = do
     st0 <- get
     convs <- liftIO (listConversations st0)
     let agents = st0._entities._loadedAgents
-
     let handles = orderUnifiedConversations agents convs
-    case listSelectedElement st0._ui._unifiedList of
-        Just (oldSelectedIdx, _) -> do
-            ui . unifiedList .= (list UnifiedList (Vector.fromList handles) oldSelectedIdx)
-        Nothing ->
-            ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
+    ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
+    ui . unifiedList . listSelectedL .= fmap fst (listSelectedElement st0._ui._unifiedList)
 
 showHandle :: ChatHandle -> String
 showHandle (ChatEntryPoint (_, _, oai)) = Text.unpack $ "(agent)" <> oai.slug
