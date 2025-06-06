@@ -14,7 +14,7 @@ import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Party as Party
 
 import Brick
-import Brick.Focus (focusGetCurrent, focusNext, focusPrev)
+import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRing)
 import Brick.Widgets.Edit
 import Brick.Widgets.List
 import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
@@ -69,8 +69,29 @@ tui_appHandleEvent ev = do
             currentFocus <- use (ui . focus . to focusGetCurrent)
             case currentFocus of
                 Nothing -> pure ()
-                (Just UnifiedList) ->
+                (Just UnifiedList) -> do
                     zoom (ui . unifiedList) $ handleListEvent vtyEv
+                    st1 <- get
+                    case listSelectedElement st1._ui._unifiedList of
+                        Nothing ->
+                            ui . focus
+                                .= focusRing
+                                    [ UnifiedList
+                                    , PromptEditor
+                                    ]
+                        (Just (_, (ChatEntryPoint _))) ->
+                            ui . focus
+                                .= focusRing
+                                    [ UnifiedList
+                                    , PromptEditor
+                                    ]
+                        (Just (_, (ConversationEntryPoint _))) ->
+                            ui . focus
+                                .= focusRing
+                                    [ UnifiedList
+                                    , PromptEditor
+                                    , FocusedConversation
+                                    ]
                 (Just PromptEditor) -> do
                     zoom (ui . promptEditor) $ handleEditorEvent ev
                     tui_handleViewPortEvent_PromptEditor ev

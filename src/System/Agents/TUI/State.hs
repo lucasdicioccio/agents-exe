@@ -79,7 +79,7 @@ newCliState agents =
             <*> newIORef []
     uiV =
         UI
-            <$> pure (focusRing [UnifiedList, PromptEditor, FocusedConversation])
+            <$> pure (focusRing [UnifiedList, PromptEditor])
             <*> pure False
             <*> pure (editorText PromptEditor Nothing "")
             <*> pure (list UnifiedList (Vector.fromList (orderUnifiedConversations agents [])) 0)
