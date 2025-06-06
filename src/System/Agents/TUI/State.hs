@@ -1,15 +1,18 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module System.Agents.TUI.State where
 
+import Control.Concurrent.STM (STM)
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 
 import qualified System.Agents.Agent as Agent
+import System.Agents.Base (ConversationId)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Party as Party
 
@@ -32,18 +35,27 @@ data LoadedAgent
     , loadedAgentInfo :: FileLoader.OpenAIAgent
     }
 
-data OngoingConversation
-    = OngoingConversation
+data StartedConversation
+    = StartedConversation
     { conversingAgent :: FileLoader.OpenAIAgent
     , conversationState :: Party.ConversationState
+    , headline :: Text
+    }
+
+data OngoingConversation
+    = OngoingConversation
+    { conversationId :: ConversationId
+    , conversingAgent :: FileLoader.OpenAIAgent
+    , conversationStatus :: Party.ConversationStatus
     , conversationHistory :: [Agent.Trace]
+    , prompt :: Maybe Text -> STM Bool
     , headline :: Text
     }
 
 data Entities
     = Entities
     { _loadedAgents :: [LoadedAgent]
-    , _conversations :: IORef [OngoingConversation]
+    , _conversations :: IORef [StartedConversation]
     }
 makeLenses ''Entities
 
@@ -84,7 +96,7 @@ newCliState agents =
             <*> pure (editorText PromptEditor Nothing "")
             <*> pure (list UnifiedList (Vector.fromList (orderUnifiedConversations agents [])) 0)
 
-referenceConversation :: TuiState -> OngoingConversation -> IO ()
+referenceConversation :: TuiState -> StartedConversation -> IO ()
 referenceConversation st0 conv = do
     modifyIORef st0._entities._conversations (conv :)
 
@@ -92,11 +104,18 @@ listConversations :: TuiState -> IO [OngoingConversation]
 listConversations st0 = do
     convs <- readIORef st0._entities._conversations
     traces <- traverse (Party.traces . conversationState) convs
-    pure $ zipWith update convs traces
+    statuses <- traverse (Party.status . conversationState) convs
+    pure $ zipWith3 update convs traces statuses
   where
-    update conv trs =
-        conv
-            { conversationHistory = trs
+    update :: StartedConversation -> [Agent.Trace] -> Party.ConversationStatus -> OngoingConversation
+    update conv trs status =
+        OngoingConversation
+            { conversationId = conv.conversationState.conversationId
+            , conversingAgent = conv.conversingAgent
+            , conversationStatus = status
+            , conversationHistory = trs
+            , headline = conv.headline
+            , prompt = conv.conversationState.prompt
             }
 
 orderUnifiedConversations ::

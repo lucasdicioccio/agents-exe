@@ -50,8 +50,7 @@ traceConversationId (AgentTrace_Conversation _ _ cId _) = Just cId
 traceConversationId (AgentTrace_Memorize _ _ cId _) = Just cId
 
 data ConversationTrace
-    = -- | useful for recording an edge between a pair of parent/child conversation
-      NewConversation
+    = NewConversation
     | LLMTrace !StepId !LLM.Trace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace

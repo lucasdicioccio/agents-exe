@@ -17,10 +17,10 @@ import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 
+import qualified System.Agents.Agent as Agent
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Party as Party
-
 import System.Agents.TUI.State
 
 setSelectedUnifiedConversation :: Maybe Int -> EventM N TuiState ()
@@ -34,7 +34,7 @@ setSelectedUnifiedConversationById cId = do
     setSelectedUnifiedConversation idx
   where
     f (ChatEntryPoint _) = False
-    f (ConversationEntryPoint conv) = conv.conversationState.conversationId == cId
+    f (ConversationEntryPoint conv) = conv.conversationId == cId
 
 replaceUnifiedConversationsList :: [LoadedAgent] -> [OngoingConversation] -> EventM N TuiState ()
 replaceUnifiedConversationsList agents convs = do
@@ -51,7 +51,7 @@ refreshStuffFromIOs_Conversations = do
 
 showHandle :: ChatHandle -> String
 showHandle (ChatEntryPoint la) = Text.unpack $ "(agent)" <> la.loadedAgentInfo.slug
-showHandle (ConversationEntryPoint oc) = "(conv)" <> show oc.conversationState.conversationId
+showHandle (ConversationEntryPoint oc) = "(conv)" <> show oc.conversationId
 
 unZoom :: EventM N TuiState ()
 unZoom =
@@ -71,11 +71,20 @@ cycleFocusBwd = do
     (ui . focus) %= focusPrev
     unZoom
 
-tui_appHandleEvent :: BrickEvent N e0 -> EventM N TuiState ()
+tui_appHandleEvent_AppEvent :: Agent.Trace -> EventM N TuiState ()
+tui_appHandleEvent_AppEvent ev = do
+    refreshStuffFromIOs_Conversations
+    case ev of
+        Agent.AgentTrace_Conversation _ _ cId (Agent.NewConversation) ->
+            setSelectedUnifiedConversationById cId
+        _ ->
+            pure ()
+
+tui_appHandleEvent :: BrickEvent N Agent.Trace -> EventM N TuiState ()
 tui_appHandleEvent ev = do
     case ev of
-        AppEvent _ -> do
-            refreshStuffFromIOs_Conversations
+        AppEvent appEv -> do
+            tui_appHandleEvent_AppEvent appEv
         VtyEvent (Vty.EvKey Vty.KEsc _) -> halt
         VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
             cycleFocusFwd
@@ -130,12 +139,11 @@ tui_handleViewPortEvent_PromptEditor ev = do
                         liftIO $
                             referenceConversation
                                 st0
-                                (OngoingConversation la.loadedAgentInfo conv [] startingPrompt)
+                                (StartedConversation la.loadedAgentInfo conv startingPrompt)
                         refreshStuffFromIOs_Conversations
-                        setSelectedUnifiedConversationById conv.conversationId
                     (Just (_, (ConversationEntryPoint conv))) -> do
                         continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        _ <- liftIO . atomically $ conv.conversationState.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
+                        _ <- liftIO . atomically $ conv.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
                         pure ()
         _ -> pure ()
 

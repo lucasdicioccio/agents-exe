@@ -13,6 +13,7 @@ import qualified Data.Text.Encoding as Text
 import qualified System.Agents.Agent as Agent
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.Party as Party
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
@@ -158,9 +159,17 @@ tui_appDraw tuiState = [render_ui tuiState]
     render_focusedConversation st =
         case listSelectedElement st._ui._unifiedList of
             Just (_, (ConversationEntryPoint conv)) ->
-                vBox $ Maybe.mapMaybe (render_focusedConversation_HistoryItem st) conv.conversationHistory
+                render_focusedConversation_Status st conv
+                    <=> vBox (Maybe.mapMaybe (render_focusedConversation_HistoryItem st) conv.conversationHistory)
             _ ->
-                txt "no history"
+                txt "missing conversation"
+
+    render_focusedConversation_Status :: TuiState -> OngoingConversation -> Widget N
+    render_focusedConversation_Status _ conv =
+        case conv.conversationStatus of
+            Party.WaitingForPrompt -> txt ""
+            Party.Executing -> txt "(executing)"
+            Party.Final -> txt "(ended)"
 
     render_focusedConversation_HistoryItem :: TuiState -> Agent.Trace -> Maybe (Widget N)
     render_focusedConversation_HistoryItem _ tr =
