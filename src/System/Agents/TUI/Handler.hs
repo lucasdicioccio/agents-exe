@@ -3,35 +3,51 @@
 
 module System.Agents.TUI.Handler where
 
-import Control.Concurrent.STM (atomically)
-import Control.Monad.IO.Class (liftIO)
-import Data.Text (Text)
-import qualified Data.Text as Text
-
-import qualified Data.Vector as Vector
-
-import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.Party as Party
-
 import Brick
 import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRing)
 import Brick.Widgets.Edit
 import Brick.Widgets.List
+import Control.Concurrent.STM (atomically)
 import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
+import Control.Monad.IO.Class (liftIO)
+import Data.Foldable (toList)
+import qualified Data.List as List
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
+
+import System.Agents.Base (ConversationId)
+import qualified System.Agents.FileLoader as FileLoader
+import qualified System.Agents.Party as Party
 
 import System.Agents.TUI.State
 
-refreshStuffFromIOs_Conversations :: EventM N TuiState ()
-refreshStuffFromIOs_Conversations = do
-    -- todo: only show conversations if item is selected
-    -- todo: propagate refreshed info if new things happen
-    st0 <- get
-    convs <- liftIO (listConversations st0)
-    let agents = st0._entities._loadedAgents
+setSelectedUnifiedConversation :: Maybe Int -> EventM N TuiState ()
+setSelectedUnifiedConversation n =
+    ui . unifiedList . listSelectedL .= n
+
+setSelectedUnifiedConversationById :: ConversationId -> EventM N TuiState ()
+setSelectedUnifiedConversationById cId = do
+    lst <- use (ui . unifiedList)
+    let idx = List.findIndex f (toList lst)
+    setSelectedUnifiedConversation idx
+  where
+    f (ChatEntryPoint _) = False
+    f (ConversationEntryPoint conv) = conv.conversationState.conversationId == cId
+
+replaceUnifiedConversationsList :: [LoadedAgent] -> [OngoingConversation] -> EventM N TuiState ()
+replaceUnifiedConversationsList agents convs = do
     let handles = orderUnifiedConversations agents convs
     ui . unifiedList .= (list UnifiedList (Vector.fromList handles) 0)
-    ui . unifiedList . listSelectedL .= fmap fst (listSelectedElement st0._ui._unifiedList)
+
+refreshStuffFromIOs_Conversations :: EventM N TuiState ()
+refreshStuffFromIOs_Conversations = do
+    st0 <- get
+    let agents = st0._entities._loadedAgents
+    convs <- liftIO (listConversations st0)
+    replaceUnifiedConversationsList agents convs
+    setSelectedUnifiedConversation (fmap fst (listSelectedElement st0._ui._unifiedList))
 
 showHandle :: ChatHandle -> String
 showHandle (ChatEntryPoint la) = Text.unpack $ "(agent)" <> la.loadedAgentInfo.slug
@@ -111,7 +127,12 @@ tui_handleViewPortEvent_PromptEditor ev = do
                         startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
                         conv <- liftIO $ Party.converse la.loadedAgentRuntime startingPrompt
                         st0 <- get
-                        liftIO $ addConversation st0 (OngoingConversation la.loadedAgentInfo conv [] False)
+                        liftIO $
+                            referenceConversation
+                                st0
+                                (OngoingConversation la.loadedAgentInfo conv [] startingPrompt)
+                        refreshStuffFromIOs_Conversations
+                        setSelectedUnifiedConversationById conv.conversationId
                     (Just (_, (ConversationEntryPoint conv))) -> do
                         continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
                         _ <- liftIO . atomically $ conv.conversationState.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)

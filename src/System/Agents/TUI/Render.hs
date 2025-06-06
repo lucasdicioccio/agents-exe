@@ -129,9 +129,10 @@ tui_appDraw tuiState = [render_ui tuiState]
             ChatEntryPoint la ->
                 txt (" @" <> la.loadedAgentInfo.slug)
             ConversationEntryPoint conv ->
-                txt (" -" <> conv.conversingAgent.slug)
+                txt (" -" <> renderHeadline conv.headline)
               where
-                modifiedFlag = if conv.historyChanged then "*" else " "
+                renderHeadline :: Text -> Text
+                renderHeadline = Text.take 8
 
     render_focusedAgentInfo :: TuiState -> Widget N
     render_focusedAgentInfo st =

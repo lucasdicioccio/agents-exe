@@ -37,7 +37,7 @@ data OngoingConversation
     { conversingAgent :: FileLoader.OpenAIAgent
     , conversationState :: Party.ConversationState
     , conversationHistory :: [Agent.Trace]
-    , historyChanged :: Bool
+    , headline :: Text
     }
 
 data Entities
@@ -84,8 +84,8 @@ newCliState agents =
             <*> pure (editorText PromptEditor Nothing "")
             <*> pure (list UnifiedList (Vector.fromList (orderUnifiedConversations agents [])) 0)
 
-addConversation :: TuiState -> OngoingConversation -> IO ()
-addConversation st0 conv = do
+referenceConversation :: TuiState -> OngoingConversation -> IO ()
+referenceConversation st0 conv = do
     modifyIORef st0._entities._conversations (conv :)
 
 listConversations :: TuiState -> IO [OngoingConversation]
@@ -97,7 +97,6 @@ listConversations st0 = do
     update conv trs =
         conv
             { conversationHistory = trs
-            , historyChanged = conv.historyChanged || length conv.conversationHistory /= length trs
             }
 
 orderUnifiedConversations ::
