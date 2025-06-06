@@ -3,13 +3,10 @@
 
 module System.Agents.CLI where
 
-import qualified Control.Concurrent.Async as Async
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
-import qualified Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -23,7 +20,6 @@ import qualified System.Agents.Agent as Agent
 import System.Agents.Base (newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Party as Party
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
@@ -49,6 +45,7 @@ mainOneShotText props query = do
     agentFunctions =
         Agent.AgentFunctions
             (pure Nothing)
+            (\_hist -> pure ())
             (\err -> putStrLn $ unlines ["execution error", err])
             (\hist -> OpenAI.printLastAnswer hist)
     runMainAgent rt = do
@@ -67,6 +64,7 @@ mainInteractiveAgent props = do
     agentFunctions ask =
         Agent.AgentFunctions
             (fmap queryOrNothing ask)
+            (\_hist -> pure ())
             (\err -> putStrLn $ unlines ["parse error", err])
             (\_ -> putStrLn "done")
 
@@ -203,6 +201,7 @@ renderMemorizeAgentTrace tr = case tr of
 renderConversationAgentTrace :: Agent.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of
     Agent.NewConversation -> ""
+    Agent.WaitingForPrompt -> ""
     Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
         Text.unwords ["bash-tool", "start", Text.pack p, Text.unwords $ map Text.pack args]
     Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->

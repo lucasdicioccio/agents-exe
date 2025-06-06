@@ -54,14 +54,21 @@ converse baseRuntime txt = do
             , traces = readIORef tracesIORef
             }
   where
-    agentFunctions :: TMVar (Maybe Text) -> TVar ConversationStatus -> AgentFunctions (Either String LLMs.History)
+    agentFunctions ::
+        TMVar (Maybe Text) ->
+        TVar ConversationStatus ->
+        AgentFunctions (Either String LLMs.History)
     agentFunctions inbox statusTVar =
         AgentFunctions
             (nextQuery inbox statusTVar)
+            (claimProgress statusTVar)
             (endWithError statusTVar)
             (endWithSuccess statusTVar)
 
-    nextQuery :: TMVar (Maybe Text) -> TVar ConversationStatus -> IO (Maybe Text)
+    nextQuery ::
+        TMVar (Maybe Text) ->
+        TVar ConversationStatus ->
+        IO (Maybe Text)
     nextQuery inbox statusTVar = do
         -- claim we need a prompt
         atomically $ do
@@ -71,12 +78,26 @@ converse baseRuntime txt = do
             writeTVar statusTVar Executing
             takeTMVar inbox
 
-    endWithSuccess :: TVar ConversationStatus -> LLMs.History -> IO (Either String LLMs.History)
+    claimProgress ::
+        TVar ConversationStatus ->
+        LLMs.History ->
+        IO ()
+    claimProgress statusTVar _ = do
+        atomically $ do
+            writeTVar statusTVar WaitingForPrompt
+
+    endWithSuccess ::
+        TVar ConversationStatus ->
+        LLMs.History ->
+        IO (Either String LLMs.History)
     endWithSuccess statusTVar hist = do
         atomically $ writeTVar statusTVar Final
         pure $ Right hist
 
-    endWithError :: TVar ConversationStatus -> String -> IO (Either String LLMs.History)
+    endWithError ::
+        TVar ConversationStatus ->
+        String ->
+        IO (Either String LLMs.History)
     endWithError statusTVar err = do
         atomically $ writeTVar statusTVar Final
         pure $ Left err

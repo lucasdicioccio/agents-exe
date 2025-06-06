@@ -50,8 +50,10 @@ refreshStuffFromIOs_Conversations = do
     setSelectedUnifiedConversation (fmap fst (listSelectedElement st0._ui._unifiedList))
 
 showHandle :: ChatHandle -> String
-showHandle (ChatEntryPoint la) = Text.unpack $ "(agent)" <> la.loadedAgentInfo.slug
-showHandle (ConversationEntryPoint oc) = "(conv)" <> show oc.conversationId
+showHandle (ChatEntryPoint la) =
+    Text.unpack $ "(agent)" <> la.loadedAgentInfo.slug
+showHandle (ConversationEntryPoint oc) =
+    "(conv)" <> show oc.conversationId
 
 unZoom :: EventM N TuiState ()
 unZoom =
@@ -140,7 +142,6 @@ tui_handleViewPortEvent_PromptEditor ev = do
                             referenceConversation
                                 st0
                                 (StartedConversation la.loadedAgentInfo conv startingPrompt)
-                        refreshStuffFromIOs_Conversations
                     (Just (_, (ConversationEntryPoint conv))) -> do
                         continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
                         _ <- liftIO . atomically $ conv.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)

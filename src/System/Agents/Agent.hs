@@ -51,6 +51,7 @@ traceConversationId (AgentTrace_Memorize _ _ cId _) = Just cId
 
 data ConversationTrace
     = NewConversation
+    | WaitingForPrompt
     | LLMTrace !StepId !LLM.Trace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
@@ -165,6 +166,7 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
 data AgentFunctions r
     = AgentFunctions
     { waitAdditionalQuery :: IO (Maybe Text)
+    , onProgress :: LLM.History -> IO ()
     , onError :: String -> IO r
     , onDone :: LLM.History -> IO r
     }
@@ -186,9 +188,9 @@ handleConversation rt functions conversationId startingPrompt = do
         (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId NewConversation)
     go conversationId
   where
-    go conversationId =
+    go cId =
         let step :: LLM.History -> PendingQuery -> IO r
-            step = stepWith conversationId rt functions continue
+            step = stepWith cId rt functions continue
 
             continue :: ContinueFunction r
             continue (PromptMore q h) = step h q
@@ -214,26 +216,28 @@ stepWith ::
     PendingQuery ->
     IO r
 stepWith conversationId rt _ next hist Done = do
-    let infoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) rt.agentTracer
+    let memoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) rt.agentTracer
     stepUUID <- UUID.nextRandom
-    runTracer infoTracer (InteractionDone hist stepUUID)
+    runTracer memoTracer (InteractionDone hist stepUUID)
     next $ OnDone hist
 stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
     let convTracer = contramap (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId) tracer
-    let infoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) tracer
+    let memoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) tracer
     let query = getQuery pendingQuery
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
     let payload = LLM.simplePayload model llmTools hist query
     stepUUID <- UUID.nextRandom
-    runTracer infoTracer (Calling pendingQuery hist stepUUID)
+    runTracer memoTracer (Calling pendingQuery hist stepUUID)
     llmResponse <- LLM.callLLMPayload (contramap (LLMTrace stepUUID) convTracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
             let hist02 = hist <> Seq.singleton (LLM.PromptAnswered query rsp)
-            runTracer infoTracer (GotResponse pendingQuery hist02 stepUUID rsp)
+            functions.onProgress hist02
+            runTracer memoTracer (GotResponse pendingQuery hist02 stepUUID rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
                 [] -> do
+                    runTracer convTracer WaitingForPrompt
                     nextQuery <- functions.waitAdditionalQuery
                     next $
                         PromptMore
@@ -369,7 +373,11 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
 
     runSubAgent conversationId txt = do
         subConversationId <- newConversationId
-        handleConversation (nestTracer conversationId rt) agentFunctions subConversationId txt
+        handleConversation
+            (nestTracer conversationId rt)
+            agentFunctions
+            subConversationId
+            txt
 
     nestTracer conversationId childRuntime =
         childRuntime
@@ -387,6 +395,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     agentFunctions =
         AgentFunctions
             (pure Nothing)
+            (\_hist -> pure ())
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
             (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ locateResponse done)
 

@@ -471,6 +471,8 @@ toJsonTrace x = case x of
                     Aeson.object
                         [ "x" .= ("new-conversation" :: Text.Text)
                         ]
+            (BaseAgent.WaitingForPrompt) ->
+                Nothing
             (BaseAgent.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
             (BaseAgent.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->

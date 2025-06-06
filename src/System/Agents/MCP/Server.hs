@@ -175,6 +175,7 @@ handleMsg req (CallToolRequestMsg callTool) = do
     let agentFunctions =
             Agent.AgentFunctions
                 (pure Nothing)
+                (\_hist -> pure ())
                 (\err -> pure $ Left err)
                 (\hist -> pure $ maybe (Left "no answer") Right $ OpenAI.lastAnswerMaybe hist)
     mappedTool <- askMappedTools
