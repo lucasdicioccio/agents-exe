@@ -22,15 +22,15 @@ will guide you into writing a `agent.json` and its tools directory
 
 ### Agents
 
-An agent embodies a repeatable, parameterized LLM.
+An agent comprises a repeatable, parameterized LLM.
 
-An agent thus requires: 
-- an LLM endpoint
-- an API key for the endpoint
-- a model
-- a system-prompt
-- a set of command line tools
-- a set of helper agents
+An agent requires:
+- An LLM endpoint
+- An API key for the endpoint
+- A model
+- A system prompt
+- A set of command line tools
+- A set of helper agents
 
 The model and system-prompt are the typical LLM parameter you encounter.
 Large, general models are more capable but more expensive.  The system-prompt
@@ -54,7 +54,8 @@ functions concurrently.
 
 ### Adding new tools
 
-Tools are executable program (most often, you'll want to wrap bash scripts) that conform to the following specification:
+
+Tools are executable programs (often, you might want to encapsulate bash scripts) that adhere to the following specifications:
 - when called with `describe` (no parameter), the program MUST return a description of the parameters allowed
 - when called with `run` (with arguments/stdin) executes the command, the program SHOULD always write something to stdout
 
@@ -125,10 +126,10 @@ into a processing that would be morally equivalent to
 mytool John --env prod Salmons --tag=fish <( echo "good article"; echo ""; echo "uninteresting")
 ```
 
-Note that agents-exe itself conforms to the above specification.  Which allows
-you to use an agents-exe invocation direcly as a tool.  This mechanism gives
-some extra flexibility when executing a tree of agents with different access
-rights or when you want to run across container boundaries.
+Agents-exe adheres to the same specifications, allowing you to use an
+`agents-exe` invocation directly as a tool. This flexibility is useful when
+running a hierarchy of agents with different access rights or across container
+boundaries. 
 
 ### Adding new agents
 
@@ -166,14 +167,12 @@ The content of the keys file is as follows:
 }
 ```
 
-The key `id` field is the one that has to match the `apiKeyId` field in agents
-JSON description.
+The `id` key must match the `apiKeyId` field in the agent's JSON description.
 
 
 ### environment variables
 
-A few environment variables may affect somme commands.
-
+Certain environment variables can influence command behaviors:
 - `EDITOR` or `GIT_EDITOR` are used to edit files (notably in the `init` command)
 
 ## Using as an MCP server
@@ -216,26 +215,22 @@ cabal run -- agents-exe --help
 cabal run -- agents-exe init
 ```
 
-Then either run the Terminal UI.
-
+Then choose to either run the Terminal UI.
 ```console
 cabal run -- agents-exe tui
 ```
 
-
-Or run the interactive CLI.
+Or interact via the CLI.
 ```console
 cabal run -- agents-exe cli
 ```
 
-If you are on a linux machine with some tools like `ping` an `notify-send`
-installed, you should be able to run the example tools.
-
+On a Linux machine with tools like `ping` and `notify-send` installed, you can execute example tools:
 ```console
 cabal run -- agents-exe run --prompt "can you report the latency to github.com"
 ```
 
-The `run` command can also take filename if the prompt is prefixed with an `@` (inspired from cURL).
+The `run` command can also handle filenames if the prompt starts with an `@` (inspired by cURL).
 
 ## Building from the Containerfile
 
@@ -281,6 +276,5 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
 - internal machinery
   - metrics and prodapi-endpoints
   - we need to allow an orchestrator to introspect what happened
-  - some storage
 
 - consider allowing sub-agents to also call other agents
