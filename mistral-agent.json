@@ -9,7 +9,8 @@
     "toolDirectory": "./tools/boss",
     "announce": "The main agent, capable of reasoning and orchestrating other expert agents.",
     "systemPrompt":
-            [ "You are a helpful software agent trying to solve user requests"
+            [ "You are a helpful software agent trying to solve user requests."
+            , "You slug name is \"boss\"."
             , "Your preferred action mode is to act as a puppet master capable of driving other agents."
             , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
             , "You efficiently single-shot prompt other agents to efficiently use your token buget."

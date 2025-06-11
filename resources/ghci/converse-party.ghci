@@ -1,0 +1,13 @@
+
+import qualified System.Agents.FileLoader as FL
+import qualified System.Agents.Conversation as Conversation
+import qualified Prod.Tracer as Prod
+
+import qualified System.Agents.Party as Party
+
+(Right oaiDescription) <- FL.readJsonDescriptionFile "agents/net-expert.json"
+keys <- Conversation.readOpenApiKeysFile "agents-exe.keys"
+Right agentRt <- Conversation.initAgent Prod.tracePrint keys id [] oaiDescription
+
+st0 <- Party.converse agentRt "hi"
+

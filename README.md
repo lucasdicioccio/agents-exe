@@ -209,8 +209,22 @@ Coding style follows these guidelines:
 ```console
 git clone https://github.com/lucasdicioccio/agents-exe
 cd agents-exe
+```
+
+```console
 cabal run -- agents-exe --help
 cabal run -- agents-exe init
+```
+
+Then either run the Terminal UI.
+
+```console
+cabal run -- agents-exe tui
+```
+
+
+Or run the interactive CLI.
+```console
 cabal run -- agents-exe cli
 ```
 
@@ -220,6 +234,8 @@ installed, you should be able to run the example tools.
 ```console
 cabal run -- agents-exe run --prompt "can you report the latency to github.com"
 ```
+
+The `run` command can also take filename if the prompt is prefixed with an `@` (inspired from cURL).
 
 ## Building from the Containerfile
 

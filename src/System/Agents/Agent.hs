@@ -17,7 +17,7 @@ import qualified Data.Text.Encoding as Text
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import qualified Prod.Background as Background
-import Prod.Tracer (Tracer, contramap, runTracer)
+import Prod.Tracer (Tracer, contramap, runTracer, traceBoth)
 import qualified System.Agents.HttpClient as HttpClient
 
 import System.Agents.Base
@@ -50,8 +50,8 @@ traceConversationId (AgentTrace_Conversation _ _ cId _) = Just cId
 traceConversationId (AgentTrace_Memorize _ _ cId _) = Just cId
 
 data ConversationTrace
-    = -- | useful for recording an edge between a pair of parent/child conversation
-      NewConversation
+    = NewConversation
+    | WaitingForPrompt
     | LLMTrace !StepId !LLM.Trace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
@@ -84,6 +84,14 @@ data Runtime
     , agentTools :: IO [ToolRegistration]
     , agentTriggerRefreshTools :: STM Bool
     }
+
+{- | Adds an extra tracer to the runtime, hence returning a modified Runtime.
+
+In current implementation (arbitrary) the extra tracer is ran before the
+already-in-place one.
+-}
+addTracer :: Runtime -> (Tracer IO Trace) -> Runtime
+addTracer rt t = rt{agentTracer = traceBoth t rt.agentTracer}
 
 triggerRefreshTools :: Runtime -> IO Bool
 triggerRefreshTools rt = atomically $ rt.agentTriggerRefreshTools
@@ -158,6 +166,7 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
 data AgentFunctions r
     = AgentFunctions
     { waitAdditionalQuery :: IO (Maybe Text)
+    , onProgress :: LLM.History -> IO ()
     , onError :: String -> IO r
     , onDone :: LLM.History -> IO r
     }
@@ -172,17 +181,16 @@ getQuery :: PendingQuery -> Maybe Text
 getQuery (SomeQuery t) = Just t
 getQuery _ = Nothing
 
-handleConversation :: forall r. Runtime -> AgentFunctions r -> Text -> IO r
-handleConversation rt functions startingPrompt = do
-    conversationId <- newConversationId
+handleConversation :: forall r. Runtime -> AgentFunctions r -> ConversationId -> Text -> IO r
+handleConversation rt functions conversationId startingPrompt = do
     runTracer
         rt.agentTracer
         (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId NewConversation)
     go conversationId
   where
-    go conversationId =
+    go cId =
         let step :: LLM.History -> PendingQuery -> IO r
-            step = stepWith conversationId rt functions continue
+            step = stepWith cId rt functions continue
 
             continue :: ContinueFunction r
             continue (PromptMore q h) = step h q
@@ -208,26 +216,28 @@ stepWith ::
     PendingQuery ->
     IO r
 stepWith conversationId rt _ next hist Done = do
-    let infoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) rt.agentTracer
+    let memoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) rt.agentTracer
     stepUUID <- UUID.nextRandom
-    runTracer infoTracer (InteractionDone hist stepUUID)
+    runTracer memoTracer (InteractionDone hist stepUUID)
     next $ OnDone hist
 stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions next hist pendingQuery = do
     let convTracer = contramap (AgentTrace_Conversation rt.agentSlug rt.agentId conversationId) tracer
-    let infoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) tracer
+    let memoTracer = contramap (AgentTrace_Memorize rt.agentSlug rt.agentId conversationId) tracer
     let query = getQuery pendingQuery
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
     let payload = LLM.simplePayload model llmTools hist query
     stepUUID <- UUID.nextRandom
-    runTracer infoTracer (Calling pendingQuery hist stepUUID)
+    runTracer memoTracer (Calling pendingQuery hist stepUUID)
     llmResponse <- LLM.callLLMPayload (contramap (LLMTrace stepUUID) convTracer) httpRt model.modelBaseUrl payload
     case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
         Right rsp -> do
             let hist02 = hist <> Seq.singleton (LLM.PromptAnswered query rsp)
-            runTracer infoTracer (GotResponse pendingQuery hist02 stepUUID rsp)
+            functions.onProgress hist02
+            runTracer memoTracer (GotResponse pendingQuery hist02 stepUUID rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
                 [] -> do
+                    runTracer convTracer WaitingForPrompt
                     nextQuery <- functions.waitAdditionalQuery
                     next $
                         PromptMore
@@ -361,8 +371,13 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             )
             (\conversationId (PromptOtherAgent txt) -> runSubAgent conversationId txt)
 
-    runSubAgent conversationId txt =
-        handleConversation (nestTracer conversationId rt) agentFunctions txt
+    runSubAgent conversationId txt = do
+        subConversationId <- newConversationId
+        handleConversation
+            (nestTracer conversationId rt)
+            agentFunctions
+            subConversationId
+            txt
 
     nestTracer conversationId childRuntime =
         childRuntime
@@ -380,21 +395,22 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     agentFunctions =
         AgentFunctions
             (pure Nothing)
+            (\_hist -> pure ())
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
             (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ locateResponse done)
 
-    locateResponse :: LLM.History -> Maybe Text
-    locateResponse hist = do
-        rsp <-
-            Maybe.listToMaybe $
-                Maybe.mapMaybe viewResponse $
-                    toList $
-                        Seq.reverse hist
-        rsp.rspContent
-      where
-        viewResponse :: LLM.HistoryItem -> Maybe LLM.Response
-        viewResponse (LLM.PromptAnswered _ rsp) = Just rsp
-        viewResponse _ = Nothing
+locateResponse :: LLM.History -> Maybe Text
+locateResponse hist = do
+    rsp <-
+        Maybe.listToMaybe $
+            Maybe.mapMaybe viewResponse $
+                toList $
+                    Seq.reverse hist
+    rsp.rspContent
+  where
+    viewResponse :: LLM.HistoryItem -> Maybe LLM.Response
+    viewResponse (LLM.PromptAnswered _ rsp) = Just rsp
+    viewResponse _ = Nothing
 
 -- TODO: improve on message handling here so that yankResults or default values are agent-specific
 yankResults :: [CallResult call] -> [(call, ByteString)]
