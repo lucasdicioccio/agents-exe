@@ -57,7 +57,7 @@ data Command
 
 data OneShotOptions
     = OneShotOptions
-    { fileOrPromptArg :: String
+    { fileOrPromptArgs :: [String]
     }
 
 data McpServerOptions
@@ -84,12 +84,15 @@ parseOneShotTextualCommand =
     parseOneShotOptions :: Parser OneShotOptions
     parseOneShotOptions =
         OneShotOptions
-            <$> strOption
-                ( long "prompt"
-                    <> metavar "PROMPT"
-                    <> help "prompt, magical values is @filepath"
-                    <> showDefault
-                    <> value "@/dev/stdin"
+            <$> fmap
+                addDefaultStdinFile
+                ( many
+                    ( strOption
+                        ( long "prompt"
+                            <> metavar "PROMPT"
+                            <> help "prompt, magical values is @filepath"
+                        )
+                    )
                 )
 
 parseMcpServer :: Parser Command
@@ -183,6 +186,10 @@ addDefaultSomeAgentFile :: [FilePath] -> [FilePath]
 addDefaultSomeAgentFile [] = ["agent.json"]
 addDefaultSomeAgentFile xs = xs
 
+addDefaultStdinFile :: [FilePath] -> [FilePath]
+addDefaultStdinFile [] = ["@/dev/stdin"]
+addDefaultStdinFile xs = xs
+
 main :: IO ()
 main = do
     hSetBuffering stderr LineBuffering
@@ -263,12 +270,9 @@ main = do
                 TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
-                    prompt <-
-                        if "@" `List.isPrefixOf` opts.fileOrPromptArg
-                            then Text.readFile (drop 1 opts.fileOrPromptArg)
-                            else pure $ Text.pack opts.fileOrPromptArg
+                    promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
                     let oneShot = flip CLI.mainOneShotText
-                    oneShot prompt $
+                    oneShot (Text.unlines promptLines) $
                         Conversation.Props
                             { Conversation.apiKeysFile = args.apiKeysFile
                             , Conversation.rawLogFile = args.logFile
@@ -541,3 +545,10 @@ makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text
 makeHttpJsonTrace baseTracer url = do
     rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
     pure $ HttpLogger.httpTracer rt baseTracer
+
+-- | interprets a `--prompt` arg as either a magic file or a chunk of text
+interpretPromptArg :: FilePath -> IO Text.Text
+interpretPromptArg path =
+    if "@" `List.isPrefixOf` path
+        then Text.readFile (drop 1 path)
+        else pure $ Text.pack path
