@@ -231,6 +231,12 @@ cabal run -- agents-exe run --prompt "can you report the latency to github.com"
 ```
 
 The `run` command can also handle filenames if the prompt starts with an `@` (inspired by cURL).
+Multiple `--prompt` are allowed and concatenated into a single prompt with newline spacing, which allows for simple templating.
+```
+cabal run -- agents-exe run \
+  --prompt "resume the following content:" \
+  --prompt "@README.md"
+```
 
 ## Building from the Containerfile
 
