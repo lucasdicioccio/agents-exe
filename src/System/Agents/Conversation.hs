@@ -1,146 +1,103 @@
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
+-- need to capture
+-- \* identifying info about the agent
+-- \* identifying info about the conversation
+-- \* some history of the conversation
+-- \* a thread that is either waiting on input or waiting on an llm
+-- \* some resumable information
+-- \* some notion of party
 
+-- | organizes multi-agents discussions into parties
 module System.Agents.Conversation where
 
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy as LByteString
-import qualified Data.Either as Either
-import qualified Data.List.NonEmpty as NonEmpty
-import qualified Data.Maybe as Maybe
+import Control.Concurrent.Async
+import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVarIO, writeTVar)
+import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, takeTMVar, tryPutTMVar)
+import Data.IORef (modifyIORef, newIORef, readIORef)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import Prod.Tracer (Tracer (..), contramap)
+import qualified Prod.Tracer as Prod
 
-import qualified System.Agents.Agent as Agent
-import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Base (ConversationId, newConversationId)
+import System.Agents.LLMs.OpenAI as LLMs
+import System.Agents.Runtime (AgentFunctions (..), handleConversation)
+import qualified System.Agents.Runtime as Runtime
 
-import System.Agents.ApiKeys
+data ConversationStatus
+    = WaitingForPrompt
+    | Executing
+    | Final
+    deriving (Show, Eq, Ord)
 
-data Trace
-    = AgentTrace Agent.Trace
-    | DataLoadingTrace FileLoader.Trace
-    deriving (Show)
-
-data Props
-    = Props
-    { apiKeysFile :: FilePath
-    , mainAgentFile :: FilePath
-    , helperAgentsDir :: FilePath
-    , interactiveTracer :: Tracer IO Trace
-    , rawLogFile :: FilePath
+data ConversationState
+    = ConversationState
+    { conversationId :: ConversationId
+    , task :: Async (Either String LLMs.History)
+    , prompt :: Maybe Text -> STM Bool
+    , status :: IO ConversationStatus
+    , traces :: IO [Runtime.Trace]
     }
 
-data AgentInfo = AgentInfo
-    { agentDescription :: FileLoader.AgentDescription
-    , agentRuntime :: Agent.Runtime
-    , agentSibling :: FileLoader.Agents
-    , agentSiblingRuntimes :: [Agent.Runtime]
-    }
-
-data Continue
-    = LoadingErrors (NonEmpty.NonEmpty FileLoader.InvalidAgentError)
-    | OtherErrors (NonEmpty.NonEmpty String)
-    | Initialized AgentInfo
-
-withAgentRuntime :: Props -> (Continue -> IO a) -> IO a
-withAgentRuntime props continue = do
-    let tracer = props.interactiveTracer
-    loadedBoss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.mainAgentFile
-    case loadedBoss of
-        Left err ->
-            continue $ LoadingErrors (NonEmpty.singleton err)
-        Right mainAgentDescription -> do
-            (loadedAgents, errs) <- FileLoader.loadDirectory (contramap DataLoadingTrace tracer) props.helperAgentsDir
-            case NonEmpty.nonEmpty errs of
-                Just xs -> continue $ LoadingErrors xs
-                Nothing -> do
-                    keys <- readOpenApiKeysFile props.apiKeysFile
-                    agentRuntimes <- traverse (initAgent tracer keys id []) loadedAgents.agents
-                    let (koRuntimes, okRuntimes) = Either.partitionEithers agentRuntimes
-                    case NonEmpty.nonEmpty koRuntimes of
-                        Just xs -> continue $ OtherErrors xs
-                        Nothing -> do
-                            mainAgent <-
-                                initAgent
-                                    tracer
-                                    keys
-                                    (augmentMainAgentPromptWithSubAgents okRuntimes)
-                                    okRuntimes
-                                    mainAgentDescription
-                            case mainAgent of
-                                Left err -> continue $ OtherErrors (NonEmpty.singleton err)
-                                Right mainRt -> continue $ Initialized (AgentInfo mainAgentDescription mainRt loadedAgents okRuntimes)
-
-type PromptModifier = Text -> Text
-
-initAgent ::
-    Tracer IO Trace ->
-    [(Text, OpenAI.ApiKey)] ->
-    PromptModifier ->
-    [Agent.Runtime] ->
-    FileLoader.AgentDescription ->
-    IO (Either String Agent.Runtime)
-initAgent _ _ _ _ (FileLoader.Unspecified _) = pure $ Left "unspecified agent unsupported"
-initAgent tracer keys modifyPrompt helperAgents (FileLoader.OpenAIAgentDescription desc) = do
-    case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
-        (_, Nothing) ->
-            pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
-        (Nothing, _) ->
-            pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
-        (Just key, Just flavor) ->
-            Agent.newRuntime
-                desc.slug
-                desc.announce
-                (contramap AgentTrace tracer)
-                key
-                ( OpenAI.Model
-                    flavor
-                    (OpenAI.ApiBaseUrl desc.modelUrl)
-                    desc.modelName
-                    ( OpenAI.SystemPrompt $
-                        modifyPrompt $
-                            Text.unlines desc.systemPrompt
-                    )
-                )
-                desc.toolDirectory
-                [Agent.turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
-
-augmentMainAgentPromptWithSubAgents :: [Agent.Runtime] -> Text -> Text
-augmentMainAgentPromptWithSubAgents [] base = base
-augmentMainAgentPromptWithSubAgents agents base =
-    Text.unlines
-        [ base
-        , ""
-        , "==="
-        , "The helper agents you can query using json tools are as follows:"
-        , Text.unlines $
-            Maybe.mapMaybe declareAgent agents
-        , ""
-        , "If an helper agent fails, do not retry and abdicate"
-        ]
+converse :: Runtime.Runtime -> Text -> IO ConversationState
+converse baseRuntime txt = do
+    cId <- newConversationId
+    inbox <- newEmptyTMVarIO
+    tracesIORef <- newIORef []
+    statusTVar <- newTVarIO Executing
+    let logTracesInIORef = Prod.Tracer $ \t -> modifyIORef tracesIORef (t :)
+    let adaptedRuntime = Runtime.addTracer baseRuntime logTracesInIORef
+    a <- async $ handleConversation adaptedRuntime (agentFunctions inbox statusTVar) cId txt
+    pure $
+        ConversationState
+            { task = a
+            , conversationId = cId
+            , prompt = tryPutTMVar inbox
+            , status = readTVarIO statusTVar
+            , traces = readIORef tracesIORef
+            }
   where
-    declareAgent :: Agent.Runtime -> Maybe Text
-    declareAgent desc =
-        Just $ Text.unwords ["*", desc.agentSlug, ":", desc.agentAnnounce]
+    agentFunctions ::
+        TMVar (Maybe Text) ->
+        TVar ConversationStatus ->
+        AgentFunctions (Either String LLMs.History)
+    agentFunctions inbox statusTVar =
+        AgentFunctions
+            (nextQuery inbox statusTVar)
+            (claimProgress statusTVar)
+            (endWithError statusTVar)
+            (endWithSuccess statusTVar)
 
-readApiKeys :: FilePath -> IO (Maybe ApiKeys)
-readApiKeys path =
-    Aeson.decode <$> LByteString.readFile path
+    nextQuery ::
+        TMVar (Maybe Text) ->
+        TVar ConversationStatus ->
+        IO (Maybe Text)
+    nextQuery inbox statusTVar = do
+        -- claim we need a prompt
+        atomically $ do
+            writeTVar statusTVar WaitingForPrompt
+        -- then wait on the prompt and claim we are executing
+        atomically $ do
+            writeTVar statusTVar Executing
+            takeTMVar inbox
 
-flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
-flattenOpenAIKeys (ApiKeys keys) =
-    [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
+    claimProgress ::
+        TVar ConversationStatus ->
+        LLMs.History ->
+        IO ()
+    claimProgress statusTVar _ = do
+        atomically $ do
+            writeTVar statusTVar WaitingForPrompt
 
-readOpenApiKeysFile :: FilePath -> IO [(Text, OpenAI.ApiKey)]
-readOpenApiKeysFile path =
-    maybe [] flattenOpenAIKeys <$> readApiKeys path
+    endWithSuccess ::
+        TVar ConversationStatus ->
+        LLMs.History ->
+        IO (Either String LLMs.History)
+    endWithSuccess statusTVar hist = do
+        atomically $ writeTVar statusTVar Final
+        pure $ Right hist
 
-traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
-traceWaitingOpenAIRateLimits lims onWait = Tracer f
-  where
-    f (AgentTrace (Agent.AgentTrace_Conversation _ _ _ (Agent.LLMTrace _ tr))) =
-        runTracer (OpenAI.waitRateLimit lims onWait) tr
-    f _ = pure ()
+    endWithError ::
+        TVar ConversationStatus ->
+        String ->
+        IO (Either String LLMs.History)
+    endWithError statusTVar err = do
+        atomically $ writeTVar statusTVar Final
+        pure $ Left err

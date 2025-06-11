@@ -22,21 +22,21 @@ import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
 import System.Agents.Base (newConversationId)
-import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
+import qualified System.Agents.Runtime as Runtime
 
 import System.Agents.MCP.Server.Runtime
 
-mainAgentServer :: Conversation.Props -> IO ()
+mainAgentServer :: Agent.Props -> IO ()
 mainAgentServer props = do
     multiAgentsServer [props]
 
-multiAgentsServer :: [Conversation.Props] -> IO ()
+multiAgentsServer :: [Agent.Props] -> IO ()
 multiAgentsServer xs = multiAgentsServer' 0 xs []
 
-multiAgentsServer' :: Int -> [Conversation.Props] -> MappedTools -> IO ()
+multiAgentsServer' :: Int -> [Agent.Props] -> MappedTools -> IO ()
 multiAgentsServer' _ [] [] = do
     print ("no agent definitions" :: Text)
 multiAgentsServer' _ [] mtools = do
@@ -46,9 +46,9 @@ multiAgentsServer' _ [] mtools = do
     logTrace =
         defaultOutput stderr
 multiAgentsServer' idx (props : xs) mtools = do
-    Conversation.withAgentRuntime props go
+    Agent.withAgentRuntime props go
   where
-    go (Conversation.Initialized ai) = do
+    go (Agent.Initialized ai) = do
         case ai.agentDescription of
             (FileLoader.Unspecified _) -> do
                 print ("cannot expose over MCP an agent with unspecified description" :: Text)
@@ -173,7 +173,7 @@ handleMsg req (ListPromptsRequestMsg _) = do
     Rpc.sendResponse rsp
 handleMsg req (CallToolRequestMsg callTool) = do
     let agentFunctions =
-            Agent.AgentFunctions
+            Runtime.AgentFunctions
                 (pure Nothing)
                 (\_hist -> pure ())
                 (\err -> pure $ Left err)
@@ -186,7 +186,7 @@ handleMsg req (CallToolRequestMsg callTool) = do
                 (Just query) -> do
                     liftIO $ do
                         cId <- newConversationId
-                        Agent.handleConversation ai.agentRuntime agentFunctions cId query
+                        Runtime.handleConversation ai.agentRuntime agentFunctions cId query
         Nothing -> do
             pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =
@@ -210,7 +210,7 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
     adapt :: MappedTool -> Maybe Mcp.Tool
     adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
 
-callExpertTool :: Mcp.Name -> Conversation.AgentInfo -> Maybe Mcp.Tool
+callExpertTool :: Mcp.Name -> Agent.AgentInfo -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     case ai.agentDescription of
         (FileLoader.Unspecified _) -> Nothing

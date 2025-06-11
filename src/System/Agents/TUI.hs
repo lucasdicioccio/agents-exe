@@ -10,9 +10,9 @@ import Control.Monad (forever, void)
 import Data.Text (Text)
 import Prod.Tracer (Tracer (..))
 
-import qualified System.Agents.Agent as Agent
-import System.Agents.Conversation
+import System.Agents.Agent
 import qualified System.Agents.FileLoader as FileLoader
+import qualified System.Agents.Runtime as Runtime
 import System.Agents.TUI.Event
 import System.Agents.TUI.Handler (tui_appHandleEvent, tui_appStartEvent)
 import System.Agents.TUI.Render (tui_appAttrMap, tui_appChooseCursor, tui_appDraw)
@@ -43,8 +43,8 @@ mainMultiAgents2 bChan idx (props : xs) agents = do
             (FileLoader.Unspecified _) -> do
                 print ("cannot load an agent with unspecified description" :: Text)
             (FileLoader.OpenAIAgentDescription oai) -> do
-                let rt = Agent.addTracer ai.agentRuntime (traceInChan bChan)
-                tools <- Agent.agentTools rt
+                let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
+                tools <- Runtime.agentTools rt
                 let la = LoadedAgent rt tools oai
                 mainMultiAgents2 bChan (succ idx) xs (la : agents)
     go _ = do
@@ -58,7 +58,7 @@ mainMultiAgents xs = do
     _ <- publishHeartBeats bChan
     mainMultiAgents2 bChan 0 xs []
 
-traceInChan :: BChan AppEvent -> Tracer IO Agent.Trace
+traceInChan :: BChan AppEvent -> Tracer IO Runtime.Trace
 traceInChan bChan = Tracer (writeBChan bChan . AppEvent_AgentTrace)
 
 publishHeartBeats :: BChan AppEvent -> IO ThreadId

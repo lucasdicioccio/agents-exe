@@ -4,21 +4,21 @@ import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
-import qualified System.Agents.Agent as Agent
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.Runtime as Runtime
 
 data MemoryItem
     = MemoryItem
     { rootConversationId :: ConversationId
     , conversationId :: ConversationId
-    , stepId :: Agent.StepId
+    , stepId :: Runtime.StepId
     , agentSlug :: AgentSlug
     , agentId :: AgentId
     , parentConversationId :: Maybe ConversationId
     , parentAgentSlug :: Maybe AgentSlug
     , parentAgentId :: Maybe AgentId
-    , pendingQuery :: Agent.PendingQuery
+    , pendingQuery :: Runtime.PendingQuery
     , llmHistory :: LLM.History
     }
     deriving (Show)
@@ -37,17 +37,17 @@ instance ToJSON MemoryItem where
             , "llm_history" .= fmap encodeHistoryItem m.llmHistory
             ]
       where
-        encodeQuery :: Agent.PendingQuery -> Aeson.Value
-        encodeQuery (Agent.SomeQuery txt) =
+        encodeQuery :: Runtime.PendingQuery -> Aeson.Value
+        encodeQuery (Runtime.SomeQuery txt) =
             Aeson.object
                 [ "type" .= ("query" :: Text)
                 , "q" .= txt
                 ]
-        encodeQuery (Agent.GaveToolAnswers) =
+        encodeQuery (Runtime.GaveToolAnswers) =
             Aeson.object
                 [ "type" .= ("gave-tool-answers" :: Text)
                 ]
-        encodeQuery (Agent.Done) =
+        encodeQuery (Runtime.Done) =
             Aeson.object
                 [ "type" .= ("done" :: Text)
                 ]

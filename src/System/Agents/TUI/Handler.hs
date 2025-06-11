@@ -18,10 +18,10 @@ import qualified Data.Text.Zipper as Text
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 
-import qualified System.Agents.Agent as Agent
 import System.Agents.Base (ConversationId)
+import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.Party as Party
+import qualified System.Agents.Runtime as Agent
 import System.Agents.TUI.Event (AppEvent (..))
 import System.Agents.TUI.State
 
@@ -144,7 +144,7 @@ tui_handleViewPortEvent_PromptEditor ev = do
                     Nothing -> pure ()
                     (Just (_, (ChatEntryPoint la))) -> do
                         startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        conv <- liftIO $ Party.converse la.loadedAgentRuntime startingPrompt
+                        conv <- liftIO $ Conversation.converse la.loadedAgentRuntime startingPrompt
                         st0 <- get
                         liftIO $
                             referenceConversation

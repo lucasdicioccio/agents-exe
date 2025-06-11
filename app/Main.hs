@@ -13,18 +13,17 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
-import qualified System.Agents.Agent as BaseAgent
 import System.Agents.Base (AgentId, AgentSlug, ConversationId)
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
-import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
+import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
@@ -228,44 +227,44 @@ main = do
             Check -> do
                 forM_ args.agentFiles $ \agentFile -> do
                     CLI.mainPrintAgent $
-                        Conversation.Props
-                            { Conversation.apiKeysFile = args.apiKeysFile
-                            , Conversation.rawLogFile = args.logFile
-                            , Conversation.mainAgentFile = agentFile
-                            , Conversation.helperAgentsDir = args.agentsDir
-                            , Conversation.interactiveTracer =
+                        Agent.Props
+                            { Agent.apiKeysFile = args.apiKeysFile
+                            , Agent.rawLogFile = args.logFile
+                            , Agent.mainAgentFile = agentFile
+                            , Agent.helperAgentsDir = args.agentsDir
+                            , Agent.interactiveTracer =
                                 Prod.traceBoth baseTracer CLI.traceUsefulPromptStdout
                             }
             InteractiveCommandLine ->
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     CLI.mainInteractiveAgent $
-                        Conversation.Props
-                            { Conversation.apiKeysFile = args.apiKeysFile
-                            , Conversation.rawLogFile = args.logFile
-                            , Conversation.mainAgentFile = agentFile
-                            , Conversation.helperAgentsDir = args.agentsDir
-                            , Conversation.interactiveTracer =
+                        Agent.Props
+                            { Agent.apiKeysFile = args.apiKeysFile
+                            , Agent.rawLogFile = args.logFile
+                            , Agent.mainAgentFile = agentFile
+                            , Agent.helperAgentsDir = args.agentsDir
+                            , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
                                         CLI.traceUsefulPromptStdout
                                         ( Prod.traceBoth
                                             CLI.tracePrintingTextResponses
-                                            (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                            (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                                         )
                                     )
                             }
             TerminalUI -> do
                 let oneAgent agentFile =
-                        Conversation.Props
-                            { Conversation.apiKeysFile = args.apiKeysFile
-                            , Conversation.rawLogFile = args.logFile
-                            , Conversation.mainAgentFile = agentFile
-                            , Conversation.helperAgentsDir = args.agentsDir
-                            , Conversation.interactiveTracer =
+                        Agent.Props
+                            { Agent.apiKeysFile = args.apiKeysFile
+                            , Agent.rawLogFile = args.logFile
+                            , Agent.mainAgentFile = agentFile
+                            , Agent.helperAgentsDir = args.agentsDir
+                            , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
-                                    (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                    (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             }
                 TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do
@@ -273,12 +272,12 @@ main = do
                     promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
                     let oneShot = flip CLI.mainOneShotText
                     oneShot (Text.unlines promptLines) $
-                        Conversation.Props
-                            { Conversation.apiKeysFile = args.apiKeysFile
-                            , Conversation.rawLogFile = args.logFile
-                            , Conversation.mainAgentFile = agentFile
-                            , Conversation.helperAgentsDir = args.agentsDir
-                            , Conversation.interactiveTracer =
+                        Agent.Props
+                            { Agent.apiKeysFile = args.apiKeysFile
+                            , Agent.rawLogFile = args.logFile
+                            , Agent.mainAgentFile = agentFile
+                            , Agent.helperAgentsDir = args.agentsDir
+                            , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
                                     CLI.traceUsefulPromptStderr
@@ -291,17 +290,17 @@ main = do
                         "introspect a version of yourself"
             McpServer -> do
                 let oneAgent agentFile =
-                        Conversation.Props
-                            { Conversation.apiKeysFile = args.apiKeysFile
-                            , Conversation.rawLogFile = args.logFile
-                            , Conversation.mainAgentFile = agentFile
-                            , Conversation.helperAgentsDir = args.agentsDir
-                            , Conversation.interactiveTracer =
+                        Agent.Props
+                            { Agent.apiKeysFile = args.apiKeysFile
+                            , Agent.rawLogFile = args.logFile
+                            , Agent.mainAgentFile = agentFile
+                            , Agent.helperAgentsDir = args.agentsDir
+                            , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
                                         CLI.traceUsefulPromptStderr
-                                        (Conversation.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                        (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
                             }
                 McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
@@ -337,29 +336,29 @@ maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
 
-extractMemories :: Conversation.Trace -> Either () [Memory.MemoryItem]
+extractMemories :: Agent.Trace -> Either () [Memory.MemoryItem]
 extractMemories x = case x of
-    Conversation.AgentTrace tr -> go [] tr
+    Agent.AgentTrace tr -> go [] tr
     _ -> Left ()
   where
-    parentInfo :: [BaseAgent.Trace] -> (Maybe AgentSlug, Maybe ConversationId, Maybe AgentId)
-    parentInfo ((BaseAgent.AgentTrace_Memorize pSlug paId pcId _) : _) =
+    parentInfo :: [Runtime.Trace] -> (Maybe AgentSlug, Maybe ConversationId, Maybe AgentId)
+    parentInfo ((Runtime.AgentTrace_Memorize pSlug paId pcId _) : _) =
         (Just pSlug, Just pcId, Just paId)
-    parentInfo ((BaseAgent.AgentTrace_Conversation pSlug paId pcId _) : _) =
+    parentInfo ((Runtime.AgentTrace_Conversation pSlug paId pcId _) : _) =
         (Just pSlug, Just pcId, Just paId)
     parentInfo _ =
         (Nothing, Nothing, Nothing)
 
-    rootConversationId :: [BaseAgent.Trace] -> Maybe ConversationId
-    rootConversationId = rootTrace >=> BaseAgent.traceConversationId
+    rootConversationId :: [Runtime.Trace] -> Maybe ConversationId
+    rootConversationId = rootTrace >=> Runtime.traceConversationId
 
-    rootTrace :: [BaseAgent.Trace] -> Maybe BaseAgent.Trace
+    rootTrace :: [Runtime.Trace] -> Maybe Runtime.Trace
     rootTrace [] = Nothing
     rootTrace (t : []) = Just t
     rootTrace ts = rootTrace (drop 1 ts)
 
-    go :: [BaseAgent.Trace] -> BaseAgent.Trace -> Either () [Memory.MemoryItem]
-    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.Calling query hist stepId)) =
+    go :: [Runtime.Trace] -> Runtime.Trace -> Either () [Memory.MemoryItem]
+    go stack (Runtime.AgentTrace_Memorize aSlug aId cId (Runtime.Calling query hist stepId)) =
         let
             (pSlug, pcId, paId) = parentInfo stack
             rId = fromMaybe cId (rootConversationId stack)
@@ -378,7 +377,7 @@ extractMemories x = case x of
                     , Memory.parentAgentId = paId
                     }
                 ]
-    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.GotResponse query hist stepId rsp)) =
+    go stack (Runtime.AgentTrace_Memorize aSlug aId cId (Runtime.GotResponse query hist stepId rsp)) =
         let
             (pSlug, pcId, paId) = parentInfo stack
             rId = fromMaybe cId (rootConversationId stack)
@@ -397,7 +396,7 @@ extractMemories x = case x of
                     , Memory.parentAgentId = paId
                     }
                 ]
-    go stack (BaseAgent.AgentTrace_Memorize aSlug aId cId (BaseAgent.InteractionDone hist stepId)) =
+    go stack (Runtime.AgentTrace_Memorize aSlug aId cId (Runtime.InteractionDone hist stepId)) =
         let
             (pSlug, pcId, paId) = parentInfo stack
             rId = fromMaybe cId (rootConversationId stack)
@@ -410,40 +409,40 @@ extractMemories x = case x of
                     , Memory.agentId = aId
                     , Memory.stepId = stepId
                     , Memory.llmHistory = hist
-                    , Memory.pendingQuery = BaseAgent.Done
+                    , Memory.pendingQuery = Runtime.Done
                     , Memory.parentAgentSlug = pSlug
                     , Memory.parentConversationId = pcId
                     , Memory.parentAgentId = paId
                     }
                 ]
-    go xs tr@(BaseAgent.AgentTrace_Conversation _ _ _ (BaseAgent.ChildrenTrace sub)) =
+    go xs tr@(Runtime.AgentTrace_Conversation _ _ _ (Runtime.ChildrenTrace sub)) =
         go (tr : xs) sub
     go _ _ = Left ()
 
-toJsonTrace :: Conversation.Trace -> Maybe Aeson.Value
+toJsonTrace :: Agent.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
-    Conversation.DataLoadingTrace _ -> Nothing
-    Conversation.AgentTrace v -> encodeAgentTrace v
+    Agent.DataLoadingTrace _ -> Nothing
+    Agent.AgentTrace v -> encodeAgentTrace v
   where
-    encodeAgentTrace :: BaseAgent.Trace -> Maybe Aeson.Value
+    encodeAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
     encodeAgentTrace tr = do
         baseVal <- encodeBaseTrace tr
         Just $
             Aeson.object
                 [ "e"
                     .= Aeson.object
-                        [ "slug" .= Agent.traceAgentSlug tr
-                        , "agent-id" .= Agent.traceAgentId tr
+                        [ "slug" .= Runtime.traceAgentSlug tr
+                        , "agent-id" .= Runtime.traceAgentId tr
                         , "val" .= baseVal
                         ]
                 ]
 
-    encodeBaseTrace :: BaseAgent.Trace -> Maybe Aeson.Value
-    encodeBaseTrace (BaseAgent.AgentTrace_Loading _ _ tr) =
+    encodeBaseTrace :: Runtime.Trace -> Maybe Aeson.Value
+    encodeBaseTrace (Runtime.AgentTrace_Loading _ _ tr) =
         encodeBaseTrace_Loading tr
-    encodeBaseTrace (BaseAgent.AgentTrace_Memorize _ _ _ tr) =
+    encodeBaseTrace (Runtime.AgentTrace_Memorize _ _ _ tr) =
         encodeBaseTrace_Memorize tr
-    encodeBaseTrace (BaseAgent.AgentTrace_Conversation _ _ convId tr) = do
+    encodeBaseTrace (Runtime.AgentTrace_Conversation _ _ convId tr) = do
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
             Aeson.object
@@ -451,35 +450,35 @@ toJsonTrace x = case x of
                 , "val" .= baseVal
                 ]
 
-    encodeBaseTrace_Loading :: BaseAgent.LoadingTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Loading :: Runtime.LoadingTrace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =
         case bt of
-            (BaseAgent.BashToolsLoadingTrace _) -> Nothing
-            (BaseAgent.ReloadToolsTrace _) -> Nothing
+            (Runtime.BashToolsLoadingTrace _) -> Nothing
+            (Runtime.ReloadToolsTrace _) -> Nothing
 
-    encodeBaseTrace_Memorize :: BaseAgent.MemorizeTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Memorize :: Runtime.MemorizeTrace -> Maybe Aeson.Value
     encodeBaseTrace_Memorize bt =
         case bt of
-            (BaseAgent.Calling _ _ _) ->
+            (Runtime.Calling _ _ _) ->
                 Nothing
-            (BaseAgent.GotResponse _ _ _ _) ->
+            (Runtime.GotResponse _ _ _ _) ->
                 Nothing
-            (BaseAgent.InteractionDone _ _) ->
+            (Runtime.InteractionDone _ _) ->
                 Nothing
 
-    encodeBaseTrace_Conversation :: BaseAgent.ConversationTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Conversation :: Runtime.ConversationTrace -> Maybe Aeson.Value
     encodeBaseTrace_Conversation bt =
         case bt of
-            (BaseAgent.NewConversation) ->
+            (Runtime.NewConversation) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("new-conversation" :: Text.Text)
                         ]
-            (BaseAgent.WaitingForPrompt) ->
+            (Runtime.WaitingForPrompt) ->
                 Nothing
-            (BaseAgent.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
+            (Runtime.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
-            (BaseAgent.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
+            (Runtime.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
@@ -487,7 +486,7 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
-            (BaseAgent.LLMTrace uuid (LLMTrace.GotChatCompletion val)) ->
+            (Runtime.LLMTrace uuid (LLMTrace.GotChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
@@ -495,7 +494,7 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
-            (BaseAgent.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -505,7 +504,7 @@ toJsonTrace x = case x of
                         , "cmd" .= cmd
                         , "args" .= args
                         ]
-            (BaseAgent.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -516,7 +515,7 @@ toJsonTrace x = case x of
                         , "cmd" .= cmd
                         , "args" .= args
                         ]
-            (BaseAgent.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -526,7 +525,7 @@ toJsonTrace x = case x of
                         , "tool" .= desc.ioSlug
                         , "input" .= input
                         ]
-            (BaseAgent.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -537,7 +536,7 @@ toJsonTrace x = case x of
                         , "input" .= input
                         -- , "output" .= output
                         ]
-            (BaseAgent.ChildrenTrace sub) -> do
+            (Runtime.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= subVal]
 

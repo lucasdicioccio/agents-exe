@@ -63,6 +63,7 @@ library agents-lib
                     , System.Agents.Agent
                     , System.Agents.ApiKeys
                     , System.Agents.Base
+                    , System.Agents.Conversation
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.Base
                     , System.Agents.FileLoader.JSON
@@ -71,13 +72,12 @@ library agents-lib
                     , System.Agents.Tools.IO
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Memory
-                    , System.Agents.Party
+                    , System.Agents.Runtime
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
                     , System.Agents.CLI
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.InitProject
-                    , System.Agents.Conversation
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime

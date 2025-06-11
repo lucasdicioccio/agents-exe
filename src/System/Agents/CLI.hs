@@ -16,15 +16,15 @@ import GHC.IO.Handle (Handle)
 import Prod.Tracer (Tracer (..), silent)
 import System.IO (stderr, stdout)
 
-import qualified System.Agents.Agent as Agent
 import System.Agents.Base (newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
 
-import System.Agents.Conversation
+import System.Agents.Agent
 
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
@@ -43,14 +43,14 @@ mainOneShotText props query = do
             Initialized ai -> runMainAgent ai.agentRuntime
   where
     agentFunctions =
-        Agent.AgentFunctions
+        Runtime.AgentFunctions
             (pure Nothing)
             (\_hist -> pure ())
             (\err -> putStrLn $ unlines ["execution error", err])
             (\hist -> OpenAI.printLastAnswer hist)
     runMainAgent rt = do
         cId <- newConversationId
-        Agent.handleConversation rt agentFunctions cId query
+        Runtime.handleConversation rt agentFunctions cId query
 
 mainInteractiveAgent :: Props -> IO ()
 mainInteractiveAgent props = do
@@ -62,7 +62,7 @@ mainInteractiveAgent props = do
                 runMainAgent ai
   where
     agentFunctions ask =
-        Agent.AgentFunctions
+        Runtime.AgentFunctions
             (fmap queryOrNothing ask)
             (\_hist -> pure ())
             (\err -> putStrLn $ unlines ["parse error", err])
@@ -73,7 +73,7 @@ mainInteractiveAgent props = do
         let nextQuery = askQuery ai
         query <- nextQuery
         cId <- newConversationId
-        Agent.handleConversation ai.agentRuntime (agentFunctions nextQuery) cId query
+        Runtime.handleConversation ai.agentRuntime (agentFunctions nextQuery) cId query
 
     askQuery :: AgentInfo -> IO Text
     askQuery ai = do
@@ -104,7 +104,7 @@ mainInteractiveAgent props = do
                     traverse_ printAgentTools (ai.agentRuntime : ai.agentSiblingRuntimes)
                     go
                 "?reload-tools" -> do
-                    traverse_ Agent.triggerRefreshTools (ai.agentRuntime : ai.agentSiblingRuntimes)
+                    traverse_ Runtime.triggerRefreshTools (ai.agentRuntime : ai.agentSiblingRuntimes)
 
                     go
                 txt
@@ -113,7 +113,7 @@ mainInteractiveAgent props = do
                         go
                     | otherwise -> pure txt
 
-    printAgentTools :: Agent.Runtime -> IO ()
+    printAgentTools :: Runtime.Runtime -> IO ()
     printAgentTools rt = do
         registry <- rt.agentTools
         Text.putStrLn (renderToolRegistry registry)
@@ -141,16 +141,16 @@ traceSilent = silent
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
   where
-    f (AgentTrace (Agent.AgentTrace_Conversation slug _ _ trace)) =
+    f (AgentTrace (Runtime.AgentTrace_Conversation slug _ _ trace)) =
         g [slug] trace
     f _ = pure ()
 
-    g pfx (Agent.LLMTrace _ (OpenAI.GotChatCompletion x)) =
+    g pfx (Runtime.LLMTrace _ (OpenAI.GotChatCompletion x)) =
         case Aeson.parseEither OpenAI.parseLLMResponse x of
             Left _ -> pure ()
             Right rsp ->
                 Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent]
-    g pfx (Agent.ChildrenTrace (Agent.AgentTrace_Conversation childSlug _ _ sub)) =
+    g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_Conversation childSlug _ _ sub)) =
         g (childSlug : pfx) sub
     g _ _ = pure ()
 
@@ -167,59 +167,59 @@ traceUsefulPromptHandle h = Tracer f
         Text.hPutStrLn h $ renderAgentTrace tr
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
 
-renderAgentTrace :: Agent.Trace -> Text
-renderAgentTrace (Agent.AgentTrace_Loading slug _ tr) =
+renderAgentTrace :: Runtime.Trace -> Text
+renderAgentTrace (Runtime.AgentTrace_Loading slug _ tr) =
     Text.unlines
         [ mconcat ["@", slug, ":"]
         , renderLoadingAgentTrace tr
         ]
-renderAgentTrace (Agent.AgentTrace_Conversation slug _ _ tr) =
+renderAgentTrace (Runtime.AgentTrace_Conversation slug _ _ tr) =
     Text.unlines
         [ mconcat ["@", slug, ":"]
         , renderConversationAgentTrace tr
         ]
-renderAgentTrace (Agent.AgentTrace_Memorize slug _ _ tr) =
+renderAgentTrace (Runtime.AgentTrace_Memorize slug _ _ tr) =
     Text.unlines
         [ mconcat ["@", slug, ":"]
         , renderMemorizeAgentTrace tr
         ]
 
-renderLoadingAgentTrace :: Agent.LoadingTrace -> Text
+renderLoadingAgentTrace :: Runtime.LoadingTrace -> Text
 renderLoadingAgentTrace tr = case tr of
-    Agent.ReloadToolsTrace _ -> "(reload-tools...)"
-    Agent.BashToolsLoadingTrace _ -> "(reload-tools...)"
+    Runtime.ReloadToolsTrace _ -> "(reload-tools...)"
+    Runtime.BashToolsLoadingTrace _ -> "(reload-tools...)"
 
-renderMemorizeAgentTrace :: Agent.MemorizeTrace -> Text
+renderMemorizeAgentTrace :: Runtime.MemorizeTrace -> Text
 renderMemorizeAgentTrace tr = case tr of
-    Agent.Calling _ hist _ ->
+    Runtime.Calling _ hist _ ->
         Text.unwords [Text.pack . show $ length hist, ">>>"]
-    Agent.GotResponse _ hist _ rsp ->
+    Runtime.GotResponse _ hist _ rsp ->
         Text.unwords [Text.pack . show $ length hist, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
-    Agent.InteractionDone hist _ ->
+    Runtime.InteractionDone hist _ ->
         Text.unwords [Text.pack . show $ length hist, "<<<"]
 
-renderConversationAgentTrace :: Agent.ConversationTrace -> Text
+renderConversationAgentTrace :: Runtime.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of
-    Agent.NewConversation -> ""
-    Agent.WaitingForPrompt -> ""
-    Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
+    Runtime.NewConversation -> ""
+    Runtime.WaitingForPrompt -> ""
+    Runtime.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStart p args)) ->
         Text.unwords ["bash-tool", "start", Text.pack p, Text.unwords $ map Text.pack args]
-    Agent.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->
+    Runtime.RunToolTrace _ (Tools.BashToolsTrace (Tools.RunCommandStopped p args code _ _)) ->
         Text.unlines
             [ Text.unwords ["bash-tool", "stopped", Text.pack p, Text.unwords $ map Text.pack args]
             , Text.pack $ show code
             ]
-    Agent.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStarted desc _)) ->
+    Runtime.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStarted desc _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "start"]
-    Agent.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
+    Runtime.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "stop"]
-    Agent.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
-    Agent.LLMTrace _ (OpenAI.CallChatCompletion _) ->
+    Runtime.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
+    Runtime.LLMTrace _ (OpenAI.CallChatCompletion _) ->
         Text.unwords ["to: llm"]
-    Agent.LLMTrace _ (OpenAI.GotChatCompletion x) ->
+    Runtime.LLMTrace _ (OpenAI.GotChatCompletion x) ->
         Text.unwords ["from: llm", jsonTxt x]
-    Agent.ChildrenTrace sub ->
-        Text.unwords ["(", Agent.traceAgentSlug sub, ")", renderAgentTrace sub]
+    Runtime.ChildrenTrace sub ->
+        Text.unwords ["(", Runtime.traceAgentSlug sub, ")", renderAgentTrace sub]
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode

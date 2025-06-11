@@ -1,7 +1,7 @@
 module System.Agents.TUI.Event where
 
-import qualified System.Agents.Agent as Agent
+import qualified System.Agents.Runtime as Runtime
 
 data AppEvent
     = AppEvent_Heartbeat
-    | AppEvent_AgentTrace !Agent.Trace
+    | AppEvent_AgentTrace !Runtime.Trace

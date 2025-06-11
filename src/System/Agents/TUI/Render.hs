@@ -10,10 +10,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 
-import qualified System.Agents.Agent as Agent
+import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Party as Party
+import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
@@ -165,16 +165,16 @@ tui_appDraw tuiState = [render_ui tuiState]
     render_focusedConversation_Status :: TuiState -> OngoingConversation -> Widget N
     render_focusedConversation_Status _ conv =
         case conv.conversationStatus of
-            Party.WaitingForPrompt -> txt ""
-            Party.Executing -> txt "(executing)"
-            Party.Final -> txt "(ended)"
+            Conversation.WaitingForPrompt -> txt ""
+            Conversation.Executing -> txt "(executing)"
+            Conversation.Final -> txt "(ended)"
 
-    render_focusedConversation_HistoryItem :: TuiState -> Agent.Trace -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem :: TuiState -> Runtime.Trace -> Maybe (Widget N)
     render_focusedConversation_HistoryItem _ tr =
         case tr of
-            (Agent.AgentTrace_Loading _ _ _) -> Nothing
-            (Agent.AgentTrace_Conversation _ _ _ _) -> Nothing
-            (Agent.AgentTrace_Memorize _ _ _ (Agent.GotResponse q _ _ rsp)) ->
+            (Runtime.AgentTrace_Loading _ _ _) -> Nothing
+            (Runtime.AgentTrace_Conversation _ _ _ _) -> Nothing
+            (Runtime.AgentTrace_Memorize _ _ _ (Runtime.GotResponse q _ _ rsp)) ->
                 Just $
                     vBox $
                         Maybe.catMaybes
@@ -185,12 +185,12 @@ tui_appDraw tuiState = [render_ui tuiState]
                             , render_focusedConversation_HistoryItem_response_toolcalls rsp
                             , Just $ txt ""
                             ]
-            (Agent.AgentTrace_Memorize _ _ _ _) -> Nothing
+            (Runtime.AgentTrace_Memorize _ _ _ _) -> Nothing
 
-    render_focusedConversation_HistoryItem_query :: Agent.PendingQuery -> Maybe (Widget N)
-    render_focusedConversation_HistoryItem_query Agent.GaveToolAnswers = Nothing
-    render_focusedConversation_HistoryItem_query Agent.Done = Just $ txt "~~~ done ~~~"
-    render_focusedConversation_HistoryItem_query (Agent.SomeQuery t) = Just $ txt ("> " <> t)
+    render_focusedConversation_HistoryItem_query :: Runtime.PendingQuery -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem_query Runtime.GaveToolAnswers = Nothing
+    render_focusedConversation_HistoryItem_query Runtime.Done = Just $ txt "~~~ done ~~~"
+    render_focusedConversation_HistoryItem_query (Runtime.SomeQuery t) = Just $ txt ("> " <> t)
 
     render_focusedConversation_HistoryItem_response_text :: OpenAI.Response -> Maybe (Widget N)
     render_focusedConversation_HistoryItem_response_text rsp = do

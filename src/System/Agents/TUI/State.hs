@@ -11,10 +11,10 @@ import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 
-import qualified System.Agents.Agent as Agent
 import System.Agents.Base (ConversationId)
+import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.Party as Party
+import qualified System.Agents.Runtime as Runtime
 
 import Brick.Focus (FocusRing, focusRing)
 import Brick.Widgets.Edit
@@ -30,15 +30,15 @@ type N = BrickWidgetName
 
 data LoadedAgent
     = LoadedAgent
-    { loadedAgentRuntime :: Agent.Runtime
-    , loadedAgentTools :: [Agent.ToolRegistration]
+    { loadedAgentRuntime :: Runtime.Runtime
+    , loadedAgentTools :: [Runtime.ToolRegistration]
     , loadedAgentInfo :: FileLoader.OpenAIAgent
     }
 
 data StartedConversation
     = StartedConversation
     { conversingAgent :: FileLoader.OpenAIAgent
-    , conversationState :: Party.ConversationState
+    , conversationState :: Conversation.ConversationState
     , headline :: Text
     }
 
@@ -46,8 +46,8 @@ data OngoingConversation
     = OngoingConversation
     { conversationId :: ConversationId
     , conversingAgent :: FileLoader.OpenAIAgent
-    , conversationStatus :: Party.ConversationStatus
-    , conversationHistory :: [Agent.Trace]
+    , conversationStatus :: Conversation.ConversationStatus
+    , conversationHistory :: [Runtime.Trace]
     , prompt :: Maybe Text -> STM Bool
     , headline :: Text
     }
@@ -103,11 +103,11 @@ referenceConversation st0 conv = do
 listConversations :: TuiState -> IO [OngoingConversation]
 listConversations st0 = do
     convs <- readIORef st0._entities._conversations
-    traces <- traverse (Party.traces . conversationState) convs
-    statuses <- traverse (Party.status . conversationState) convs
+    traces <- traverse (Conversation.traces . conversationState) convs
+    statuses <- traverse (Conversation.status . conversationState) convs
     pure $ zipWith3 update convs traces statuses
   where
-    update :: StartedConversation -> [Agent.Trace] -> Party.ConversationStatus -> OngoingConversation
+    update :: StartedConversation -> [Runtime.Trace] -> Conversation.ConversationStatus -> OngoingConversation
     update conv trs status =
         OngoingConversation
             { conversationId = conv.conversationState.conversationId
