@@ -17,6 +17,7 @@ import System.Agents.Base (AgentId, AgentSlug, ConversationId)
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
+import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
 import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -234,7 +235,7 @@ main = do
                             , Agent.mainAgentFile = agentFile
                             , Agent.helperAgentsDir = args.agentsDir
                             , Agent.interactiveTracer =
-                                Prod.traceBoth baseTracer CLI.traceUsefulPromptStdout
+                                Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
             InteractiveCommandLine ->
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
@@ -248,9 +249,9 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
-                                        CLI.traceUsefulPromptStdout
+                                        traceUsefulPromptStdout
                                         ( Prod.traceBoth
-                                            CLI.tracePrintingTextResponses
+                                            tracePrintingTextResponses
                                             (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                                         )
                                     )
@@ -281,7 +282,7 @@ main = do
                             , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
-                                    CLI.traceUsefulPromptStderr
+                                    traceUsefulPromptStderr
                             }
             SelfDescribe ->
                 Aeson.encodeFile "/dev/stdout" $
@@ -300,7 +301,7 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
-                                        CLI.traceUsefulPromptStderr
+                                        traceUsefulPromptStderr
                                         (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
                             }
