@@ -237,9 +237,8 @@ main = do
                             , Agent.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
-            InteractiveCommandLine ->
-                forM_ (take 1 args.agentFiles) $ \agentFile -> do
-                    CLI.mainInteractiveAgent $
+            InteractiveCommandLine -> do
+                let oneProp agentFile =
                         Agent.Props
                             { Agent.apiKeysFile = args.apiKeysFile
                             , Agent.rawLogFile = args.logFile
@@ -249,13 +248,11 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
-                                        traceUsefulPromptStdout
-                                        ( Prod.traceBoth
-                                            tracePrintingTextResponses
-                                            (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                                        )
+                                        tracePrintingTextResponses
+                                        (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                                     )
                             }
+                CLI.mainInteractiveAgent $ map oneProp args.agentFiles
             TerminalUI -> do
                 let oneAgent agentFile =
                         Agent.Props

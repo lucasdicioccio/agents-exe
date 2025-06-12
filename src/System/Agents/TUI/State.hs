@@ -5,21 +5,19 @@
 
 module System.Agents.TUI.State where
 
-import Control.Concurrent.STM (STM)
+import Brick.Focus (FocusRing, focusRing)
+import Brick.Widgets.Edit
+import Brick.Widgets.List
+import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 
-import System.Agents.Base (ConversationId)
 import qualified System.Agents.Conversation as Conversation
+import System.Agents.Dialogues (LoadedAgent (..), OngoingConversation (..), StartedConversation (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
-
-import Brick.Focus (FocusRing, focusRing)
-import Brick.Widgets.Edit
-import Brick.Widgets.List
-import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 
 data BrickWidgetName
     = UnifiedList
@@ -27,30 +25,6 @@ data BrickWidgetName
     | FocusedConversation
     deriving (Show, Eq, Ord)
 type N = BrickWidgetName
-
-data LoadedAgent
-    = LoadedAgent
-    { loadedAgentRuntime :: Runtime.Runtime
-    , loadedAgentTools :: [Runtime.ToolRegistration]
-    , loadedAgentInfo :: FileLoader.OpenAIAgent
-    }
-
-data StartedConversation
-    = StartedConversation
-    { conversingAgent :: FileLoader.OpenAIAgent
-    , conversationState :: Conversation.ConversationState
-    , headline :: Text
-    }
-
-data OngoingConversation
-    = OngoingConversation
-    { conversationId :: ConversationId
-    , conversingAgent :: FileLoader.OpenAIAgent
-    , conversationStatus :: Conversation.ConversationStatus
-    , conversationHistory :: [Runtime.Trace]
-    , prompt :: Maybe Text -> STM Bool
-    , headline :: Text
-    }
 
 data Entities
     = Entities

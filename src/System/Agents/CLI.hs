@@ -3,87 +3,148 @@
 
 module System.Agents.CLI where
 
+import qualified Control.Concurrent.STM as STM
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
+import qualified Data.List as List
+import qualified Data.List.Extra as ListExtra
+import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import System.Console.Haskeline
 
 import System.Agents.Agent
 import System.Agents.Base (newConversationId)
+import System.Agents.CLI.State
+import qualified System.Agents.Conversation as Conversation
+import System.Agents.Dialogues
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
 
-mainInteractiveAgent :: Props -> IO ()
-mainInteractiveAgent props = do
+mainInteractiveAgent :: [Props] -> IO ()
+mainInteractiveAgent xs =
+    mainInteractiveAgent2 [] xs
+
+mainInteractiveAgent2 :: [LoadedAgent] -> [Props] -> IO ()
+mainInteractiveAgent2 agents (props : rest) = do
     withAgentRuntime props $ \x -> do
         case x of
             LoadingErrors errs -> traverse_ print errs
             OtherErrors errs -> traverse_ print errs
-            Initialized ai ->
-                runMainAgent ai
+            Initialized ai -> do
+                case ai.agentDescription of
+                    FileLoader.OpenAIAgentDescription oai -> do
+                        registry <- liftIO ai.agentRuntime.agentTools
+                        let loadedAgent = LoadedAgent ai.agentRuntime registry oai
+                        mainInteractiveAgent2 (loadedAgent : agents) rest
+mainInteractiveAgent2 xs [] =
+    runMainCLI $
+        CliState
+            (NonEmpty.fromList xs)
+            []
   where
-    agentFunctions ask =
-        Runtime.AgentFunctions
-            (fmap queryOrNothing ask)
-            (\_hist -> pure ())
-            (\err -> putStrLn $ unlines ["parse error", err])
-            (\_ -> putStrLn "done")
+    runMainCLI :: CliState -> IO ()
+    runMainCLI state = do
+        runInputT (settings state) (oneAgentLoop state)
 
-    runMainAgent :: AgentInfo -> IO ()
-    runMainAgent ai = do
-        let nextQuery = askQuery ai
-        query <- nextQuery
-        cId <- newConversationId
-        Runtime.handleConversation ai.agentRuntime (agentFunctions nextQuery) cId query
+    settings :: CliState -> Settings IO
+    settings state =
+        (defaultSettings :: Settings IO)
+            { historyFile = Just "agents-exe.hist"
+            , complete = handleComplete state
+            }
 
-    askQuery :: AgentInfo -> IO Text
-    askQuery ai = do
-        go
+    handleComplete :: CliState -> CompletionFunc IO
+    handleComplete state (chunk1r, chunk2) =
+        pure (chunk1r, [Completion (drop len w) h True | (w, h) <- commands state, chunk1 `List.isPrefixOf` w])
       where
-        helpStr = do
-            unlines
-                [ "? or ?help -- show this help"
-                , "?desc-main -- dump loaded main agent"
-                , "?desc-agents -- dump loaded helper agents' descriptions"
-                , "?desc-tools -- dump loaded tools"
-                , "?reload-tools -- reload tools"
-                ]
-        go = do
-            putStrLn "### Enter query:"
-            query <- Text.pack <$> getLine
-            case query of
-                "?help" -> do
-                    putStrLn helpStr
-                    go
-                "?desc-main" -> do
-                    print ai.agentDescription
-                    go
-                "?desc-agents" -> do
-                    traverse_ print ai.agentSibling.agents
-                    go
-                "?desc-tools" -> do
-                    traverse_ printAgentTools (ai.agentRuntime : ai.agentSiblingRuntimes)
-                    go
-                "?reload-tools" -> do
-                    traverse_ Runtime.triggerRefreshTools (ai.agentRuntime : ai.agentSiblingRuntimes)
+        chunk1 = reverse chunk1r
+        len = length chunk1
 
-                    go
-                txt
-                    | "?" `Text.isPrefixOf` txt -> do
-                        putStrLn helpStr
-                        go
-                    | otherwise -> pure txt
+    commands :: CliState -> [(String, String)]
+    commands state =
+        Maybe.catMaybes
+            ( [ Just ("quit", "quit (quit this program)")
+              , Just ("help", "help (display some help)")
+              , Just ("info", "show current agent infos")
+              , Just ("reload", "reload (refresh tools)")
+              ]
+                <> atCommands
+            )
+      where
+        atCommands :: [Maybe (String, String)]
+        atCommands =
+            let
+                f :: LoadedAgent -> Maybe (String, String)
+                f ai = let z = atSlug ai.loadedAgentInfo in Just (z, z)
+             in
+                NonEmpty.toList (fmap f state.loadedAgents)
 
-    printAgentTools :: Runtime.Runtime -> IO ()
+    atSlug :: FileLoader.OpenAIAgent -> String
+    atSlug desc =
+        Text.unpack ("@" <> FileLoader.slug desc)
+
+    oneAgentLoop :: CliState -> InputT IO ()
+    oneAgentLoop state = do
+        minput <- getInputLine "% "
+        case fmap ListExtra.trim minput of
+            Nothing -> return ()
+            Just "" -> do
+                oneAgentLoop state
+            Just "quit" -> return ()
+            Just "reload" -> do
+                liftIO $ traverse_ (Runtime.triggerRefreshTools . loadedAgentRuntime) state.loadedAgents
+                oneAgentLoop state
+            Just "info" -> do
+                outputStrLn $
+                    unlines $
+                        NonEmpty.toList $
+                            fmap (show . loadedAgentInfo) state.loadedAgents
+                oneAgentLoop state
+            Just ('@' : input) -> do
+                let (searchedSlug, prompt) = List.break (== ' ') input
+                let promptMessage = Text.pack (drop 1 prompt)
+                let foundAgent = List.find (\ai -> Text.unpack ai.loadedAgentInfo.slug == searchedSlug) state.loadedAgents
+                let foundConversation = foundAgent >>= \ai -> List.find (\conv -> conv.conversingAgent == ai.loadedAgentInfo) state.ongoingConversations
+                case (foundConversation, foundAgent) of
+                    (Just conv, _) -> do
+                        if promptMessage /= ""
+                            then do
+                                liftIO $ STM.atomically $ conv.prompt (Just promptMessage)
+                                oneAgentLoop state
+                            else do
+                                liftIO $ STM.atomically $ conv.prompt Nothing
+                                -- liftIO $ Conversation.wait conv >>= print
+                                oneAgentLoop (removeConversation state conv)
+                    (Nothing, Just ai) -> do
+                        conv <- liftIO $ Conversation.converse ai.loadedAgentRuntime promptMessage
+                        let ongoingConv = OngoingConversation conv.conversationId ai.loadedAgentInfo Conversation.Executing [] conv.prompt promptMessage
+                        oneAgentLoop (insertConversation state ongoingConv)
+                    (Nothing, Nothing) -> do
+                        outputStrLn $
+                            unlines
+                                ["No such agent: ", searchedSlug]
+                        oneAgentLoop state
+            Just (input) -> do
+                outputStrLn $
+                    unlines
+                        ( "Unrecognized input. Valid commands: "
+                            : map fst (commands state)
+                        )
+                oneAgentLoop state
+
+    printAgentTools :: Runtime.Runtime -> InputT IO ()
     printAgentTools rt = do
-        registry <- rt.agentTools
-        Text.putStrLn (renderToolRegistry registry)
+        registry <- liftIO rt.agentTools
+        outputStrLn $ Text.unpack (renderToolRegistry registry)
 
     renderToolRegistry :: (Aeson.ToJSON b) => [Tools.Registration a b c] -> Text
     renderToolRegistry registry =
@@ -97,7 +158,3 @@ mainInteractiveAgent props = do
                 Text.unwords ["command", Text.pack bashScript.scriptPath, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode reg.declareTool]
             Tools.IOTool ioScript ->
                 Text.unwords ["io", ioScript.ioSlug, ioScript.ioDescription]
-
-    queryOrNothing :: Text -> Maybe Text
-    queryOrNothing "" = Nothing
-    queryOrNothing t = Just t

@@ -20,6 +20,7 @@ import qualified Graphics.Vty as Vty
 
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.Conversation as Conversation
+import System.Agents.Dialogues (LoadedAgent (..), OngoingConversation (..), StartedConversation (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Agent
 import System.Agents.TUI.Event (AppEvent (..))

@@ -9,7 +9,8 @@
 -- | organizes multi-agents discussions into parties
 module System.Agents.Conversation where
 
-import Control.Concurrent.Async
+import Control.Concurrent.Async (Async)
+import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, takeTMVar, tryPutTMVar)
 import Data.IORef (modifyIORef, newIORef, readIORef)
@@ -44,7 +45,7 @@ converse baseRuntime txt = do
     statusTVar <- newTVarIO Executing
     let logTracesInIORef = Prod.Tracer $ \t -> modifyIORef tracesIORef (t :)
     let adaptedRuntime = Runtime.addTracer baseRuntime logTracesInIORef
-    a <- async $ handleConversation adaptedRuntime (agentFunctions inbox statusTVar) cId txt
+    a <- Async.async $ handleConversation adaptedRuntime (agentFunctions inbox statusTVar) cId txt
     pure $
         ConversationState
             { task = a
@@ -101,3 +102,6 @@ converse baseRuntime txt = do
     endWithError statusTVar err = do
         atomically $ writeTVar statusTVar Final
         pure $ Left err
+
+wait :: ConversationState -> IO (Either String LLMs.History)
+wait c = Async.wait c.task
