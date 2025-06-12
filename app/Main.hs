@@ -23,6 +23,7 @@ import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
+import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace
@@ -226,7 +227,7 @@ main = do
         case args.mainCommand of
             Check -> do
                 forM_ args.agentFiles $ \agentFile -> do
-                    CLI.mainPrintAgent $
+                    OneShot.mainPrintAgent $
                         Agent.Props
                             { Agent.apiKeysFile = args.apiKeysFile
                             , Agent.rawLogFile = args.logFile
@@ -270,7 +271,7 @@ main = do
             OneShot opts -> do
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
-                    let oneShot = flip CLI.mainOneShotText
+                    let oneShot = flip OneShot.mainOneShotText
                     oneShot (Text.unlines promptLines) $
                         Agent.Props
                             { Agent.apiKeysFile = args.apiKeysFile

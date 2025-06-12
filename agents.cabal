@@ -75,6 +75,7 @@ library agents-lib
                     , System.Agents.Runtime
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
+                    , System.Agents.OneShot
                     , System.Agents.CLI
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.InitProject
