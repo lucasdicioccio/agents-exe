@@ -3,13 +3,16 @@
 
 module System.Agents.CLI where
 
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
+import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import System.Console.Haskeline
 
 import System.Agents.Agent
 import System.Agents.Base (newConversationId)
@@ -28,62 +31,58 @@ mainInteractiveAgent props = do
             Initialized ai ->
                 runMainAgent ai
   where
-    agentFunctions ask =
-        Runtime.AgentFunctions
-            (fmap queryOrNothing ask)
-            (\_hist -> pure ())
-            (\err -> putStrLn $ unlines ["parse error", err])
-            (\_ -> putStrLn "done")
-
     runMainAgent :: AgentInfo -> IO ()
     runMainAgent ai = do
-        let nextQuery = askQuery ai
-        query <- nextQuery
-        cId <- newConversationId
-        Runtime.handleConversation ai.agentRuntime (agentFunctions nextQuery) cId query
+        runInputT (settings ai) (oneAgentLoop ai)
 
-    askQuery :: AgentInfo -> IO Text
-    askQuery ai = do
-        go
+    settings :: AgentInfo -> Settings IO
+    settings ai =
+        (defaultSettings :: Settings IO)
+            { historyFile = Just "agents-exe.hist"
+            , complete = handleComplete ai
+            }
+
+    handleComplete :: AgentInfo -> CompletionFunc IO
+    handleComplete ai (chunk1r, chunk2) =
+        pure (chunk1r, [Completion (drop len w) h True | (w, h) <- commands, chunk1 `List.isPrefixOf` w])
       where
-        helpStr = do
-            unlines
-                [ "? or ?help -- show this help"
-                , "?desc-main -- dump loaded main agent"
-                , "?desc-agents -- dump loaded helper agents' descriptions"
-                , "?desc-tools -- dump loaded tools"
-                , "?reload-tools -- reload tools"
-                ]
-        go = do
-            putStrLn "### Enter query:"
-            query <- Text.pack <$> getLine
-            case query of
-                "?help" -> do
-                    putStrLn helpStr
-                    go
-                "?desc-main" -> do
-                    print ai.agentDescription
-                    go
-                "?desc-agents" -> do
-                    traverse_ print ai.agentSibling.agents
-                    go
-                "?desc-tools" -> do
-                    traverse_ printAgentTools (ai.agentRuntime : ai.agentSiblingRuntimes)
-                    go
-                "?reload-tools" -> do
-                    traverse_ Runtime.triggerRefreshTools (ai.agentRuntime : ai.agentSiblingRuntimes)
+        chunk1 = reverse chunk1r
+        len = length chunk1
+        commands =
+            [ ("quit", "quit (quit this program)")
+            , ("help", "help (display some help)")
+            , ("info", "show current agent infos")
+            , ("list agents", "agents")
+            , ("list tools", "tools")
+            , ("reload", "reload (refresh tools)")
+            ]
 
-                    go
-                txt
-                    | "?" `Text.isPrefixOf` txt -> do
-                        putStrLn helpStr
-                        go
-                    | otherwise -> pure txt
+    oneAgentLoop :: AgentInfo -> InputT IO ()
+    oneAgentLoop ai = do
+        minput <- getInputLine "% "
+        case minput of
+            Nothing -> return ()
+            Just "quit" -> return ()
+            Just "reload" -> do
+                liftIO $ traverse_ Runtime.triggerRefreshTools (ai.agentRuntime : ai.agentSiblingRuntimes)
+                oneAgentLoop ai
+            Just "info" -> do
+                outputStrLn $ show ai.agentDescription
+                oneAgentLoop ai
+            Just "list agents" -> do
+                traverse_ (outputStrLn . show) ai.agentSibling.agents
+                oneAgentLoop ai
+            Just "list tools" -> do
+                traverse_ printAgentTools (ai.agentRuntime : ai.agentSiblingRuntimes)
+                oneAgentLoop ai
+            Just input -> do
+                outputStrLn $ show ("ok", input)
+                oneAgentLoop ai
 
-    printAgentTools :: Runtime.Runtime -> IO ()
+    printAgentTools :: Runtime.Runtime -> InputT IO ()
     printAgentTools rt = do
-        registry <- rt.agentTools
-        Text.putStrLn (renderToolRegistry registry)
+        registry <- liftIO rt.agentTools
+        outputStrLn $ Text.unpack (renderToolRegistry registry)
 
     renderToolRegistry :: (Aeson.ToJSON b) => [Tools.Registration a b c] -> Text
     renderToolRegistry registry =
@@ -98,6 +97,22 @@ mainInteractiveAgent props = do
             Tools.IOTool ioScript ->
                 Text.unwords ["io", ioScript.ioSlug, ioScript.ioDescription]
 
+{-
+    agentFunctions ask =
+        Runtime.AgentFunctions
+            (fmap queryOrNothing ask)
+            (\_hist -> pure ())
+            (\err -> putStrLn $ unlines ["parse error", err])
+            (\_ -> putStrLn "done")
+
+    runMainAgent :: AgentInfo -> IO ()
+    runMainAgent ai = do
+        let nextQuery = askQuery ai
+        query <- nextQuery
+        cId <- newConversationId
+        Runtime.handleConversation ai.agentRuntime (agentFunctions nextQuery) cId query
+
     queryOrNothing :: Text -> Maybe Text
     queryOrNothing "" = Nothing
     queryOrNothing t = Just t
+-}
