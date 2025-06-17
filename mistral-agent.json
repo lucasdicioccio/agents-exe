@@ -1,7 +1,7 @@
 {
   "tag": "OpenAIAgentDescription",
   "contents": {
-    "slug": "boss",
+    "slug": "boss-mistral",
     "flavor": "MistralV1",
     "modelUrl": "https://api.mistral.ai/v1",
     "apiKeyId": "mistral",
