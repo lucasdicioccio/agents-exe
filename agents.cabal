@@ -64,6 +64,12 @@ library agents-lib
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.Conversation
+                    , System.Agents.CLI
+                    , System.Agents.CLI.TraceUtils
+                    , System.Agents.CLI.Base
+                    , System.Agents.CLI.InitProject
+                    , System.Agents.CLI.State
+                    , System.Agents.Dialogues
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.Base
                     , System.Agents.FileLoader.JSON
@@ -75,9 +81,7 @@ library agents-lib
                     , System.Agents.Runtime
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
-                    , System.Agents.CLI
-                    , System.Agents.CLI.Base
-                    , System.Agents.CLI.InitProject
+                    , System.Agents.OneShot
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
@@ -97,8 +101,10 @@ library agents-lib
                       containers,
                       contravariant,
                       directory,
+                      extra,
                       filepath,
                       formatting,
+                      haskeline,
                       http-client,
                       http-client-tls,
                       http-types,

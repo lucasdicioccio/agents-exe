@@ -26,6 +26,7 @@ import Brick.Widgets.Edit
 import Brick.Widgets.List
 import qualified Graphics.Vty as Vty
 
+import System.Agents.Dialogues (LoadedAgent (..), OngoingConversation (..), StartedConversation (..))
 import System.Agents.TUI.State
 
 tui_appChooseCursor :: TuiState -> [CursorLocation N] -> Maybe (CursorLocation N)

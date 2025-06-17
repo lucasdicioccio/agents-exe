@@ -17,12 +17,14 @@ import System.Agents.Base (AgentId, AgentSlug, ConversationId)
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
+import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
 import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
+import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace
@@ -226,18 +228,17 @@ main = do
         case args.mainCommand of
             Check -> do
                 forM_ args.agentFiles $ \agentFile -> do
-                    CLI.mainPrintAgent $
+                    OneShot.mainPrintAgent $
                         Agent.Props
                             { Agent.apiKeysFile = args.apiKeysFile
                             , Agent.rawLogFile = args.logFile
                             , Agent.mainAgentFile = agentFile
                             , Agent.helperAgentsDir = args.agentsDir
                             , Agent.interactiveTracer =
-                                Prod.traceBoth baseTracer CLI.traceUsefulPromptStdout
+                                Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
-            InteractiveCommandLine ->
-                forM_ (take 1 args.agentFiles) $ \agentFile -> do
-                    CLI.mainInteractiveAgent $
+            InteractiveCommandLine -> do
+                let oneProp agentFile =
                         Agent.Props
                             { Agent.apiKeysFile = args.apiKeysFile
                             , Agent.rawLogFile = args.logFile
@@ -247,13 +248,11 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
-                                        CLI.traceUsefulPromptStdout
-                                        ( Prod.traceBoth
-                                            CLI.tracePrintingTextResponses
-                                            (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                                        )
+                                        tracePrintingTextResponses
+                                        (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                                     )
                             }
+                CLI.mainInteractiveAgent $ map oneProp args.agentFiles
             TerminalUI -> do
                 let oneAgent agentFile =
                         Agent.Props
@@ -270,7 +269,7 @@ main = do
             OneShot opts -> do
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
-                    let oneShot = flip CLI.mainOneShotText
+                    let oneShot = flip OneShot.mainOneShotText
                     oneShot (Text.unlines promptLines) $
                         Agent.Props
                             { Agent.apiKeysFile = args.apiKeysFile
@@ -280,7 +279,7 @@ main = do
                             , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
-                                    CLI.traceUsefulPromptStderr
+                                    traceUsefulPromptStderr
                             }
             SelfDescribe ->
                 Aeson.encodeFile "/dev/stdout" $
@@ -299,7 +298,7 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
-                                        CLI.traceUsefulPromptStderr
+                                        traceUsefulPromptStderr
                                         (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
                             }
