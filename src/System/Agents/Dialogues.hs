@@ -15,7 +15,6 @@ import qualified System.Agents.Runtime as Runtime
 data LoadedAgent
     = LoadedAgent
     { loadedAgentRuntime :: Runtime.Runtime
-    , loadedAgentTools :: [Runtime.ToolRegistration]
     , loadedAgentInfo :: FileLoader.OpenAIAgent
     }
 
