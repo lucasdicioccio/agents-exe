@@ -13,7 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (Agent (..), AgentDescription (..), AgentId, AgentSlug, ConversationId)
+import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId)
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject

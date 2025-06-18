@@ -11,7 +11,6 @@ import Data.Text (Text)
 import Prod.Tracer (Tracer (..))
 
 import System.Agents.Agent
-import System.Agents.Base (AgentDescription (..))
 import System.Agents.Dialogues (LoadedAgent (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.TUI.Event
@@ -40,11 +39,10 @@ mainMultiAgents2 bChan idx (props : xs) agents = do
     withAgentRuntime props go
   where
     go (Initialized ai) = do
-        case ai.agentDescription of
-            (AgentDescription oai) -> do
-                let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
-                let la = LoadedAgent rt oai
-                mainMultiAgents2 bChan (succ idx) xs (la : agents)
+        let oai = ai.agentBase
+        let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
+        let la = LoadedAgent rt oai
+        mainMultiAgents2 bChan (succ idx) xs (la : agents)
     go _ = do
         print ("failed to initialize" :: Text)
 mainMultiAgents2 bChan _ [] agents = do

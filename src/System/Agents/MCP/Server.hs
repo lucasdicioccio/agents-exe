@@ -21,7 +21,7 @@ import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (Agent (..), AgentDescription (..), newConversationId)
+import System.Agents.Base (Agent (..), newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Runtime as Runtime
@@ -48,11 +48,10 @@ multiAgentsServer' idx (props : xs) mtools = do
     Agent.withAgentRuntime props go
   where
     go (Agent.Initialized ai) = do
-        case ai.agentDescription of
-            (AgentDescription oai) -> do
-                let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
-                let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
-                multiAgentsServer' (succ idx) xs (tool : mtools)
+        let oai = ai.agentBase
+        let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
+        let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
+        multiAgentsServer' (succ idx) xs (tool : mtools)
     go _ = do
         print ("failed to initialize" :: Text)
 
@@ -209,24 +208,23 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
 
 callExpertTool :: Mcp.Name -> Agent.RunningAgent -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
-    case ai.agentDescription of
-        (AgentDescription oai) ->
-            Just $
-                Mcp.Tool
-                    mcpName
-                    (Just oai.announce)
-                    ( Mcp.InputSchema
-                        (Just ["prompt"])
-                        ( Just $
-                            Mcp.pairz
-                                [ "prompt"
-                                    .= Mcp.object
-                                        [ "type" .= ("string" :: Text)
-                                        , "title" .= ("the prompt asked when calling the expert" :: Text)
-                                        ]
-                                ]
-                        )
+    let oai = ai.agentBase
+     in Just $
+            Mcp.Tool
+                mcpName
+                (Just oai.announce)
+                ( Mcp.InputSchema
+                    (Just ["prompt"])
+                    ( Just $
+                        Mcp.pairz
+                            [ "prompt"
+                                .= Mcp.object
+                                    [ "type" .= ("string" :: Text)
+                                    , "title" .= ("the prompt asked when calling the expert" :: Text)
+                                    ]
+                            ]
                     )
+                )
 
 extractPrompt :: Mcp.CallToolRequest -> Maybe Text
 extractPrompt (Mcp.CallToolRequest _ Nothing) = Nothing

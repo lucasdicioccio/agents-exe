@@ -13,7 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 
-import System.Agents.Base (AgentDescription (..))
+import System.Agents.Base (Agent, AgentDescription (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
@@ -35,7 +35,7 @@ data Props
     }
 
 data RunningAgent = RunningAgent
-    { agentDescription :: AgentDescription
+    { agentBase :: Agent
     , agentRuntime :: Runtime.Runtime
     , agentSibling :: FileLoader.Agents
     , agentSiblingRuntimes :: [Runtime.Runtime]
@@ -53,7 +53,7 @@ withAgentRuntime props continue = do
     case loadedBoss of
         Left err ->
             continue $ LoadingErrors (NonEmpty.singleton err)
-        Right mainAgentDescription -> do
+        Right mainAgentDescription@(AgentDescription mainAgentBase) -> do
             (loadedAgents, errs) <- FileLoader.loadDirectory (contramap DataLoadingTrace tracer) props.helperAgentsDir
             case NonEmpty.nonEmpty errs of
                 Just xs -> continue $ LoadingErrors xs
@@ -73,7 +73,7 @@ withAgentRuntime props continue = do
                                     mainAgentDescription
                             case mainAgent of
                                 Left err -> continue $ OtherErrors (NonEmpty.singleton err)
-                                Right mainRt -> continue $ Initialized (RunningAgent mainAgentDescription mainRt loadedAgents okRuntimes)
+                                Right mainRt -> continue $ Initialized (RunningAgent mainAgentBase mainRt loadedAgents okRuntimes)
 
 type PromptModifier = Text -> Text
 
