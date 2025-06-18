@@ -33,7 +33,7 @@ data Props
     , rawLogFile :: FilePath
     }
 
-data AgentInfo = AgentInfo
+data RunningAgent = RunningAgent
     { agentDescription :: FileLoader.AgentDescription
     , agentRuntime :: Runtime.Runtime
     , agentSibling :: FileLoader.Agents
@@ -43,7 +43,7 @@ data AgentInfo = AgentInfo
 data Continue
     = LoadingErrors (NonEmpty.NonEmpty FileLoader.InvalidAgentError)
     | OtherErrors (NonEmpty.NonEmpty String)
-    | Initialized AgentInfo
+    | Initialized RunningAgent
 
 withAgentRuntime :: Props -> (Continue -> IO a) -> IO a
 withAgentRuntime props continue = do
@@ -72,7 +72,7 @@ withAgentRuntime props continue = do
                                     mainAgentDescription
                             case mainAgent of
                                 Left err -> continue $ OtherErrors (NonEmpty.singleton err)
-                                Right mainRt -> continue $ Initialized (AgentInfo mainAgentDescription mainRt loadedAgents okRuntimes)
+                                Right mainRt -> continue $ Initialized (RunningAgent mainAgentDescription mainRt loadedAgents okRuntimes)
 
 type PromptModifier = Text -> Text
 

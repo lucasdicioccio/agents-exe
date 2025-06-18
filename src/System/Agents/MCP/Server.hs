@@ -208,7 +208,7 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
     adapt :: MappedTool -> Maybe Mcp.Tool
     adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
 
-callExpertTool :: Mcp.Name -> Agent.AgentInfo -> Maybe Mcp.Tool
+callExpertTool :: Mcp.Name -> Agent.RunningAgent -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     case ai.agentDescription of
         (FileLoader.AgentDescription oai) ->
