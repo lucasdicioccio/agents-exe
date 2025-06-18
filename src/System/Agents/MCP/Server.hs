@@ -21,8 +21,7 @@ import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (newConversationId)
-import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.Base (Agent (..), AgentDescription (..), newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Runtime as Runtime
@@ -50,7 +49,7 @@ multiAgentsServer' idx (props : xs) mtools = do
   where
     go (Agent.Initialized ai) = do
         case ai.agentDescription of
-            (FileLoader.AgentDescription oai) -> do
+            (AgentDescription oai) -> do
                 let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
                 let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
                 multiAgentsServer' (succ idx) xs (tool : mtools)
@@ -211,7 +210,7 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
 callExpertTool :: Mcp.Name -> Agent.RunningAgent -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     case ai.agentDescription of
-        (FileLoader.AgentDescription oai) ->
+        (AgentDescription oai) ->
             Just $
                 Mcp.Tool
                     mcpName

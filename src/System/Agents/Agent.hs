@@ -13,6 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 
+import System.Agents.Base (AgentDescription (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
@@ -34,7 +35,7 @@ data Props
     }
 
 data RunningAgent = RunningAgent
-    { agentDescription :: FileLoader.AgentDescription
+    { agentDescription :: AgentDescription
     , agentRuntime :: Runtime.Runtime
     , agentSibling :: FileLoader.Agents
     , agentSiblingRuntimes :: [Runtime.Runtime]
@@ -81,9 +82,9 @@ initAgent ::
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
     [Runtime.Runtime] ->
-    FileLoader.AgentDescription ->
+    AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgent tracer keys modifyPrompt helperAgents (FileLoader.AgentDescription desc) = do
+initAgent tracer keys modifyPrompt helperAgents (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)

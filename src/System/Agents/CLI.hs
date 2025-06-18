@@ -14,6 +14,7 @@ import qualified Data.Text as Text
 import System.Console.Haskeline
 
 import System.Agents.Agent
+import System.Agents.Base (AgentDescription (..))
 import System.Agents.CLI.State
 import qualified System.Agents.Conversation as Conversation
 import System.Agents.Dialogues
@@ -32,7 +33,7 @@ mainInteractiveAgent2 agents (props : rest) = do
             OtherErrors errs -> traverse_ print errs
             Initialized ai -> do
                 case ai.agentDescription of
-                    FileLoader.AgentDescription oai -> do
+                    AgentDescription oai -> do
                         -- registry <- liftIO ai.agentRuntime.agentTools
                         let loadedAgent = LoadedAgent ai.agentRuntime oai
                         mainInteractiveAgent2 (loadedAgent : agents) rest

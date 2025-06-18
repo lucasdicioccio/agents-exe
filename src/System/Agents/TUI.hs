@@ -11,8 +11,8 @@ import Data.Text (Text)
 import Prod.Tracer (Tracer (..))
 
 import System.Agents.Agent
+import System.Agents.Base (AgentDescription (..))
 import System.Agents.Dialogues (LoadedAgent (..))
-import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.TUI.Event
 import System.Agents.TUI.Handler (tui_appHandleEvent, tui_appStartEvent)
@@ -41,7 +41,7 @@ mainMultiAgents2 bChan idx (props : xs) agents = do
   where
     go (Initialized ai) = do
         case ai.agentDescription of
-            (FileLoader.AgentDescription oai) -> do
+            (AgentDescription oai) -> do
                 let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
                 let la = LoadedAgent rt oai
                 mainMultiAgents2 bChan (succ idx) xs (la : agents)
