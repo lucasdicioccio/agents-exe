@@ -11,7 +11,7 @@ import System.Environment (lookupEnv)
 import System.Process as Process
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
-import System.Agents.FileLoader.Base (AgentDescription (..), OpenAIAgent (..))
+import System.Agents.Base (AgentDescription (..), OpenAIAgent (..))
 
 data InitializeError
     = AgentFilePreExists !FilePath

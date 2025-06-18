@@ -71,7 +71,6 @@ library agents-lib
                     , System.Agents.CLI.State
                     , System.Agents.Dialogues
                     , System.Agents.FileLoader
-                    , System.Agents.FileLoader.Base
                     , System.Agents.FileLoader.JSON
                     , System.Agents.Tools
                     , System.Agents.Tools.Bash

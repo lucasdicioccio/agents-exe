@@ -1,6 +1,6 @@
 -- | load agents from the filesystem
 module System.Agents.FileLoader (
-    module System.Agents.FileLoader.Base,
+    module System.Agents.Base,
     module System.Agents.FileLoader.JSON,
     Trace (..),
     Agents (..),
@@ -16,7 +16,7 @@ import Prod.Tracer (Tracer, runTracer)
 import System.Directory (listDirectory)
 import System.FilePath (takeExtension, (</>))
 
-import System.Agents.FileLoader.Base
+import System.Agents.Base (AgentDescription (..), OpenAIAgent (..))
 import System.Agents.FileLoader.JSON
 
 -------------------------------------------------------------------------------

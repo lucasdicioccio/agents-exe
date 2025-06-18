@@ -13,12 +13,11 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (AgentId, AgentSlug, ConversationId)
+import System.Agents.Base (AgentDescription (..), AgentId, AgentSlug, ConversationId, OpenAIAgent (..))
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
-import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
@@ -305,15 +304,15 @@ main = do
                 McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
             Initialize ->
                 let o =
-                        Agents.OpenAIAgent
-                            { Agents.slug = "main-agent"
-                            , Agents.apiKeyId = "main-key"
-                            , Agents.flavor = "OpenAIv1"
-                            , Agents.modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
-                            , Agents.modelName = "gpt-4-turbo"
-                            , Agents.announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
-                            , Agents.toolDirectory = "."
-                            , Agents.systemPrompt =
+                        OpenAIAgent
+                            { slug = "main-agent"
+                            , apiKeyId = "main-key"
+                            , flavor = "OpenAIv1"
+                            , modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
+                            , modelName = "gpt-4-turbo"
+                            , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
+                            , toolDirectory = "."
+                            , systemPrompt =
                                 [ "You are a helpful software agent trying to solve user requests"
                                 , "Your preferred action mode is to act as a puppet master capable of driving other agents."
                                 , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
