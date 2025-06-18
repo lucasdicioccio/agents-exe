@@ -29,8 +29,8 @@ newConversationId =
     ConversationId <$> UUID.nextRandom
 
 -------------------------------------------------------------------------------
-data OpenAIAgent
-    = OpenAIAgent
+data Agent
+    = Agent
     { slug :: Text
     , apiKeyId :: Text
     , flavor :: Text
@@ -41,11 +41,11 @@ data OpenAIAgent
     , toolDirectory :: FilePath
     }
     deriving (Show, Ord, Eq, Generic)
-instance ToJSON OpenAIAgent
-instance FromJSON OpenAIAgent
+instance ToJSON Agent
+instance FromJSON Agent
 
 data AgentDescription
-    = AgentDescription OpenAIAgent
+    = AgentDescription Agent
     deriving (Show, Ord, Eq, Generic)
 instance ToJSON AgentDescription where
     toJSON (AgentDescription val) =

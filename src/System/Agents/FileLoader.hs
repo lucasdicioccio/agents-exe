@@ -16,7 +16,7 @@ import Prod.Tracer (Tracer, runTracer)
 import System.Directory (listDirectory)
 import System.FilePath (takeExtension, (</>))
 
-import System.Agents.Base (AgentDescription (..), OpenAIAgent (..))
+import System.Agents.Base (Agent (..), AgentDescription (..))
 import System.Agents.FileLoader.JSON
 
 -------------------------------------------------------------------------------

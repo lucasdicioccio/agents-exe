@@ -79,7 +79,7 @@ mainInteractiveAgent2 xs [] =
              in
                 NonEmpty.toList (fmap f state.loadedAgents)
 
-    atSlug :: FileLoader.OpenAIAgent -> String
+    atSlug :: FileLoader.Agent -> String
     atSlug desc =
         Text.unpack ("@" <> FileLoader.slug desc)
 

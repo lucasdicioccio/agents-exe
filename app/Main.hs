@@ -13,7 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (AgentDescription (..), AgentId, AgentSlug, ConversationId, OpenAIAgent (..))
+import System.Agents.Base (Agent (..), AgentDescription (..), AgentId, AgentSlug, ConversationId)
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
@@ -304,7 +304,7 @@ main = do
                 McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
             Initialize ->
                 let o =
-                        OpenAIAgent
+                        Agent
                             { slug = "main-agent"
                             , apiKeyId = "main-key"
                             , flavor = "OpenAIv1"

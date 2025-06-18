@@ -11,7 +11,7 @@ import System.Environment (lookupEnv)
 import System.Process as Process
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
-import System.Agents.Base (AgentDescription (..), OpenAIAgent (..))
+import System.Agents.Base (Agent (..), AgentDescription (..))
 
 data InitializeError
     = AgentFilePreExists !FilePath
@@ -21,7 +21,7 @@ data InitializeError
 
 instance Exception (InitializeError)
 
-initOpenAIAgent :: OpenAIAgent -> FilePath -> IO ()
+initOpenAIAgent :: Agent -> FilePath -> IO ()
 initOpenAIAgent o path = do
     exist <- doesFileExist path
     if exist
