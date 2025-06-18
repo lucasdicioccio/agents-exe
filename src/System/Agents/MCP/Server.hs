@@ -50,8 +50,6 @@ multiAgentsServer' idx (props : xs) mtools = do
   where
     go (Agent.Initialized ai) = do
         case ai.agentDescription of
-            (FileLoader.Unspecified _) -> do
-                print ("cannot expose over MCP an agent with unspecified description" :: Text)
             (FileLoader.OpenAIAgentDescription oai) -> do
                 let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
                 let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
@@ -213,7 +211,6 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
 callExpertTool :: Mcp.Name -> Agent.AgentInfo -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     case ai.agentDescription of
-        (FileLoader.Unspecified _) -> Nothing
         (FileLoader.OpenAIAgentDescription oai) ->
             Just $
                 Mcp.Tool

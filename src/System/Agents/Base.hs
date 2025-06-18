@@ -46,7 +46,6 @@ instance FromJSON OpenAIAgent
 
 data AgentDescription
     = OpenAIAgentDescription OpenAIAgent
-    | Unspecified Aeson.Value
     deriving (Show, Ord, Eq, Generic)
 instance ToJSON AgentDescription where
     toJSON (OpenAIAgentDescription val) =

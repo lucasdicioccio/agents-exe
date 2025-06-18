@@ -32,8 +32,6 @@ mainInteractiveAgent2 agents (props : rest) = do
             OtherErrors errs -> traverse_ print errs
             Initialized ai -> do
                 case ai.agentDescription of
-                    FileLoader.Unspecified _ -> do
-                        putStrLn "cannot work with unspecified description"
                     FileLoader.OpenAIAgentDescription oai -> do
                         -- registry <- liftIO ai.agentRuntime.agentTools
                         let loadedAgent = LoadedAgent ai.agentRuntime oai

@@ -83,7 +83,6 @@ initAgent ::
     [Runtime.Runtime] ->
     FileLoader.AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgent _ _ _ _ (FileLoader.Unspecified _) = pure $ Left "unspecified agent unsupported"
 initAgent tracer keys modifyPrompt helperAgents (FileLoader.OpenAIAgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->

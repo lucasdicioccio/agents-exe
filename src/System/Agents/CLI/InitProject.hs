@@ -34,7 +34,6 @@ initOpenAIAgent o path = do
             readBack <- Aeson.eitherDecodeFileStrict' path
             case readBack of
                 (Left err) -> throwIO $ UnparseableAgentFile err
-                (Right (Unspecified _)) -> throwIO $ UnparseableAgentFile "unspecified agent description type"
                 (Right (OpenAIAgentDescription o2)) -> do
                     createDirectoryIfMissing True o2.toolDirectory
                     putStrLn $ unwords ["tool dir:", o2.toolDirectory, "ok"]
