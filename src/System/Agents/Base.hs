@@ -4,7 +4,7 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -48,5 +48,17 @@ data AgentDescription
     = OpenAIAgentDescription OpenAIAgent
     | Unspecified Aeson.Value
     deriving (Show, Ord, Eq, Generic)
-instance ToJSON AgentDescription
-instance FromJSON AgentDescription
+instance ToJSON AgentDescription where
+    toJSON (OpenAIAgentDescription val) =
+        Aeson.object
+            [ "tag" .= ("OpenAIAgentDescription" :: Text)
+            , "contents" .= val
+            ]
+
+instance FromJSON AgentDescription where
+    parseJSON = Aeson.withObject "AgentDescription" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "OpenAIAgentDescription" ->
+                OpenAIAgentDescription <$> v .: "contents"
+            _ -> fail "expecting OpenAIAgentDescription 'tag'"
