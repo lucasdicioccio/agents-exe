@@ -10,7 +10,7 @@ import Brick.Widgets.List
 import Control.Concurrent.STM (atomically)
 import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import Control.Monad.IO.Class (liftIO)
-import Data.Foldable (toList)
+import Data.Foldable (toList, traverse_)
 import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -76,6 +76,15 @@ cycleFocusBwd = do
     (ui . focus) %= focusPrev
     unZoom
 
+tui_reloadTools :: EventM N TuiState ()
+tui_reloadTools = do
+    st0 <- get
+    let agents = st0._entities._loadedAgents
+    traverse_ (liftIO . reloadTools) agents
+  where
+    reloadTools :: LoadedAgent -> IO Bool
+    reloadTools rt = atomically rt.loadedAgentRuntime.agentTriggerRefreshTools
+
 tui_appHandleEvent_AppEvent_AgentTrace :: Agent.Trace -> EventM N TuiState ()
 tui_appHandleEvent_AppEvent_AgentTrace ev = do
     refreshStuffFromIOs_Conversations
@@ -101,6 +110,8 @@ tui_appHandleEvent ev = do
             cycleFocusFwd
         VtyEvent (Vty.EvKey Vty.KBackTab _) ->
             cycleFocusBwd
+        VtyEvent (Vty.EvKey (Vty.KFun 5) _) ->
+            tui_reloadTools
         (VtyEvent vtyEv) -> do
             currentFocus <- use (ui . focus . to focusGetCurrent)
             case currentFocus of
