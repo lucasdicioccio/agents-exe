@@ -5,29 +5,20 @@ module System.Agents.CLI where
 
 import qualified Control.Concurrent.STM as STM
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
 import qualified Data.List as List
 import qualified Data.List.Extra as ListExtra
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
-import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Text.IO as Text
 import System.Console.Haskeline
 
 import System.Agents.Agent
-import System.Agents.Base (newConversationId)
 import System.Agents.CLI.State
 import qualified System.Agents.Conversation as Conversation
 import System.Agents.Dialogues
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
-import qualified System.Agents.Tools as Tools
-import qualified System.Agents.Tools.Bash as Tools
-import qualified System.Agents.Tools.IO as Tools
 
 mainInteractiveAgent :: [Props] -> IO ()
 mainInteractiveAgent xs =
@@ -41,6 +32,8 @@ mainInteractiveAgent2 agents (props : rest) = do
             OtherErrors errs -> traverse_ print errs
             Initialized ai -> do
                 case ai.agentDescription of
+                    FileLoader.Unspecified _ -> do
+                        putStrLn "cannot work with unspecified description"
                     FileLoader.OpenAIAgentDescription oai -> do
                         registry <- liftIO ai.agentRuntime.agentTools
                         let loadedAgent = LoadedAgent ai.agentRuntime registry oai
@@ -63,7 +56,7 @@ mainInteractiveAgent2 xs [] =
             }
 
     handleComplete :: CliState -> CompletionFunc IO
-    handleComplete state (chunk1r, chunk2) =
+    handleComplete state (chunk1r, _) =
         pure (chunk1r, [Completion (drop len w) h True | (w, h) <- commands state, chunk1 `List.isPrefixOf` w])
       where
         chunk1 = reverse chunk1r
@@ -110,18 +103,18 @@ mainInteractiveAgent2 xs [] =
                             fmap (show . loadedAgentInfo) state.loadedAgents
                 oneAgentLoop state
             Just ('@' : input) -> do
-                let (searchedSlug, prompt) = List.break (== ' ') input
-                let promptMessage = Text.pack (drop 1 prompt)
+                let (searchedSlug, promptChunk) = List.break (== ' ') input
+                let promptMessage = Text.pack (drop 1 promptChunk)
                 let foundAgent = List.find (\ai -> Text.unpack ai.loadedAgentInfo.slug == searchedSlug) state.loadedAgents
                 let foundConversation = foundAgent >>= \ai -> List.find (\conv -> conv.conversingAgent == ai.loadedAgentInfo) state.ongoingConversations
                 case (foundConversation, foundAgent) of
                     (Just conv, _) -> do
                         if promptMessage /= ""
                             then do
-                                liftIO $ STM.atomically $ conv.prompt (Just promptMessage)
+                                _ <- liftIO $ STM.atomically $ conv.prompt (Just promptMessage)
                                 oneAgentLoop state
                             else do
-                                liftIO $ STM.atomically $ conv.prompt Nothing
+                                _ <- liftIO $ STM.atomically $ conv.prompt Nothing
                                 -- liftIO $ Conversation.wait conv >>= print
                                 oneAgentLoop (removeConversation state conv)
                     (Nothing, Just ai) -> do
@@ -133,7 +126,7 @@ mainInteractiveAgent2 xs [] =
                             unlines
                                 ["No such agent: ", searchedSlug]
                         oneAgentLoop state
-            Just (input) -> do
+            Just _ -> do
                 outputStrLn $
                     unlines
                         ( "Unrecognized input. Valid commands: "
@@ -141,6 +134,7 @@ mainInteractiveAgent2 xs [] =
                         )
                 oneAgentLoop state
 
+{-
     printAgentTools :: Runtime.Runtime -> InputT IO ()
     printAgentTools rt = do
         registry <- liftIO rt.agentTools
@@ -158,3 +152,4 @@ mainInteractiveAgent2 xs [] =
                 Text.unwords ["command", Text.pack bashScript.scriptPath, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode reg.declareTool]
             Tools.IOTool ioScript ->
                 Text.unwords ["io", ioScript.ioSlug, ioScript.ioDescription]
+-}
