@@ -83,7 +83,7 @@ initAgent ::
     [Runtime.Runtime] ->
     FileLoader.AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgent tracer keys modifyPrompt helperAgents (FileLoader.OpenAIAgentDescription desc) = do
+initAgent tracer keys modifyPrompt helperAgents (FileLoader.AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)

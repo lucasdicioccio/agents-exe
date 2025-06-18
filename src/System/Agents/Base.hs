@@ -45,10 +45,10 @@ instance ToJSON OpenAIAgent
 instance FromJSON OpenAIAgent
 
 data AgentDescription
-    = OpenAIAgentDescription OpenAIAgent
+    = AgentDescription OpenAIAgent
     deriving (Show, Ord, Eq, Generic)
 instance ToJSON AgentDescription where
-    toJSON (OpenAIAgentDescription val) =
+    toJSON (AgentDescription val) =
         Aeson.object
             [ "tag" .= ("OpenAIAgentDescription" :: Text)
             , "contents" .= val
@@ -59,5 +59,5 @@ instance FromJSON AgentDescription where
         tag <- v .: "tag"
         case (tag :: Text) of
             "OpenAIAgentDescription" ->
-                OpenAIAgentDescription <$> v .: "contents"
+                AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"

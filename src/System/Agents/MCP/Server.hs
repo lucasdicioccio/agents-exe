@@ -50,7 +50,7 @@ multiAgentsServer' idx (props : xs) mtools = do
   where
     go (Agent.Initialized ai) = do
         case ai.agentDescription of
-            (FileLoader.OpenAIAgentDescription oai) -> do
+            (FileLoader.AgentDescription oai) -> do
                 let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
                 let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
                 multiAgentsServer' (succ idx) xs (tool : mtools)
@@ -211,7 +211,7 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
 callExpertTool :: Mcp.Name -> Agent.AgentInfo -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     case ai.agentDescription of
-        (FileLoader.OpenAIAgentDescription oai) ->
+        (FileLoader.AgentDescription oai) ->
             Just $
                 Mcp.Tool
                     mcpName

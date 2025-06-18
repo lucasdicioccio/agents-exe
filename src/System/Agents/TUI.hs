@@ -41,7 +41,7 @@ mainMultiAgents2 bChan idx (props : xs) agents = do
   where
     go (Initialized ai) = do
         case ai.agentDescription of
-            (FileLoader.OpenAIAgentDescription oai) -> do
+            (FileLoader.AgentDescription oai) -> do
                 let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
                 let la = LoadedAgent rt oai
                 mainMultiAgents2 bChan (succ idx) xs (la : agents)

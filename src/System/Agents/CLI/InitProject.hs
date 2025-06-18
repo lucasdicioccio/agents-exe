@@ -28,13 +28,13 @@ initOpenAIAgent o path = do
         then do
             throwIO $ AgentFilePreExists path
         else do
-            LByteString.writeFile path $ Aeson.encodePretty (OpenAIAgentDescription o)
+            LByteString.writeFile path $ Aeson.encodePretty (AgentDescription o)
             _ <- openFileWithEditor path
             putStrLn $ unwords ["agent definition saved at:", path]
             readBack <- Aeson.eitherDecodeFileStrict' path
             case readBack of
                 (Left err) -> throwIO $ UnparseableAgentFile err
-                (Right (OpenAIAgentDescription o2)) -> do
+                (Right (AgentDescription o2)) -> do
                     createDirectoryIfMissing True o2.toolDirectory
                     putStrLn $ unwords ["tool dir:", o2.toolDirectory, "ok"]
 
