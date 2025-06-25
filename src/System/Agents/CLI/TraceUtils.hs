@@ -17,9 +17,10 @@ import System.IO (stderr, stdout)
 
 import System.Agents.Agent
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Runtime as Runtime
+import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
+import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as Tools
 
 traceSilent :: Tracer IO Trace
@@ -71,10 +72,10 @@ renderAgentTrace (Runtime.AgentTrace_Memorize slug _ _ tr) =
         , renderMemorizeAgentTrace tr
         ]
 
-renderLoadingAgentTrace :: Runtime.LoadingTrace -> Text
+renderLoadingAgentTrace :: BashToolbox.Trace -> Text
 renderLoadingAgentTrace tr = case tr of
-    Runtime.ReloadToolsTrace _ -> "(reload-tools...)"
-    Runtime.BashToolsLoadingTrace _ -> "(reload-tools...)"
+    BashToolbox.ReloadToolsTrace _ -> "(reload-tools...)"
+    BashToolbox.BashToolsLoadingTrace _ -> "(reload-tools...)"
 
 renderMemorizeAgentTrace :: Runtime.MemorizeTrace -> Text
 renderMemorizeAgentTrace tr = case tr of

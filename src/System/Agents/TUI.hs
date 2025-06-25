@@ -12,7 +12,6 @@ import Prod.Tracer (Tracer (..))
 
 import System.Agents.Agent
 import System.Agents.Dialogues (LoadedAgent (..))
-import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.TUI.Event
 import System.Agents.TUI.Handler (tui_appHandleEvent, tui_appStartEvent)
@@ -40,14 +39,10 @@ mainMultiAgents2 bChan idx (props : xs) agents = do
     withAgentRuntime props go
   where
     go (Initialized ai) = do
-        case ai.agentDescription of
-            (FileLoader.Unspecified _) -> do
-                print ("cannot load an agent with unspecified description" :: Text)
-            (FileLoader.OpenAIAgentDescription oai) -> do
-                let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
-                tools <- Runtime.agentTools rt
-                let la = LoadedAgent rt tools oai
-                mainMultiAgents2 bChan (succ idx) xs (la : agents)
+        let oai = ai.agentBase
+        let rt = Runtime.addTracer ai.agentRuntime (traceInChan bChan)
+        let la = LoadedAgent rt oai
+        mainMultiAgents2 bChan (succ idx) xs (la : agents)
     go _ = do
         print ("failed to initialize" :: Text)
 mainMultiAgents2 bChan _ [] agents = do

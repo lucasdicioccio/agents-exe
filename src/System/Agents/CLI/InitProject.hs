@@ -11,7 +11,7 @@ import System.Environment (lookupEnv)
 import System.Process as Process
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
-import System.Agents.FileLoader.Base (AgentDescription (..), OpenAIAgent (..))
+import System.Agents.Base (Agent (..), AgentDescription (..))
 
 data InitializeError
     = AgentFilePreExists !FilePath
@@ -21,28 +21,22 @@ data InitializeError
 
 instance Exception (InitializeError)
 
-initOpenAIAgent :: OpenAIAgent -> FilePath -> IO ()
+initOpenAIAgent :: Agent -> FilePath -> IO ()
 initOpenAIAgent o path = do
     exist <- doesFileExist path
     if exist
         then do
             throwIO $ AgentFilePreExists path
         else do
-            LByteString.writeFile path $ Aeson.encodePretty (OpenAIAgentDescription o)
+            LByteString.writeFile path $ Aeson.encodePretty (AgentDescription o)
             _ <- openFileWithEditor path
             putStrLn $ unwords ["agent definition saved at:", path]
             readBack <- Aeson.eitherDecodeFileStrict' path
             case readBack of
                 (Left err) -> throwIO $ UnparseableAgentFile err
-                (Right (Unspecified _)) -> throwIO $ UnparseableAgentFile "unspecified agent description type"
-                (Right (OpenAIAgentDescription o2)) -> do
+                (Right (AgentDescription o2)) -> do
                     createDirectoryIfMissing True o2.toolDirectory
                     putStrLn $ unwords ["tool dir:", o2.toolDirectory, "ok"]
-
-initAgentsDir :: FilePath -> IO ()
-initAgentsDir path = do
-    createDirectoryIfMissing True path
-    putStrLn $ unwords ["agents dir:", path, "ok"]
 
 initOpenAIKeys :: FilePath -> IO ()
 initOpenAIKeys path = do

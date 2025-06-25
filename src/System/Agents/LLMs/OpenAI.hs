@@ -9,12 +9,14 @@ import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LByteString
-import Data.HashMap.Strict as HashMap
+import Data.Foldable (toList)
+import qualified Data.HashMap.Strict as HashMap
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
 import Data.Monoid (Last (..))
 import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import Data.String (IsString)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -427,7 +429,15 @@ instance FromJSON Response where
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
 
-printLastAnswer :: History -> IO ()
-printLastAnswer hist = do
-    let msg = rspContent =<< lastAnswerMaybe hist
-    Text.putStrLn $ Maybe.fromMaybe "finished but with no response" msg
+locateResponseText :: History -> Maybe Text
+locateResponseText hist = do
+    rsp <-
+        Maybe.listToMaybe $
+            Maybe.mapMaybe viewResponse $
+                toList $
+                    Seq.reverse hist
+    rsp.rspContent
+  where
+    viewResponse :: HistoryItem -> Maybe Response
+    viewResponse (PromptAnswered _ rsp) = Just rsp
+    viewResponse _ = Nothing

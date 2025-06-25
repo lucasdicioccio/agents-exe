@@ -1,6 +1,6 @@
 module System.Agents.TUI.Event where
 
-import qualified System.Agents.Runtime as Runtime
+import qualified System.Agents.Runtime.Trace as Runtime
 
 data AppEvent
     = AppEvent_Heartbeat

@@ -137,9 +137,8 @@ Agents defined in `agents-exe` can call to other agents much like tools (and
 indeed, sub-agents are exposed as "expert tools" to LLMs).  Agents and
 sub-agents can share a same API-key but they do not have to.
 
-At this point, sub-agents cannot have further agents themselves, however
-sub-agents can have their own tools. If you really want to experiment with a
-tree of agents, you can simulate that by using `agents-exe` itself as a tool.
+Sub-agents can have further agents themselves. They are loaded from json files
+in the tool-directory.  At this point, no provision is made to prevent cycles.
 
 ### API Keys
 
@@ -282,5 +281,3 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
 - internal machinery
   - metrics and prodapi-endpoints
   - we need to allow an orchestrator to introspect what happened
-
-- consider allowing sub-agents to also call other agents

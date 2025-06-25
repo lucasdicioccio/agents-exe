@@ -10,10 +10,12 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 
+import System.Agents.Base (AgentId, PingPongQuery (..))
 import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
+import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
@@ -26,7 +28,7 @@ import Brick.Widgets.Edit
 import Brick.Widgets.List
 import qualified Graphics.Vty as Vty
 
-import System.Agents.Dialogues (LoadedAgent (..), OngoingConversation (..), StartedConversation (..))
+import System.Agents.Dialogues (LoadedAgent (..), OngoingConversation (..))
 import System.Agents.TUI.State
 
 tui_appChooseCursor :: TuiState -> [CursorLocation N] -> Maybe (CursorLocation N)
@@ -149,7 +151,7 @@ tui_appDraw tuiState = [render_ui tuiState]
     render_focusedAgentTools st =
         case listSelectedElement st._ui._unifiedList of
             Just (_, (ChatEntryPoint la)) ->
-                txt (renderToolRegistry la.loadedAgentTools)
+                txt (renderToolRegistry st la.loadedAgentRuntime.agentId)
                     <=> str la.loadedAgentInfo.toolDirectory
             _ ->
                 txt "select an agent to show tools"
@@ -188,10 +190,10 @@ tui_appDraw tuiState = [render_ui tuiState]
                             ]
             (Runtime.AgentTrace_Memorize _ _ _ _) -> Nothing
 
-    render_focusedConversation_HistoryItem_query :: Runtime.PendingQuery -> Maybe (Widget N)
-    render_focusedConversation_HistoryItem_query Runtime.GaveToolAnswers = Nothing
-    render_focusedConversation_HistoryItem_query Runtime.Done = Just $ txt "~~~ done ~~~"
-    render_focusedConversation_HistoryItem_query (Runtime.SomeQuery t) = Just $ txt ("> " <> t)
+    render_focusedConversation_HistoryItem_query :: PingPongQuery -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem_query GaveToolAnswers = Nothing
+    render_focusedConversation_HistoryItem_query NoQuery = Just $ txt "~~~ done ~~~"
+    render_focusedConversation_HistoryItem_query (SomeQueryToAnswer t) = Just $ txt ("> " <> t)
 
     render_focusedConversation_HistoryItem_response_text :: OpenAI.Response -> Maybe (Widget N)
     render_focusedConversation_HistoryItem_response_text rsp = do
@@ -207,12 +209,15 @@ tui_appDraw tuiState = [render_ui tuiState]
             else
                 pure $ txt ("< tool calls")
 
-renderToolRegistry :: (Aeson.ToJSON b) => [Tools.Registration a b c] -> Text
-renderToolRegistry registry =
+renderToolRegistry :: TuiState -> AgentId -> Text
+renderToolRegistry st aId =
     Text.unlines $
         fmap renderRegisteredTool registry
   where
-    renderRegisteredTool :: (Aeson.ToJSON b) => Tools.Registration a b c -> Text
+    registry :: [ToolRegistration]
+    registry = Maybe.fromMaybe [] (lookup aId st._projections._tools)
+
+    renderRegisteredTool :: ToolRegistration -> Text
     renderRegisteredTool reg =
         case reg.innerTool.toolDef of
             Tools.BashTool bashScript ->

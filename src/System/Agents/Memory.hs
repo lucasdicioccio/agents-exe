@@ -6,19 +6,18 @@ import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
-import qualified System.Agents.Runtime as Runtime
 
 data MemoryItem
     = MemoryItem
     { rootConversationId :: ConversationId
     , conversationId :: ConversationId
-    , stepId :: Runtime.StepId
+    , stepId :: StepId
     , agentSlug :: AgentSlug
     , agentId :: AgentId
     , parentConversationId :: Maybe ConversationId
     , parentAgentSlug :: Maybe AgentSlug
     , parentAgentId :: Maybe AgentId
-    , pendingQuery :: Runtime.PendingQuery
+    , pendingQuery :: PingPongQuery
     , llmHistory :: LLM.History
     }
     deriving (Show)
@@ -37,17 +36,17 @@ instance ToJSON MemoryItem where
             , "llm_history" .= fmap encodeHistoryItem m.llmHistory
             ]
       where
-        encodeQuery :: Runtime.PendingQuery -> Aeson.Value
-        encodeQuery (Runtime.SomeQuery txt) =
+        encodeQuery :: PingPongQuery -> Aeson.Value
+        encodeQuery (SomeQueryToAnswer txt) =
             Aeson.object
                 [ "type" .= ("query" :: Text)
                 , "q" .= txt
                 ]
-        encodeQuery (Runtime.GaveToolAnswers) =
+        encodeQuery (GaveToolAnswers) =
             Aeson.object
                 [ "type" .= ("gave-tool-answers" :: Text)
                 ]
-        encodeQuery (Runtime.Done) =
+        encodeQuery (NoQuery) =
             Aeson.object
                 [ "type" .= ("done" :: Text)
                 ]

@@ -7,21 +7,19 @@ module System.Agents.Dialogues where
 import Control.Concurrent.STM (STM)
 import Data.Text (Text)
 
-import System.Agents.Base (ConversationId)
+import System.Agents.Base (Agent, ConversationId)
 import qualified System.Agents.Conversation as Conversation
-import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
 
 data LoadedAgent
     = LoadedAgent
     { loadedAgentRuntime :: Runtime.Runtime
-    , loadedAgentTools :: [Runtime.ToolRegistration]
-    , loadedAgentInfo :: FileLoader.OpenAIAgent
+    , loadedAgentInfo :: Agent
     }
 
 data StartedConversation
     = StartedConversation
-    { conversingAgent :: FileLoader.OpenAIAgent
+    { conversingAgent :: Agent
     , conversationState :: Conversation.ConversationState
     , headline :: Text
     }
@@ -29,7 +27,7 @@ data StartedConversation
 data OngoingConversation
     = OngoingConversation
     { conversationId :: ConversationId
-    , conversingAgent :: FileLoader.OpenAIAgent
+    , conversingAgent :: Agent
     , conversationStatus :: Conversation.ConversationStatus
     , conversationHistory :: [Runtime.Trace]
     , prompt :: Maybe Text -> STM Bool
