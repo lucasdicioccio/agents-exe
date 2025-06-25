@@ -90,7 +90,7 @@ library agents-lib
                     , System.Agents.TUI.Handler
                     , System.Agents.TUI.State
                     , System.Agents.TUI.Render
-    build-depends:    base ^>=4.19.1.0,
+    build-depends:    base ^>=4.18.3.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,
                       async,
@@ -142,7 +142,7 @@ executable agents-exe
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.19.1.0,
+    build-depends:    base ^>=4.18.3.0,
                       agents-lib,
                       aeson,
                       contravariant,
@@ -162,7 +162,7 @@ test-suite agents-tests
     main-is: Main.hs
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
-    build-depends:    base ^>=4.19.1.0,
+    build-depends:    base ^>=4.18.3.0,
                       agents-lib,
                       aeson,
                       text,

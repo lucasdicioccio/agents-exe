@@ -47,7 +47,7 @@ instance FromJSON ScriptArgArity where
         _ ->
             fail $
                 List.unlines
-                    [ "Invalid arity: " <> show v
+                    [ "Invalid arity: " <> Prelude.show v
                     , "allowed values are:"
                     , "- single"
                     ]
@@ -75,7 +75,7 @@ instance FromJSON ScriptArgCallingMode where
         _ ->
             fail $
                 List.unlines
-                    [ "Invalid mode: " <> show v
+                    [ "Invalid mode: " <> Prelude.show v
                     , "allowed values are:"
                     , "- positional"
                     , "- stdin"
@@ -222,7 +222,7 @@ translateArguments script = Aeson.withObject "Args" $ \v -> do
     parseArg v arg = v .: (textToKey $ arg.argName)
 
     textToKey :: Text -> Aeson.Key
-    textToKey = read . show
+    textToKey = read . Prelude.show
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.
 flattenArguments :: [(ScriptArg, Text)] -> [Text]
