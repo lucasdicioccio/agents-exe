@@ -1,22 +1,20 @@
 -- | load agents from the filesystem
 module System.Agents.FileLoader (
-    module System.Agents.FileLoader.Base,
+    module System.Agents.Base,
     module System.Agents.FileLoader.JSON,
     Trace (..),
     Agents (..),
-    loadDirectory,
+    listJsonDirectory,
     loadJsonFile,
     InvalidAgentError,
 ) where
 
-import Control.Concurrent.Async (mapConcurrently)
-import Data.Either (partitionEithers)
 import qualified Data.List as List
 import Prod.Tracer (Tracer, runTracer)
 import System.Directory (listDirectory)
 import System.FilePath (takeExtension, (</>))
 
-import System.Agents.FileLoader.Base
+import System.Agents.Base (Agent (..), AgentDescription (..))
 import System.Agents.FileLoader.JSON
 
 -------------------------------------------------------------------------------
@@ -45,14 +43,9 @@ data InvalidAgentError
     = LoadFailure FilePath String
     deriving (Show)
 
-loadDirectory :: Tracer IO Trace -> FilePath -> IO (Agents, [InvalidAgentError])
-loadDirectory tracer path = do
-    contents <- listDirectory path
-    loaded <- mapConcurrently (loadJsonFile tracer) (sources contents)
-    let (erroredScripts, loadedAgents) = partitionEithers loaded
-    let ok = Agents path loadedAgents
-    let ko = erroredScripts
-    pure (ok, ko)
+listJsonDirectory :: FilePath -> IO [FilePath]
+listJsonDirectory path = do
+    sources <$> listDirectory path
   where
     sources :: [FilePath] -> [FilePath]
     sources xs =

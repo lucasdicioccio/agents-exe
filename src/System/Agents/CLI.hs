@@ -28,16 +28,12 @@ mainInteractiveAgent2 :: [LoadedAgent] -> [Props] -> IO ()
 mainInteractiveAgent2 agents (props : rest) = do
     withAgentRuntime props $ \x -> do
         case x of
-            LoadingErrors errs -> traverse_ print errs
-            OtherErrors errs -> traverse_ print errs
+            Errors errs -> traverse_ print errs
             Initialized ai -> do
-                case ai.agentDescription of
-                    FileLoader.Unspecified _ -> do
-                        putStrLn "cannot work with unspecified description"
-                    FileLoader.OpenAIAgentDescription oai -> do
-                        registry <- liftIO ai.agentRuntime.agentTools
-                        let loadedAgent = LoadedAgent ai.agentRuntime registry oai
-                        mainInteractiveAgent2 (loadedAgent : agents) rest
+                let oai = ai.agentBase
+                -- registry <- liftIO ai.agentRuntime.agentTools
+                let loadedAgent = LoadedAgent ai.agentRuntime oai
+                mainInteractiveAgent2 (loadedAgent : agents) rest
 mainInteractiveAgent2 xs [] =
     runMainCLI $
         CliState
@@ -81,7 +77,7 @@ mainInteractiveAgent2 xs [] =
              in
                 NonEmpty.toList (fmap f state.loadedAgents)
 
-    atSlug :: FileLoader.OpenAIAgent -> String
+    atSlug :: FileLoader.Agent -> String
     atSlug desc =
         Text.unpack ("@" <> FileLoader.slug desc)
 

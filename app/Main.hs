@@ -13,23 +13,23 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (AgentId, AgentSlug, ConversationId)
+import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, PingPongQuery (..))
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
-import qualified System.Agents.FileLoader.Base as Agents
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
-import qualified System.Agents.Runtime as Runtime
+import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
+import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
@@ -43,7 +43,6 @@ data Prog = Prog
     , logHttp :: Maybe String
     , memoryHttpStore :: Maybe String
     , agentFiles :: [FilePath]
-    , agentsDir :: FilePath
     , mainCommand :: Command
     }
 
@@ -165,13 +164,6 @@ parseProgOptions =
                     )
                 )
             )
-        <*> strOption
-            ( long "helper-agents-dir"
-                <> metavar "AGENTSDIR"
-                <> help "helper sub-agents directory"
-                <> showDefault
-                <> value "agents"
-            )
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "cli" (info parseCliCommand (idm))
@@ -225,25 +217,23 @@ main = do
 
         let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer
 
+        apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+
         case args.mainCommand of
             Check -> do
                 forM_ args.agentFiles $ \agentFile -> do
                     OneShot.mainPrintAgent $
                         Agent.Props
-                            { Agent.apiKeysFile = args.apiKeysFile
-                            , Agent.rawLogFile = args.logFile
-                            , Agent.mainAgentFile = agentFile
-                            , Agent.helperAgentsDir = args.agentsDir
+                            { Agent.apiKeys = apiKeys
+                            , Agent.rootAgentFile = agentFile
                             , Agent.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
             InteractiveCommandLine -> do
                 let oneProp agentFile =
                         Agent.Props
-                            { Agent.apiKeysFile = args.apiKeysFile
-                            , Agent.rawLogFile = args.logFile
-                            , Agent.mainAgentFile = agentFile
-                            , Agent.helperAgentsDir = args.agentsDir
+                            { Agent.apiKeys = apiKeys
+                            , Agent.rootAgentFile = agentFile
                             , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
@@ -256,10 +246,8 @@ main = do
             TerminalUI -> do
                 let oneAgent agentFile =
                         Agent.Props
-                            { Agent.apiKeysFile = args.apiKeysFile
-                            , Agent.rawLogFile = args.logFile
-                            , Agent.mainAgentFile = agentFile
-                            , Agent.helperAgentsDir = args.agentsDir
+                            { Agent.apiKeys = apiKeys
+                            , Agent.rootAgentFile = agentFile
                             , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
@@ -272,10 +260,8 @@ main = do
                     let oneShot = flip OneShot.mainOneShotText
                     oneShot (Text.unlines promptLines) $
                         Agent.Props
-                            { Agent.apiKeysFile = args.apiKeysFile
-                            , Agent.rawLogFile = args.logFile
-                            , Agent.mainAgentFile = agentFile
-                            , Agent.helperAgentsDir = args.agentsDir
+                            { Agent.apiKeys = apiKeys
+                            , Agent.rootAgentFile = agentFile
                             , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
@@ -290,10 +276,8 @@ main = do
             McpServer -> do
                 let oneAgent agentFile =
                         Agent.Props
-                            { Agent.apiKeysFile = args.apiKeysFile
-                            , Agent.rawLogFile = args.logFile
-                            , Agent.mainAgentFile = agentFile
-                            , Agent.helperAgentsDir = args.agentsDir
+                            { Agent.apiKeys = apiKeys
+                            , Agent.rootAgentFile = agentFile
                             , Agent.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
@@ -305,15 +289,15 @@ main = do
                 McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
             Initialize ->
                 let o =
-                        Agents.OpenAIAgent
-                            { Agents.slug = "main-agent"
-                            , Agents.apiKeyId = "main-key"
-                            , Agents.flavor = "OpenAIv1"
-                            , Agents.modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
-                            , Agents.modelName = "gpt-4-turbo"
-                            , Agents.announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
-                            , Agents.toolDirectory = "."
-                            , Agents.systemPrompt =
+                        Agent
+                            { slug = "main-agent"
+                            , apiKeyId = "main-key"
+                            , flavor = "OpenAIv1"
+                            , modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
+                            , modelName = "gpt-4-turbo"
+                            , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
+                            , toolDirectory = "."
+                            , systemPrompt =
                                 [ "You are a helpful software agent trying to solve user requests"
                                 , "Your preferred action mode is to act as a puppet master capable of driving other agents."
                                 , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
@@ -326,7 +310,6 @@ main = do
                  in do
                         forM_ (take 1 args.agentFiles) $ \agentFile -> do
                             InitProject.initOpenAIAgent o agentFile
-                            InitProject.initAgentsDir args.agentsDir
                             InitProject.initOpenAIKeys args.apiKeysFile
 
 -------------------------------------------------------------------------------
@@ -408,7 +391,7 @@ extractMemories x = case x of
                     , Memory.agentId = aId
                     , Memory.stepId = stepId
                     , Memory.llmHistory = hist
-                    , Memory.pendingQuery = Runtime.Done
+                    , Memory.pendingQuery = NoQuery
                     , Memory.parentAgentSlug = pSlug
                     , Memory.parentConversationId = pcId
                     , Memory.parentAgentId = paId
@@ -449,11 +432,11 @@ toJsonTrace x = case x of
                 , "val" .= baseVal
                 ]
 
-    encodeBaseTrace_Loading :: Runtime.LoadingTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =
         case bt of
-            (Runtime.BashToolsLoadingTrace _) -> Nothing
-            (Runtime.ReloadToolsTrace _) -> Nothing
+            (BashToolbox.BashToolsLoadingTrace _) -> Nothing
+            (BashToolbox.ReloadToolsTrace _) -> Nothing
 
     encodeBaseTrace_Memorize :: Runtime.MemorizeTrace -> Maybe Aeson.Value
     encodeBaseTrace_Memorize bt =

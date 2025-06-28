@@ -21,8 +21,7 @@ import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.Agent as Agent
-import System.Agents.Base (newConversationId)
-import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.Base (Agent (..), newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Runtime as Runtime
@@ -49,13 +48,10 @@ multiAgentsServer' idx (props : xs) mtools = do
     Agent.withAgentRuntime props go
   where
     go (Agent.Initialized ai) = do
-        case ai.agentDescription of
-            (FileLoader.Unspecified _) -> do
-                print ("cannot expose over MCP an agent with unspecified description" :: Text)
-            (FileLoader.OpenAIAgentDescription oai) -> do
-                let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
-                let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
-                multiAgentsServer' (succ idx) xs (tool : mtools)
+        let oai = ai.agentBase
+        let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
+        let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
+        multiAgentsServer' (succ idx) xs (tool : mtools)
     go _ = do
         print ("failed to initialize" :: Text)
 
@@ -172,8 +168,8 @@ handleMsg req (ListPromptsRequestMsg _) = do
                 (Mcp.ListPromptsResult [] Nothing)
     Rpc.sendResponse rsp
 handleMsg req (CallToolRequestMsg callTool) = do
-    let agentFunctions =
-            Runtime.AgentFunctions
+    let conversationFunctions =
+            Runtime.ConversationFunctions
                 (pure Nothing)
                 (\_hist -> pure ())
                 (\err -> pure $ Left err)
@@ -186,7 +182,7 @@ handleMsg req (CallToolRequestMsg callTool) = do
                 (Just query) -> do
                     liftIO $ do
                         cId <- newConversationId
-                        Runtime.handleConversation ai.agentRuntime agentFunctions cId query
+                        Runtime.handleConversation ai.agentRuntime conversationFunctions cId query
         Nothing -> do
             pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =
@@ -210,27 +206,25 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
     adapt :: MappedTool -> Maybe Mcp.Tool
     adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
 
-callExpertTool :: Mcp.Name -> Agent.AgentInfo -> Maybe Mcp.Tool
+callExpertTool :: Mcp.Name -> Agent.AgentTree -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
-    case ai.agentDescription of
-        (FileLoader.Unspecified _) -> Nothing
-        (FileLoader.OpenAIAgentDescription oai) ->
-            Just $
-                Mcp.Tool
-                    mcpName
-                    (Just oai.announce)
-                    ( Mcp.InputSchema
-                        (Just ["prompt"])
-                        ( Just $
-                            Mcp.pairz
-                                [ "prompt"
-                                    .= Mcp.object
-                                        [ "type" .= ("string" :: Text)
-                                        , "title" .= ("the prompt asked when calling the expert" :: Text)
-                                        ]
-                                ]
-                        )
+    let oai = ai.agentBase
+     in Just $
+            Mcp.Tool
+                mcpName
+                (Just oai.announce)
+                ( Mcp.InputSchema
+                    (Just ["prompt"])
+                    ( Just $
+                        Mcp.pairz
+                            [ "prompt"
+                                .= Mcp.object
+                                    [ "type" .= ("string" :: Text)
+                                    , "title" .= ("the prompt asked when calling the expert" :: Text)
+                                    ]
+                            ]
                     )
+                )
 
 extractPrompt :: Mcp.CallToolRequest -> Maybe Text
 extractPrompt (Mcp.CallToolRequest _ Nothing) = Nothing

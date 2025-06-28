@@ -19,7 +19,7 @@ import qualified Prod.Tracer as Prod
 
 import System.Agents.Base (ConversationId, newConversationId)
 import System.Agents.LLMs.OpenAI as LLMs
-import System.Agents.Runtime (AgentFunctions (..), handleConversation)
+import System.Agents.Runtime (ConversationFunctions (..), handleConversation)
 import qualified System.Agents.Runtime as Runtime
 
 data ConversationStatus
@@ -45,7 +45,7 @@ converse baseRuntime txt = do
     statusTVar <- newTVarIO Executing
     let logTracesInIORef = Prod.Tracer $ \t -> modifyIORef tracesIORef (t :)
     let adaptedRuntime = Runtime.addTracer baseRuntime logTracesInIORef
-    a <- Async.async $ handleConversation adaptedRuntime (agentFunctions inbox statusTVar) cId txt
+    a <- Async.async $ handleConversation adaptedRuntime (conversationFunctions inbox statusTVar) cId txt
     pure $
         ConversationState
             { task = a
@@ -55,12 +55,12 @@ converse baseRuntime txt = do
             , traces = readIORef tracesIORef
             }
   where
-    agentFunctions ::
+    conversationFunctions ::
         TMVar (Maybe Text) ->
         TVar ConversationStatus ->
-        AgentFunctions (Either String LLMs.History)
-    agentFunctions inbox statusTVar =
-        AgentFunctions
+        ConversationFunctions (Either String LLMs.History)
+    conversationFunctions inbox statusTVar =
+        ConversationFunctions
             (nextQuery inbox statusTVar)
             (claimProgress statusTVar)
             (endWithError statusTVar)

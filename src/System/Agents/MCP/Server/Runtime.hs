@@ -22,7 +22,7 @@ import qualified System.Agents.Agent as Agent
 import System.Agents.MCP.Base as Mcp
 
 data MappedTool
-    = ExpertAgentAsPrompt Mcp.Name Agent.AgentInfo
+    = ExpertAgentAsPrompt Mcp.Name Agent.AgentTree
 
 type MappedTools = [MappedTool]
 

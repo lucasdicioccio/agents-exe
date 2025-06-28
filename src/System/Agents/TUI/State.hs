@@ -14,10 +14,12 @@ import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 
+import System.Agents.Base (AgentId)
 import qualified System.Agents.Conversation as Conversation
 import System.Agents.Dialogues (LoadedAgent (..), OngoingConversation (..), StartedConversation (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Runtime as Runtime
+import System.Agents.ToolRegistration (ToolRegistration)
 
 data BrickWidgetName
     = UnifiedList
@@ -32,6 +34,12 @@ data Entities
     , _conversations :: IORef [StartedConversation]
     }
 makeLenses ''Entities
+
+data Projections
+    = Projections
+    { _tools :: [(AgentId, [ToolRegistration])]
+    }
+makeLenses ''Projections
 
 data ChatHandle
     = ChatEntryPoint LoadedAgent
@@ -49,6 +57,7 @@ makeLenses ''UI
 data TuiState
     = TuiState
     { _entities :: Entities
+    , _projections :: Projections
     , _ui :: UI
     }
 makeLenses ''TuiState
@@ -57,12 +66,22 @@ newTuiState :: [LoadedAgent] -> IO TuiState
 newTuiState agents =
     TuiState
         <$> entitiesV
+        <*> projectionsV
         <*> uiV
   where
     entitiesV =
         Entities
             <$> pure agents
             <*> newIORef []
+    projectionsV =
+        let
+            readTools :: LoadedAgent -> IO (AgentId, [ToolRegistration])
+            readTools agent = do
+                x <- agent.loadedAgentRuntime.agentTools
+                pure (agent.loadedAgentRuntime.agentId, x)
+         in
+            Projections
+                <$> traverse readTools agents
     uiV =
         UI
             <$> pure (focusRing [UnifiedList, PromptEditor])
