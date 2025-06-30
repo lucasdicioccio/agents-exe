@@ -151,6 +151,8 @@ executable agents-exe
                       agents-lib,
                       aeson,
                       contravariant,
+                      directory,
+                      filepath,
                       text,
                       prodapi,
                       optparse-applicative

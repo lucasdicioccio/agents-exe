@@ -111,6 +111,8 @@ loadAgentTree props tree = do
                     okRuntimes
                     (AgentDescription tree.agentBase2)
             case rt of
+                Left err ->
+                    pure $ Left $ NonEmpty.singleton $ OtherError err
                 Right agentRt ->
                     pure $ Right $ AgentTree tree.agentBase2 agentRt oks
 
