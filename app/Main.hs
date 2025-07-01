@@ -31,11 +31,23 @@ import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
+import System.Directory (getHomeDirectory)
+import System.FilePath ((</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import qualified System.Agents.Memory as Memory
 
 import Options.Applicative
+
+data ArgParserArgs
+    = ArgParserArgs
+    { configdir :: FilePath
+    }
+
+initArgParserArgs :: IO ArgParserArgs
+initArgParserArgs = do
+    homedir <- getHomeDirectory
+    pure $ ArgParserArgs (homedir </> ".config/agents-exe")
 
 data Prog = Prog
     { apiKeysFile :: FilePath
@@ -121,15 +133,15 @@ parseSelfDescribeCommand :: Parser Command
 parseSelfDescribeCommand =
     pure SelfDescribe
 
-parseProgOptions :: Parser Prog
-parseProgOptions =
+parseProgOptions :: ArgParserArgs -> Parser Prog
+parseProgOptions argparserargs =
     Prog
         <$> strOption
             ( long "api-keys"
                 <> metavar "AGENTS-KEY"
                 <> help "path to json-file containing API keys"
                 <> showDefault
-                <> value "agents-exe.keys"
+                <> value (argparserargs.configdir </> "secret-keys")
             )
         <*> strOption
             ( long "log-file"
@@ -155,7 +167,7 @@ parseProgOptions =
                 )
             )
         <*> fmap
-            addDefaultSomeAgentFile
+            (addDefaultSomeAgentFile argparserargs.configdir)
             ( many
                 ( strOption
                     ( long "agent-file"
@@ -175,9 +187,9 @@ parseProgOptions =
             )
 
 -- | helper to make agent-file entirely optional whilst using the 'many' combinator
-addDefaultSomeAgentFile :: [FilePath] -> [FilePath]
-addDefaultSomeAgentFile [] = ["agent.json"]
-addDefaultSomeAgentFile xs = xs
+addDefaultSomeAgentFile :: FilePath -> [FilePath] -> [FilePath]
+addDefaultSomeAgentFile configdir [] = [configdir </> "default" </> "agent.json"]
+addDefaultSomeAgentFile _ xs = xs
 
 addDefaultStdinFile :: [FilePath] -> [FilePath]
 addDefaultStdinFile [] = ["@/dev/stdin"]
@@ -187,11 +199,12 @@ main :: IO ()
 main = do
     hSetBuffering stderr LineBuffering
     hSetBuffering stdout LineBuffering
-    prog =<< execParser infoProg
+    argzparam <- initArgParserArgs
+    prog =<< execParser (infoProg argzparam)
   where
-    infoProg =
+    infoProg argzparam =
         info
-            (parseProgOptions <**> helper)
+            (parseProgOptions argzparam <**> helper)
             ( fullDesc
                 <> progDesc "Your favorite agent framework."
                 <> header "hi"
@@ -217,10 +230,9 @@ main = do
 
         let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer
 
-        apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
-
         case args.mainCommand of
             Check -> do
+                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
                 forM_ args.agentFiles $ \agentFile -> do
                     OneShot.mainPrintAgent $
                         Agent.Props
@@ -230,6 +242,7 @@ main = do
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
             InteractiveCommandLine -> do
+                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
                 let oneProp agentFile =
                         Agent.Props
                             { Agent.apiKeys = apiKeys
@@ -244,6 +257,7 @@ main = do
                             }
                 CLI.mainInteractiveAgent $ map oneProp args.agentFiles
             TerminalUI -> do
+                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =
                         Agent.Props
                             { Agent.apiKeys = apiKeys
@@ -255,6 +269,7 @@ main = do
                             }
                 TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do
+                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
                     let oneShot = flip OneShot.mainOneShotText
@@ -267,13 +282,15 @@ main = do
                                     baseTracer
                                     traceUsefulPromptStderr
                             }
-            SelfDescribe ->
+            SelfDescribe -> do
+                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
                 Aeson.encodeFile "/dev/stdout" $
                     Bash.ScriptInfo
                         []
                         "self-introspect"
                         "introspect a version of yourself"
             McpServer -> do
+                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =
                         Agent.Props
                             { Agent.apiKeys = apiKeys
@@ -296,7 +313,7 @@ main = do
                             , modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
                             , modelName = "gpt-4-turbo"
                             , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
-                            , toolDirectory = "."
+                            , toolDirectory = "tools"
                             , systemPrompt =
                                 [ "You are a helpful software agent trying to solve user requests"
                                 , "Your preferred action mode is to act as a puppet master capable of driving other agents."
@@ -309,8 +326,9 @@ main = do
                             }
                  in do
                         forM_ (take 1 args.agentFiles) $ \agentFile -> do
-                            InitProject.initOpenAIAgent o agentFile
-                            InitProject.initOpenAIKeys args.apiKeysFile
+                            InitProject.initAgentFile o agentFile
+                            InitProject.initAgentTooldir o agentFile
+                            InitProject.initKeyFile args.apiKeysFile
 
 -------------------------------------------------------------------------------
 

@@ -7,7 +7,9 @@ import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Maybe as Maybe
 import System.Directory (createDirectoryIfMissing, doesFileExist)
+import qualified System.Directory as Directory
 import System.Environment (lookupEnv)
+import System.FilePath (takeDirectory, (</>))
 import System.Process as Process
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
@@ -21,13 +23,14 @@ data InitializeError
 
 instance Exception (InitializeError)
 
-initOpenAIAgent :: Agent -> FilePath -> IO ()
-initOpenAIAgent o path = do
+initAgentFile :: Agent -> FilePath -> IO ()
+initAgentFile o path = do
     exist <- doesFileExist path
     if exist
         then do
             throwIO $ AgentFilePreExists path
         else do
+            Directory.createDirectoryIfMissing True (takeDirectory path)
             LByteString.writeFile path $ Aeson.encodePretty (AgentDescription o)
             _ <- openFileWithEditor path
             putStrLn $ unwords ["agent definition saved at:", path]
@@ -38,13 +41,18 @@ initOpenAIAgent o path = do
                     createDirectoryIfMissing True o2.toolDirectory
                     putStrLn $ unwords ["tool dir:", o2.toolDirectory, "ok"]
 
-initOpenAIKeys :: FilePath -> IO ()
-initOpenAIKeys path = do
+initAgentTooldir :: Agent -> FilePath -> IO ()
+initAgentTooldir o path = do
+    Directory.createDirectoryIfMissing True (takeDirectory path </> o.toolDirectory)
+
+initKeyFile :: FilePath -> IO ()
+initKeyFile path = do
     exist <- doesFileExist path
     if exist
         then do
             throwIO $ KeyFilePreExists path
         else do
+            Directory.createDirectoryIfMissing True (takeDirectory path)
             putStrLn $ "You need to initialize an OpenAI Key."
             putStrLn $ ""
             putStrLn $ "For OpenAI:"

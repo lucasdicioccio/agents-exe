@@ -138,7 +138,20 @@ indeed, sub-agents are exposed as "expert tools" to LLMs).  Agents and
 sub-agents can share a same API-key but they do not have to.
 
 Sub-agents can have further agents themselves. They are loaded from json files
-in the tool-directory.  At this point, no provision is made to prevent cycles.
+in the tool-directory (relative to the agent's json file parent directory).  At this point, no provision is made to prevent cycles.
+
+A typical config-tree for an agent is as follows on the filesystem.
+
+```console
+/some-dir      # the agent root dir
+  /agent.json  # the agent-definition file
+  /tools             # the tool dir
+    /aloha.json      # some aloha tool
+    /expert-1.json   # subagent agent-definition file
+    /expert-1-tools  # subagent's tool dir
+      /...
+    /ping.sh         # some ping tool
+```
 
 ### API Keys
 
