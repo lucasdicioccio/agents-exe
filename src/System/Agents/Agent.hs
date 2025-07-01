@@ -3,6 +3,8 @@
 
 module System.Agents.Agent where
 
+import qualified System.FilePath as FilePath
+import System.FilePath ((</>))
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy as LByteString
@@ -57,9 +59,13 @@ data AgentTree = AgentTree
     }
 
 data AgentTree2 = AgentTree2
-    { agentBase2 :: Agent
+    { agentRootFile2 :: FilePath
+    , agentBase2 :: Agent
     , agentChildren2 :: [AgentTree2]
     }
+
+agentRootDir :: AgentTree2 -> FilePath
+agentRootDir agent = FilePath.takeDirectory agent.agentRootFile2
 
 agentLeaf :: Agent -> Runtime.Runtime -> AgentTree
 agentLeaf a rt =
@@ -92,7 +98,7 @@ loadAgentTreeConfig props = do
                 Just errs -> do
                     pure $ Left $ sconcat errs
                 Nothing -> do
-                    pure $ Right $ AgentTree2 agent oks
+                    pure $ Right $ AgentTree2 props.rootAgentFile agent oks
 
 loadAgentTree :: Props -> AgentTree2 -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
 loadAgentTree props tree = do
@@ -109,6 +115,7 @@ loadAgentTree props tree = do
                     props.apiKeys
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
                     okRuntimes
+                    (agentRootDir tree)
                     (AgentDescription tree.agentBase2)
             case rt of
                 Left err ->
@@ -138,9 +145,10 @@ initAgent ::
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
     [Runtime.Runtime] ->
+    FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgent tracer keys modifyPrompt helperAgents (AgentDescription desc) = do
+initAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
@@ -161,7 +169,7 @@ initAgent tracer keys modifyPrompt helperAgents (AgentDescription desc) = do
                             Text.unlines desc.systemPrompt
                     )
                 )
-                desc.toolDirectory
+                (rootDir </> desc.toolDirectory)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text

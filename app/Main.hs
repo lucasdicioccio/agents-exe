@@ -313,7 +313,7 @@ main = do
                             , modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
                             , modelName = "gpt-4-turbo"
                             , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
-                            , toolDirectory = "."
+                            , toolDirectory = "tools"
                             , systemPrompt =
                                 [ "You are a helpful software agent trying to solve user requests"
                                 , "Your preferred action mode is to act as a puppet master capable of driving other agents."
@@ -327,6 +327,7 @@ main = do
                  in do
                         forM_ (take 1 args.agentFiles) $ \agentFile -> do
                             InitProject.initAgentFile o agentFile
+                            InitProject.initAgentTooldir o agentFile
                             InitProject.initKeyFile args.apiKeysFile
 
 -------------------------------------------------------------------------------

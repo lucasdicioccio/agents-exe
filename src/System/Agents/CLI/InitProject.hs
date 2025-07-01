@@ -9,7 +9,7 @@ import qualified Data.Maybe as Maybe
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import qualified System.Directory as Directory
 import System.Environment (lookupEnv)
-import System.FilePath (takeDirectory)
+import System.FilePath (takeDirectory, (</>))
 import System.Process as Process
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
@@ -40,6 +40,10 @@ initAgentFile o path = do
                 (Right (AgentDescription o2)) -> do
                     createDirectoryIfMissing True o2.toolDirectory
                     putStrLn $ unwords ["tool dir:", o2.toolDirectory, "ok"]
+
+initAgentTooldir :: Agent -> FilePath -> IO ()
+initAgentTooldir o path = do
+    Directory.createDirectoryIfMissing True (takeDirectory path </> o.toolDirectory)
 
 initKeyFile :: FilePath -> IO ()
 initKeyFile path = do
