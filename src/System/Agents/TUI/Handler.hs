@@ -9,6 +9,7 @@ import Brick.Widgets.Edit
 import Brick.Widgets.List
 import Control.Concurrent.STM (atomically)
 import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (toList, traverse_)
 import qualified Data.List as List
@@ -151,23 +152,33 @@ tui_handleViewPortEvent_PromptEditor ev = do
     case ev of
         VtyEvent (Vty.EvKey Vty.KEnter mods)
             | Vty.MMeta `elem` mods -> do
-                item <- use (ui . unifiedList)
-                case listSelectedElement item of
-                    Nothing -> pure ()
-                    (Just (_, (ChatEntryPoint la))) -> do
-                        startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        conv <- liftIO $ Conversation.converse la.loadedAgentRuntime startingPrompt
-                        st0 <- get
-                        liftIO $
-                            referenceConversation
-                                st0
-                                (StartedConversation la.loadedAgentInfo conv startingPrompt)
-                    (Just (_, (ConversationEntryPoint conv))) -> do
-                        continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-                        _ <- liftIO . atomically $ conv.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
-                        pure ()
-                (ui . promptEditor . editContentsL) .= Text.textZipper [] Nothing
+                sendPromptBuffer
+                resetPromptBuffer
+            | otherwise -> do
+                buf <- use (ui . promptEditor . to getEditContents . to Text.unlines)
+                when ("\n\n\n\n" `Text.isSuffixOf` buf) $ do
+                  sendPromptBuffer
+                  resetPromptBuffer
         _ -> pure ()
+
+  where
+    resetPromptBuffer = (ui . promptEditor . editContentsL) .= Text.textZipper [] Nothing
+    sendPromptBuffer = do
+      item <- use (ui . unifiedList)
+      case listSelectedElement item of
+          Nothing -> pure ()
+          (Just (_, (ChatEntryPoint la))) -> do
+              startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
+              conv <- liftIO $ Conversation.converse la.loadedAgentRuntime startingPrompt
+              st0 <- get
+              liftIO $
+                  referenceConversation
+                      st0
+                      (StartedConversation la.loadedAgentInfo conv startingPrompt)
+          (Just (_, (ConversationEntryPoint conv))) -> do
+              continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
+              _ <- liftIO . atomically $ conv.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
+              pure ()
 
 textLinesToPrompt :: [Text] -> Text
 textLinesToPrompt = Text.stripEnd . Text.unlines
