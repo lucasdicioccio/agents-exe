@@ -6,7 +6,7 @@
     "modelUrl": "https://api.openai.com/v1",
     "apiKeyId": "openai",
     "modelName": "gpt-4o-mini",
-    "toolDirectory": "./tools/toolsmith",
+    "toolDirectory": "toolsmith",
     "announce": "an agent capable to enumerate and create bash tools",
     "systemPrompt": [
       "You are a capable toolsmith capable of creating new tools in bash.",

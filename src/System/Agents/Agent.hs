@@ -3,8 +3,6 @@
 
 module System.Agents.Agent where
 
-import qualified System.FilePath as FilePath
-import System.FilePath ((</>))
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy as LByteString
@@ -16,6 +14,8 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
+import System.FilePath ((</>))
+import qualified System.FilePath as FilePath
 
 import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
@@ -91,7 +91,7 @@ loadAgentTreeConfig props = do
         Left err ->
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
         Right (AgentDescription agent) -> do
-            subConfigs <- FileLoader.listJsonDirectory agent.toolDirectory
+            subConfigs <- FileLoader.listJsonDirectory (FilePath.takeDirectory props.rootAgentFile </> agent.toolDirectory)
             let propz = [props{rootAgentFile = c} | c <- subConfigs]
             (kos, oks) <- fmap Either.partitionEithers $ traverse loadAgentTreeConfig propz
             case NonEmpty.nonEmpty kos of

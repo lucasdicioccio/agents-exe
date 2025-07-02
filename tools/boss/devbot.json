@@ -6,7 +6,7 @@
     "modelUrl": "https://api.openai.com/v1",
     "apiKeyId": "openai",
     "modelName": "gpt-4o-mini",
-    "toolDirectory": "./tools/devbot",
+    "toolDirectory": "devbot",
     "announce": "an agent capable to read/save memory banks, generate and run code",
     "systemPrompt":
       [ "You are a helpful assistant."
