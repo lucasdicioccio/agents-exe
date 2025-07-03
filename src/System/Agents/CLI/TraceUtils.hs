@@ -54,6 +54,15 @@ traceUsefulPromptHandle h = Tracer f
     f (AgentTrace tr) =
         Text.hPutStrLn h $ renderAgentTrace tr
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (ConfigLoadedTrace x) =
+        Text.hPutStrLn h (showTree 0 x)
+      where
+        showTree :: Int -> AgentConfigTree -> Text.Text
+        showTree n v =
+            Text.unlines
+                [ Text.concat [Text.replicate n "  ", Text.pack v.agentConfigFile]
+                , Text.unlines $ fmap (showTree (succ n)) v.agentConfigChildren
+                ]
 
 renderAgentTrace :: Runtime.Trace -> Text
 renderAgentTrace (Runtime.AgentTrace_Loading slug _ tr) =

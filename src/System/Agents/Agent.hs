@@ -43,6 +43,7 @@ readOpenApiKeysFile path =
 data Trace
     = AgentTrace Runtime.Trace
     | DataLoadingTrace FileLoader.Trace
+    | ConfigLoadedTrace AgentConfigTree
     deriving (Show)
 
 data Props
@@ -58,14 +59,15 @@ data AgentTree = AgentTree
     , agentChildren :: [AgentTree]
     }
 
-data AgentTree2 = AgentTree2
-    { agentRootFile2 :: FilePath
-    , agentBase2 :: Agent
-    , agentChildren2 :: [AgentTree2]
+data AgentConfigTree = AgentConfigTree
+    { agentConfigFile :: FilePath
+    , agentConfig :: Agent
+    , agentConfigChildren :: [AgentConfigTree]
     }
+    deriving (Show)
 
-agentRootDir :: AgentTree2 -> FilePath
-agentRootDir agent = FilePath.takeDirectory agent.agentRootFile2
+agentRootDir :: AgentConfigTree -> FilePath
+agentRootDir agent = FilePath.takeDirectory agent.agentConfigFile
 
 agentLeaf :: Agent -> Runtime.Runtime -> AgentTree
 agentLeaf a rt =
@@ -83,7 +85,7 @@ data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
     | Initialized AgentTree
 
-loadAgentTreeConfig :: Props -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree2)
+loadAgentTreeConfig :: Props -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
     let tracer = props.interactiveTracer
     boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.rootAgentFile
@@ -98,12 +100,12 @@ loadAgentTreeConfig props = do
                 Just errs -> do
                     pure $ Left $ sconcat errs
                 Nothing -> do
-                    pure $ Right $ AgentTree2 props.rootAgentFile agent oks
+                    pure $ Right $ AgentConfigTree props.rootAgentFile agent oks
 
-loadAgentTree :: Props -> AgentTree2 -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
+loadAgentTree :: Props -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
 loadAgentTree props tree = do
     let tracer = props.interactiveTracer
-    agentRuntimes <- traverse (loadAgentTree props) tree.agentChildren2
+    agentRuntimes <- traverse (loadAgentTree props) tree.agentConfigChildren
     let (kos, oks) = Either.partitionEithers agentRuntimes
     case NonEmpty.nonEmpty kos of
         Just errs -> pure $ Left $ sconcat errs
@@ -116,12 +118,12 @@ loadAgentTree props tree = do
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
                     okRuntimes
                     (agentRootDir tree)
-                    (AgentDescription tree.agentBase2)
+                    (AgentDescription tree.agentConfig)
             case rt of
                 Left err ->
                     pure $ Left $ NonEmpty.singleton $ OtherError err
                 Right agentRt ->
-                    pure $ Right $ AgentTree tree.agentBase2 agentRt oks
+                    pure $ Right $ AgentTree tree.agentConfig agentRt oks
 
 loadAgentRuntime :: Props -> IO LoadAgentResult
 loadAgentRuntime props = do
@@ -129,6 +131,7 @@ loadAgentRuntime props = do
     case cfgs of
         Left errs -> pure $ Errors errs
         Right cfg -> do
+            runTracer props.interactiveTracer (ConfigLoadedTrace cfg)
             tree <- loadAgentTree props cfg
             case tree of
                 Left errs -> pure $ Errors errs

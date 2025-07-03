@@ -423,6 +423,7 @@ toJsonTrace :: Agent.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
     Agent.DataLoadingTrace _ -> Nothing
     Agent.AgentTrace v -> encodeAgentTrace v
+    Agent.ConfigLoadedTrace _ -> Nothing
   where
     encodeAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
     encodeAgentTrace tr = do
