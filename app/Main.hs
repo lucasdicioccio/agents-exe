@@ -12,7 +12,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
-import qualified System.Agents.Agent as Agent
+import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, PingPongQuery (..))
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
@@ -31,6 +31,7 @@ import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
+import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Directory (getHomeDirectory)
 import System.FilePath ((</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
@@ -232,75 +233,75 @@ main = do
 
         case args.mainCommand of
             Check -> do
-                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 forM_ args.agentFiles $ \agentFile -> do
                     OneShot.mainPrintAgent $
-                        Agent.Props
-                            { Agent.apiKeys = apiKeys
-                            , Agent.rootAgentFile = agentFile
-                            , Agent.interactiveTracer =
+                        AgentTree.Props
+                            { AgentTree.apiKeys = apiKeys
+                            , AgentTree.rootAgentFile = agentFile
+                            , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
             InteractiveCommandLine -> do
-                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 let oneProp agentFile =
-                        Agent.Props
-                            { Agent.apiKeys = apiKeys
-                            , Agent.rootAgentFile = agentFile
-                            , Agent.interactiveTracer =
+                        AgentTree.Props
+                            { AgentTree.apiKeys = apiKeys
+                            , AgentTree.rootAgentFile = agentFile
+                            , AgentTree.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
                                         tracePrintingTextResponses
-                                        (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                        (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                                     )
                             }
                 CLI.mainInteractiveAgent $ map oneProp args.agentFiles
             TerminalUI -> do
-                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =
-                        Agent.Props
-                            { Agent.apiKeys = apiKeys
-                            , Agent.rootAgentFile = agentFile
-                            , Agent.interactiveTracer =
+                        AgentTree.Props
+                            { AgentTree.apiKeys = apiKeys
+                            , AgentTree.rootAgentFile = agentFile
+                            , AgentTree.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
-                                    (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                                    (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             }
                 TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
             OneShot opts -> do
-                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
                     promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
                     let oneShot = flip OneShot.mainOneShotText
                     oneShot (Text.unlines promptLines) $
-                        Agent.Props
-                            { Agent.apiKeys = apiKeys
-                            , Agent.rootAgentFile = agentFile
-                            , Agent.interactiveTracer =
+                        AgentTree.Props
+                            { AgentTree.apiKeys = apiKeys
+                            , AgentTree.rootAgentFile = agentFile
+                            , AgentTree.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
                                     traceUsefulPromptStderr
                             }
             SelfDescribe -> do
-                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 Aeson.encodeFile "/dev/stdout" $
                     Bash.ScriptInfo
                         []
                         "self-introspect"
                         "introspect a version of yourself"
             McpServer -> do
-                apiKeys <- Agent.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =
-                        Agent.Props
-                            { Agent.apiKeys = apiKeys
-                            , Agent.rootAgentFile = agentFile
-                            , Agent.interactiveTracer =
+                        AgentTree.Props
+                            { AgentTree.apiKeys = apiKeys
+                            , AgentTree.rootAgentFile = agentFile
+                            , AgentTree.interactiveTracer =
                                 Prod.traceBoth
                                     baseTracer
                                     ( Prod.traceBoth
                                         traceUsefulPromptStderr
-                                        (Agent.traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                        (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
                             }
                 McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
@@ -336,9 +337,9 @@ maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
 
-extractMemories :: Agent.Trace -> Either () [Memory.MemoryItem]
+extractMemories :: AgentTree.Trace -> Either () [Memory.MemoryItem]
 extractMemories x = case x of
-    Agent.AgentTrace tr -> go [] tr
+    AgentTree.AgentTrace tr -> go [] tr
     _ -> Left ()
   where
     parentInfo :: [Runtime.Trace] -> (Maybe AgentSlug, Maybe ConversationId, Maybe AgentId)
@@ -419,10 +420,11 @@ extractMemories x = case x of
         go (tr : xs) sub
     go _ _ = Left ()
 
-toJsonTrace :: Agent.Trace -> Maybe Aeson.Value
+toJsonTrace :: AgentTree.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
-    Agent.DataLoadingTrace _ -> Nothing
-    Agent.AgentTrace v -> encodeAgentTrace v
+    AgentTree.DataLoadingTrace _ -> Nothing
+    AgentTree.AgentTrace v -> encodeAgentTrace v
+    AgentTree.ConfigLoadedTrace _ -> Nothing
   where
     encodeAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
     encodeAgentTrace tr = do

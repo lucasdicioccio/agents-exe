@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Agents.Agent where
+module System.Agents.AgentTree where
 
+import Control.Monad (void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy as LByteString
@@ -19,6 +20,7 @@ import qualified System.FilePath as FilePath
 
 import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
+import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as LLM
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
@@ -28,22 +30,18 @@ import qualified System.Agents.Tools.IO as IOTools
 
 import System.Agents.ApiKeys
 
-readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
-readOpenApiKeysFile path =
-    maybe [] flattenOpenAIKeys <$> readApiKeys path
-  where
-    flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
-    flattenOpenAIKeys (ApiKeys keys) =
-        [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
-
-    readApiKeys :: FilePath -> IO (Maybe ApiKeys)
-    readApiKeys path =
-        Aeson.decode <$> LByteString.readFile path
-
+-------------------------------------------------------------------------------
 data Trace
     = AgentTrace Runtime.Trace
     | DataLoadingTrace FileLoader.Trace
-    deriving (Show)
+    | ConfigLoadedTrace AgentConfigTree
+    deriving
+        ( -- | AgentInitialized AgentConfigTree Runtime
+          Show
+        )
+
+-------------------------------------------------------------------------------
+type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
 
 data Props
     = Props
@@ -53,27 +51,26 @@ data Props
     }
 
 data AgentTree = AgentTree
-    { agentBase :: Agent
+    { agentFile :: FilePath
+    , agentBase :: Agent
     , agentRuntime :: Runtime.Runtime
     , agentChildren :: [AgentTree]
     }
 
-data AgentTree2 = AgentTree2
-    { agentRootFile2 :: FilePath
-    , agentBase2 :: Agent
-    , agentChildren2 :: [AgentTree2]
+agentToolDir :: AgentTree -> FilePath
+agentToolDir t = toolDir t.agentFile t.agentBase
+
+data AgentConfigTree = AgentConfigTree
+    { agentConfigFile :: FilePath
+    , agentConfig :: Agent
+    , agentConfigChildren :: [AgentConfigTree]
     }
+    deriving (Show)
 
-agentRootDir :: AgentTree2 -> FilePath
-agentRootDir agent = FilePath.takeDirectory agent.agentRootFile2
+agentRootDir :: AgentConfigTree -> FilePath
+agentRootDir agent = FilePath.takeDirectory agent.agentConfigFile
 
-agentLeaf :: Agent -> Runtime.Runtime -> AgentTree
-agentLeaf a rt =
-    AgentTree a rt []
-
-extractChildrenAgents :: FileLoader.Agents -> [Agent]
-extractChildrenAgents xs = [a | (AgentDescription a) <- xs.agents]
-
+-------------------------------------------------------------------------------
 data LoadingError
     = AgentLoadingError FileLoader.InvalidAgentError
     | OtherError String
@@ -83,7 +80,11 @@ data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
     | Initialized AgentTree
 
-loadAgentTreeConfig :: Props -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree2)
+toolDir :: FilePath -> Agent -> FilePath
+toolDir root agent =
+    FilePath.takeDirectory root </> agent.toolDirectory
+
+loadAgentTreeConfig :: Props -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
     let tracer = props.interactiveTracer
     boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.rootAgentFile
@@ -91,56 +92,62 @@ loadAgentTreeConfig props = do
         Left err ->
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
         Right (AgentDescription agent) -> do
-            subConfigs <- FileLoader.listJsonDirectory (FilePath.takeDirectory props.rootAgentFile </> agent.toolDirectory)
+            subConfigs <- FileLoader.listJsonDirectory (toolDir props.rootAgentFile agent)
             let propz = [props{rootAgentFile = c} | c <- subConfigs]
             (kos, oks) <- fmap Either.partitionEithers $ traverse loadAgentTreeConfig propz
             case NonEmpty.nonEmpty kos of
                 Just errs -> do
                     pure $ Left $ sconcat errs
                 Nothing -> do
-                    pure $ Right $ AgentTree2 props.rootAgentFile agent oks
+                    pure $ Right $ AgentConfigTree props.rootAgentFile agent oks
 
-loadAgentTree :: Props -> AgentTree2 -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
+loadAgentTree :: Props -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
 loadAgentTree props tree = do
     let tracer = props.interactiveTracer
-    agentRuntimes <- traverse (loadAgentTree props) tree.agentChildren2
+    agentRuntimes <- traverse (loadAgentTree props) tree.agentConfigChildren
     let (kos, oks) = Either.partitionEithers agentRuntimes
     case NonEmpty.nonEmpty kos of
         Just errs -> pure $ Left $ sconcat errs
         Nothing -> do
             let okRuntimes = fmap agentRuntime oks
             rt <-
-                initAgent
+                initAgentTreeAgent
                     tracer
                     props.apiKeys
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
                     okRuntimes
                     (agentRootDir tree)
-                    (AgentDescription tree.agentBase2)
+                    (AgentDescription tree.agentConfig)
             case rt of
                 Left err ->
                     pure $ Left $ NonEmpty.singleton $ OtherError err
-                Right agentRt ->
-                    pure $ Right $ AgentTree tree.agentBase2 agentRt oks
+                Right agentRt -> do
+                    -- runTracer props.interactiveTracer (AgentInitialized tree agentRt)
+                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt oks
+                    _ <- Notify.initRuntime reloadNotificationTracer [(ret, agentToolDir ret)] (\_ ev -> Notify.isAboutFileChange ev)
+                    pure $ Right $ ret
 
-loadAgentRuntime :: Props -> IO LoadAgentResult
-loadAgentRuntime props = do
+loadAgentTreeRuntime :: Props -> IO LoadAgentResult
+loadAgentTreeRuntime props = do
     cfgs <- loadAgentTreeConfig props
     case cfgs of
         Left errs -> pure $ Errors errs
         Right cfg -> do
+            runTracer props.interactiveTracer (ConfigLoadedTrace cfg)
             tree <- loadAgentTree props cfg
             case tree of
                 Left errs -> pure $ Errors errs
                 Right ok -> pure $ Initialized ok
 
-withAgentRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
-withAgentRuntime props continue = do
-    loadAgentRuntime props >>= continue
+withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
+withAgentTreeRuntime props continue = do
+    loadAgentTreeRuntime props >>= continue
+
+-------------------------------------------------------------------------------
 
 type PromptModifier = Text -> Text
 
-initAgent ::
+initAgentTreeAgent ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
@@ -148,7 +155,7 @@ initAgent ::
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
+initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
@@ -189,15 +196,6 @@ augmentMainAgentPromptWithSubAgents agents base =
     declareAgent :: Runtime.Runtime -> Maybe Text
     declareAgent desc =
         Just $ Text.unwords ["*", desc.agentSlug, ":", desc.agentAnnounce]
-
-type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
-
-traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
-traceWaitingOpenAIRateLimits lims onWait = Tracer f
-  where
-    f (AgentTrace (Runtime.AgentTrace_Conversation _ _ _ (Runtime.LLMTrace _ tr))) =
-        runTracer (OpenAI.waitRateLimit lims onWait) tr
-    f _ = pure ()
 
 -------------------------------------------------------------------------------
 data PromptOtherAgent
@@ -255,3 +253,22 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (\_hist -> pure ())
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
             (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ LLM.locateResponseText done)
+
+-------------------------------------------------------------------------------
+readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
+readOpenApiKeysFile keysPath =
+    maybe [] flattenOpenAIKeys <$> readApiKeys keysPath
+  where
+    flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
+    flattenOpenAIKeys (ApiKeys keys) =
+        [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
+
+    readApiKeys :: FilePath -> IO (Maybe ApiKeys)
+    readApiKeys path =
+        Aeson.decode <$> LByteString.readFile path
+
+-------------------------------------------------------------------------------
+
+reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
+reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
+    void $ Runtime.triggerRefreshTools tree.agentRuntime

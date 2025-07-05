@@ -10,7 +10,7 @@ import Control.Monad (forever, void)
 import Data.Text (Text)
 import Prod.Tracer (Tracer (..))
 
-import System.Agents.Agent
+import System.Agents.AgentTree
 import System.Agents.Dialogues (LoadedAgent (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.TUI.Event
@@ -36,7 +36,7 @@ runMultiAgents bChan agents = do
 
 mainMultiAgents2 :: BChan AppEvent -> Int -> [Props] -> [LoadedAgent] -> IO ()
 mainMultiAgents2 bChan idx (props : xs) agents = do
-    withAgentRuntime props go
+    withAgentTreeRuntime props go
   where
     go (Initialized ai) = do
         let oai = ai.agentBase

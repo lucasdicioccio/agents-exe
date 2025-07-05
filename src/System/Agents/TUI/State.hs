@@ -74,14 +74,8 @@ newTuiState agents =
             <$> pure agents
             <*> newIORef []
     projectionsV =
-        let
-            readTools :: LoadedAgent -> IO (AgentId, [ToolRegistration])
-            readTools agent = do
-                x <- agent.loadedAgentRuntime.agentTools
-                pure (agent.loadedAgentRuntime.agentId, x)
-         in
-            Projections
-                <$> traverse readTools agents
+        Projections
+            <$> traverse readTools agents
     uiV =
         UI
             <$> pure (focusRing [UnifiedList, PromptEditor])
@@ -137,3 +131,8 @@ orderChatHandles items =
     orderByAgent (ChatEntryPoint la1) (ConversationEntryPoint c2) =
         let cmp = la1.loadedAgentInfo.slug `compare` c2.conversingAgent.slug
          in if cmp == EQ then LT else cmp
+
+readTools :: LoadedAgent -> IO (AgentId, [ToolRegistration])
+readTools agent = do
+    x <- agent.loadedAgentRuntime.agentTools
+    pure (agent.loadedAgentRuntime.agentId, x)

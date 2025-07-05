@@ -53,6 +53,13 @@ refreshStuffFromIOs_Conversations = do
     replaceUnifiedConversationsList agents convs
     setSelectedUnifiedConversation (fmap fst (listSelectedElement st0._ui._unifiedList))
 
+refreshStuffFromIOs_Tools :: EventM N TuiState ()
+refreshStuffFromIOs_Tools = do
+    st0 <- get
+    let agents = st0._entities._loadedAgents
+    toolz <- liftIO $ traverse readTools agents
+    projections . tools .= toolz
+
 showHandle :: ChatHandle -> String
 showHandle (ChatEntryPoint la) =
     Text.unpack $ "(agent)" <> la.loadedAgentInfo.slug
@@ -98,6 +105,7 @@ tui_appHandleEvent_AppEvent_AgentTrace ev = do
 tui_appHandleEvent_AppEvent_Heartbeat :: EventM N TuiState ()
 tui_appHandleEvent_AppEvent_Heartbeat = do
     refreshStuffFromIOs_Conversations
+    refreshStuffFromIOs_Tools
 
 tui_appHandleEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
 tui_appHandleEvent ev = do
@@ -157,28 +165,27 @@ tui_handleViewPortEvent_PromptEditor ev = do
             | otherwise -> do
                 buf <- use (ui . promptEditor . to getEditContents . to Text.unlines)
                 when ("\n\n\n\n" `Text.isSuffixOf` buf) $ do
-                  sendPromptBuffer
-                  resetPromptBuffer
+                    sendPromptBuffer
+                    resetPromptBuffer
         _ -> pure ()
-
   where
     resetPromptBuffer = (ui . promptEditor . editContentsL) .= Text.textZipper [] Nothing
     sendPromptBuffer = do
-      item <- use (ui . unifiedList)
-      case listSelectedElement item of
-          Nothing -> pure ()
-          (Just (_, (ChatEntryPoint la))) -> do
-              startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-              conv <- liftIO $ Conversation.converse la.loadedAgentRuntime startingPrompt
-              st0 <- get
-              liftIO $
-                  referenceConversation
-                      st0
-                      (StartedConversation la.loadedAgentInfo conv startingPrompt)
-          (Just (_, (ConversationEntryPoint conv))) -> do
-              continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
-              _ <- liftIO . atomically $ conv.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
-              pure ()
+        item <- use (ui . unifiedList)
+        case listSelectedElement item of
+            Nothing -> pure ()
+            (Just (_, (ChatEntryPoint la))) -> do
+                startingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
+                conv <- liftIO $ Conversation.converse la.loadedAgentRuntime startingPrompt
+                st0 <- get
+                liftIO $
+                    referenceConversation
+                        st0
+                        (StartedConversation la.loadedAgentInfo conv startingPrompt)
+            (Just (_, (ConversationEntryPoint conv))) -> do
+                continuingPrompt <- use (ui . promptEditor . to getEditContents . to textLinesToPrompt)
+                _ <- liftIO . atomically $ conv.prompt (if continuingPrompt == "" then Nothing else Just continuingPrompt)
+                pure ()
 
 textLinesToPrompt :: [Text] -> Text
 textLinesToPrompt = Text.stripEnd . Text.unlines
