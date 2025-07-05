@@ -46,9 +46,9 @@ isAboutFileChange ev = case ev of
     FSNotify.Added _ _ _ -> True
     FSNotify.CloseWrite _ _ _ -> True
     FSNotify.Modified _ _ _ -> True
-    FSNotify.ModifiedAttributes _ _ _ -> False
+    FSNotify.ModifiedAttributes _ _ _ -> True
+    FSNotify.Removed _ _ _ -> True
     FSNotify.Unknown _ _ _ _ -> False
-    FSNotify.Removed _ _ _ -> False
     FSNotify.WatchedDirectoryRemoved _ _ _ -> False
 
 getFilePath :: FSNotify.Event -> FilePath

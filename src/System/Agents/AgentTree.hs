@@ -35,7 +35,10 @@ data Trace
     = AgentTrace Runtime.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
-    deriving (Show)
+    deriving
+        ( -- | AgentInitialized AgentConfigTree Runtime
+          Show
+        )
 
 -------------------------------------------------------------------------------
 type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
