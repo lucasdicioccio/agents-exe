@@ -72,6 +72,7 @@ library agents-lib
                     , System.Agents.Dialogues
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
+                    , System.Agents.FileNotification
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Trace
@@ -120,6 +121,7 @@ library agents-lib
                       process,
                       process-extras,
                       prodapi,
+                      fsnotify,
                       stm,
                       stm-conduit,
                       text,
