@@ -46,7 +46,8 @@ data Props
     }
 
 data AgentTree = AgentTree
-    { agentBase :: Agent
+    { agentFile :: FilePath
+    , agentBase :: Agent
     , agentRuntime :: Runtime.Runtime
     , agentChildren :: [AgentTree]
     }
@@ -71,6 +72,10 @@ data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
     | Initialized AgentTree
 
+toolDir :: FilePath -> Agent -> FilePath
+toolDir root agent =
+    FilePath.takeDirectory root </> agent.toolDirectory
+
 loadAgentTreeConfig :: Props -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
     let tracer = props.interactiveTracer
@@ -79,7 +84,7 @@ loadAgentTreeConfig props = do
         Left err ->
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
         Right (AgentDescription agent) -> do
-            subConfigs <- FileLoader.listJsonDirectory (FilePath.takeDirectory props.rootAgentFile </> agent.toolDirectory)
+            subConfigs <- FileLoader.listJsonDirectory (toolDir props.rootAgentFile agent)
             let propz = [props{rootAgentFile = c} | c <- subConfigs]
             (kos, oks) <- fmap Either.partitionEithers $ traverse loadAgentTreeConfig propz
             case NonEmpty.nonEmpty kos of
@@ -109,7 +114,7 @@ loadAgentTree props tree = do
                 Left err ->
                     pure $ Left $ NonEmpty.singleton $ OtherError err
                 Right agentRt ->
-                    pure $ Right $ AgentTree tree.agentConfig agentRt oks
+                    pure $ Right $ AgentTree props.rootAgentFile tree.agentConfig agentRt oks
 
 loadAgentRuntime :: Props -> IO LoadAgentResult
 loadAgentRuntime props = do
@@ -160,7 +165,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                             Text.unlines desc.systemPrompt
                     )
                 )
-                (rootDir </> desc.toolDirectory)
+                (toolDir rootDir desc)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
