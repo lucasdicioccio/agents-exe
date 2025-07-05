@@ -60,7 +60,7 @@ library agents-lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     exposed-modules:  System.Agents
-                    , System.Agents.Agent
+                    , System.Agents.AgentTree
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.Conversation
@@ -96,6 +96,7 @@ library agents-lib
                     , System.Agents.TUI.Handler
                     , System.Agents.TUI.State
                     , System.Agents.TUI.Render
+                    , System.Agents.TraceUtils
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,

@@ -18,11 +18,11 @@ import qualified Data.List as List
 import qualified Network.JSONRPC as Rpc
 import UnliftIO (Async, IORef, MonadIO, MonadUnliftIO, async, atomicModifyIORef, atomically, cancel, liftIO, newIORef, readIORef, wait, withAsync)
 
-import qualified System.Agents.Agent as Agent
+import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.MCP.Base as Mcp
 
 data MappedTool
-    = ExpertAgentAsPrompt Mcp.Name Agent.AgentTree
+    = ExpertAgentAsPrompt Mcp.Name AgentTree.AgentTree
 
 type MappedTools = [MappedTool]
 

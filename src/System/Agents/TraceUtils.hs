@@ -2,7 +2,7 @@ module System.Agents.TraceUtils where
 
 import Prod.Tracer (Tracer (..))
 
-import System.Agents.Agent (Trace (..))
+import System.Agents.AgentTree (Trace (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
 

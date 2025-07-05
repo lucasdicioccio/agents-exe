@@ -10,7 +10,7 @@ import Control.Monad (forever, void)
 import Data.Text (Text)
 import Prod.Tracer (Tracer (..))
 
-import System.Agents.Agent
+import System.Agents.AgentTree
 import System.Agents.Dialogues (LoadedAgent (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.TUI.Event

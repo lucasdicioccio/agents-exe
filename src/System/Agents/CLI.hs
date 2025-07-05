@@ -13,7 +13,7 @@ import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import System.Console.Haskeline
 
-import System.Agents.Agent
+import System.Agents.AgentTree
 import System.Agents.CLI.State
 import qualified System.Agents.Conversation as Conversation
 import System.Agents.Dialogues

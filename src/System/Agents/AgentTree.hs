@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Agents.Agent where
+module System.Agents.AgentTree where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
@@ -28,23 +28,15 @@ import qualified System.Agents.Tools.IO as IOTools
 
 import System.Agents.ApiKeys
 
-readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
-readOpenApiKeysFile path =
-    maybe [] flattenOpenAIKeys <$> readApiKeys path
-  where
-    flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
-    flattenOpenAIKeys (ApiKeys keys) =
-        [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
-
-    readApiKeys :: FilePath -> IO (Maybe ApiKeys)
-    readApiKeys path =
-        Aeson.decode <$> LByteString.readFile path
-
+-------------------------------------------------------------------------------
 data Trace
     = AgentTrace Runtime.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     deriving (Show)
+
+-------------------------------------------------------------------------------
+type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
 
 data Props
     = Props
@@ -69,13 +61,7 @@ data AgentConfigTree = AgentConfigTree
 agentRootDir :: AgentConfigTree -> FilePath
 agentRootDir agent = FilePath.takeDirectory agent.agentConfigFile
 
-agentLeaf :: Agent -> Runtime.Runtime -> AgentTree
-agentLeaf a rt =
-    AgentTree a rt []
-
-extractChildrenAgents :: FileLoader.Agents -> [Agent]
-extractChildrenAgents xs = [a | (AgentDescription a) <- xs.agents]
-
+-------------------------------------------------------------------------------
 data LoadingError
     = AgentLoadingError FileLoader.InvalidAgentError
     | OtherError String
@@ -112,7 +98,7 @@ loadAgentTree props tree = do
         Nothing -> do
             let okRuntimes = fmap agentRuntime oks
             rt <-
-                initAgent
+                initAgentTreeAgent
                     tracer
                     props.apiKeys
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
@@ -141,9 +127,11 @@ withAgentRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentRuntime props continue = do
     loadAgentRuntime props >>= continue
 
+-------------------------------------------------------------------------------
+
 type PromptModifier = Text -> Text
 
-initAgent ::
+initAgentTreeAgent ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
@@ -151,7 +139,7 @@ initAgent ::
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
+initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
@@ -192,15 +180,6 @@ augmentMainAgentPromptWithSubAgents agents base =
     declareAgent :: Runtime.Runtime -> Maybe Text
     declareAgent desc =
         Just $ Text.unwords ["*", desc.agentSlug, ":", desc.agentAnnounce]
-
-type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
-
-traceWaitingOpenAIRateLimits :: OpenAI.ApiLimits -> (OpenAI.WaitAction -> IO ()) -> Tracer IO Trace
-traceWaitingOpenAIRateLimits lims onWait = Tracer f
-  where
-    f (AgentTrace (Runtime.AgentTrace_Conversation _ _ _ (Runtime.LLMTrace _ tr))) =
-        runTracer (OpenAI.waitRateLimit lims onWait) tr
-    f _ = pure ()
 
 -------------------------------------------------------------------------------
 data PromptOtherAgent
@@ -258,3 +237,16 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (\_hist -> pure ())
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
             (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ LLM.locateResponseText done)
+
+-------------------------------------------------------------------------------
+readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
+readOpenApiKeysFile keysPath =
+    maybe [] flattenOpenAIKeys <$> readApiKeys keysPath
+  where
+    flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
+    flattenOpenAIKeys (ApiKeys keys) =
+        [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
+
+    readApiKeys :: FilePath -> IO (Maybe ApiKeys)
+    readApiKeys path =
+        Aeson.decode <$> LByteString.readFile path

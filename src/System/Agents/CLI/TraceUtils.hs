@@ -15,7 +15,7 @@ import GHC.IO.Handle (Handle)
 import Prod.Tracer (Tracer (..), silent)
 import System.IO (stderr, stdout)
 
-import System.Agents.Agent
+import System.Agents.AgentTree
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.Tools as Tools

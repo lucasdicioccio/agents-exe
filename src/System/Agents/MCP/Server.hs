@@ -20,7 +20,7 @@ import qualified Formatting as Format
 import qualified Network.JSONRPC as Rpc
 import UnliftIO (async, liftIO, stderr, stdout)
 
-import qualified System.Agents.Agent as Agent
+import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
@@ -28,14 +28,14 @@ import qualified System.Agents.Runtime as Runtime
 
 import System.Agents.MCP.Server.Runtime
 
-mainAgentServer :: Agent.Props -> IO ()
+mainAgentServer :: AgentTree.Props -> IO ()
 mainAgentServer props = do
     multiAgentsServer [props]
 
-multiAgentsServer :: [Agent.Props] -> IO ()
+multiAgentsServer :: [AgentTree.Props] -> IO ()
 multiAgentsServer xs = multiAgentsServer' 0 xs []
 
-multiAgentsServer' :: Int -> [Agent.Props] -> MappedTools -> IO ()
+multiAgentsServer' :: Int -> [AgentTree.Props] -> MappedTools -> IO ()
 multiAgentsServer' _ [] [] = do
     print ("no agent definitions" :: Text)
 multiAgentsServer' _ [] mtools = do
@@ -45,9 +45,9 @@ multiAgentsServer' _ [] mtools = do
     logTrace =
         defaultOutput stderr
 multiAgentsServer' idx (props : xs) mtools = do
-    Agent.withAgentRuntime props go
+    AgentTree.withAgentRuntime props go
   where
-    go (Agent.Initialized ai) = do
+    go (AgentTree.Initialized ai) = do
         let oai = ai.agentBase
         let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
         let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
@@ -206,7 +206,7 @@ makeMappedTools = Maybe.catMaybes . fmap adapt
     adapt :: MappedTool -> Maybe Mcp.Tool
     adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
 
-callExpertTool :: Mcp.Name -> Agent.AgentTree -> Maybe Mcp.Tool
+callExpertTool :: Mcp.Name -> AgentTree.AgentTree -> Maybe Mcp.Tool
 callExpertTool mcpName ai =
     let oai = ai.agentBase
      in Just $
