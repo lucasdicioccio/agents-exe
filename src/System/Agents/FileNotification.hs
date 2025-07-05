@@ -1,36 +1,45 @@
 -- todo: upstream to prodapi once the design settles
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module System.Agents.FileNotification where
 
 import Control.Concurrent.STM (STM, TMVar)
 import qualified Control.Concurrent.STM as STM
 import Control.Monad (void)
+import Data.Foldable (forM_)
 import Prod.Tracer (Tracer, runTracer)
 import qualified System.FSNotify as FSNotify
 
 -------------------------------------------------------------------------------
-data Trace
-    = NotifyEvent FSNotify.Event
+data Trace obj
+    = NotifyEvent obj FSNotify.Event
 
 -------------------------------------------------------------------------------
 -- note: would be nice to have some way to dynamically change the set of watched dirs
-data Runtime
+data Runtime obj
     = Runtime
     { notifyManager :: FSNotify.WatchManager
-    , waitForChange :: STM ()
+    , waitForChange :: STM obj
     }
 
 -------------------------------------------------------------------------------
-initRuntime :: Tracer IO Trace -> FilePath -> (FSNotify.Event -> Bool) -> IO Runtime
-initRuntime tracer path shouldNotify = do
+initRuntime ::
+    forall obj.
+    Tracer IO (Trace obj) ->
+    [(obj, FilePath)] ->
+    (obj -> FSNotify.Event -> Bool) ->
+    IO (Runtime obj)
+initRuntime tracer paths shouldNotify = do
     fsTVar <- STM.newEmptyTMVarIO
     notify <- FSNotify.startManager
-    _ <- FSNotify.watchDir notify path shouldNotify (handleFSEvent fsTVar)
+    forM_ paths $ \(obj, path) ->
+        FSNotify.watchDir notify path (shouldNotify obj) (handleFSEvent fsTVar obj)
     pure $ Runtime notify (STM.takeTMVar fsTVar)
   where
-    handleFSEvent :: TMVar () -> FSNotify.Event -> IO ()
-    handleFSEvent x ev = do
-        runTracer tracer $ NotifyEvent ev
-        void $ STM.atomically $ STM.tryPutTMVar x ()
+    handleFSEvent :: TMVar obj -> obj -> FSNotify.Event -> IO ()
+    handleFSEvent x obj ev = do
+        runTracer tracer $ NotifyEvent obj ev
+        void $ STM.atomically $ STM.tryPutTMVar x obj
 
 isAboutFileChange :: FSNotify.Event -> Bool
 isAboutFileChange ev = case ev of

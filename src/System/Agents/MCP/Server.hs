@@ -45,7 +45,7 @@ multiAgentsServer' _ [] mtools = do
     logTrace =
         defaultOutput stderr
 multiAgentsServer' idx (props : xs) mtools = do
-    AgentTree.withAgentRuntime props go
+    AgentTree.withAgentTreeRuntime props go
   where
     go (AgentTree.Initialized ai) = do
         let oai = ai.agentBase

@@ -36,7 +36,7 @@ runMultiAgents bChan agents = do
 
 mainMultiAgents2 :: BChan AppEvent -> Int -> [Props] -> [LoadedAgent] -> IO ()
 mainMultiAgents2 bChan idx (props : xs) agents = do
-    withAgentRuntime props go
+    withAgentTreeRuntime props go
   where
     go (Initialized ai) = do
         let oai = ai.agentBase

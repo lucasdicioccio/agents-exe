@@ -15,14 +15,14 @@ import qualified System.Agents.Runtime as Runtime
 
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
-    withAgentRuntime props $ \x -> do
+    withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized _ -> pure ()
 
 mainOneShotText :: Props -> Text -> IO ()
 mainOneShotText props query = do
-    withAgentRuntime props $ \x -> do
+    withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized ai -> runMainAgent ai.agentRuntime

@@ -3,6 +3,7 @@
 
 module System.Agents.AgentTree where
 
+import Control.Monad (void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy as LByteString
@@ -19,6 +20,7 @@ import qualified System.FilePath as FilePath
 
 import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
+import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as LLM
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
@@ -51,6 +53,9 @@ data AgentTree = AgentTree
     , agentRuntime :: Runtime.Runtime
     , agentChildren :: [AgentTree]
     }
+
+agentToolDir :: AgentTree -> FilePath
+agentToolDir t = toolDir t.agentFile t.agentBase
 
 data AgentConfigTree = AgentConfigTree
     { agentConfigFile :: FilePath
@@ -116,8 +121,8 @@ loadAgentTree props tree = do
                 Right agentRt ->
                     pure $ Right $ AgentTree props.rootAgentFile tree.agentConfig agentRt oks
 
-loadAgentRuntime :: Props -> IO LoadAgentResult
-loadAgentRuntime props = do
+loadAgentTreeRuntime :: Props -> IO LoadAgentResult
+loadAgentTreeRuntime props = do
     cfgs <- loadAgentTreeConfig props
     case cfgs of
         Left errs -> pure $ Errors errs
@@ -128,9 +133,9 @@ loadAgentRuntime props = do
                 Left errs -> pure $ Errors errs
                 Right ok -> pure $ Initialized ok
 
-withAgentRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
-withAgentRuntime props continue = do
-    loadAgentRuntime props >>= continue
+withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
+withAgentTreeRuntime props continue = do
+    loadAgentTreeRuntime props >>= continue
 
 -------------------------------------------------------------------------------
 
@@ -255,3 +260,9 @@ readOpenApiKeysFile keysPath =
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
+
+-------------------------------------------------------------------------------
+
+reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
+reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
+    void $ Runtime.triggerRefreshTools tree.agentRuntime

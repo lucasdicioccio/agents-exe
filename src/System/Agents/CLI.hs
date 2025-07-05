@@ -26,7 +26,7 @@ mainInteractiveAgent xs =
 
 mainInteractiveAgent2 :: [LoadedAgent] -> [Props] -> IO ()
 mainInteractiveAgent2 agents (props : rest) = do
-    withAgentRuntime props $ \x -> do
+    withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized ai -> do
