@@ -118,8 +118,11 @@ loadAgentTree props tree = do
             case rt of
                 Left err ->
                     pure $ Left $ NonEmpty.singleton $ OtherError err
-                Right agentRt ->
-                    pure $ Right $ AgentTree props.rootAgentFile tree.agentConfig agentRt oks
+                Right agentRt -> do
+                    -- runTracer props.interactiveTracer (AgentInitialized tree agentRt)
+                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt oks
+                    _ <- Notify.initRuntime reloadNotificationTracer [(ret, agentToolDir ret)] (\_ ev -> Notify.isAboutFileChange ev)
+                    pure $ Right $ ret
 
 loadAgentTreeRuntime :: Props -> IO LoadAgentResult
 loadAgentTreeRuntime props = do
@@ -170,7 +173,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                             Text.unlines desc.systemPrompt
                     )
                 )
-                (toolDir rootDir desc)
+                (rootDir </> desc.toolDirectory)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
