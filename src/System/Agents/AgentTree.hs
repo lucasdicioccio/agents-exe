@@ -57,9 +57,6 @@ data AgentTree = AgentTree
     , agentChildren :: [AgentTree]
     }
 
-agentToolDir :: AgentTree -> FilePath
-agentToolDir t = toolDir t.agentFile t.agentBase
-
 data AgentConfigTree = AgentConfigTree
     { agentConfigFile :: FilePath
     , agentConfig :: Agent
@@ -80,11 +77,9 @@ data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
     | Initialized AgentTree
 
-toolDir :: FilePath -> Agent -> FilePath
-toolDir root agent =
-    FilePath.takeDirectory root </> agent.toolDirectory
-
-loadAgentTreeConfig :: Props -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
+loadAgentTreeConfig ::
+    Props ->
+    IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
     let tracer = props.interactiveTracer
     boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.rootAgentFile
@@ -92,7 +87,9 @@ loadAgentTreeConfig props = do
         Left err ->
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
         Right (AgentDescription agent) -> do
-            subConfigs <- FileLoader.listJsonDirectory (toolDir props.rootAgentFile agent)
+            let rootdir = FilePath.takeDirectory props.rootAgentFile
+            let tooldir = rootdir </> agent.toolDirectory
+            subConfigs <- FileLoader.listJsonDirectory tooldir
             let propz = [props{rootAgentFile = c} | c <- subConfigs]
             (kos, oks) <- fmap Either.partitionEithers $ traverse loadAgentTreeConfig propz
             case NonEmpty.nonEmpty kos of
@@ -103,12 +100,12 @@ loadAgentTreeConfig props = do
 
 loadAgentTree :: Props -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
 loadAgentTree props tree = do
-    let tracer = props.interactiveTracer
     agentRuntimes <- traverse (loadAgentTree props) tree.agentConfigChildren
     let (kos, oks) = Either.partitionEithers agentRuntimes
     case NonEmpty.nonEmpty kos of
         Just errs -> pure $ Left $ sconcat errs
         Nothing -> do
+            let tracer = props.interactiveTracer
             let okRuntimes = fmap agentRuntime oks
             rt <-
                 initAgentTreeAgent
@@ -124,7 +121,12 @@ loadAgentTree props tree = do
                 Right agentRt -> do
                     -- runTracer props.interactiveTracer (AgentInitialized tree agentRt)
                     let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt oks
-                    _ <- Notify.initRuntime reloadNotificationTracer [(ret, agentToolDir ret)] (\_ ev -> Notify.isAboutFileChange ev)
+                    let tooldir = agentRootDir tree </> tree.agentConfig.toolDirectory
+                    _ <-
+                        Notify.initRuntime
+                            reloadNotificationTracer
+                            [(ret, tooldir)]
+                            (\_ ev -> Notify.isAboutFileChange ev)
                     pure $ Right $ ret
 
 loadAgentTreeRuntime :: Props -> IO LoadAgentResult

@@ -6,7 +6,7 @@
     "modelUrl": "https://api.mistral.ai/v1",
     "apiKeyId": "mistral",
     "modelName": "open-codestral-mamba",
-    "toolDirectory": "./tools/boss",
+    "toolDirectory": "tools",
     "announce": "The main agent, capable of reasoning and orchestrating other expert agents.",
     "systemPrompt":
             [ "You are a helpful software agent trying to solve user requests."

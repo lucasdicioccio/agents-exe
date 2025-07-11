@@ -6,7 +6,7 @@
     "modelUrl": "https://api.openai.com/v1",
     "apiKeyId": "openai",
     "modelName": "gpt-4-turbo",
-    "toolDirectory": "./tools/boss",
+    "toolDirectory": "tools",
     "announce": "The main agent, capable of reasoning and orchestrating other expert agents.",
     "systemPrompt":
             [ "You are a helpful software agent trying to solve user requests"
