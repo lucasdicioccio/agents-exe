@@ -20,7 +20,7 @@ EOD
 
   run)
     agent_definitionname=$2
-    path="./agents/${agent_definitionname}"
+    path="./tools/${agent_definitionname}"
     if [ -f "${path}" ]; then
       cat "${path}"
     else

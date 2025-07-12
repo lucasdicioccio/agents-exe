@@ -12,7 +12,7 @@ EOD
   ;;
 
   run)
-    find ./agents -name "*.json" | sed 's/^.\/agents\///'
+    find ./tools -name "*.json" | sed 's/^.\/tools\///'
   ;;
 esac
 

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 case $1 in
   describe)
     cat <<- EOD
@@ -28,7 +30,7 @@ EOD
   run)
     path=$2
     content=$3
-    echo "${content}" > "./agents/${path}"
+    echo "${content}" | jq . > "./tools/${path}"
     echo "content has been stored in file ${path}"
     dir="$(echo "${content}" | jq -r ".contents.toolDirectory")"
     mkdir "${dir}"
