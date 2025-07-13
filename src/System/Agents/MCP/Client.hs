@@ -9,6 +9,7 @@ import Control.Monad.Reader (MonadReader (..), ReaderT, ask, runReaderT)
 import Control.Monad.Trans (lift)
 import qualified Data.Aeson as Aeson
 import Data.Conduit.TMChan
+import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Network.JSONRPC as Rpc
 import UnliftIO (Async, MonadIO, MonadUnliftIO, async, atomically, cancel, liftIO, wait, withAsync)
@@ -52,45 +53,112 @@ toto rt = do
 
 data ClientMsg
     = InitializeMsg Mcp.InitializeRequest
+    | NotifyInitializedMsg Mcp.InitializedNotification
+    | ListToolsRequestMsg Mcp.ListToolsRequest
+    | CallToolRequestMsg Mcp.CallToolRequest
     deriving (Show)
 
 newtype InitializeResultRsp = InitializeResultRsp {getInitializeResult :: Mcp.InitializeResult}
     deriving (Show, Aeson.FromJSON)
 
+newtype ListToolsResultRsp = ListToolsResultRsp {getListToolsResult :: Mcp.ListToolsResult}
+    deriving (Show, Aeson.FromJSON)
+
+newtype CallToolResultRsp = CallToolResultRsp {getCallToolResult :: Mcp.CallToolResult}
+    deriving (Show, Aeson.FromJSON)
+
 instance Rpc.ToRequest ClientMsg where
-    requestMethod _ = "initialize"
-    requestIsNotif _ = False
+    requestMethod (InitializeMsg _) = "initialize"
+    requestMethod (NotifyInitializedMsg _) = "notifications/initialized"
+    requestMethod (ListToolsRequestMsg _) = "tools/list"
+    requestMethod (CallToolRequestMsg _) = "tools/call"
+    requestIsNotif (InitializeMsg _) = False
+    requestIsNotif (NotifyInitializedMsg _) = True
+    requestIsNotif (ListToolsRequestMsg _) = False
+    requestIsNotif (CallToolRequestMsg _) = False
 
 instance Rpc.FromResponse InitializeResultRsp where
     parseResult "initialize" =
         Just Aeson.parseJSON
     parseResult _ = Nothing
 
+instance Rpc.FromResponse ListToolsResultRsp where
+    parseResult "tools/list" =
+        Just Aeson.parseJSON
+    parseResult _ = Nothing
+
+instance Rpc.FromResponse CallToolResultRsp where
+    parseResult "tools/call" =
+        Just Aeson.parseJSON
+    parseResult _ = Nothing
+
 instance Aeson.ToJSON ClientMsg where
     toJSON (InitializeMsg msg) = Aeson.toJSON msg
+    toJSON (NotifyInitializedMsg _) = Aeson.toJSON (Aeson.object [])
+    toJSON (ListToolsRequestMsg msg) = Aeson.toJSON msg
+    toJSON (CallToolRequestMsg msg) = Aeson.toJSON msg
+
+-------------------------------------------------------------------------------
+clientProtocolVersion :: Text
+clientProtocolVersion = "2024-11-05"
+
+clientImplem :: Mcp.Implementation
+clientImplem = Implementation "agents-exe-mcp-client" "0.0.1"
+
+clientCapabilities :: Mcp.ClientCapabilities
+clientCapabilities =
+    Mcp.ClientCapabilities
+        (Just mempty)
+        (Just $ Aeson.object [])
+        []
+
+-------------------------------------------------------------------------------
 
 handlerLoop :: Rpc.JSONRPCT McpStack ()
 handlerLoop = do
     srv <- initialize
     case srv of
-        (Just (Right srv)) -> loop srv
+        (Just (Right srv)) -> do
+            notifyInitialized
+            loop srv
+        _ -> do
+            pure ()
   where
     initialize :: Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj InitializeResultRsp))
     initialize =
         Rpc.sendRequest $
             InitializeMsg $
                 Mcp.InitializeRequest
-                    "2024-11-05"
-                    ( Mcp.ClientCapabilities
-                        Nothing
-                        Nothing
-                        []
-                    )
-                    (Mcp.Implementation "agents-exe-mcp-client" "0.0.1")
+                    clientProtocolVersion
+                    clientCapabilities
+                    clientImplem
+
+    notifyInitialized :: Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj ()))
+    notifyInitialized =
+        Rpc.sendRequest $
+            NotifyInitializedMsg $
+                Mcp.InitializedNotification
+
+    listTools :: Maybe Mcp.Cursor -> Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj ListToolsResultRsp))
+    listTools cursor =
+        Rpc.sendRequest $
+            ListToolsRequestMsg $
+                Mcp.ListToolsRequest
+                    cursor
+
+    callTool :: Mcp.Name -> Maybe Aeson.Object -> Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
+    callTool name arg =
+        Rpc.sendRequest $
+            CallToolRequestMsg $
+                Mcp.CallToolRequest
+                    name
+                    arg
 
     loop :: InitializeResultRsp -> Rpc.JSONRPCT McpStack ()
     loop srv = do
         -- todo: need to cycle between requests and responses
         debugString "hello"
-        liftIO $ threadDelay 1000000
+        listTools Nothing >>= liftIO . print
+        callTool "ask_boss-openai_000" (Just ("prompt" Aeson..= ("hi" :: Text))) >>= liftIO . print
+        liftIO $ threadDelay 10000000
         loop srv
