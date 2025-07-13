@@ -12,14 +12,11 @@ import Data.Conduit.TMChan
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Network.JSONRPC as Rpc
+import Prod.Tracer (Tracer, runTracer)
 import UnliftIO (Async, MonadIO, MonadUnliftIO, async, atomically, cancel, liftIO, wait, withAsync)
 
 import System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Client.Runtime
-
-data Trace
-    = ProcessLevelTrace Loc LogSource LogLevel LogStr
-    deriving (Show)
 
 newtype McpStack a
     = McpStack {runMcpStack :: ReaderT Runtime (LoggingT IO) a}
@@ -38,18 +35,30 @@ debugString = logDebugN . Text.pack
 debugShow :: (Show a) => a -> Rpc.JSONRPCT McpStack ()
 debugShow = debugString . show
 
-toto :: Runtime -> (LoopInfos -> Rpc.JSONRPCT McpStack ()) -> IO ()
-toto rt loop = do
-    runStderrLoggingT $
-        runReaderT (runMcpStack scheduleMcp) rt
+data ClientTrace
+    = JsonRpcLog Loc LogSource LogLevel LogStr
+    deriving (Show)
+
+runClient ::
+    Tracer IO ClientTrace ->
+    Runtime ->
+    (ClientInfos -> Rpc.JSONRPCT McpStack ()) ->
+    IO ()
+runClient tracer rt act = do
+    runLoggingT
+        ( runReaderT (runMcpStack scheduleMcp) rt
+        )
+        logInTracer
   where
+    logInTracer loc src lvl str =
+        runTracer tracer (JsonRpcLog loc src lvl str)
     scheduleMcp = do
         runJSONRPCT'
             Rpc.V2
             False
             (sinkTBMChan rt.reqChan)
             (sourceTBMChan rt.rspChan)
-            (handlerLoop loop)
+            (handleClient act)
 
 data ClientMsg
     = InitializeMsg Mcp.InitializeRequest
@@ -114,19 +123,19 @@ clientCapabilities =
 
 -------------------------------------------------------------------------------
 
-data LoopInfos
-    = LoopInfos
+data ClientInfos
+    = ClientInfos
     { initializeResult :: InitializeResultRsp
     }
 
-handlerLoop ::
-    (LoopInfos -> Rpc.JSONRPCT McpStack ()) -> Rpc.JSONRPCT McpStack ()
-handlerLoop loop = do
+handleClient ::
+    (ClientInfos -> Rpc.JSONRPCT McpStack ()) -> Rpc.JSONRPCT McpStack ()
+handleClient act = do
     srv <- initialize
     case srv of
         (Just (Right srv)) -> do
             notifyInitialized
-            loop (LoopInfos srv)
+            act (ClientInfos srv)
         _ -> do
             pure ()
   where
@@ -183,12 +192,56 @@ enumerateTools = do
         go (item : xs) (previewCursor item)
 
 -------------------------------------------------------------------------------
-defaultLoop :: LoopInfos -> Rpc.JSONRPCT McpStack ()
-defaultLoop loopInfo = do
-    let srv = loopInfo.initializeResult
-    -- todo: need to cycle between requests and responses
-    debugString "hello"
-    enumerateTools >>= liftIO . print
-    callTool "ask_boss-openai_000" (Just ("prompt" Aeson..= ("hi" :: Text))) >>= liftIO . print
-    liftIO $ threadDelay 10000000
-    defaultLoop loopInfo
+data ToolCall
+    = ToolCall Mcp.Name (Maybe Aeson.Object) ((Maybe (Either Rpc.ErrorObj CallToolResultRsp)) -> IO ())
+
+data LoopTrace
+    = StartToolCall Mcp.Name (Maybe Aeson.Object)
+    | EndToolCall Mcp.Name (Maybe Aeson.Object) (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
+    | ToolsRefreshed [Maybe (Either Rpc.ErrorObj ListToolsResultRsp)]
+    deriving (Show)
+
+data LoopProps = LoopProps
+    { tracer :: Tracer IO LoopTrace
+    , waitToolCall :: IO ToolCall
+    }
+
+defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
+defaultLoop props clientInfos = do
+    withAsync loopToolCalls $ \x -> do
+        if hasToolsChangedNotif
+            then
+                loopEnumerateTools_Notif
+            else
+                loopEnumerateTools_Poll
+  where
+    hasToolsChangedNotif :: Bool
+    hasToolsChangedNotif =
+        Mcp.ToolsListChanged `elem` clientInfos.initializeResult.getInitializeResult.capabilities.flags
+
+    doRefreshTools :: Rpc.JSONRPCT McpStack ()
+    doRefreshTools =
+        enumerateTools >>= liftIO . runTracer props.tracer . ToolsRefreshed
+
+    loopEnumerateTools_Notif :: Rpc.JSONRPCT McpStack ()
+    loopEnumerateTools_Notif = do
+        doRefreshTools
+        liftIO (threadDelay 1000000)
+        loopEnumerateTools_Notif
+
+    loopEnumerateTools_Poll :: Rpc.JSONRPCT McpStack ()
+    loopEnumerateTools_Poll = do
+        doRefreshTools
+        liftIO (threadDelay 3000000)
+        loopEnumerateTools_Poll
+
+    loopToolCalls :: Rpc.JSONRPCT McpStack ()
+    loopToolCalls = do
+        (ToolCall name obj resp) <- liftIO props.waitToolCall
+        liftIO $ runTracer props.tracer (StartToolCall name obj)
+        _ <- async $ do
+            r <- callTool name obj
+            liftIO $ do
+                runTracer props.tracer (EndToolCall name obj r)
+                resp r
+        loopToolCalls

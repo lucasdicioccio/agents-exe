@@ -10,9 +10,15 @@ import qualified Data.ByteString.Lazy.Char8 as L8
 import Data.Conduit.Process (sourceProcessWithStreams)
 import Data.Conduit.TMChan
 import qualified Network.JSONRPC as Rpc
+import Prod.Tracer (Tracer, runTracer)
 import System.Exit (ExitCode)
 import System.Process (CreateProcess)
 import UnliftIO (Async, MonadUnliftIO, async, atomically, liftIO, wait, withAsync)
+
+data RunTrace
+    = RunCommandStart !CreateProcess
+    | RunCommandStopped !CreateProcess !ExitCode
+    deriving (Show)
 
 data Runtime = Runtime
     { processAsync :: Async (ExitCode)
@@ -20,18 +26,20 @@ data Runtime = Runtime
     , rspChan :: TBMChan ByteString
     }
 
-initRuntime :: CreateProcess -> IO (Runtime)
-initRuntime proc = do
+initRuntime :: Tracer IO RunTrace -> CreateProcess -> IO (Runtime)
+initRuntime tracer proc = do
     outChan <- newTBMChanIO 1024 :: IO (TBMChan ByteString)
     inChan <- newTBMChanIO 1024 :: IO (TBMChan (Flush ByteString))
     let process :: IO ExitCode
         process = do
+            runTracer tracer (RunCommandStart proc)
             (code, _, _) <-
                 sourceProcessWithStreams
                     proc
                     (sourceTBMChan inChan .| discardFlush)
                     (sinkTBMChan outChan)
-                    C.sinkNull
+                    C.sinkNull -- todo: extract errorstream
+            runTracer tracer (RunCommandStopped proc code)
             pure code
     a <- async $ process
     pure $ Runtime a inChan outChan
