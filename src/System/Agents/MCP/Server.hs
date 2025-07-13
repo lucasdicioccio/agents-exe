@@ -78,7 +78,11 @@ serverImplem :: Mcp.Implementation
 serverImplem = Implementation "agents-exe-mcp-server" "0.0.1"
 
 serverCapabilities :: Mcp.ServerCapabilities
-serverCapabilities = Mcp.ServerCapabilities (Just mempty) (Just $ Aeson.object []) [ToolsListChanged, PromptsListChanged, ResourcesListChanged]
+serverCapabilities =
+    Mcp.ServerCapabilities
+        (Just mempty)
+        (Just $ Aeson.object [])
+        [ToolsListChanged, PromptsListChanged, ResourcesListChanged]
 
 -------------------------------------------------------------------------------
 data ClientMsg

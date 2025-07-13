@@ -229,7 +229,11 @@ instance FromJSON ClientCapabilities where
             <*> pure (clientFlags p)
       where
         clientFlags :: Aeson.Object -> FlagsSet ClientFlag
-        clientFlags o = Maybe.mapMaybe (\(k, f) -> flg k f o) [(RootsListChanged, hasRootsListChanged)]
+        clientFlags o =
+            Maybe.mapMaybe
+                (\(k, f) -> flg k f o)
+                [ (RootsListChanged, hasRootsListChanged)
+                ]
 
         flg :: ClientFlag -> (Aeson.Object -> Maybe Bool) -> Aeson.Object -> Maybe ClientFlag
         flg k predParse o =
@@ -243,6 +247,16 @@ instance FromJSON ClientCapabilities where
             (Aeson.Bool lc) <- Aeson.lookup "listChanged" r
             pure lc
 
+instance ToJSON ClientCapabilities where
+    toJSON cc =
+        object
+            [ "experimental" .=? cc.experimental
+            , "sampling" .=? cc.sampling
+            , "roots"
+                .= Aeson.object
+                    ["listChanged" .=! (RootsListChanged `List.elem` cc.flags)]
+            ]
+
 data ServerCapabilities
     = ServerCapabilities
     { experimental :: Maybe Aeson.Object
@@ -250,6 +264,53 @@ data ServerCapabilities
     , flags :: FlagsSet ServerFlag
     }
     deriving (Show)
+
+instance FromJSON ServerCapabilities where
+    parseJSON = withObject "ServerCapabilities" $ \p -> do
+        ServerCapabilities
+            <$> p .:? "experimental"
+            <*> p .:? "sampling"
+            <*> pure (serverFlags p)
+      where
+        serverFlags :: Aeson.Object -> FlagsSet ServerFlag
+        serverFlags o =
+            Maybe.mapMaybe
+                (\(k, f) -> flg k f o)
+                [ (PromptsListChanged, hasPromptsListChanged)
+                , (ResourcesSubscribe, hasResourcesSubscribe)
+                , (ResourcesListChanged, hasResourcesListChanged)
+                , (ToolsListChanged, hasToolsListChanged)
+                ]
+
+        flg :: ServerFlag -> (Aeson.Object -> Maybe Bool) -> Aeson.Object -> Maybe ServerFlag
+        flg k predParse o =
+            if Maybe.fromMaybe False (predParse o)
+                then Just k
+                else Nothing
+
+        hasResourcesSubscribe :: Aeson.Object -> Maybe Bool
+        hasResourcesSubscribe o = do
+            (Aeson.Object r) <- Aeson.lookup "resources" o
+            (Aeson.Bool lc) <- Aeson.lookup "subscribe" r
+            pure lc
+
+        hasResourcesListChanged :: Aeson.Object -> Maybe Bool
+        hasResourcesListChanged o = do
+            (Aeson.Object r) <- Aeson.lookup "resources" o
+            (Aeson.Bool lc) <- Aeson.lookup "listChanged" r
+            pure lc
+
+        hasPromptsListChanged :: Aeson.Object -> Maybe Bool
+        hasPromptsListChanged o = do
+            (Aeson.Object r) <- Aeson.lookup "prompts" o
+            (Aeson.Bool lc) <- Aeson.lookup "listChanged" r
+            pure lc
+
+        hasToolsListChanged :: Aeson.Object -> Maybe Bool
+        hasToolsListChanged o = do
+            (Aeson.Object r) <- Aeson.lookup "tools" o
+            (Aeson.Bool lc) <- Aeson.lookup "listChanged" r
+            pure lc
 
 instance ToJSON ServerCapabilities where
     toJSON c =
@@ -288,6 +349,14 @@ instance FromJSON InitializeRequest where
             <*> p .: "capabilities"
             <*> p .: "clientInfo"
 
+instance ToJSON InitializeRequest where
+    toJSON r =
+        Aeson.object
+            [ "protocolVersion" .=! r.protocolVersion
+            , "capabilities" .=! r.capabilities
+            , "clientInfo" .=! r.clientInfo
+            ]
+
 data InitializeResult = InitializeResult
     { protocolVersion :: Text
     , capabilities :: ServerCapabilities
@@ -304,6 +373,14 @@ instance ToJSON InitializeResult where
             , "serverInfo" .= ir.serverInfo
             , "instructions" .=? ir.instructions
             ]
+
+instance FromJSON InitializeResult where
+    parseJSON = withObject "InitializeRequest" $ \o ->
+        InitializeResult
+            <$> o .: "protocolVersion"
+            <*> o .: "capabilities"
+            <*> o .: "serverInfo"
+            <*> o .: "instructions"
 
 data Implementation = Implementation
     { name :: Text
@@ -622,3 +699,7 @@ object = Aeson.object . Maybe.catMaybes
 infixr 8 .=
 (.=) :: (ToJSON v) => Aeson.Key -> v -> Maybe Aeson.Pair
 (.=) k v = Just ((Aeson..=) k v)
+
+infixr 8 .=!
+(.=!) :: (ToJSON v) => Aeson.Key -> v -> Aeson.Pair
+(.=!) k v = (Aeson..=) k v

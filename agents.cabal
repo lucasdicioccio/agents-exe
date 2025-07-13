@@ -89,6 +89,8 @@ library agents-lib
                     , System.Agents.HttpLogger
                     , System.Agents.OneShot
                     , System.Agents.MCP.Base
+                    , System.Agents.MCP.Client
+                    , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
                     , System.Agents.TUI
@@ -105,6 +107,7 @@ library agents-lib
                       bytestring,
                       case-insensitive,
                       conduit,
+                      conduit-extra,
                       containers,
                       contravariant,
                       directory,
@@ -124,6 +127,7 @@ library agents-lib
                       prodapi,
                       fsnotify,
                       stm,
+                      stm-chans,
                       stm-conduit,
                       text,
                       text-zipper,
