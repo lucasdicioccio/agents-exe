@@ -38,8 +38,8 @@ debugString = logDebugN . Text.pack
 debugShow :: (Show a) => a -> Rpc.JSONRPCT McpStack ()
 debugShow = debugString . show
 
-toto :: Runtime -> IO ()
-toto rt = do
+toto :: Runtime -> (LoopInfos -> Rpc.JSONRPCT McpStack ()) -> IO ()
+toto rt loop = do
     runStderrLoggingT $
         runReaderT (runMcpStack scheduleMcp) rt
   where
@@ -49,7 +49,7 @@ toto rt = do
             False
             (sinkTBMChan rt.reqChan)
             (sourceTBMChan rt.rspChan)
-            handlerLoop
+            (handlerLoop loop)
 
 data ClientMsg
     = InitializeMsg Mcp.InitializeRequest
@@ -114,16 +114,23 @@ clientCapabilities =
 
 -------------------------------------------------------------------------------
 
-handlerLoop :: Rpc.JSONRPCT McpStack ()
-handlerLoop = do
+data LoopInfos
+    = LoopInfos
+    { initializeResult :: InitializeResultRsp
+    }
+
+handlerLoop ::
+    (LoopInfos -> Rpc.JSONRPCT McpStack ()) -> Rpc.JSONRPCT McpStack ()
+handlerLoop loop = do
     srv <- initialize
     case srv of
         (Just (Right srv)) -> do
             notifyInitialized
-            loop srv
+            loop (LoopInfos srv)
         _ -> do
             pure ()
   where
+    -- primitives
     initialize :: Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj InitializeResultRsp))
     initialize =
         Rpc.sendRequest $
@@ -139,26 +146,49 @@ handlerLoop = do
             NotifyInitializedMsg $
                 Mcp.InitializedNotification
 
-    listTools :: Maybe Mcp.Cursor -> Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj ListToolsResultRsp))
-    listTools cursor =
-        Rpc.sendRequest $
-            ListToolsRequestMsg $
-                Mcp.ListToolsRequest
-                    cursor
+-------------------------------------------------------------------------------
+listTools ::
+    Maybe Mcp.Cursor ->
+    Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj ListToolsResultRsp))
+listTools cursor =
+    Rpc.sendRequest $
+        ListToolsRequestMsg $
+            Mcp.ListToolsRequest
+                cursor
 
-    callTool :: Mcp.Name -> Maybe Aeson.Object -> Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
-    callTool name arg =
-        Rpc.sendRequest $
-            CallToolRequestMsg $
-                Mcp.CallToolRequest
-                    name
-                    arg
+callTool ::
+    Mcp.Name ->
+    Maybe Aeson.Object ->
+    Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
+callTool name arg =
+    Rpc.sendRequest $
+        CallToolRequestMsg $
+            Mcp.CallToolRequest
+                name
+                arg
 
-    loop :: InitializeResultRsp -> Rpc.JSONRPCT McpStack ()
-    loop srv = do
-        -- todo: need to cycle between requests and responses
-        debugString "hello"
-        listTools Nothing >>= liftIO . print
-        callTool "ask_boss-openai_000" (Just ("prompt" Aeson..= ("hi" :: Text))) >>= liftIO . print
-        liftIO $ threadDelay 10000000
-        loop srv
+enumerateTools ::
+    Rpc.JSONRPCT McpStack ([Maybe (Either Rpc.ErrorObj ListToolsResultRsp)])
+enumerateTools = do
+    item <- listTools Nothing
+    go [item] (previewCursor item)
+  where
+    previewCursor :: Maybe (Either Rpc.ErrorObj ListToolsResultRsp) -> Maybe Mcp.Cursor
+    previewCursor (Just (Right rsp)) = rsp.getListToolsResult.nextCursor
+    previewCursor _ = Nothing
+
+    go xs Nothing = pure xs
+    go xs cursor@(Just _) = do
+        item <- listTools cursor
+        go (item : xs) (previewCursor item)
+
+-------------------------------------------------------------------------------
+defaultLoop :: LoopInfos -> Rpc.JSONRPCT McpStack ()
+defaultLoop loopInfo = do
+    let srv = loopInfo.initializeResult
+    -- todo: need to cycle between requests and responses
+    debugString "hello"
+    enumerateTools >>= liftIO . print
+    callTool "ask_boss-openai_000" (Just ("prompt" Aeson..= ("hi" :: Text))) >>= liftIO . print
+    liftIO $ threadDelay 10000000
+    defaultLoop loopInfo
