@@ -210,11 +210,12 @@ data LoopTrace
     = StartToolCall Mcp.Name (Maybe Aeson.Object)
     | EndToolCall Mcp.Name (Maybe Aeson.Object) (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
     | ToolsRefreshed [Maybe (Either Rpc.ErrorObj ListToolsResultRsp)]
+    | ExitingToolCallLoop
     deriving (Show)
 
 data LoopProps = LoopProps
     { tracer :: Tracer IO LoopTrace
-    , waitToolCall :: IO ToolCall
+    , waitToolCall :: IO (Maybe ToolCall)
     }
 
 defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
@@ -271,11 +272,15 @@ defaultLoop props clientInfos = do
 
     loopToolCalls :: Rpc.JSONRPCT McpStack ()
     loopToolCalls = do
-        (ToolCall name obj resp) <- liftIO props.waitToolCall
-        liftIO $ runTracer props.tracer (StartToolCall name obj)
-        _ <- async $ do
-            r <- callTool name obj
-            liftIO $ do
-                runTracer props.tracer (EndToolCall name obj r)
-                resp r
-        loopToolCalls
+        tc <- liftIO props.waitToolCall
+        case tc of
+            Just (ToolCall name obj resp) -> do
+                liftIO $ runTracer props.tracer (StartToolCall name obj)
+                _ <- async $ do
+                    r <- callTool name obj
+                    liftIO $ do
+                        runTracer props.tracer (EndToolCall name obj r)
+                        resp r
+                loopToolCalls
+            Nothing -> do
+                liftIO $ runTracer props.tracer ExitingToolCallLoop
