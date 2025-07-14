@@ -653,6 +653,10 @@ data ResourceUpdatedNotification = ResourceUpdatedNotification
 
 data PromptListChangedNotification = PromptListChangedNotification
 data ToolListChangedNotification = ToolListChangedNotification
+    deriving (Show)
+
+instance Aeson.FromJSON ToolListChangedNotification where
+    parseJSON _ = pure ToolListChangedNotification
 
 data LoggingMessageNotification = LoggingMessageNotification
     { level :: LoggingLevel

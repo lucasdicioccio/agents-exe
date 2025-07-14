@@ -4,6 +4,7 @@
 module System.Agents.MCP.Client where
 
 import Control.Concurrent (threadDelay)
+import Control.Monad (when)
 import Control.Monad.Logger (Loc, LogLevel, LogSource, LogStr, LoggingT (..), MonadLogger, MonadLoggerIO, logDebugN, runStderrLoggingT)
 import Control.Monad.Reader (MonadReader (..), ReaderT, ask, runReaderT)
 import Control.Monad.Trans (lift)
@@ -106,6 +107,16 @@ instance Aeson.ToJSON ClientMsg where
     toJSON (NotifyInitializedMsg _) = Aeson.toJSON (Aeson.object [])
     toJSON (ListToolsRequestMsg msg) = Aeson.toJSON msg
     toJSON (CallToolRequestMsg msg) = Aeson.toJSON msg
+
+data ServerMsg
+    = NotifyToolListChanged Mcp.ToolListChangedNotification
+    deriving (Show)
+
+instance Rpc.FromRequest ServerMsg where
+    parseParams "notifications/tools/list_changed" =
+        Just (fmap NotifyToolListChanged <$> Aeson.parseJSON)
+    parseParams _ =
+        Nothing
 
 -------------------------------------------------------------------------------
 clientProtocolVersion :: Text
@@ -215,6 +226,27 @@ defaultLoop props clientInfos = do
             else
                 loopEnumerateTools_Poll
   where
+    waitToolChangeNotification :: Rpc.JSONRPCT McpStack Bool
+    waitToolChangeNotification = do
+        mreq <- Rpc.receiveRequest
+        case mreq of
+            Nothing -> do
+                debugString "no request received"
+                pure False
+            Just req -> do
+                msg <- handleReq req
+                case msg of
+                    Just (NotifyToolListChanged _) -> pure True
+                    _ -> pure False
+      where
+        handleReq :: Rpc.Request -> Rpc.JSONRPCT McpStack (Maybe ServerMsg)
+        handleReq req = do
+            debugShow req
+            let emsg = Rpc.fromRequest req :: Either Rpc.ErrorObj ServerMsg
+            case emsg of
+                (Left err) -> debugShow err >> pure Nothing
+                (Right msg) -> pure $ Just msg
+
     hasToolsChangedNotif :: Bool
     hasToolsChangedNotif =
         Mcp.ToolsListChanged `elem` clientInfos.initializeResult.getInitializeResult.capabilities.flags
@@ -225,8 +257,9 @@ defaultLoop props clientInfos = do
 
     loopEnumerateTools_Notif :: Rpc.JSONRPCT McpStack ()
     loopEnumerateTools_Notif = do
-        doRefreshTools
-        liftIO (threadDelay 1000000)
+        changed <- waitToolChangeNotification
+        when changed $ do
+            doRefreshTools
         loopEnumerateTools_Notif
 
     loopEnumerateTools_Poll :: Rpc.JSONRPCT McpStack ()
