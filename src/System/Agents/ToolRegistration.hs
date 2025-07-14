@@ -8,7 +8,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
-import Data.Foldable.WithIndex (ifoldMap')
+import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 
@@ -115,18 +115,27 @@ registerIOScriptInLLM script llmProps =
 registerMcpToolInLLM ::
     McpTools.Toolbox ->
     McpTools.ToolDescription ->
-    ToolRegistration
+    Either String ToolRegistration
 registerMcpToolInLLM box mcp =
     let
         matchName :: McpTools.ToolDescription -> LLM.ToolCall -> Bool
         matchName mcp call = mcp2LLMName box mcp == call.toolCallFunction.toolCallFunctionName
 
-        mapToolDescriptionMcp2LLM :: McpTools.ToolDescription -> LLM.Tool
-        mapToolDescriptionMcp2LLM mcp =
+        llmBasedSchema :: Either String [LLM.ParamProperty]
+        llmBasedSchema = adaptSchema mcp.getToolDescription.inputSchema
+
+        llmName :: LLM.ToolName
+        llmName = mcp2LLMName box mcp
+
+        llmDescription :: Text
+        llmDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
+
+        mapToolDescriptionMcp2LLM :: [LLM.ParamProperty] -> LLM.Tool
+        mapToolDescriptionMcp2LLM schema =
             LLM.Tool
-                { LLM.toolName = mcp2LLMName box mcp
-                , LLM.toolDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
-                , LLM.toolParamProperties = adaptSchema mcp.getToolDescription.inputSchema
+                { LLM.toolName = llmName
+                , LLM.toolDescription = llmDescription
+                , LLM.toolParamProperties = schema
                 }
 
         tool :: Tool ToolRuntimeArg ()
@@ -135,31 +144,35 @@ registerMcpToolInLLM box mcp =
         find :: LLM.ToolCall -> Maybe (Tool ToolRuntimeArg LLM.ToolCall)
         find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
      in
-        ToolRegistration tool (mapToolDescriptionMcp2LLM mcp) find
+        case llmBasedSchema of
+            Right schema ->
+                Right $ ToolRegistration tool (mapToolDescriptionMcp2LLM schema) find
+            Left err ->
+                Left err
 
--- todo: surface errors instead
-adaptSchema :: Mcp.InputSchema -> [LLM.ParamProperty]
+adaptSchema :: Mcp.InputSchema -> Either String [LLM.ParamProperty]
 adaptSchema schema =
     case schema.properties of
-        Nothing -> []
-        Just obj -> ifoldMap' f obj
+        Nothing -> Right []
+        Just obj -> ifoldl' f (Right []) obj
   where
-    f :: Aeson.Key -> Aeson.Value -> [LLM.ParamProperty]
-    f k v = maybe2singleton $ adaptProperty k v
+    f :: Aeson.Key -> Either String [LLM.ParamProperty] -> Aeson.Value -> Either String [LLM.ParamProperty]
+    f _ err@(Left _) _ = err
+    f k (Right xs) v =
+        case adaptProperty k v of
+            Left err -> Left err
+            Right x -> Right (x : xs)
 
-    maybe2singleton :: Maybe a -> [a]
-    maybe2singleton = maybe [] (: [])
-
-adaptProperty :: Aeson.Key -> Aeson.Value -> Maybe LLM.ParamProperty
+adaptProperty :: Aeson.Key -> Aeson.Value -> Either String LLM.ParamProperty
 adaptProperty k val =
     case propMappingResult of
         Aeson.Success prop ->
-            Just $
+            Right $
                 LLM.ParamProperty
                     (AesonKey.toText k)
                     prop._type
                     prop._description
-        Aeson.Error _ -> Nothing
+        Aeson.Error err -> Left err
   where
     propMappingResult :: Aeson.Result PropertyHelper
     propMappingResult = Aeson.fromJSON val
@@ -169,4 +182,4 @@ data PropertyHelper
 
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
-        PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "properties"
+        PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "title"
