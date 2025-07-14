@@ -12,7 +12,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Network.JSONRPC as Rpc
-import Prod.Tracer (Tracer (..), silent)
+import Prod.Tracer (Tracer (..), contramap, traceBoth)
 import System.Process (CreateProcess)
 
 import qualified System.Agents.MCP.Base as Mcp
@@ -25,7 +25,9 @@ newtype ToolDescription = ToolDescription {getToolDescription :: Mcp.Tool}
     deriving (Show)
 
 data Trace
-    = McpClientLoopTrace !McpClient.LoopTrace
+    = McpClientRunTrace !McpClient.RunTrace
+    | McpClientClientTrace !McpClient.ClientTrace
+    | McpClientLoopTrace !McpClient.LoopTrace
     deriving (Show)
 
 data Toolbox = Toolbox
@@ -60,9 +62,9 @@ initializeMcpToolbox tracer name proc = do
     discoveredTools <- newTVarIO []
     let toolsListTracer = storeToolsInDiscoveredValues discoveredTools
     -- tracers
-    let rtTracer = silent
-    let clientTracer = silent
-    let loopTracer = toolsListTracer
+    let rtTracer = contramap McpClientRunTrace tracer
+    let clientTracer = contramap McpClientClientTrace tracer
+    let loopTracer = traceBoth toolsListTracer (contramap McpClientLoopTrace tracer)
 
     -- wire things together
     mcpRt <- McpClient.initRuntime rtTracer proc

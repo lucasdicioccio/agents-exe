@@ -1,7 +1,11 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Agents.CLI.TraceUtils where
+module System.Agents.CLI.TraceUtils (
+    tracePrintingTextResponses,
+    traceUsefulPromptStderr,
+    traceUsefulPromptStdout,
+) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
@@ -12,7 +16,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
 import GHC.IO.Handle (Handle)
-import Prod.Tracer (Tracer (..), silent)
+import Prod.Tracer (Tracer (..))
 import System.IO (stderr, stdout)
 
 import System.Agents.AgentTree
@@ -22,9 +26,6 @@ import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as Tools
-
-traceSilent :: Tracer IO Trace
-traceSilent = silent
 
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
@@ -53,6 +54,8 @@ traceUsefulPromptHandle h = Tracer f
   where
     f (AgentTrace tr) =
         Text.hPutStrLn h $ renderAgentTrace tr
+    f (McpTrace _ tr) =
+        Text.hPutStrLn h (Text.pack $ show tr)
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
     f (ConfigLoadedTrace x) =
         Text.hPutStrLn h (showTree 0 x)

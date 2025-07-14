@@ -14,7 +14,7 @@ import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Prod.Tracer (Tracer (..), contramap, tracePrint)
+import Prod.Tracer (Tracer (..), contramap)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
@@ -36,6 +36,7 @@ import System.Agents.ApiKeys
 -------------------------------------------------------------------------------
 data Trace
     = AgentTrace Runtime.Trace
+    | McpTrace McpServerDescription McpTools.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     deriving
@@ -187,9 +188,9 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                 mcpToolboxes
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
-    startMcp (McpSimpleBinary cfg) =
+    startMcp srv@(McpSimpleBinary cfg) =
         McpTools.initializeMcpToolbox
-            tracePrint
+            (contramap (McpTrace srv) tracer)
             cfg.name
             (proc cfg.executable (map Text.unpack cfg.args))
 
