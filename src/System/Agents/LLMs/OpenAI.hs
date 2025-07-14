@@ -172,7 +172,7 @@ waitRateLimit lims onWait = Tracer go
 newtype ToolName = ToolName {getToolName :: Text}
     deriving (Show, Eq, Ord)
 
--- todo: move to some jsonschema part
+-- todo: move to some jsonschema module
 data ParamProperty = ParamProperty
     { propertyKey :: Text
     , propertyType :: ParamType
@@ -185,11 +185,39 @@ data ParamType
     | StringParamType
     | BoolParamType
     | NumberParamType
-    | ObjectParamType [ParamProperty]
     | EnumParamType [Text]
-    | MultipleParamType Text
     | OpaqueParamType Text
+    | MultipleParamType Text -- todo: break limitation preventing string-enum and null
+    | ObjectParamType [ParamProperty]
     deriving (Show)
+
+toJsonSchemaPair :: ParamProperty -> (Text, Value)
+toJsonSchemaPair p = (p.propertyKey, Aeson.object (jsonSchema p))
+
+jsonSchema :: ParamProperty -> [(Aeson.Key, Value)]
+jsonSchema p =
+    case p.propertyType of
+        NullParamType ->
+            ["type" .= ("null" :: Text), "description" .= p.propertyDescription]
+        StringParamType ->
+            ["type" .= ("string" :: Text), "description" .= p.propertyDescription]
+        BoolParamType ->
+            ["type" .= ("boolean" :: Text), "description" .= p.propertyDescription]
+        NumberParamType ->
+            ["type" .= ("number" :: Text), "description" .= p.propertyDescription]
+        EnumParamType allowedValues ->
+            ["type" .= ("string" :: Text), "enum" .= allowedValues, "description" .= p.propertyDescription]
+        OpaqueParamType typ ->
+            ["type" .= typ, "description" .= p.propertyDescription]
+        MultipleParamType allowedTypes ->
+            ["type" .= allowedTypes, "description" .= p.propertyDescription]
+        ObjectParamType propz ->
+            [ "type" .= ("object" :: Text)
+            , "description" .= p.propertyDescription
+            , "properties" .= HashMap.fromList (fmap toJsonSchemaPair propz)
+            , "additionalProperties" .= False
+            , "required" .= fmap propertyKey propz
+            ]
 
 data Tool = Tool
     { toolName :: ToolName
@@ -218,35 +246,16 @@ instance ToJSON Tool where
                 .= Aeson.object
                     [ "name" .= t.toolName.getToolName
                     , "description" .= t.toolDescription
-                    , "parameters"
-                        .= Aeson.object
-                            [ "type" .= ("object" :: Text)
-                            , "properties" .= HashMap.fromList (fmap toJsonSchemaPair t.toolParamProperties)
-                            , "additionalProperties" .= False
-                            , "required" .= fmap propertyKey t.toolParamProperties
-                            ]
+                    , "parameters" .= Aeson.object (jsonSchema toplevelProperty)
                     ]
             ]
       where
-        toJsonSchemaPair :: ParamProperty -> (Text, Value)
-        toJsonSchemaPair p = (p.propertyKey, Aeson.object (jsonSchema p))
-        jsonSchema :: ParamProperty -> [(Aeson.Key, Value)]
-        jsonSchema p =
-            case p.propertyType of
-                NullParamType ->
-                    ["type" .= ("null" :: Text), "description" .= p.propertyDescription]
-                StringParamType ->
-                    ["type" .= ("string" :: Text), "description" .= p.propertyDescription]
-                BoolParamType ->
-                    ["type" .= ("boolean" :: Text), "description" .= p.propertyDescription]
-                NumberParamType ->
-                    ["type" .= ("number" :: Text), "description" .= p.propertyDescription]
-                EnumParamType allowedValues ->
-                    ["type" .= ("string" :: Text), "enum" .= allowedValues, "description" .= p.propertyDescription]
-                MultipleParamType allowedTypes ->
-                    ["type" .= allowedTypes, "description" .= p.propertyDescription]
-                OpaqueParamType typ ->
-                    ["type" .= typ, "description" .= p.propertyDescription]
+        toplevelProperty :: ParamProperty
+        toplevelProperty =
+            ParamProperty
+                t.toolName.getToolName
+                (ObjectParamType t.toolParamProperties)
+                t.toolDescription
 
 systemMessage :: Text -> Aeson.Value
 systemMessage txt =
