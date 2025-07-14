@@ -48,6 +48,7 @@ data Agent
     , announce :: Text
     , systemPrompt :: [Text]
     , toolDirectory :: FilePath
+    , mcpServers :: Maybe [McpServerDescription]
     }
     deriving (Show, Ord, Eq, Generic)
 instance ToJSON Agent
@@ -70,6 +71,35 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+
+-------------------------------------------------------------------------------
+data McpSimpleBinaryConfiguration
+    = McpSimpleBinaryConfiguration
+    { name :: Text
+    , executable :: FilePath
+    , args :: [Text]
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON McpSimpleBinaryConfiguration
+instance ToJSON McpSimpleBinaryConfiguration
+data McpServerDescription
+    = McpSimpleBinary McpSimpleBinaryConfiguration
+    deriving (Show, Ord, Eq, Generic)
+instance ToJSON McpServerDescription where
+    toJSON (McpSimpleBinary val) =
+        Aeson.object
+            [ "tag" .= ("McpSimpleBinary" :: Text)
+            , "contents" .= val
+            ]
+
+instance FromJSON McpServerDescription where
+    parseJSON = Aeson.withObject "McpServerDescription" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "McpSimpleBinary" ->
+                McpSimpleBinary <$> v .: "contents"
+            _ -> fail "expecting McpSimpleBinary 'tag'"
 
 -------------------------------------------------------------------------------
 data PingPongQuery

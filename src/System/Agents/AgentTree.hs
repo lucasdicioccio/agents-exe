@@ -17,9 +17,10 @@ import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap, tracePrint)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
-import System.Process (shell)
+import System.Process (proc)
 
-import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, newConversationId)
+import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, McpServerDescription (..), newConversationId)
+import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as LLM
@@ -166,7 +167,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
         (Nothing, _) ->
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
-            tb <- McpTools.initializeMcpToolbox tracePrint "dev" (shell "agents-exe mcp-server")
+            mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
             Runtime.newRuntime
                 desc.slug
                 desc.announce
@@ -183,7 +184,14 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                 )
                 (rootDir </> desc.toolDirectory)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
-                [tb]
+                mcpToolboxes
+  where
+    startMcp :: McpServerDescription -> IO McpTools.Toolbox
+    startMcp (McpSimpleBinary cfg) =
+        McpTools.initializeMcpToolbox
+            tracePrint
+            cfg.name
+            (proc cfg.executable (map Text.unpack cfg.args))
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
 augmentMainAgentPromptWithSubAgents [] base = base
