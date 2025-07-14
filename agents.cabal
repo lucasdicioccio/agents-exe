@@ -119,6 +119,7 @@ library agents-lib
                       http-client,
                       http-client-tls,
                       http-types,
+                      indexed-traversable,
                       json-rpc,
                       lens,
                       monad-logger,

@@ -14,11 +14,13 @@ import System.Agents.Base (AgentId, PingPongQuery (..))
 import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.MCP.Base as MCP
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.IO as Tools
+import qualified System.Agents.Tools.McpToolbox as Tools
 
 import Brick
 import Brick.Focus (focusGetCurrent)
@@ -224,6 +226,8 @@ renderToolRegistry st aId =
                 Text.unwords ["command", Text.pack bashScript.scriptPath, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode reg.declareTool]
             Tools.IOTool ioScript ->
                 Text.unwords ["io", ioScript.ioSlug, ioScript.ioDescription]
+            Tools.MCPTool desc ->
+                Text.unwords ["mcp", desc.getToolDescription.name, Maybe.fromMaybe "no description" desc.getToolDescription.description]
 
 separator :: Widget a
 separator = txt "=============="

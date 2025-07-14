@@ -4,14 +4,21 @@
 -- | Defines an LLM tool registration.
 module System.Agents.ToolRegistration where
 
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
+import Data.Foldable.WithIndex (ifoldMap')
+import qualified Data.Maybe as Maybe
+import Data.Text (Text)
 
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.Tools
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 
 -------------------------------------------------------------------------------
 
@@ -36,6 +43,11 @@ io2LLMName io = LLM.ToolName (mconcat ["io_", io.description.ioSlug])
 -- naming policy for Bash tools
 bash2LLMName :: BashTools.ScriptDescription -> LLM.ToolName
 bash2LLMName bash = LLM.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlug])
+
+-- naming policy for MCP tools
+mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> LLM.ToolName
+mcp2LLMName box mcp =
+    LLM.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
 
 -------------------------------------------------------------------------------
 
@@ -99,3 +111,62 @@ registerIOScriptInLLM script llmProps =
                 }
      in
         ToolRegistration tool llmTool find
+
+registerMcpToolInLLM ::
+    McpTools.Toolbox ->
+    McpTools.ToolDescription ->
+    ToolRegistration
+registerMcpToolInLLM box mcp =
+    let
+        matchName :: McpTools.ToolDescription -> LLM.ToolCall -> Bool
+        matchName mcp call = mcp2LLMName box mcp == call.toolCallFunction.toolCallFunctionName
+
+        mapToolDescriptionMcp2LLM :: McpTools.ToolDescription -> LLM.Tool
+        mapToolDescriptionMcp2LLM mcp =
+            LLM.Tool
+                { LLM.toolName = mcp2LLMName box mcp
+                , LLM.toolDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
+                , LLM.toolParamProperties = adaptSchema mcp.getToolDescription.inputSchema
+                }
+
+        tool :: Tool ToolRuntimeArg ()
+        tool = mcpTool box mcp
+
+        find :: LLM.ToolCall -> Maybe (Tool ToolRuntimeArg LLM.ToolCall)
+        find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
+     in
+        ToolRegistration tool (mapToolDescriptionMcp2LLM mcp) find
+
+-- todo: surface errors instead
+adaptSchema :: Mcp.InputSchema -> [LLM.ParamProperty]
+adaptSchema schema =
+    case schema.properties of
+        Nothing -> []
+        Just obj -> ifoldMap' f obj
+  where
+    f :: Aeson.Key -> Aeson.Value -> [LLM.ParamProperty]
+    f k v = maybe2singleton $ adaptProperty k v
+
+    maybe2singleton :: Maybe a -> [a]
+    maybe2singleton = maybe [] (: [])
+
+adaptProperty :: Aeson.Key -> Aeson.Value -> Maybe LLM.ParamProperty
+adaptProperty k val =
+    case propMappingResult of
+        Aeson.Success prop ->
+            Just $
+                LLM.ParamProperty
+                    (AesonKey.toText k)
+                    prop._type
+                    prop._description
+        Aeson.Error _ -> Nothing
+  where
+    propMappingResult :: Aeson.Result PropertyHelper
+    propMappingResult = Aeson.fromJSON val
+
+data PropertyHelper
+    = PropertyHelper {_type :: Text, _description :: Text}
+
+instance Aeson.FromJSON PropertyHelper where
+    parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
+        PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "properties"

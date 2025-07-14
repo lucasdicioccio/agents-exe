@@ -14,9 +14,10 @@ import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Prod.Tracer (Tracer (..), contramap)
+import Prod.Tracer (Tracer (..), contramap, tracePrint)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
+import System.Process (shell)
 
 import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, newConversationId)
 import qualified System.Agents.FileLoader as FileLoader
@@ -27,6 +28,7 @@ import System.Agents.Runtime (Runtime (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 
 import System.Agents.ApiKeys
 
@@ -163,7 +165,8 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
         (Nothing, _) ->
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
-        (Just key, Just flavor) ->
+        (Just key, Just flavor) -> do
+            tb <- McpTools.initializeMcpToolbox tracePrint "dev" (shell "agents-exe mcp-server")
             Runtime.newRuntime
                 desc.slug
                 desc.announce
@@ -180,6 +183,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                 )
                 (rootDir </> desc.toolDirectory)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
+                [tb]
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
 augmentMainAgentPromptWithSubAgents [] base = base

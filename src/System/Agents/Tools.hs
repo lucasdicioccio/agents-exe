@@ -17,6 +17,7 @@ module System.Agents.Tools (
     ToolDef (..),
     ioTool,
     bashTool,
+    mcpTool,
     mapToolResult,
     mapCallResult,
     extractCall,
@@ -28,8 +29,10 @@ import Prod.Tracer (Tracer, contramap)
 
 -------------------------------------------------------------------------------
 
+import qualified System.Agents.MCP.Client as McpClient
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.Trace
 
 -------------------------------------------------------------------------------
@@ -43,6 +46,7 @@ data Tool rtVal call
 
 data ToolDef
     = BashTool !BashTools.ScriptDescription
+    | MCPTool !McpTools.ToolDescription
     | IOTool !IOTools.IOScriptDescription
     deriving (Show)
 
@@ -64,6 +68,27 @@ bashTool script =
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ ToolSuccess call rsp
+
+-------------------------------------------------------------------------------
+mcpTool ::
+    McpTools.Toolbox ->
+    McpTools.ToolDescription ->
+    Tool a ()
+mcpTool toolbox desc =
+    Tool
+        { toolDef = MCPTool desc
+        , toolRun = run
+        }
+  where
+    call = ()
+    run _ _ (Aeson.Object v) = do
+        ret <- McpTools.callTool toolbox desc (Just v)
+        case ret of
+            (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
+            err -> pure $ McpToolError call (show err)
+    extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()
+    extractContentsFromToolCall rsp =
+        ToolSuccess call "TODO"
 
 -------------------------------------------------------------------------------
 

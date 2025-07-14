@@ -9,7 +9,7 @@ module System.Agents.Runtime.Runtime (
 ) where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent.STM (STM, atomically)
+import Control.Concurrent.STM (STM, atomically, readTVar)
 import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, takeTMVar, tryPutTMVar)
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
@@ -32,6 +32,7 @@ import System.Agents.Tools
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 
 import System.Agents.Runtime.Trace
 
@@ -60,16 +61,22 @@ addTracer rt t = rt{agentTracer = traceBoth t rt.agentTracer}
 triggerRefreshTools :: Runtime -> IO Bool
 triggerRefreshTools rt = atomically $ rt.agentTriggerRefreshTools
 
+-- todo: directly ask for effects returning registrations
+type ToolboxDirectory = FilePath
+type IOToolBuilder = AgentSlug -> AgentId -> ToolRegistration
+type McpToolConfig = McpTools.Toolbox
+
 newRuntime ::
     AgentSlug ->
     AgentAnnounce ->
     Tracer IO Trace ->
     LLM.ApiKey ->
     LLM.Model ->
-    FilePath ->
-    [AgentSlug -> AgentId -> ToolRegistration] ->
+    ToolboxDirectory ->
+    [IOToolBuilder] ->
+    [McpToolConfig] ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
+newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
     toolz <- BashToolbox.initializeBackroundToolbox (contramap (AgentTrace_Loading slug uid) tracer) tooldir
@@ -81,9 +88,16 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools = do
             let appendIOTools xs = ioTools <> xs
             let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
-            let readTools = Background.readBackgroundVal bkgToolsWithIOTools
+
+            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readMcpToolsRegistrations
             let rt = Runtime slug uid announce tracer httpRt model readTools toolbox.triggerReload
             pure $ Right rt
+  where
+    readMcpToolsRegistrations :: IO [ToolRegistration]
+    readMcpToolsRegistrations = do
+        lists <- traverse (atomically . readTVar . McpTools.toolsList) $ mcpToolboxes
+        let reg tb tds = [registerMcpToolInLLM tb td | td <- tds]
+        pure $ mconcat $ zipWith reg mcpToolboxes lists
 
 data ConversationFunctions r
     = ConversationFunctions

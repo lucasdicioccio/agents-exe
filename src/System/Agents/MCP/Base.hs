@@ -259,7 +259,7 @@ instance FromJSON Tool where
 
 data InputSchema = InputSchema
     { required :: Maybe [Text]
-    , properties :: Maybe Aeson.Object
+    , properties :: Maybe Aeson.Object -- todo: consider a (recursive) KeyMap of schema properties
     }
     deriving (Show)
 

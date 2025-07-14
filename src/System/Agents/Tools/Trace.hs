@@ -14,8 +14,9 @@ data ToolTrace
     deriving (Show)
 
 data CallResult call
-    = ToolNotFound call
+    = ToolSuccess call ByteString
+    | ToolNotFound call
     | BashToolError call BashTools.RunScriptError
     | IOToolError call IOTools.RunError
-    | ToolSuccess call ByteString
+    | McpToolError call String -- TODO: better error
     deriving (Show)
