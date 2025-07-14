@@ -13,7 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..), PingPongQuery (..))
+import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
@@ -26,6 +26,7 @@ import qualified System.Agents.MCP.Client as McpClient
 import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
+import System.Agents.Runtime.Base (PingPongQuery (..))
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace

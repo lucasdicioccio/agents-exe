@@ -100,14 +100,3 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-
--------------------------------------------------------------------------------
-data PingPongQuery
-    = SomeQueryToAnswer Text
-    | GaveToolAnswers
-    | NoQuery
-    deriving (Show)
-
-getQueryToAnswer :: PingPongQuery -> Maybe Text
-getQueryToAnswer (SomeQueryToAnswer t) = Just t
-getQueryToAnswer _ = Nothing

@@ -8,6 +8,8 @@ import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as IOTools
 
+import System.Agents.Runtime.Base
+
 -------------------------------------------------------------------------------
 data Trace
     = AgentTrace_Loading !AgentSlug !AgentId !BashToolbox.Trace

@@ -83,6 +83,7 @@ library agents-lib
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Memory
                     , System.Agents.Runtime
+                    , System.Agents.Runtime.Base
                     , System.Agents.Runtime.Conversation
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace

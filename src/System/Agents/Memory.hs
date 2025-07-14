@@ -6,6 +6,7 @@ import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
+import System.Agents.Runtime.Base (PingPongQuery (..))
 
 data MemoryItem
     = MemoryItem

@@ -20,6 +20,7 @@ import qualified System.Agents.LLMs.OpenAI as LLM
 import System.Agents.ToolRegistration
 import System.Agents.Tools
 
+import System.Agents.Runtime.Base
 import System.Agents.Runtime.Runtime
 import System.Agents.Runtime.Trace
 
@@ -134,3 +135,5 @@ yankResults xs = fmap (\x -> (extractCall x, f x)) xs
     f (BashToolError _ err) = CByteString.unlines ["the tool errored with:", CByteString.pack $ show err]
     f (IOToolError _ err) = CByteString.unlines ["the tool errored with:", CByteString.pack $ show err]
     f (ToolSuccess _ v) = v
+
+-------------------------------------------------------------------------------

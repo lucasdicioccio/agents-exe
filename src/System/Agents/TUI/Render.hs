@@ -10,12 +10,13 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 
-import System.Agents.Base (AgentId, PingPongQuery (..))
+import System.Agents.Base (AgentId)
 import qualified System.Agents.Conversation as Conversation
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as MCP
 import qualified System.Agents.Runtime as Runtime
+import System.Agents.Runtime.Base (PingPongQuery (..))
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
