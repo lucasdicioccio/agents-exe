@@ -221,7 +221,8 @@ defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
 defaultLoop props clientInfos = do
     withAsync loopToolCalls $ \x -> do
         if hasToolsChangedNotif
-            then
+            then do
+                doRefreshTools
                 loopEnumerateTools_Notif
             else
                 loopEnumerateTools_Poll
