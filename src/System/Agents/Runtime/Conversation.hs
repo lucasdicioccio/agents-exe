@@ -76,7 +76,7 @@ stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions
     let query = getQueryToAnswer pendingQuery
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
-    let payload = LLM.simplePayload model llmTools hist query
+    let payload = LLM.renderPayload model llmTools hist query
     stepUUID <- newStepId
     runTracer memoTracer (Calling pendingQuery hist stepUUID)
     llmResponse <- LLM.callLLMPayload (contramap (LLMTrace stepUUID) convTracer) httpRt model.modelBaseUrl payload

@@ -224,7 +224,7 @@ callExpertTool mcpName ai =
                             [ "prompt"
                                 .= Mcp.object
                                     [ "type" .= ("string" :: Text)
-                                    , "title" .= ("the prompt asked when calling the expert" :: Text)
+                                    , "description" .= ("the prompt asked when calling the expert" :: Text)
                                     ]
                             ]
                     )

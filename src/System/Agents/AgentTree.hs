@@ -229,8 +229,8 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     props =
         [ LLM.ParamProperty
             { LLM.propertyKey = "what"
-            , LLM.propertyType = "string"
-            , LLM.propertyDescription = "the prompt to the other agent"
+            , LLM.propertyType = LLM.StringParamType
+            , LLM.propertyDescription = "the prompt to call the specialized-agent with"
             }
         ]
     io =

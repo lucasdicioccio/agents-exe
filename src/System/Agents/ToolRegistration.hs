@@ -71,7 +71,7 @@ registerBashToolInLLM script =
         mapArg arg =
             LLM.ParamProperty
                 { LLM.propertyKey = arg.argName
-                , LLM.propertyType = arg.argBackingTypeString
+                , LLM.propertyType = LLM.OpaqueParamType arg.argBackingTypeString
                 , LLM.propertyDescription = arg.argDescription
                 }
 
@@ -170,7 +170,7 @@ adaptProperty k val =
             Right $
                 LLM.ParamProperty
                     (AesonKey.toText k)
-                    prop._type
+                    (LLM.OpaqueParamType prop._type)
                     prop._description
         Aeson.Error err -> Left err
   where
@@ -182,4 +182,4 @@ data PropertyHelper
 
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
-        PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "title"
+        PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"

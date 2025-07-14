@@ -172,11 +172,23 @@ waitRateLimit lims onWait = Tracer go
 newtype ToolName = ToolName {getToolName :: Text}
     deriving (Show, Eq, Ord)
 
+-- todo: move to some jsonschema part
 data ParamProperty = ParamProperty
     { propertyKey :: Text
-    , propertyType :: Text
+    , propertyType :: ParamType
     , propertyDescription :: Text
     }
+    deriving (Show)
+
+data ParamType
+    = NullParamType
+    | StringParamType
+    | BoolParamType
+    | NumberParamType
+    | ObjectParamType [ParamProperty]
+    | EnumParamType [Text]
+    | MultipleParamType Text
+    | OpaqueParamType Text
     deriving (Show)
 
 data Tool = Tool
@@ -186,6 +198,18 @@ data Tool = Tool
     }
     deriving (Show)
 
+-- TODO: decide on format
+-- type:'function'
+-- name:string
+-- description:string
+-- properties.type:'object'
+-- properties.strict:'true'
+-- properties.parameters:object
+-- properties.parameters.type:'object'
+-- properties.parameters.required:[]string
+-- properties.parameters.additionalProperties:'false'
+-- properties.parameters.parameters:object
+-- https://platform.openai.com/docs/guides/function-calling?api-mode=responses&example=send-email
 instance ToJSON Tool where
     toJSON t =
         Aeson.object
@@ -197,15 +221,32 @@ instance ToJSON Tool where
                     , "parameters"
                         .= Aeson.object
                             [ "type" .= ("object" :: Text)
-                            , "properties" .= HashMap.fromList (fmap toPair t.toolParamProperties)
+                            , "properties" .= HashMap.fromList (fmap toJsonSchemaPair t.toolParamProperties)
                             , "additionalProperties" .= False
                             , "required" .= fmap propertyKey t.toolParamProperties
                             ]
                     ]
             ]
       where
-        toPair :: ParamProperty -> (Text, Value)
-        toPair p = (p.propertyKey, Aeson.object ["type" .= p.propertyType, "description" .= p.propertyDescription])
+        toJsonSchemaPair :: ParamProperty -> (Text, Value)
+        toJsonSchemaPair p = (p.propertyKey, Aeson.object (jsonSchema p))
+        jsonSchema :: ParamProperty -> [(Aeson.Key, Value)]
+        jsonSchema p =
+            case p.propertyType of
+                NullParamType ->
+                    ["type" .= ("null" :: Text), "description" .= p.propertyDescription]
+                StringParamType ->
+                    ["type" .= ("string" :: Text), "description" .= p.propertyDescription]
+                BoolParamType ->
+                    ["type" .= ("boolean" :: Text), "description" .= p.propertyDescription]
+                NumberParamType ->
+                    ["type" .= ("number" :: Text), "description" .= p.propertyDescription]
+                EnumParamType allowedValues ->
+                    ["type" .= ("string" :: Text), "enum" .= allowedValues, "description" .= p.propertyDescription]
+                MultipleParamType allowedTypes ->
+                    ["type" .= allowedTypes, "description" .= p.propertyDescription]
+                OpaqueParamType typ ->
+                    ["type" .= typ, "description" .= p.propertyDescription]
 
 systemMessage :: Text -> Aeson.Value
 systemMessage txt =
@@ -310,13 +351,13 @@ gpt4Turbo = Model OpenAIv1 openAIv1Endpoint "gpt-4-turbo"
 gpt4oMini :: SystemPrompt -> Model
 gpt4oMini = Model OpenAIv1 openAIv1Endpoint "gpt-4o-mini"
 
-simplePayload ::
+renderPayload ::
     Model ->
     [Tool] ->
     History ->
     Maybe Text ->
     Aeson.Value
-simplePayload model tools hist prompt =
+renderPayload model tools hist prompt =
     case model.modelFlavor of
         OpenAIv1 ->
             Aeson.object
