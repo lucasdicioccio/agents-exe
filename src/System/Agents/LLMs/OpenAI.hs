@@ -226,18 +226,6 @@ data Tool = Tool
     }
     deriving (Show)
 
--- TODO: decide on format
--- type:'function'
--- name:string
--- description:string
--- properties.type:'object'
--- properties.strict:'true'
--- properties.parameters:object
--- properties.parameters.type:'object'
--- properties.parameters.required:[]string
--- properties.parameters.additionalProperties:'false'
--- properties.parameters.parameters:object
--- https://platform.openai.com/docs/guides/function-calling?api-mode=responses&example=send-email
 instance ToJSON Tool where
     toJSON t =
         Aeson.object
