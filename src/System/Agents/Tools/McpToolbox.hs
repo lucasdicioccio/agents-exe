@@ -51,11 +51,9 @@ initializeMcpToolbox tracer name proc = do
             let tc = McpClient.ToolCall td.getToolDescription.name param
             mbox <- newEmptyMVar
             let done res = do
-                    print "done, responding"
                     putMVar mbox res
             let fullcall = McpClient.FullToolCall tc done
             atomically $ writeTBMChan chan fullcall
-            print "enqueued, waiting"
             takeMVar mbox
 
     -- tool discovery
