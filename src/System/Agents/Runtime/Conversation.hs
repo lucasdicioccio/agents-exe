@@ -7,9 +7,11 @@ module System.Agents.Runtime.Conversation (
 ) where
 
 import Control.Concurrent.Async (mapConcurrently)
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as CByteString
+import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
 import qualified Data.Sequence as Seq
@@ -18,11 +20,15 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer, contramap, runTracer)
 
+-------------------------------------------------------------------------------
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.ToolRegistration
 import System.Agents.Tools
+import System.Agents.Tools.Base
 
+-------------------------------------------------------------------------------
 import System.Agents.Runtime.Base
 import System.Agents.Runtime.Runtime
 import System.Agents.Runtime.Trace
@@ -137,9 +143,32 @@ yankResults xs = fmap (\x -> (extractCall x, f x)) xs
         LLM.ToolNotFound
     f (BashToolError _ err) =
         LLM.ToolFailure $ Text.pack $ show err
+    f (McpToolError _ err) =
+        LLM.ToolFailure $ Text.pack $ show err
+    f (McpToolResult _ res) =
+        case res.isError of
+            (Just True) -> LLM.ToolFailure $ aesonBlobify res
+            _ -> interpretMcpContents res.content
     f (IOToolError _ err) =
         LLM.ToolFailure $ Text.pack $ show err
-    f (ToolSuccess _ v) =
+    f (BlobToolSuccess _ v) =
         LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
+    f (BlobToolSuccess _ v) =
+        LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
+
+    aesonBlobify :: (Aeson.ToJSON a) => a -> Text
+    aesonBlobify = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+
+    interpretMcpContents :: [Mcp.Content] -> LLM.ToolResponse
+    interpretMcpContents items =
+        case NonEmpty.nonEmpty items of
+            Nothing -> LLM.ToolFailure "tool gave no contents"
+            Just xs -> LLM.TextToolResponse (fmap interpretMcpContent xs)
+
+    interpretMcpContent :: Mcp.Content -> Text
+    interpretMcpContent (Mcp.TextContent impl) = impl.text
+    interpretMcpContent (Mcp.ImageContent impl) = impl.data_ -- todo: consider giving the whole json payload
+    interpretMcpContent (Mcp.EmbeddedResourceContent (Mcp.TextResourceContents impl)) = impl.text
+    interpretMcpContent (Mcp.EmbeddedResourceContent (Mcp.BlobResourceContents impl)) = impl.blob
 
 -------------------------------------------------------------------------------

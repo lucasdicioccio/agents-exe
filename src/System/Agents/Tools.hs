@@ -30,6 +30,7 @@ import Prod.Tracer (Tracer, contramap)
 -------------------------------------------------------------------------------
 
 import qualified System.Agents.MCP.Client as McpClient
+import System.Agents.Tools.Base
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
@@ -67,7 +68,7 @@ bashTool script =
         ret <- BashTools.runValue (contramap BashToolsTrace tracer) script v
         case ret of
             Left err -> pure $ BashToolError call err
-            Right rsp -> pure $ ToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp
 
 -------------------------------------------------------------------------------
 mcpTool ::
@@ -88,7 +89,7 @@ mcpTool toolbox desc =
             err -> pure $ McpToolError call (show err)
     extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()
     extractContentsFromToolCall rsp =
-        ToolSuccess call "TODO"
+        McpToolResult call rsp.getCallToolResult
 
 -------------------------------------------------------------------------------
 
@@ -110,7 +111,7 @@ ioTool script =
         ret <- IOTools.runValue (contramap adaptTrace tracer) script runtimeValue v
         case ret of
             Left err -> pure $ IOToolError call err
-            Right rsp -> pure $ ToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp
 
 -------------------------------------------------------------------------------
 
@@ -121,7 +122,7 @@ extractCall :: CallResult call -> call
 extractCall (ToolNotFound c) = c
 extractCall (BashToolError c _) = c
 extractCall (IOToolError c _) = c
-extractCall (ToolSuccess c _) = c
+extractCall (BlobToolSuccess c _) = c
 
 -- | Explicit helper to map on the result of a CallResult.
 mapCallResult :: (a -> b) -> CallResult a -> CallResult b
@@ -130,7 +131,7 @@ mapCallResult f c =
         (ToolNotFound v) -> ToolNotFound (f v)
         (BashToolError v e) -> BashToolError (f v) e
         (IOToolError v e) -> IOToolError (f v) e
-        (ToolSuccess v b) -> ToolSuccess (f v) b
+        (BlobToolSuccess v b) -> BlobToolSuccess (f v) b
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool x a -> Tool x b

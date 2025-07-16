@@ -76,6 +76,7 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Trace
+                    , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.IO
