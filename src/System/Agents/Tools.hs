@@ -87,6 +87,8 @@ mcpTool toolbox desc =
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
             err -> pure $ McpToolError call (show err)
+    run _ _ _ = do
+        pure $ McpToolError call ("can only call McpTools with Aeson.Object")
     extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()
     extractContentsFromToolCall rsp =
         McpToolResult call rsp.getCallToolResult
@@ -123,6 +125,8 @@ extractCall (ToolNotFound c) = c
 extractCall (BashToolError c _) = c
 extractCall (IOToolError c _) = c
 extractCall (BlobToolSuccess c _) = c
+extractCall (McpToolResult c _) = c
+extractCall (McpToolError c _) = c
 
 -- | Explicit helper to map on the result of a CallResult.
 mapCallResult :: (a -> b) -> CallResult a -> CallResult b
@@ -132,6 +136,8 @@ mapCallResult f c =
         (BashToolError v e) -> BashToolError (f v) e
         (IOToolError v e) -> IOToolError (f v) e
         (BlobToolSuccess v b) -> BlobToolSuccess (f v) b
+        (McpToolResult v b) -> McpToolResult (f v) b
+        (McpToolError v b) -> McpToolError (f v) b
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool x a -> Tool x b
