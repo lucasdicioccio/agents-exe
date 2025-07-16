@@ -10,9 +10,12 @@ import Control.Concurrent.Async (mapConcurrently)
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as CByteString
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer, contramap, runTracer)
 
 import System.Agents.Base
@@ -126,14 +129,17 @@ llmCallTool conversationId tracer registrations call =
                 ret <- t.toolRun (contramap (RunToolTrace toolcallUUID) tracer) conversationId v
                 pure $ mapCallResult (const call) ret
 
--- TODO: improve on message handling here so that yankResults or default values are agent-specific
-yankResults :: [CallResult call] -> [(call, ByteString)]
+yankResults :: [CallResult call] -> [(call, LLM.ToolResponse)]
 yankResults xs = fmap (\x -> (extractCall x, f x)) xs
   where
-    f :: CallResult c -> ByteString
-    f (ToolNotFound _) = "the tool was not found"
-    f (BashToolError _ err) = CByteString.unlines ["the tool errored with:", CByteString.pack $ show err]
-    f (IOToolError _ err) = CByteString.unlines ["the tool errored with:", CByteString.pack $ show err]
-    f (ToolSuccess _ v) = v
+    f :: CallResult c -> LLM.ToolResponse
+    f (ToolNotFound _) =
+        LLM.ToolNotFound
+    f (BashToolError _ err) =
+        LLM.ToolFailure $ Text.pack $ show err
+    f (IOToolError _ err) =
+        LLM.ToolFailure $ Text.pack $ show err
+    f (ToolSuccess _ v) =
+        LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
 
 -------------------------------------------------------------------------------

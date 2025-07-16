@@ -259,17 +259,42 @@ userPromptMessage txt =
         , "content" .= txt
         ]
 
-toolResponseMessages :: ToolCall -> Text -> Aeson.Value
-toolResponseMessages tc txt =
+data ToolResponse
+    = ToolNotFound
+    | TextToolResponse (NonEmpty Text)
+    | ToolFailure Text
+    deriving (Show, Eq, Ord)
+
+toolResponseMessages :: ToolCall -> ToolResponse -> Aeson.Value
+toolResponseMessages tc ToolNotFound =
     Aeson.object
         [ "role" .= ("tool" :: Text)
         , "tool_call_id" .= tc.toolCallId
-        , "content" .= txt
+        , "content" .= ("the requested tool was not found" :: Text)
         ]
+toolResponseMessages tc (ToolFailure rsp) =
+    Aeson.object
+        [ "role" .= ("tool" :: Text)
+        , "tool_call_id" .= tc.toolCallId
+        , "content" .= rsp
+        ]
+toolResponseMessages tc (TextToolResponse rsps) =
+    Aeson.object
+        [ "role" .= ("tool" :: Text)
+        , "tool_call_id" .= tc.toolCallId
+        , "content" .= NonEmpty.toList (fmap formatText rsps)
+        ]
+  where
+    formatText txt =
+        Aeson.object
+            [ "type" .= ("text" :: Text)
+            , "text" .= txt
+            , "annotations" .= ([] :: [Text])
+            ]
 
 data HistoryItem
     = PromptAnswered (Maybe Text) Response
-    | ToolCalled (ToolCall, ByteString)
+    | ToolCalled (ToolCall, ToolResponse)
     deriving (Show)
 
 type History = Seq HistoryItem
@@ -290,7 +315,7 @@ withLastAnswer v f =
     maybe v f . lastAnswerMaybe
 
 makeMessage :: HistoryItem -> [Aeson.Value]
-makeMessage (ToolCalled (t, bs)) = [toolResponseMessages t (Text.decodeUtf8 bs)]
+makeMessage (ToolCalled (t, rs)) = [toolResponseMessages t rs]
 makeMessage (PromptAnswered prompt r) =
     Maybe.catMaybes
         [ fmap userPromptMessage prompt

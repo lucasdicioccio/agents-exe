@@ -65,5 +65,20 @@ instance ToJSON MemoryItem where
                 , "raw" .= tool.rawToolCall
                 , "tool" .= tool.toolCallFunction.toolCallFunctionName.getToolName
                 , "args" .= tool.toolCallFunction.toolCallFunctionArgs
-                , "result" .= Text.decodeUtf8 res
+                , "result" .= encodeToolResponse res
+                ]
+        encodeToolResponse :: LLM.ToolResponse -> Aeson.Value
+        encodeToolResponse LLM.ToolNotFound =
+            Aeson.object
+                [ "type" .= ("not-found" :: Text)
+                ]
+        encodeToolResponse (LLM.TextToolResponse items) =
+            Aeson.object
+                [ "type" .= ("text" :: Text)
+                , "items" .= items
+                ]
+        encodeToolResponse (LLM.ToolFailure err) =
+            Aeson.object
+                [ "type" .= ("failure" :: Text)
+                , "err" .= err
                 ]
