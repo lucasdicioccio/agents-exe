@@ -86,7 +86,7 @@ mcpTool toolbox desc =
         ret <- McpTools.callTool toolbox desc (Just v)
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
-            err -> pure $ McpToolError call (show err)
+            err -> pure $ McpToolError call (mconcat ["calling error: ", show err])
     run _ _ _ = do
         pure $ McpToolError call ("can only call McpTools with Aeson.Object")
     extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()

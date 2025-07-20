@@ -55,7 +55,7 @@ instance FromJSON Annotation where
 
 data TextContentImpl = TextContentImpl
     { text :: Text
-    , annotations :: [Annotation]
+    , annotations :: Maybe [Annotation]
     }
     deriving (Show)
 
@@ -64,7 +64,7 @@ instance FromJSON TextContentImpl where
         guardTypeTag o "text"
         TextContentImpl
             <$> o .: "text"
-            <*> o .: "annotations"
+            <*> o .:? "annotations"
 
 instance ToJSON TextContentImpl where
     toJSON t =

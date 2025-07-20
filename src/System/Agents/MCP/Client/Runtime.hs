@@ -15,8 +15,15 @@ import System.Exit (ExitCode)
 import System.Process (CreateProcess)
 import UnliftIO (Async, MonadUnliftIO, async, atomically, liftIO, wait, withAsync)
 
+data BufferStream
+    = In
+    | Out
+    | Err
+    deriving (Show)
+
 data RunTrace
     = RunCommandStart !CreateProcess
+    | RunBufferMoved !BufferStream !ByteString
     | RunCommandStopped !CreateProcess !ExitCode
     deriving (Show)
 
@@ -36,13 +43,19 @@ initRuntime tracer proc = do
             (code, _, _) <-
                 sourceProcessWithStreams
                     proc
-                    (sourceTBMChan inChan .| discardFlush)
-                    (sinkTBMChan outChan)
-                    C.sinkNull -- todo: extract errorstream
+                    (sourceTBMChan inChan .| discardFlush .| dupToTraces tracer In)
+                    (dupToTraces tracer Out .| sinkTBMChan outChan)
+                    (dupToTraces tracer Err .| C.sinkNull)
             runTracer tracer (RunCommandStopped proc code)
             pure code
     a <- async $ process
     pure $ Runtime a inChan outChan
+
+dupToTraces :: Tracer IO RunTrace -> BufferStream -> ConduitT ByteString ByteString IO ()
+dupToTraces tracer s = do
+    C.awaitForever $ \buf -> do
+        liftIO $ runTracer tracer (RunBufferMoved s buf)
+        C.yield buf
 
 discardFlush :: (Monad m) => ConduitT (Flush a) a m ()
 discardFlush = do

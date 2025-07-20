@@ -272,13 +272,15 @@ defaultLoop props clientInfos = do
     loopEnumerateTools_Poll :: Rpc.JSONRPCT McpStack ()
     loopEnumerateTools_Poll = do
         doRefreshTools
-        liftIO (threadDelay 3000000)
+        liftIO (threadDelay 30000000)
         loopEnumerateTools_Poll
 
     loopToolCalls :: Rpc.JSONRPCT McpStack ()
     loopToolCalls = do
         tc <- liftIO props.waitToolCall
         case tc of
+            Nothing -> do
+                liftIO $ runTracer props.tracer ExitingToolCallLoop
             Just (FullToolCall (ToolCall name obj) resp) -> do
                 liftIO $ runTracer props.tracer (StartToolCall name obj)
                 _ <- async $ do
@@ -287,5 +289,3 @@ defaultLoop props clientInfos = do
                         runTracer props.tracer (EndToolCall name obj r)
                         resp r
                 loopToolCalls
-            Nothing -> do
-                liftIO $ runTracer props.tracer ExitingToolCallLoop

@@ -563,6 +563,9 @@ toJsonTrace x = case x of
     encodeBaseMcpTrace :: McpTools.Trace -> Maybe Aeson.Value
     encodeBaseMcpTrace (McpTools.McpClientClientTrace _) = Nothing
     encodeBaseMcpTrace
+        (McpTools.McpClientRunTrace (McpClient.RunBufferMoved _ _)) =
+            Nothing
+    encodeBaseMcpTrace
         (McpTools.McpClientRunTrace (McpClient.RunCommandStart _)) =
             Just $
                 Aeson.object

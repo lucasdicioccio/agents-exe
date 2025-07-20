@@ -240,10 +240,10 @@ extractPrompt (Mcp.CallToolRequest _ (Just arg)) =
 
 toolCallContent :: Either String OpenAI.Response -> Mcp.Content
 toolCallContent (Left err) =
-    Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) []
+    Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right rsp) =
     case rsp.rspContent of
         Nothing ->
-            Mcp.TextContent $ Mcp.TextContentImpl ("got no anwser but it finished") []
+            Mcp.TextContent $ Mcp.TextContentImpl ("got no anwser but it finished") (Just [])
         Just txt ->
-            Mcp.TextContent $ Mcp.TextContentImpl (txt) []
+            Mcp.TextContent $ Mcp.TextContentImpl (txt) (Just [])

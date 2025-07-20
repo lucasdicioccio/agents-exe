@@ -144,10 +144,10 @@ yankResults xs = fmap (\x -> (extractCall x, f x)) xs
     f (BashToolError _ err) =
         LLM.ToolFailure $ Text.pack $ show err
     f (McpToolError _ err) =
-        LLM.ToolFailure $ Text.pack $ show err
+        LLM.ToolFailure $ (Text.unlines ["tool-error", Text.pack (show err)])
     f (McpToolResult _ res) =
         case res.isError of
-            (Just True) -> LLM.ToolFailure $ aesonBlobify res
+            (Just True) -> LLM.ToolFailure (Text.unlines ["result-is-error:", aesonBlobify res])
             _ -> interpretMcpContents res.content
     f (IOToolError _ err) =
         LLM.ToolFailure $ Text.pack $ show err
