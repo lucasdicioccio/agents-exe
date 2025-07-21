@@ -12,10 +12,3 @@ data ToolTrace
     = BashToolsTrace !BashTools.RunTrace
     | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
     deriving (Show)
-
-data CallResult call
-    = ToolNotFound call
-    | BashToolError call BashTools.RunScriptError
-    | IOToolError call IOTools.RunError
-    | ToolSuccess call ByteString
-    deriving (Show)

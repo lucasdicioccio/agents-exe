@@ -76,12 +76,15 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Trace
+                    , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.IO
+                    , System.Agents.Tools.McpToolbox
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Memory
                     , System.Agents.Runtime
+                    , System.Agents.Runtime.Base
                     , System.Agents.Runtime.Conversation
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace
@@ -89,6 +92,8 @@ library agents-lib
                     , System.Agents.HttpLogger
                     , System.Agents.OneShot
                     , System.Agents.MCP.Base
+                    , System.Agents.MCP.Client
+                    , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
                     , System.Agents.TUI
@@ -105,6 +110,7 @@ library agents-lib
                       bytestring,
                       case-insensitive,
                       conduit,
+                      conduit-extra,
                       containers,
                       contravariant,
                       directory,
@@ -115,6 +121,7 @@ library agents-lib
                       http-client,
                       http-client-tls,
                       http-types,
+                      indexed-traversable,
                       json-rpc,
                       lens,
                       monad-logger,
@@ -124,6 +131,7 @@ library agents-lib
                       prodapi,
                       fsnotify,
                       stm,
+                      stm-chans,
                       stm-conduit,
                       text,
                       text-zipper,

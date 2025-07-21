@@ -13,7 +13,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, PingPongQuery (..))
+import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
@@ -22,8 +22,11 @@ import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.MCP.Client as McpClient
+import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
+import System.Agents.Runtime.Base (PingPongQuery (..))
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.TUI as TUI
 import qualified System.Agents.Tools as ToolsTrace
@@ -31,6 +34,7 @@ import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
+import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Directory (getHomeDirectory)
 import System.FilePath ((</>))
@@ -324,6 +328,7 @@ main = do
                                 , "You notify users as you progress"
                                 , "If an agent fails, do not retry and abdicate"
                                 ]
+                            , mcpServers = Just []
                             }
                  in do
                         forM_ (take 1 args.agentFiles) $ \agentFile -> do
@@ -422,13 +427,14 @@ extractMemories x = case x of
 
 toJsonTrace :: AgentTree.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
-    AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.AgentTrace v -> encodeAgentTrace v
+    AgentTree.McpTrace cfg v -> encodeMcpTrace cfg v
+    AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
   where
     encodeAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
     encodeAgentTrace tr = do
-        baseVal <- encodeBaseTrace tr
+        baseVal <- encodeBaseAgentTrace tr
         Just $
             Aeson.object
                 [ "e"
@@ -439,12 +445,12 @@ toJsonTrace x = case x of
                         ]
                 ]
 
-    encodeBaseTrace :: Runtime.Trace -> Maybe Aeson.Value
-    encodeBaseTrace (Runtime.AgentTrace_Loading _ _ tr) =
+    encodeBaseAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
+    encodeBaseAgentTrace (Runtime.AgentTrace_Loading _ _ tr) =
         encodeBaseTrace_Loading tr
-    encodeBaseTrace (Runtime.AgentTrace_Memorize _ _ _ tr) =
+    encodeBaseAgentTrace (Runtime.AgentTrace_Memorize _ _ _ tr) =
         encodeBaseTrace_Memorize tr
-    encodeBaseTrace (Runtime.AgentTrace_Conversation _ _ convId tr) = do
+    encodeBaseAgentTrace (Runtime.AgentTrace_Conversation _ _ convId tr) = do
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
             Aeson.object
@@ -541,6 +547,63 @@ toJsonTrace x = case x of
             (Runtime.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= subVal]
+
+    encodeMcpTrace :: McpServerDescription -> McpTools.Trace -> Maybe Aeson.Value
+    encodeMcpTrace (McpSimpleBinary cfg) tr = do
+        baseVal <- encodeBaseMcpTrace tr
+        Just $
+            Aeson.object
+                [ "e"
+                    .= Aeson.object
+                        [ "server" .= cfg.name
+                        , "val" .= baseVal
+                        ]
+                ]
+
+    encodeBaseMcpTrace :: McpTools.Trace -> Maybe Aeson.Value
+    encodeBaseMcpTrace (McpTools.McpClientClientTrace _) = Nothing
+    encodeBaseMcpTrace
+        (McpTools.McpClientRunTrace (McpClient.RunBufferMoved _ _)) =
+            Nothing
+    encodeBaseMcpTrace
+        (McpTools.McpClientRunTrace (McpClient.RunCommandStart _)) =
+            Just $
+                Aeson.object
+                    [ "x" .= ("program-start" :: Text.Text)
+                    ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientRunTrace (McpClient.RunCommandStopped _ code)) =
+            Just $
+                Aeson.object
+                    [ "x" .= ("program-end" :: Text.Text)
+                    , "code-str" .= show code -- todo: code
+                    ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace McpClient.ExitingToolCallLoop) =
+            Just $
+                Aeson.object
+                    [ "x" .= ("loop-end" :: Text.Text)
+                    ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace (McpClient.ToolsRefreshed _)) =
+            Just $
+                Aeson.object
+                    [ "x" .= ("tools-reloaded" :: Text.Text)
+                    ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace (McpClient.StartToolCall n _)) =
+            Just $
+                Aeson.object
+                    [ "x" .= ("tool-call-start" :: Text.Text)
+                    , "name" .= n
+                    ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
+            Just $
+                Aeson.object
+                    [ "x" .= ("tool-call-end" :: Text.Text)
+                    , "name" .= n
+                    ]
 
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text.Text -> IO (Prod.Tracer IO a)
 makeHttpJsonTrace baseTracer url = do

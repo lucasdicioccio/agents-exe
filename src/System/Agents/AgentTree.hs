@@ -17,8 +17,10 @@ import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
+import System.Process (proc)
 
-import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, newConversationId)
+import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, McpServerDescription (..), newConversationId)
+import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as LLM
@@ -27,12 +29,14 @@ import System.Agents.Runtime (Runtime (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 
 import System.Agents.ApiKeys
 
 -------------------------------------------------------------------------------
 data Trace
     = AgentTrace Runtime.Trace
+    | McpTrace McpServerDescription McpTools.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     deriving
@@ -163,7 +167,8 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
         (Nothing, _) ->
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
-        (Just key, Just flavor) ->
+        (Just key, Just flavor) -> do
+            mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
             Runtime.newRuntime
                 desc.slug
                 desc.announce
@@ -180,6 +185,14 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                 )
                 (rootDir </> desc.toolDirectory)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
+                mcpToolboxes
+  where
+    startMcp :: McpServerDescription -> IO McpTools.Toolbox
+    startMcp srv@(McpSimpleBinary cfg) =
+        McpTools.initializeMcpToolbox
+            (contramap (McpTrace srv) tracer)
+            cfg.name
+            (proc cfg.executable (map Text.unpack cfg.args))
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
 augmentMainAgentPromptWithSubAgents [] base = base
@@ -216,8 +229,8 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     props =
         [ LLM.ParamProperty
             { LLM.propertyKey = "what"
-            , LLM.propertyType = "string"
-            , LLM.propertyDescription = "the prompt to the other agent"
+            , LLM.propertyType = LLM.StringParamType
+            , LLM.propertyDescription = "the prompt to call the specialized-agent with"
             }
         ]
     io =

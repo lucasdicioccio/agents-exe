@@ -78,7 +78,11 @@ serverImplem :: Mcp.Implementation
 serverImplem = Implementation "agents-exe-mcp-server" "0.0.1"
 
 serverCapabilities :: Mcp.ServerCapabilities
-serverCapabilities = Mcp.ServerCapabilities (Just mempty) (Just $ Aeson.object []) [ToolsListChanged, PromptsListChanged, ResourcesListChanged]
+serverCapabilities =
+    Mcp.ServerCapabilities
+        (Just mempty)
+        (Just $ Aeson.object [])
+        [ToolsListChanged, PromptsListChanged, ResourcesListChanged]
 
 -------------------------------------------------------------------------------
 data ClientMsg
@@ -220,7 +224,7 @@ callExpertTool mcpName ai =
                             [ "prompt"
                                 .= Mcp.object
                                     [ "type" .= ("string" :: Text)
-                                    , "title" .= ("the prompt asked when calling the expert" :: Text)
+                                    , "description" .= ("the prompt asked when calling the expert" :: Text)
                                     ]
                             ]
                     )
@@ -236,10 +240,10 @@ extractPrompt (Mcp.CallToolRequest _ (Just arg)) =
 
 toolCallContent :: Either String OpenAI.Response -> Mcp.Content
 toolCallContent (Left err) =
-    Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) []
+    Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right rsp) =
     case rsp.rspContent of
         Nothing ->
-            Mcp.TextContent $ Mcp.TextContentImpl ("got no anwser but it finished") []
+            Mcp.TextContent $ Mcp.TextContentImpl ("got no anwser but it finished") (Just [])
         Just txt ->
-            Mcp.TextContent $ Mcp.TextContentImpl (txt) []
+            Mcp.TextContent $ Mcp.TextContentImpl (txt) (Just [])

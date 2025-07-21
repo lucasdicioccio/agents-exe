@@ -7,19 +7,29 @@ module System.Agents.Runtime.Conversation (
 ) where
 
 import Control.Concurrent.Async (mapConcurrently)
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as CByteString
+import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer, contramap, runTracer)
 
+-------------------------------------------------------------------------------
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.ToolRegistration
 import System.Agents.Tools
+import System.Agents.Tools.Base
 
+-------------------------------------------------------------------------------
+import System.Agents.Runtime.Base
 import System.Agents.Runtime.Runtime
 import System.Agents.Runtime.Trace
 
@@ -76,7 +86,7 @@ stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions
     let query = getQueryToAnswer pendingQuery
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
-    let payload = LLM.simplePayload model llmTools hist query
+    let payload = LLM.renderPayload model llmTools hist query
     stepUUID <- newStepId
     runTracer memoTracer (Calling pendingQuery hist stepUUID)
     llmResponse <- LLM.callLLMPayload (contramap (LLMTrace stepUUID) convTracer) httpRt model.modelBaseUrl payload
@@ -125,12 +135,40 @@ llmCallTool conversationId tracer registrations call =
                 ret <- t.toolRun (contramap (RunToolTrace toolcallUUID) tracer) conversationId v
                 pure $ mapCallResult (const call) ret
 
--- TODO: improve on message handling here so that yankResults or default values are agent-specific
-yankResults :: [CallResult call] -> [(call, ByteString)]
+yankResults :: [CallResult call] -> [(call, LLM.ToolResponse)]
 yankResults xs = fmap (\x -> (extractCall x, f x)) xs
   where
-    f :: CallResult c -> ByteString
-    f (ToolNotFound _) = "the tool was not found"
-    f (BashToolError _ err) = CByteString.unlines ["the tool errored with:", CByteString.pack $ show err]
-    f (IOToolError _ err) = CByteString.unlines ["the tool errored with:", CByteString.pack $ show err]
-    f (ToolSuccess _ v) = v
+    f :: CallResult c -> LLM.ToolResponse
+    f (ToolNotFound _) =
+        LLM.ToolNotFound
+    f (BashToolError _ err) =
+        LLM.ToolFailure $ Text.pack $ show err
+    f (McpToolError _ err) =
+        LLM.ToolFailure $ (Text.unlines ["tool-error", Text.pack (show err)])
+    f (McpToolResult _ res) =
+        case res.isError of
+            (Just True) -> LLM.ToolFailure (Text.unlines ["result-is-error:", aesonBlobify res])
+            _ -> interpretMcpContents res.content
+    f (IOToolError _ err) =
+        LLM.ToolFailure $ Text.pack $ show err
+    f (BlobToolSuccess _ v) =
+        LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
+    f (BlobToolSuccess _ v) =
+        LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
+
+    aesonBlobify :: (Aeson.ToJSON a) => a -> Text
+    aesonBlobify = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+
+    interpretMcpContents :: [Mcp.Content] -> LLM.ToolResponse
+    interpretMcpContents items =
+        case NonEmpty.nonEmpty items of
+            Nothing -> LLM.ToolFailure "tool gave no contents"
+            Just xs -> LLM.TextToolResponse (fmap interpretMcpContent xs)
+
+    interpretMcpContent :: Mcp.Content -> Text
+    interpretMcpContent (Mcp.TextContent impl) = impl.text
+    interpretMcpContent (Mcp.ImageContent impl) = impl.data_ -- todo: consider giving the whole json payload
+    interpretMcpContent (Mcp.EmbeddedResourceContent (Mcp.TextResourceContents impl)) = impl.text
+    interpretMcpContent (Mcp.EmbeddedResourceContent (Mcp.BlobResourceContents impl)) = impl.blob
+
+-------------------------------------------------------------------------------

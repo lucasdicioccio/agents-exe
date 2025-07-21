@@ -4,14 +4,21 @@
 -- | Defines an LLM tool registration.
 module System.Agents.ToolRegistration where
 
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
+import Data.Foldable.WithIndex (ifoldl')
+import qualified Data.Maybe as Maybe
+import Data.Text (Text)
 
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.Tools
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 
 -------------------------------------------------------------------------------
 
@@ -37,6 +44,11 @@ io2LLMName io = LLM.ToolName (mconcat ["io_", io.description.ioSlug])
 bash2LLMName :: BashTools.ScriptDescription -> LLM.ToolName
 bash2LLMName bash = LLM.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlug])
 
+-- naming policy for MCP tools
+mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> LLM.ToolName
+mcp2LLMName box mcp =
+    LLM.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
+
 -------------------------------------------------------------------------------
 
 registerBashToolInLLM ::
@@ -59,7 +71,7 @@ registerBashToolInLLM script =
         mapArg arg =
             LLM.ParamProperty
                 { LLM.propertyKey = arg.argName
-                , LLM.propertyType = arg.argBackingTypeString
+                , LLM.propertyType = LLM.OpaqueParamType arg.argBackingTypeString
                 , LLM.propertyDescription = arg.argDescription
                 }
 
@@ -99,3 +111,75 @@ registerIOScriptInLLM script llmProps =
                 }
      in
         ToolRegistration tool llmTool find
+
+registerMcpToolInLLM ::
+    McpTools.Toolbox ->
+    McpTools.ToolDescription ->
+    Either String ToolRegistration
+registerMcpToolInLLM box mcp =
+    let
+        matchName :: McpTools.ToolDescription -> LLM.ToolCall -> Bool
+        matchName mcp call = mcp2LLMName box mcp == call.toolCallFunction.toolCallFunctionName
+
+        llmBasedSchema :: Either String [LLM.ParamProperty]
+        llmBasedSchema = adaptSchema mcp.getToolDescription.inputSchema
+
+        llmName :: LLM.ToolName
+        llmName = mcp2LLMName box mcp
+
+        llmDescription :: Text
+        llmDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
+
+        mapToolDescriptionMcp2LLM :: [LLM.ParamProperty] -> LLM.Tool
+        mapToolDescriptionMcp2LLM schema =
+            LLM.Tool
+                { LLM.toolName = llmName
+                , LLM.toolDescription = llmDescription
+                , LLM.toolParamProperties = schema
+                }
+
+        tool :: Tool ToolRuntimeArg ()
+        tool = mcpTool box mcp
+
+        find :: LLM.ToolCall -> Maybe (Tool ToolRuntimeArg LLM.ToolCall)
+        find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
+     in
+        case llmBasedSchema of
+            Right schema ->
+                Right $ ToolRegistration tool (mapToolDescriptionMcp2LLM schema) find
+            Left err ->
+                Left err
+
+adaptSchema :: Mcp.InputSchema -> Either String [LLM.ParamProperty]
+adaptSchema schema =
+    case schema.properties of
+        Nothing -> Right []
+        Just obj -> ifoldl' f (Right []) obj
+  where
+    f :: Aeson.Key -> Either String [LLM.ParamProperty] -> Aeson.Value -> Either String [LLM.ParamProperty]
+    f _ err@(Left _) _ = err
+    f k (Right xs) v =
+        case adaptProperty k v of
+            Left err -> Left err
+            Right x -> Right (x : xs)
+
+adaptProperty :: Aeson.Key -> Aeson.Value -> Either String LLM.ParamProperty
+adaptProperty k val =
+    case propMappingResult of
+        Aeson.Success prop ->
+            Right $
+                LLM.ParamProperty
+                    (AesonKey.toText k)
+                    (LLM.OpaqueParamType prop._type)
+                    prop._description
+        Aeson.Error err -> Left err
+  where
+    propMappingResult :: Aeson.Result PropertyHelper
+    propMappingResult = Aeson.fromJSON val
+
+data PropertyHelper
+    = PropertyHelper {_type :: Text, _description :: Text}
+
+instance Aeson.FromJSON PropertyHelper where
+    parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
+        PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"

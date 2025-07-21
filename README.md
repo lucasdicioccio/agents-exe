@@ -52,7 +52,7 @@ so.  When an LLM requires more than one function, `agents-exe` runs all the
 functions concurrently.
 
 
-### Adding new tools
+### Adding new executable-program tools
 
 
 Tools are executable programs (often, you might want to encapsulate bash scripts) that adhere to the following specifications:
@@ -130,6 +130,40 @@ Agents-exe adheres to the same specifications, allowing you to use an
 `agents-exe` invocation directly as a tool. This flexibility is useful when
 running a hierarchy of agents with different access rights or across container
 boundaries. 
+
+### Adding new tools using an MCP-server
+
+Agents-exe can act as an MCP-client of MCP-servers.
+For now, only the local-executable transport is supported.
+
+Adding executables is as follows:
+
+```
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "my-agent",
+    "...": "other-structures",
+    "mcpServers": [
+      {
+        "tag": "McpSimpleBinary",
+        "contents": {
+          "name": "my-mcp-server",
+          "executable": "/path/to/executable",
+          "args": [
+            "arg0",
+            "arg1"
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+For MCP-servers which do not advertise tools-changed notifications, agents-exe
+resorts to periodic polling to refresh tools list.
+
 
 ### Adding new agents
 
@@ -284,13 +318,19 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
 
 ## MCP support
 
-- server: reloads/notifications
+- server: expose a toolregistration directly
+- server: forward tool-reloads/notifications
 - server: expose completion/prompt/resources, somehow
-- client mode as a consumer of tools
 - networked transport
 
 ## Framework features
 
 - internal machinery
-  - metrics and prodapi-endpoints
-  - we need to allow an orchestrator to introspect what happened
+  - http-server with metrics and/or prodapi-endpoints
+  - agents-tree reloading
+  - better async-linking when it makes sense
+- better CLI tooling
+  - to more-directly inspect/call a tool
+  - aggregate configs/tools definitions from different places
+  - make the 'cli' mode tolerable or remove it
+  - improve the 'tui' mode

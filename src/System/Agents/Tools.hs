@@ -17,6 +17,7 @@ module System.Agents.Tools (
     ToolDef (..),
     ioTool,
     bashTool,
+    mcpTool,
     mapToolResult,
     mapCallResult,
     extractCall,
@@ -28,8 +29,11 @@ import Prod.Tracer (Tracer, contramap)
 
 -------------------------------------------------------------------------------
 
+import qualified System.Agents.MCP.Client as McpClient
+import System.Agents.Tools.Base
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.Trace
 
 -------------------------------------------------------------------------------
@@ -43,6 +47,7 @@ data Tool rtVal call
 
 data ToolDef
     = BashTool !BashTools.ScriptDescription
+    | MCPTool !McpTools.ToolDescription
     | IOTool !IOTools.IOScriptDescription
     deriving (Show)
 
@@ -63,7 +68,30 @@ bashTool script =
         ret <- BashTools.runValue (contramap BashToolsTrace tracer) script v
         case ret of
             Left err -> pure $ BashToolError call err
-            Right rsp -> pure $ ToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp
+
+-------------------------------------------------------------------------------
+mcpTool ::
+    McpTools.Toolbox ->
+    McpTools.ToolDescription ->
+    Tool a ()
+mcpTool toolbox desc =
+    Tool
+        { toolDef = MCPTool desc
+        , toolRun = run
+        }
+  where
+    call = ()
+    run _ _ (Aeson.Object v) = do
+        ret <- McpTools.callTool toolbox desc (Just v)
+        case ret of
+            (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
+            err -> pure $ McpToolError call (mconcat ["calling error: ", show err])
+    run _ _ _ = do
+        pure $ McpToolError call ("can only call McpTools with Aeson.Object")
+    extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()
+    extractContentsFromToolCall rsp =
+        McpToolResult call rsp.getCallToolResult
 
 -------------------------------------------------------------------------------
 
@@ -85,7 +113,7 @@ ioTool script =
         ret <- IOTools.runValue (contramap adaptTrace tracer) script runtimeValue v
         case ret of
             Left err -> pure $ IOToolError call err
-            Right rsp -> pure $ ToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp
 
 -------------------------------------------------------------------------------
 
@@ -96,7 +124,9 @@ extractCall :: CallResult call -> call
 extractCall (ToolNotFound c) = c
 extractCall (BashToolError c _) = c
 extractCall (IOToolError c _) = c
-extractCall (ToolSuccess c _) = c
+extractCall (BlobToolSuccess c _) = c
+extractCall (McpToolResult c _) = c
+extractCall (McpToolError c _) = c
 
 -- | Explicit helper to map on the result of a CallResult.
 mapCallResult :: (a -> b) -> CallResult a -> CallResult b
@@ -105,7 +135,9 @@ mapCallResult f c =
         (ToolNotFound v) -> ToolNotFound (f v)
         (BashToolError v e) -> BashToolError (f v) e
         (IOToolError v e) -> IOToolError (f v) e
-        (ToolSuccess v b) -> ToolSuccess (f v) b
+        (BlobToolSuccess v b) -> BlobToolSuccess (f v) b
+        (McpToolResult v b) -> McpToolResult (f v) b
+        (McpToolError v b) -> McpToolError (f v) b
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool x a -> Tool x b
