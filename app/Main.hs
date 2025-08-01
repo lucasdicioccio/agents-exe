@@ -283,9 +283,7 @@ main = do
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
-                                Prod.traceBoth
-                                    baseTracer
-                                    traceUsefulPromptStderr
+                                baseTracer
                             }
             SelfDescribe -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
