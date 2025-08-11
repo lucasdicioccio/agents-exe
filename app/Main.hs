@@ -126,6 +126,7 @@ data Command
     | InteractiveCommandLine
     | TerminalUI
     | OneShot OneShotOptions
+    | EchoPrompt OneShotOptions
     | SelfDescribe
     | Initialize
     | McpServer
@@ -165,14 +166,18 @@ parseTuiChatCommand =
 parseOneShotTextualCommand :: Parser Command
 parseOneShotTextualCommand =
     OneShot <$> parseOneShotOptions
-  where
-    parseOneShotOptions :: Parser OneShotOptions
-    parseOneShotOptions =
-        OneShotOptions
-            <$> ( many
-                    (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
-                )
 
+parseEchoPromptCommand :: Parser Command
+parseEchoPromptCommand =
+    EchoPrompt <$> parseOneShotOptions
+
+parseOneShotOptions :: Parser OneShotOptions
+parseOneShotOptions =
+    OneShotOptions
+        <$> ( many
+                (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
+            )
+  where
     smallSeparatorFlag :: Parser PromptScriptDirective
     smallSeparatorFlag =
         Separator 4
@@ -296,6 +301,7 @@ parseProgOptions argparserargs =
                 <> command "cli" (info parseCliCommand (idm))
                 <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
+                <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info parseSelfDescribeCommand (idm))
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
@@ -374,6 +380,9 @@ main = do
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             }
                 TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
+            EchoPrompt opts -> do
+                promptContents <- interpretPromptScript opts.promptScript
+                Text.putStr promptContents
             OneShot opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
