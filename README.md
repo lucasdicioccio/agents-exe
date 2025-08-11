@@ -249,6 +249,8 @@ Coding style follows these guidelines:
 
 # Build and run
 
+Note that once installed, you need not prefix commands below with `cabal run`.
+
 ## Directly build from source using Haskell tools
 
 ```console
@@ -276,12 +278,19 @@ On a Linux machine with tools like `ping` and `notify-send` installed, you can e
 cabal run -- agents-exe run --prompt "can you report the latency to github.com"
 ```
 
-The `run` command can also handle filenames if the prompt starts with an `@` (inspired by cURL).
+The `run` command can also include file contents with `--file`, separators, and even execute shell commands.
 Multiple `--prompt` are allowed and concatenated into a single prompt with newline spacing, which allows for simple templating.
+
 ```
 cabal run -- agents-exe run \
   --prompt "resume the following content:" \
-  --prompt "@README.md"
+  --file "README.md"
+```
+
+```
+cabal run -- agents-exe run -p "explain the diff:" \
+  -s "#" \
+  --shell "git diff"
 ```
 
 ## Building from the Containerfile

@@ -12,6 +12,8 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
+import qualified System.Process as Process
+
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import qualified System.Agents.CLI as CLI
@@ -72,9 +74,19 @@ data Command
     | Initialize
     | McpServer
 
+data PromptScriptDirective
+    = Str Text.Text
+    | FileContents FilePath
+    | Separator Int Text.Text
+    | ShellOutput String
+    deriving (Show)
+
+type PromptScript =
+    [PromptScriptDirective]
+
 data OneShotOptions
     = OneShotOptions
-    { fileOrPromptArgs :: [String]
+    { promptScript :: PromptScript
     }
 
 data McpServerOptions
@@ -101,15 +113,57 @@ parseOneShotTextualCommand =
     parseOneShotOptions :: Parser OneShotOptions
     parseOneShotOptions =
         OneShotOptions
-            <$> fmap
-                addDefaultStdinFile
-                ( many
-                    ( strOption
-                        ( long "prompt"
-                            <> metavar "PROMPT"
-                            <> help "prompt, magical values is @filepath"
-                        )
-                    )
+            <$> ( many
+                    (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
+                )
+
+    smallSeparatorFlag :: Parser PromptScriptDirective
+    smallSeparatorFlag =
+        Separator 4
+            <$> strOption
+                ( long "sep4"
+                    <> short 's'
+                    <> metavar "SEPARATOR"
+                    <> help "a short separator"
+                )
+
+    largeSeparatorFlag :: Parser PromptScriptDirective
+    largeSeparatorFlag =
+        Separator 40
+            <$> strOption
+                ( long "sep40"
+                    <> short 'S'
+                    <> metavar "SEPARATOR"
+                    <> help "a long separator"
+                )
+
+    promptOption :: Parser PromptScriptDirective
+    promptOption =
+        Str
+            <$> strOption
+                ( long "prompt"
+                    <> short 'p'
+                    <> metavar "PROMPT"
+                    <> help "prompt text paragraph"
+                )
+
+    fileOption :: Parser PromptScriptDirective
+    fileOption =
+        FileContents
+            <$> strOption
+                ( long "file"
+                    <> short 'f'
+                    <> metavar "FILE"
+                    <> help "prompt text file"
+                )
+
+    shellOption :: Parser PromptScriptDirective
+    shellOption =
+        ShellOutput
+            <$> strOption
+                ( long "shell"
+                    <> metavar "SHELL"
+                    <> help "prompt the stdout of a shell command"
                 )
 
 parseMcpServer :: Parser Command
@@ -196,10 +250,6 @@ addDefaultSomeAgentFile :: FilePath -> [FilePath] -> [FilePath]
 addDefaultSomeAgentFile configdir [] = [configdir </> "default" </> "agent.json"]
 addDefaultSomeAgentFile _ xs = xs
 
-addDefaultStdinFile :: [FilePath] -> [FilePath]
-addDefaultStdinFile [] = ["@/dev/stdin"]
-addDefaultStdinFile xs = xs
-
 main :: IO ()
 main = do
     hSetBuffering stderr LineBuffering
@@ -276,9 +326,9 @@ main = do
             OneShot opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 forM_ (take 1 args.agentFiles) $ \agentFile -> do
-                    promptLines <- traverse interpretPromptArg opts.fileOrPromptArgs
+                    promptContents <- interpretPromptScript opts.promptScript
                     let oneShot = flip OneShot.mainOneShotText
-                    oneShot (Text.unlines promptLines) $
+                    oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
@@ -289,9 +339,16 @@ main = do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 Aeson.encodeFile "/dev/stdout" $
                     Bash.ScriptInfo
-                        []
-                        "self-introspect"
-                        "introspect a version of yourself"
+                        [ Bash.ScriptArg
+                            "prompt"
+                            "the prompt to call the agent with"
+                            "string"
+                            "string"
+                            Bash.Single
+                            Bash.DashDashSpace
+                        ]
+                        "self_call"
+                        "calls oneself with a prompt"
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =
@@ -608,9 +665,16 @@ makeHttpJsonTrace baseTracer url = do
     rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
     pure $ HttpLogger.httpTracer rt baseTracer
 
--- | interprets a `--prompt` arg as either a magic file or a chunk of text
-interpretPromptArg :: FilePath -> IO Text.Text
-interpretPromptArg path =
-    if "@" `List.isPrefixOf` path
-        then Text.readFile (drop 1 path)
-        else pure $ Text.pack path
+interpretPromptScript :: PromptScript -> IO Text.Text
+interpretPromptScript [] =
+    Text.unlines <$> traverse interpretPromptScriptDirective [FileContents "/dev/stdin"]
+interpretPromptScript directives =
+    Text.unlines <$> traverse interpretPromptScriptDirective directives
+
+interpretPromptScriptDirective :: PromptScriptDirective -> IO Text.Text
+interpretPromptScriptDirective x =
+    case x of
+        Str s -> pure s
+        FileContents p -> Text.readFile p
+        Separator n s -> pure $ Text.replicate n s
+        ShellOutput cmd -> Text.pack <$> Process.readCreateProcess (Process.shell cmd) ("" :: String)
