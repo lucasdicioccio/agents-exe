@@ -1,5 +1,8 @@
 # an LLM-agent tool
 
+A handy LLM-agent tool, with a variety of calling and configuration modes so
+that the LLM adapts to your workflow rather than the opposite.
+
 ## Using as a tool
 
 The primary intended usage is to run agents-exe a standalone application.
@@ -292,6 +295,42 @@ cabal run -- agents-exe run -p "explain the diff:" \
   -s "#" \
   --shell "git diff"
 ```
+
+## Advanced configuration with agents-exe.cfg.json
+
+Agents-exe command line arguments allows you to configure and call to different
+LLMs. At some point, it is tedious to keep repeating command line arguments to
+pick an agent-file or another. Also, sometimes you need more sophisticated
+setups, with varying agents based on varying depoloyments.
+
+The modus-operandi of the command line is that arguments overrides a "base
+configuration".  The base configuration itself is configurable, which helps
+defining different configuration on different projects.
+
+Agents-exe starts by locating an `agents-exe.cfg.json` file from the
+current-dir and searching up in the file-hierarchy until the root directory. 
+The format of `agents-exe.cfg.json` defines the following json format:
+
+```json
+{ "agentsConfigDir": "/some/dir"
+, "agentsDirectories":["./agents"]
+, "agentsFiles":[]
+}
+```
+
+The `agentsConfigDir` key is optional and defines a directory where other
+configurations may be loaded (for now only the `secret-keys` file has a
+meaningful location in this directory).
+
+The two other keys provide ways to list individual agents JSON definition files
+(and their tool and agents subtrees). Whether to use Directories or Files
+depends on your own workflow: you may need fewer configuration changes if you
+pick directories rather than individual files, however any `.json` file that is
+not an agent-definition will crash agents-exe.
+
+Absent an `agents-exe.cfg.json`, agents are loaded from the directory
+`${HOME}/.config/agents-exe/default` and the key-secrets from
+`${HOME}/.config/agents-exe/secret-keys`.
 
 ## Building from the Containerfile
 

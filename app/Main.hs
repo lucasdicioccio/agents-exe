@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -11,15 +12,15 @@ import qualified Data.List as List
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
+import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
-import qualified System.Process as Process
-
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
+import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
@@ -27,6 +28,7 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Client as McpClient
 import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
+import qualified System.Agents.Memory as Memory
 import qualified System.Agents.OneShot as OneShot
 import System.Agents.Runtime.Base (PingPongQuery (..))
 import qualified System.Agents.Runtime.Trace as Runtime
@@ -38,23 +40,77 @@ import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
-import System.Directory (getHomeDirectory)
-import System.FilePath ((</>))
+import System.Directory (doesFileExist, getCurrentDirectory, getHomeDirectory)
+import System.FilePath (takeDirectory, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
-
-import qualified System.Agents.Memory as Memory
+import qualified System.Process as Process
 
 import Options.Applicative
 
 data ArgParserArgs
     = ArgParserArgs
     { configdir :: FilePath
+    , defaultAgentFiles :: [FilePath]
     }
+
+secretsKeyFile :: ArgParserArgs -> FilePath
+secretsKeyFile args = args.configdir </> "secret-keys"
+
+-- | helper to make agent-file entirely optional whilst using the 'many' combinator
+addDefaultAgentFiles :: ArgParserArgs -> [FilePath] -> [FilePath]
+addDefaultAgentFiles args [] = args.defaultAgentFiles
+addDefaultAgentFiles _ xs = xs
+
+data AgentsExeConfig = AgentsExeConfig
+    { agentsConfigDir :: Maybe FilePath
+    , agentsDirectories :: [FilePath]
+    , agentsFiles :: [FilePath]
+    }
+    deriving (Show, Generic)
+
+instance Aeson.FromJSON AgentsExeConfig
+
+locateAgentsExeConfig :: IO (Maybe FilePath)
+locateAgentsExeConfig = do
+    go =<< getCurrentDirectory
+  where
+    go :: FilePath -> IO (Maybe FilePath)
+    go "" = pure Nothing
+    go "/" = pure Nothing
+    go path = do
+        let temptative = path </> "agents-exe.cfg.json"
+        exists <- doesFileExist temptative
+        if exists
+            then pure (Just temptative)
+            else go (takeDirectory path)
 
 initArgParserArgs :: IO ArgParserArgs
 initArgParserArgs = do
     homedir <- getHomeDirectory
-    pure $ ArgParserArgs (homedir </> ".config/agents-exe")
+    agentsExecConfig <- locateAgentsExeConfig
+    maybe (initWithoutAgentsExeConfig homedir) (initFromAgentsExeConfig homedir) agentsExecConfig
+  where
+    initFromAgentsExeConfig :: FilePath -> FilePath -> IO ArgParserArgs
+    initFromAgentsExeConfig homedir agentsexecfgpath = do
+        zeconfig <- Aeson.eitherDecodeFileStrict' agentsexecfgpath :: IO (Either String AgentsExeConfig)
+        case zeconfig of
+            Left err -> error ("failed to load agents-exe config at " <> agentsexecfgpath <> " " <> err)
+            Right obj -> do
+                let defaultconfigdir = homedir </> ".config/agents-exe"
+                jsonPathss <- traverse FileLoader.listJsonDirectory obj.agentsDirectories
+                pure $
+                    ArgParserArgs
+                        (fromMaybe defaultconfigdir obj.agentsConfigDir)
+                        (obj.agentsFiles <> mconcat jsonPathss)
+
+    initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
+    initWithoutAgentsExeConfig homedir = do
+        let configdir = homedir </> ".config/agents-exe"
+        jsonPaths <- FileLoader.listJsonDirectory (configdir </> "default")
+        pure $
+            ArgParserArgs
+                configdir
+                jsonPaths
 
 data Prog = Prog
     { apiKeysFile :: FilePath
@@ -200,7 +256,7 @@ parseProgOptions argparserargs =
                 <> metavar "AGENTS-KEY"
                 <> help "path to json-file containing API keys"
                 <> showDefault
-                <> value (argparserargs.configdir </> "secret-keys")
+                <> value (secretsKeyFile argparserargs)
             )
         <*> strOption
             ( long "log-file"
@@ -226,7 +282,7 @@ parseProgOptions argparserargs =
                 )
             )
         <*> fmap
-            (addDefaultSomeAgentFile argparserargs.configdir)
+            (addDefaultAgentFiles argparserargs)
             ( many
                 ( strOption
                     ( long "agent-file"
@@ -244,11 +300,6 @@ parseProgOptions argparserargs =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
             )
-
--- | helper to make agent-file entirely optional whilst using the 'many' combinator
-addDefaultSomeAgentFile :: FilePath -> [FilePath] -> [FilePath]
-addDefaultSomeAgentFile configdir [] = [configdir </> "default" </> "agent.json"]
-addDefaultSomeAgentFile _ xs = xs
 
 main :: IO ()
 main = do
