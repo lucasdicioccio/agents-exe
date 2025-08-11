@@ -375,10 +375,8 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
 
 - internal machinery
   - http-server with metrics and/or prodapi-endpoints
-  - agents-tree reloading
   - better async-linking when it makes sense
 - better CLI tooling
   - to more-directly inspect/call a tool
-  - aggregate configs/tools definitions from different places
   - make the 'cli' mode tolerable or remove it
   - improve the 'tui' mode
