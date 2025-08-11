@@ -165,6 +165,7 @@ executable agents-exe
                       directory,
                       filepath,
                       text,
+                      process,
                       prodapi,
                       optparse-applicative
 
