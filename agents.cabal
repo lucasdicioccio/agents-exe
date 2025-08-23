@@ -113,6 +113,7 @@ library agents-lib
                       conduit-extra,
                       containers,
                       contravariant,
+                      data-clist,
                       directory,
                       extra,
                       filepath,
