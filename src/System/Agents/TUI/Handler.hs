@@ -4,13 +4,14 @@
 module System.Agents.TUI.Handler where
 
 import Brick
-import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRing)
+import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRing, focusRingModify, focusRingToList)
 import Brick.Widgets.Edit
 import Brick.Widgets.List
 import Control.Concurrent.STM (atomically)
 import Control.Lens hiding (zoom) -- (makeLenses, to, use, (%=))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.CircularList as CList
 import Data.Foldable (toList, traverse_)
 import qualified Data.List as List
 import Data.Text (Text)
@@ -27,6 +28,13 @@ import qualified System.Agents.Runtime as Agent
 import System.Agents.TUI.Event (AppEvent (..))
 import System.Agents.TUI.State
 
+addFocusedConversationToFocusRing :: EventM N TuiState ()
+addFocusedConversationToFocusRing = do
+    fcs <- use (ui. focus)
+    when (not $ FocusedConversation `elem` focusRingToList fcs) $ do
+      ui . focus
+        %= focusRingModify (CList.insertL FocusedConversation)
+
 setSelectedUnifiedConversation :: Maybe Int -> EventM N TuiState ()
 setSelectedUnifiedConversation n =
     ui . unifiedList . listSelectedL .= n
@@ -36,6 +44,7 @@ setSelectedUnifiedConversationById cId = do
     lst <- use (ui . unifiedList)
     let idx = List.findIndex f (toList lst)
     setSelectedUnifiedConversation idx
+    addFocusedConversationToFocusRing
   where
     f (ChatEntryPoint _) = False
     f (ConversationEntryPoint conv) = conv.conversationId == cId
