@@ -51,6 +51,8 @@ data ArgParserArgs
     = ArgParserArgs
     { configdir :: FilePath
     , defaultAgentFiles :: [FilePath]
+    , defaultLogHttpEndpoint :: Maybe String
+    , defaultLogJsonFilepath :: Maybe FilePath
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -65,6 +67,8 @@ data AgentsExeConfig = AgentsExeConfig
     { agentsConfigDir :: Maybe FilePath
     , agentsDirectories :: [FilePath]
     , agentsFiles :: [FilePath]
+    , logHttpEndpoint :: Maybe String
+    , logJsonPath :: FilePath
     }
     deriving (Show, Generic)
 
@@ -102,6 +106,8 @@ initArgParserArgs = do
                     ArgParserArgs
                         (fromMaybe defaultconfigdir obj.agentsConfigDir)
                         (obj.agentsFiles <> mconcat jsonPathss)
+                        (obj.logHttpEndpoint)
+                        (Just $ obj.logJsonPath)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig homedir = do
@@ -111,6 +117,8 @@ initArgParserArgs = do
             ArgParserArgs
                 configdir
                 jsonPaths
+                Nothing
+                Nothing
 
 data Prog = Prog
     { apiKeysFile :: FilePath
@@ -277,6 +285,7 @@ parseProgOptions argparserargs =
                     <> metavar "LOGHTTP"
                     <> help "http log sink"
                     <> showDefault
+                    <> (maybe mempty value argparserargs.defaultLogHttpEndpoint)
                 )
             )
         <*> optional
@@ -292,6 +301,7 @@ parseProgOptions argparserargs =
                 ( long "log-json-file"
                     <> metavar "JSONFILE"
                     <> help "local JSON file log sink"
+                    <> (maybe mempty value argparserargs.defaultLogJsonFilepath)
                 )
             )
         <*> fmap
