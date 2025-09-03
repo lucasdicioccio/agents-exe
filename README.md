@@ -380,3 +380,24 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
   - to more-directly inspect/call a tool
   - make the 'cli' mode tolerable or remove it
   - improve the 'tui' mode
+
+## HTTP logging
+
+Agents-exe can log HTTP traffic details for debugging or auditing purposes.
+
+To enable HTTP of file logging of JSON conversation digests, start agents-exe with the command line argument:
+
+```console
+agents-exe --log-json-file logfile.json
+```
+or 
+
+```console
+agents-exe --log-http logfile.json
+```
+
+(or both).
+
+The log file will contain detailed JSON entries, in a better format than the "raw log file".
+
+
