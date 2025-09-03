@@ -266,35 +266,67 @@ cabal run -- agents-exe --help
 cabal run -- agents-exe init
 ```
 
+## Usage
+
 Then choose to either run the Terminal UI.
 ```console
-cabal run -- agents-exe tui
+agents-exe tui
 ```
 
-Or interact via the CLI.
+Or interact via the CLI (the future of this future is heavily uncertain).
 ```console
-cabal run -- agents-exe cli
+agents-exe cli
 ```
 
 On a Linux machine with tools like `ping` and `notify-send` installed, you can execute example tools:
 ```console
-cabal run -- agents-exe run --prompt "can you report the latency to github.com"
+agents-exe run --prompt "can you report the latency to github.com"
 ```
 
 The `run` command can also include file contents with `--file`, separators, and even execute shell commands.
 Multiple `--prompt` are allowed and concatenated into a single prompt with newline spacing, which allows for simple templating.
 
 ```
-cabal run -- agents-exe run \
+agents-exe run \
   --prompt "resume the following content:" \
   --file "README.md"
 ```
 
 ```
-cabal run -- agents-exe run -p "explain the diff:" \
+agents-exe run -p "explain the diff:" \
   -s "#" \
   --shell "git diff"
 ```
+
+## JSON logging
+
+Agents-exe logs _a lot_ of information.  The default format is defined the
+"Show Format" and is hard to parse and consume in a mechanical way. The main
+purpose of the Show Format is for developping and debugging agents-exe,
+sometimes when agents-exe fails to load it's useful to look at these logs.
+
+Agents-exe also provide a more synthetic (as in loses information) JSON format
+for mechanical consumption. The exact format is still a bit liberal so do not
+build your business around this JSON structure, however for typical
+conversation summarization, tracing you'll get plenty of information.
+
+To enable HTTP of file logging of JSON conversation digests, start agents-exe
+with the command line argument:
+
+```console
+agents-exe --log-json-file logfile.json run -p "hi"
+```
+or 
+
+```console
+agents-exe --log-http http://example.com/log-sink run -p "hi"
+```
+
+(or both).
+
+The log file will contain detailed JSON entries, in a better format than the "raw log file".
+The HTTP endpoint will format perform HTTP POSTs with the same content.
+
 
 ## Advanced configuration with agents-exe.cfg.json
 
@@ -315,6 +347,11 @@ The format of `agents-exe.cfg.json` defines the following json format:
 { "agentsConfigDir": "/some/dir"
 , "agentsDirectories":["./agents"]
 , "agentsFiles":[]
+, "agentsLogs":
+  { "logJsonHttpEndpoint":"https://example.org/log-sink"
+  , "logRawPath":"agents-exe.raw"
+  , "logJsonPath":"logs.json"
+  }
 }
 ```
 
@@ -322,7 +359,7 @@ The `agentsConfigDir` key is optional and defines a directory where other
 configurations may be loaded (for now only the `secret-keys` file has a
 meaningful location in this directory).
 
-The two other keys provide ways to list individual agents JSON definition files
+The two other 'agents' keys provide ways to list individual agents JSON definition files
 (and their tool and agents subtrees). Whether to use Directories or Files
 depends on your own workflow: you may need fewer configuration changes if you
 pick directories rather than individual files, however any `.json` file that is
@@ -331,6 +368,9 @@ not an agent-definition will crash agents-exe.
 Absent an `agents-exe.cfg.json`, agents are loaded from the directory
 `${HOME}/.config/agents-exe/default` and the key-secrets from
 `${HOME}/.config/agents-exe/secret-keys`.
+
+In a similar manner, `logHttpEndpoint` and `logJsonPath` provide a default (as
+in overrideable by the command line args) HTTP or File endpoints.
 
 ## Building from the Containerfile
 
@@ -393,11 +433,9 @@ agents-exe --log-json-file logfile.json
 or 
 
 ```console
-agents-exe --log-http logfile.json
+agents-exe --log-http http://example.com/logz
 ```
 
 (or both).
 
 The log file will contain detailed JSON entries, in a better format than the "raw log file".
-
-

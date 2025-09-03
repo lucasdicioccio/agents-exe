@@ -51,8 +51,9 @@ data ArgParserArgs
     = ArgParserArgs
     { configdir :: FilePath
     , defaultAgentFiles :: [FilePath]
-    , defaultLogHttpEndpoint :: Maybe String
+    , defaultLogJsonHttpEndpoint :: Maybe String
     , defaultLogJsonFilepath :: Maybe FilePath
+    , defaultLogRawFilepath :: Maybe FilePath
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -63,12 +64,19 @@ addDefaultAgentFiles :: ArgParserArgs -> [FilePath] -> [FilePath]
 addDefaultAgentFiles args [] = args.defaultAgentFiles
 addDefaultAgentFiles _ xs = xs
 
+data AgentsExeLogConfig = AgentsExeLogConfig
+    { logJsonHttpEndpoint :: Maybe String
+    , logJsonPath :: Maybe FilePath
+    , logRawPath :: Maybe FilePath
+    }
+    deriving (Show, Generic)
+instance Aeson.FromJSON AgentsExeLogConfig
+
 data AgentsExeConfig = AgentsExeConfig
     { agentsConfigDir :: Maybe FilePath
     , agentsDirectories :: [FilePath]
     , agentsFiles :: [FilePath]
-    , logHttpEndpoint :: Maybe String
-    , logJsonPath :: FilePath
+    , agentsLogs :: Maybe AgentsExeLogConfig
     }
     deriving (Show, Generic)
 
@@ -106,8 +114,9 @@ initArgParserArgs = do
                     ArgParserArgs
                         (fromMaybe defaultconfigdir obj.agentsConfigDir)
                         (obj.agentsFiles <> mconcat jsonPathss)
-                        (obj.logHttpEndpoint)
-                        (Just $ obj.logJsonPath)
+                        (logJsonHttpEndpoint =<< obj.agentsLogs)
+                        (logJsonPath =<< obj.agentsLogs)
+                        (logRawPath =<< obj.agentsLogs)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig homedir = do
@@ -117,6 +126,7 @@ initArgParserArgs = do
             ArgParserArgs
                 configdir
                 jsonPaths
+                Nothing
                 Nothing
                 Nothing
 
@@ -278,6 +288,7 @@ parseProgOptions argparserargs =
                 <> help "raw log file"
                 <> showDefault
                 <> value "agents-logfile"
+                <> (maybe mempty value argparserargs.defaultLogRawFilepath)
             )
         <*> optional
             ( strOption
@@ -285,7 +296,7 @@ parseProgOptions argparserargs =
                     <> metavar "LOGHTTP"
                     <> help "http log sink"
                     <> showDefault
-                    <> (maybe mempty value argparserargs.defaultLogHttpEndpoint)
+                    <> (maybe mempty value argparserargs.defaultLogJsonHttpEndpoint)
                 )
             )
         <*> optional
