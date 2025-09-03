@@ -17,7 +17,7 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import qualified System.Agents.CLI as CLI
-import System.Agents.CLI.Base (makeShowLogFileTracer)
+import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
 import qualified System.Agents.FileLoader as FileLoader
@@ -117,6 +117,7 @@ data Prog = Prog
     , logFile :: FilePath
     , logHttp :: Maybe String
     , memoryHttpStore :: Maybe String
+    , logJsonFile :: Maybe FilePath
     , agentFiles :: [FilePath]
     , mainCommand :: Command
     }
@@ -286,6 +287,13 @@ parseProgOptions argparserargs =
                     <> showDefault
                 )
             )
+        <*> optional
+            ( strOption
+                ( long "log-json-file"
+                    <> metavar "JSONFILE"
+                    <> help "local JSON file log sink"
+                )
+            )
         <*> fmap
             (addDefaultAgentFiles argparserargs)
             ( many
@@ -329,6 +337,11 @@ main = do
     prog :: Prog -> IO ()
     prog args = do
         showFileTracer <- makeShowLogFileTracer args.logFile
+        baseJsonFileTracer1 <- traverse makeFileJsonTracer args.logJsonFile
+        let logFileJsonTracer =
+                case baseJsonFileTracer1 of
+                    Nothing -> Nothing
+                    Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
         baseHttpTracer1 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) args.logHttp
         let logHttpTracer =
                 case baseHttpTracer1 of
@@ -340,7 +353,7 @@ main = do
                     Nothing -> Nothing
                     Just t -> Just $ choose extractMemories Prod.silent t
 
-        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer
+        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer `traceExtra` logFileJsonTracer
 
         case args.mainCommand of
             Check -> do
