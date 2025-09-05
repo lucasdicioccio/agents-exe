@@ -17,7 +17,7 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import qualified System.Agents.CLI as CLI
-import System.Agents.CLI.Base (makeShowLogFileTracer)
+import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
 import qualified System.Agents.FileLoader as FileLoader
@@ -51,6 +51,9 @@ data ArgParserArgs
     = ArgParserArgs
     { configdir :: FilePath
     , defaultAgentFiles :: [FilePath]
+    , defaultLogJsonHttpEndpoint :: Maybe String
+    , defaultLogJsonFilepath :: Maybe FilePath
+    , defaultLogRawFilepath :: Maybe FilePath
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -61,10 +64,19 @@ addDefaultAgentFiles :: ArgParserArgs -> [FilePath] -> [FilePath]
 addDefaultAgentFiles args [] = args.defaultAgentFiles
 addDefaultAgentFiles _ xs = xs
 
+data AgentsExeLogConfig = AgentsExeLogConfig
+    { logJsonHttpEndpoint :: Maybe String
+    , logJsonPath :: Maybe FilePath
+    , logRawPath :: Maybe FilePath
+    }
+    deriving (Show, Generic)
+instance Aeson.FromJSON AgentsExeLogConfig
+
 data AgentsExeConfig = AgentsExeConfig
     { agentsConfigDir :: Maybe FilePath
     , agentsDirectories :: [FilePath]
     , agentsFiles :: [FilePath]
+    , agentsLogs :: Maybe AgentsExeLogConfig
     }
     deriving (Show, Generic)
 
@@ -102,6 +114,9 @@ initArgParserArgs = do
                     ArgParserArgs
                         (fromMaybe defaultconfigdir obj.agentsConfigDir)
                         (obj.agentsFiles <> mconcat jsonPathss)
+                        (logJsonHttpEndpoint =<< obj.agentsLogs)
+                        (logJsonPath =<< obj.agentsLogs)
+                        (logRawPath =<< obj.agentsLogs)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig homedir = do
@@ -111,12 +126,16 @@ initArgParserArgs = do
             ArgParserArgs
                 configdir
                 jsonPaths
+                Nothing
+                Nothing
+                Nothing
 
 data Prog = Prog
     { apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
     , memoryHttpStore :: Maybe String
+    , logJsonFile :: Maybe FilePath
     , agentFiles :: [FilePath]
     , mainCommand :: Command
     }
@@ -269,6 +288,7 @@ parseProgOptions argparserargs =
                 <> help "raw log file"
                 <> showDefault
                 <> value "agents-logfile"
+                <> (maybe mempty value argparserargs.defaultLogRawFilepath)
             )
         <*> optional
             ( strOption
@@ -276,6 +296,7 @@ parseProgOptions argparserargs =
                     <> metavar "LOGHTTP"
                     <> help "http log sink"
                     <> showDefault
+                    <> (maybe mempty value argparserargs.defaultLogJsonHttpEndpoint)
                 )
             )
         <*> optional
@@ -284,6 +305,14 @@ parseProgOptions argparserargs =
                     <> metavar "MEMORYHTTPSTORE"
                     <> help "http memory sink"
                     <> showDefault
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "log-json-file"
+                    <> metavar "JSONFILE"
+                    <> help "local JSON file log sink"
+                    <> (maybe mempty value argparserargs.defaultLogJsonFilepath)
                 )
             )
         <*> fmap
@@ -329,6 +358,11 @@ main = do
     prog :: Prog -> IO ()
     prog args = do
         showFileTracer <- makeShowLogFileTracer args.logFile
+        baseJsonFileTracer1 <- traverse makeFileJsonTracer args.logJsonFile
+        let logFileJsonTracer =
+                case baseJsonFileTracer1 of
+                    Nothing -> Nothing
+                    Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
         baseHttpTracer1 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) args.logHttp
         let logHttpTracer =
                 case baseHttpTracer1 of
@@ -340,7 +374,7 @@ main = do
                     Nothing -> Nothing
                     Just t -> Just $ choose extractMemories Prod.silent t
 
-        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer
+        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer `traceExtra` logFileJsonTracer
 
         case args.mainCommand of
             Check -> do
