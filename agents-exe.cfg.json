@@ -1,0 +1,6 @@
+{ "agentsDirectories":["./agents"]
+, "agentsFiles":[]
+, "agentsLogs": {
+    "logJsonPath": "logs.json"
+  }
+}
