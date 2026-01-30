@@ -188,6 +188,7 @@ tui_appDraw tuiState = [render_ui tuiState]
                             , render_focusedConversation_HistoryItem_query q
                             , Just $ txt ""
                             , render_focusedConversation_HistoryItem_response_text rsp
+                            , render_focusedConversation_HistoryItem_response_reasoning rsp
                             , render_focusedConversation_HistoryItem_response_toolcalls rsp
                             , Just $ txt ""
                             ]
@@ -203,6 +204,11 @@ tui_appDraw tuiState = [render_ui tuiState]
         content <- rsp.rspContent
         pure $ txt ("< " <> content)
 
+    render_focusedConversation_HistoryItem_response_reasoning :: OpenAI.Response -> Maybe (Widget N)
+    render_focusedConversation_HistoryItem_response_reasoning rsp = do
+        content <- rsp.rspReasoningContent
+        pure $ txt ("% " <> content)
+
     render_focusedConversation_HistoryItem_response_toolcalls :: OpenAI.Response -> Maybe (Widget N)
     render_focusedConversation_HistoryItem_response_toolcalls rsp = do
         calls <- rsp.rspToolCalls
@@ -210,7 +216,10 @@ tui_appDraw tuiState = [render_ui tuiState]
             then
                 Nothing
             else
-                pure $ txt ("< tool calls")
+                pure $ txt ("< tool calls: " <> Text.unwords (fmap toolname calls))
+      where
+        toolname :: OpenAI.ToolCall -> Text
+        toolname tc = tc.toolCallFunction.toolCallFunctionName.getToolName
 
 renderToolRegistry :: TuiState -> AgentId -> Text
 renderToolRegistry st aId =
