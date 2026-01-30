@@ -2,6 +2,7 @@
 
 module System.Agents.LLMs.OpenAI where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
@@ -347,6 +348,7 @@ makeApiKey = ApiKey
 data ModelFlavor
     = OpenAIv1
     | MistralV1
+    | KimiV1
     deriving (Show, Eq, Ord)
 
 data Model = Model
@@ -361,6 +363,8 @@ defaultFlavor :: ModelFlavor
 defaultFlavor = OpenAIv1
 
 parseFlavor :: Text -> Maybe ModelFlavor
+parseFlavor "kimiv1" = Just KimiV1
+parseFlavor "KimiV1" = Just KimiV1
 parseFlavor "OpenAIv1" = Just OpenAIv1
 parseFlavor "MistralV1" = Just MistralV1
 parseFlavor "openai-v1" = Just OpenAIv1
@@ -399,6 +403,16 @@ renderPayload model tools hist prompt =
                 , "tools" .= tools
                 , "tool_choice" .= ("any" :: Text)
                 , "parallel_tool_calls" .= True
+                ]
+        KimiV1 ->
+            Aeson.object
+                [ "model" .= model.modelName
+                , "messages"
+                    .= makeMessages model.modelSystemPrompt hist (prompt <|> Just "ok")
+                , "tools" .= tools
+                -- todo:
+                -- allow to tune json format with something like
+                -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
                 ]
 
 callLLMPayload ::
@@ -465,6 +479,7 @@ data Response
     , finishReason :: Maybe Text
     , rspContent :: Maybe Text
     , rspToolCalls :: Maybe [ToolCall]
+    , rspReasoningContent :: Maybe Text
     }
     deriving (Show)
 
@@ -488,6 +503,7 @@ instance FromJSON Response where
                 <*> firstChoice .:? "finish_reason"
                 <*> firstChoice .: "content"
                 <*> firstChoice .:? "tool_calls"
+                <*> firstChoice .:? "reasoning_content"
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
