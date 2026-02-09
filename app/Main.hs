@@ -443,6 +443,7 @@ main = do
                         ]
                         "self_call"
                         "calls oneself with a prompt"
+                        (Just $ Bash.AddMessage "--no output--")
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =
