@@ -1,6 +1,8 @@
+{-# LANGUAGE DeriveGeneric #-}
 -- | Defines tools as bash script (or programs) according to a simple convention.
 module System.Agents.Tools.Bash where
 
+import GHC.Generics (Generic)
 import Control.Concurrent.Async (mapConcurrently)
 import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import qualified Data.Aeson as Aeson
@@ -28,6 +30,16 @@ data RunTrace
     = RunCommandStart !FilePath [String]
     | RunCommandStopped !FilePath [String] !ExitCode !ByteString !ByteString
     deriving (Show)
+
+-------------------------------------------------------------------------------
+data ScriptEmptyResultBehavior
+    = DoNothing
+    | AddMessage !Text
+    deriving (Generic, Show, Eq, Ord)
+
+instance ToJSON ScriptEmptyResultBehavior where
+
+instance FromJSON ScriptEmptyResultBehavior where
 
 -------------------------------------------------------------------------------
 data ScriptArgArity
@@ -121,16 +133,18 @@ data ScriptInfo
     { scriptArgs :: [ScriptArg]
     , scriptSlug :: Text
     , scriptDescription :: Text
+    , scriptEmptyResultBehavior :: Maybe ScriptEmptyResultBehavior
     }
     deriving (Show, Eq, Ord)
 
 instance ToJSON ScriptInfo where
     toJSON s =
         Aeson.object
-            [ "args" .= s.scriptArgs
-            , "slug" .= s.scriptSlug
-            , "description" .= s.scriptDescription
-            ]
+            $ [ "args" .= s.scriptArgs
+              , "slug" .= s.scriptSlug
+              , "description" .= s.scriptDescription
+              ]
+            <> maybe [] (\seb -> ["empty-result" .= seb]) s.scriptEmptyResultBehavior
 
 instance FromJSON ScriptInfo where
     parseJSON =
@@ -139,6 +153,16 @@ instance FromJSON ScriptInfo where
                 <$> v .: "args"
                 <*> v .: "slug"
                 <*> v .: "description"
+                <*> v Aeson..:? "empty-result"
+
+-- helper function to adjust output
+adjustOutput :: ScriptEmptyResultBehavior -> Text -> Text
+adjustOutput behavior out = case behavior of
+    DoNothing -> out
+    AddMessage msg ->
+     if out == ""
+     then msg
+     else out
 
 data ScriptDescription
     = ScriptDescription
@@ -257,6 +281,7 @@ parseArgsForValue script val = do
 runValue :: Tracer IO RunTrace -> ScriptDescription -> Aeson.Value -> IO (Either RunScriptError ByteString)
 runValue tracer script val = do
     let path = script.scriptPath
+    let maybeBehavior = script.scriptInfo.scriptEmptyResultBehavior
     case parseArgsForValue script val of
         Left err ->
             pure $ Left $ SerializeArgumentErrors path err
@@ -267,4 +292,9 @@ runValue tracer script val = do
             runTracer tracer (RunCommandStopped path args code out err)
             if code /= ExitSuccess
                 then pure $ Left $ ScriptExecutionError path code err
-                else pure $ Right out
+                else
+                    let outText = Text.decodeUtf8 out
+                        adjusted = case maybeBehavior of
+                            Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
+                            Nothing       -> out
+                    in pure $ Right adjusted
