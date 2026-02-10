@@ -16,7 +16,6 @@ import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
-import qualified System.Agents.CLI as CLI
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
@@ -387,21 +386,6 @@ main = do
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
-            InteractiveCommandLine -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
-                let oneProp agentFile =
-                        AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                Prod.traceBoth
-                                    baseTracer
-                                    ( Prod.traceBoth
-                                        tracePrintingTextResponses
-                                        (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                                    )
-                            }
-                CLI.mainInteractiveAgent $ map oneProp args.agentFiles
             TerminalUI -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
                 let oneAgent agentFile =

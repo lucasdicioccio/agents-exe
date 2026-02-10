@@ -273,9 +273,9 @@ Then choose to either run the Terminal UI.
 agents-exe tui
 ```
 
-Or interact via the CLI (the future of this future is heavily uncertain).
+Or interact via the TUI.
 ```console
-agents-exe cli
+agents-exe tui
 ```
 
 On a Linux machine with tools like `ping` and `notify-send` installed, you can execute example tools:
@@ -387,7 +387,7 @@ And then from inside the container.
 
 ```console
 agents-exe init
-agents-exe cli
+agents-exe tui
 ```
 
 # Unordered Roadmap
@@ -418,7 +418,6 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
   - better async-linking when it makes sense
 - better CLI tooling
   - to more-directly inspect/call a tool
-  - make the 'cli' mode tolerable or remove it
   - improve the 'tui' mode
 
 ## HTTP logging
