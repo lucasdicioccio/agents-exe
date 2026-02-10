@@ -113,7 +113,7 @@ tui_appDraw tuiState = [render_ui tuiState]
                 Nothing ->
                     hBox [chatList]
                 (Just (_, (ChatEntryPoint _))) ->
-                    hBox [chatList] <+> vBox [hBox [agent_infos, agent_tools], prompt_input]
+                    hBox [chatList] <+> vBox [vLimit 20 $ hBox [agent_infos, agent_tools], prompt_input]
                 (Just (_, (ConversationEntryPoint _))) ->
                     hBox [chatList] <+> vBox [prompt_input, ongoingConversation]
 
