@@ -40,6 +40,7 @@ tui_appChooseCursor st locs =
         Just PromptEditor -> showCursorNamed PromptEditor locs
         Just UnifiedList -> Nothing
         Just FocusedConversation -> Nothing
+        Just AgentInfo -> Nothing
         Nothing -> Nothing
 
 blueBg :: AttrName
@@ -64,6 +65,7 @@ tui_appDraw tuiState = [render_ui tuiState]
                 (Just PromptEditor) -> render_promptEditor st
                 (Just FocusedConversation) -> render_focusedConversation st
                 (Just UnifiedList) -> render_unifiedList st
+                (Just AgentInfo) -> render_ui_general st
     render_ui st
         | otherwise =
             render_ui_general st
@@ -95,8 +97,10 @@ tui_appDraw tuiState = [render_ui tuiState]
                             render_focusedConversation st
                     )
             agent_infos =
-                borderWithLabel
-                    (txt "info")
+                borderWithFocus
+                    st
+                    AgentInfo
+                    "info"
                     (hLimit 60 $ render_focusedAgentInfo st)
             agent_tools =
                 borderWithLabel
@@ -241,3 +245,4 @@ renderToolRegistry st aId =
 
 separator :: Widget a
 separator = txt "=============="
+

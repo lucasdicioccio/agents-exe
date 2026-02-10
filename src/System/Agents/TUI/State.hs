@@ -25,6 +25,7 @@ data BrickWidgetName
     = UnifiedList
     | PromptEditor
     | FocusedConversation
+    | AgentInfo
     deriving (Show, Eq, Ord)
 type N = BrickWidgetName
 
@@ -78,7 +79,7 @@ newTuiState agents =
             <$> traverse readTools agents
     uiV =
         UI
-            <$> pure (focusRing [UnifiedList, PromptEditor])
+            <$> pure (focusRing [UnifiedList, PromptEditor, AgentInfo])
             <*> pure False
             <*> pure (editorText PromptEditor Nothing "")
             <*> pure (list UnifiedList (Vector.fromList (orderUnifiedConversations agents [])) 0)
@@ -136,3 +137,4 @@ readTools :: LoadedAgent -> IO (AgentId, [ToolRegistration])
 readTools agent = do
     x <- agent.loadedAgentRuntime.agentTools
     pure (agent.loadedAgentRuntime.agentId, x)
+
