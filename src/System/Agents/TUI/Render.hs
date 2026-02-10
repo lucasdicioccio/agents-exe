@@ -40,6 +40,7 @@ tui_appChooseCursor st locs =
         Just PromptEditor -> showCursorNamed PromptEditor locs
         Just UnifiedList -> Nothing
         Just FocusedConversation -> Nothing
+        Just AgentInfo -> Nothing
         Nothing -> Nothing
 
 blueBg :: AttrName
@@ -62,8 +63,9 @@ tui_appDraw tuiState = [render_ui tuiState]
             case (focusGetCurrent st._ui._focus) of
                 Nothing -> render_ui_general st
                 (Just PromptEditor) -> render_promptEditor st
-                (Just FocusedConversation) -> render_focusedConversation st
+                (Just FocusedConversation) -> viewport FocusedConversation Both $ render_focusedConversation st
                 (Just UnifiedList) -> render_unifiedList st
+                (Just AgentInfo) -> render_ui_general st
     render_ui st
         | otherwise =
             render_ui_general st
@@ -95,9 +97,14 @@ tui_appDraw tuiState = [render_ui tuiState]
                             render_focusedConversation st
                     )
             agent_infos =
-                borderWithLabel
-                    (txt "info")
-                    (hLimit 60 $ render_focusedAgentInfo st)
+                borderWithFocus
+                    st
+                    AgentInfo
+                    "info"
+                    ( hLimit 60 $
+                        viewport AgentInfo Both $
+                            render_focusedAgentInfo st
+                    )
             agent_tools =
                 borderWithLabel
                     (txt "tools")
@@ -113,7 +120,7 @@ tui_appDraw tuiState = [render_ui tuiState]
                 Nothing ->
                     hBox [chatList]
                 (Just (_, (ChatEntryPoint _))) ->
-                    hBox [chatList] <+> vBox [hBox [agent_infos, agent_tools], prompt_input]
+                    hBox [chatList] <+> vBox [vLimit 20 $ hBox [agent_infos, agent_tools], prompt_input]
                 (Just (_, (ConversationEntryPoint _))) ->
                     hBox [chatList] <+> vBox [prompt_input, ongoingConversation]
 
@@ -241,3 +248,4 @@ renderToolRegistry st aId =
 
 separator :: Widget a
 separator = txt "=============="
+

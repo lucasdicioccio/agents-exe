@@ -149,6 +149,7 @@ tui_appHandleEvent ev = do
                                 .= focusRing
                                     [ UnifiedList
                                     , PromptEditor
+                                    , AgentInfo
                                     ]
                         (Just (_, (ConversationEntryPoint _))) ->
                             ui . focus
@@ -162,6 +163,8 @@ tui_appHandleEvent ev = do
                     tui_handleViewPortEvent_PromptEditor ev
                 (Just FocusedConversation) -> do
                     tui_handleViewPortEvent_Conversation ev
+                (Just AgentInfo) -> do
+                    tui_handleViewPortEvent_AgentInfo ev
         _ -> pure ()
 
 tui_handleViewPortEvent_PromptEditor :: BrickEvent N e0 -> EventM N TuiState ()
@@ -199,6 +202,25 @@ tui_handleViewPortEvent_PromptEditor ev = do
 textLinesToPrompt :: [Text] -> Text
 textLinesToPrompt = Text.stripEnd . Text.unlines
 
+tui_handleViewPortEvent_AgentInfo :: BrickEvent N e0 -> EventM N TuiState ()
+tui_handleViewPortEvent_AgentInfo ev = do
+    case ev of
+        VtyEvent (Vty.EvKey (Vty.KUp) _) -> do
+            let vp = viewportScroll AgentInfo
+            vScrollBy vp (-1)
+        VtyEvent (Vty.EvKey (Vty.KDown) _) -> do
+            let vp = viewportScroll AgentInfo
+            vScrollBy vp 1
+        VtyEvent (Vty.EvKey (Vty.KLeft) _) -> do
+            let vp = viewportScroll AgentInfo
+            hScrollBy vp (-1)
+        VtyEvent (Vty.EvKey (Vty.KRight) _) -> do
+            let vp = viewportScroll AgentInfo
+            hScrollBy vp 1
+        VtyEvent (Vty.EvKey (Vty.KChar 'z') _) -> do
+            flipZoom
+        _ -> pure ()
+
 tui_handleViewPortEvent_Conversation :: BrickEvent N e0 -> EventM N TuiState ()
 tui_handleViewPortEvent_Conversation ev = do
     case ev of
@@ -220,3 +242,4 @@ tui_handleViewPortEvent_Conversation ev = do
 
 tui_appStartEvent :: EventM a TuiState ()
 tui_appStartEvent = pure ()
+
