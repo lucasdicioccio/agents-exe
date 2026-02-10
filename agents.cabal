@@ -64,11 +64,9 @@ library agents-lib
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.Conversation
-                    , System.Agents.CLI
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.InitProject
-                    , System.Agents.CLI.State
                     , System.Agents.Dialogues
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
