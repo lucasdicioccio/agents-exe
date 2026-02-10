@@ -63,7 +63,7 @@ tui_appDraw tuiState = [render_ui tuiState]
             case (focusGetCurrent st._ui._focus) of
                 Nothing -> render_ui_general st
                 (Just PromptEditor) -> render_promptEditor st
-                (Just FocusedConversation) -> render_focusedConversation st
+                (Just FocusedConversation) -> viewport FocusedConversation Both $ render_focusedConversation st
                 (Just UnifiedList) -> render_unifiedList st
                 (Just AgentInfo) -> render_ui_general st
     render_ui st
@@ -101,7 +101,10 @@ tui_appDraw tuiState = [render_ui tuiState]
                     st
                     AgentInfo
                     "info"
-                    (hLimit 60 $ render_focusedAgentInfo st)
+                    ( hLimit 60 $
+                        viewport AgentInfo Both $
+                            render_focusedAgentInfo st
+                    )
             agent_tools =
                 borderWithLabel
                     (txt "tools")
