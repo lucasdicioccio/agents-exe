@@ -63,11 +63,9 @@ library agents-lib
                     , System.Agents.AgentTree
                     , System.Agents.ApiKeys
                     , System.Agents.Base
-                    , System.Agents.Conversation
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.InitProject
-                    , System.Agents.Dialogues
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
@@ -80,12 +78,16 @@ library agents-lib
                     , System.Agents.Tools.IO
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.LLMs.OpenAI
-                    , System.Agents.Memory
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Base
                     , System.Agents.Runtime.Conversation
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace
+                    , System.Agents.Session.Base
+                    , System.Agents.Session.OpenAI
+                    , System.Agents.Session.Loop
+                    , System.Agents.Session.Step
+                    , System.Agents.ToolSchema
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
                     , System.Agents.OneShot
@@ -94,11 +96,7 @@ library agents-lib
                     , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
-                    , System.Agents.TUI
-                    , System.Agents.TUI.Event
-                    , System.Agents.TUI.Handler
-                    , System.Agents.TUI.State
-                    , System.Agents.TUI.Render
+                    , System.Agents.TUI2.Core
                     , System.Agents.TraceUtils
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,
@@ -116,6 +114,7 @@ library agents-lib
                       extra,
                       filepath,
                       formatting,
+                      free,
                       haskeline,
                       http-client,
                       http-client-tls,

@@ -5,11 +5,10 @@ module System.Agents.Tools.McpToolbox where
 
 import Control.Concurrent.Async (Async, async)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Concurrent.STM (STM, atomically)
-import Control.Concurrent.STM.TBMChan (TBMChan, newTBMChanIO, readTBMChan, writeTBMChan)
+import Control.Concurrent.STM (atomically)
+import Control.Concurrent.STM.TBMChan (newTBMChanIO, readTBMChan, writeTBMChan)
 import Control.Concurrent.STM.TVar (TVar, newTVarIO, writeTVar)
 import qualified Data.Aeson as Aeson
-import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Network.JSONRPC as Rpc
 import Prod.Tracer (Tracer (..), contramap, traceBoth)
@@ -42,12 +41,12 @@ initializeMcpToolbox ::
     Text ->
     CreateProcess ->
     IO Toolbox
-initializeMcpToolbox tracer name proc = do
+initializeMcpToolbox ttracer tname proc = do
     -- tool calls
     chan <- newTBMChanIO 30
     let nextToolCall = atomically $ readTBMChan chan
-    let callTool :: ToolDescription -> Maybe Aeson.Object -> IO McpClient.ToolCallResponse
-        callTool td param = do
+    let doCallTool :: ToolDescription -> Maybe Aeson.Object -> IO McpClient.ToolCallResponse
+        doCallTool td param = do
             let tc = McpClient.ToolCall td.getToolDescription.name param
             mbox <- newEmptyMVar
             let done res = do
@@ -60,15 +59,15 @@ initializeMcpToolbox tracer name proc = do
     discoveredTools <- newTVarIO []
     let toolsListTracer = storeToolsInDiscoveredValues discoveredTools
     -- tracers
-    let rtTracer = contramap McpClientRunTrace tracer
-    let clientTracer = contramap McpClientClientTrace tracer
-    let loopTracer = traceBoth toolsListTracer (contramap McpClientLoopTrace tracer)
+    let rtTracer = contramap McpClientRunTrace ttracer
+    let clientTracer = contramap McpClientClientTrace ttracer
+    let loopTracer = traceBoth toolsListTracer (contramap McpClientLoopTrace ttracer)
 
     -- wire things together
     mcpRt <- McpClient.initRuntime rtTracer proc
     let props = LoopProps loopTracer nextToolCall
-    job <- async (McpClient.runClient clientTracer mcpRt (McpClient.defaultLoop props))
-    pure $ Toolbox name job discoveredTools callTool
+    ajob <- async (McpClient.runClient clientTracer mcpRt (McpClient.defaultLoop props))
+    pure $ Toolbox tname ajob discoveredTools doCallTool
 
 storeToolsInDiscoveredValues :: TVar [ToolDescription] -> Tracer IO LoopTrace
 storeToolsInDiscoveredValues list = Tracer f
@@ -80,10 +79,10 @@ storeToolsInDiscoveredValues list = Tracer f
         atomically (writeTVar list [])
     f (ToolsRefreshed mitems) =
         let
-            f :: Maybe (Either Rpc.ErrorObj McpClient.ListToolsResultRsp) -> [ToolDescription]
-            f (Just (Right rsp)) = fmap ToolDescription rsp.getListToolsResult.tools
-            f _ = []
+            g :: Maybe (Either Rpc.ErrorObj McpClient.ListToolsResultRsp) -> [ToolDescription]
+            g (Just (Right rsp)) = fmap ToolDescription rsp.getListToolsResult.tools
+            g _ = []
 
-            items = mconcat $ map f mitems
+            items = mconcat $ map g mitems
          in
             atomically (writeTVar list items)

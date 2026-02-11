@@ -9,8 +9,6 @@ module System.Agents.Runtime.Conversation (
 import Control.Concurrent.Async (mapConcurrently)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
@@ -22,7 +20,7 @@ import Prod.Tracer (Tracer, contramap, runTracer)
 
 -------------------------------------------------------------------------------
 import System.Agents.Base
-import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.ToolRegistration
 import System.Agents.Tools
@@ -38,14 +36,14 @@ import System.Agents.Runtime.Trace
 data ConversationFunctions r
     = ConversationFunctions
     { waitAdditionalQuery :: IO (Maybe Text)
-    , onProgress :: LLM.History -> IO ()
+    , onProgress :: OpenAI.History -> IO ()
     , onError :: String -> IO r
-    , onDone :: LLM.History -> IO r
+    , onDone :: OpenAI.History -> IO r
     }
 
 data ContinueD
-    = PromptMore !PingPongQuery !LLM.History
-    | OnDone !LLM.History
+    = PromptMore !PingPongQuery !OpenAI.History
+    | OnDone !OpenAI.History
     | OnError !String
 
 type ContinueFunction r = ContinueD -> IO r
@@ -58,7 +56,7 @@ handleConversation rt functions conversationId startingPrompt = do
     go conversationId
   where
     go cId =
-        let step :: LLM.History -> PingPongQuery -> IO r
+        let step :: OpenAI.History -> PingPongQuery -> IO r
             step = stepWith cId rt functions continue
 
             continue :: ContinueFunction r
@@ -72,7 +70,7 @@ stepWith ::
     Runtime ->
     ConversationFunctions r ->
     ContinueFunction r ->
-    LLM.History ->
+    OpenAI.History ->
     PingPongQuery ->
     IO r
 stepWith conversationId rt _ next hist NoQuery = do
@@ -86,13 +84,13 @@ stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions
     let query = getQueryToAnswer pendingQuery
     registeredTools <- tools
     let llmTools = fmap declareTool registeredTools
-    let payload = LLM.renderPayload model llmTools hist query
+    let payload = OpenAI.renderPayload model llmTools hist query
     stepUUID <- newStepId
     runTracer memoTracer (Calling pendingQuery hist stepUUID)
-    llmResponse <- LLM.callLLMPayload (contramap (LLMTrace stepUUID) convTracer) httpRt model.modelBaseUrl payload
-    case Aeson.parseEither LLM.parseLLMResponse =<< llmResponse of
+    llmResponse <- OpenAI.callLLMPayload (contramap (LLMTrace stepUUID) convTracer) httpRt model.modelBaseUrl payload
+    case Aeson.parseEither OpenAI.parseLLMResponse =<< llmResponse of
         Right rsp -> do
-            let hist02 = hist <> Seq.singleton (LLM.PromptAnswered query rsp)
+            let hist02 = hist <> Seq.singleton (OpenAI.PromptAnswered query rsp)
             functions.onProgress hist02
             runTracer memoTracer (GotResponse pendingQuery hist02 stepUUID rsp)
             case Maybe.fromMaybe [] rsp.rspToolCalls of
@@ -105,7 +103,7 @@ stepWith conversationId rt@(Runtime _ _ _ tracer httpRt model tools _) functions
                             hist02
                 toolcalls -> do
                     responses <- mapConcurrently (llmCallTool conversationId convTracer registeredTools) toolcalls
-                    let toolResults = fmap LLM.ToolCalled $ yankResults responses
+                    let toolResults = fmap OpenAI.ToolCalled $ yankResults responses
                     let hist03 = hist02 <> Seq.fromList toolResults
                     next $
                         PromptMore
@@ -118,15 +116,15 @@ llmCallTool ::
     ConversationId ->
     Tracer IO ConversationTrace ->
     [ToolRegistration] ->
-    LLM.ToolCall ->
-    IO (CallResult LLM.ToolCall)
+    OpenAI.ToolCall ->
+    IO (CallResult OpenAI.ToolCall)
 llmCallTool conversationId tracer registrations call =
     let
         script =
             Maybe.listToMaybe $
                 Maybe.mapMaybe (\r -> r.findTool call) registrations
-        args = call.toolCallFunction.toolCallFunctionArgs
-        spec = (,) <$> script <*> args
+        targs = call.toolCallFunction.toolCallFunctionArgs
+        spec = (,) <$> script <*> targs
      in
         case spec of
             Nothing -> pure $ ToolNotFound call
@@ -135,35 +133,33 @@ llmCallTool conversationId tracer registrations call =
                 ret <- t.toolRun (contramap (RunToolTrace toolcallUUID) tracer) conversationId v
                 pure $ mapCallResult (const call) ret
 
-yankResults :: [CallResult call] -> [(call, LLM.ToolResponse)]
+yankResults :: [CallResult call] -> [(call, OpenAI.ToolResponse)]
 yankResults xs = fmap (\x -> (extractCall x, f x)) xs
   where
-    f :: CallResult c -> LLM.ToolResponse
+    f :: CallResult c -> OpenAI.ToolResponse
     f (ToolNotFound _) =
-        LLM.ToolNotFound
+        OpenAI.ToolNotFound
     f (BashToolError _ err) =
-        LLM.ToolFailure $ Text.pack $ show err
+        OpenAI.ToolFailure $ Text.pack $ show err
     f (McpToolError _ err) =
-        LLM.ToolFailure $ (Text.unlines ["tool-error", Text.pack (show err)])
+        OpenAI.ToolFailure $ (Text.unlines ["tool-error", Text.pack (show err)])
     f (McpToolResult _ res) =
         case res.isError of
-            (Just True) -> LLM.ToolFailure (Text.unlines ["result-is-error:", aesonBlobify res])
+            (Just True) -> OpenAI.ToolFailure (Text.unlines ["result-is-error:", aesonBlobify res])
             _ -> interpretMcpContents res.content
     f (IOToolError _ err) =
-        LLM.ToolFailure $ Text.pack $ show err
+        OpenAI.ToolFailure $ Text.pack $ show err
     f (BlobToolSuccess _ v) =
-        LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
-    f (BlobToolSuccess _ v) =
-        LLM.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
+        OpenAI.TextToolResponse (NonEmpty.singleton $ Text.decodeUtf8 v)
 
     aesonBlobify :: (Aeson.ToJSON a) => a -> Text
     aesonBlobify = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
 
-    interpretMcpContents :: [Mcp.Content] -> LLM.ToolResponse
+    interpretMcpContents :: [Mcp.Content] -> OpenAI.ToolResponse
     interpretMcpContents items =
         case NonEmpty.nonEmpty items of
-            Nothing -> LLM.ToolFailure "tool gave no contents"
-            Just xs -> LLM.TextToolResponse (fmap interpretMcpContent xs)
+            Nothing -> OpenAI.ToolFailure "tool gave no contents"
+            Just ys -> OpenAI.TextToolResponse (fmap interpretMcpContent ys)
 
     interpretMcpContent :: Mcp.Content -> Text
     interpretMcpContent (Mcp.TextContent impl) = impl.text

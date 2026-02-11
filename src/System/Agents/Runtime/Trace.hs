@@ -1,12 +1,9 @@
 module System.Agents.Runtime.Trace where
 
 import System.Agents.Base
-import qualified System.Agents.LLMs.OpenAI as LLM
-import System.Agents.ToolRegistration
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools
-import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
-import qualified System.Agents.Tools.IO as IOTools
 
 import System.Agents.Runtime.Base
 
@@ -18,9 +15,9 @@ data Trace
     deriving (Show)
 
 traceAgentSlug :: Trace -> AgentSlug
-traceAgentSlug (AgentTrace_Loading slug _ _) = slug
-traceAgentSlug (AgentTrace_Conversation slug _ _ _) = slug
-traceAgentSlug (AgentTrace_Memorize slug _ _ _) = slug
+traceAgentSlug (AgentTrace_Loading aSlug _ _) = aSlug
+traceAgentSlug (AgentTrace_Conversation aSlug _ _ _) = aSlug
+traceAgentSlug (AgentTrace_Memorize aSlug _ _ _) = aSlug
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
@@ -35,13 +32,13 @@ traceConversationId (AgentTrace_Memorize _ _ cId _) = Just cId
 data ConversationTrace
     = NewConversation
     | WaitingForPrompt
-    | LLMTrace !StepId !LLM.Trace
+    | LLMTrace !StepId !OpenAI.Trace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
 
 data MemorizeTrace
-    = Calling !PingPongQuery !LLM.History !StepId
-    | GotResponse !PingPongQuery !LLM.History !StepId !LLM.Response
-    | InteractionDone !LLM.History !StepId
+    = Calling !PingPongQuery !OpenAI.History !StepId
+    | GotResponse !PingPongQuery !OpenAI.History !StepId !OpenAI.Response
+    | InteractionDone !OpenAI.History !StepId
     deriving (Show)

@@ -16,7 +16,7 @@ import Prod.Tracer (Tracer, contramap, traceBoth)
 import qualified System.Agents.HttpClient as HttpClient
 
 import System.Agents.Base (AgentAnnounce, AgentId, AgentSlug, newAgentId)
-import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.McpToolbox as McpTools
@@ -32,7 +32,7 @@ data Runtime
     , agentAnnounce :: AgentAnnounce
     , agentTracer :: Tracer IO Trace
     , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
-    , agentModel :: LLM.Model
+    , agentModel :: OpenAI.Model
     , agentTools :: IO [ToolRegistration]
     , agentTriggerRefreshTools :: STM Bool
     }
@@ -57,8 +57,8 @@ newRuntime ::
     AgentSlug ->
     AgentAnnounce ->
     Tracer IO Trace ->
-    LLM.ApiKey ->
-    LLM.Model ->
+    OpenAI.ApiKey ->
+    OpenAI.Model ->
     ToolboxDirectory ->
     [IOToolBuilder] ->
     [McpToolConfig] ->
@@ -70,7 +70,7 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
     case toolz of
         Left err -> pure $ Left (show err)
         Right toolbox -> do
-            let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ LLM.revealApiKey apiKey
+            let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey
             httpRt <- HttpClient.newRuntime auth
             let appendIOTools xs = ioTools <> xs
             let registerTools xs = fmap registerBashToolInLLM xs

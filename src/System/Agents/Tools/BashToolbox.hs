@@ -58,10 +58,10 @@ initializeBackroundToolbox tracer tooldir = do
     reloadToolsOnTrigger :: TMVar () -> IO ([BashTools.ScriptDescription], ())
     reloadToolsOnTrigger lock = do
         _ <- atomically $ takeTMVar lock
-        tools <- reloadTools
-        pure (tools, ())
+        toolz <- reloadTools
+        pure (toolz, ())
 
     reloadTools :: IO [BashTools.ScriptDescription]
     reloadTools = do
-        (tools, _) <- loadToolsOnce
-        pure tools
+        (toolz, _) <- loadToolsOnce
+        pure toolz
