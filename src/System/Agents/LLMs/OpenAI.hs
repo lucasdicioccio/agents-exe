@@ -349,6 +349,7 @@ data ModelFlavor
     = OpenAIv1
     | MistralV1
     | KimiV1
+    | ClaudeV1
     deriving (Show, Eq, Ord)
 
 data Model = Model
@@ -369,6 +370,8 @@ parseFlavor "OpenAIv1" = Just OpenAIv1
 parseFlavor "MistralV1" = Just MistralV1
 parseFlavor "openai-v1" = Just OpenAIv1
 parseFlavor "mistral-v1" = Just MistralV1
+parseFlavor "claude-v1" = Just ClaudeV1
+parseFlavor "ClaudeV1" = Just ClaudeV1
 parseFlavor _ = Nothing
 
 gpt4Turbo :: SystemPrompt -> Model
@@ -413,6 +416,18 @@ renderPayload model tools hist prompt =
                 -- todo:
                 -- allow to tune json format with something like
                 -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
+                ]
+        ClaudeV1 ->
+            Aeson.object
+                [ "model" .= model.modelName
+                , "messages"
+                    .= makeMessages model.modelSystemPrompt hist prompt
+                , "tools" .= tools
+                , "thinking"
+                    .= Aeson.object
+                        [ "type" .= ("enabled" :: Text)
+                        , "budget_tokens" .= (10000 :: Int)
+                        ]
                 ]
 
 callLLMPayload ::
