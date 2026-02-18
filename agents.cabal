@@ -14,7 +14,7 @@ cabal-version:      3.0
 name:               agents
 
 -- The package version.
--- See the Haskell package versioning policy (PVP) for standards
+-- See the package version versioning policy (PVP) for standards
 -- guiding when and how versions should be incremented.
 -- https://pvp.haskell.org
 -- PVP summary:     +-+------- breaking API changes
@@ -97,6 +97,9 @@ library agents-lib
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
                     , System.Agents.TUI2.Core
+                    , System.Agents.TUI2.Types
+                    , System.Agents.TUI2.Render
+                    , System.Agents.TUI2.Event
                     , System.Agents.TraceUtils
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,
