@@ -246,7 +246,7 @@ readSession path = do
 
 storeSession :: Session -> FilePath -> IO ()
 storeSession sess path = do
-  BSL.appendFile path (Aeson.encode sess <> "\n")
+  BSL.writeFile path (Aeson.encode sess <> "\n")
 
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
