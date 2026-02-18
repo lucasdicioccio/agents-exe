@@ -50,6 +50,7 @@ data ArgParserArgs
     , defaultLogJsonHttpEndpoint :: Maybe String
     , defaultLogJsonFilepath :: Maybe FilePath
     , defaultLogRawFilepath :: Maybe FilePath
+    , defaultLogSesionsJsonPrefix :: Maybe FilePath
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -64,6 +65,7 @@ data AgentsExeLogConfig = AgentsExeLogConfig
     { logJsonHttpEndpoint :: Maybe String
     , logJsonPath :: Maybe FilePath
     , logRawPath :: Maybe FilePath
+    , logSessionsJsonPrefix :: Maybe FilePath
     }
     deriving (Show, Generic)
 instance Aeson.FromJSON AgentsExeLogConfig
@@ -113,6 +115,7 @@ initArgParserArgs = do
                         (logJsonHttpEndpoint =<< obj.agentsLogs)
                         (logJsonPath =<< obj.agentsLogs)
                         (logRawPath =<< obj.agentsLogs)
+                        (logSessionsJsonPrefix =<< obj.agentsLogs)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig homedir = do
@@ -125,19 +128,21 @@ initArgParserArgs = do
                 Nothing
                 Nothing
                 Nothing
+                Nothing
 
 data Prog = Prog
     { apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
     , logJsonFile :: Maybe FilePath
+    , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
     , mainCommand :: Command
     }
 
 data Command
     = Check
-    | TerminalUI2
+    | TerminalUI TuiOptions
     | OneShot OneShotOptions
     | EchoPrompt OneShotOptions
     | SelfDescribe
@@ -154,6 +159,11 @@ data PromptScriptDirective
 type PromptScript =
     [PromptScriptDirective]
 
+data TuiOptions
+    = TuiOptions
+    { sessionJsonPrefix :: Maybe FilePath
+    }
+
 data OneShotOptions
     = OneShotOptions
     { sessionFile :: Maybe FilePath
@@ -169,9 +179,9 @@ parseCheckCommand :: Parser Command
 parseCheckCommand =
     pure Check
 
-parseTui2ChatCommand :: Parser Command
-parseTui2ChatCommand =
-    pure TerminalUI2
+parseTuiChatCommand :: Parser Command
+parseTuiChatCommand =
+    TerminalUI <$> parseTuiOptions
 
 parseOneShotTextualCommand :: Parser Command
 parseOneShotTextualCommand =
@@ -180,6 +190,18 @@ parseOneShotTextualCommand =
 parseEchoPromptCommand :: Parser Command
 parseEchoPromptCommand =
     EchoPrompt <$> parseOneShotOptions
+
+parseTuiOptions :: Parser TuiOptions
+parseTuiOptions =
+    TuiOptions
+        <$> optional
+            ( strOption
+                ( long "session-files-prefix"
+                    <> metavar "SESSIONPREFIX"
+                    <> help "file prefix to store per session json files"
+                    <> showDefault
+                )
+            )
 
 parseOneShotOptions :: Parser OneShotOptions
 parseOneShotOptions =
@@ -306,6 +328,14 @@ parseProgOptions argparserargs =
                     <> (maybe mempty value argparserargs.defaultLogJsonFilepath)
                 )
             )
+        <*> optional
+            ( strOption
+                ( long "session-json-file-prefix"
+                    <> metavar "SESSIONSJSONPREFIX"
+                    <> help "local JSON sessions file prefix"
+                    <> (maybe mempty value argparserargs.defaultLogSesionsJsonPrefix)
+                )
+            )
         <*> fmap
             (addDefaultAgentFiles argparserargs)
             ( many
@@ -318,7 +348,7 @@ parseProgOptions argparserargs =
             )
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
-                <> command "tui" (info parseTui2ChatCommand (idm))
+                <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info parseSelfDescribeCommand (idm))
@@ -372,7 +402,7 @@ main = do
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
-            TerminalUI2 -> do
+            TerminalUI opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let oneAgent agentFile =
                         AgentTree.Props
@@ -383,7 +413,7 @@ main = do
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             }
-                TUI2.runTUI (fmap oneAgent pargs.agentFiles)
+                TUI2.runTUI (opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix) (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents

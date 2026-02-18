@@ -134,8 +134,9 @@ initUIState agents =
         }
 
 -- | Initialize the TUI with props
-runTUI :: [Props] -> IO ()
-runTUI props = do
+runTUI :: Maybe FilePath -> [Props] -> IO ()
+runTUI mConvPrefix props = do
+    let convPrefix = fromMaybe "./" mConvPrefix
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTreeRuntime props
     let itrees = [rt | Initialized rt <- trees]
@@ -159,7 +160,7 @@ runTUI props = do
             App
                 { appDraw = tui_appDraw
                 , appChooseCursor = tui_appChooseCursor
-                , appHandleEvent = tui_appHandleEvent
+                , appHandleEvent = tui_appHandleEvent convPrefix
                 , appStartEvent = tui_appStartEvent
                 , appAttrMap = tui_appAttrMap
                 }
@@ -365,8 +366,8 @@ borderWithFocus st name label content =
 -- Event Handling
 -------------------------------------------------------------------------------
 
-tui_appHandleEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
-tui_appHandleEvent ev = do
+tui_appHandleEvent :: FilePath -> BrickEvent N AppEvent -> EventM N TuiState ()
+tui_appHandleEvent convPrefix ev = do
     case ev of
         -- Application events
         AppEvent (AppEvent_Heartbeat) ->
@@ -392,7 +393,7 @@ tui_appHandleEvent ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'z') _) ->
             toggleZoom
         VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) ->
-            handleNewConversationFromEditor
+            handleNewConversationFromEditor convPrefix
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
 
@@ -575,15 +576,15 @@ handleRefreshTools = do
         Nothing -> pure ()
 
 -- | Create a new conversation from the selected agent
-handleNewConversationFromEditor :: EventM N TuiState ()
-handleNewConversationFromEditor = do
+handleNewConversationFromEditor :: FilePath -> EventM N TuiState ()
+handleNewConversationFromEditor convPrefix = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
             -- * agent will have prompt, tools from the base agent, but will communicate via a pair of chans
             agent0 <- liftIO $ runtimeToAgent (baseTuiAgent.agentTree.agentRuntime)
             convId@(ConversationId cId) <- liftIO $ newConversationId
-            let convFilePath = "conv." <> (show cId) <> ".json"
+            let convFilePath = convPrefix <> "conv." <> (show cId) <> ".json"
             outChan <- use eventChan
             let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
             let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
