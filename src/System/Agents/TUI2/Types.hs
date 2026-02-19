@@ -70,14 +70,29 @@ data TuiAgent = TuiAgent
 -- Conversation Types
 -------------------------------------------------------------------------------
 
+-- | Status of a conversation regarding its execution state.
+data ConversationStatus
+    = ConversationStatus_Active
+    -- ^ Conversation is currently running (agent is processing)
+    | ConversationStatus_WaitingForInput
+    -- ^ Conversation is waiting for user input
+    | ConversationStatus_Restored
+    -- ^ Conversation was restored from disk, needs to be continued
+    deriving (Show, Eq)
+
 -- | A conversation with an agent.
 data Conversation = Conversation
     { conversationId :: ConversationId
     , conversationAgent :: TuiAgent
-    , conversationThreadId :: ThreadId
+    , conversationThreadId :: Maybe ThreadId
+    -- ^ Nothing for restored conversations that haven't been continued yet
     , conversationSession :: Maybe Session
     , conversationName :: Text
     , conversationChan :: BChan (Maybe UserQuery)
+    , conversationStatus :: ConversationStatus
+    -- ^ Current status of the conversation
+    , conversationFilePath :: FilePath
+    -- ^ Path to the session file on disk
     }
 
 -------------------------------------------------------------------------------
@@ -155,4 +170,12 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+
+-- | Check if a conversation needs to be continued (was restored from disk).
+isConversationRestored :: Conversation -> Bool
+isConversationRestored conv = conversationStatus conv == ConversationStatus_Restored
+
+-- | Check if a conversation can be continued.
+canContinueConversation :: Conversation -> Bool
+canContinueConversation conv = conversationStatus conv == ConversationStatus_Restored
 

@@ -136,6 +136,7 @@ library agents-lib
                       stm-conduit,
                       text,
                       text-zipper,
+                      time,
                       unix,
                       unliftio,
                       unordered-containers,

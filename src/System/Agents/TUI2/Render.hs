@@ -41,6 +41,10 @@ userMessageAttr = attrName "userMessage"
 llmMessageAttr :: AttrName
 llmMessageAttr = attrName "llmMessage"
 
+-- | Attribute for restored conversations.
+restoredConversationAttr :: AttrName
+restoredConversationAttr = attrName "restoredConversation"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -107,14 +111,27 @@ render_conversationArea st =
     case listSelectedElement (st ^. tuiUI . conversationList) of
         Nothing ->
             vBox
-                [ txt "Select or create a conversation"
+                [ txt "Select or create a conversation (Ctrl+n)"
                 , render_messageEditor st
                 ]
-        Just (_, _conv) ->
+        Just (_, conv) ->
             vBox
-                [ hLimit 60 $ render_messageEditor st
+                [ render_conversationStatus conv
+                , hLimit 60 $ render_messageEditor st
                 , hLimit 80 $ render_conversationView st
                 ]
+
+-- | Render status information for the current conversation.
+render_conversationStatus :: Conversation -> Widget N
+render_conversationStatus conv =
+    case conversationStatus conv of
+        ConversationStatus_Restored ->
+            withAttr restoredConversationAttr $
+                txt "[RESTORED] Press Ctrl+c to continue this conversation"
+        ConversationStatus_Active ->
+            txt "[ACTIVE] Agent is processing..."
+        ConversationStatus_WaitingForInput ->
+            txt "[READY] Waiting for your message..."
 
 -------------------------------------------------------------------------------
 -- Agent List Rendering
@@ -150,12 +167,19 @@ render_conversationList st =
 -- | Render a single conversation item.
 render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
 render_conversationItem st _ conv =
-    let indicator = if isOngoing then "⟳ " else if isUnread then "● " else "  "
-        baseText = indicator <> Text.take 20 (conversationName conv)
-    in txt $ " " <> baseText
+    let indicator = case conversationStatus conv of
+            ConversationStatus_Active -> "⟳ "
+            ConversationStatus_Restored -> "💾 "
+            ConversationStatus_WaitingForInput -> 
+                if isUnread then "● " else "  "
+        baseText = indicator <> Text.take 18 (conversationName conv)
+        widget = txt $ " " <> baseText
+    in if isRestored
+       then withAttr restoredConversationAttr widget
+       else widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
-    isOngoing = Set.member (conversationId conv) (st ^. tuiUI . ongoingConversations)
+    isRestored = conversationStatus conv == ConversationStatus_Restored
 
 -------------------------------------------------------------------------------
 -- Agent Info Rendering
@@ -281,5 +305,6 @@ tui_appAttrMap _ =
         , (listSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.blue)
         , (userMessageAttr, BrickUtil.fg Vty.green)
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
+        , (restoredConversationAttr, BrickUtil.fg Vty.yellow)
         ]
 
