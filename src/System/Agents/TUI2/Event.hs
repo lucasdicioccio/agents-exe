@@ -63,7 +63,7 @@ tui_appHandleEvent convPrefix ev = do
             cycleFocusBackward
         VtyEvent (Vty.EvKey (Vty.KFun 5) _) ->
             handleRefreshTools
-        VtyEvent (Vty.EvKey (Vty.KChar 'z') _) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) ->
             toggleZoom
         VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) ->
             handleNewConversationFromEditor convPrefix
