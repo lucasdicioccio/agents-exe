@@ -56,6 +56,7 @@ render_ui st
         case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
             Just MessageEditorWidget -> render_messageEditor st
             Just ConversationViewWidget -> render_conversationView st
+            Just SessionViewWidget -> render_sessionView st
             Just AgentInfoWidget -> render_agentInfo st
             Just AgentToolsWidget -> render_agentTools st
             _ -> render_mainLayout st
@@ -90,7 +91,12 @@ render_contentArea st =
         Just AgentListWidget -> render_agentDetail st
         Just AgentInfoWidget -> render_agentDetail st
         Just AgentToolsWidget -> render_agentDetail st
-        _ -> render_conversationArea st
+        Just SessionsListWidget -> render_sessionArea st
+        Just SessionViewWidget -> render_sessionArea st
+        Just MessageEditorWidget -> render_conversationArea st
+        Just ConversationListWidget -> render_conversationArea st
+        Just ConversationViewWidget -> render_conversationArea st
+        Nothing -> txt "hello"
 
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
@@ -114,6 +120,21 @@ render_conversationArea st =
             vBox
                 [ hLimit 60 $ render_messageEditor st
                 , hLimit 80 $ render_conversationView st
+                ]
+
+-- | Conversation area with message input and conversation history.
+render_sessionArea :: TuiState -> Widget N
+render_sessionArea st =
+    case listSelectedElement (st ^. tuiUI . sessionList) of
+        Nothing ->
+            vBox
+                [ txt "Select or create a session (Ctrl+c)"
+                , render_messageEditor st
+                ]
+        Just (_, conv) ->
+            vBox
+                [ hLimit 60 $ render_messageEditor st
+                , hLimit 80 $ render_sessionView st
                 ]
 
 -------------------------------------------------------------------------------
@@ -237,6 +258,17 @@ render_conversationView st =
             Nothing -> txt "No conversation selected"
             Just (_, conv) ->
                 viewport ConversationViewWidget Both $ render_session (conversationSession conv) (st ^. tuiUI . ongoingConversations)
+
+-- | Render the session history view.
+render_sessionView :: TuiState -> Widget N
+render_sessionView st =
+       borderWithFocus st SessionViewWidget "Sessions" content
+  where
+    content =
+        case listSelectedElement (st ^. tuiUI . sessionList) of
+            Nothing -> txt "No session selected"
+            Just (_, session) ->
+                viewport SessionViewWidget Both $ render_session (Just session) (st ^. tuiUI . ongoingConversations)
 
 -- | Render a session's turns.
 render_session :: Maybe Session -> Set ConversationId -> Widget N

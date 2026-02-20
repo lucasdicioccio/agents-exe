@@ -82,6 +82,8 @@ tui_appHandleEvent convPrefix ev = do
                     handleMessageEditorEvent ev
                 Just ConversationViewWidget ->
                     handleConversationViewEvent vtyEv
+                Just SessionViewWidget ->
+                    handleSessionViewEvent vtyEv
                 Just AgentInfoWidget ->
                     handleAgentInfoEvent vtyEv
                 Just AgentToolsWidget ->
@@ -130,6 +132,24 @@ handleMessageEditorEvent ev = do
     case ev of
         VtyEvent (Vty.EvKey Vty.KEnter mods)
             | Vty.MCtrl `elem` mods -> handleSendMessage
+        _ -> pure ()
+
+-- | Handle conversation view scrolling.
+handleSessionViewEvent :: Vty.Event -> EventM N TuiState ()
+handleSessionViewEvent ev =
+    case ev of
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll SessionViewWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll SessionViewWidget) 1
+        Vty.EvKey Vty.KLeft _ ->
+            hScrollBy (viewportScroll SessionViewWidget) (-1)
+        Vty.EvKey Vty.KRight _ ->
+            hScrollBy (viewportScroll SessionViewWidget) 1
+        Vty.EvKey Vty.KPageUp _ ->
+            vScrollPage (viewportScroll SessionViewWidget) Up
+        Vty.EvKey Vty.KPageDown _ ->
+            vScrollPage (viewportScroll SessionViewWidget) Down
         _ -> pure ()
 
 -- | Handle conversation view scrolling.

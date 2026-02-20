@@ -38,6 +38,7 @@ data WidgetName
     | ConversationListWidget
     | MessageEditorWidget
     | ConversationViewWidget
+    | SessionViewWidget
     | AgentInfoWidget
     | AgentToolsWidget
     deriving (Show, Eq, Ord)
@@ -147,7 +148,16 @@ makeLenses ''TuiState
 initUIState :: [TuiAgent] -> [Session] -> UIState
 initUIState agents loadedSessions =
     UIState
-        { _uiFocusRing = focusRing [AgentListWidget, ConversationListWidget, SessionsListWidget, MessageEditorWidget, AgentInfoWidget, AgentToolsWidget]
+        { _uiFocusRing =
+            focusRing
+              [ AgentListWidget
+              , ConversationListWidget
+              , SessionsListWidget
+              , MessageEditorWidget
+              , SessionViewWidget
+              , AgentInfoWidget
+              , AgentToolsWidget
+              ]
         , _zoomed = False
         , _agentList = list AgentListWidget (Vector.fromList agents) 1
         , _conversationList = list ConversationListWidget Vector.empty 1
