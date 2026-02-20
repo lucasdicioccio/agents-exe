@@ -121,6 +121,7 @@ data Session
     = Session
     { turns :: [Turn]
     , sessionId :: SessionId
+    , forkedFromSessionId :: Maybe SessionId
     , turnId :: TurnId
     }
     deriving (Show, Ord, Eq, Generic)

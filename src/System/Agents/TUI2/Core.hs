@@ -60,25 +60,19 @@ import Brick.Widgets.List (list)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (void)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import Data.List (isPrefixOf, sortOn)
 import Data.Ord (Down(..))
-import Data.Text (Text)
-import qualified Data.Text as Text
 import Data.Time (UTCTime)
-import Data.UUID (UUID)
-import qualified Data.UUID as UUID
-import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import System.Directory (listDirectory, doesFileExist, getModificationTime)
-import System.FilePath (takeFileName, (</>))
+import System.FilePath ((</>))
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
 import System.Agents.Base (ConversationId(..), newConversationId)
 import System.Agents.OneShot (runtimeToAgent, readSession, storeSession)
-import System.Agents.Runtime (Runtime)
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Session.Base (Action(..), MissingUserPrompt(..), Session(..), Agent(..))
+import System.Agents.Session.Base (Action(..), MissingUserPrompt(..), Session(..), Agent(..), newSessionId, newTurnId)
 
 -- Import from submodules
 import System.Agents.TUI2.Types
@@ -116,7 +110,7 @@ isSessionFile :: String -> Bool
 isSessionFile name =
     "conv." `isPrefixOf` name && ".json" `isSuffixOf` name
   where
-    isSuffixOf suffix str = reverse suffix `isPrefixOf` reverse str
+    isSuffixOf suffix str0 = reverse suffix `isPrefixOf` reverse str0
 
 -- | Find all session files in the given directory matching the pattern.
 findSessionFiles :: FilePath -> IO [SessionFileInfo]
@@ -168,7 +162,7 @@ runTUI mConvPrefix props = do
     loadedSessions <- loadSessionFiles convPrefix
     
     -- Create event channel (needed for conversations)
-    eventChan <- newBChan 100
+    evChan <- newBChan 100
     
     -- Get the selected agent (first one in the list, if any)
     let mSelectedAgent = case tuiAgents of
@@ -177,7 +171,7 @@ runTUI mConvPrefix props = do
     
     -- Create restored conversations from loaded sessions
     -- Uses the selected agent and forks conversations with new IDs
-    restoredConversations <- concat <$> mapM (makeRestoredConversation eventChan mSelectedAgent convPrefix) loadedSessions
+    restoredConversations <- concat <$> mapM (makeRestoredConversation evChan mSelectedAgent convPrefix) loadedSessions
 
     -- Create core state with loaded conversations
     core0 <- newTVarIO (Core tuiAgents restoredConversations)
@@ -188,7 +182,7 @@ runTUI mConvPrefix props = do
             }
 
     -- Create TUI state
-    let st = TuiState core0 ui0 eventChan
+    let st = TuiState core0 ui0 evChan
 
     -- Build and run the app
     let app =
@@ -200,7 +194,7 @@ runTUI mConvPrefix props = do
                 , appAttrMap = tui_appAttrMap
                 }
 
-    void $ customMainWithDefaultVty (Just eventChan) app st
+    void $ customMainWithDefaultVty (Just evChan) app st
 
 -- | Create a restored conversation from a loaded session.
 -- Uses the provided selected agent (or returns empty if none available).
@@ -208,12 +202,14 @@ runTUI mConvPrefix props = do
 makeRestoredConversation :: BChan AppEvent -> Maybe TuiAgent -> FilePath -> (FilePath, Maybe Session) -> IO [Conversation]
 makeRestoredConversation _ Nothing _ _ = pure []  -- No agent available
 makeRestoredConversation _ _ _ (_, Nothing) = pure []  -- Failed to load session
-makeRestoredConversation outChan (Just selectedAgent) convPrefix (path, Just session) = do
+makeRestoredConversation outChan (Just selectedAgent) convPrefix (path, Just session0) = do
     -- Create a channel for this conversation
     inChan <- newBChan 100
     
     -- Generate a new conversation ID to fork the conversation
     convId@(ConversationId cId) <- newConversationId
+    -- Generate a new session.
+    session <- Session session0.turns <$> newSessionId <*> pure (Just session0.sessionId) <*> newTurnId
     
     -- Create agent with session restoration capability using the selected agent
     let baseAgentTree = agentTree selectedAgent

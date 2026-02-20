@@ -303,7 +303,7 @@ handleNewConversationFromEditor convPrefix = do
 
             -- * wrap in Conversation
             let tuiAgent = TuiAgent a baseTuiAgent.agentTree
-            session <- liftIO (Session [] <$> newSessionId <*> newTurnId)
+            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
             threadId <- liftIO $ forkIO $ void $ Loop.run a session
             let conv =
                     Conversation

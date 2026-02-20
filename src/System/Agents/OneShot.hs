@@ -63,7 +63,7 @@ runOneShotAgent mpath rt query = do
           $ agent0
     result <- case mpath of
       Nothing -> do
-        session0 <- Session [] <$> newSessionId <*> newTurnId
+        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
         run agent session0
       Just path -> do
         msession0 <- readSession path
@@ -238,7 +238,7 @@ readSession path = do
        dat <- BSL.readFile path
        pure $ Aeson.decode =<< lastLine dat
     else do
-       sess <- Session [] <$> newSessionId <*> newTurnId
+       sess <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
        pure $ Just sess
   where
     lastLine :: LByteString.ByteString -> Maybe LByteString.ByteString
