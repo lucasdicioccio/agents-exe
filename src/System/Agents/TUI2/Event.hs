@@ -10,23 +10,19 @@ import Brick.Focus (focusGetCurrent, focusSetCurrent, focusNext, focusPrev, focu
 import Brick.Widgets.Edit (Editor, handleEditorEvent, editContentsL, getEditContents)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listInsert, listSelectedL, listElements)
 import qualified Brick.Widgets.List as List
-import Control.Concurrent (forkIO, myThreadId)
-import Control.Concurrent.STM (atomically, modifyTVar, newTVarIO, readTVarIO)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (use, (%=), (.=), to)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
-import Data.Maybe (listToMaybe, fromMaybe)
-import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Zipper as TextZipper
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
-import qualified Graphics.Vty.Input.Events as Vty
 
-import System.Agents.AgentTree (AgentTree(..), LoadAgentResult (..), Props)
+import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId (..), newConversationId)
 import System.Agents.OneShot (runtimeToAgent, storeSession)
 import qualified System.Agents.Runtime as Runtime
@@ -68,7 +64,7 @@ tui_appHandleEvent convPrefix ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) ->
             handleNewConversationFromEditor convPrefix
         VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) ->
-            handleContinueRestoredConversation convPrefix
+            handleRestoredConversation convPrefix
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
 
@@ -80,6 +76,8 @@ tui_appHandleEvent convPrefix ev = do
                     handleAgentListEvent vtyEv
                 Just ConversationListWidget ->
                     handleConversationListEvent vtyEv
+                Just SessionsListWidget ->
+                    handleSessionsListEvent vtyEv
                 Just MessageEditorWidget ->
                     handleMessageEditorEvent ev
                 Just ConversationViewWidget ->
@@ -118,6 +116,11 @@ handleConversationListEvent ev = do
         Just (_, conv) ->
             tuiUI . unreadConversations %= Set.delete (conversationId conv)
         Nothing -> pure ()
+
+-- | Handle sessions list navigation.
+handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
+handleSessionsListEvent ev = do
+    zoom (tuiUI . sessionList) $ handleListEvent ev
 
 -- | Handle message editor events.
 handleMessageEditorEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
@@ -281,6 +284,21 @@ handleNewConversationFromEditor convPrefix = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
+           session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
+           runConversation convPrefix baseTuiAgent session
+
+-- | Continue a session restored from storage.
+-- This starts the agent loop with the restored session.
+handleRestoredConversation :: FilePath -> EventM N TuiState ()
+handleRestoredConversation convPrefix = do
+    mSession <- use (tuiUI . sessionList . to listSelectedElement)
+    mAgent <- use (tuiUI . agentList . to listSelectedElement)
+    case (,) <$> mSession <*> mAgent of
+        Just ((idx, session), (_,baseTuiAgent)) -> do
+            runConversation convPrefix baseTuiAgent session
+
+runConversation :: FilePath -> TuiAgent -> Session -> EventM N TuiState ()
+runConversation convPrefix baseTuiAgent session = do
             -- * agent will have prompt, tools from the base agent, but will communicate via a pair of chans
             agent0 <- liftIO $ runtimeToAgent (baseTuiAgent.agentTree.agentRuntime)
             convId@(ConversationId cId) <- liftIO $ newConversationId
@@ -303,7 +321,6 @@ handleNewConversationFromEditor convPrefix = do
 
             -- * wrap in Conversation
             let tuiAgent = TuiAgent a baseTuiAgent.agentTree
-            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
             threadId <- liftIO $ forkIO $ void $ Loop.run a session
             let conv =
                     Conversation
@@ -327,78 +344,6 @@ handleNewConversationFromEditor convPrefix = do
             tuiUI . conversationList . listSelectedL .= Just 0
             tuiUI . uiFocusRing %= focusRingModify (CList.insertR ConversationViewWidget)
             tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
-        Nothing -> pure ()
-
--- | Continue a restored conversation from disk.
--- This starts the agent loop with the restored session.
-handleContinueRestoredConversation :: FilePath -> EventM N TuiState ()
-handleContinueRestoredConversation convPrefix = do
-    selected <- use (tuiUI . conversationList . to listSelectedElement)
-    case selected of
-        Just (idx, conv) -> do
-            -- Only continue if the conversation is in restored state
-            if conversationStatus conv /= ConversationStatus_Restored
-                then pure ()  -- Already running or waiting for input
-                else case conversationSession conv of
-                    Nothing -> pure ()  -- No session to continue from
-                    Just session -> do
-                        outChan <- use eventChan
-                        let convId = conversationId conv
-                        
-                        -- Create the agent with session storage and notification
-                        let baseTuiAgent = conversationAgent conv
-                        let convFilePath = conversationFilePath conv
-                        
-                        -- Create a new channel for this conversation
-                        inChan <- liftIO $ newBChan 100
-                        
-                        -- Wrap the agent step function
-                        let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
-                        let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-                        
-                        -- Get the base agent's step function
-                        let baseStep = (sessionAgent baseTuiAgent).step
-                        
-                        -- Create the decorated step function
-                        let decoratedStep sess = do
-                                storeSession sess convFilePath
-                                notifyProgress sess
-                                ret <- baseStep sess
-                                case ret of
-                                    Stop _r ->
-                                        pure $ AskUserPrompt (MissingUserPrompt True [])
-                                    _ -> pure ret
-                        
-                        -- Create the updated agent
-                        let updatedAgent = (sessionAgent baseTuiAgent)
-                                { step = decoratedStep
-                                , usrQuery = notifyNeedInput >> readBChan inChan
-                                }
-                        
-                        let updatedTuiAgent = TuiAgent updatedAgent (agentTree baseTuiAgent)
-                        
-                        -- Start the agent loop with the restored session
-                        threadId <- liftIO $ forkIO $ void $ Loop.run updatedAgent session
-                        
-                        -- Update the conversation with new thread and status
-                        let updatedConv = conv
-                                { conversationAgent = updatedTuiAgent
-                                , conversationThreadId = Just threadId
-                                , conversationStatus = ConversationStatus_Active
-                                , conversationChan = inChan
-                                , conversationName = Text.replace " (restored)" "" (conversationName conv)
-                                }
-                        
-                        -- Update core
-                        coreRef <- use tuiCore
-                        liftIO $ atomically $ modifyTVar coreRef $ \c ->
-                            c{coreConversations = updateConversation updatedConv (coreConversations c)}
-                        
-                        -- Update UI
-                        tuiUI . conversationList . listSelectedL .= Just idx
-                        tuiUI . ongoingConversations %= Set.insert convId
-                        tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
-        Nothing -> pure ()
 
 -- | Send a message in the current conversation.
 handleSendMessage :: EventM N TuiState ()
@@ -412,20 +357,16 @@ handleSendMessage = do
         selected <- use (tuiUI . conversationList . to listSelectedElement)
         case selected of
             Just (_idx, conv) -> do
-                -- Check if conversation is restored - if so, we can't send messages until continued
-                if conversationStatus conv == ConversationStatus_Restored
-                    then pure ()  -- Can't send to restored conversation without continuing first
-                    else do
-                        -- Write message unconditionally
-                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText)
+                -- Write message unconditionally
+                liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText)
 
-                        -- Check if conversation is already being processed
-                        ongoing <- use (tuiUI . ongoingConversations)
-                        when (not $ Set.member (conversationId conv) ongoing) $ do
-                            -- Mark as ongoing
-                            tuiUI . ongoingConversations %= Set.insert (conversationId conv)
-                            -- Clear editor
-                            tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                -- Check if conversation is already being processed
+                ongoing <- use (tuiUI . ongoingConversations)
+                when (not $ Set.member (conversationId conv) ongoing) $ do
+                    -- Mark as ongoing
+                    tuiUI . ongoingConversations %= Set.insert (conversationId conv)
+                    -- Clear editor
+                    tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
 
             Nothing -> pure ()
 

@@ -20,8 +20,6 @@ module System.Agents.TUI2.Core (
     initUIState,
     updateConversationSession,
     updateConversation,
-    isConversationRestored,
-    canContinueConversation,
     
     -- * Lens accessors
     uiFocusRing,
@@ -56,7 +54,6 @@ module System.Agents.TUI2.Core (
 import Brick hiding (Down)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
-import Brick.Widgets.List (list)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (void)
@@ -64,7 +61,6 @@ import Data.Maybe (fromMaybe)
 import Data.List (isPrefixOf, sortOn)
 import Data.Ord (Down(..))
 import Data.Time (UTCTime)
-import qualified Data.Vector as Vector
 import System.Directory (listDirectory, doesFileExist, getModificationTime)
 import System.FilePath ((</>))
 
@@ -163,23 +159,12 @@ runTUI mConvPrefix props = do
     
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
-    
-    -- Get the selected agent (first one in the list, if any)
-    let mSelectedAgent = case tuiAgents of
-            [] -> Nothing
-            (a:_) -> Just a
-    
-    -- Create restored conversations from loaded sessions
-    -- Uses the selected agent and forks conversations with new IDs
-    restoredConversations <- concat <$> mapM (makeRestoredConversation evChan mSelectedAgent convPrefix) loadedSessions
 
     -- Create core state with loaded conversations
-    core0 <- newTVarIO (Core tuiAgents restoredConversations)
+    core0 <- newTVarIO (Core tuiAgents mempty)
 
     -- Create UI state
-    let ui0 = (initUIState tuiAgents)
-            { _conversationList = list ConversationListWidget (Vector.fromList restoredConversations) 1
-            }
+    let ui0 = initUIState tuiAgents [s | (_,Just s) <- loadedSessions]
 
     -- Create TUI state
     let st = TuiState core0 ui0 evChan
@@ -243,7 +228,7 @@ makeRestoredConversation outChan (Just selectedAgent) convPrefix (path, Just ses
             , conversationSession = Just session
             , conversationName = "@" <> agentSlug <> " (restored)"
             , conversationChan = inChan
-            , conversationStatus = ConversationStatus_Restored
+            , conversationStatus = ConversationStatus_Active
             , conversationFilePath = path
             }
     

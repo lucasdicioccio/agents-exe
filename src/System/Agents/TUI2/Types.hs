@@ -34,6 +34,7 @@ import System.Agents.Session.Base
 -- | Widget names for Brick focus management.
 data WidgetName
     = AgentListWidget
+    | SessionsListWidget
     | ConversationListWidget
     | MessageEditorWidget
     | ConversationViewWidget
@@ -76,8 +77,6 @@ data ConversationStatus
     -- ^ Conversation is currently running (agent is processing)
     | ConversationStatus_WaitingForInput
     -- ^ Conversation is waiting for user input
-    | ConversationStatus_Restored
-    -- ^ Conversation was restored from disk, needs to be continued
     deriving (Show, Eq)
 
 -- | A conversation with an agent.
@@ -116,6 +115,7 @@ data UIState = UIState
     { _uiFocusRing :: FocusRing WidgetName
     , _zoomed :: Bool
     , _agentList :: List WidgetName TuiAgent
+    , _sessionList :: List WidgetName Session
     , _conversationList :: List WidgetName Conversation
     , _messageEditor :: Editor Text WidgetName
     , _selectedAgentInfo :: Maybe TuiAgent
@@ -144,13 +144,14 @@ makeLenses ''TuiState
 -------------------------------------------------------------------------------
 
 -- | Create initial UI state.
-initUIState :: [TuiAgent] -> UIState
-initUIState agents =
+initUIState :: [TuiAgent] -> [Session] -> UIState
+initUIState agents loadedSessions =
     UIState
-        { _uiFocusRing = focusRing [AgentListWidget, ConversationListWidget, MessageEditorWidget, AgentInfoWidget, AgentToolsWidget]
+        { _uiFocusRing = focusRing [AgentListWidget, ConversationListWidget, SessionsListWidget, MessageEditorWidget, AgentInfoWidget, AgentToolsWidget]
         , _zoomed = False
         , _agentList = list AgentListWidget (Vector.fromList agents) 1
         , _conversationList = list ConversationListWidget Vector.empty 1
+        , _sessionList = list SessionsListWidget (Vector.fromList loadedSessions) 1
         , _messageEditor = editorText MessageEditorWidget (Just 1) ""
         , _selectedAgentInfo = listToMaybe agents
         , _unreadConversations = Set.empty
@@ -170,12 +171,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-
--- | Check if a conversation needs to be continued (was restored from disk).
-isConversationRestored :: Conversation -> Bool
-isConversationRestored conv = conversationStatus conv == ConversationStatus_Restored
-
--- | Check if a conversation can be continued.
-canContinueConversation :: Conversation -> Bool
-canContinueConversation conv = conversationStatus conv == ConversationStatus_Restored
-

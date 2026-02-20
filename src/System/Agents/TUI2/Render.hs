@@ -41,10 +41,6 @@ userMessageAttr = attrName "userMessage"
 llmMessageAttr :: AttrName
 llmMessageAttr = attrName "llmMessage"
 
--- | Attribute for restored conversations.
-restoredConversationAttr :: AttrName
-restoredConversationAttr = attrName "restoredConversation"
-
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -83,8 +79,8 @@ render_sidebar st =
     hLimit 25 $
         vBox
             [ render_agentList st
-            , hBorder
             , render_conversationList st
+            , render_sessionList st
             ]
 
 -- | Content area showing either agent info or conversation.
@@ -116,22 +112,9 @@ render_conversationArea st =
                 ]
         Just (_, conv) ->
             vBox
-                [ render_conversationStatus conv
-                , hLimit 60 $ render_messageEditor st
+                [ hLimit 60 $ render_messageEditor st
                 , hLimit 80 $ render_conversationView st
                 ]
-
--- | Render status information for the current conversation.
-render_conversationStatus :: Conversation -> Widget N
-render_conversationStatus conv =
-    case conversationStatus conv of
-        ConversationStatus_Restored ->
-            withAttr restoredConversationAttr $
-                txt "[RESTORED] Press Ctrl+c to continue this conversation"
-        ConversationStatus_Active ->
-            txt "[ACTIVE] Agent is processing..."
-        ConversationStatus_WaitingForInput ->
-            txt "[READY] Waiting for your message..."
 
 -------------------------------------------------------------------------------
 -- Agent List Rendering
@@ -169,17 +152,29 @@ render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
 render_conversationItem st _ conv =
     let indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
-            ConversationStatus_Restored -> "💾 "
             ConversationStatus_WaitingForInput -> 
                 if isUnread then "● " else "  "
         baseText = indicator <> Text.take 18 (conversationName conv)
         widget = txt $ " " <> baseText
-    in if isRestored
-       then withAttr restoredConversationAttr widget
-       else widget
+    in widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
-    isRestored = conversationStatus conv == ConversationStatus_Restored
+
+-- | Render the sessions list.
+render_sessionList :: TuiState -> Widget N
+render_sessionList st =
+    borderWithFocus st SessionsListWidget "Sessions" $
+        renderList (render_sessionItem st) hasFocus (st ^. tuiUI . sessionList)
+  where
+    hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
+
+
+-- | Render a single conversation item.
+render_sessionItem :: TuiState -> Bool -> Session -> Widget N
+render_sessionItem st _ sess =
+    let
+        widget = txt $ Text.pack $ " " <> show sess.sessionId
+    in widget
 
 -------------------------------------------------------------------------------
 -- Agent Info Rendering
@@ -305,6 +300,5 @@ tui_appAttrMap _ =
         , (listSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.blue)
         , (userMessageAttr, BrickUtil.fg Vty.green)
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
-        , (restoredConversationAttr, BrickUtil.fg Vty.yellow)
         ]
 
