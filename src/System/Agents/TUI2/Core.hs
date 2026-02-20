@@ -75,10 +75,10 @@ import System.FilePath (takeFileName, (</>))
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
 import System.Agents.Base (ConversationId(..), newConversationId)
-import System.Agents.OneShot (runtimeToAgent, readSession)
+import System.Agents.OneShot (runtimeToAgent, readSession, storeSession)
 import System.Agents.Runtime (Runtime)
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Session.Base (Session(..), Agent(..))
+import System.Agents.Session.Base (Action(..), MissingUserPrompt(..), Session(..), Agent(..))
 
 -- Import from submodules
 import System.Agents.TUI2.Types
@@ -208,12 +208,12 @@ runTUI mConvPrefix props = do
 makeRestoredConversation :: BChan AppEvent -> Maybe TuiAgent -> FilePath -> (FilePath, Maybe Session) -> IO [Conversation]
 makeRestoredConversation _ Nothing _ _ = pure []  -- No agent available
 makeRestoredConversation _ _ _ (_, Nothing) = pure []  -- Failed to load session
-makeRestoredConversation outChan (Just selectedAgent) _convPrefix (path, Just session) = do
+makeRestoredConversation outChan (Just selectedAgent) convPrefix (path, Just session) = do
     -- Create a channel for this conversation
     inChan <- newBChan 100
     
     -- Generate a new conversation ID to fork the conversation
-    convId <- newConversationId
+    convId@(ConversationId cId) <- newConversationId
     
     -- Create agent with session restoration capability using the selected agent
     let baseAgentTree = agentTree selectedAgent
@@ -221,9 +221,17 @@ makeRestoredConversation outChan (Just selectedAgent) _convPrefix (path, Just se
     
     let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-    
+    let convFilePath = convPrefix <> "conv." <> show cId <> ".json"
     let a = agent0
             { usrQuery = notifyNeedInput >> readBChan inChan
+            , step = \sess -> do
+                   storeSession sess convFilePath
+                   notifyProgress sess
+                   ret <- agent0.step sess
+                   case ret of
+                      Stop _r -> -- smoll hack to reuse the naive step from runtimeToAgent
+                        pure $ AskUserPrompt (MissingUserPrompt True [])
+                      _ -> pure ret
             }
     
     let tuiAgent = TuiAgent a baseAgentTree
