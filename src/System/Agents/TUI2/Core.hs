@@ -74,7 +74,7 @@ import System.Directory (listDirectory, doesFileExist, getModificationTime)
 import System.FilePath (takeFileName, (</>))
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
-import System.Agents.Base (ConversationId(..))
+import System.Agents.Base (ConversationId(..), newConversationId)
 import System.Agents.OneShot (runtimeToAgent, readSession)
 import System.Agents.Runtime (Runtime)
 import qualified System.Agents.Runtime as Runtime
@@ -170,8 +170,14 @@ runTUI mConvPrefix props = do
     -- Create event channel (needed for conversations)
     eventChan <- newBChan 100
     
+    -- Get the selected agent (first one in the list, if any)
+    let mSelectedAgent = case tuiAgents of
+            [] -> Nothing
+            (a:_) -> Just a
+    
     -- Create restored conversations from loaded sessions
-    restoredConversations <- concat <$> mapM (makeRestoredConversation eventChan tuiAgents convPrefix) loadedSessions
+    -- Uses the selected agent and forks conversations with new IDs
+    restoredConversations <- concat <$> mapM (makeRestoredConversation eventChan mSelectedAgent convPrefix) loadedSessions
 
     -- Create core state with loaded conversations
     core0 <- newTVarIO (Core tuiAgents restoredConversations)
@@ -196,60 +202,46 @@ runTUI mConvPrefix props = do
 
     void $ customMainWithDefaultVty (Just eventChan) app st
 
--- | Parse a conversation ID from a session filename.
--- Filename pattern: conv.<uuid>.json
-parseConversationIdFromFileName :: FilePath -> Maybe ConversationId
-parseConversationIdFromFileName path =
-    let fileName = takeFileName path
-        -- Remove "conv." prefix and ".json" suffix
-        uuidStr = drop 5 $ take (length fileName - 5) fileName
-    in case UUID.fromString uuidStr of
-        Just uuid -> Just (ConversationId uuid)
-        Nothing -> Nothing
-
 -- | Create a restored conversation from a loaded session.
-makeRestoredConversation :: BChan AppEvent -> [TuiAgent] -> FilePath -> (FilePath, Maybe Session) -> IO [Conversation]
+-- Uses the provided selected agent (or returns empty if none available).
+-- Forks the conversation by generating a new conversation ID.
+makeRestoredConversation :: BChan AppEvent -> Maybe TuiAgent -> FilePath -> (FilePath, Maybe Session) -> IO [Conversation]
+makeRestoredConversation _ Nothing _ _ = pure []  -- No agent available
 makeRestoredConversation _ _ _ (_, Nothing) = pure []  -- Failed to load session
-makeRestoredConversation outChan agents _convPrefix (path, Just session) = do
+makeRestoredConversation outChan (Just selectedAgent) _convPrefix (path, Just session) = do
     -- Create a channel for this conversation
     inChan <- newBChan 100
     
-    -- Parse conversation ID from filename
-    case parseConversationIdFromFileName path of
-        Just convId -> do
-            -- Find the agent that matches this conversation
-            -- For now, we use the first agent as default, but ideally we'd store agent info in the session
-            case agents of
-                [] -> pure []
-                (baseTuiAgent:_) -> do
-                    -- Create agent with session restoration capability
-                    let baseAgentTree = agentTree baseTuiAgent
-                    agent0 <- runtimeToAgent (agentRuntime baseAgentTree)
-                    
-                    let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
-                    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-                    
-                    let a = agent0
-                            { usrQuery = notifyNeedInput >> readBChan inChan
-                            }
-                    
-                    let tuiAgent = TuiAgent a baseAgentTree
-                    
-                    -- Get agent slug from the runtime
-                    let agentSlug = Runtime.agentSlug (agentRuntime baseAgentTree)
-                    
-                    -- Create the restored conversation
-                    let conv = Conversation
-                            { conversationId = convId
-                            , conversationAgent = tuiAgent
-                            , conversationThreadId = Nothing  -- Not started yet
-                            , conversationSession = Just session
-                            , conversationName = "@" <> agentSlug <> " (restored)"
-                            , conversationChan = inChan
-                            , conversationStatus = ConversationStatus_Restored
-                            , conversationFilePath = path
-                            }
-                    
-                    pure [conv]
-        _ -> pure []  -- Failed to parse conversation ID
+    -- Generate a new conversation ID to fork the conversation
+    convId <- newConversationId
+    
+    -- Create agent with session restoration capability using the selected agent
+    let baseAgentTree = agentTree selectedAgent
+    agent0 <- runtimeToAgent (agentRuntime baseAgentTree)
+    
+    let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+    
+    let a = agent0
+            { usrQuery = notifyNeedInput >> readBChan inChan
+            }
+    
+    let tuiAgent = TuiAgent a baseAgentTree
+    
+    -- Get agent slug from the runtime
+    let agentSlug = Runtime.agentSlug (agentRuntime baseAgentTree)
+    
+    -- Create the restored conversation
+    let conv = Conversation
+            { conversationId = convId
+            , conversationAgent = tuiAgent
+            , conversationThreadId = Nothing  -- Not started yet
+            , conversationSession = Just session
+            , conversationName = "@" <> agentSlug <> " (restored)"
+            , conversationChan = inChan
+            , conversationStatus = ConversationStatus_Restored
+            , conversationFilePath = path
+            }
+    
+    pure [conv]
 
