@@ -114,12 +114,12 @@ render_conversationArea st =
         Nothing ->
             vBox
                 [ txt "Select or create a conversation (Ctrl+n)"
-                , render_messageEditor st
+                , vLimit 30 $ render_messageEditor st
                 ]
         Just (_, conv) ->
             vBox
-                [ hLimit 60 $ render_messageEditor st
-                , hLimit 80 $ render_conversationView st
+                [ vLimit 30 $ render_messageEditor st
+                , render_conversationView st
                 ]
 
 -- | Conversation area with message input and conversation history.
@@ -128,13 +128,13 @@ render_sessionArea st =
     case listSelectedElement (st ^. tuiUI . sessionList) of
         Nothing ->
             vBox
-                [ txt "Select or create a session (Ctrl+c)"
-                , render_messageEditor st
+                [ txt "Select or resume a session (Ctrl+c)"
+                , vLimit 30 $ render_messageEditor st
                 ]
         Just (_, conv) ->
             vBox
-                [ hLimit 60 $ render_messageEditor st
-                , hLimit 80 $ render_sessionView st
+                [ vLimit 30 $ render_messageEditor st
+                , render_sessionView st
                 ]
 
 -------------------------------------------------------------------------------
