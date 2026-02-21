@@ -21,6 +21,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 
 import System.Agents.AgentTree (AgentTree, Props, agentRuntime)
+import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Base (AgentId, ConversationId (..))
 import System.Agents.OneShot (runtimeToAgent)
 import System.Agents.Runtime (Runtime (..))
@@ -123,6 +124,7 @@ data UIState = UIState
     , _unreadConversations :: Set ConversationId
     , _ongoingConversations :: Set ConversationId
     -- ^ Conversations currently being processed by an agent
+    , _coreAgentTools :: [(AgentId,[ToolRegistration])]
     }
 
 makeLenses ''UIState
@@ -166,6 +168,7 @@ initUIState agents loadedSessions =
         , _selectedAgentInfo = listToMaybe agents
         , _unreadConversations = Set.empty
         , _ongoingConversations = Set.empty
+        , _coreAgentTools = []
         }
 
 -------------------------------------------------------------------------------

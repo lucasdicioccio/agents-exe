@@ -23,6 +23,7 @@ import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId)
 import System.Agents.Runtime (Runtime(..))
 import System.Agents.Session.Base
+import System.Agents.ToolRegistration (declareTool)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -------------------------------------------------------------------------------
@@ -101,9 +102,8 @@ render_contentArea st =
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
 render_agentDetail st =
-    vBox
+    hBox
         [ render_agentInfo st
-        , hBorder
         , render_agentTools st
         ]
 
@@ -114,11 +114,11 @@ render_conversationArea st =
         Nothing ->
             vBox
                 [ txt "Select or create a conversation (Ctrl+n)"
-                , vLimit 30 $ render_messageEditor st
+                , render_messageEditor st
                 ]
         Just (_, conv) ->
             vBox
-                [ vLimit 30 $ render_messageEditor st
+                [ render_messageEditor st
                 , render_conversationView st
                 ]
 
@@ -129,12 +129,10 @@ render_sessionArea st =
         Nothing ->
             vBox
                 [ txt "Select or resume a session (Ctrl+c)"
-                , vLimit 30 $ render_messageEditor st
                 ]
         Just (_, conv) ->
-            vBox
-                [ vLimit 30 $ render_messageEditor st
-                , render_sessionView st
+            hBox
+                [ render_sessionView st
                 ]
 
 -------------------------------------------------------------------------------
@@ -222,14 +220,14 @@ render_agentInfo st =
 -- | Render agent tools panel.
 render_agentTools :: TuiState -> Widget N
 render_agentTools st =
-  ( hLimit 60 $
-    borderWithFocus st AgentToolsWidget "Tools" $
+  borderWithFocus st AgentToolsWidget "Tools" $
         case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
-            Just _agent ->
-                -- Tools are loaded asynchronously, show placeholder for now
-                txt "placeholder"
-  )
+            Just agent ->
+                case lookup agent.agentTree.agentRuntime.agentId (st ^. tuiUI . coreAgentTools) of
+                   Nothing -> txt "Tools not loaded"
+                   Just toolz -> do
+                     txt $ Text.unlines [ OpenAI.getToolName $ OpenAI.toolName (declareTool tool) | tool <- toolz]
 
 -------------------------------------------------------------------------------
 -- Message Editor Rendering

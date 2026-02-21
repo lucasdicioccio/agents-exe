@@ -54,9 +54,10 @@ module System.Agents.TUI2.Core (
 import Brick hiding (Down)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
-import Control.Monad (void)
+import Control.Monad (void, forever)
 import Data.Maybe (fromMaybe)
 import Data.List (isPrefixOf, sortOn)
 import Data.Ord (Down(..))
@@ -68,7 +69,7 @@ import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadA
 import System.Agents.Base (ConversationId(..), newConversationId)
 import System.Agents.OneShot (runtimeToAgent, readSession, storeSession)
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Session.Base (Action(..), MissingUserPrompt(..), Session(..), Agent(..), newSessionId, newTurnId)
+import System.Agents.Session.Base (Session(..))
 
 -- Import from submodules
 import System.Agents.TUI2.Types
@@ -179,58 +180,8 @@ runTUI mConvPrefix props = do
                 , appAttrMap = tui_appAttrMap
                 }
 
+    void $ forkIO $ forever $ do
+      writeBChan evChan AppEvent_Heartbeat
+      threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-
--- | Create a restored conversation from a loaded session.
--- Uses the provided selected agent (or returns empty if none available).
--- Forks the conversation by generating a new conversation ID.
-makeRestoredConversation :: BChan AppEvent -> Maybe TuiAgent -> FilePath -> (FilePath, Maybe Session) -> IO [Conversation]
-makeRestoredConversation _ Nothing _ _ = pure []  -- No agent available
-makeRestoredConversation _ _ _ (_, Nothing) = pure []  -- Failed to load session
-makeRestoredConversation outChan (Just selectedAgent) convPrefix (path, Just session0) = do
-    -- Create a channel for this conversation
-    inChan <- newBChan 100
-    
-    -- Generate a new conversation ID to fork the conversation
-    convId@(ConversationId cId) <- newConversationId
-    -- Generate a new session.
-    session <- Session session0.turns <$> newSessionId <*> pure (Just session0.sessionId) <*> newTurnId
-    
-    -- Create agent with session restoration capability using the selected agent
-    let baseAgentTree = agentTree selectedAgent
-    agent0 <- runtimeToAgent (agentRuntime baseAgentTree)
-    
-    let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
-    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-    let convFilePath = convPrefix <> "conv." <> show cId <> ".json"
-    let a = agent0
-            { usrQuery = notifyNeedInput >> readBChan inChan
-            , step = \sess -> do
-                   storeSession sess convFilePath
-                   notifyProgress sess
-                   ret <- agent0.step sess
-                   case ret of
-                      Stop _r -> -- smoll hack to reuse the naive step from runtimeToAgent
-                        pure $ AskUserPrompt (MissingUserPrompt True [])
-                      _ -> pure ret
-            }
-    
-    let tuiAgent = TuiAgent a baseAgentTree
-    
-    -- Get agent slug from the runtime
-    let agentSlug = Runtime.agentSlug (agentRuntime baseAgentTree)
-    
-    -- Create the restored conversation
-    let conv = Conversation
-            { conversationId = convId
-            , conversationAgent = tuiAgent
-            , conversationThreadId = Nothing  -- Not started yet
-            , conversationSession = Just session
-            , conversationName = "@" <> agentSlug <> " (restored)"
-            , conversationChan = inChan
-            , conversationStatus = ConversationStatus_Active
-            , conversationFilePath = path
-            }
-    
-    pure [conv]
 

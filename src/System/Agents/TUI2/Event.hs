@@ -11,7 +11,7 @@ import Brick.Widgets.Edit (Editor, handleEditorEvent, editContentsL, getEditCont
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listInsert, listSelectedL, listElements)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO)
-import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
+import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO, writeTVar)
 import Control.Lens (use, (%=), (.=), to)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
@@ -230,6 +230,11 @@ handleHeartbeat = do
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList convs) 1
+    -- Refresh tools.
+    let itrees = fmap agentTree coreState.coreAgents
+    agentTools <- liftIO $ traverse (\itree -> itree.agentRuntime.agentTools) itrees
+    let toolz = zipWith (,) [ itree.agentRuntime.agentId | itree <- itrees] agentTools
+    tuiUI . coreAgentTools .= toolz
 
 -- | Handle new conversation event.
 handleNewConversation :: ConversationId -> EventM N TuiState ()
