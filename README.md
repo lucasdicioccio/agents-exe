@@ -401,8 +401,9 @@ compatible with: OpenAI, OpenAI-claimed-compatible APIs, Ollama, others.
 - [x] Mixed-API keys between agents and sub-agents
 - [x] OpenAI
 - [x] Mistral
+- [x] Ollama
+- [x] Moonshot
 - [ ] vLLM
-- [ ] Ollama
 
 ## MCP support
 
