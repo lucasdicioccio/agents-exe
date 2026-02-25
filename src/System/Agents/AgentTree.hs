@@ -52,6 +52,7 @@ data Props
     { apiKeys :: LoadedApiKeys
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO Trace
+    , agentToTool :: Runtime -> AgentSlug -> AgentId -> ToolRegistration
     }
 
 data AgentTree = AgentTree
@@ -116,6 +117,7 @@ loadAgentTree props tree = do
                     tracer
                     props.apiKeys
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
+                    props.agentToTool
                     okRuntimes
                     (agentRootDir tree)
                     (AgentDescription tree.agentConfig)
@@ -157,11 +159,12 @@ initAgentTreeAgent ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
+    (Runtime -> AgentSlug -> AgentId -> ToolRegistration) ->
     [Runtime.Runtime] ->
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
+initAgentTreeAgent tracer keys modifyPrompt agentToTool helperAgents rootDir (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
@@ -184,7 +187,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                     )
                 )
                 (rootDir </> desc.toolDirectory)
-                [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
+                [agentToTool rt | rt <- helperAgents]
                 mcpToolboxes
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox

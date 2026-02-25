@@ -442,6 +442,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
+                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
                             }
             TerminalUI opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
@@ -453,6 +454,7 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
                             }
                 TUI2.runTUI (opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix) (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
@@ -469,6 +471,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 baseTracer
+                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
                             }
             SelfDescribe -> do
                 -- verify the api-key file exists at least
@@ -499,6 +502,7 @@ main = do
                                         traceUsefulPromptStderr
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
+                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
                             }
                 McpServer.multiAgentsServer (fmap oneAgent pargs.agentFiles)
             Initialize ->
