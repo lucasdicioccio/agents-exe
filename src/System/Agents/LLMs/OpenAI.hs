@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module System.Agents.LLMs.OpenAI where
@@ -11,7 +12,6 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (toList)
-import qualified Data.HashMap.Strict as HashMap
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Maybe as Maybe
@@ -22,13 +22,13 @@ import Data.String (IsString)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Data.Text.IO as Text
 import Data.Text.Read as Text
 import qualified Network.HTTP.Client as NetHttpClient
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import Text.Read (readMaybe)
 
 import qualified System.Agents.HttpClient as HttpClient
+import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
 data Trace
@@ -41,12 +41,6 @@ data Trace
 newtype ApiBaseUrl
     = ApiBaseUrl {getBaseUrl :: Text}
     deriving (Show, Eq, Ord)
-
-openAIv1Endpoint :: ApiBaseUrl
-openAIv1Endpoint = ApiBaseUrl "https://api.openai.com/v1"
-
-mistralLaPlateformV1Endpoint :: ApiBaseUrl
-mistralLaPlateformV1Endpoint = ApiBaseUrl "https://api.mistral.ai/v1"
 
 -------------------------------------------------------------------------------
 
@@ -108,8 +102,8 @@ parseRateLimitDelay t0 =
         (d, t1) = getDays t0
         (h, t2) = getHours t1
         (m, t3) = getMin t2
-        (ms, rms) = getMsec t3
-        (s, rs) = getSec t3
+        (ms, _) = getMsec t3
+        (s, _) = getSec t3
         secs = if ms > 0 then 1 else s
      in
         secs + 60 * (m + 60 * (h + 24 * d))
@@ -172,53 +166,6 @@ waitRateLimit lims onWait = Tracer go
 -------------------------------------------------------------------------------
 newtype ToolName = ToolName {getToolName :: Text}
     deriving (Show, Eq, Ord)
-
--- todo: move to some jsonschema module
-data ParamProperty = ParamProperty
-    { propertyKey :: Text
-    , propertyType :: ParamType
-    , propertyDescription :: Text
-    }
-    deriving (Show)
-
-data ParamType
-    = NullParamType
-    | StringParamType
-    | BoolParamType
-    | NumberParamType
-    | EnumParamType [Text]
-    | OpaqueParamType Text
-    | MultipleParamType Text -- todo: break limitation preventing string-enum and null
-    | ObjectParamType [ParamProperty]
-    deriving (Show)
-
-toJsonSchemaPair :: ParamProperty -> (Text, Value)
-toJsonSchemaPair p = (p.propertyKey, Aeson.object (jsonSchema p))
-
-jsonSchema :: ParamProperty -> [(Aeson.Key, Value)]
-jsonSchema p =
-    case p.propertyType of
-        NullParamType ->
-            ["type" .= ("null" :: Text), "description" .= p.propertyDescription]
-        StringParamType ->
-            ["type" .= ("string" :: Text), "description" .= p.propertyDescription]
-        BoolParamType ->
-            ["type" .= ("boolean" :: Text), "description" .= p.propertyDescription]
-        NumberParamType ->
-            ["type" .= ("number" :: Text), "description" .= p.propertyDescription]
-        EnumParamType allowedValues ->
-            ["type" .= ("string" :: Text), "enum" .= allowedValues, "description" .= p.propertyDescription]
-        OpaqueParamType typ ->
-            ["type" .= typ, "description" .= p.propertyDescription]
-        MultipleParamType allowedTypes ->
-            ["type" .= allowedTypes, "description" .= p.propertyDescription]
-        ObjectParamType propz ->
-            [ "type" .= ("object" :: Text)
-            , "description" .= p.propertyDescription
-            , "properties" .= HashMap.fromList (fmap toJsonSchemaPair propz)
-            , "additionalProperties" .= False
-            , "required" .= fmap propertyKey propz
-            ]
 
 data Tool = Tool
     { toolName :: ToolName
@@ -373,12 +320,6 @@ parseFlavor "mistral-v1" = Just MistralV1
 parseFlavor "claude-v1" = Just ClaudeV1
 parseFlavor "ClaudeV1" = Just ClaudeV1
 parseFlavor _ = Nothing
-
-gpt4Turbo :: SystemPrompt -> Model
-gpt4Turbo = Model OpenAIv1 openAIv1Endpoint "gpt-4-turbo"
-
-gpt4oMini :: SystemPrompt -> Model
-gpt4oMini = Model OpenAIv1 openAIv1Endpoint "gpt-4o-mini"
 
 renderPayload ::
     Model ->

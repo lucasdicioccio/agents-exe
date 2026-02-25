@@ -4,21 +4,20 @@
 
 module Main where
 
-import Control.Monad (forM_, (>=>))
+import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
-import qualified Data.List as List
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (Agent (..), AgentId, AgentSlug, ConversationId, McpServerDescription (..), McpSimpleBinaryConfiguration (..))
+import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
-import System.Agents.CLI.TraceUtils (tracePrintingTextResponses, traceUsefulPromptStderr, traceUsefulPromptStdout)
+import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr, traceUsefulPromptStdout)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -27,11 +26,9 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Client as McpClient
 import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
-import qualified System.Agents.Memory as Memory
 import qualified System.Agents.OneShot as OneShot
-import System.Agents.Runtime.Base (PingPongQuery (..))
 import qualified System.Agents.Runtime.Trace as Runtime
-import qualified System.Agents.TUI as TUI
+import qualified System.Agents.TUI2.Core as TUI2
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
@@ -53,20 +50,22 @@ data ArgParserArgs
     , defaultLogJsonHttpEndpoint :: Maybe String
     , defaultLogJsonFilepath :: Maybe FilePath
     , defaultLogRawFilepath :: Maybe FilePath
+    , defaultLogSesionsJsonPrefix :: Maybe FilePath
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
-secretsKeyFile args = args.configdir </> "secret-keys"
+secretsKeyFile pargs = pargs.configdir </> "secret-keys"
 
 -- | helper to make agent-file entirely optional whilst using the 'many' combinator
 addDefaultAgentFiles :: ArgParserArgs -> [FilePath] -> [FilePath]
-addDefaultAgentFiles args [] = args.defaultAgentFiles
+addDefaultAgentFiles pargs [] = pargs.defaultAgentFiles
 addDefaultAgentFiles _ xs = xs
 
 data AgentsExeLogConfig = AgentsExeLogConfig
     { logJsonHttpEndpoint :: Maybe String
     , logJsonPath :: Maybe FilePath
     , logRawPath :: Maybe FilePath
+    , logSessionsJsonPrefix :: Maybe FilePath
     }
     deriving (Show, Generic)
 instance Aeson.FromJSON AgentsExeLogConfig
@@ -116,15 +115,17 @@ initArgParserArgs = do
                         (logJsonHttpEndpoint =<< obj.agentsLogs)
                         (logJsonPath =<< obj.agentsLogs)
                         (logRawPath =<< obj.agentsLogs)
+                        (logSessionsJsonPrefix =<< obj.agentsLogs)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig homedir = do
-        let configdir = homedir </> ".config/agents-exe"
-        jsonPaths <- FileLoader.listJsonDirectory (configdir </> "default")
+        let pconfigdir = homedir </> ".config/agents-exe"
+        jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
         pure $
             ArgParserArgs
-                configdir
+                pconfigdir
                 jsonPaths
+                Nothing
                 Nothing
                 Nothing
                 Nothing
@@ -133,16 +134,15 @@ data Prog = Prog
     { apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
-    , memoryHttpStore :: Maybe String
     , logJsonFile :: Maybe FilePath
+    , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
     , mainCommand :: Command
     }
 
 data Command
     = Check
-    | InteractiveCommandLine
-    | TerminalUI
+    | TerminalUI TuiOptions
     | OneShot OneShotOptions
     | EchoPrompt OneShotOptions
     | SelfDescribe
@@ -159,9 +159,15 @@ data PromptScriptDirective
 type PromptScript =
     [PromptScriptDirective]
 
+data TuiOptions
+    = TuiOptions
+    { sessionJsonPrefix :: Maybe FilePath
+    }
+
 data OneShotOptions
     = OneShotOptions
-    { promptScript :: PromptScript
+    { sessionFile :: Maybe FilePath
+    , promptScript :: PromptScript
     }
 
 data McpServerOptions
@@ -173,13 +179,9 @@ parseCheckCommand :: Parser Command
 parseCheckCommand =
     pure Check
 
-parseCliCommand :: Parser Command
-parseCliCommand =
-    pure InteractiveCommandLine
-
 parseTuiChatCommand :: Parser Command
 parseTuiChatCommand =
-    pure TerminalUI
+    TerminalUI <$> parseTuiOptions
 
 parseOneShotTextualCommand :: Parser Command
 parseOneShotTextualCommand =
@@ -189,10 +191,30 @@ parseEchoPromptCommand :: Parser Command
 parseEchoPromptCommand =
     EchoPrompt <$> parseOneShotOptions
 
+parseTuiOptions :: Parser TuiOptions
+parseTuiOptions =
+    TuiOptions
+        <$> optional
+            ( strOption
+                ( long "session-files-prefix"
+                    <> metavar "SESSIONPREFIX"
+                    <> help "file prefix to store per session json files"
+                    <> showDefault
+                )
+            )
+
 parseOneShotOptions :: Parser OneShotOptions
 parseOneShotOptions =
     OneShotOptions
-        <$> ( many
+        <$> optional
+            ( strOption
+                ( long "session-file"
+                    <> metavar "SESSIONFILE"
+                    <> help "session file"
+                    <> showDefault
+                )
+            )
+        <*> ( many
                 (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
             )
   where
@@ -300,18 +322,18 @@ parseProgOptions argparserargs =
             )
         <*> optional
             ( strOption
-                ( long "memory-http-store"
-                    <> metavar "MEMORYHTTPSTORE"
-                    <> help "http memory sink"
-                    <> showDefault
-                )
-            )
-        <*> optional
-            ( strOption
                 ( long "log-json-file"
                     <> metavar "JSONFILE"
                     <> help "local JSON file log sink"
                     <> (maybe mempty value argparserargs.defaultLogJsonFilepath)
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "session-json-file-prefix"
+                    <> metavar "SESSIONSJSONPREFIX"
+                    <> help "local JSON sessions file prefix"
+                    <> (maybe mempty value argparserargs.defaultLogSesionsJsonPrefix)
                 )
             )
         <*> fmap
@@ -326,7 +348,6 @@ parseProgOptions argparserargs =
             )
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
-                <> command "cli" (info parseCliCommand (idm))
                 <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
@@ -355,30 +376,25 @@ main = do
     traceExtra t1 (Just t2) = Prod.traceBoth t1 t2
 
     prog :: Prog -> IO ()
-    prog args = do
-        showFileTracer <- makeShowLogFileTracer args.logFile
-        baseJsonFileTracer1 <- traverse makeFileJsonTracer args.logJsonFile
+    prog pargs = do
+        showFileTracer <- makeShowLogFileTracer pargs.logFile
+        baseJsonFileTracer1 <- traverse makeFileJsonTracer pargs.logJsonFile
         let logFileJsonTracer =
                 case baseJsonFileTracer1 of
                     Nothing -> Nothing
                     Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
-        baseHttpTracer1 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) args.logHttp
+        baseHttpTracer1 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) pargs.logHttp
         let logHttpTracer =
                 case baseHttpTracer1 of
                     Nothing -> Nothing
                     Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
-        baseHttpTracer2 <- traverse (makeHttpJsonTrace Prod.silent . Text.pack) args.memoryHttpStore
-        let memoryHttpTracer =
-                case baseHttpTracer2 of
-                    Nothing -> Nothing
-                    Just t -> Just $ choose extractMemories Prod.silent t
 
-        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` memoryHttpTracer `traceExtra` logFileJsonTracer
+        let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` logFileJsonTracer
 
-        case args.mainCommand of
+        case pargs.mainCommand of
             Check -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
-                forM_ args.agentFiles $ \agentFile -> do
+                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+                forM_ pargs.agentFiles $ \agentFile -> do
                     OneShot.mainPrintAgent $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -386,8 +402,8 @@ main = do
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             }
-            TerminalUI -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
+            TerminalUI opts -> do
+                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -397,15 +413,15 @@ main = do
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             }
-                TUI.mainMultiAgents (fmap oneAgent args.agentFiles)
+                TUI2.runTUI (opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix) (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
             OneShot opts -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
-                forM_ (take 1 args.agentFiles) $ \agentFile -> do
+                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+                forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
-                    let oneShot = flip OneShot.mainOneShotText
+                    let oneShot = flip (OneShot.mainOneShotText opts.sessionFile)
                     oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -414,7 +430,8 @@ main = do
                                 baseTracer
                             }
             SelfDescribe -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
+                -- verify the api-key file exists at least
+                _ <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 Aeson.encodeFile "/dev/stdout" $
                     Bash.ScriptInfo
                         [ Bash.ScriptArg
@@ -429,7 +446,7 @@ main = do
                         "calls oneself with a prompt"
                         (Just $ Bash.AddMessage "--no output--")
             McpServer -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile args.apiKeysFile
+                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -442,14 +459,14 @@ main = do
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
                             }
-                McpServer.multiAgentsServer (fmap oneAgent args.agentFiles)
+                McpServer.multiAgentsServer (fmap oneAgent pargs.agentFiles)
             Initialize ->
                 let o =
                         Agent
                             { slug = "main-agent"
                             , apiKeyId = "main-key"
                             , flavor = "OpenAIv1"
-                            , modelUrl = OpenAI.openAIv1Endpoint.getBaseUrl
+                            , modelUrl = "https://api.openai.com/v1"
                             , modelName = "gpt-4-turbo"
                             , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
                             , toolDirectory = "tools"
@@ -465,99 +482,16 @@ main = do
                             , mcpServers = Just []
                             }
                  in do
-                        forM_ (take 1 args.agentFiles) $ \agentFile -> do
+                        forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                             InitProject.initAgentFile o agentFile
                             InitProject.initAgentTooldir o agentFile
-                            InitProject.initKeyFile args.apiKeysFile
+                            InitProject.initKeyFile pargs.apiKeysFile
 
 -------------------------------------------------------------------------------
 
 maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
-
-extractMemories :: AgentTree.Trace -> Either () [Memory.MemoryItem]
-extractMemories x = case x of
-    AgentTree.AgentTrace tr -> go [] tr
-    _ -> Left ()
-  where
-    parentInfo :: [Runtime.Trace] -> (Maybe AgentSlug, Maybe ConversationId, Maybe AgentId)
-    parentInfo ((Runtime.AgentTrace_Memorize pSlug paId pcId _) : _) =
-        (Just pSlug, Just pcId, Just paId)
-    parentInfo ((Runtime.AgentTrace_Conversation pSlug paId pcId _) : _) =
-        (Just pSlug, Just pcId, Just paId)
-    parentInfo _ =
-        (Nothing, Nothing, Nothing)
-
-    rootConversationId :: [Runtime.Trace] -> Maybe ConversationId
-    rootConversationId = rootTrace >=> Runtime.traceConversationId
-
-    rootTrace :: [Runtime.Trace] -> Maybe Runtime.Trace
-    rootTrace [] = Nothing
-    rootTrace (t : []) = Just t
-    rootTrace ts = rootTrace (drop 1 ts)
-
-    go :: [Runtime.Trace] -> Runtime.Trace -> Either () [Memory.MemoryItem]
-    go stack (Runtime.AgentTrace_Memorize aSlug aId cId (Runtime.Calling query hist stepId)) =
-        let
-            (pSlug, pcId, paId) = parentInfo stack
-            rId = fromMaybe cId (rootConversationId stack)
-         in
-            Right
-                [ Memory.MemoryItem
-                    { Memory.rootConversationId = rId
-                    , Memory.conversationId = cId
-                    , Memory.agentSlug = aSlug
-                    , Memory.agentId = aId
-                    , Memory.stepId = stepId
-                    , Memory.llmHistory = hist
-                    , Memory.pendingQuery = query
-                    , Memory.parentAgentSlug = pSlug
-                    , Memory.parentConversationId = pcId
-                    , Memory.parentAgentId = paId
-                    }
-                ]
-    go stack (Runtime.AgentTrace_Memorize aSlug aId cId (Runtime.GotResponse query hist stepId rsp)) =
-        let
-            (pSlug, pcId, paId) = parentInfo stack
-            rId = fromMaybe cId (rootConversationId stack)
-         in
-            Right
-                [ Memory.MemoryItem
-                    { Memory.rootConversationId = rId
-                    , Memory.conversationId = cId
-                    , Memory.agentSlug = aSlug
-                    , Memory.agentId = aId
-                    , Memory.stepId = stepId
-                    , Memory.llmHistory = hist
-                    , Memory.pendingQuery = query
-                    , Memory.parentAgentSlug = pSlug
-                    , Memory.parentConversationId = pcId
-                    , Memory.parentAgentId = paId
-                    }
-                ]
-    go stack (Runtime.AgentTrace_Memorize aSlug aId cId (Runtime.InteractionDone hist stepId)) =
-        let
-            (pSlug, pcId, paId) = parentInfo stack
-            rId = fromMaybe cId (rootConversationId stack)
-         in
-            Right
-                [ Memory.MemoryItem
-                    { Memory.rootConversationId = rId
-                    , Memory.conversationId = cId
-                    , Memory.agentSlug = aSlug
-                    , Memory.agentId = aId
-                    , Memory.stepId = stepId
-                    , Memory.llmHistory = hist
-                    , Memory.pendingQuery = NoQuery
-                    , Memory.parentAgentSlug = pSlug
-                    , Memory.parentConversationId = pcId
-                    , Memory.parentAgentId = paId
-                    }
-                ]
-    go xs tr@(Runtime.AgentTrace_Conversation _ _ _ (Runtime.ChildrenTrace sub)) =
-        go (tr : xs) sub
-    go _ _ = Left ()
 
 toJsonTrace :: AgentTree.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
@@ -636,7 +570,7 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd args))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd targs))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -644,9 +578,9 @@ toJsonTrace x = case x of
                         , "flavor" .= ("bash" :: Text.Text)
                         , "action" .= ("start" :: Text.Text)
                         , "cmd" .= cmd
-                        , "args" .= args
+                        , "args" .= targs
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd args code _ _))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd targs code _ _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -655,7 +589,7 @@ toJsonTrace x = case x of
                         , "action" .= ("stop" :: Text.Text)
                         , "code-str" .= show code -- todo: code
                         , "cmd" .= cmd
-                        , "args" .= args
+                        , "args" .= targs
                         ]
             (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
                 Just $
@@ -667,7 +601,7 @@ toJsonTrace x = case x of
                         , "tool" .= desc.ioSlug
                         , "input" .= input
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input output))) ->
+            (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)

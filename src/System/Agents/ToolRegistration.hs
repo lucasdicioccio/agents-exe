@@ -6,16 +6,16 @@ module System.Agents.ToolRegistration where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
-import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 
 import System.Agents.Base
-import qualified System.Agents.LLMs.OpenAI as LLM
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.Tools
+import System.Agents.ToolSchema
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
@@ -28,8 +28,8 @@ type ToolRuntimeArg = ConversationId
 data ToolRegistration
     = ToolRegistration
     { innerTool :: Tool ToolRuntimeArg ()
-    , declareTool :: LLM.Tool
-    , findTool :: LLM.ToolCall -> Maybe (Tool ConversationId LLM.ToolCall)
+    , declareTool :: OpenAI.Tool
+    , findTool :: OpenAI.ToolCall -> Maybe (Tool ConversationId OpenAI.ToolCall)
     }
 instance Show ToolRegistration where
     show (ToolRegistration d _ _) = Prelude.unwords ["ToolRegistration(", show d.toolDef, ")"]
@@ -37,17 +37,17 @@ instance Show ToolRegistration where
 -------------------------------------------------------------------------------
 
 -- naming policy for IO tools
-io2LLMName :: forall a b. IOTools.IOScript ToolRuntimeArg a b -> LLM.ToolName
-io2LLMName io = LLM.ToolName (mconcat ["io_", io.description.ioSlug])
+io2LLMName :: forall a b. IOTools.IOScript ToolRuntimeArg a b -> OpenAI.ToolName
+io2LLMName io = OpenAI.ToolName (mconcat ["io_", io.description.ioSlug])
 
 -- naming policy for Bash tools
-bash2LLMName :: BashTools.ScriptDescription -> LLM.ToolName
-bash2LLMName bash = LLM.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlug])
+bash2LLMName :: BashTools.ScriptDescription -> OpenAI.ToolName
+bash2LLMName bash = OpenAI.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlug])
 
 -- naming policy for MCP tools
-mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> LLM.ToolName
+mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> OpenAI.ToolName
 mcp2LLMName box mcp =
-    LLM.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
+    OpenAI.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
 
 -------------------------------------------------------------------------------
 
@@ -56,29 +56,29 @@ registerBashToolInLLM ::
     ToolRegistration
 registerBashToolInLLM script =
     let
-        matchName :: BashTools.ScriptDescription -> LLM.ToolCall -> Bool
+        matchName :: BashTools.ScriptDescription -> OpenAI.ToolCall -> Bool
         matchName bash call = bash2LLMName bash == call.toolCallFunction.toolCallFunctionName
 
-        mapToolDescriptionBash2LLM :: BashTools.ScriptDescription -> LLM.Tool
+        mapToolDescriptionBash2LLM :: BashTools.ScriptDescription -> OpenAI.Tool
         mapToolDescriptionBash2LLM bash =
-            LLM.Tool
-                { LLM.toolName = bash2LLMName bash
-                , LLM.toolDescription = bash.scriptInfo.scriptDescription
-                , LLM.toolParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
+            OpenAI.Tool
+                { OpenAI.toolName = bash2LLMName bash
+                , OpenAI.toolDescription = bash.scriptInfo.scriptDescription
+                , OpenAI.toolParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
                 }
 
-        mapArg :: BashTools.ScriptArg -> LLM.ParamProperty
+        mapArg :: BashTools.ScriptArg -> ParamProperty
         mapArg arg =
-            LLM.ParamProperty
-                { LLM.propertyKey = arg.argName
-                , LLM.propertyType = LLM.OpaqueParamType arg.argBackingTypeString
-                , LLM.propertyDescription = arg.argDescription
+            ParamProperty
+                { propertyKey = arg.argName
+                , propertyType = OpaqueParamType arg.argBackingTypeString
+                , propertyDescription = arg.argDescription
                 }
 
         tool :: Tool ToolRuntimeArg ()
         tool = bashTool script
 
-        find :: LLM.ToolCall -> Maybe (Tool ToolRuntimeArg LLM.ToolCall)
+        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
      in
         ToolRegistration tool (mapToolDescriptionBash2LLM script) find
@@ -89,25 +89,25 @@ shape of the tool for IOScript (ideally some generics or something like Data.Aes
 registerIOScriptInLLM ::
     (Aeson.FromJSON a) =>
     IOTools.IOScript ToolRuntimeArg a ByteString ->
-    [LLM.ParamProperty] ->
+    [ParamProperty] ->
     ToolRegistration
 registerIOScriptInLLM script llmProps =
     let
-        matchName :: IOTools.IOScript ToolRuntimeArg a b -> LLM.ToolCall -> Bool
+        matchName :: IOTools.IOScript ToolRuntimeArg a b -> OpenAI.ToolCall -> Bool
         matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
 
         tool :: Tool ToolRuntimeArg ()
         tool = ioTool script
 
-        find :: LLM.ToolCall -> Maybe (Tool ToolRuntimeArg LLM.ToolCall)
+        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
 
-        llmTool :: LLM.Tool
+        llmTool :: OpenAI.Tool
         llmTool =
-            LLM.Tool
-                { LLM.toolName = io2LLMName script
-                , LLM.toolDescription = script.description.ioDescription
-                , LLM.toolParamProperties = llmProps
+            OpenAI.Tool
+                { OpenAI.toolName = io2LLMName script
+                , OpenAI.toolDescription = script.description.ioDescription
+                , OpenAI.toolParamProperties = llmProps
                 }
      in
         ToolRegistration tool llmTool find
@@ -118,30 +118,30 @@ registerMcpToolInLLM ::
     Either String ToolRegistration
 registerMcpToolInLLM box mcp =
     let
-        matchName :: McpTools.ToolDescription -> LLM.ToolCall -> Bool
-        matchName mcp call = mcp2LLMName box mcp == call.toolCallFunction.toolCallFunctionName
+        matchName :: McpTools.ToolDescription -> OpenAI.ToolCall -> Bool
+        matchName td call = mcp2LLMName box td == call.toolCallFunction.toolCallFunctionName
 
-        llmBasedSchema :: Either String [LLM.ParamProperty]
+        llmBasedSchema :: Either String [ParamProperty]
         llmBasedSchema = adaptSchema mcp.getToolDescription.inputSchema
 
-        llmName :: LLM.ToolName
+        llmName :: OpenAI.ToolName
         llmName = mcp2LLMName box mcp
 
         llmDescription :: Text
         llmDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
 
-        mapToolDescriptionMcp2LLM :: [LLM.ParamProperty] -> LLM.Tool
+        mapToolDescriptionMcp2LLM :: [ParamProperty] -> OpenAI.Tool
         mapToolDescriptionMcp2LLM schema =
-            LLM.Tool
-                { LLM.toolName = llmName
-                , LLM.toolDescription = llmDescription
-                , LLM.toolParamProperties = schema
+            OpenAI.Tool
+                { OpenAI.toolName = llmName
+                , OpenAI.toolDescription = llmDescription
+                , OpenAI.toolParamProperties = schema
                 }
 
         tool :: Tool ToolRuntimeArg ()
         tool = mcpTool box mcp
 
-        find :: LLM.ToolCall -> Maybe (Tool ToolRuntimeArg LLM.ToolCall)
+        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
         find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
      in
         case llmBasedSchema of
@@ -150,27 +150,27 @@ registerMcpToolInLLM box mcp =
             Left err ->
                 Left err
 
-adaptSchema :: Mcp.InputSchema -> Either String [LLM.ParamProperty]
+adaptSchema :: Mcp.InputSchema -> Either String [ParamProperty]
 adaptSchema schema =
     case schema.properties of
         Nothing -> Right []
         Just obj -> ifoldl' f (Right []) obj
   where
-    f :: Aeson.Key -> Either String [LLM.ParamProperty] -> Aeson.Value -> Either String [LLM.ParamProperty]
+    f :: Aeson.Key -> Either String [ParamProperty] -> Aeson.Value -> Either String [ParamProperty]
     f _ err@(Left _) _ = err
     f k (Right xs) v =
         case adaptProperty k v of
             Left err -> Left err
             Right x -> Right (x : xs)
 
-adaptProperty :: Aeson.Key -> Aeson.Value -> Either String LLM.ParamProperty
+adaptProperty :: Aeson.Key -> Aeson.Value -> Either String ParamProperty
 adaptProperty k val =
     case propMappingResult of
         Aeson.Success prop ->
             Right $
-                LLM.ParamProperty
+                ParamProperty
                     (AesonKey.toText k)
-                    (LLM.OpaqueParamType prop._type)
+                    (OpaqueParamType prop._type)
                     prop._description
         Aeson.Error err -> Left err
   where

@@ -23,7 +23,7 @@ import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, Mcp
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
-import qualified System.Agents.LLMs.OpenAI as LLM
+import System.Agents.ToolSchema
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
 import qualified System.Agents.Runtime as Runtime
@@ -227,10 +227,10 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     registerIOScriptInLLM io props
   where
     props =
-        [ LLM.ParamProperty
-            { LLM.propertyKey = "what"
-            , LLM.propertyType = LLM.StringParamType
-            , LLM.propertyDescription = "the prompt to call the specialized-agent with"
+        [ ParamProperty
+            { propertyKey = "what"
+            , propertyType = StringParamType
+            , propertyDescription = "the prompt to call the specialized-agent with"
             }
         ]
     io =
@@ -267,7 +267,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
             (pure Nothing)
             (\_hist -> pure ())
             (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
-            (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ LLM.locateResponseText done)
+            (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ OpenAI.locateResponseText done)
 
 -------------------------------------------------------------------------------
 readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys

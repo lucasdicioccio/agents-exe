@@ -5,7 +5,7 @@ module System.Agents.MCP.Client where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)
-import Control.Monad.Logger (Loc, LogLevel, LogSource, LogStr, LoggingT (..), MonadLogger, MonadLoggerIO, logDebugN, runStderrLoggingT)
+import Control.Monad.Logger (Loc, LogLevel, LogSource, LogStr, LoggingT (..), MonadLogger, MonadLoggerIO, logDebugN)
 import Control.Monad.Reader (MonadReader (..), ReaderT, ask, runReaderT)
 import Control.Monad.Trans (lift)
 import qualified Data.Aeson as Aeson
@@ -14,7 +14,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Network.JSONRPC as Rpc
 import Prod.Tracer (Tracer, runTracer)
-import UnliftIO (Async, MonadIO, MonadUnliftIO, async, atomically, cancel, liftIO, wait, withAsync)
+import UnliftIO (MonadIO, MonadUnliftIO, async, liftIO, withAsync)
 
 import System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Client.Runtime
@@ -45,14 +45,14 @@ runClient ::
     Runtime ->
     (ClientInfos -> Rpc.JSONRPCT McpStack ()) ->
     IO ()
-runClient tracer rt act = do
+runClient ctracer rt act = do
     runLoggingT
         ( runReaderT (runMcpStack scheduleMcp) rt
         )
         logInTracer
   where
     logInTracer loc src lvl str =
-        runTracer tracer (JsonRpcLog loc src lvl str)
+        runTracer ctracer (JsonRpcLog loc src lvl str)
     scheduleMcp = do
         runJSONRPCT'
             Rpc.V2
@@ -142,10 +142,10 @@ data ClientInfos
 handleClient ::
     (ClientInfos -> Rpc.JSONRPCT McpStack ()) -> Rpc.JSONRPCT McpStack ()
 handleClient act = do
-    srv <- initialize
-    case srv of
+    initSrv <- initialize
+    case initSrv of
         (Just (Right srv)) -> do
-            notifyInitialized
+            _ <- notifyInitialized
             act (ClientInfos srv)
         _ -> do
             pure ()
@@ -170,21 +170,21 @@ handleClient act = do
 listTools ::
     Maybe Mcp.Cursor ->
     Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj ListToolsResultRsp))
-listTools cursor =
+listTools ecursor =
     Rpc.sendRequest $
         ListToolsRequestMsg $
             Mcp.ListToolsRequest
-                cursor
+                ecursor
 
 callTool ::
     Mcp.Name ->
     Maybe Aeson.Object ->
     Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
-callTool name arg =
+callTool tname arg =
     Rpc.sendRequest $
         CallToolRequestMsg $
             Mcp.CallToolRequest
-                name
+                tname
                 arg
 
 enumerateTools ::
@@ -198,8 +198,8 @@ enumerateTools = do
     previewCursor _ = Nothing
 
     go xs Nothing = pure xs
-    go xs cursor@(Just _) = do
-        item <- listTools cursor
+    go xs ecursor@(Just _) = do
+        item <- listTools ecursor
         go (item : xs) (previewCursor item)
 
 -------------------------------------------------------------------------------
@@ -225,7 +225,7 @@ data LoopProps = LoopProps
 
 defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
 defaultLoop props clientInfos = do
-    withAsync loopToolCalls $ \x -> do
+    withAsync loopToolCalls $ \_ -> do
         if hasToolsChangedNotif
             then do
                 doRefreshTools
@@ -281,11 +281,11 @@ defaultLoop props clientInfos = do
         case tc of
             Nothing -> do
                 liftIO $ runTracer props.tracer ExitingToolCallLoop
-            Just (FullToolCall (ToolCall name obj) resp) -> do
-                liftIO $ runTracer props.tracer (StartToolCall name obj)
+            Just (FullToolCall (ToolCall tname obj) resp) -> do
+                liftIO $ runTracer props.tracer (StartToolCall tname obj)
                 _ <- async $ do
-                    r <- callTool name obj
+                    r <- callTool tname obj
                     liftIO $ do
-                        runTracer props.tracer (EndToolCall name obj r)
+                        runTracer props.tracer (EndToolCall tname obj r)
                         resp r
                 loopToolCalls
