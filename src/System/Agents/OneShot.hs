@@ -29,6 +29,7 @@ import System.Agents.Session.Step
 import System.Agents.Session.OpenAI
 import System.Agents.ToolRegistration
 import System.Agents.Tools
+import qualified System.Agents.Tools.OpenApi as OpenApi
 import System.Agents.Tools.Base
 import System.Agents.ToolSchema
 
@@ -174,6 +175,12 @@ callResultToUserToolResponse _ result =
         McpToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.unlines ["tool-error", Text.pack $ show err]
         McpToolResult _ res ->
+            UserToolResponse $ Aeson.toJSON res
+        OpenApiToolResult _ (OpenApi.CallError n err) ->
+            UserToolResponse $ Aeson.String $ Text.unlines ["tool-error", err]
+        OpenApiToolResult _ (OpenApi.CallNetworkError err) ->
+            UserToolResponse $ Aeson.String $ Text.unlines ["network-error", err]
+        OpenApiToolResult _ (OpenApi.CallSuccess res) ->
             UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
             UserToolResponse $ Aeson.String $ Text.decodeUtf8 v

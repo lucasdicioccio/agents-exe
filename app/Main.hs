@@ -481,6 +481,7 @@ main = do
                                 , "If an agent fails, do not retry and abdicate"
                                 ]
                             , mcpServers = Just []
+                            , openApiServers = Just []
                             }
                  in do
                         forM_ (take 1 pargs.agentFiles) $ \agentFile -> do

@@ -11,6 +11,8 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import qualified System.Agents.Tools.OpenApi as OpenApi
+
 type AgentSlug = Text
 type AgentAnnounce = Text
 
@@ -104,12 +106,18 @@ instance FromJSON McpServerDescription where
 
 -------------------------------------------------------------------------------
 -- | Description of an OpenAPI server to load tools from
+-- 
+-- The 'openApiPredicates' field contains a list of conjunction predicates.
+-- Each conjunction is a list of predicates that all must match for a tool
+-- to be included. If any conjunction matches, the tool is included.
+-- An empty list means "match all" (include all endpoints).
 data OpenApiServerDescription
     = OpenApiServerDescription
-    { openApiName :: Text          -- ^ Name for this toolbox (e.g., "petstore")
-    , openApiBaseUrl :: Text       -- ^ Base URL for API calls (e.g., "https://api.example.com/v1")
-    , openApiSpecUrl :: Text       -- ^ URL to fetch the OpenAPI spec from
-    , openApiAuthToken :: Maybe Text  -- ^ Optional Bearer token for authentication
+    { openApiName :: Text                    -- ^ Name for this toolbox (e.g., "petstore")
+    , openApiBaseUrl :: Text                 -- ^ Base URL for API calls (e.g., "https://api.example.com/v1")
+    , openApiSpecUrl :: Text                 -- ^ URL to fetch the OpenAPI spec from
+    , openApiAuthToken :: Maybe Text         -- ^ Optional Bearer token for authentication
+    , openApiPredicates :: [[OpenApi.ToolPredicate]]  -- ^ List of conjunction predicates for filtering
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -120,6 +128,7 @@ instance FromJSON OpenApiServerDescription where
             <*> v .: "baseUrl"
             <*> v .: "specUrl"
             <*> v .:? "authToken"
+            <*> v .:? "predicates" Aeson..!= []
 
 instance ToJSON OpenApiServerDescription where
     toJSON desc =
@@ -128,4 +137,5 @@ instance ToJSON OpenApiServerDescription where
             , "baseUrl" .= desc.openApiBaseUrl
             , "specUrl" .= desc.openApiSpecUrl
             ] <> maybe [] (\t -> ["authToken" .= t]) desc.openApiAuthToken
+              <> ["predicates" .= desc.openApiPredicates | not (null desc.openApiPredicates)]
 

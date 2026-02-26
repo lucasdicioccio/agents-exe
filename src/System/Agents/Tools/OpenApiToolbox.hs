@@ -30,7 +30,7 @@ import Prod.Tracer (Tracer (..), contramap)
 
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Base ()
-import System.Agents.Tools.OpenApi (CallResult(..), makeCallTool, ToolDescription(..), RequestBodySchema(..), Parameter(..), ParamLocation(..))
+import System.Agents.Tools.OpenApi (CallResult(..), makeCallTool, ToolDescription(..), RequestBodySchema(..), Parameter(..), ParamLocation(..), ToolPredicate, ConjunctionPredicates, evalConjunction)
 import qualified System.Agents.Tools.OpenApi as OpenApi
 
 -------------------------------------------------------------------------------
@@ -76,14 +76,18 @@ instance Aeson.FromJSON Operation where
 -------------------------------------------------------------------------------
 -- Initialization
 
+-- | Initialize a toolbox from an OpenAPI spec.
+-- The predicates are used to filter which endpoints become tools.
+-- An empty list means include all endpoints.
 initializeToolbox ::
     Tracer IO Trace ->
     Text ->           -- toolbox name
     Text ->           -- base URL
     Text ->           -- OpenAPI spec URL
     Maybe Text ->     -- optional auth token
+    [[ToolPredicate]] -> -- list of conjunction predicates for filtering
     IO Toolbox
-initializeToolbox tracer tname baseUrl specUrl mToken = do
+initializeToolbox tracer tname baseUrl specUrl mToken predicates = do
     trace tracer (FetchingOpenApiSpec specUrl)
     
     -- Fetch the OpenAPI spec
@@ -108,7 +112,7 @@ initializeToolbox tracer tname baseUrl specUrl mToken = do
                     emptyTools <- newTVarIO []
                     pure $ Toolbox tname baseUrl emptyTools (\_ _ -> pure $ CallNetworkError "Invalid spec JSON")
                 Just spec -> do
-                    let tools = convertSpecToTools spec
+                    let tools = convertSpecToTools predicates spec
                     trace tracer (FetchedOpenApiSpec status (length tools))
                     toolsVar <- newTVarIO tools
                     pure $ Toolbox
@@ -151,15 +155,24 @@ lookupRef val [] = val
 -------------------------------------------------------------------------------
 -- Tool Conversion
 
-convertSpecToTools :: Aeson.Value -> [ToolDescription]
-convertSpecToTools spec = 
+-- | Convert an OpenAPI spec to a list of tool descriptions.
+-- Applies the given predicates to filter which endpoints become tools.
+-- An empty list of predicates means include all endpoints.
+convertSpecToTools :: [[ToolPredicate]] -> Aeson.Value -> [ToolDescription]
+convertSpecToTools predicates spec = 
     let components = case spec of
             Aeson.Object obj -> fromMaybe (Aeson.Object mempty) (KeyMap.lookup "components" obj)
             _ -> Aeson.Object mempty
         paths = case spec of
             Aeson.Object obj -> fromMaybe Aeson.Null (KeyMap.lookup "paths" obj)
             _ -> Aeson.Object mempty
-    in parsePaths components paths
+        allTools = parsePaths components paths
+    in filter (matchesAnyConjunction predicates) allTools
+  where
+    -- If no predicates specified, match all
+    matchesAnyConjunction :: [[ToolPredicate]] -> ToolDescription -> Bool
+    matchesAnyConjunction [] _ = True
+    matchesAnyConjunction conjuncts desc = any (\conj -> evalConjunction conj desc) conjuncts
 
 parsePaths :: Aeson.Value -> Aeson.Value -> [ToolDescription]
 parsePaths components (Aeson.Object paths) = 

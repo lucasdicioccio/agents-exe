@@ -207,6 +207,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
             srv.openApiBaseUrl
             srv.openApiSpecUrl
             srv.openApiAuthToken
+            srv.openApiPredicates
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
 augmentMainAgentPromptWithSubAgents [] base = base
