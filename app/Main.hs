@@ -14,7 +14,7 @@ import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
+import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..), OpenApiServerDescription(..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr, traceUsefulPromptStdout)
@@ -35,6 +35,7 @@ import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenApiToolbox as OpenApiTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Directory (doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.FilePath (takeDirectory, (</>))
@@ -497,6 +498,7 @@ toJsonTrace :: AgentTree.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
     AgentTree.AgentTrace v -> encodeAgentTrace v
     AgentTree.McpTrace cfg v -> encodeMcpTrace cfg v
+    AgentTree.OpenApiTrace cfg v -> encodeOpenApiTrace cfg v
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
   where
@@ -672,6 +674,22 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text.Text)
                     , "name" .= n
                     ]
+
+    encodeOpenApiTrace :: OpenApiServerDescription -> OpenApiTools.Trace -> Maybe Aeson.Value
+    encodeOpenApiTrace cfg tr = do
+        baseVal <- encodeBaseOpenApiTrace tr
+        Just $
+            Aeson.object
+                [ "e"
+                    .= Aeson.object
+                        [ "server" .= cfg.openApiName
+                        , "val" .= baseVal
+                        ]
+                ]
+
+    encodeBaseOpenApiTrace :: OpenApiTools.Trace -> Maybe Aeson.Value
+    encodeBaseOpenApiTrace  _ = Nothing -- TODO: implement something sensible
+
 
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text.Text -> IO (Prod.Tracer IO a)
 makeHttpJsonTrace baseTracer url = do

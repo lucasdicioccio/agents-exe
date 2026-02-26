@@ -77,6 +77,8 @@ library agents-lib
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.IO
                     , System.Agents.Tools.McpToolbox
+                    , System.Agents.Tools.OpenApi
+                    , System.Agents.Tools.OpenApiToolbox
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Base
@@ -121,6 +123,7 @@ library agents-lib
                       haskeline,
                       http-client,
                       http-client-tls,
+                      http-conduit,
                       http-types,
                       indexed-traversable,
                       json-rpc,

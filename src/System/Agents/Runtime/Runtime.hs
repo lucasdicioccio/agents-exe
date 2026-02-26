@@ -20,6 +20,7 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenApiToolbox as OpenApiTools
 
 import System.Agents.Runtime.Trace
 
@@ -52,6 +53,7 @@ triggerRefreshTools rt = atomically $ rt.agentTriggerRefreshTools
 type ToolboxDirectory = FilePath
 type IOToolBuilder = AgentSlug -> AgentId -> ToolRegistration
 type McpToolConfig = McpTools.Toolbox
+type OpenApiToolConfig = OpenApiTools.Toolbox
 
 newRuntime ::
     AgentSlug ->
@@ -62,8 +64,9 @@ newRuntime ::
     ToolboxDirectory ->
     [IOToolBuilder] ->
     [McpToolConfig] ->
+    [OpenApiToolConfig] ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
+newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolboxes = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
     toolz <- BashToolbox.initializeBackroundToolbox (contramap (AgentTrace_Loading slug uid) tracer) tooldir
@@ -76,7 +79,9 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
             let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
 
-            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readMcpToolsRegistrations
+            let readTools = 
+                    (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools 
+                         <*> ((<>) <$> readMcpToolsRegistrations <*> readOpenApiToolsRegistrations)
             let rt = Runtime slug uid announce tracer httpRt model readTools toolbox.triggerReload
             pure $ Right rt
   where
@@ -86,3 +91,11 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
         lists <- traverse (atomically . readTVar . McpTools.toolsList) $ mcpToolboxes
         let reg tb tds = rights [registerMcpToolInLLM tb td | td <- tds]
         pure $ mconcat $ zipWith reg mcpToolboxes lists
+
+    readOpenApiToolsRegistrations :: IO [ToolRegistration]
+    readOpenApiToolsRegistrations = do
+        -- TODO: would be nice to collect the lefts and trace errors upon reloading
+        lists <- traverse (atomically . readTVar . OpenApiTools.toolsList) $ openApiToolboxes
+        let reg tb tds = rights [registerOpenApiToolInLLM tb td | td <- tds]
+        pure $ mconcat $ zipWith reg openApiToolboxes lists
+

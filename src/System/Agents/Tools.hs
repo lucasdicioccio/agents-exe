@@ -2,9 +2,11 @@
 
 {- | Provides some abstraction of tools that agents can use.
 
-To date, there are two ways to provide tools:
+To date, there are three ways to provide tools:
 * bash tools (arbitrary code running in a separate process, and defined with an external command)
 * IO tools (arbitrary code running in the same process, and defined with Haskell code)
+* MCP tools (tools from an MCP server)
+* OpenAPI tools (tools from an OpenAPI specification)
 
 Technically, we could implement bash-tools as a sepecific implementation of
 IO-tools however having a separate constructor enables to surface a bit more
@@ -18,6 +20,7 @@ module System.Agents.Tools (
     ioTool,
     bashTool,
     mcpTool,
+    openapiTool,
     mapToolResult,
     mapCallResult,
     extractCall,
@@ -28,12 +31,13 @@ import Data.ByteString.Char8 as CByteString
 import Prod.Tracer (Tracer, contramap)
 
 -------------------------------------------------------------------------------
-
 import qualified System.Agents.MCP.Client as McpClient
 import System.Agents.Tools.Base
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenApi as OpenApiTools
+import qualified System.Agents.Tools.OpenApiToolbox as OpenApiTools
 import System.Agents.Tools.Trace
 
 -------------------------------------------------------------------------------
@@ -49,6 +53,7 @@ data ToolDef
     = BashTool !BashTools.ScriptDescription
     | MCPTool !McpTools.ToolDescription
     | IOTool !IOTools.IOScriptDescription
+    | OpenApiTool !OpenApiTools.ToolDescription
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -94,6 +99,25 @@ mcpTool toolbox desc =
         McpToolResult call rsp.getCallToolResult
 
 -------------------------------------------------------------------------------
+-- | Builder for a tool based on an OpenAPI tool description.
+openapiTool ::
+    OpenApiTools.Toolbox ->
+    OpenApiTools.ToolDescription ->
+    Tool a ()
+openapiTool toolbox desc =
+    Tool
+        { toolDef = OpenApiTool desc
+        , toolRun = run
+        }
+  where
+    call = ()
+    run _ _ (Aeson.Object v) = do
+        ret <- OpenApiTools.callTool toolbox desc v
+        pure $ OpenApiToolResult call ret
+    run _ _ _ = do
+        pure $ OpenApiToolResult call (OpenApiTools.CallNetworkError "can only call OpenApiTools with Aeson.Object")
+
+-------------------------------------------------------------------------------
 
 -- | Builder for a tool based on an IO-tool script-description.
 ioTool ::
@@ -127,6 +151,7 @@ extractCall (IOToolError c _) = c
 extractCall (BlobToolSuccess c _) = c
 extractCall (McpToolResult c _) = c
 extractCall (McpToolError c _) = c
+extractCall (OpenApiToolResult c _) = c
 
 -- | Explicit helper to map on the result of a CallResult.
 mapCallResult :: (a -> b) -> CallResult a -> CallResult b
@@ -138,8 +163,10 @@ mapCallResult f c =
         (BlobToolSuccess v b) -> BlobToolSuccess (f v) b
         (McpToolResult v b) -> McpToolResult (f v) b
         (McpToolError v b) -> McpToolError (f v) b
+        (OpenApiToolResult v r) -> OpenApiToolResult (f v) r
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool x a -> Tool x b
 mapToolResult f (Tool d run) =
     Tool d (\tracer rtval v -> fmap (mapCallResult f) (run tracer rtval v))
+

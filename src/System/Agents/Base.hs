@@ -4,7 +4,7 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.=), (.:?))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -49,6 +49,7 @@ data Agent
     , systemPrompt :: [Text]
     , toolDirectory :: FilePath
     , mcpServers :: Maybe [McpServerDescription]
+    , openApiServers :: Maybe [OpenApiServerDescription]
     }
     deriving (Show, Ord, Eq, Generic)
 instance ToJSON Agent
@@ -100,3 +101,31 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+
+-------------------------------------------------------------------------------
+-- | Description of an OpenAPI server to load tools from
+data OpenApiServerDescription
+    = OpenApiServerDescription
+    { openApiName :: Text          -- ^ Name for this toolbox (e.g., "petstore")
+    , openApiBaseUrl :: Text       -- ^ Base URL for API calls (e.g., "https://api.example.com/v1")
+    , openApiSpecUrl :: Text       -- ^ URL to fetch the OpenAPI spec from
+    , openApiAuthToken :: Maybe Text  -- ^ Optional Bearer token for authentication
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON OpenApiServerDescription where
+    parseJSON = Aeson.withObject "OpenApiServerDescription" $ \v ->
+        OpenApiServerDescription
+            <$> v .: "name"
+            <*> v .: "baseUrl"
+            <*> v .: "specUrl"
+            <*> v .:? "authToken"
+
+instance ToJSON OpenApiServerDescription where
+    toJSON desc =
+        Aeson.object $
+            [ "name" .= desc.openApiName
+            , "baseUrl" .= desc.openApiBaseUrl
+            , "specUrl" .= desc.openApiSpecUrl
+            ] <> maybe [] (\t -> ["authToken" .= t]) desc.openApiAuthToken
+

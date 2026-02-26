@@ -5,11 +5,14 @@
 module System.Agents.ToolRegistration where
 
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as AesonKeyMap
 import qualified Data.Aeson.Key as AesonKey
 import Data.ByteString (ByteString)
+import Data.Foldable (toList)
 import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
+import qualified Data.Text as Text
 
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -19,6 +22,8 @@ import System.Agents.ToolSchema
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenApi as OpenApiTools
+import qualified System.Agents.Tools.OpenApiToolbox as OpenApiTools
 
 -------------------------------------------------------------------------------
 
@@ -48,6 +53,11 @@ bash2LLMName bash = OpenAI.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlu
 mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> OpenAI.ToolName
 mcp2LLMName box mcp =
     OpenAI.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
+
+-- naming policy for OpenAPI tools
+openapi2LLMName :: OpenApiTools.Toolbox -> OpenApiTools.ToolDescription -> OpenAI.ToolName
+openapi2LLMName box desc =
+    OpenAI.ToolName (mconcat ["openapi_", box.name, "_", desc.operationId])
 
 -------------------------------------------------------------------------------
 
@@ -150,6 +160,113 @@ registerMcpToolInLLM box mcp =
             Left err ->
                 Left err
 
+registerOpenApiToolInLLM ::
+    OpenApiTools.Toolbox ->
+    OpenApiTools.ToolDescription ->
+    Either String ToolRegistration
+registerOpenApiToolInLLM box desc =
+    let
+        matchName :: OpenApiTools.ToolDescription -> OpenAI.ToolCall -> Bool
+        matchName d call = openapi2LLMName box d == call.toolCallFunction.toolCallFunctionName
+
+        llmName :: OpenAI.ToolName
+        llmName = openapi2LLMName box desc
+
+        llmDescription :: Text
+        llmDescription = desc.summary <> ":\n" <> desc.description
+
+        -- Convert parameters to ParamProperty list
+        paramProps :: [ParamProperty]
+        paramProps = concatMap paramToProperty desc.parameters
+
+        -- Add body parameter if present
+        allProps :: [ParamProperty]
+        allProps = paramProps <> bodyParam desc.requestBody desc.hasRequiredBody
+
+        llmTool :: OpenAI.Tool
+        llmTool =
+            OpenAI.Tool
+                { OpenAI.toolName = llmName
+                , OpenAI.toolDescription = llmDescription
+                , OpenAI.toolParamProperties = allProps
+                }
+
+        tool :: Tool ToolRuntimeArg ()
+        tool = openapiTool box desc
+
+        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
+        find call = if matchName desc call then Just (mapToolResult (const call) tool) else Nothing
+     in
+        Right $ ToolRegistration tool llmTool find
+
+-- | Convert an OpenAPI parameter to ParamProperty
+paramToProperty :: OpenApiTools.Parameter -> [ParamProperty]
+paramToProperty param =
+    let key = "p_" <> OpenApiTools.paramName param
+        propType = schemaToParamType (OpenApiTools.paramSchema param)
+        -- Try to extract description from schema
+        desc = case OpenApiTools.paramSchema param of
+            Aeson.Object obj -> 
+                case AesonKeyMap.lookup "description" obj of
+                    Just (Aeson.String s) -> s
+                    _ -> ""
+            _ -> ""
+    in [ParamProperty key propType desc]
+
+-- | Convert JSON schema to ParamType
+schemaToParamType :: Aeson.Value -> ParamType
+schemaToParamType schema =
+    case schema of
+        Aeson.Object obj ->
+            -- Check for enum
+            case AesonKeyMap.lookup "enum" obj of
+                Just (Aeson.Array arr) ->
+                    let vals = [s | Aeson.String s <- toList arr]
+                    in EnumParamType vals
+                _ ->
+                    -- Check for type
+                    case AesonKeyMap.lookup "type" obj of
+                        Just (Aeson.String "string") -> StringParamType
+                        Just (Aeson.String "integer") -> NumberParamType
+                        Just (Aeson.String "number") -> NumberParamType
+                        Just (Aeson.String "boolean") -> BoolParamType
+                        Just (Aeson.String "array") ->
+                            case AesonKeyMap.lookup "items" obj of
+                                Just items ->
+                                    let itemType = schemaToParamType items
+                                    in OpaqueParamType ("array of " <> showItemType itemType)
+                                Nothing -> OpaqueParamType "array"
+                        Just (Aeson.String "object") ->
+                            case AesonKeyMap.lookup "properties" obj of
+                                Just (Aeson.Object props) ->
+                                    let subProps = concatMap (\(k, v) -> 
+                                            [ParamProperty (AesonKey.toText k) (schemaToParamType v) ""]) 
+                                            (AesonKeyMap.toList props)
+                                    in ObjectParamType subProps
+                                _ -> OpaqueParamType "object"
+                        _ -> OpaqueParamType "any"
+        _ -> OpaqueParamType "any"
+
+showItemType :: ParamType -> Text
+showItemType StringParamType = "string"
+showItemType NumberParamType = "number"
+showItemType BoolParamType = "boolean"
+showItemType NullParamType = "null"
+showItemType (EnumParamType vals) = "enum(" <> Text.intercalate "," vals <> ")"
+showItemType (OpaqueParamType t) = t
+showItemType (MultipleParamType t) = t
+showItemType (ObjectParamType _) = "object"
+
+-- | Create body parameter if request body exists
+bodyParam :: Maybe OpenApiTools.RequestBodySchema -> Bool -> [ParamProperty]
+bodyParam Nothing _ = []
+bodyParam (Just reqBody) required =
+    let schema = OpenApiTools.bodySchema reqBody
+        propType = schemaToParamType schema
+    in [ParamProperty "b" propType "Request body"]
+
+-------------------------------------------------------------------------------
+
 adaptSchema :: Mcp.InputSchema -> Either String [ParamProperty]
 adaptSchema schema =
     case schema.properties of
@@ -183,3 +300,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

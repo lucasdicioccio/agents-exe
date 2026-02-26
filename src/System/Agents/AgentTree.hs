@@ -30,6 +30,8 @@ import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenApiToolbox as OpenApiTools
+
 
 import System.Agents.ApiKeys
 
@@ -37,6 +39,7 @@ import System.Agents.ApiKeys
 data Trace
     = AgentTrace Runtime.Trace
     | McpTrace McpServerDescription McpTools.Trace
+    | OpenApiTrace AgentsBase.OpenApiServerDescription OpenApiTools.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     deriving
@@ -169,6 +172,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
+            openApiToolboxes <- traverse startOpenApi (Maybe.fromMaybe [] desc.openApiServers)
             Runtime.newRuntime
                 desc.slug
                 desc.announce
@@ -186,6 +190,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                 (rootDir </> desc.toolDirectory)
                 [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
                 mcpToolboxes
+                openApiToolboxes
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
@@ -193,6 +198,15 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
             (contramap (McpTrace srv) tracer)
             cfg.name
             (proc cfg.executable (map Text.unpack cfg.args))
+
+    startOpenApi :: AgentsBase.OpenApiServerDescription -> IO OpenApiTools.Toolbox
+    startOpenApi srv =
+        OpenApiTools.initializeToolbox
+            (contramap (OpenApiTrace srv) tracer)
+            srv.openApiName
+            srv.openApiBaseUrl
+            srv.openApiSpecUrl
+            srv.openApiAuthToken
 
 augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
 augmentMainAgentPromptWithSubAgents [] base = base
