@@ -244,8 +244,8 @@ schemaToParamType schema =
                                             (AesonKeyMap.toList props)
                                     in ObjectParamType subProps
                                 _ -> OpaqueParamType "object"
-                        _ -> OpaqueParamType "any"
-        _ -> OpaqueParamType "any"
+                        _ -> OpaqueParamType "object" -- should be "any"
+        _ -> OpaqueParamType "object" -- should be "any"
 
 showItemType :: ParamType -> Text
 showItemType StringParamType = "string"
