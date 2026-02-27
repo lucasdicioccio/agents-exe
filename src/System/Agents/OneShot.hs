@@ -42,35 +42,72 @@ mainPrintAgent props = do
             Errors errs -> traverse_ print errs
             Initialized _ -> pure ()
 
+-- | Configuration for one-shot execution with optional session persistence.
+data OneShotConfig = OneShotConfig
+  { onSessionProgress :: OnSessionProgress
+    -- ^ Callback for session progress updates (defaults to 'ignoreSessionProgress')
+  , initialSession :: Maybe Session
+    -- ^ Optional initial session to resume from
+  }
+
+-- | Default configuration with no session tracking.
+defaultOneShotConfig :: OneShotConfig
+defaultOneShotConfig = OneShotConfig
+  { onSessionProgress = ignoreSessionProgress
+  , initialSession = Nothing
+  }
+
+-- | Creates a configuration that persists sessions to a file.
+fileStoringConfig :: FilePath -> Maybe Session -> OneShotConfig
+fileStoringConfig path mSession = OneShotConfig
+  { onSessionProgress = fileStoringCallback path
+  , initialSession = mSession
+  }
+
+-- | Run a one-shot agent with the given configuration.
+runOneShotWithConfig :: OneShotConfig -> Runtime.Runtime -> Text -> IO OneShotResult
+runOneShotWithConfig config rt query = do
+    agent0 <- runtimeToAgent rt
+    let agent = agentSetQuery (UserQuery query)
+          $ agentWithSessionProgress config.onSessionProgress
+          $ fmap oneShotStep
+          $ agent0
+    
+    -- Notify session start
+    session0 <- case config.initialSession of
+      Just s -> pure s
+      Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+    
+    config.onSessionProgress (SessionStarted session0)
+    result <- run agent session0
+    config.onSessionProgress (SessionCompleted session0)
+    pure result
+
+-- | Legacy function: Run a one-shot agent with optional file-based session storage.
 mainOneShotText :: Maybe FilePath -> Props -> Text -> IO ()
 mainOneShotText mpath props query = do
     withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
-            Initialized ai -> runOneShotAgent mpath ai.agentRuntime query
+            Initialized ai -> do
+                let config = case mpath of
+                      Nothing -> defaultOneShotConfig
+                      Just path -> fileStoringConfig path Nothing
+                result <- runOneShotWithConfig config ai.agentRuntime query
+                Text.putStrLn (getOneShotResult result)
+
+-- | Legacy function: Run a one-shot agent with optional file path for session storage.
+runOneShotAgent :: Maybe FilePath -> Runtime.Runtime -> Text -> IO ()
+runOneShotAgent mpath rt query = do
+    let config = case mpath of
+          Nothing -> defaultOneShotConfig
+          Just path -> fileStoringConfig path Nothing
+    result <- runOneShotWithConfig config rt query
+    Text.putStrLn (getOneShotResult result)
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
   deriving (Show)
 instance Exception SessionLoadingFailed
-
-
-runOneShotAgent :: Maybe FilePath -> Runtime.Runtime -> Text -> IO ()
-runOneShotAgent mpath rt query = do
-    agent0 <- runtimeToAgent rt
-    let agent = agentSetQuery (UserQuery query)
-          $ maybe id agentStoreSession mpath
-          $ fmap oneShotStep
-          $ agent0
-    result <- case mpath of
-      Nothing -> do
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
-        run agent session0
-      Just path -> do
-        msession0 <- readSession path
-        case msession0 of
-          Just session0 -> run agent session0
-          Nothing -> throwIO (SessionLoadingFailed path)
-    Text.putStrLn (getOneShotResult result)
 
 -- | Stopping result type that carries the final response text.
 newtype OneShotResult = OneShotResult  { getOneShotResult :: Text }
@@ -244,18 +281,38 @@ readSession path = do
     lastLine :: LByteString.ByteString -> Maybe LByteString.ByteString
     lastLine dat = case BSL.lines dat of [] -> Nothing ; rows -> Just (last rows)
 
+-- | Legacy function: Store session to a file.
 storeSession :: Session -> FilePath -> IO ()
 storeSession sess path = do
   BSL.writeFile path (Aeson.encode sess <> "\n")
+
+-- | Creates a callback that stores session progress to a file.
+-- This is useful for creating an 'OnSessionProgress' handler that persists to disk.
+fileStoringCallback :: FilePath -> OnSessionProgress
+fileStoringCallback path progress =
+    case progress of
+        SessionUpdated sess -> storeSession sess path
+        SessionCompleted sess -> storeSession sess path
+        SessionStarted sess -> storeSession sess path  -- Also store initial session
+        SessionFailed sess _ -> storeSession sess path  -- Store even on failure
 
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent { usrQuery = pure (Just query) }
 
+-- | Legacy function: Wrap an agent to store sessions to a file.
+-- Consider using 'agentWithSessionProgress' with 'fileStoringCallback' instead.
 agentStoreSession :: forall r. FilePath -> Agent r -> Agent r
 agentStoreSession path agent =
+    agentWithSessionProgress (fileStoringCallback path) agent
+
+-- | Wrap an agent to emit session progress events after each step.
+agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r
+agentWithSessionProgress onProgress agent =
     agent { step = decorate agent.step }
   where
     decorate :: (Session -> IO (Action r)) -> (Session -> IO (Action r))
-    decorate f = \sess -> storeSession sess path >> f sess
+    decorate f = \sess -> do
+        onProgress (SessionUpdated sess)
+        f sess
 

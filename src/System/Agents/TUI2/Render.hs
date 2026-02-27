@@ -6,12 +6,11 @@ module System.Agents.TUI2.Render where
 
 import Brick
 import Brick.Focus (focusGetCurrent)
-import Brick.Widgets.Border (borderWithLabel, hBorder)
+import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.List (renderList, listSelectedElement, listElements, listSelectedAttr)
+import Brick.Widgets.List (renderList, listSelectedElement, listSelectedAttr)
 import Control.Lens ((^.))
 import qualified Brick.Util as BrickUtil
-import Data.Foldable (toList)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -116,7 +115,7 @@ render_conversationArea st =
                 [ txt "Select or create a conversation (Ctrl+n)"
                 , render_messageEditor st
                 ]
-        Just (_, conv) ->
+        Just _ ->
             vBox
                 [ render_messageEditor st
                 , render_conversationView st
@@ -130,7 +129,7 @@ render_sessionArea st =
             vBox
                 [ txt "Select or resume a session (Ctrl+c)"
                 ]
-        Just (_, conv) ->
+        Just _ ->
             hBox
                 [ render_sessionView st
                 ]
@@ -190,7 +189,7 @@ render_sessionList st =
 
 -- | Render a single conversation item.
 render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem st _ sess =
+render_sessionItem _st _ sess =
     let
         widget = txt $ Text.pack $ " " <> show sess.sessionId
     in widget
@@ -302,7 +301,7 @@ render_turn (k, turn) =
 
 -- | Helper to extract text from SystemPrompt.
 getSystemPromptText :: SystemPrompt -> Text
-getSystemPromptText (SystemPrompt txt) = txt
+getSystemPromptText (SystemPrompt txt0) = txt0
 
 -------------------------------------------------------------------------------
 -- Helper Functions
@@ -310,9 +309,9 @@ getSystemPromptText (SystemPrompt txt) = txt
 
 -- | Create a border that shows focus.
 borderWithFocus :: TuiState -> WidgetName -> Text -> Widget N -> Widget N
-borderWithFocus st name label content =
+borderWithFocus st widgetName label content =
     let labelWidget =
-            if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just name
+            if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just widgetName
                 then withAttr focusedAttr (txt label)
                 else txt label
      in borderWithLabel labelWidget content

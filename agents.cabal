@@ -80,8 +80,6 @@ library agents-lib
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
-                    , System.Agents.Runtime.Base
-                    , System.Agents.Runtime.Conversation
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace
                     , System.Agents.Session.Base

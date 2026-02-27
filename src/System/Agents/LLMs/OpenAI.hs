@@ -1,9 +1,20 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module System.Agents.LLMs.OpenAI where
+module System.Agents.LLMs.OpenAI (
+  Tool(..),Trace(..),ToolCall(..),ToolCallFunction(..),ToolName(..), Model(..), ModelFlavor(..)
+ , ApiKey(..)
+ , parseFlavor
+ , ApiBaseUrl(..)
+ , SystemPrompt(..)
+ , Response(..)
+ , callLLMPayload
+ , parseLLMResponse
+ , waitRateLimit
+ , ApiLimits(..)
+ , WaitAction(..)
+) where
 
-import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
@@ -11,13 +22,8 @@ import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
-import qualified Data.Maybe as Maybe
-import Data.Monoid (Last (..))
-import Data.Sequence (Seq)
-import qualified Data.Sequence as Seq
 import Data.String (IsString)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -193,104 +199,16 @@ instance ToJSON Tool where
                 (ObjectParamType t.toolParamProperties)
                 t.toolDescription
 
-systemMessage :: Text -> Aeson.Value
-systemMessage txt =
-    Aeson.object
-        [ "role" .= ("system" :: Text)
-        , "content" .= txt
-        ]
-
-userPromptMessage :: Text -> Aeson.Value
-userPromptMessage txt =
-    Aeson.object
-        [ "role" .= ("user" :: Text)
-        , "content" .= txt
-        ]
-
 data ToolResponse
     = ToolNotFound
     | TextToolResponse (NonEmpty Text)
     | ToolFailure Text
     deriving (Show, Eq, Ord)
 
-toolResponseMessages :: ToolCall -> ToolResponse -> Aeson.Value
-toolResponseMessages tc ToolNotFound =
-    Aeson.object
-        [ "role" .= ("tool" :: Text)
-        , "tool_call_id" .= tc.toolCallId
-        , "content" .= ("the requested tool was not found" :: Text)
-        ]
-toolResponseMessages tc (ToolFailure rsp) =
-    Aeson.object
-        [ "role" .= ("tool" :: Text)
-        , "tool_call_id" .= tc.toolCallId
-        , "content" .= rsp
-        ]
-toolResponseMessages tc (TextToolResponse rsps) =
-    Aeson.object
-        [ "role" .= ("tool" :: Text)
-        , "tool_call_id" .= tc.toolCallId
-        , "content" .= NonEmpty.toList (fmap formatText rsps)
-        ]
-  where
-    formatText txt =
-        Aeson.object
-            [ "type" .= ("text" :: Text)
-            , "text" .= txt
-            , "annotations" .= ([] :: [Text])
-            ]
-
-data HistoryItem
-    = PromptAnswered (Maybe Text) Response
-    | ToolCalled (ToolCall, ToolResponse)
-    deriving (Show)
-
-type History = Seq HistoryItem
-
-lastAnswer :: History -> Last Response
-lastAnswer hist =
-    foldMap f $ hist
-  where
-    f :: HistoryItem -> Last Response
-    f (PromptAnswered _ r) = Last $ Just r
-    f (ToolCalled _) = Last $ Nothing
-
-lastAnswerMaybe :: History -> Maybe Response
-lastAnswerMaybe = getLast . lastAnswer
-
-withLastAnswer :: a -> (Response -> a) -> History -> a
-withLastAnswer v f =
-    maybe v f . lastAnswerMaybe
-
-makeMessage :: HistoryItem -> [Aeson.Value]
-makeMessage (ToolCalled (t, rs)) = [toolResponseMessages t rs]
-makeMessage (PromptAnswered prompt r) =
-    Maybe.catMaybes
-        [ fmap userPromptMessage prompt
-        , Just $ Aeson.Object r.chosenMessage
-        ]
-
 newtype SystemPrompt = SystemPrompt {getSystemPrompt :: Text}
     deriving (Show, Eq, Ord, IsString)
 
-makeMessages :: SystemPrompt -> History -> Maybe Text -> [Aeson.Value]
-makeMessages sysPrompt hist prompt =
-    mconcat [initialHistory, recordedHistory, lastMessage]
-  where
-    initialHistory =
-        Maybe.catMaybes
-            [ Just $ systemMessage sysPrompt.getSystemPrompt
-            ]
-    recordedHistory =
-        foldMap makeMessage hist
-    lastMessage =
-        Maybe.catMaybes
-            [fmap userPromptMessage prompt]
-
 newtype ApiKey = ApiKey {revealApiKey :: ByteString}
-
-makeApiKey :: ByteString -> ApiKey
-makeApiKey = ApiKey
 
 data ModelFlavor
     = OpenAIv1
@@ -307,9 +225,6 @@ data Model = Model
     }
     deriving (Show, Eq, Ord)
 
-defaultFlavor :: ModelFlavor
-defaultFlavor = OpenAIv1
-
 parseFlavor :: Text -> Maybe ModelFlavor
 parseFlavor "kimiv1" = Just KimiV1
 parseFlavor "KimiV1" = Just KimiV1
@@ -321,55 +236,6 @@ parseFlavor "claude-v1" = Just ClaudeV1
 parseFlavor "ClaudeV1" = Just ClaudeV1
 parseFlavor _ = Nothing
 
-renderPayload ::
-    Model ->
-    [Tool] ->
-    History ->
-    Maybe Text ->
-    Aeson.Value
-renderPayload model tools hist prompt =
-    case model.modelFlavor of
-        OpenAIv1 ->
-            Aeson.object
-                [ "model" .= model.modelName
-                , "messages"
-                    .= makeMessages model.modelSystemPrompt hist prompt
-                , "tools" .= tools
-                -- todo:
-                -- allow to tune json format with something like
-                -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
-                ]
-        MistralV1 ->
-            Aeson.object
-                [ "model" .= model.modelName
-                , "messages"
-                    .= makeMessages model.modelSystemPrompt hist prompt
-                , "tools" .= tools
-                , "tool_choice" .= ("any" :: Text)
-                , "parallel_tool_calls" .= True
-                ]
-        KimiV1 ->
-            Aeson.object
-                [ "model" .= model.modelName
-                , "messages"
-                    .= makeMessages model.modelSystemPrompt hist (prompt <|> Just "ok")
-                , "tools" .= tools
-                -- todo:
-                -- allow to tune json format with something like
-                -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
-                ]
-        ClaudeV1 ->
-            Aeson.object
-                [ "model" .= model.modelName
-                , "messages"
-                    .= makeMessages model.modelSystemPrompt hist prompt
-                , "tools" .= tools
-                , "thinking"
-                    .= Aeson.object
-                        [ "type" .= ("enabled" :: Text)
-                        , "budget_tokens" .= (10000 :: Int)
-                        ]
-                ]
 
 callLLMPayload ::
     (ToJSON payload) =>
@@ -439,15 +305,6 @@ data Response
     }
     deriving (Show)
 
-finishedForToolCalls :: Response -> Bool
-finishedForToolCalls r = r.finishReason == Just "tool_calls"
-
-finishedForLength :: Response -> Bool
-finishedForLength r = r.finishReason == Just "length"
-
-finishedBecauseStopped :: Response -> Bool
-finishedBecauseStopped r = r.finishReason == Just "stop"
-
 instance FromJSON Response where
     parseJSON =
         Aeson.withObject "Response" $ \v -> do
@@ -463,16 +320,3 @@ instance FromJSON Response where
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
-
-locateResponseText :: History -> Maybe Text
-locateResponseText hist = do
-    rsp <-
-        Maybe.listToMaybe $
-            Maybe.mapMaybe viewResponse $
-                toList $
-                    Seq.reverse hist
-    rsp.rspContent
-  where
-    viewResponse :: HistoryItem -> Maybe Response
-    viewResponse (PromptAnswered _ rsp) = Just rsp
-    viewResponse _ = Nothing

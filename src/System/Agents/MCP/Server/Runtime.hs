@@ -20,20 +20,25 @@ import UnliftIO (Async, IORef, MonadIO, MonadUnliftIO, async, atomicModifyIORef,
 
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.MCP.Base as Mcp
+import qualified System.Agents.Session.Base as SessionBase
 
+-- | A mapped tool representing an expert agent exposed as an MCP tool
 data MappedTool
     = ExpertAgentAsPrompt Mcp.Name AgentTree.AgentTree
 
 type MappedTools = [MappedTool]
 
+-- | MCP Server runtime state
 data Runtime = Runtime
     { mappedTools :: MappedTools
     , actions :: IORef [(Rpc.Request, Async ())]
+    , mcpSessionProgress :: Maybe SessionBase.OnSessionProgress
+    -- ^ Optional callback for session progress tracking.
     }
 
 initRuntime :: MappedTools -> IO Runtime
 initRuntime ai =
-    Runtime ai <$> newIORef []
+    Runtime ai <$> newIORef [] <*> pure Nothing
 
 -- returns another async waiting and removing the first one from the list of pending requests
 addAsync :: Runtime -> Rpc.Request -> Async () -> IO (Async ())
@@ -119,3 +124,4 @@ encodeConduit = do
         C.yield $ Chunk . L8.toStrict $ Aeson.encode m
         C.yield $ Chunk "\n"
         C.yield Flush
+

@@ -10,14 +10,13 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
-import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Prod.Tracer (Tracer (..), contramap)
+import Prod.Tracer (contramap)
 
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newConversationId, newStepId)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newStepId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
@@ -37,12 +36,12 @@ import System.Agents.Session.Base
     , newTurnId
     )
 import System.Agents.Session.Loop (run)
+import System.Agents.OneShot (agentStoreSession)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.ToolRegistration
     ( ToolRegistration (..)
     , registerIOScriptInLLM
-    , ToolRuntimeArg
     )
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import qualified System.Agents.Tools.IO as IOTools
@@ -65,6 +64,8 @@ instance Aeson.FromJSON PromptOtherAgent where
 -- Runtime.handleConversation. It creates an Agent from the Runtime,
 -- runs it with a session, and returns the result.
 turnAgentRuntimeIntoIOTool ::
+    -- | Session storage filepath
+    Maybe FilePath ->
     -- | The runtime of the agent to convert into a tool
     Runtime ->
     -- | The slug of the calling agent (for tracing)
@@ -73,7 +74,7 @@ turnAgentRuntimeIntoIOTool ::
     AgentId ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool rt callerSlug callerId =
+turnAgentRuntimeIntoIOTool mpath rt callerSlug callerId =
     registerIOScriptInLLM io props
   where
     -- Define the parameter properties for the LLM tool schema
@@ -98,7 +99,7 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
     runSubAgent :: ConversationId -> PromptOtherAgent -> IO CByteString.ByteString
     runSubAgent conversationId (PromptOtherAgent query) = do
         -- Create the agent from the runtime with the OneShot configuration
-        agent <- runtimeToAgentForTool rt callerSlug callerId conversationId
+        agent <- runtimeToAgentForTool mpath rt callerSlug callerId conversationId
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) agent
@@ -117,12 +118,13 @@ turnAgentRuntimeIntoIOTool rt callerSlug callerId =
 -- | Creates an Agent from a Runtime configured for use as a tool.
 -- Based on runtimeToAgent from OneShot.hs.
 runtimeToAgentForTool ::
+    Maybe FilePath ->
     Runtime ->
     AgentSlug ->
     AgentId ->
     ConversationId ->
     IO (Agent (LlmTurnContent, Session))
-runtimeToAgentForTool rt callerSlug callerId parentConvId = do
+runtimeToAgentForTool mpath rt callerSlug callerId parentConvId = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -139,6 +141,7 @@ runtimeToAgentForTool rt callerSlug callerId parentConvId = do
     let completeF = mkOpenAICompletion completionConfig
 
     pure $
+      maybe id agentStoreSession mpath $
         Agent
             { step = naiveTilNoToolCallStep
             , sysPrompt = pure sPrompt
@@ -196,7 +199,7 @@ toolParamsToJson props =
             , "description" .= p.propertyDescription
             ]
             ++ case p.propertyType of
-                EnumParamType values -> ["enum" .= values]
+                EnumParamType values -> ["enum" Aeson..= values]
                 _ -> []
 
     paramTypeToString :: ParamType -> Text
@@ -213,7 +216,7 @@ toolParamsToJson props =
 -- | Execute a tool call using the runtime's registered tools.
 -- Based on executeToolCall from OneShot.hs.
 executeToolCall :: IO [ToolRegistration] -> LlmToolCall -> IO UserToolResponse
-executeToolCall registrations (LlmToolCall callVal) = do
+executeToolCall registrations (LlmToolCall _callVal) = do
     -- For simplicity in this OneShot-based version, we return the raw
     -- tool call result. In a more sophisticated implementation, we would
     -- parse the tool call and execute it using the registered tools.

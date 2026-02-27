@@ -443,10 +443,11 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool Nothing
                             }
             TerminalUI opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+                let sessionMpath = opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -455,13 +456,14 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionMpath
                             }
-                TUI2.runTUI (opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix) (fmap oneAgent pargs.agentFiles)
+                TUI2.runTUI sessionMpath (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
             OneShot opts -> do
+                let sessionMpath = pargs.sessionsJsonPrefix
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
@@ -472,7 +474,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 baseTracer
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionMpath
                             }
             SelfDescribe -> do
                 -- verify the api-key file exists at least
@@ -492,6 +494,7 @@ main = do
                         (Just $ Bash.AddMessage "--no output--")
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+                let sessionMpath = pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -503,9 +506,9 @@ main = do
                                         traceUsefulPromptStderr
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionMpath
                             }
-                McpServer.multiAgentsServer (fmap oneAgent pargs.agentFiles)
+                McpServer.multiAgentsServer McpServer.defaultMcpServerConfig (fmap oneAgent pargs.agentFiles)
             Initialize ->
                 let o =
                         Agent
@@ -566,8 +569,6 @@ toJsonTrace x = case x of
     encodeBaseAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
     encodeBaseAgentTrace (Runtime.AgentTrace_Loading _ _ tr) =
         encodeBaseTrace_Loading tr
-    encodeBaseAgentTrace (Runtime.AgentTrace_Memorize _ _ _ tr) =
-        encodeBaseTrace_Memorize tr
     encodeBaseAgentTrace (Runtime.AgentTrace_Conversation _ _ convId tr) = do
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
@@ -581,16 +582,6 @@ toJsonTrace x = case x of
         case bt of
             (BashToolbox.BashToolsLoadingTrace _) -> Nothing
             (BashToolbox.ReloadToolsTrace _) -> Nothing
-
-    encodeBaseTrace_Memorize :: Runtime.MemorizeTrace -> Maybe Aeson.Value
-    encodeBaseTrace_Memorize bt =
-        case bt of
-            (Runtime.Calling _ _ _) ->
-                Nothing
-            (Runtime.GotResponse _ _ _ _) ->
-                Nothing
-            (Runtime.InteractionDone _ _) ->
-                Nothing
 
     encodeBaseTrace_Conversation :: Runtime.ConversationTrace -> Maybe Aeson.Value
     encodeBaseTrace_Conversation bt =

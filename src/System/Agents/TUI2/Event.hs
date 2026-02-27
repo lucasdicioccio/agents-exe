@@ -5,13 +5,13 @@
 module System.Agents.TUI2.Event where
 
 import Brick
-import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.BChan (newBChan, readBChan, writeBChan, BChan)
 import Brick.Focus (focusGetCurrent, focusSetCurrent, focusNext, focusPrev, focusRingModify)
-import Brick.Widgets.Edit (Editor, handleEditorEvent, editContentsL, getEditContents)
+import Brick.Widgets.Edit (handleEditorEvent, editContentsL, getEditContents)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listInsert, listSelectedL, listElements)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO)
-import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO, writeTVar)
+import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (use, (%=), (.=), to)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
@@ -24,9 +24,9 @@ import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId (..), newConversationId)
-import System.Agents.OneShot (runtimeToAgent, storeSession)
+import System.Agents.OneShot (runtimeToAgent, fileStoringCallback)
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..))
+import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.TUI2.Types
 
@@ -35,8 +35,8 @@ import System.Agents.TUI2.Types
 -------------------------------------------------------------------------------
 
 -- | Main event handler for the TUI application.
-tui_appHandleEvent :: FilePath -> BrickEvent N AppEvent -> EventM N TuiState ()
-tui_appHandleEvent convPrefix ev = do
+tui_appHandleEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
+tui_appHandleEvent ev = do
     case ev of
         -- Application events
         AppEvent AppEvent_Heartbeat ->
@@ -62,9 +62,9 @@ tui_appHandleEvent convPrefix ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) ->
             toggleZoom
         VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) ->
-            handleNewConversationFromEditor convPrefix
+            handleNewConversationFromEditor
         VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) ->
-            handleRestoredConversation convPrefix
+            handleRestoredConversation
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
 
@@ -74,10 +74,10 @@ tui_appHandleEvent convPrefix ev = do
             case currentFocus of
                 Just AgentListWidget ->
                     handleAgentListEvent vtyEv
-                Just ConversationListWidget ->
-                    handleConversationListEvent vtyEv
                 Just SessionsListWidget ->
                     handleSessionsListEvent vtyEv
+                Just ConversationListWidget ->
+                    handleConversationListEvent vtyEv
                 Just MessageEditorWidget ->
                     handleMessageEditorEvent ev
                 Just ConversationViewWidget ->
@@ -304,71 +304,114 @@ handleRefreshTools = do
 -------------------------------------------------------------------------------
 
 -- | Create a new conversation from the selected agent.
-handleNewConversationFromEditor :: FilePath -> EventM N TuiState ()
-handleNewConversationFromEditor convPrefix = do
+handleNewConversationFromEditor :: EventM N TuiState ()
+handleNewConversationFromEditor = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
-           runConversation convPrefix baseTuiAgent session
+           runConversation baseTuiAgent session
+        _ ->
+           pure ()
 
 -- | Continue a session restored from storage.
 -- This starts the agent loop with the restored session.
-handleRestoredConversation :: FilePath -> EventM N TuiState ()
-handleRestoredConversation convPrefix = do
+handleRestoredConversation :: EventM N TuiState ()
+handleRestoredConversation = do
     mSession <- use (tuiUI . sessionList . to listSelectedElement)
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
     case (,) <$> mSession <*> mAgent of
-        Just ((idx, session), (_,baseTuiAgent)) -> do
-            runConversation convPrefix baseTuiAgent session
+        Just ((_, session), (_,baseTuiAgent)) -> do
+            runConversation baseTuiAgent session
+        _ ->
+           pure ()
 
-runConversation :: FilePath -> TuiAgent -> Session -> EventM N TuiState ()
-runConversation convPrefix baseTuiAgent session = do
-            -- * agent will have prompt, tools from the base agent, but will communicate via a pair of chans
-            agent0 <- liftIO $ runtimeToAgent (baseTuiAgent.agentTree.agentRuntime)
-            convId@(ConversationId cId) <- liftIO $ newConversationId
-            let convFilePath = convPrefix <> "conv." <> show cId <> ".json"
-            outChan <- use eventChan
-            let notifyProgress sess = writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
-            let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-            inChan <- liftIO $ newBChan 100
-            let a = agent0 {
-                step = \sess -> do
-                   storeSession sess convFilePath
-                   notifyProgress sess
-                   ret <- agent0.step sess
-                   case ret of
-                      Stop _r -> -- smoll hack to reuse the naive step from runtimeToAgent
-                        pure $ AskUserPrompt (MissingUserPrompt True [])
-                      _ -> pure ret
-              , usrQuery = notifyNeedInput >> readBChan inChan
-              }
+-- | Build the progress callback for a conversation.
+-- Combines the global session config with TUI-specific notification needs.
+buildOnProgress :: FilePath -> ConversationId -> BChan AppEvent -> OnSessionProgress
+buildOnProgress _filePath convId outChan progress = do
+    -- Notify TUI of progress updates
+    case progress of
+        SessionUpdated sess -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+        SessionCompleted sess -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+        SessionStarted sess -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+        SessionFailed sess _ -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
 
-            -- * wrap in Conversation
-            let tuiAgent = TuiAgent a baseTuiAgent.agentTree
-            threadId <- liftIO $ forkIO $ void $ Loop.run a session
-            let conv =
-                    Conversation
-                        { conversationId = convId
-                        , conversationAgent = tuiAgent
-                        , conversationThreadId = Just threadId
-                        , conversationSession = Nothing
-                        , conversationName = "@" <> tuiAgent.agentTree.agentRuntime.agentSlug
-                        , conversationChan = inChan
-                        , conversationStatus = ConversationStatus_WaitingForInput
-                        , conversationFilePath = convFilePath
-                        }
+runConversation :: TuiAgent -> Session -> EventM N TuiState ()
+runConversation baseTuiAgent session = do
+    -- Get session configuration
+    config <- use sessionConfig
+    
+    -- Generate conversation ID and determine file path
+    convId@(ConversationId cId) <- liftIO $ newConversationId
+    
+    -- Determine the file path and progress callback
+    let (mFilePath, globalOnProgress) = case config.sessionFilePrefix of
+          Just prefix -> 
+            let path = prefix ++ "conv." ++ show cId ++ ".json"
+            in (Just path, config.sessionOnProgress)
+          Nothing -> (Nothing, config.sessionOnProgress)
+    
+    outChan <- use eventChan
+    inChan <- liftIO $ newBChan 100
+    
+    -- Build the combined progress callback
+    let notifyProgress = buildOnProgress (maybe "" id mFilePath) convId outChan
+    let fileCallback = maybe (\_ -> pure ()) fileStoringCallback mFilePath
+    
+    -- Combine callbacks: first the file storage (if any), then TUI notification, then global config
+    let combinedOnProgress progressEvent = do
+            fileCallback progressEvent
+            notifyProgress progressEvent
+            globalOnProgress progressEvent
+    
+    -- Create the agent with the progress callback
+    agent0 <- liftIO $ runtimeToAgent (baseTuiAgent.agentTree.agentRuntime)
+    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+    let a = agent0 {
+        step = \sess -> do
+           combinedOnProgress (SessionUpdated sess)
+           ret <- agent0.step sess
+           case ret of
+              Stop _r -> -- smoll hack to reuse the naive step from runtimeToAgent
+                pure $ AskUserPrompt (MissingUserPrompt True [])
+              _ -> pure ret
+      , usrQuery = notifyNeedInput >> readBChan inChan
+      }
+
+    -- * wrap in Conversation
+    let tuiAgent = TuiAgent a baseTuiAgent.agentTree
+    threadId <- liftIO $ forkIO $ do
+        combinedOnProgress (SessionStarted session)
+        void $ Loop.run a session
+        combinedOnProgress (SessionCompleted session)
+    let conv =
+            Conversation
+                { conversationId = convId
+                , conversationAgent = tuiAgent
+                , conversationThreadId = Just threadId
+                , conversationSession = Nothing
+                , conversationName = "@" <> tuiAgent.agentTree.agentRuntime.agentSlug
+                , conversationChan = inChan
+                , conversationStatus = ConversationStatus_WaitingForInput
+                , conversationFilePath = mFilePath
+                , conversationOnProgress = combinedOnProgress
+                }
 
 
-            -- Add to core
-            coreRef <- use tuiCore
-            liftIO $ atomically $ modifyTVar coreRef $ \c ->
-                c{coreConversations = conv : coreConversations c}
-            -- Update UI
-            tuiUI . conversationList %= listInsert 0 conv
-            tuiUI . conversationList . listSelectedL .= Just 0
-            tuiUI . uiFocusRing %= focusRingModify (CList.insertR ConversationViewWidget)
-            tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
+    -- Add to core
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c{coreConversations = conv : coreConversations c}
+    -- Update UI
+    tuiUI . conversationList %= listInsert 0 conv
+    tuiUI . conversationList . listSelectedL .= Just 0
+    tuiUI . uiFocusRing %= focusRingModify (CList.insertR ConversationViewWidget)
+    tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
 
 -- | Send a message in the current conversation.
 handleSendMessage :: EventM N TuiState ()

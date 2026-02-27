@@ -17,6 +17,8 @@ module System.Agents.TUI2.Core (
     Core(..),
     UIState(..),
     TuiState(..),
+    SessionConfig(..),
+    defaultSessionConfig,
     initUIState,
     updateConversationSession,
     updateConversation,
@@ -49,10 +51,12 @@ module System.Agents.TUI2.Core (
     
     -- * Main entry point
     runTUI,
+    runTUIWithConfig,
+    fileSessionConfig,
 ) where
 
 import Brick hiding (Down)
-import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.BChan (newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO)
@@ -66,10 +70,8 @@ import System.Directory (listDirectory, doesFileExist, getModificationTime)
 import System.FilePath ((</>))
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
-import System.Agents.Base (ConversationId(..), newConversationId)
-import System.Agents.OneShot (runtimeToAgent, readSession, storeSession)
-import qualified System.Agents.Runtime as Runtime
-import System.Agents.Session.Base (Session(..))
+import System.Agents.OneShot (runtimeToAgent, readSession, fileStoringCallback)
+import System.Agents.Session.Base (Session(..), OnSessionProgress, ignoreSessionProgress)
 
 -- Import from submodules
 import System.Agents.TUI2.Types
@@ -142,21 +144,44 @@ filterM p = foldr (\x acc -> do
     if b then (x :) <$> acc else acc) (return [])
 
 -------------------------------------------------------------------------------
+-- Session Configuration Helpers
+-------------------------------------------------------------------------------
+
+-- | Create a session configuration with file-based persistence.
+fileSessionConfig :: FilePath -> SessionConfig
+fileSessionConfig prefix = SessionConfig
+    { sessionOnProgress = ignoreSessionProgress  -- Will be set per-conversation with specific path
+    , sessionFilePrefix = Just prefix
+    }
+
+-------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
--- | Initialize the TUI with props.
+-- | Initialize the TUI with props and optional conversation prefix (legacy API).
+-- 
+-- For more control, use 'runTUIWithConfig' instead.
 runTUI :: Maybe FilePath -> [Props] -> IO ()
-runTUI mConvPrefix props = do
-    let convPrefix = fromMaybe "./" mConvPrefix
+runTUI mConvPrefix props = 
+    let config = case mConvPrefix of
+          Nothing -> defaultSessionConfig
+          Just prefix -> fileSessionConfig prefix
+    in runTUIWithConfig config props
+
+-- | Initialize the TUI with a custom session configuration.
+runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
+runTUIWithConfig config props = do
+    let convPrefix = fromMaybe "./" config.sessionFilePrefix
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTreeRuntime props
     let itrees = [rt | Initialized rt <- trees]
     sessionAgents <- traverse (runtimeToAgent . agentRuntime) itrees
     let tuiAgents = zipWith TuiAgent sessionAgents itrees
 
-    -- Load existing session files
-    loadedSessions <- loadSessionFiles convPrefix
+    -- Load existing session files (only if file prefix is provided)
+    loadedSessions <- case config.sessionFilePrefix of
+        Just prefix -> loadSessionFiles prefix
+        Nothing -> pure []
     
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
@@ -167,15 +192,15 @@ runTUI mConvPrefix props = do
     -- Create UI state
     let ui0 = initUIState tuiAgents [s | (_,Just s) <- loadedSessions]
 
-    -- Create TUI state
-    let st = TuiState core0 ui0 evChan
+    -- Create TUI state with session configuration
+    let st = TuiState core0 ui0 evChan config
 
     -- Build and run the app
     let app =
             App
                 { appDraw = tui_appDraw
                 , appChooseCursor = tui_appChooseCursor
-                , appHandleEvent = tui_appHandleEvent convPrefix
+                , appHandleEvent = tui_appHandleEvent
                 , appStartEvent = tui_appStartEvent
                 , appAttrMap = tui_appAttrMap
                 }
