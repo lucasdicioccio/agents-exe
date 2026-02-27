@@ -53,7 +53,7 @@ mkOpenAICompletion config completion = do
     buildPayload :: LlmCompletion -> Aeson.Value
     buildPayload comp =
         let 
-            tools = map systemToolToOpenAI comp.completeTools
+            tools = map (OpenAI.adaptTool . systemToolToOpenAI) comp.completeTools
             messages = buildMessages comp
          in Aeson.object $
                 [ "model" .= config.cfgModelName

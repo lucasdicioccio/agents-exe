@@ -67,7 +67,7 @@ registerBashToolInLLM ::
 registerBashToolInLLM script =
     let
         matchName :: BashTools.ScriptDescription -> OpenAI.ToolCall -> Bool
-        matchName bash call = bash2LLMName bash == call.toolCallFunction.toolCallFunctionName
+        matchName bash call = OpenAI.capToolName (bash2LLMName bash) == call.toolCallFunction.toolCallFunctionName
 
         mapToolDescriptionBash2LLM :: BashTools.ScriptDescription -> OpenAI.Tool
         mapToolDescriptionBash2LLM bash =
@@ -104,7 +104,7 @@ registerIOScriptInLLM ::
 registerIOScriptInLLM script llmProps =
     let
         matchName :: IOTools.IOScript ToolRuntimeArg a b -> OpenAI.ToolCall -> Bool
-        matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
+        matchName io call = OpenAI.capToolName (io2LLMName io) == call.toolCallFunction.toolCallFunctionName
 
         tool :: Tool ToolRuntimeArg ()
         tool = ioTool script
@@ -129,7 +129,7 @@ registerMcpToolInLLM ::
 registerMcpToolInLLM box mcp =
     let
         matchName :: McpTools.ToolDescription -> OpenAI.ToolCall -> Bool
-        matchName td call = mcp2LLMName box td == call.toolCallFunction.toolCallFunctionName
+        matchName td call = OpenAI.capToolName (mcp2LLMName box td) == call.toolCallFunction.toolCallFunctionName
 
         llmBasedSchema :: Either String [ParamProperty]
         llmBasedSchema = adaptSchema mcp.getToolDescription.inputSchema
@@ -167,7 +167,7 @@ registerOpenApiToolInLLM ::
 registerOpenApiToolInLLM box desc =
     let
         matchName :: OpenApiTools.ToolDescription -> OpenAI.ToolCall -> Bool
-        matchName d call = openapi2LLMName box d == call.toolCallFunction.toolCallFunctionName
+        matchName d call = OpenAI.capToolName (openapi2LLMName box d) == call.toolCallFunction.toolCallFunctionName
 
         llmName :: OpenAI.ToolName
         llmName = openapi2LLMName box desc

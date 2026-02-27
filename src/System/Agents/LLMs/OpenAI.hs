@@ -8,9 +8,11 @@ import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import Data.Bits (xor, shiftL)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LByteString
+import Data.Char (ord)
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
@@ -26,6 +28,7 @@ import Data.Text.Read as Text
 import qualified Network.HTTP.Client as NetHttpClient
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import Text.Read (readMaybe)
+import Numeric (showHex)
 
 import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.ToolSchema
@@ -173,6 +176,49 @@ data Tool = Tool
     , toolParamProperties :: [ParamProperty]
     }
     deriving (Show)
+
+-- | Maximum length for a tool name (OpenAI limit)
+maxToolNameLength :: Int
+maxToolNameLength = 64
+
+-- | Length of the hash prefix to use when truncating tool names
+hashPrefixLength :: Int
+hashPrefixLength = 8
+
+-- | Compute a simple hash of a Text value.
+-- Uses a variant of djb2 algorithm to produce a 32-bit hash.
+textHash :: Text -> Text
+textHash txt =
+    let h = Text.foldl' hashStep 5381 txt
+        hashStep hash char = ((hash `shiftL` 5) + hash) `xor` ord char
+        -- Convert to hex, padding to 8 characters
+        hex = Text.pack $ showHex (fromIntegral h :: Word) ""
+    in Text.take hashPrefixLength (hex <> "00000000")
+
+-- | Caps a tool name to 64 characters.
+-- If the name exceeds 64 chars, the head is replaced with a hash prefix
+-- and the description is updated to include the original tool name.
+capToolName :: ToolName -> ToolName
+capToolName tn =
+    let originalName = tn.getToolName
+        nameLen = Text.length originalName
+    in if nameLen <= maxToolNameLength
+        then tn
+        else
+            let -- Calculate how much of the tail we can keep
+                 suffixLength = maxToolNameLength - hashPrefixLength - 1  -- -1 for the hyphen
+                 suffix = Text.drop (nameLen - suffixLength) originalName
+                 newName = textHash originalName <> "-" <> suffix
+            in ToolName newName
+
+adaptTool :: Tool -> Tool
+adaptTool tool =
+  let
+    newToolName = capToolName tool.toolName
+    newDesc = tool.toolDescription <> "\n(tool: " <> tool.toolName.getToolName <> ")"
+  in if newToolName == tool.toolName
+     then tool
+     else tool { toolName = newToolName, toolDescription = newDesc }
 
 instance ToJSON Tool where
     toJSON t =
@@ -334,7 +380,7 @@ renderPayload model tools hist prompt =
                 [ "model" .= model.modelName
                 , "messages"
                     .= makeMessages model.modelSystemPrompt hist prompt
-                , "tools" .= tools
+                , "tools" .= map adaptTool tools
                 -- todo:
                 -- allow to tune json format with something like
                 -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
@@ -344,7 +390,7 @@ renderPayload model tools hist prompt =
                 [ "model" .= model.modelName
                 , "messages"
                     .= makeMessages model.modelSystemPrompt hist prompt
-                , "tools" .= tools
+                , "tools" .= map adaptTool tools
                 , "tool_choice" .= ("any" :: Text)
                 , "parallel_tool_calls" .= True
                 ]
@@ -353,7 +399,7 @@ renderPayload model tools hist prompt =
                 [ "model" .= model.modelName
                 , "messages"
                     .= makeMessages model.modelSystemPrompt hist (prompt <|> Just "ok")
-                , "tools" .= tools
+                , "tools" .= map adaptTool tools
                 -- todo:
                 -- allow to tune json format with something like
                 -- "json_format" .= Aeson.object [ "type" .= ("json_object :: Text) ]
@@ -363,7 +409,7 @@ renderPayload model tools hist prompt =
                 [ "model" .= model.modelName
                 , "messages"
                     .= makeMessages model.modelSystemPrompt hist prompt
-                , "tools" .= tools
+                , "tools" .= map adaptTool tools
                 , "thinking"
                     .= Aeson.object
                         [ "type" .= ("enabled" :: Text)
@@ -476,3 +522,4 @@ locateResponseText hist = do
     viewResponse :: HistoryItem -> Maybe Response
     viewResponse (PromptAnswered _ rsp) = Just rsp
     viewResponse _ = Nothing
+
