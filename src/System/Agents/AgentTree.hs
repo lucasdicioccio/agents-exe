@@ -224,9 +224,9 @@ instance Aeson.FromJSON PromptOtherAgent where
         PromptOtherAgent
             <$> v Aeson..: "what"
 
-turnAgentRuntimeIntoIOTool ::
+turnAgentRuntimeIntoIOTool_ ::
     Runtime -> AgentSlug -> AgentId -> ToolRegistration
-turnAgentRuntimeIntoIOTool rt callerSlug callerId =
+turnAgentRuntimeIntoIOTool_ rt callerSlug callerId =
     registerIOScriptInLLM io props
   where
     props =

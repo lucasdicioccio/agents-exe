@@ -14,6 +14,7 @@ import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
@@ -442,7 +443,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
-                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
                             }
             TerminalUI opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
@@ -454,7 +455,7 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
                             }
                 TUI2.runTUI (opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix) (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
@@ -471,7 +472,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 baseTracer
-                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
                             }
             SelfDescribe -> do
                 -- verify the api-key file exists at least
@@ -502,7 +503,7 @@ main = do
                                         traceUsefulPromptStderr
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
-                            , AgentTree.agentToTool = AgentTree.turnAgentRuntimeIntoIOTool
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool
                             }
                 McpServer.multiAgentsServer (fmap oneAgent pargs.agentFiles)
             Initialize ->

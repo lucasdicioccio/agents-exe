@@ -61,6 +61,7 @@ library agents-lib
     default-extensions: OverloadedStrings, OverloadedRecordDot
     exposed-modules:  System.Agents
                     , System.Agents.AgentTree
+                    , System.Agents.AgentTree.OneShotTool
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.CLI.TraceUtils
