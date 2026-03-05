@@ -72,6 +72,7 @@ library agents-lib
                     , System.Agents.FileNotification
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
+                    , System.Agents.Tools.Context
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
@@ -175,7 +176,7 @@ executable agents-exe
     -- Directories containing source files.
     hs-source-dirs:   app
 
-    -- Base language which the package is written in.
+    -- Base language which the package written in.
     default-language: Haskell2010
 
 test-suite agents-tests
