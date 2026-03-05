@@ -121,11 +121,9 @@ fileSessionConfig store = SessionConfig
 -- | Initialize the TUI with props and optional conversation prefix (legacy API).
 -- 
 -- For more control, use 'runTUIWithConfig' instead.
-runTUI :: Maybe SessionStore -> [Props] -> IO ()
-runTUI mStore props = 
-    let config = case mStore of
-          Nothing -> defaultSessionConfig
-          Just store -> fileSessionConfig store
+runTUI :: SessionStore -> [Props] -> IO ()
+runTUI store props = 
+    let config = fileSessionConfig store
     in runTUIWithConfig config props
 
 -- | Initialize the TUI with a custom session configuration.

@@ -86,16 +86,14 @@ runOneShotWithConfig config convId rt query = do
     pure result
 
 -- | Legacy function: Run a one-shot agent with optional file-based session storage.
-mainOneShotText :: Maybe SessionStore -> Props -> Text -> IO ()
-mainOneShotText mstore props query = do
+mainOneShotText :: SessionStore -> Props -> Text -> IO ()
+mainOneShotText store props query = do
     convId <- newConversationId
     withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized ai -> do
-                let config = case mstore of
-                      Nothing -> defaultOneShotConfig
-                      Just store -> fileStoringConfig store Nothing
+                let config = fileStoringConfig store Nothing
                 result <- runOneShotWithConfig config convId ai.agentRuntime query
                 Text.putStrLn (getOneShotResult result)
 
