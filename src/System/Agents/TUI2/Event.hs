@@ -356,7 +356,7 @@ runConversation baseTuiAgent session = do
     
     -- Build the combined progress callback
     let notifyProgress = buildOnProgress convId outChan
-    let fileCallback = maybe (\_ -> pure ()) (\store -> fileStoringCallback store convId) config.sessionStore
+    let fileCallback = fileStoringCallback config.sessionStore convId
     
     -- Combine callbacks: first the file storage (if any), then TUI notification, then global config
     let combinedOnProgress progressEvent = do

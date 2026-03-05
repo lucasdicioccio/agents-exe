@@ -109,7 +109,7 @@ loadSessionFiles store = do
 -- | Create a session configuration with file-based persistence.
 fileSessionConfig :: SessionStore -> SessionConfig
 fileSessionConfig store = SessionConfig
-    { sessionStore = Just store
+    { sessionStore = store
     }
 
 -------------------------------------------------------------------------------
@@ -134,9 +134,7 @@ runTUIWithConfig config props = do
     let tuiAgents = zipWith TuiAgent sessionAgents itrees
 
     -- Load existing session files (only if file prefix is provided)
-    loadedSessions <- case config.sessionStore of
-        Just store -> loadSessionFiles store
-        Nothing -> pure []
+    loadedSessions <- loadSessionFiles config.sessionStore
     
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100

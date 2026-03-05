@@ -99,7 +99,7 @@ data Conversation = Conversation
 
 -- | Configuration for session handling in the TUI.
 data SessionConfig = SessionConfig
-    { sessionStore :: Maybe SessionStore
+    { sessionStore :: SessionStore
     }
 
 -------------------------------------------------------------------------------
