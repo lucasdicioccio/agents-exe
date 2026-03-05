@@ -1,4 +1,7 @@
 **.swp
 **.key
 **.keys
+agents-logfile
+logs.json
+conv.*.json
 dist-newstyle/
