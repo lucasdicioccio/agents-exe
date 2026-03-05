@@ -1,4 +1,4 @@
-{ "agentsDirectories":["./agents", "./dev-agents/", "./neo-agents"]
+{ "agentsDirectories":["./agents", "./dev-agents/"]
 , "agentsFiles":[]
 , "agentsLogs": {
     "logJsonPath": "logs.json"

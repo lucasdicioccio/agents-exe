@@ -126,6 +126,7 @@ cmd_process() {
 # ==============================================================================
 
 cmd_worktree_exec() {
+    set -x
     local label="$1" name="$2" instruction_rel="$3"
     local orig_cwd="$PWD"
     local instruction_abs="${orig_cwd}/${instruction_rel}"
@@ -150,11 +151,14 @@ cmd_worktree_exec() {
         echo "Warning: git-agent-task.sh not found. Skipping preparation."
     fi
 
+
     # 4. Agent Execution
     local session_file="${orig_cwd}/${SESSIONS_DIR}/${name}.session.json"
     local session_md="${orig_cwd}/${SESSIONS_DIR}/${name}.session.md"
     local agent_config="${orig_cwd}/$(get_agent_config "$label")"
     local commit_message="Update via automation ($name)"
+
+    agents-exe --agent-file "$agent_config" check
 
     if [[ -f "$instruction_abs" ]]; then
         mkdir -p "$(dirname "$session_file")"
