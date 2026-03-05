@@ -40,7 +40,6 @@ import System.Agents.OneShot (agentStoreSession)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
-import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
     ( ToolRegistration (..)
     , registerIOScriptInLLM
