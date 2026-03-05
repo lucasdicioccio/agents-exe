@@ -20,7 +20,7 @@ declare -A PROJECT_MAP=(
 
 # Mapping: Label -> Agent configuration file path
 declare -A AGENT_MAP=(
-    ["default"]="task-agents/kimi-agent-oneshot.json"
+    ["default"]="tasks-agents/kimi-agent-oneshot.json"
 )
 
 # ==============================================================================
