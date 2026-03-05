@@ -28,6 +28,7 @@ import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
+import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.TUI2.Core as TUI2
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
@@ -148,6 +149,7 @@ data Command
     | SelfDescribe
     | Initialize
     | McpServer
+    | SessionPrint SessionPrint.SessionPrintOptions
 
 data PromptScriptDirective
     = Str Text.Text
@@ -271,6 +273,34 @@ parseMcpServer :: Parser Command
 parseMcpServer =
     pure McpServer
 
+parseSessionPrintCommand :: Parser Command
+parseSessionPrintCommand =
+    SessionPrint <$> parseSessionPrintOptions
+
+parseSessionPrintOptions :: Parser SessionPrint.SessionPrintOptions
+parseSessionPrintOptions =
+    SessionPrint.SessionPrintOptions
+        <$> strArgument
+            ( metavar "SESSIONFILE"
+                <> help "Path to the session JSON file to print"
+            )
+        <*> switch
+            ( long "show-tool-call-results"
+                <> help "Show the results of tool calls in the output"
+            )
+        <*> optional
+            ( option auto
+                ( long "n-turns"
+                    <> metavar "N"
+                    <> help "Limit output to the first N turns (no limit if not specified)"
+                    <> showDefault
+                )
+            )
+        <*> switch
+            ( long "repeat-system-prompt"
+                <> help "Repeat the system prompt at each turn (default: False)"
+            )
+
 {-
   where
     parseOptions :: Parser McpServerOptions
@@ -354,6 +384,7 @@ parseProgOptions argparserargs =
                 <> command "describe" (info parseSelfDescribeCommand (idm))
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
+                <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
             )
 
 main :: IO ()
@@ -486,7 +517,11 @@ main = do
                             InitProject.initAgentFile o agentFile
                             InitProject.initAgentTooldir o agentFile
                             InitProject.initKeyFile pargs.apiKeysFile
+            SessionPrint opts -> do
+                SessionPrint.handleSessionPrint opts
 
+-------------------------------------------------------------------------------
+-- Utility Functions
 -------------------------------------------------------------------------------
 
 maybeToEither :: Maybe a -> Either () a
@@ -691,3 +726,4 @@ interpretPromptScriptDirective x =
         FileContents p -> Text.readFile p
         Separator n s -> pure $ Text.replicate n s
         ShellOutput cmd -> Text.pack <$> Process.readCreateProcess (Process.shell cmd) ("" :: String)
+
