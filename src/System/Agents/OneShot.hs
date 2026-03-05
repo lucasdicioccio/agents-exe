@@ -138,7 +138,7 @@ runtimeToAgent store mPath rt = do
 
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
-extractResponseText (LlmResponse txt _) = Maybe.fromMaybe "" txt
+extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
 
 -- | Execute a tool call using the runtime's registered tools.
 executeToolCall :: IO [ToolRegistration] -> LlmToolCall -> IO UserToolResponse

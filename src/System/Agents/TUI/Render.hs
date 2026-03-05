@@ -41,6 +41,10 @@ userMessageAttr = attrName "userMessage"
 llmMessageAttr :: AttrName
 llmMessageAttr = attrName "llmMessage"
 
+-- | Attribute for thinking/reasoning content.
+thinkingAttr :: AttrName
+thinkingAttr = attrName "thinking"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -290,7 +294,19 @@ render_turn (k, turn) =
                     ]
         LlmTurn llmTurn ->
             withAttr llmMessageAttr $
-                vBox
+                vBox $
+                    -- Show thinking content if present
+                    (case llmTurn.llmResponse.responseThinking of
+                        Just thinking ->
+                            [ withAttr thinkingAttr $
+                                vBox
+                                    [ txt "🤔 Thinking..."
+                                    , txt thinking
+                                    , txt ""
+                                    ]
+                            ]
+                        Nothing -> []
+                    ) ++
                     [ case llmTurn.llmResponse.responseText of
                         Just txt0 -> txt $ "< " <> txt0
                         Nothing -> txt "< (no response)"
@@ -329,5 +345,6 @@ tui_appAttrMap _ =
         , (listSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.blue)
         , (userMessageAttr, BrickUtil.fg Vty.green)
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
+        , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
         ]
 

@@ -430,7 +430,7 @@ toolParamsToJson props =
 -- | Extract text content from an LLM response.
 -- Based on extractResponseText from OneShot.hs.
 extractResponseText :: SessionBase.LlmResponse -> Text
-extractResponseText (SessionBase.LlmResponse txt _) =
+extractResponseText (SessionBase.LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
 
 -------------------------------------------------------------------------------

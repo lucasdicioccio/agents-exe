@@ -226,7 +226,11 @@ mkOpenAICompletion config completion = do
     -- Extract LlmResponse and [LlmToolCall] from parsed Response
     extractResponse :: Aeson.Value -> OpenAI.Response -> (LlmResponse, [LlmToolCall])
     extractResponse rawValue rsp =
-        let llmRsp = LlmResponse rsp.rspContent rawValue
+        let llmRsp = LlmResponse
+                { responseText = rsp.rspContent
+                , responseThinking = rsp.rspReasoningContent  -- Extract thinking/reasoning content
+                , rawResponse = rawValue
+                }
             toolCalls = case rsp.rspToolCalls of
                 Nothing -> []
                 Just calls -> map toolCallToLlmToolCall calls

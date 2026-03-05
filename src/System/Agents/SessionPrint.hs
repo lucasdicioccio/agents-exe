@@ -153,13 +153,21 @@ formatUserTurn opts isFirstTurn content =
 -- | Format LLM turn content.
 formatLlmTurn :: SessionPrintOptions -> Session.LlmTurnContent -> Text.Text
 formatLlmTurn _opts content =
-    let responseSection = case content.llmResponse.responseText of
+    let thinkingSection = case content.llmResponse.responseThinking of
+            Just thinking ->
+                "### Thinking Process\n\n" <>
+                "<details>\n" <>
+                "<summary>Click to expand reasoning</summary>\n\n" <>
+                thinking <> "\n" <>
+                "</details>\n\n"
+            Nothing -> ""
+        responseSection = case content.llmResponse.responseText of
             Just txt -> "### Response\n\n" <> txt <> "\n"
             Nothing -> "### Response\n\n_(No text response)_\n"
         toolCallsSection = if null content.llmToolCalls
             then ""
             else "\n### Tool Calls\n\n" <> formatLlmToolCalls content.llmToolCalls
-    in responseSection <> toolCallsSection
+    in thinkingSection <> responseSection <> toolCallsSection
 
 -- | Format available tools (just names and descriptions).
 formatAvailableTools :: [Session.SystemTool] -> Text.Text
