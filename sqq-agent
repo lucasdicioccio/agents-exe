@@ -11,7 +11,7 @@ SQQ_BIN="${SQQ_BIN:-sqq}"
 QUEUE_DB="tasks/queue.sql"
 TASK_DIR="tasks"
 SESSIONS_DIR="tasks-sessions"
-BASE_BRANCH="main"
+BASE_BRANCH="sqq-agent"
 
 # Mapping: Label -> Relative path from worktree root
 declare -A PROJECT_MAP=(
