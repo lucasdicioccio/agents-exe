@@ -4,7 +4,7 @@ if [[ "$1" == "describe" ]]; then
     cat << 'EOF'
 {
     "slug": "grep-files",
-    "description": "Search for a pattern in files",
+    "description": "Search for a pattern in files using 'git grep'",
     "args": [
         {
             "name": "pattern",
@@ -25,8 +25,9 @@ if [[ "$1" == "run" ]]; then
         echo "Error: pattern argument is required"
         exit 1
     fi
-    echo "----"
-    grep -r "$2" . 2>/dev/null || echo "No matches found for pattern: $2"
+    echo "---"
+    pattern="$2"
+    git grep -I "${pattern}" -- . ":!tasks-sessions/*"
     exit 0
 fi
 
