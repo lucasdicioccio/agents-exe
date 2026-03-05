@@ -298,7 +298,11 @@ parseSessionPrintOptions =
             )
         <*> switch
             ( long "repeat-system-prompt"
-                <> help "Repeat the system prompt at each turn (default: False)"
+                <> help "Repeat the system prompt at each turn (default: False, always shown in first turn)"
+            )
+        <*> switch
+            ( long "repeat-tools"
+                <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
 
 {-
