@@ -181,6 +181,8 @@ data McpServerOptions
 data SessionPrintOptions
     = SessionPrintOptions
     { sessionPrintFile :: FilePath
+    , showToolCallResults :: Bool
+    , nTurns :: Maybe Int
     }
 
 parseCheckCommand :: Parser Command
@@ -289,6 +291,18 @@ parseSessionPrintOptions =
         <$> strArgument
             ( metavar "SESSIONFILE"
                 <> help "Path to the session JSON file to print"
+            )
+        <*> switch
+            ( long "show-tool-call-results"
+                <> help "Show the results of tool calls in the output"
+            )
+        <*> optional
+            ( option auto
+                ( long "n-turns"
+                    <> metavar "N"
+                    <> help "Limit output to the first N turns (no limit if not specified)"
+                    <> showDefault
+                )
             )
 
 {-
@@ -521,18 +535,25 @@ handleSessionPrint opts = do
         Left err -> do
             Text.hPutStrLn stderr $ "Error loading session file: " <> Text.pack err
         Right session -> do
-            let markdown = formatSessionAsMarkdown session
+            let markdown = formatSessionAsMarkdown opts session
             Text.putStr markdown
 
 -- | Format a Session as markdown text
-formatSessionAsMarkdown :: Session.Session -> Text.Text
-formatSessionAsMarkdown session =
+formatSessionAsMarkdown :: SessionPrintOptions -> Session.Session -> Text.Text
+formatSessionAsMarkdown opts session =
     let -- Turns are stored newest-first, so reverse for chronological order
         chronologicalTurns = reverse session.turns
+        -- Apply n-turns limit if specified
+        limitedTurns = case opts.nTurns of
+            Just n -> take n chronologicalTurns
+            Nothing -> chronologicalTurns
         mdHeader = "# Session Report\n\n"
         sessionInfo = formatSessionInfo session
-        turnsSection = formatTurns chronologicalTurns
-    in mdHeader <> sessionInfo <> "\n---\n\n" <> turnsSection
+        turnsSection = formatTurns opts limitedTurns
+        limitNotice = case opts.nTurns of
+            Just n -> "\n\n_(Showing first " <> Text.pack (show n) <> " turns)_\n"
+            Nothing -> ""
+    in mdHeader <> sessionInfo <> "\n---\n\n" <> turnsSection <> limitNotice
 
 -- | Format session metadata
 formatSessionInfo :: Session.Session -> Text.Text
@@ -545,23 +566,23 @@ formatSessionId :: Session.SessionId -> Text.Text
 formatSessionId (Session.SessionId uuid) = Text.pack $ show uuid
 
 -- | Format all turns
-formatTurns :: [Session.Turn] -> Text.Text
-formatTurns turns =
-    Text.intercalate "\n\n---\n\n" $ zipWith formatTurn [1 :: Int ..] turns
+formatTurns :: SessionPrintOptions -> [Session.Turn] -> Text.Text
+formatTurns opts turns =
+    Text.intercalate "\n\n---\n\n" $ zipWith (formatTurn opts) [1 :: Int ..] turns
 
 -- | Format a single turn with step number
-formatTurn :: Int -> Session.Turn -> Text.Text
-formatTurn stepNum turn = case turn of
+formatTurn :: SessionPrintOptions -> Int -> Session.Turn -> Text.Text
+formatTurn opts stepNum turn = case turn of
     Session.UserTurn content ->
         "## Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
-        formatUserTurn content
+        formatUserTurn opts content
     Session.LlmTurn content ->
         "## Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
-        formatLlmTurn content
+        formatLlmTurn opts content
 
 -- | Format user turn content
-formatUserTurn :: Session.UserTurnContent -> Text.Text
-formatUserTurn content =
+formatUserTurn :: SessionPrintOptions -> Session.UserTurnContent -> Text.Text
+formatUserTurn opts content =
     let systemPromptSection = case content.userPrompt of
             Session.SystemPrompt sp ->
                 "### System Prompt\n\n```\n" <> sp <> "\n```\n"
@@ -571,14 +592,14 @@ formatUserTurn content =
         toolsSection = if null content.userTools
             then ""
             else "\n### Available Tools\n\n" <> formatAvailableTools content.userTools
-        toolResponsesSection = if null content.userToolResponses
+        toolResponsesSection = if null content.userToolResponses || not opts.showToolCallResults
             then ""
             else "\n### Tool Responses\n\n" <> formatToolResponses content.userToolResponses
     in systemPromptSection <> querySection <> toolsSection <> toolResponsesSection
 
 -- | Format LLM turn content
-formatLlmTurn :: Session.LlmTurnContent -> Text.Text
-formatLlmTurn content =
+formatLlmTurn :: SessionPrintOptions -> Session.LlmTurnContent -> Text.Text
+formatLlmTurn _opts content =
     let responseSection = case content.llmResponse.responseText of
             Just txt -> "### Response\n\n" <> txt <> "\n"
             Nothing -> "### Response\n\n_(No text response)_\n"
