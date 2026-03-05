@@ -8,6 +8,7 @@
 module System.Agents.SessionPrint
     ( -- * Options
       SessionPrintOptions (..)
+    , OrderPreference (..)
       -- * Main handler
     , handleSessionPrint
       -- * Formatting functions
@@ -22,6 +23,12 @@ import System.IO (stderr)
 
 import qualified System.Agents.Session.Base as Session
 
+-- | Preference for ordering session steps.
+data OrderPreference
+    = Chronological       -- ^ Oldest first (earlier steps shown first)
+    | Antichronological   -- ^ Newest first (recent steps shown first)
+    deriving (Show, Eq)
+
 -- | Options for controlling the session print output.
 data SessionPrintOptions = SessionPrintOptions
     { -- | Path to the session JSON file to print
@@ -34,6 +41,8 @@ data SessionPrintOptions = SessionPrintOptions
     , repeatSystemPrompt :: Bool
       -- | Whether to repeat the available tools at each turn
     , repeatTools :: Bool
+      -- | Order preference for displaying session steps
+    , orderPreference :: OrderPreference
     }
 
 -- | Handle the session-print command: load a session file and output it as markdown.
@@ -50,15 +59,18 @@ handleSessionPrint opts = do
 -- | Format a Session as markdown text.
 formatSessionAsMarkdown :: SessionPrintOptions -> Session.Session -> Text.Text
 formatSessionAsMarkdown opts session =
-    let -- Turns are stored newest-first, so reverse for chronological order
-        -- Apply n-turns limit if specified
+    let -- Apply n-turns limit if specified
         limitedTurns = case opts.nTurns of
             Just n -> take n session.turns
             Nothing -> session.turns
-        chronologicalTurns = reverse limitedTurns
+        -- Order turns based on preference
+        -- Session turns are stored newest-first
+        orderedTurns = case opts.orderPreference of
+            Chronological -> reverse limitedTurns
+            Antichronological -> limitedTurns
         mdHeader = "# Session Report\n\n"
         sessionInfo = formatSessionInfo session
-        turnsSection = formatTurns opts chronologicalTurns
+        turnsSection = formatTurns opts orderedTurns
         limitNotice = case opts.nTurns of
             Just n -> "\n\n_(Showing first " <> Text.pack (show n) <> " turns)_\n"
             Nothing -> ""
