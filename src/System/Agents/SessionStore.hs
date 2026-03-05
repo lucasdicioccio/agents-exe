@@ -25,10 +25,6 @@ module System.Agents.SessionStore (
     storeSession,
     readSession,
 
-    -- * Low-level file operations
-    storeSessionToFile,
-    readSessionFromFile,
-
     -- * Listing sessions
     listSessions,
     SessionFileInfo (..),

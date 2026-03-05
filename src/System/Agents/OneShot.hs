@@ -268,16 +268,6 @@ toolParamsToJson props =
     paramTypeToString (MultipleParamType t) = t
     paramTypeToString (ObjectParamType _) = "object"
 
--- | Legacy function: Read a session from a file.
--- Re-exported from SessionStore for backwards compatibility.
-readSession :: FilePath -> IO (Maybe Session)
-readSession = SessionStore.readSessionFromFile
-
--- | Legacy function: Store session to a file.
--- Re-exported from SessionStore for backwards compatibility.
-storeSession :: Session -> FilePath -> IO ()
-storeSession = SessionStore.storeSessionToFile
-
 -- | Creates a callback that stores session progress to a file.
 -- This is useful for creating an 'OnSessionProgress' handler that persists to disk.
 fileStoringCallback :: SessionStore -> ConversationId -> OnSessionProgress
