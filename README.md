@@ -15,13 +15,151 @@ Agents-exe is primarily configured using command line arguments
 agents-exe --help
 ```
 
-Getting started:
+### Global Options
+
+These options can be used with any command:
+
+| Option | Description |
+|--------|-------------|
+| `--api-keys FILE` | Path to JSON file containing API keys (default: `~/.config/agents-exe/secret-keys`) |
+| `--log-file FILE` | Raw log file (default: `agents-logfile`) |
+| `--log-http URL` | HTTP log sink for JSON logs |
+| `--log-json-file FILE` | Local JSON file log sink |
+| `--session-json-file-prefix PREFIX` | Local JSON sessions file prefix |
+| `--agent-file FILE` | Root agent(s) description files (can be specified multiple times, defaults to `agent.json`) |
+
+### Commands
+
+#### `init` - Initialize a new agent
 
 ```console
 agents-exe init
 ```
 
-will guide you into writing a `agent.json` and its tools directory
+Creates a new agent configuration file (`agent.json`) and its tools directory.
+Will guide you through setting up:
+- An LLM endpoint and API key
+- A model and system prompt
+- A tools directory
+
+#### `check` - Verify agent configuration
+
+```console
+agents-exe check
+```
+
+Validates agent configuration files and prints agent information.
+Useful for debugging configuration issues.
+
+#### `tui` - Terminal User Interface
+
+```console
+agents-exe tui
+```
+
+Launches an interactive terminal UI for chatting with agents.
+Supports multiple agent files for multi-agent workflows.
+
+#### `run` - Execute a one-shot prompt
+
+```console
+agents-exe run [OPTIONS]
+```
+
+Execute a single prompt and exit. Supports prompt composition via multiple options:
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--prompt TEXT` | `-p` | Add a text paragraph to the prompt |
+| `--file FILE` | `-f` | Include contents of a file in the prompt |
+| `--shell COMMAND` | | Include stdout of a shell command in the prompt |
+| `--sep4 TEXT` | `-s` | Add a short separator (4 repetitions of TEXT) |
+| `--sep40 TEXT` | `-S` | Add a long separator (40 repetitions of TEXT) |
+| `--session-file FILE` | | Extra session file to resume/store |
+
+**Examples:**
+
+Simple prompt:
+```console
+agents-exe run --prompt "can you report the latency to github.com"
+```
+
+Prompt with file content:
+```console
+agents-exe run \
+  --prompt "resume the following content:" \
+  --file "README.md"
+```
+
+Prompt with shell output:
+```console
+agents-exe run -p "explain the diff:" \
+  -s "#" \
+  --shell "git diff"
+```
+
+#### `echo-prompt` - Preview prompt composition
+
+```console
+agents-exe echo-prompt [OPTIONS]
+```
+
+Same options as `run`, but only prints the composed prompt without executing it.
+Useful for testing prompt scripts.
+
+#### `describe` - Self-describe as a tool
+
+```console
+agents-exe describe
+```
+
+Outputs a JSON description of agents-exe as a tool, following the tool specification format.
+Useful when using agents-exe as a sub-agent in other agent configurations.
+
+#### `mcp-server` - Run as MCP server
+
+```console
+agents-exe mcp-server
+```
+
+Runs agents-exe as a (stdin/stdout) MCP server, exposing agents as individual tools.
+Compatible with MCP clients like Claude-desktop.
+
+The name of tools exposed over MCP is deterministic across runs when using
+the same `--agent-file` arguments in the same order.
+
+#### `session-print` - Print session files
+
+```console
+agents-exe session-print [OPTIONS] SESSIONFILE
+```
+
+Print a session file in markdown format.
+
+| Option | Description |
+|--------|-------------|
+| `--show-tool-call-results` | Show the results of tool calls in the output |
+| `--n-turns N` | Limit output to the first N turns |
+| `--repeat-system-prompt` | Repeat the system prompt at each turn |
+| `--repeat-tools` | Repeat the available tools at each turn |
+| `--antichronological` | Display turns in antichronological order (newest first) |
+
+**Examples:**
+
+Print an entire session:
+```console
+agents-exe session-print my-session.json
+```
+
+Print only the first 5 turns:
+```console
+agents-exe session-print --n-turns 5 my-session.json
+```
+
+Print with tool call results included:
+```console
+agents-exe session-print --show-tool-call-results my-session.json
+```
 
 ### Agents
 
@@ -312,6 +450,9 @@ The `SessionPrintOptions` type controls how session files are displayed:
 | `sessionPrintFile` | `FilePath` | Path to the session JSON file to print (required positional argument) |
 | `showToolCallResults` | `Bool` | When enabled with `--show-tool-call-results`, displays the actual results returned by tool calls |
 | `nTurns` | `Maybe Int` | When specified with `--n-turns N`, limits output to the first N turns |
+| `repeatSystemPrompt` | `Bool` | When enabled with `--repeat-system-prompt`, repeats the system prompt at each turn |
+| `repeatTools` | `Bool` | When enabled with `--repeat-tools`, repeats the available tools at each turn |
+| `order` | `SessionPrintOrder` | Use `--antichronological` for newest-first order (default: chronological) |
 
 ### Usage Examples
 
