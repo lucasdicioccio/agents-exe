@@ -4,7 +4,7 @@
 
 module Main where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, join)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
@@ -165,12 +165,13 @@ type PromptScript =
 
 data TuiOptions
     = TuiOptions
-    { sessionJsonPrefix :: Maybe FilePath
+    {
     }
 
 data OneShotOptions
     = OneShotOptions
-    { promptScript :: PromptScript
+    { sessionFile :: Maybe FilePath
+    , promptScript :: PromptScript
     }
 
 data McpServerOptions
@@ -196,20 +197,19 @@ parseEchoPromptCommand =
 
 parseTuiOptions :: Parser TuiOptions
 parseTuiOptions =
-    TuiOptions
-        <$> optional
-            ( strOption
-                ( long "session-files-prefix"
-                    <> metavar "SESSIONPREFIX"
-                    <> help "file prefix to store per session json files"
-                    <> showDefault
-                )
-            )
+    pure TuiOptions
 
 parseOneShotOptions :: Parser OneShotOptions
 parseOneShotOptions =
     OneShotOptions
-        <$> ( many
+        <$> optional
+            ( strOption
+                ( long "session-file"
+                    <> metavar "SESSIONFILE"
+                    <> help "extra session-file to resume/store"
+                )
+            )
+        <*> ( many
                 (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
             )
   where
@@ -440,7 +440,7 @@ main = do
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
-            TerminalUI opts -> do
+            TerminalUI _ -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
@@ -462,7 +462,8 @@ main = do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
-                    let oneShot = flip (OneShot.mainOneShotText sessionStore)
+                    mSession <- join <$> traverse SessionStore.readSessionFromFile opts.sessionFile
+                    let oneShot text props = OneShot.mainOneShotText sessionStore opts.sessionFile mSession props text
                     oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys

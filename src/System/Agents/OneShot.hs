@@ -53,19 +53,22 @@ data OneShotConfig = OneShotConfig
     -- ^ Callback for session progress updates (defaults to 'ignoreSessionProgress')
   , initialSession :: Maybe Session
     -- ^ Optional initial session to resume from
+  , extraSavePath :: Maybe FilePath
+    -- ^ Optional final session store path
   }
 
--- | Creates a configuration that persists sessions to a file.
-fileStoringConfig :: SessionStore -> Maybe Session -> OneShotConfig
-fileStoringConfig store mSession = OneShotConfig
+-- | Creates a configuration that optionally persists sessions to a file on top of the SessionStore.
+fileStoringConfig :: SessionStore -> Maybe Session -> Maybe FilePath -> OneShotConfig
+fileStoringConfig store mSession mPath = OneShotConfig
   { onSessionProgress = fileStoringCallback store
   , initialSession = mSession
+  , extraSavePath = mPath
   }
 
 -- | Run a one-shot agent with the given configuration.
 runOneShotWithConfig :: SessionStore -> OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
 runOneShotWithConfig store config convId rt query = do
-    agent0 <- runtimeToAgent store rt
+    agent0 <- runtimeToAgent store config.extraSavePath rt
     let agent = agentSetQuery (UserQuery query)
           $ agentWithSessionProgress (config.onSessionProgress convId)
           $ fmap oneShotStep
@@ -82,14 +85,14 @@ runOneShotWithConfig store config convId rt query = do
     pure result
 
 -- | Legacy function: Run a one-shot agent with optional file-based session storage.
-mainOneShotText :: SessionStore -> Props -> Text -> IO ()
-mainOneShotText store props query = do
+mainOneShotText :: SessionStore -> Maybe FilePath -> Maybe Session -> Props -> Text -> IO ()
+mainOneShotText store mPath mSession props query = do
     convId <- newConversationId
     withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized ai -> do
-                let config = fileStoringConfig store Nothing
+                let config = fileStoringConfig store mSession mPath
                 result <- runOneShotWithConfig store config convId ai.agentRuntime query
                 Text.putStrLn (getOneShotResult result)
 
@@ -105,8 +108,8 @@ oneShotStep :: (LlmTurnContent, Session) -> OneShotResult
 oneShotStep (llmTurn,_) = OneShotResult $ extractResponseText llmTurn.llmResponse
 
 -- | Converts a Runtime into an Agent that stops when no tool calls are present.
-runtimeToAgent :: SessionStore -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
-runtimeToAgent store rt = do
+runtimeToAgent :: SessionStore -> Maybe FilePath -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
+runtimeToAgent store mPath rt = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -123,7 +126,7 @@ runtimeToAgent store rt = do
     let completeF = mkOpenAICompletion completionConfig
 
     pure $ 
-      agentStoreSession store convId $
+      agentStoreSession store mPath convId $
         Agent
         { step = naiveTilNoToolCallStep
         , sysPrompt = pure sPrompt
@@ -268,7 +271,6 @@ fileStoringCallback store convId progress =
         SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
 -- | Creates a callback that stores session progress using a SessionStore.
--- Uses the session's conversation ID to determine the file path.
 sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
 sessionStoreCallback store convId progress =
     case progress of
@@ -280,15 +282,33 @@ sessionStoreCallback store convId progress =
     storeSessionWithStore sess =
       SessionStore.storeSession store convId sess
 
+-- | Creates a callback that stores session progress using an extra optional session-path.
+-- This second is useful in OneShot command where the command-line drives the filename.
+filepathStoreCallback :: Maybe FilePath -> OnSessionProgress
+filepathStoreCallback Nothing _ = pure ()
+filepathStoreCallback (Just path) progress =
+    case progress of
+        SessionUpdated sess -> go sess
+        SessionCompleted sess -> go sess
+        SessionStarted sess -> go sess
+        SessionFailed sess _ -> go sess
+  where
+    go sess =
+      SessionStore.storeSessionToFile sess path
+
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent { usrQuery = pure (Just query) }
 
 -- | Wrap an agent to store sessions using a SessionStore.
 -- The session is stored using the conversation ID from the session.
-agentStoreSession :: forall r. SessionStore -> ConversationId -> Agent r -> Agent r
-agentStoreSession store convId agent =
-    agentWithSessionProgress (sessionStoreCallback store convId) agent
+agentStoreSession :: forall r. SessionStore -> Maybe FilePath -> ConversationId -> Agent r -> Agent r
+agentStoreSession store mPath convId agent =
+    agentWithSessionProgress handleProgress agent
+  where
+    handleProgress x = do
+      sessionStoreCallback store convId x
+      filepathStoreCallback mPath x
 
 -- | Wrap an agent to emit session progress events after each step.
 agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r

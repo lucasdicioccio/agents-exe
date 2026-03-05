@@ -145,7 +145,7 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
 
     convId <- newConversationId
     pure $
-      agentStoreSession store convId $
+      agentStoreSession store Nothing convId $
         Agent
             { step = naiveTilNoToolCallStep
             , sysPrompt = pure sPrompt
