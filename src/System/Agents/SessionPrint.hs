@@ -8,6 +8,7 @@
 module System.Agents.SessionPrint
     ( -- * Options
       SessionPrintOptions (..)
+    , OrderPreference (..)
       -- * Main handler
     , handleSessionPrint
       -- * Formatting functions
@@ -22,6 +23,12 @@ import System.IO (stderr)
 
 import qualified System.Agents.Session.Base as Session
 
+-- | Preference for ordering session steps.
+data OrderPreference
+    = Chronological       -- ^ Oldest first (earlier steps shown first)
+    | Antichronological   -- ^ Newest first (recent steps shown first)
+    deriving (Show, Eq)
+
 -- | Options for controlling the session print output.
 data SessionPrintOptions = SessionPrintOptions
     { -- | Path to the session JSON file to print
@@ -34,6 +41,8 @@ data SessionPrintOptions = SessionPrintOptions
     , repeatSystemPrompt :: Bool
       -- | Whether to repeat the available tools at each turn
     , repeatTools :: Bool
+      -- | Order preference for displaying session steps
+    , orderPreference :: OrderPreference
     }
 
 -- | Handle the session-print command: load a session file and output it as markdown.
@@ -48,21 +57,45 @@ handleSessionPrint opts = do
             Text.putStr markdown
 
 -- | Format a Session as markdown text.
+--
+-- The logic for processing steps is:
+-- 1. First, number the steps (zip with [1..]) - preserves original step numbers
+-- 2. Then, cut the n-latest steps if n-turns limit is specified
+-- 3. Then, reverse or not depending on the order preference
+-- 4. Finally, traverse and print
 formatSessionAsMarkdown :: SessionPrintOptions -> Session.Session -> Text.Text
 formatSessionAsMarkdown opts session =
-    let -- Turns are stored newest-first, so reverse for chronological order
-        -- Apply n-turns limit if specified
+    let -- Session turns are stored newest-first (last turn is first in the list)
+        -- Step 1: Number the steps with their original position
+        -- We reverse first to get chronological order for numbering, then zip
+        numberedChronological = zip [1 :: Int ..] (reverse session.turns)
+        
+        -- Step 2: Apply n-turns limit (takes the last N steps in chronological order = most recent)
         limitedTurns = case opts.nTurns of
-            Just n -> take n session.turns
-            Nothing -> session.turns
-        chronologicalTurns = reverse limitedTurns
+            Just n -> takeLast n numberedChronological
+            Nothing -> numberedChronological
+        
+        -- Step 3: Apply ordering preference
+        orderedTurns = case opts.orderPreference of
+            Chronological -> limitedTurns  -- Already in chronological order
+            Antichronological -> reverse limitedTurns  -- Newest first
+        
+        -- Determine the first step number in display order for "is first turn" checks
+        firstDisplayStepNum = case orderedTurns of
+            [] -> Nothing
+            ((n, _) : _) -> Just n
+        
         mdHeader = "# Session Report\n\n"
         sessionInfo = formatSessionInfo session
-        turnsSection = formatTurns opts chronologicalTurns
+        turnsSection = formatTurns opts firstDisplayStepNum orderedTurns
         limitNotice = case opts.nTurns of
-            Just n -> "\n\n_(Showing first " <> Text.pack (show n) <> " turns)_\n"
+            Just n -> "\n\n_(Showing last " <> Text.pack (show n) <> " turns)_\n"
             Nothing -> ""
     in mdHeader <> sessionInfo <> "\n---\n\n" <> turnsSection <> limitNotice
+  where
+    -- | Take the last n elements from a list
+    takeLast :: Int -> [a] -> [a]
+    takeLast n xs = drop (max 0 (length xs - n)) xs
 
 -- | Format session metadata.
 formatSessionInfo :: Session.Session -> Text.Text
@@ -74,20 +107,24 @@ formatSessionInfo session =
 formatSessionId :: Session.SessionId -> Text.Text
 formatSessionId (Session.SessionId uuid) = Text.pack $ show uuid
 
--- | Format all turns.
-formatTurns :: SessionPrintOptions -> [Session.Turn] -> Text.Text
-formatTurns opts turns =
-    Text.intercalate "\n\n---\n\n" $ zipWith (formatTurn opts) [1 :: Int ..] turns
+-- | Format all turns (already numbered and ordered).
+-- The firstDisplayStepNum indicates which step number appears first in the output
+-- (used for determining whether to show system prompt/tools on the first displayed turn).
+formatTurns :: SessionPrintOptions -> Maybe Int -> [(Int, Session.Turn)] -> Text.Text
+formatTurns opts firstDisplayStepNum turns =
+    Text.intercalate "\n\n---\n\n" $ map (formatTurn opts firstDisplayStepNum) turns
 
--- | Format a single turn with step number.
-formatTurn :: SessionPrintOptions -> Int -> Session.Turn -> Text.Text
-formatTurn opts stepNum turn = case turn of
-    Session.UserTurn content ->
-        "## Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
-        formatUserTurn opts (stepNum == 1) content
-    Session.LlmTurn content ->
-        "## Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
-        formatLlmTurn opts content
+-- | Format a single turn with its original step number.
+formatTurn :: SessionPrintOptions -> Maybe Int -> (Int, Session.Turn) -> Text.Text
+formatTurn opts firstDisplayStepNum (stepNum, turn) = 
+    let isFirstTurn = Just stepNum == firstDisplayStepNum
+    in case turn of
+        Session.UserTurn content ->
+            "## Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
+            formatUserTurn opts isFirstTurn content
+        Session.LlmTurn content ->
+            "## Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
+            formatLlmTurn opts content
 
 -- | Format user turn content.
 -- The 'isFirstTurn' parameter ensures that system prompt and tools are shown

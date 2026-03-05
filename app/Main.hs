@@ -304,6 +304,12 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
+        <*> flag
+            SessionPrint.Chronological
+            SessionPrint.Antichronological
+            ( long "antichronological"
+                <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
+            )
 
 {-
   where
