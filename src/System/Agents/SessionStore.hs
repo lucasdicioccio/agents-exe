@@ -12,15 +12,6 @@ module System.Agents.SessionStore (
     defaultSessionStore,
     mkSessionStore,
 
-    -- * Default pattern
-    defaultSessionPattern,
-    defaultSessionSuffix,
-
-    -- * File path operations
-    sessionFilePath,
-    conversationIdToFileName,
-    parseConversationIdFromFileName,
-
     -- * Session storage operations
     storeSession,
     readSession,
