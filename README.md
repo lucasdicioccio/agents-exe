@@ -224,6 +224,119 @@ The `id` key must match the `apiKeyId` field in the agent's JSON description.
 Certain environment variables can influence command behaviors:
 - `EDITOR` or `GIT_EDITOR` are used to edit files (notably in the `init` command)
 
+## Commands Reference
+
+### `init` - Initialize Project
+
+Creates a new agent configuration with an `agent.json` file and tool directory structure.
+
+```console
+agents-exe init
+```
+
+### `check` - Validate Configuration
+
+Validates agent files and API keys without running any agent. Useful for CI/CD or verifying configurations.
+
+```console
+agents-exe check
+agents-exe check --agent-file my-agent.json
+```
+
+### `run` - Execute One-Shot Agent
+
+Runs an agent with a single prompt and exits. Supports composing prompts from multiple sources.
+
+```console
+agents-exe run --prompt "hello world"
+agents-exe run -p "explain this code" -f "src/Main.hs"
+```
+
+**Prompt Composition Options:**
+- `--prompt`, `-p` - Add a text paragraph to the prompt
+- `--file`, `-f` - Include contents of a file in the prompt
+- `--shell` - Include stdout of a shell command in the prompt
+- `--sep4`, `-s` - Add a short (4 character) separator
+- `--sep40`, `-S` - Add a long (40 character) separator
+- `--session-file` - Resume from or save to a session file
+
+**Examples:**
+```console
+# Combine prompts
+agents-exe run -p "summarize:" -f "document.txt"
+
+# Include git diff
+agents-exe run -p "explain the diff:" -s "#" --shell "git diff"
+
+# Resume a session
+agents-exe run --session-file previous.json -p "continue from where we left off"
+```
+
+### `echo-prompt` - Preview Prompt
+
+Constructs and echoes the prompt without running the agent. Useful for debugging prompt composition.
+
+```console
+agents-exe echo-prompt -p "hello" -f "README.md"
+```
+
+### `tui` - Terminal UI
+
+Interactive terminal UI for continuous conversation with agents.
+
+```console
+agents-exe tui
+agents-exe tui --agent-file my-agent.json
+```
+
+### `describe` - Self-Describe
+
+Outputs the tool schema for `agents-exe` itself, allowing it to be used as a tool by other agents.
+
+```console
+agents-exe describe
+```
+
+### `mcp-server` - MCP Server Mode
+
+Runs `agents-exe` as an MCP server, exposing agents as tools via stdin/stdout.
+
+```console
+agents-exe mcp-server
+agents-exe mcp-server --agent-file agent1.json --agent-file agent2.json
+```
+
+The name of tools exposed over MCP is deterministic across runs provided you
+run the `mcp-server` command with the same `--agent-file` in the same order.
+
+### `session-print` - Print Session Files
+
+Prints session files in a human-readable markdown format.
+
+```console
+# Print entire session
+agents-exe session-print my-session.json
+
+# Print only first 5 turns
+agents-exe session-print --n-turns 5 my-session.json
+
+# Show tool call results
+agents-exe session-print --show-tool-call-results my-session.json
+
+# Display newest first
+agents-exe session-print --antichronological my-session.json
+
+# Repeat system prompt and tools at each turn
+agents-exe session-print --repeat-system-prompt --repeat-tools my-session.json
+```
+
+**Options:**
+- `--show-tool-call-results` - Display results returned by tool calls
+- `--n-turns N` - Limit output to first N turns
+- `--repeat-system-prompt` - Show system prompt at each turn (default: first turn only)
+- `--repeat-tools` - Show available tools at each turn (default: first turn only)
+- `--antichronological` - Display turns newest first (default: oldest first)
+
 ## Using as an MCP server
 
 The command `agents-exe mcp-server` runs a (stdin/stdout) MCP server exposing
@@ -297,50 +410,6 @@ agents-exe run -p "explain the diff:" \
   -s "#" \
   --shell "git diff"
 ```
-
-## Session Print Command
-
-The `session-print` command allows you to view saved session files in a human-readable markdown format.
-Sessions are JSON files that store the conversation history between users and agents, including tool calls and responses.
-
-### SessionPrintOptions
-
-The `SessionPrintOptions` type controls how session files are displayed:
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `sessionPrintFile` | `FilePath` | Path to the session JSON file to print (required positional argument) |
-| `showToolCallResults` | `Bool` | When enabled with `--show-tool-call-results`, displays the actual results returned by tool calls |
-| `nTurns` | `Maybe Int` | When specified with `--n-turns N`, limits output to the first N turns |
-
-### Usage Examples
-
-Print an entire session:
-```console
-agents-exe session-print my-session.json
-```
-
-Print only the first 5 turns:
-```console
-agents-exe session-print --n-turns 5 my-session.json
-```
-
-Print with tool call results included:
-```console
-agents-exe session-print --show-tool-call-results my-session.json
-```
-
-Combine options:
-```console
-agents-exe session-print --n-turns 10 --show-tool-call-results my-session.json
-```
-
-The output is formatted as markdown with:
-- Session metadata (ID and fork information)
-- Chronologically ordered turns (user turns and LLM turns)
-- System prompts, user queries, and LLM responses
-- Tool calls made by the LLM
-- Tool responses (when `--show-tool-call-results` is enabled)
 
 ## JSON logging
 
