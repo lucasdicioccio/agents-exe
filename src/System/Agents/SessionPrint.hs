@@ -32,6 +32,8 @@ data SessionPrintOptions = SessionPrintOptions
     , nTurns :: Maybe Int
       -- | Whether to repeat the system prompt at each turn
     , repeatSystemPrompt :: Bool
+      -- | Whether to repeat the available tools at each turn
+    , repeatTools :: Bool
     }
 
 -- | Handle the session-print command: load a session file and output it as markdown.
@@ -82,25 +84,30 @@ formatTurn :: SessionPrintOptions -> Int -> Session.Turn -> Text.Text
 formatTurn opts stepNum turn = case turn of
     Session.UserTurn content ->
         "## Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
-        formatUserTurn opts content
+        formatUserTurn opts (stepNum == 1) content
     Session.LlmTurn content ->
         "## Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
         formatLlmTurn opts content
 
 -- | Format user turn content.
-formatUserTurn :: SessionPrintOptions -> Session.UserTurnContent -> Text.Text
-formatUserTurn opts content =
-    let -- Only include system prompt section if repeatSystemPrompt is True
+-- The 'isFirstTurn' parameter ensures that system prompt and tools are shown
+-- at least once, even when 'repeatSystemPrompt' or 'repeatTools' is False.
+formatUserTurn :: SessionPrintOptions -> Bool -> Session.UserTurnContent -> Text.Text
+formatUserTurn opts isFirstTurn content =
+    let -- Show system prompt if repeatSystemPrompt is True, or if it's the first turn
         systemPromptSection = case content.userPrompt of
-            Session.SystemPrompt sp | opts.repeatSystemPrompt ->
+            Session.SystemPrompt sp | opts.repeatSystemPrompt || isFirstTurn ->
                 "### System Prompt\n\n```\n" <> sp <> "```\n"
             _ -> ""
         querySection = case content.userQuery of
             Just (Session.UserQuery q) -> "\n### User Query\n\n" <> q <> "\n"
             Nothing -> ""
+        -- Show tools if repeatTools is True, or if it's the first turn (and tools exist)
         toolsSection = if null content.userTools
             then ""
-            else "\n### Available Tools\n\n" <> formatAvailableTools content.userTools
+            else if opts.repeatTools || isFirstTurn
+                then "\n### Available Tools\n\n" <> formatAvailableTools content.userTools
+                else ""
         toolResponsesSection = if null content.userToolResponses || not opts.showToolCallResults
             then ""
             else "\n### Tool Responses\n\n" <> formatToolResponses content.userToolResponses
