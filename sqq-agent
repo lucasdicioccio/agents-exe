@@ -37,7 +37,7 @@ Usage: $0 <command> [args]
 Commands:
   init                     Initialize the task queue
   add <label> <branch>     Manually enqueue a task (opens editor for instructions)
-  from-github              Fetch tasks from GitHub issues (label: "agents/to-be-taken")
+  from_github              Fetch tasks from GitHub issues (label: "agents/to-be-taken")
   process                  Start processing the queue
   worktree_exec <label> <name> <instruction_file>
                            Internal: The worker command that sets up worktree and runs agent
@@ -217,7 +217,7 @@ find_or_create_taskfile() {
 COMMAND="$1"; shift
 
 case "$COMMAND" in
-    init|add|from-github|process|worktree_exec) "cmd_$COMMAND" "$@" ;;
+    init|add|from_github|process|worktree_exec) "cmd_$COMMAND" "$@" ;;
     *) usage ;;
 esac
 

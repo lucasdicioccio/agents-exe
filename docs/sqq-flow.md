@@ -68,10 +68,10 @@ sqq-agent add <label> <branch>
 3. Opens `$EDITOR` for user to write instructions
 4. Enqueues job: `sqq-agent worktree_exec "<label>" "<branch>" "<taskfile>"`
 
-### 3. GitHub Issue Import (`from-github`)
+### 3. GitHub Issue Import (`from_github`)
 
 ```bash
-sqq-agent from-github
+sqq-agent from_github
 ```
 
 1. Queries GitHub for issues labeled `agents/to-be-taken` **from the configured author only**
