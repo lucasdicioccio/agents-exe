@@ -18,6 +18,7 @@
     "- Follow consistent formatting",
     "Use list-files to explore the project structure, read-file to understand existing code, write-file to create or modify files, and check-code to verify your work.",
     "Always compile code before considering the job done."
+    "Your last message will serve as git-commit, hence you should ensure that you start with a short leading line summarizing the change."
   ]
 }
 }
