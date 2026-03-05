@@ -24,11 +24,10 @@ import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId (..), newConversationId)
-import System.Agents.OneShot (runtimeToAgent, fileStoringCallback)
+import System.Agents.OneShot (runtimeToAgent)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
 import qualified System.Agents.Session.Loop as Loop
-import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
 
 -------------------------------------------------------------------------------
@@ -353,21 +352,15 @@ runConversation baseTuiAgent session = do
     outChan <- use eventChan
     inChan <- liftIO $ newBChan 100
     
-    -- Build the combined progress callback
+    -- Build the progress callback
     let notifyProgress = buildOnProgress convId outChan
-    let fileCallback = fileStoringCallback config.sessionStore convId
-    
-    -- Combine callbacks: first the file storage (if any), then TUI notification, then global config
-    let combinedOnProgress progressEvent = do
-            fileCallback progressEvent
-            notifyProgress progressEvent
     
     -- Create the agent with the progress callback
     agent0 <- liftIO $ runtimeToAgent config.sessionStore (baseTuiAgent.agentTree.agentRuntime)
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
     let a = agent0 {
         step = \sess -> do
-           combinedOnProgress (SessionUpdated sess)
+           notifyProgress (SessionUpdated sess)
            ret <- agent0.step sess
            case ret of
               Stop _r -> -- smoll hack to reuse the naive step from runtimeToAgent
@@ -379,9 +372,9 @@ runConversation baseTuiAgent session = do
     -- * wrap in Conversation
     let tuiAgent = TuiAgent a baseTuiAgent.agentTree
     threadId <- liftIO $ forkIO $ do
-        combinedOnProgress (SessionStarted session)
+        notifyProgress (SessionStarted session)
         void $ Loop.run a session
-        combinedOnProgress (SessionCompleted session)
+        notifyProgress (SessionCompleted session)
     let conv =
             Conversation
                 { conversationId = convId
@@ -391,7 +384,7 @@ runConversation baseTuiAgent session = do
                 , conversationName = "@" <> tuiAgent.agentTree.agentRuntime.agentSlug
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_WaitingForInput
-                , conversationOnProgress = combinedOnProgress
+                , conversationOnProgress = notifyProgress
                 }
 
 
