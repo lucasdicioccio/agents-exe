@@ -15,6 +15,7 @@ The `sqq-agent` is a task queue automation system that manages AI agent executio
 | `TASK_DIR` | Directory for instruction files (`tasks/`) |
 | `SESSIONS_DIR` | Directory for agent session outputs (`tasks-sessions/`) |
 | `BASE_BRANCH` | Base git branch for new worktrees (`main`) |
+| `GITHUB_USERNAME` | GitHub username to filter issues by author (security filter) |
 | `PROJECT_MAP` | Maps labels to relative paths in worktree |
 | `AGENT_MAP` | Maps labels to agent configuration files |
 
@@ -73,13 +74,15 @@ sqq-agent add <label> <branch>
 sqq-agent from-github
 ```
 
-1. Queries GitHub for issues labeled `agents/to-be-taken`
+1. Queries GitHub for issues labeled `agents/to-be-taken` **from the configured author only**
 2. For each issue:
    - Matches project label from issue labels
    - Creates task file with issue content (title, body, comments)
    - Adds note to mention issue number in commit
    - Enqueues worktree_exec job
    - Updates issue labels: removes `agents/to-be-taken`, adds `agents/taken`
+
+**Security Note:** The `GITHUB_USERNAME` filter ensures that only issues created by the trusted author are processed. This prevents arbitrary code execution from malicious issues filed by third parties on public repositories.
 
 ### 4. Queue Processing (`process`)
 
@@ -161,4 +164,5 @@ sqq-agent worktree_exec <label> <name> <instruction_file>
 - Uses `--no-verify` on git commits to bypass hooks in worktrees
 - Force-removes worktrees (potential data loss if in-progress)
 - Executes `./git-agent-task.sh` without sandboxing
+- **Critical:** `GITHUB_USERNAME` environment variable filters GitHub issues by author to prevent processing malicious issues from third parties on public repositories. Default is `lucasdicioccio`.
 
