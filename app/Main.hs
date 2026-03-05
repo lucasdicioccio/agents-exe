@@ -542,14 +542,14 @@ handleSessionPrint opts = do
 formatSessionAsMarkdown :: SessionPrintOptions -> Session.Session -> Text.Text
 formatSessionAsMarkdown opts session =
     let -- Turns are stored newest-first, so reverse for chronological order
-        chronologicalTurns = reverse session.turns
         -- Apply n-turns limit if specified
         limitedTurns = case opts.nTurns of
-            Just n -> take n chronologicalTurns
-            Nothing -> chronologicalTurns
+            Just n -> take n session.turns
+            Nothing -> session.turns
+        chronologicalTurns = reverse limitedTurns
         mdHeader = "# Session Report\n\n"
         sessionInfo = formatSessionInfo session
-        turnsSection = formatTurns opts limitedTurns
+        turnsSection = formatTurns opts chronologicalTurns
         limitNotice = case opts.nTurns of
             Just n -> "\n\n_(Showing first " <> Text.pack (show n) <> " turns)_\n"
             Nothing -> ""
