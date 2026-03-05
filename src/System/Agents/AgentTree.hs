@@ -5,7 +5,6 @@ module System.Agents.AgentTree where
 
 import Control.Monad (void)
 import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Either as Either
 import qualified Data.List.NonEmpty as NonEmpty
@@ -19,16 +18,14 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
 
-import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, McpServerDescription (..), newConversationId)
+import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, McpServerDescription (..))
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
-import System.Agents.ToolSchema
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration
-import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 
 import System.Agents.ApiKeys
@@ -52,6 +49,7 @@ data Props
     { apiKeys :: LoadedApiKeys
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO Trace
+    , agentToTool :: Runtime -> AgentSlug -> AgentId -> ToolRegistration
     }
 
 data AgentTree = AgentTree
@@ -116,6 +114,7 @@ loadAgentTree props tree = do
                     tracer
                     props.apiKeys
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
+                    props.agentToTool
                     okRuntimes
                     (agentRootDir tree)
                     (AgentDescription tree.agentConfig)
@@ -157,11 +156,12 @@ initAgentTreeAgent ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
+    (Runtime -> AgentSlug -> AgentId -> ToolRegistration) ->
     [Runtime.Runtime] ->
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescription desc) = do
+initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
@@ -184,7 +184,7 @@ initAgentTreeAgent tracer keys modifyPrompt helperAgents rootDir (AgentDescripti
                     )
                 )
                 (rootDir </> desc.toolDirectory)
-                [turnAgentRuntimeIntoIOTool rt | rt <- helperAgents]
+                [agentToTool' rt | rt <- helperAgents]
                 mcpToolboxes
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
@@ -221,54 +221,6 @@ instance Aeson.FromJSON PromptOtherAgent where
         PromptOtherAgent
             <$> v Aeson..: "what"
 
-turnAgentRuntimeIntoIOTool ::
-    Runtime -> AgentSlug -> AgentId -> ToolRegistration
-turnAgentRuntimeIntoIOTool rt callerSlug callerId =
-    registerIOScriptInLLM io props
-  where
-    props =
-        [ ParamProperty
-            { propertyKey = "what"
-            , propertyType = StringParamType
-            , propertyDescription = "the prompt to call the specialized-agent with"
-            }
-        ]
-    io =
-        IOTools.IOScript
-            ( IOTools.IOScriptDescription
-                ("prompt_agent_" <> rt.agentSlug)
-                ("aks a prompt to the expert agent: " <> rt.agentSlug)
-            )
-            (\conversationId (PromptOtherAgent txt) -> runSubAgent conversationId txt)
-
-    runSubAgent conversationId txt = do
-        subConversationId <- newConversationId
-        Runtime.handleConversation
-            (nestTracer conversationId rt)
-            conversationFunctions
-            subConversationId
-            txt
-
-    nestTracer conversationId childRuntime =
-        childRuntime
-            { agentTracer =
-                contramap
-                    ( Runtime.AgentTrace_Conversation
-                        callerSlug
-                        callerId
-                        conversationId
-                        . Runtime.ChildrenTrace
-                    )
-                    childRuntime.agentTracer
-            }
-
-    conversationFunctions =
-        Runtime.ConversationFunctions
-            (pure Nothing)
-            (\_hist -> pure ())
-            (\err -> pure $ "sorry I got an error: " <> (CByteString.pack err))
-            (\done -> pure $ maybe "i could not find an answer" Text.encodeUtf8 $ OpenAI.locateResponseText done)
-
 -------------------------------------------------------------------------------
 readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
 readOpenApiKeysFile keysPath =
@@ -287,3 +239,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+

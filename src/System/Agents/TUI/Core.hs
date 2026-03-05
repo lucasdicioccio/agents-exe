@@ -6,7 +6,7 @@
 -- | Main entry point for the TUI application.
 -- This module re-exports functionality from the submodules and provides
 -- the main initialization and application runner.
-module System.Agents.TUI2.Core (
+module System.Agents.TUI.Core (
     -- * Re-exports from Types
     WidgetName(..),
     N,
@@ -17,6 +17,7 @@ module System.Agents.TUI2.Core (
     Core(..),
     UIState(..),
     TuiState(..),
+    SessionConfig(..),
     initUIState,
     updateConversationSession,
     updateConversation,
@@ -49,32 +50,28 @@ module System.Agents.TUI2.Core (
     
     -- * Main entry point
     runTUI,
+    runTUIWithConfig,
+    fileSessionConfig,
 ) where
 
 import Brick hiding (Down)
-import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.BChan (newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (void, forever)
-import Data.Maybe (fromMaybe)
-import Data.List (isPrefixOf, sortOn)
-import Data.Ord (Down(..))
-import Data.Time (UTCTime)
-import System.Directory (listDirectory, doesFileExist, getModificationTime)
-import System.FilePath ((</>))
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
-import System.Agents.Base (ConversationId(..), newConversationId)
-import System.Agents.OneShot (runtimeToAgent, readSession, storeSession)
-import qualified System.Agents.Runtime as Runtime
+import System.Agents.OneShot (runtimeToAgent)
 import System.Agents.Session.Base (Session(..))
+import System.Agents.SessionStore (SessionStore)
+import qualified System.Agents.SessionStore as SessionStore
 
 -- Import from submodules
-import System.Agents.TUI2.Types
-import System.Agents.TUI2.Render
-import System.Agents.TUI2.Event
+import System.Agents.TUI.Types
+import System.Agents.TUI.Render
+import System.Agents.TUI.Event
 
 -------------------------------------------------------------------------------
 -- Cursor and Start Event
@@ -95,68 +92,49 @@ tui_appStartEvent = pure ()
 -- Session File Loading
 -------------------------------------------------------------------------------
 
--- | Session file info with metadata for sorting.
-data SessionFileInfo = SessionFileInfo
-    { sessionFilePath :: FilePath
-    , sessionModTime :: UTCTime
-    }
-
--- | Check if a filename matches the session file pattern.
--- Pattern: conv.<uuid>.json
-isSessionFile :: String -> Bool
-isSessionFile name =
-    "conv." `isPrefixOf` name && ".json" `isSuffixOf` name
-  where
-    isSuffixOf suffix str0 = reverse suffix `isPrefixOf` reverse str0
-
--- | Find all session files in the given directory matching the pattern.
-findSessionFiles :: FilePath -> IO [SessionFileInfo]
-findSessionFiles dir = do
-    entries <- listDirectory dir
-    let candidates = [dir </> entry | entry <- entries, isSessionFile entry]
-    -- Filter to only existing files and get modification times
-    existing <- filterM doesFileExist candidates
-    mapM (\path -> SessionFileInfo path <$> getModificationTime path) existing
-
 -- | Load all sessions from files matching the prefix pattern.
 -- Returns a list of (FilePath, Maybe Session) pairs.
-loadSessionFiles :: FilePath -> IO [(FilePath, Maybe Session)]
-loadSessionFiles convPrefix = do
-    -- Get directory from prefix (if prefix is a path, use its directory)
-    let dir = if '/' `elem` convPrefix || '\\' `elem` convPrefix
-                then case reverse $ dropWhile (\c -> c /= '/' && c /= '\\') $ reverse convPrefix of
-                       "" -> "."
-                       d -> d
-                else "."
-    
-    sessionFiles <- findSessionFiles dir
-    -- Sort by modification time (most recent first)
-    let sortedFiles = map sessionFilePath $ sortOn (Data.Ord.Down . sessionModTime) sessionFiles
-    
-    -- Load each session file
-    mapM (\path -> (path,) <$> readSession path) sortedFiles
+--
+-- This function uses 'SessionStore' internally to discover and load sessions.
+loadSessionFiles :: SessionStore -> IO [(FilePath, Maybe Session)]
+loadSessionFiles store = do
+    sessions <- SessionStore.listSessions store
+    -- Convert to the legacy format (filepath, Maybe Session)
+    pure [(path, mSess) | (path, mSess, _) <- sessions]
 
-filterM :: Monad m => (a -> m Bool) -> [a] -> m [a]
-filterM p = foldr (\x acc -> do
-    b <- p x
-    if b then (x :) <$> acc else acc) (return [])
+-------------------------------------------------------------------------------
+-- Session Configuration Helpers
+-------------------------------------------------------------------------------
+
+-- | Create a session configuration with file-based persistence.
+fileSessionConfig :: SessionStore -> SessionConfig
+fileSessionConfig store = SessionConfig
+    { sessionStore = store
+    }
 
 -------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
--- | Initialize the TUI with props.
-runTUI :: Maybe FilePath -> [Props] -> IO ()
-runTUI mConvPrefix props = do
-    let convPrefix = fromMaybe "./" mConvPrefix
+-- | Initialize the TUI with props and optional conversation prefix (legacy API).
+-- 
+-- For more control, use 'runTUIWithConfig' instead.
+runTUI :: SessionStore -> [Props] -> IO ()
+runTUI store props = 
+    let config = fileSessionConfig store
+    in runTUIWithConfig config props
+
+-- | Initialize the TUI with a custom session configuration.
+runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
+runTUIWithConfig config props = do
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTreeRuntime props
     let itrees = [rt | Initialized rt <- trees]
-    sessionAgents <- traverse (runtimeToAgent . agentRuntime) itrees
+    sessionAgents <- traverse (runtimeToAgent config.sessionStore . agentRuntime) itrees
     let tuiAgents = zipWith TuiAgent sessionAgents itrees
 
-    -- Load existing session files
-    loadedSessions <- loadSessionFiles convPrefix
+    -- Load existing session files (only if file prefix is provided)
+    loadedSessions <- loadSessionFiles config.sessionStore
     
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
@@ -167,15 +145,15 @@ runTUI mConvPrefix props = do
     -- Create UI state
     let ui0 = initUIState tuiAgents [s | (_,Just s) <- loadedSessions]
 
-    -- Create TUI state
-    let st = TuiState core0 ui0 evChan
+    -- Create TUI state with session configuration
+    let st = TuiState core0 ui0 evChan config
 
     -- Build and run the app
     let app =
             App
                 { appDraw = tui_appDraw
                 , appChooseCursor = tui_appChooseCursor
-                , appHandleEvent = tui_appHandleEvent convPrefix
+                , appHandleEvent = tui_appHandleEvent
                 , appStartEvent = tui_appStartEvent
                 , appAttrMap = tui_appAttrMap
                 }

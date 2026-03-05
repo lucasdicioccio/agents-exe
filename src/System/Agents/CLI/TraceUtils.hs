@@ -78,25 +78,11 @@ renderAgentTrace (Runtime.AgentTrace_Conversation slug _ _ tr) =
         [ mconcat ["@", slug, ":"]
         , renderConversationAgentTrace tr
         ]
-renderAgentTrace (Runtime.AgentTrace_Memorize slug _ _ tr) =
-    Text.unlines
-        [ mconcat ["@", slug, ":"]
-        , renderMemorizeAgentTrace tr
-        ]
 
 renderLoadingAgentTrace :: BashToolbox.Trace -> Text
 renderLoadingAgentTrace tr = case tr of
     BashToolbox.ReloadToolsTrace _ -> "(reload-tools...)"
     BashToolbox.BashToolsLoadingTrace _ -> "(reload-tools...)"
-
-renderMemorizeAgentTrace :: Runtime.MemorizeTrace -> Text
-renderMemorizeAgentTrace tr = case tr of
-    Runtime.Calling _ hist _ ->
-        Text.unwords [Text.pack . show $ length hist, ">>>"]
-    Runtime.GotResponse _ hist _ rsp ->
-        Text.unwords [Text.pack . show $ length hist, Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode rsp.chosenMessage]
-    Runtime.InteractionDone hist _ ->
-        Text.unwords [Text.pack . show $ length hist, "<<<"]
 
 renderConversationAgentTrace :: Runtime.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of

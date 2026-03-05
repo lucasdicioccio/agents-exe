@@ -61,6 +61,7 @@ library agents-lib
     default-extensions: OverloadedStrings, OverloadedRecordDot
     exposed-modules:  System.Agents
                     , System.Agents.AgentTree
+                    , System.Agents.AgentTree.OneShotTool
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.CLI.TraceUtils
@@ -79,8 +80,6 @@ library agents-lib
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
-                    , System.Agents.Runtime.Base
-                    , System.Agents.Runtime.Conversation
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace
                     , System.Agents.Session.Base
@@ -88,6 +87,7 @@ library agents-lib
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
                     , System.Agents.SessionPrint
+                    , System.Agents.SessionStore
                     , System.Agents.ToolSchema
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
@@ -97,10 +97,10 @@ library agents-lib
                     , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
-                    , System.Agents.TUI2.Core
-                    , System.Agents.TUI2.Types
-                    , System.Agents.TUI2.Render
-                    , System.Agents.TUI2.Event
+                    , System.Agents.TUI.Core
+                    , System.Agents.TUI.Types
+                    , System.Agents.TUI.Render
+                    , System.Agents.TUI.Event
                     , System.Agents.TraceUtils
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,

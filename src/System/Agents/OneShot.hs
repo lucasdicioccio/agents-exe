@@ -2,14 +2,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module System.Agents.OneShot where
+module System.Agents.OneShot (
+  runtimeToAgent,
+  agentStoreSession,
+  fileStoringCallback,
+  mainPrintAgent,
+  mainOneShotText
+) where
 
-import Control.Exception (Exception, throwIO)
+import Control.Exception (Exception)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
 import qualified Data.Aeson.Types as Aeson
-import qualified Data.ByteString.Lazy.Char8 as BSL
-import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Foldable (traverse_)
 import qualified Data.Maybe as Maybe
@@ -17,16 +21,17 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import System.Directory (doesFileExist)
 
 import System.Agents.AgentTree
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Base (newConversationId,newStepId)
+import System.Agents.Base (newConversationId,newStepId,ConversationId)
 import System.Agents.Session.Base
 import System.Agents.Session.Loop
 import System.Agents.Session.Step
 import System.Agents.Session.OpenAI
+import System.Agents.SessionStore (SessionStore)
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
 import System.Agents.Tools
 import System.Agents.Tools.Base
@@ -42,35 +47,55 @@ mainPrintAgent props = do
             Errors errs -> traverse_ print errs
             Initialized _ -> pure ()
 
-mainOneShotText :: Maybe FilePath -> Props -> Text -> IO ()
-mainOneShotText mpath props query = do
+-- | Configuration for one-shot execution with optional session persistence.
+data OneShotConfig = OneShotConfig
+  { onSessionProgress :: ConversationId -> OnSessionProgress
+    -- ^ Callback for session progress updates (defaults to 'ignoreSessionProgress')
+  , initialSession :: Maybe Session
+    -- ^ Optional initial session to resume from
+  }
+
+-- | Creates a configuration that persists sessions to a file.
+fileStoringConfig :: SessionStore -> Maybe Session -> OneShotConfig
+fileStoringConfig store mSession = OneShotConfig
+  { onSessionProgress = fileStoringCallback store
+  , initialSession = mSession
+  }
+
+-- | Run a one-shot agent with the given configuration.
+runOneShotWithConfig :: SessionStore -> OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
+runOneShotWithConfig store config convId rt query = do
+    agent0 <- runtimeToAgent store rt
+    let agent = agentSetQuery (UserQuery query)
+          $ agentWithSessionProgress (config.onSessionProgress convId)
+          $ fmap oneShotStep
+          $ agent0
+    
+    -- Create or use initial session with all required fields including sessionConversationId
+    session0 <- case config.initialSession of
+      Just s -> pure s
+      Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+    
+    config.onSessionProgress convId (SessionStarted session0)
+    result <- run agent session0
+    config.onSessionProgress convId (SessionCompleted session0)
+    pure result
+
+-- | Legacy function: Run a one-shot agent with optional file-based session storage.
+mainOneShotText :: SessionStore -> Props -> Text -> IO ()
+mainOneShotText store props query = do
+    convId <- newConversationId
     withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
-            Initialized ai -> runOneShotAgent mpath ai.agentRuntime query
+            Initialized ai -> do
+                let config = fileStoringConfig store Nothing
+                result <- runOneShotWithConfig store config convId ai.agentRuntime query
+                Text.putStrLn (getOneShotResult result)
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
   deriving (Show)
 instance Exception SessionLoadingFailed
-
-
-runOneShotAgent :: Maybe FilePath -> Runtime.Runtime -> Text -> IO ()
-runOneShotAgent mpath rt query = do
-    agent0 <- runtimeToAgent rt
-    let agent = agentSetQuery (UserQuery query)
-          $ maybe id agentStoreSession mpath
-          $ fmap oneShotStep
-          $ agent0
-    result <- case mpath of
-      Nothing -> do
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
-        run agent session0
-      Just path -> do
-        msession0 <- readSession path
-        case msession0 of
-          Just session0 -> run agent session0
-          Nothing -> throwIO (SessionLoadingFailed path)
-    Text.putStrLn (getOneShotResult result)
 
 -- | Stopping result type that carries the final response text.
 newtype OneShotResult = OneShotResult  { getOneShotResult :: Text }
@@ -80,8 +105,8 @@ oneShotStep :: (LlmTurnContent, Session) -> OneShotResult
 oneShotStep (llmTurn,_) = OneShotResult $ extractResponseText llmTurn.llmResponse
 
 -- | Converts a Runtime into an Agent that stops when no tool calls are present.
-runtimeToAgent :: Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
-runtimeToAgent rt = do
+runtimeToAgent :: SessionStore -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
+runtimeToAgent store rt = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -97,7 +122,9 @@ runtimeToAgent rt = do
             }
     let completeF = mkOpenAICompletion completionConfig
 
-    pure $ Agent
+    pure $ 
+      agentStoreSession store convId $
+        Agent
         { step = naiveTilNoToolCallStep
         , sysPrompt = pure sPrompt
         , sysTools = sTools
@@ -230,32 +257,46 @@ toolParamsToJson props =
     paramTypeToString (MultipleParamType t) = t
     paramTypeToString (ObjectParamType _) = "object"
 
-readSession :: FilePath -> IO (Maybe Session)
-readSession path = do
-  fileExists <- doesFileExist path
-  if fileExists
-    then do
-       dat <- BSL.readFile path
-       pure $ Aeson.decode =<< lastLine dat
-    else do
-       sess <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
-       pure $ Just sess
-  where
-    lastLine :: LByteString.ByteString -> Maybe LByteString.ByteString
-    lastLine dat = case BSL.lines dat of [] -> Nothing ; rows -> Just (last rows)
+-- | Creates a callback that stores session progress to a file.
+-- This is useful for creating an 'OnSessionProgress' handler that persists to disk.
+fileStoringCallback :: SessionStore -> ConversationId -> OnSessionProgress
+fileStoringCallback store convId progress =
+    case progress of
+        SessionUpdated sess -> SessionStore.storeSession store convId sess
+        SessionCompleted sess -> SessionStore.storeSession store convId sess
+        SessionStarted sess -> SessionStore.storeSession store convId sess
+        SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
-storeSession :: Session -> FilePath -> IO ()
-storeSession sess path = do
-  BSL.writeFile path (Aeson.encode sess <> "\n")
+-- | Creates a callback that stores session progress using a SessionStore.
+-- Uses the session's conversation ID to determine the file path.
+sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
+sessionStoreCallback store convId progress =
+    case progress of
+        SessionUpdated sess -> storeSessionWithStore sess
+        SessionCompleted sess -> storeSessionWithStore sess
+        SessionStarted sess -> storeSessionWithStore sess
+        SessionFailed sess _ -> storeSessionWithStore sess
+  where
+    storeSessionWithStore sess =
+      SessionStore.storeSession store convId sess
 
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent { usrQuery = pure (Just query) }
 
-agentStoreSession :: forall r. FilePath -> Agent r -> Agent r
-agentStoreSession path agent =
+-- | Wrap an agent to store sessions using a SessionStore.
+-- The session is stored using the conversation ID from the session.
+agentStoreSession :: forall r. SessionStore -> ConversationId -> Agent r -> Agent r
+agentStoreSession store convId agent =
+    agentWithSessionProgress (sessionStoreCallback store convId) agent
+
+-- | Wrap an agent to emit session progress events after each step.
+agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r
+agentWithSessionProgress onProgress agent =
     agent { step = decorate agent.step }
   where
     decorate :: (Session -> IO (Action r)) -> (Session -> IO (Action r))
-    decorate f = \sess -> storeSession sess path >> f sess
+    decorate f = \sess -> do
+        onProgress (SessionUpdated sess)
+        f sess
 

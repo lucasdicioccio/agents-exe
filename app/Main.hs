@@ -14,6 +14,7 @@ import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
@@ -29,7 +30,8 @@ import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.SessionPrint as SessionPrint
-import qualified System.Agents.TUI2.Core as TUI2
+import qualified System.Agents.SessionStore as SessionStore
+import qualified System.Agents.TUI.Core as TUI
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
@@ -168,8 +170,7 @@ data TuiOptions
 
 data OneShotOptions
     = OneShotOptions
-    { sessionFile :: Maybe FilePath
-    , promptScript :: PromptScript
+    { promptScript :: PromptScript
     }
 
 data McpServerOptions
@@ -208,15 +209,7 @@ parseTuiOptions =
 parseOneShotOptions :: Parser OneShotOptions
 parseOneShotOptions =
     OneShotOptions
-        <$> optional
-            ( strOption
-                ( long "session-file"
-                    <> metavar "SESSIONFILE"
-                    <> help "session file"
-                    <> showDefault
-                )
-            )
-        <*> ( many
+        <$> ( many
                 (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
             )
   where
@@ -432,6 +425,9 @@ main = do
 
         let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` logFileJsonTracer
 
+        -- Initialize SessionStore from the session prefix argument
+        let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
+
         case pargs.mainCommand of
             Check -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
@@ -442,9 +438,11 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
             TerminalUI opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -453,22 +451,25 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
-                TUI2.runTUI (opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix) (fmap oneAgent pargs.agentFiles)
+                TUI.runTUI sessionStore (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
             OneShot opts -> do
+                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
-                    let oneShot = flip (OneShot.mainOneShotText opts.sessionFile)
+                    let oneShot = flip (OneShot.mainOneShotText sessionStore)
                     oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 baseTracer
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
             SelfDescribe -> do
                 -- verify the api-key file exists at least
@@ -488,6 +489,7 @@ main = do
                         (Just $ Bash.AddMessage "--no output--")
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -499,8 +501,9 @@ main = do
                                         traceUsefulPromptStderr
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
-                McpServer.multiAgentsServer (fmap oneAgent pargs.agentFiles)
+                McpServer.multiAgentsServer McpServer.defaultMcpServerConfig (fmap oneAgent pargs.agentFiles)
             Initialize ->
                 let o =
                         Agent
@@ -561,8 +564,6 @@ toJsonTrace x = case x of
     encodeBaseAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
     encodeBaseAgentTrace (Runtime.AgentTrace_Loading _ _ tr) =
         encodeBaseTrace_Loading tr
-    encodeBaseAgentTrace (Runtime.AgentTrace_Memorize _ _ _ tr) =
-        encodeBaseTrace_Memorize tr
     encodeBaseAgentTrace (Runtime.AgentTrace_Conversation _ _ convId tr) = do
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
@@ -576,16 +577,6 @@ toJsonTrace x = case x of
         case bt of
             (BashToolbox.BashToolsLoadingTrace _) -> Nothing
             (BashToolbox.ReloadToolsTrace _) -> Nothing
-
-    encodeBaseTrace_Memorize :: Runtime.MemorizeTrace -> Maybe Aeson.Value
-    encodeBaseTrace_Memorize bt =
-        case bt of
-            (Runtime.Calling _ _ _) ->
-                Nothing
-            (Runtime.GotResponse _ _ _ _) ->
-                Nothing
-            (Runtime.InteractionDone _ _) ->
-                Nothing
 
     encodeBaseTrace_Conversation :: Runtime.ConversationTrace -> Maybe Aeson.Value
     encodeBaseTrace_Conversation bt =
