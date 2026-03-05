@@ -66,6 +66,7 @@ library agents-lib
                     , System.Agents.Base
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.Base
+                    , System.Agents.CLI.CleanWorktrees
                     , System.Agents.CLI.InitProject
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
@@ -128,6 +129,7 @@ library agents-lib
                       lens,
                       monad-logger,
                       mtl,
+                      optparse-applicative,
                       process,
                       process-extras,
                       prodapi,

@@ -17,6 +17,7 @@ import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
+import qualified System.Agents.CLI.CleanWorktrees as CleanWorktrees
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr, traceUsefulPromptStdout)
 import qualified System.Agents.FileLoader as FileLoader
@@ -152,6 +153,7 @@ data Command
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
+    | CleanWorktrees CleanWorktrees.CleanWorktreesOptions
 
 data PromptScriptDirective
     = Str Text.Text
@@ -304,6 +306,10 @@ parseSessionPrintOptions =
                 <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
             )
 
+parseCleanWorktreesCommand :: Parser Command
+parseCleanWorktreesCommand =
+    CleanWorktrees <$> CleanWorktrees.parseCleanWorktreesOptions
+
 {-
   where
     parseOptions :: Parser McpServerOptions
@@ -388,6 +394,7 @@ parseProgOptions argparserargs =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
+                <> command "clean-worktrees" (info parseCleanWorktreesCommand (progDesc "Clean up git worktrees with associated session files (use --do-it to actually delete)"))
             )
 
 main :: IO ()
@@ -431,7 +438,7 @@ main = do
         case pargs.mainCommand of
             Check -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                forM_ pargs.agentFiles $ \agentFile -> do
+                forM_ pargs.agentFiles $ \agentFile ->
                     OneShot.mainPrintAgent $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -533,6 +540,8 @@ main = do
                             InitProject.initKeyFile pargs.apiKeysFile
             SessionPrint opts -> do
                 SessionPrint.handleSessionPrint opts
+            CleanWorktrees opts -> do
+                CleanWorktrees.handleCleanWorktrees opts
 
 -------------------------------------------------------------------------------
 -- Utility Functions
