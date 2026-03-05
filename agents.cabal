@@ -97,10 +97,10 @@ library agents-lib
                     , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
-                    , System.Agents.TUI2.Core
-                    , System.Agents.TUI2.Types
-                    , System.Agents.TUI2.Render
-                    , System.Agents.TUI2.Event
+                    , System.Agents.TUI.Core
+                    , System.Agents.TUI.Types
+                    , System.Agents.TUI.Render
+                    , System.Agents.TUI.Event
                     , System.Agents.TraceUtils
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,

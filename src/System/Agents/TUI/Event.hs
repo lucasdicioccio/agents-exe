@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Event handling for the TUI application.
-module System.Agents.TUI2.Event where
+module System.Agents.TUI.Event where
 
 import Brick
 import Brick.BChan (newBChan, readBChan, writeBChan, BChan)
@@ -29,7 +29,7 @@ import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
 import qualified System.Agents.Session.Loop as Loop
 import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.TUI2.Types
+import System.Agents.TUI.Types
 
 -------------------------------------------------------------------------------
 -- Main Event Handler

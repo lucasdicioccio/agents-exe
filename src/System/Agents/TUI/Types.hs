@@ -3,7 +3,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | Core types and data structures for the TUI application.
-module System.Agents.TUI2.Types where
+module System.Agents.TUI.Types where
 
 import Brick.BChan (BChan)
 import Brick.Focus (FocusRing, focusRing)

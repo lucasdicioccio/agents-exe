@@ -6,7 +6,7 @@
 -- | Main entry point for the TUI application.
 -- This module re-exports functionality from the submodules and provides
 -- the main initialization and application runner.
-module System.Agents.TUI2.Core (
+module System.Agents.TUI.Core (
     -- * Re-exports from Types
     WidgetName(..),
     N,
@@ -69,9 +69,9 @@ import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 
 -- Import from submodules
-import System.Agents.TUI2.Types
-import System.Agents.TUI2.Render
-import System.Agents.TUI2.Event
+import System.Agents.TUI.Types
+import System.Agents.TUI.Render
+import System.Agents.TUI.Event
 
 -------------------------------------------------------------------------------
 -- Cursor and Start Event

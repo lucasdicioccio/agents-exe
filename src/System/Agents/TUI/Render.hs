@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Rendering functions for the TUI application.
-module System.Agents.TUI2.Render where
+module System.Agents.TUI.Render where
 
 import Brick
 import Brick.Focus (focusGetCurrent)
@@ -17,7 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Vty as Vty
 
-import System.Agents.TUI2.Types
+import System.Agents.TUI.Types
 import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId)
 import System.Agents.Runtime (Runtime(..))

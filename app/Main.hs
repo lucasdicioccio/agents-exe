@@ -31,7 +31,7 @@ import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionStore as SessionStore
-import qualified System.Agents.TUI2.Core as TUI2
+import qualified System.Agents.TUI.Core as TUI
 import qualified System.Agents.Tools as ToolsTrace
 import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
@@ -453,7 +453,7 @@ main = do
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
-                TUI2.runTUI sessionStore (fmap oneAgent pargs.agentFiles)
+                TUI.runTUI sessionStore (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
