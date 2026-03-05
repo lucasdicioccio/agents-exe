@@ -170,8 +170,7 @@ data TuiOptions
 
 data OneShotOptions
     = OneShotOptions
-    { sessionFile :: Maybe FilePath
-    , promptScript :: PromptScript
+    { promptScript :: PromptScript
     }
 
 data McpServerOptions
@@ -210,15 +209,7 @@ parseTuiOptions =
 parseOneShotOptions :: Parser OneShotOptions
 parseOneShotOptions =
     OneShotOptions
-        <$> optional
-            ( strOption
-                ( long "session-file"
-                    <> metavar "SESSIONFILE"
-                    <> help "session file"
-                    <> showDefault
-                )
-            )
-        <*> ( many
+        <$> ( many
                 (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
             )
   where
@@ -435,7 +426,7 @@ main = do
         let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` logFileJsonTracer
 
         -- Initialize SessionStore from the session prefix argument
-        let mSessionStore = fmap SessionStore.mkSessionStore pargs.sessionsJsonPrefix
+        let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
 
         case pargs.mainCommand of
             Check -> do
@@ -447,12 +438,11 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 Prod.traceBoth baseTracer traceUsefulPromptStdout
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool mSessionStore
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
             TerminalUI opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let sessionMpath = opts.sessionJsonPrefix <|> pargs.sessionsJsonPrefix
-                let mStore = fmap SessionStore.mkSessionStore sessionMpath
+                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -461,26 +451,25 @@ main = do
                                 Prod.traceBoth
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool mStore
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
-                TUI2.runTUI mStore (fmap oneAgent pargs.agentFiles)
+                TUI2.runTUI (Just sessionStore) (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
             OneShot opts -> do
-                let sessionMpath = opts.sessionFile <|> pargs.sessionsJsonPrefix
-                let mStore = fmap SessionStore.mkSessionStore sessionMpath
+                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
-                    let oneShot = flip (OneShot.mainOneShotText mStore)
+                    let oneShot = flip (OneShot.mainOneShotText (Just sessionStore))
                     oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
                                 baseTracer
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool mStore
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
             SelfDescribe -> do
                 -- verify the api-key file exists at least
@@ -500,8 +489,7 @@ main = do
                         (Just $ Bash.AddMessage "--no output--")
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let sessionMpath = pargs.sessionsJsonPrefix
-                let mStore = fmap SessionStore.mkSessionStore sessionMpath
+                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile =
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -513,7 +501,7 @@ main = do
                                         traceUsefulPromptStderr
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool mStore
+                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
                 McpServer.multiAgentsServer McpServer.defaultMcpServerConfig (fmap oneAgent pargs.agentFiles)
             Initialize ->

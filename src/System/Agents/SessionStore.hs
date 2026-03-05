@@ -9,6 +9,7 @@
 module System.Agents.SessionStore (
     -- * Session Store
     SessionStore (..),
+    defaultSessionStore,
     mkSessionStore,
 
     -- * Default pattern
@@ -70,6 +71,10 @@ data SessionStore = SessionStore
     -- the default pattern.
     }
     deriving (Show, Eq)
+
+-- | Create a ineffective session store.
+defaultSessionStore :: SessionStore
+defaultSessionStore = SessionStore ""
 
 -- | Create a new session store with the given prefix.
 mkSessionStore :: FilePath -> SessionStore
