@@ -7,7 +7,6 @@ module Main where
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
@@ -29,7 +28,6 @@ import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
-import qualified System.Agents.Session.Base as Session
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.TUI2.Core as TUI2
 import qualified System.Agents.Tools as ToolsTrace
@@ -297,6 +295,10 @@ parseSessionPrintOptions =
                     <> help "Limit output to the first N turns (no limit if not specified)"
                     <> showDefault
                 )
+            )
+        <*> switch
+            ( long "repeat-system-prompt"
+                <> help "Repeat the system prompt at each turn (default: False)"
             )
 
 {-

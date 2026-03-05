@@ -30,6 +30,8 @@ data SessionPrintOptions = SessionPrintOptions
     , showToolCallResults :: Bool
       -- | Optional limit on the number of turns to display
     , nTurns :: Maybe Int
+      -- | Whether to repeat the system prompt at each turn
+    , repeatSystemPrompt :: Bool
     }
 
 -- | Handle the session-print command: load a session file and output it as markdown.
@@ -88,9 +90,11 @@ formatTurn opts stepNum turn = case turn of
 -- | Format user turn content.
 formatUserTurn :: SessionPrintOptions -> Session.UserTurnContent -> Text.Text
 formatUserTurn opts content =
-    let systemPromptSection = case content.userPrompt of
-            Session.SystemPrompt sp ->
-                "### System Prompt\n\n```\n" <> sp <> "\n```\n"
+    let -- Only include system prompt section if repeatSystemPrompt is True
+        systemPromptSection = case content.userPrompt of
+            Session.SystemPrompt sp | opts.repeatSystemPrompt ->
+                "### System Prompt\n\n```\n" <> sp <> "```\n"
+            _ -> ""
         querySection = case content.userQuery of
             Just (Session.UserQuery q) -> "\n### User Query\n\n" <> q <> "\n"
             Nothing -> ""
