@@ -13,6 +13,9 @@ TASK_DIR="tasks"
 SESSIONS_DIR="tasks-sessions"
 BASE_BRANCH="main"
 
+# GitHub username for filtering issues (security: only process issues from trusted author)
+GITHUB_USERNAME="${GITHUB_USERNAME:-lucasdicioccio}"
+
 # Mapping: Label -> Relative path from worktree root
 declare -A PROJECT_MAP=(
     ["root"]="."
@@ -79,7 +82,8 @@ cmd_add() {
 
 cmd_from_github() {
     mkdir -p "$TASK_DIR"
-    local issues=$(gh issue list --label "agents/to-be-taken" --json number,labels)
+    # Security: Only fetch issues from the trusted author to prevent arbitrary code execution
+    local issues=$(gh issue list --label "agents/to-be-taken" --author "$GITHUB_USERNAME" --json number,labels)
     local count=$(echo "$issues" | jq 'length')
 
     [[ "$count" -eq 0 ]] && { echo "No tasks found in GitHub."; return 0; }
@@ -216,3 +220,4 @@ case "$COMMAND" in
     init|add|from-github|process|worktree_exec) "cmd_$COMMAND" "$@" ;;
     *) usage ;;
 esac
+
