@@ -141,7 +141,7 @@ For now, only the local-executable transport is supported.
 
 Adding executables is as follows:
 
-```
+```json
 {
   "tag": "OpenAIAgentDescription",
   "contents": {
@@ -298,6 +298,50 @@ agents-exe run -p "explain the diff:" \
   --shell "git diff"
 ```
 
+## Session Print Command
+
+The `session-print` command allows you to view saved session files in a human-readable markdown format.
+Sessions are JSON files that store the conversation history between users and agents, including tool calls and responses.
+
+### SessionPrintOptions
+
+The `SessionPrintOptions` type controls how session files are displayed:
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `sessionPrintFile` | `FilePath` | Path to the session JSON file to print (required positional argument) |
+| `showToolCallResults` | `Bool` | When enabled with `--show-tool-call-results`, displays the actual results returned by tool calls |
+| `nTurns` | `Maybe Int` | When specified with `--n-turns N`, limits output to the first N turns |
+
+### Usage Examples
+
+Print an entire session:
+```console
+agents-exe session-print my-session.json
+```
+
+Print only the first 5 turns:
+```console
+agents-exe session-print --n-turns 5 my-session.json
+```
+
+Print with tool call results included:
+```console
+agents-exe session-print --show-tool-call-results my-session.json
+```
+
+Combine options:
+```console
+agents-exe session-print --n-turns 10 --show-tool-call-results my-session.json
+```
+
+The output is formatted as markdown with:
+- Session metadata (ID and fork information)
+- Chronologically ordered turns (user turns and LLM turns)
+- System prompts, user queries, and LLM responses
+- Tool calls made by the LLM
+- Tool responses (when `--show-tool-call-results` is enabled)
+
 ## JSON logging
 
 Agents-exe logs _a lot_ of information.  The default format is defined the
@@ -439,3 +483,4 @@ agents-exe --log-http http://example.com/logz
 (or both).
 
 The log file will contain detailed JSON entries, in a better format than the "raw log file".
+
