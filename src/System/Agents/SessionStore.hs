@@ -116,7 +116,7 @@ readSessionFromFile path = do
        pure $ Aeson.decode =<< lastLine dat
     else do
        -- Create a new empty session with all required fields
-       sess <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing
+       sess <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
        pure $ Just sess
   where
     lastLine :: LByteString.ByteString -> Maybe LByteString.ByteString

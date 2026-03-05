@@ -18,7 +18,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (contramap)
 
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newStepId)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newStepId, newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
@@ -102,13 +102,13 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
     runSubAgent :: ConversationId -> PromptOtherAgent -> IO CByteString.ByteString
     runSubAgent parentConversationId (PromptOtherAgent query) = do
         -- Create the agent from the runtime with the OneShot configuration
-        agent <- runtimeToAgentForTool store rt callerSlug callerId parentConversationId
+        agent <- runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConversationId
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) agent
 
-        -- Create a fresh session with all required fields including sessionConversationId
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing
+        -- Create a fresh session
+        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
 
         -- Run the agent and get the result
         (finalTurnContent, _) <- run agentWithQuery session0
@@ -120,14 +120,14 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
 -------------------------------------------------------------------------------
 -- | Creates an Agent from a Runtime configured for use as a tool.
 -- Based on runtimeToAgent from OneShot.hs.
-runtimeToAgentForTool ::
+runtimeToAgentForToolInIOScriptExecution ::
     SessionStore ->
     Runtime ->
     AgentSlug ->
     AgentId ->
     ConversationId ->
     IO (Agent (LlmTurnContent, Session))
-runtimeToAgentForTool store rt callerSlug callerId parentConvId = do
+runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConvId = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -143,8 +143,9 @@ runtimeToAgentForTool store rt callerSlug callerId parentConvId = do
                 }
     let completeF = mkOpenAICompletion completionConfig
 
+    convId <- newConversationId
     pure $
-      agentStoreSession store $
+      agentStoreSession store convId $
         Agent
             { step = naiveTilNoToolCallStep
             , sysPrompt = pure sPrompt

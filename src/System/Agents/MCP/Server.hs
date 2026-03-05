@@ -244,7 +244,6 @@ runAgentWithQuery onProgress agentTree query = do
     session0 <- SessionBase.Session [] <$> SessionBase.newSessionId 
                                         <*> pure Nothing 
                                         <*> SessionBase.newTurnId 
-                                        <*> pure Nothing
     
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)

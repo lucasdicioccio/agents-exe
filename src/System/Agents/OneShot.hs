@@ -74,7 +74,7 @@ runOneShotWithConfig store config convId rt query = do
     -- Create or use initial session with all required fields including sessionConversationId
     session0 <- case config.initialSession of
       Just s -> pure s
-      Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing
+      Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
     
     config.onSessionProgress convId (SessionStarted session0)
     result <- run agent session0
@@ -123,7 +123,7 @@ runtimeToAgent store rt = do
     let completeF = mkOpenAICompletion completionConfig
 
     pure $ 
-      agentStoreSession store $
+      agentStoreSession store convId $
         Agent
         { step = naiveTilNoToolCallStep
         , sysPrompt = pure sPrompt
@@ -269,8 +269,8 @@ fileStoringCallback store convId progress =
 
 -- | Creates a callback that stores session progress using a SessionStore.
 -- Uses the session's conversation ID to determine the file path.
-sessionStoreCallback :: SessionStore -> OnSessionProgress
-sessionStoreCallback store progress =
+sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
+sessionStoreCallback store convId progress =
     case progress of
         SessionUpdated sess -> storeSessionWithStore sess
         SessionCompleted sess -> storeSessionWithStore sess
@@ -278,9 +278,7 @@ sessionStoreCallback store progress =
         SessionFailed sess _ -> storeSessionWithStore sess
   where
     storeSessionWithStore sess =
-        case sess.sessionConversationId of
-            Just convId -> SessionStore.storeSession store convId sess
-            Nothing -> pure () -- Cannot store without a conversation ID
+      SessionStore.storeSession store convId sess
 
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
@@ -288,9 +286,9 @@ agentSetQuery query agent =
 
 -- | Wrap an agent to store sessions using a SessionStore.
 -- The session is stored using the conversation ID from the session.
-agentStoreSession :: forall r. SessionStore -> Agent r -> Agent r
-agentStoreSession store agent =
-    agentWithSessionProgress (sessionStoreCallback store) agent
+agentStoreSession :: forall r. SessionStore -> ConversationId -> Agent r -> Agent r
+agentStoreSession store convId agent =
+    agentWithSessionProgress (sessionStoreCallback store convId) agent
 
 -- | Wrap an agent to emit session progress events after each step.
 agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r

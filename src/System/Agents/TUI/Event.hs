@@ -310,8 +310,7 @@ handleNewConversationFromEditor = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-           -- Create a fresh session with all required fields including sessionConversationId
-           session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing)
+           session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
            runConversation baseTuiAgent session
         _ ->
            pure ()
