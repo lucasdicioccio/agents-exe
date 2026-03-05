@@ -63,9 +63,9 @@ fileStoringConfig store mSession = OneShotConfig
   }
 
 -- | Run a one-shot agent with the given configuration.
-runOneShotWithConfig :: OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
-runOneShotWithConfig config convId rt query = do
-    agent0 <- runtimeToAgent rt
+runOneShotWithConfig :: SessionStore -> OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
+runOneShotWithConfig store config convId rt query = do
+    agent0 <- runtimeToAgent store rt
     let agent = agentSetQuery (UserQuery query)
           $ agentWithSessionProgress (config.onSessionProgress convId)
           $ fmap oneShotStep
@@ -90,7 +90,7 @@ mainOneShotText store props query = do
             Errors errs -> traverse_ print errs
             Initialized ai -> do
                 let config = fileStoringConfig store Nothing
-                result <- runOneShotWithConfig config convId ai.agentRuntime query
+                result <- runOneShotWithConfig store config convId ai.agentRuntime query
                 Text.putStrLn (getOneShotResult result)
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
@@ -105,8 +105,8 @@ oneShotStep :: (LlmTurnContent, Session) -> OneShotResult
 oneShotStep (llmTurn,_) = OneShotResult $ extractResponseText llmTurn.llmResponse
 
 -- | Converts a Runtime into an Agent that stops when no tool calls are present.
-runtimeToAgent :: Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
-runtimeToAgent rt = do
+runtimeToAgent :: SessionStore -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
+runtimeToAgent store rt = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -122,7 +122,9 @@ runtimeToAgent rt = do
             }
     let completeF = mkOpenAICompletion completionConfig
 
-    pure $ Agent
+    pure $ 
+      agentStoreSession store $
+        Agent
         { step = naiveTilNoToolCallStep
         , sysPrompt = pure sPrompt
         , sysTools = sTools

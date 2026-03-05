@@ -130,7 +130,7 @@ runTUIWithConfig config props = do
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTreeRuntime props
     let itrees = [rt | Initialized rt <- trees]
-    sessionAgents <- traverse (runtimeToAgent . agentRuntime) itrees
+    sessionAgents <- traverse (runtimeToAgent config.sessionStore . agentRuntime) itrees
     let tuiAgents = zipWith TuiAgent sessionAgents itrees
 
     -- Load existing session files (only if file prefix is provided)
