@@ -236,6 +236,6 @@ agentSetQuery query agent =
 -------------------------------------------------------------------------------
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
-extractResponseText (LlmResponse txt _) =
+extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
 

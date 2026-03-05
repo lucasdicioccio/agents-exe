@@ -44,6 +44,7 @@ newtype SystemPrompt = SystemPrompt Text
 -- | LLM response.
 data LlmResponse = LlmResponse 
     { responseText :: Maybe Text
+    , responseThinking :: Maybe Text  -- ^ Separate thinking/reasoning content from models like o1/o3 and Claude
     , rawResponse :: Aeson.Value
     }
     deriving (Show, Ord, Eq, Generic)
