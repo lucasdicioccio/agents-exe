@@ -83,7 +83,8 @@ cmd_add() {
 cmd_from_github() {
     mkdir -p "$TASK_DIR"
     # Security: Only fetch issues from the trusted author to prevent arbitrary code execution
-    local issues=$(gh issue list --label "agents/to-be-taken" --author "$GITHUB_USERNAME" --json number,labels)
+    # Reverse the list so oldest issues are processed first (gh lists from newest to oldest)
+    local issues=$(gh issue list --label "agents/to-be-taken" --author "$GITHUB_USERNAME" --json number,labels | jq 'reverse')
     local count=$(echo "$issues" | jq 'length')
 
     [[ "$count" -eq 0 ]] && { echo "No tasks found in GitHub."; return 0; }
