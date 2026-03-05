@@ -12,6 +12,10 @@ module System.Agents.SessionStore (
     defaultSessionStore,
     mkSessionStore,
 
+    -- * Low-level operations, mostly to implement command-line bypasses
+    readSessionFromFile,
+    storeSessionToFile,
+
     -- * Session storage operations
     storeSession,
     readSession,
@@ -115,9 +119,7 @@ readSessionFromFile path = do
        dat <- BSL.readFile path
        pure $ Aeson.decode =<< lastLine dat
     else do
-       -- Create a new empty session with all required fields
-       sess <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
-       pure $ Just sess
+       pure Nothing
   where
     lastLine :: LByteString.ByteString -> Maybe LByteString.ByteString
     lastLine dat = case BSL.lines dat of [] -> Nothing ; rows -> Just (last rows)
