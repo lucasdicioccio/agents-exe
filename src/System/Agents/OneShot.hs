@@ -2,7 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module System.Agents.OneShot where
+module System.Agents.OneShot (
+  runtimeToAgent,
+  agentStoreSession,
+  fileStoringCallback,
+  mainPrintAgent,
+  mainOneShotText
+) where
 
 import Control.Exception (Exception)
 import qualified Data.Aeson as Aeson
@@ -47,13 +53,6 @@ data OneShotConfig = OneShotConfig
     -- ^ Callback for session progress updates (defaults to 'ignoreSessionProgress')
   , initialSession :: Maybe Session
     -- ^ Optional initial session to resume from
-  }
-
--- | Default configuration with no session tracking.
-defaultOneShotConfig :: OneShotConfig
-defaultOneShotConfig = OneShotConfig
-  { onSessionProgress = \_convId -> ignoreSessionProgress
-  , initialSession = Nothing
   }
 
 -- | Creates a configuration that persists sessions to a file.
