@@ -153,9 +153,9 @@ cmd_worktree_exec() {
 
 
     # 4. Agent Execution
-    local session_file="${orig_cwd}/${SESSIONS_DIR}/${name}.session.json"
-    local session_md="${orig_cwd}/${SESSIONS_DIR}/${name}.session.md"
-    local agent_config="${orig_cwd}/$(get_agent_config "$label")"
+    local session_file="${SESSIONS_DIR}/${name}.session.json"
+    local session_md="${SESSIONS_DIR}/${name}.session.md"
+    local agent_config="$(get_agent_config "$label")"
     local commit_message="Update via automation ($name)"
 
     agents-exe --agent-file "$agent_config" check
