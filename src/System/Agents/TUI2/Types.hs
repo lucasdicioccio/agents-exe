@@ -99,16 +99,7 @@ data Conversation = Conversation
 
 -- | Configuration for session handling in the TUI.
 data SessionConfig = SessionConfig
-    { sessionOnProgress :: OnSessionProgress
-    -- ^ Callback for session progress. Defaults to 'ignoreSessionProgress'.
-    , sessionStore :: Maybe SessionStore
-    }
-
--- | Default session configuration with no persistence.
-defaultSessionConfig :: SessionConfig
-defaultSessionConfig = SessionConfig
-    { sessionOnProgress = ignoreSessionProgress
-    , sessionStore = Nothing
+    { sessionStore :: Maybe SessionStore
     }
 
 -------------------------------------------------------------------------------

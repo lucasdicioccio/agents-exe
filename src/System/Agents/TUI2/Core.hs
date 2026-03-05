@@ -18,7 +18,6 @@ module System.Agents.TUI2.Core (
     UIState(..),
     TuiState(..),
     SessionConfig(..),
-    defaultSessionConfig,
     initUIState,
     updateConversationSession,
     updateConversation,
@@ -65,7 +64,7 @@ import Control.Monad (void, forever)
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
 import System.Agents.OneShot (runtimeToAgent)
-import System.Agents.Session.Base (Session(..), ignoreSessionProgress)
+import System.Agents.Session.Base (Session(..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 
@@ -110,8 +109,7 @@ loadSessionFiles store = do
 -- | Create a session configuration with file-based persistence.
 fileSessionConfig :: SessionStore -> SessionConfig
 fileSessionConfig store = SessionConfig
-    { sessionOnProgress = ignoreSessionProgress  -- Will be set per-conversation with specific path
-    , sessionStore = Just store
+    { sessionStore = Just store
     }
 
 -------------------------------------------------------------------------------

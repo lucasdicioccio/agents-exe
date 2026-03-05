@@ -362,7 +362,6 @@ runConversation baseTuiAgent session = do
     let combinedOnProgress progressEvent = do
             fileCallback progressEvent
             notifyProgress progressEvent
-            config.sessionOnProgress progressEvent
     
     -- Create the agent with the progress callback
     agent0 <- liftIO $ runtimeToAgent (baseTuiAgent.agentTree.agentRuntime)
