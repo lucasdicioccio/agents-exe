@@ -6,6 +6,7 @@ set -Eeuo pipefail
 # ==============================================================================
 
 # Path to the 'sqq' binary and queue database
+SELF=$(realpath $0)
 SQQ_BIN="${SQQ_BIN:-sqq}"
 QUEUE_DB="tasks/queue.sql"
 TASK_DIR="tasks"
@@ -20,7 +21,6 @@ declare -A PROJECT_MAP=(
 # Mapping: Label -> Agent configuration file path
 declare -A AGENT_MAP=(
     ["default"]="task-agents/kimi-agent-oneshot.json"
-    ["architect"]="task-agents/architect-agent.json"
 )
 
 # ==============================================================================
@@ -36,7 +36,7 @@ Commands:
   add <label> <branch>     Manually enqueue a task (opens editor for instructions)
   from-github              Fetch tasks from GitHub issues (label: "agents/to-be-taken")
   process                  Start processing the queue
-  worktree-exec <label> <name> <instruction_file>
+  worktree_exec <label> <name> <instruction_file>
                            Internal: The worker command that sets up worktree and runs agent
 EOF
     exit 1
@@ -73,7 +73,7 @@ cmd_add() {
     
     ${EDITOR:-vim} "$taskfile"
 
-    "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$0 worktree-exec \"$label\" \"$branch\" \"$taskfile\"")
+    "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$branch\" \"$taskfile\"")
     echo "Enqueued task: $branch ($label)"
 }
 
@@ -107,7 +107,7 @@ cmd_from_github() {
             echo -e "\n---\nPlease mention issue #$number in the commit message." >> "$taskfile"
         fi
 
-        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$0 worktree-exec \"$label\" \"$branch\" \"$taskfile\"")
+        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$0 worktree_exec \"$label\" \"$branch\" \"$taskfile\"")
         gh issue edit "$number" --remove-label "agents/to-be-taken" --add-label "agents/taken"
         echo "Enqueued GitHub issue #$number as $label task."
     done
@@ -209,6 +209,6 @@ find_or_create_taskfile() {
 COMMAND="$1"; shift
 
 case "$COMMAND" in
-    init|add|from-github|process|worktree-exec) "cmd_$COMMAND" "$@" ;;
+    init|add|from-github|process|worktree_exec) "cmd_$COMMAND" "$@" ;;
     *) usage ;;
 esac
