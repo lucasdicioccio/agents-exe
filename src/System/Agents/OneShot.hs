@@ -4,12 +4,10 @@
 
 module System.Agents.OneShot where
 
-import Control.Exception (Exception, throwIO)
+import Control.Exception (Exception)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
 import qualified Data.Aeson.Types as Aeson
-import qualified Data.ByteString.Lazy.Char8 as BSL
-import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Foldable (traverse_)
 import qualified Data.Maybe as Maybe
@@ -17,7 +15,6 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import System.Directory (doesFileExist)
 
 import System.Agents.AgentTree
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -96,15 +93,6 @@ mainOneShotText store props query = do
                 let config = fileStoringConfig store Nothing
                 result <- runOneShotWithConfig config convId ai.agentRuntime query
                 Text.putStrLn (getOneShotResult result)
-
--- | Legacy function: Run a one-shot agent with optional file path for session storage.
-_toremove_runOneShotAgent :: Maybe SessionStore -> ConversationId -> Runtime.Runtime -> Text -> IO ()
-_toremove_runOneShotAgent mstore convId rt query = do
-    let config = case mstore of
-          Nothing -> defaultOneShotConfig
-          Just store -> fileStoringConfig store Nothing
-    result <- runOneShotWithConfig config convId rt query
-    Text.putStrLn (getOneShotResult result)
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
   deriving (Show)
