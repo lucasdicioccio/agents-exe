@@ -66,6 +66,7 @@ import Control.Monad (void, forever)
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
 import System.Agents.OneShot (runtimeToAgent)
 import System.Agents.Session.Base (Session(..), ignoreSessionProgress)
+import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 
 -- Import from submodules
@@ -96,9 +97,8 @@ tui_appStartEvent = pure ()
 -- Returns a list of (FilePath, Maybe Session) pairs.
 --
 -- This function uses 'SessionStore' internally to discover and load sessions.
-loadSessionFiles :: FilePath -> IO [(FilePath, Maybe Session)]
-loadSessionFiles convPrefix = do
-    let store = SessionStore.mkSessionStore convPrefix
+loadSessionFiles :: SessionStore -> IO [(FilePath, Maybe Session)]
+loadSessionFiles store = do
     sessions <- SessionStore.listSessions store
     -- Convert to the legacy format (filepath, Maybe Session)
     pure [(path, mSess) | (path, mSess, _) <- sessions]
@@ -108,10 +108,10 @@ loadSessionFiles convPrefix = do
 -------------------------------------------------------------------------------
 
 -- | Create a session configuration with file-based persistence.
-fileSessionConfig :: FilePath -> SessionConfig
-fileSessionConfig prefix = SessionConfig
+fileSessionConfig :: SessionStore -> SessionConfig
+fileSessionConfig store = SessionConfig
     { sessionOnProgress = ignoreSessionProgress  -- Will be set per-conversation with specific path
-    , sessionFilePrefix = Just prefix
+    , sessionStore = Just store
     }
 
 -------------------------------------------------------------------------------
@@ -121,11 +121,11 @@ fileSessionConfig prefix = SessionConfig
 -- | Initialize the TUI with props and optional conversation prefix (legacy API).
 -- 
 -- For more control, use 'runTUIWithConfig' instead.
-runTUI :: Maybe FilePath -> [Props] -> IO ()
-runTUI mConvPrefix props = 
-    let config = case mConvPrefix of
+runTUI :: Maybe SessionStore -> [Props] -> IO ()
+runTUI mStore props = 
+    let config = case mStore of
           Nothing -> defaultSessionConfig
-          Just prefix -> fileSessionConfig prefix
+          Just store -> fileSessionConfig store
     in runTUIWithConfig config props
 
 -- | Initialize the TUI with a custom session configuration.
@@ -138,8 +138,8 @@ runTUIWithConfig config props = do
     let tuiAgents = zipWith TuiAgent sessionAgents itrees
 
     -- Load existing session files (only if file prefix is provided)
-    loadedSessions <- case config.sessionFilePrefix of
-        Just prefix -> loadSessionFiles prefix
+    loadedSessions <- case config.sessionStore of
+        Just store -> loadSessionFiles store
         Nothing -> pure []
     
     -- Create event channel (needed for conversations)

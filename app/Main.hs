@@ -463,7 +463,7 @@ main = do
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool mStore
                             }
-                TUI2.runTUI sessionMpath (fmap oneAgent pargs.agentFiles)
+                TUI2.runTUI mStore (fmap oneAgent pargs.agentFiles)
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
@@ -473,7 +473,7 @@ main = do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
-                    let oneShot = flip (OneShot.mainOneShotText opts.sessionFile)
+                    let oneShot = flip (OneShot.mainOneShotText mStore)
                     oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys

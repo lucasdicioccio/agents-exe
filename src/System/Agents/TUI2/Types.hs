@@ -23,6 +23,7 @@ import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Base (AgentId, ConversationId (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base
+import System.Agents.SessionStore (SessionStore)
 
 -------------------------------------------------------------------------------
 -- Widget Names
@@ -88,8 +89,6 @@ data Conversation = Conversation
     , conversationChan :: BChan (Maybe UserQuery)
     , conversationStatus :: ConversationStatus
     -- ^ Current status of the conversation
-    , conversationFilePath :: Maybe FilePath
-    -- ^ Optional path to the session file on disk (Nothing if not persisting)
     , conversationOnProgress :: OnSessionProgress
     -- ^ Callback for session progress updates
     }
@@ -102,15 +101,14 @@ data Conversation = Conversation
 data SessionConfig = SessionConfig
     { sessionOnProgress :: OnSessionProgress
     -- ^ Callback for session progress. Defaults to 'ignoreSessionProgress'.
-    , sessionFilePrefix :: Maybe FilePath
-    -- ^ Optional file prefix for loading existing sessions and generating file paths.
+    , sessionStore :: Maybe SessionStore
     }
 
 -- | Default session configuration with no persistence.
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig
     { sessionOnProgress = ignoreSessionProgress
-    , sessionFilePrefix = Nothing
+    , sessionStore = Nothing
     }
 
 -------------------------------------------------------------------------------

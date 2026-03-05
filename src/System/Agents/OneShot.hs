@@ -22,7 +22,7 @@ import System.Directory (doesFileExist)
 import System.Agents.AgentTree
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Base (newConversationId,newStepId)
+import System.Agents.Base (newConversationId,newStepId,ConversationId)
 import System.Agents.Session.Base
 import System.Agents.Session.Loop
 import System.Agents.Session.Step
@@ -46,7 +46,7 @@ mainPrintAgent props = do
 
 -- | Configuration for one-shot execution with optional session persistence.
 data OneShotConfig = OneShotConfig
-  { onSessionProgress :: OnSessionProgress
+  { onSessionProgress :: ConversationId -> OnSessionProgress
     -- ^ Callback for session progress updates (defaults to 'ignoreSessionProgress')
   , initialSession :: Maybe Session
     -- ^ Optional initial session to resume from
@@ -55,23 +55,23 @@ data OneShotConfig = OneShotConfig
 -- | Default configuration with no session tracking.
 defaultOneShotConfig :: OneShotConfig
 defaultOneShotConfig = OneShotConfig
-  { onSessionProgress = ignoreSessionProgress
+  { onSessionProgress = \_convId -> ignoreSessionProgress
   , initialSession = Nothing
   }
 
 -- | Creates a configuration that persists sessions to a file.
-fileStoringConfig :: FilePath -> Maybe Session -> OneShotConfig
-fileStoringConfig path mSession = OneShotConfig
-  { onSessionProgress = fileStoringCallback path
+fileStoringConfig :: SessionStore -> Maybe Session -> OneShotConfig
+fileStoringConfig store mSession = OneShotConfig
+  { onSessionProgress = fileStoringCallback store
   , initialSession = mSession
   }
 
 -- | Run a one-shot agent with the given configuration.
-runOneShotWithConfig :: OneShotConfig -> Runtime.Runtime -> Text -> IO OneShotResult
-runOneShotWithConfig config rt query = do
+runOneShotWithConfig :: OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
+runOneShotWithConfig config convId rt query = do
     agent0 <- runtimeToAgent rt
     let agent = agentSetQuery (UserQuery query)
-          $ agentWithSessionProgress config.onSessionProgress
+          $ agentWithSessionProgress (config.onSessionProgress convId)
           $ fmap oneShotStep
           $ agent0
     
@@ -80,31 +80,32 @@ runOneShotWithConfig config rt query = do
       Just s -> pure s
       Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing
     
-    config.onSessionProgress (SessionStarted session0)
+    config.onSessionProgress convId (SessionStarted session0)
     result <- run agent session0
-    config.onSessionProgress (SessionCompleted session0)
+    config.onSessionProgress convId (SessionCompleted session0)
     pure result
 
 -- | Legacy function: Run a one-shot agent with optional file-based session storage.
-mainOneShotText :: Maybe FilePath -> Props -> Text -> IO ()
-mainOneShotText mpath props query = do
+mainOneShotText :: Maybe SessionStore -> Props -> Text -> IO ()
+mainOneShotText mstore props query = do
+    convId <- newConversationId
     withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized ai -> do
-                let config = case mpath of
+                let config = case mstore of
                       Nothing -> defaultOneShotConfig
-                      Just path -> fileStoringConfig path Nothing
-                result <- runOneShotWithConfig config ai.agentRuntime query
+                      Just store -> fileStoringConfig store Nothing
+                result <- runOneShotWithConfig config convId ai.agentRuntime query
                 Text.putStrLn (getOneShotResult result)
 
 -- | Legacy function: Run a one-shot agent with optional file path for session storage.
-runOneShotAgent :: Maybe FilePath -> Runtime.Runtime -> Text -> IO ()
-runOneShotAgent mpath rt query = do
-    let config = case mpath of
+_toremove_runOneShotAgent :: Maybe SessionStore -> ConversationId -> Runtime.Runtime -> Text -> IO ()
+_toremove_runOneShotAgent mstore convId rt query = do
+    let config = case mstore of
           Nothing -> defaultOneShotConfig
-          Just path -> fileStoringConfig path Nothing
-    result <- runOneShotWithConfig config rt query
+          Just store -> fileStoringConfig store Nothing
+    result <- runOneShotWithConfig config convId rt query
     Text.putStrLn (getOneShotResult result)
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
@@ -281,13 +282,13 @@ storeSession = SessionStore.storeSessionToFile
 
 -- | Creates a callback that stores session progress to a file.
 -- This is useful for creating an 'OnSessionProgress' handler that persists to disk.
-fileStoringCallback :: FilePath -> OnSessionProgress
-fileStoringCallback path progress =
+fileStoringCallback :: SessionStore -> ConversationId -> OnSessionProgress
+fileStoringCallback store convId progress =
     case progress of
-        SessionUpdated sess -> SessionStore.storeSessionToFile sess path
-        SessionCompleted sess -> SessionStore.storeSessionToFile sess path
-        SessionStarted sess -> SessionStore.storeSessionToFile sess path  -- Also store initial session
-        SessionFailed sess _ -> SessionStore.storeSessionToFile sess path  -- Store even on failure
+        SessionUpdated sess -> SessionStore.storeSession store convId sess
+        SessionCompleted sess -> SessionStore.storeSession store convId sess
+        SessionStarted sess -> SessionStore.storeSession store convId sess
+        SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
 -- | Creates a callback that stores session progress using a SessionStore.
 -- Uses the session's conversation ID to determine the file path.

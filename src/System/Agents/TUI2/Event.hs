@@ -330,8 +330,8 @@ handleRestoredConversation = do
 
 -- | Build the progress callback for a conversation.
 -- Combines the global session config with TUI-specific notification needs.
-buildOnProgress :: FilePath -> ConversationId -> BChan AppEvent -> OnSessionProgress
-buildOnProgress _filePath convId outChan progress = do
+buildOnProgress :: ConversationId -> BChan AppEvent -> OnSessionProgress
+buildOnProgress convId outChan progress = do
     -- Notify TUI of progress updates
     case progress of
         SessionUpdated sess -> do
@@ -351,19 +351,12 @@ runConversation baseTuiAgent session = do
     -- Generate conversation ID
     convId <- liftIO $ newConversationId
     
-    -- Use SessionStore to determine the file path
-    let mFilePath = case config.sessionFilePrefix of
-          Just prefix -> 
-            let store = SessionStore.mkSessionStore prefix
-            in Just $ SessionStore.sessionFilePath store convId
-          Nothing -> Nothing
-    
     outChan <- use eventChan
     inChan <- liftIO $ newBChan 100
     
     -- Build the combined progress callback
-    let notifyProgress = buildOnProgress (maybe "" id mFilePath) convId outChan
-    let fileCallback = maybe (\_ -> pure ()) fileStoringCallback mFilePath
+    let notifyProgress = buildOnProgress convId outChan
+    let fileCallback = maybe (\_ -> pure ()) (\store -> fileStoringCallback store convId) config.sessionStore
     
     -- Combine callbacks: first the file storage (if any), then TUI notification, then global config
     let combinedOnProgress progressEvent = do
@@ -400,7 +393,6 @@ runConversation baseTuiAgent session = do
                 , conversationName = "@" <> tuiAgent.agentTree.agentRuntime.agentSlug
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_WaitingForInput
-                , conversationFilePath = mFilePath
                 , conversationOnProgress = combinedOnProgress
                 }
 
