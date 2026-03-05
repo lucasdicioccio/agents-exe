@@ -96,13 +96,13 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
                 ("prompt_agent_" <> rt.agentSlug)
                 ("asks a prompt to the expert agent: " <> rt.agentSlug)
             )
-            (\conversationId prompt -> runSubAgent conversationId prompt)
+            runSubAgent
 
     -- Run the sub-agent with the given prompt and conversation ID
     runSubAgent :: ConversationId -> PromptOtherAgent -> IO CByteString.ByteString
-    runSubAgent conversationId (PromptOtherAgent query) = do
+    runSubAgent parentConversationId (PromptOtherAgent query) = do
         -- Create the agent from the runtime with the OneShot configuration
-        agent <- runtimeToAgentForTool store rt callerSlug callerId conversationId
+        agent <- runtimeToAgentForTool store rt callerSlug callerId parentConversationId
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) agent
