@@ -87,6 +87,7 @@ library agents-lib
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
                     , System.Agents.SessionPrint
+                    , System.Agents.SessionStore
                     , System.Agents.ToolSchema
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger

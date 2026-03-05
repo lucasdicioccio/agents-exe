@@ -240,8 +240,11 @@ runAgentWithQuery onProgress agentTree query = do
     let agentWithQuery = agentSetQuery (SessionBase.UserQuery query) 
           $ agentWithSessionProgress onProgress agent
     
-    -- Create a fresh session
-    session0 <- SessionBase.Session [] <$> SessionBase.newSessionId <*> pure Nothing <*> SessionBase.newTurnId
+    -- Create a fresh session with all required fields including sessionConversationId
+    session0 <- SessionBase.Session [] <$> SessionBase.newSessionId 
+                                        <*> pure Nothing 
+                                        <*> SessionBase.newTurnId 
+                                        <*> pure Nothing
     
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)

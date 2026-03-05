@@ -39,6 +39,8 @@ import System.Agents.Session.Loop (run)
 import System.Agents.OneShot (agentStoreSession)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
+import System.Agents.SessionStore (SessionStore)
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
     ( ToolRegistration (..)
     , registerIOScriptInLLM
@@ -64,8 +66,8 @@ instance Aeson.FromJSON PromptOtherAgent where
 -- Runtime.handleConversation. It creates an Agent from the Runtime,
 -- runs it with a session, and returns the result.
 turnAgentRuntimeIntoIOTool ::
-    -- | Session storage filepath
-    Maybe FilePath ->
+    -- | Optional session store for persisting sessions
+    Maybe SessionStore ->
     -- | The runtime of the agent to convert into a tool
     Runtime ->
     -- | The slug of the calling agent (for tracing)
@@ -74,7 +76,7 @@ turnAgentRuntimeIntoIOTool ::
     AgentId ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool mpath rt callerSlug callerId =
+turnAgentRuntimeIntoIOTool mStore rt callerSlug callerId =
     registerIOScriptInLLM io props
   where
     -- Define the parameter properties for the LLM tool schema
@@ -99,13 +101,13 @@ turnAgentRuntimeIntoIOTool mpath rt callerSlug callerId =
     runSubAgent :: ConversationId -> PromptOtherAgent -> IO CByteString.ByteString
     runSubAgent conversationId (PromptOtherAgent query) = do
         -- Create the agent from the runtime with the OneShot configuration
-        agent <- runtimeToAgentForTool mpath rt callerSlug callerId conversationId
+        agent <- runtimeToAgentForTool mStore rt callerSlug callerId conversationId
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) agent
 
-        -- Create a fresh session
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+        -- Create a fresh session with all required fields including sessionConversationId
+        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing
 
         -- Run the agent and get the result
         (finalTurnContent, _) <- run agentWithQuery session0
@@ -118,13 +120,13 @@ turnAgentRuntimeIntoIOTool mpath rt callerSlug callerId =
 -- | Creates an Agent from a Runtime configured for use as a tool.
 -- Based on runtimeToAgent from OneShot.hs.
 runtimeToAgentForTool ::
-    Maybe FilePath ->
+    Maybe SessionStore ->
     Runtime ->
     AgentSlug ->
     AgentId ->
     ConversationId ->
     IO (Agent (LlmTurnContent, Session))
-runtimeToAgentForTool mpath rt callerSlug callerId parentConvId = do
+runtimeToAgentForTool mStore rt callerSlug callerId parentConvId = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -141,7 +143,7 @@ runtimeToAgentForTool mpath rt callerSlug callerId parentConvId = do
     let completeF = mkOpenAICompletion completionConfig
 
     pure $
-      maybe id agentStoreSession mpath $
+      maybe id agentStoreSession mStore $
         Agent
             { step = naiveTilNoToolCallStep
             , sysPrompt = pure sPrompt

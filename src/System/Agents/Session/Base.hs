@@ -13,6 +13,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.Base (ConversationId (..))
 import System.Agents.ToolSchema
 
 
@@ -123,6 +124,9 @@ data Session
     , sessionId :: SessionId
     , forkedFromSessionId :: Maybe SessionId
     , turnId :: TurnId
+    , sessionConversationId :: Maybe ConversationId
+      -- ^ Optional conversation ID for associating this session with a conversation.
+      -- Used for session storage and retrieval.
     }
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Session

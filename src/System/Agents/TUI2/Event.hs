@@ -28,6 +28,7 @@ import System.Agents.OneShot (runtimeToAgent, fileStoringCallback)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
 import qualified System.Agents.Session.Loop as Loop
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI2.Types
 
 -------------------------------------------------------------------------------
@@ -309,7 +310,8 @@ handleNewConversationFromEditor = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-           session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
+           -- Create a fresh session with all required fields including sessionConversationId
+           session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing)
            runConversation baseTuiAgent session
         _ ->
            pure ()
@@ -346,15 +348,15 @@ runConversation baseTuiAgent session = do
     -- Get session configuration
     config <- use sessionConfig
     
-    -- Generate conversation ID and determine file path
-    convId@(ConversationId cId) <- liftIO $ newConversationId
+    -- Generate conversation ID
+    convId <- liftIO $ newConversationId
     
-    -- Determine the file path and progress callback
-    let (mFilePath, globalOnProgress) = case config.sessionFilePrefix of
+    -- Use SessionStore to determine the file path
+    let mFilePath = case config.sessionFilePrefix of
           Just prefix -> 
-            let path = prefix ++ "conv." ++ show cId ++ ".json"
-            in (Just path, config.sessionOnProgress)
-          Nothing -> (Nothing, config.sessionOnProgress)
+            let store = SessionStore.mkSessionStore prefix
+            in Just $ SessionStore.sessionFilePath store convId
+          Nothing -> Nothing
     
     outChan <- use eventChan
     inChan <- liftIO $ newBChan 100
@@ -367,7 +369,7 @@ runConversation baseTuiAgent session = do
     let combinedOnProgress progressEvent = do
             fileCallback progressEvent
             notifyProgress progressEvent
-            globalOnProgress progressEvent
+            config.sessionOnProgress progressEvent
     
     -- Create the agent with the progress callback
     agent0 <- liftIO $ runtimeToAgent (baseTuiAgent.agentTree.agentRuntime)

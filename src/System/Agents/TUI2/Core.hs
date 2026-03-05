@@ -62,16 +62,11 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (void, forever)
-import Data.Maybe (fromMaybe)
-import Data.List (isPrefixOf, sortOn)
-import Data.Ord (Down(..))
-import Data.Time (UTCTime)
-import System.Directory (listDirectory, doesFileExist, getModificationTime)
-import System.FilePath ((</>))
 
 import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
-import System.Agents.OneShot (runtimeToAgent, readSession, fileStoringCallback)
-import System.Agents.Session.Base (Session(..), OnSessionProgress, ignoreSessionProgress)
+import System.Agents.OneShot (runtimeToAgent)
+import System.Agents.Session.Base (Session(..), ignoreSessionProgress)
+import qualified System.Agents.SessionStore as SessionStore
 
 -- Import from submodules
 import System.Agents.TUI2.Types
@@ -97,51 +92,16 @@ tui_appStartEvent = pure ()
 -- Session File Loading
 -------------------------------------------------------------------------------
 
--- | Session file info with metadata for sorting.
-data SessionFileInfo = SessionFileInfo
-    { sessionFilePath :: FilePath
-    , sessionModTime :: UTCTime
-    }
-
--- | Check if a filename matches the session file pattern.
--- Pattern: conv.<uuid>.json
-isSessionFile :: String -> Bool
-isSessionFile name =
-    "conv." `isPrefixOf` name && ".json" `isSuffixOf` name
-  where
-    isSuffixOf suffix str0 = reverse suffix `isPrefixOf` reverse str0
-
--- | Find all session files in the given directory matching the pattern.
-findSessionFiles :: FilePath -> IO [SessionFileInfo]
-findSessionFiles dir = do
-    entries <- listDirectory dir
-    let candidates = [dir </> entry | entry <- entries, isSessionFile entry]
-    -- Filter to only existing files and get modification times
-    existing <- filterM doesFileExist candidates
-    mapM (\path -> SessionFileInfo path <$> getModificationTime path) existing
-
 -- | Load all sessions from files matching the prefix pattern.
 -- Returns a list of (FilePath, Maybe Session) pairs.
+--
+-- This function uses 'SessionStore' internally to discover and load sessions.
 loadSessionFiles :: FilePath -> IO [(FilePath, Maybe Session)]
 loadSessionFiles convPrefix = do
-    -- Get directory from prefix (if prefix is a path, use its directory)
-    let dir = if '/' `elem` convPrefix || '\\' `elem` convPrefix
-                then case reverse $ dropWhile (\c -> c /= '/' && c /= '\\') $ reverse convPrefix of
-                       "" -> "."
-                       d -> d
-                else "."
-    
-    sessionFiles <- findSessionFiles dir
-    -- Sort by modification time (most recent first)
-    let sortedFiles = map sessionFilePath $ sortOn (Data.Ord.Down . sessionModTime) sessionFiles
-    
-    -- Load each session file
-    mapM (\path -> (path,) <$> readSession path) sortedFiles
-
-filterM :: Monad m => (a -> m Bool) -> [a] -> m [a]
-filterM p = foldr (\x acc -> do
-    b <- p x
-    if b then (x :) <$> acc else acc) (return [])
+    let store = SessionStore.mkSessionStore convPrefix
+    sessions <- SessionStore.listSessions store
+    -- Convert to the legacy format (filepath, Maybe Session)
+    pure [(path, mSess) | (path, mSess, _) <- sessions]
 
 -------------------------------------------------------------------------------
 -- Session Configuration Helpers
@@ -171,7 +131,6 @@ runTUI mConvPrefix props =
 -- | Initialize the TUI with a custom session configuration.
 runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
 runTUIWithConfig config props = do
-    let convPrefix = fromMaybe "./" config.sessionFilePrefix
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTreeRuntime props
     let itrees = [rt | Initialized rt <- trees]

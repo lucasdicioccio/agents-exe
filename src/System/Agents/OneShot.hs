@@ -27,6 +27,8 @@ import System.Agents.Session.Base
 import System.Agents.Session.Loop
 import System.Agents.Session.Step
 import System.Agents.Session.OpenAI
+import System.Agents.SessionStore (SessionStore)
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
 import System.Agents.Tools
 import System.Agents.Tools.Base
@@ -73,10 +75,10 @@ runOneShotWithConfig config rt query = do
           $ fmap oneShotStep
           $ agent0
     
-    -- Notify session start
+    -- Create or use initial session with all required fields including sessionConversationId
     session0 <- case config.initialSession of
       Just s -> pure s
-      Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+      Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure Nothing
     
     config.onSessionProgress (SessionStarted session0)
     result <- run agent session0
@@ -267,44 +269,50 @@ toolParamsToJson props =
     paramTypeToString (MultipleParamType t) = t
     paramTypeToString (ObjectParamType _) = "object"
 
+-- | Legacy function: Read a session from a file.
+-- Re-exported from SessionStore for backwards compatibility.
 readSession :: FilePath -> IO (Maybe Session)
-readSession path = do
-  fileExists <- doesFileExist path
-  if fileExists
-    then do
-       dat <- BSL.readFile path
-       pure $ Aeson.decode =<< lastLine dat
-    else do
-       sess <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
-       pure $ Just sess
-  where
-    lastLine :: LByteString.ByteString -> Maybe LByteString.ByteString
-    lastLine dat = case BSL.lines dat of [] -> Nothing ; rows -> Just (last rows)
+readSession = SessionStore.readSessionFromFile
 
 -- | Legacy function: Store session to a file.
+-- Re-exported from SessionStore for backwards compatibility.
 storeSession :: Session -> FilePath -> IO ()
-storeSession sess path = do
-  BSL.writeFile path (Aeson.encode sess <> "\n")
+storeSession = SessionStore.storeSessionToFile
 
 -- | Creates a callback that stores session progress to a file.
 -- This is useful for creating an 'OnSessionProgress' handler that persists to disk.
 fileStoringCallback :: FilePath -> OnSessionProgress
 fileStoringCallback path progress =
     case progress of
-        SessionUpdated sess -> storeSession sess path
-        SessionCompleted sess -> storeSession sess path
-        SessionStarted sess -> storeSession sess path  -- Also store initial session
-        SessionFailed sess _ -> storeSession sess path  -- Store even on failure
+        SessionUpdated sess -> SessionStore.storeSessionToFile sess path
+        SessionCompleted sess -> SessionStore.storeSessionToFile sess path
+        SessionStarted sess -> SessionStore.storeSessionToFile sess path  -- Also store initial session
+        SessionFailed sess _ -> SessionStore.storeSessionToFile sess path  -- Store even on failure
+
+-- | Creates a callback that stores session progress using a SessionStore.
+-- Uses the session's conversation ID to determine the file path.
+sessionStoreCallback :: SessionStore -> OnSessionProgress
+sessionStoreCallback store progress =
+    case progress of
+        SessionUpdated sess -> storeSessionWithStore sess
+        SessionCompleted sess -> storeSessionWithStore sess
+        SessionStarted sess -> storeSessionWithStore sess
+        SessionFailed sess _ -> storeSessionWithStore sess
+  where
+    storeSessionWithStore sess =
+        case sess.sessionConversationId of
+            Just convId -> SessionStore.storeSession store convId sess
+            Nothing -> pure () -- Cannot store without a conversation ID
 
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent { usrQuery = pure (Just query) }
 
--- | Legacy function: Wrap an agent to store sessions to a file.
--- Consider using 'agentWithSessionProgress' with 'fileStoringCallback' instead.
-agentStoreSession :: forall r. FilePath -> Agent r -> Agent r
-agentStoreSession path agent =
-    agentWithSessionProgress (fileStoringCallback path) agent
+-- | Wrap an agent to store sessions using a SessionStore.
+-- The session is stored using the conversation ID from the session.
+agentStoreSession :: forall r. SessionStore -> Agent r -> Agent r
+agentStoreSession store agent =
+    agentWithSessionProgress (sessionStoreCallback store) agent
 
 -- | Wrap an agent to emit session progress events after each step.
 agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r
