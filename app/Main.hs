@@ -786,6 +786,8 @@ main = do
             Check -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ pargs.agentFiles $ \agentFile -> do
+                    -- Create a new runtime registry for this agent tree
+                    registry <- AgentTree.newRuntimeRegistry
                     -- Use silent tracer to suppress diagnostic output during agent loading
                     AgentTree.withAgentTreeRuntime
                         AgentTree.Props
@@ -793,6 +795,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer = Prod.silent
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                            , AgentTree.runtimeRegistry = registry
                             }
                         $ \result -> case result of
                             AgentTree.Errors errs -> mapM_ print errs
@@ -800,8 +803,9 @@ main = do
             TerminalUI _ -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
-                let oneAgent agentFile =
-                        AgentTree.Props
+                let oneAgent agentFile = do
+                        registry <- AgentTree.newRuntimeRegistry
+                        pure $ AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
@@ -809,8 +813,11 @@ main = do
                                     baseTracer
                                     (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                            , AgentTree.runtimeRegistry = registry
                             }
-                TUI.runTUI sessionStore (fmap oneAgent pargs.agentFiles)
+                -- Use traverse to sequence the IO actions for creating Props
+                agentPropsList <- traverse oneAgent pargs.agentFiles
+                TUI.runTUI sessionStore agentPropsList
             EchoPrompt opts -> do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
@@ -820,6 +827,7 @@ main = do
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
                     mSession <- join <$> traverse SessionStore.readSessionFromFile opts.sessionFile
+                    registry <- AgentTree.newRuntimeRegistry
                     let oneShot text props = OneShot.mainOneShotText sessionStore opts.sessionFile mSession props text
                     oneShot promptContents $
                         AgentTree.Props
@@ -827,6 +835,7 @@ main = do
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer = baseTracer
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                            , AgentTree.runtimeRegistry = registry
                             }
             SelfDescribe -> do
                 -- verify the api-key file exists at least
@@ -847,8 +856,9 @@ main = do
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
-                let oneAgent agentFile =
-                        AgentTree.Props
+                let oneAgent agentFile = do
+                        registry <- AgentTree.newRuntimeRegistry
+                        pure $ AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
                             , AgentTree.interactiveTracer =
@@ -859,8 +869,11 @@ main = do
                                         (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                                     )
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                            , AgentTree.runtimeRegistry = registry
                             }
-                McpServer.multiAgentsServer McpServer.defaultMcpServerConfig (fmap oneAgent pargs.agentFiles)
+                -- Use traverse to sequence the IO actions for creating Props
+                agentPropsList <- traverse oneAgent pargs.agentFiles
+                McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
             Initialize ->
                 let o =
                         Agent
