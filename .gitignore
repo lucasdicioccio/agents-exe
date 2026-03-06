@@ -5,3 +5,4 @@ agents-logfile
 logs.json
 conv.*.json
 dist-newstyle/
+salvaged/
