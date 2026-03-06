@@ -39,6 +39,8 @@ Commands:
   add <label> <branch>     Manually enqueue a task (opens editor for instructions)
   from_github              Fetch tasks from GitHub issues (label: "agents/to-be-taken")
   process                  Start processing the queue
+  clean [--do-it] [--force]
+                           Clean worktrees with completed sessions (preview mode by default)
   worktree_exec <label> <name> <instruction_file>
                            Internal: The worker command that sets up worktree and runs agent
 EOF
@@ -124,6 +126,109 @@ cmd_process() {
         echo "Job failed. Retrying in 1 minute..."
         sleep 60
     done
+}
+
+# ==============================================================================
+# CLEAN COMMAND
+# ==============================================================================
+
+cmd_clean() {
+    local do_it=false
+    local force_flag=""
+    local repo_root=$(git rev-parse --show-toplevel)
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --do-it) do_it=true ;;
+            --force) force_flag="--force" ;;
+            *) echo "Unknown option: $1"; usage ;;
+        esac
+        shift
+    done
+
+    # List all worktrees and identify those with completed sessions
+    local worktrees_to_clean=()
+    local branches_to_delete=()
+
+    # Parse git worktree list output
+    while IFS= read -r line; do
+        # Skip empty lines and the main worktree (which typically has bare repo path)
+        [[ -z "$line" ]] && continue
+
+        # Extract worktree path (first column)
+        local worktree_path=$(echo "$line" | awk '{print $1}')
+        local worktree_name=$(basename "$worktree_path")
+
+        # Skip if this is the main repository worktree (same as repo root)
+        [[ "$worktree_path" == "$repo_root" ]] && continue
+
+        # Check if there's a session file indicating successful completion
+        local session_md="${repo_root}/${SESSIONS_DIR}/${worktree_name}.session.md"
+        
+        if [[ -f "$session_md" ]]; then
+            worktrees_to_clean+=("$worktree_path")
+            branches_to_delete+=("$worktree_name")
+        fi
+    done < <(git worktree list --porcelain 2>/dev/null | grep -E '^worktree' || git worktree list)
+
+    # If no worktrees to clean
+    if [[ ${#worktrees_to_clean[@]} -eq 0 ]]; then
+        echo "No worktrees with completed sessions found."
+        return 0
+    fi
+
+    # Preview or execute
+    if [[ "$do_it" == false ]]; then
+        echo "=== PREVIEW MODE (use --do-it to execute) ==="
+        echo ""
+        echo "Worktrees to remove:"
+        for wt in "${worktrees_to_clean[@]}"; do
+            echo "  - $wt"
+        done
+        echo ""
+        echo "Branches to delete:"
+        for branch in "${branches_to_delete[@]}"; do
+            echo "  - $branch"
+        done
+        echo ""
+        echo "Run with --do-it to execute these operations."
+        return 0
+    fi
+
+    # Execute cleanup
+    echo "=== EXECUTING CLEANUP ==="
+    
+    # Remove worktrees
+    for wt in "${worktrees_to_clean[@]}"; do
+        local wt_name=$(basename "$wt")
+        echo "Removing worktree: $wt_name"
+        if [[ -n "$force_flag" ]]; then
+            git worktree remove --force "$wt_name" || echo "Warning: Failed to remove worktree $wt_name"
+        else
+            git worktree remove "$wt_name" || echo "Warning: Failed to remove worktree $wt_name (use --force to force removal)"
+        fi
+    done
+
+    # Prune worktree metadata
+    git worktree prune
+
+    # Delete branches (only if worktree was successfully removed)
+    for branch in "${branches_to_delete[@]}"; do
+        # Check if the branch still exists before trying to delete
+        if git show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+            echo "Deleting branch: $branch"
+            git branch -D "$branch" || echo "Warning: Failed to delete branch $branch"
+        elif git show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+            echo "Deleting remote branch: origin/$branch"
+            git push origin --delete "$branch" 2>/dev/null || echo "Warning: Failed to delete remote branch $branch (may need manual cleanup)"
+        else
+            echo "Branch $branch already deleted or does not exist"
+        fi
+    done
+
+    echo ""
+    echo "Cleanup completed."
 }
 
 # ==============================================================================
@@ -218,7 +323,7 @@ find_or_create_taskfile() {
 COMMAND="$1"; shift
 
 case "$COMMAND" in
-    init|add|from_github|process|worktree_exec) "cmd_$COMMAND" "$@" ;;
+    init|add|from_github|process|worktree_exec|clean) "cmd_$COMMAND" "$@" ;;
     *) usage ;;
 esac
 
