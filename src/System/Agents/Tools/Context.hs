@@ -31,7 +31,7 @@ import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
 
 import System.Agents.Base (AgentId, ConversationId)
-import System.Agents.Session.Base (Session, SessionId, TurnId)
+import System.Agents.Session.Types (Session, SessionId, TurnId)
 
 -------------------------------------------------------------------------------
 -- Tool Execution Context

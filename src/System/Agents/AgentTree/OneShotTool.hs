@@ -34,6 +34,7 @@ import System.Agents.Session.Base
     , SystemToolDefinition (..)
     , UserQuery (..)
     , UserToolResponse (..)
+    , defaultContextConfig
     , newSessionId
     , newTurnId
     )
@@ -116,8 +117,12 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
         -- Create a fresh session
         session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
 
+        -- Generate a conversation ID for this execution
+        convId <- newConversationId
+
         -- Run the agent and get the result
-        (finalTurnContent, _) <- run agentWithQuery session0
+        -- Loop.run now requires convId as the first argument
+        (finalTurnContent, _) <- run convId agentWithQuery session0
 
         -- Extract and return the response text
         let result = extractResponseText finalTurnContent.llmResponse
@@ -157,8 +162,11 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
             , sysPrompt = pure sPrompt
             , sysTools = sTools
             , usrQuery = pure Nothing
-            , toolCall = executeToolCall rt.agentTools
+            -- toolCall now accepts ToolExecutionContext as first argument
+            , toolCall = executeToolCall rt.agentId convId rt.agentTools
             , complete = completeF
+            -- Add contextConfig field (required for Agent)
+            , contextConfig = defaultContextConfig
             }
   where
     -- Nest the trace to indicate this is a child agent call
@@ -209,7 +217,7 @@ toolParamsToJson props =
             , "description" .= p.propertyDescription
             ]
             ++ case p.propertyType of
-                EnumParamType values -> ["enum" Aeson..= values]
+                EnumParamType values -> ["enum" .= values]
                 _ -> []
 
     paramTypeToString :: ParamType -> Text
@@ -225,11 +233,21 @@ toolParamsToJson props =
 -------------------------------------------------------------------------------
 -- | Execute a tool call using the runtime's registered tools.
 -- Based on executeToolCall from OneShot.hs.
-executeToolCall :: IO [ToolRegistration] -> LlmToolCall -> IO UserToolResponse
-executeToolCall registrations (LlmToolCall _callVal) = do
+--
+-- The toolCall function in Agent now accepts a ToolExecutionContext as its
+-- first argument, allowing tools to access session metadata.
+executeToolCall :: 
+    AgentId                    -- ^ Agent ID for context
+    -> ConversationId          -- ^ Conversation ID for context
+    -> IO [ToolRegistration]   -- ^ Tool registrations
+    -> ToolExecutionContext    -- ^ Context from runStepM
+    -> LlmToolCall             -- ^ Tool call from LLM
+    -> IO UserToolResponse
+executeToolCall _agentId _convId registrations _ctx (LlmToolCall _callVal) = do
     -- For simplicity in this OneShot-based version, we return the raw
     -- tool call result. In a more sophisticated implementation, we would
     -- parse the tool call and execute it using the registered tools.
+    -- The context is available for logging/tracing purposes.
     regs <- registrations
     pure $ UserToolResponse $ Aeson.String $ "Tool execution not implemented for " <> Text.pack (show (length regs)) <> " tools"
 

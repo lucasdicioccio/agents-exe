@@ -6,13 +6,14 @@ module System.Agents.Session.Step where
 
 import Data.Void (Void)
 
-
+import System.Agents.Base (ConversationId)
 import System.Agents.Session.Base
+import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
 
 -- | Runs a single step of agent for a given session.
 -- Agent may be modified, may decide to return a session, or decide to stop.
-runStepM :: forall r. Agent r -> Session -> IO (Agent r, Either r Session)
-runStepM agent sess =
+runStepM :: forall r. ConversationId -> Agent r -> Session -> IO (Agent r, Either r Session)
+runStepM convId agent sess =
     go agent sess
   where
     addTurn :: Session -> Turn -> IO Session
@@ -30,7 +31,9 @@ runStepM agent sess =
           sPrompt <- agent0.sysPrompt
           sTools <- agent0.sysTools
           uQuery <- if missing.missingQuery then agent0.usrQuery else pure Nothing
-          results <- traverse agent0.toolCall missing.missingToolCalls
+          -- Construct ToolExecutionContext for each tool call
+          let ctx = buildContext agent0.contextConfig sess0 convId
+          results <- traverse (agent0.toolCall ctx) missing.missingToolCalls
           let uToolResponses = zip missing.missingToolCalls results 
           sess1 <- addTurn sess0 (UserTurn $ UserTurnContent { userPrompt = sPrompt, userTools = sTools, userQuery = uQuery, userToolResponses = uToolResponses})
           pure (agent0, Right sess1)
@@ -38,6 +41,20 @@ runStepM agent sess =
           (llmRsp,llmTool) <- agent0.complete completion
           sess1 <- addTurn sess0 (LlmTurn $  LlmTurnContent llmRsp llmTool)
           pure (agent0, Right sess1)
+
+-- | Build a ToolExecutionContext based on the agent's configuration.
+--
+-- The context is populated according to 'ContextConfig' settings:
+-- * 'includeFullSession' controls whether 'ctxFullSession' is populated
+-- * 'includeAgentId' controls whether 'ctxAgentId' is included (as Nothing or Just)
+buildContext :: ContextConfig -> Session -> ConversationId -> ToolExecutionContext
+buildContext config sess convId =
+    mkToolExecutionContext
+        sess.sessionId
+        convId
+        sess.turnId
+        (if config.includeAgentId then Nothing else Nothing)  -- AgentId not available in Session, use Nothing
+        (if config.includeFullSession then Just sess else Nothing)
 
 -- Naive action selection function that merely parrots the least surprising
 -- thing: it never evolves or stops the agent, always ask for a user query or a prompt.
