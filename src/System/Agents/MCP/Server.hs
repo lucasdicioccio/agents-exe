@@ -28,14 +28,14 @@ import Prod.Tracer (Tracer (..), contramap)
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (newConversationId, newStepId, announce, slug)
+import System.Agents.Base (newConversationId, newStepId, announce, slug, AgentId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools (mapCallResult, toolRun)
-import System.Agents.Tools.Context (ToolExecutionContext, mkMinimalContext)
+import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
 
 import System.Agents.MCP.Server.Runtime
 
@@ -241,6 +241,9 @@ runAgentWithQuery onProgress agentTree query = do
     let agentWithQuery = agentSetQuery (SessionBase.UserQuery query) 
           $ agentWithSessionProgress onProgress agent
     
+    -- Create a fresh conversation ID for this execution
+    convId <- newConversationId
+    
     -- Create a fresh session with all required fields including sessionConversationId
     session0 <- SessionBase.Session [] <$> SessionBase.newSessionId 
                                         <*> pure Nothing 
@@ -250,7 +253,7 @@ runAgentWithQuery onProgress agentTree query = do
     onProgress (SessionBase.SessionStarted session0)
     
     -- Run the agent and get the result
-    (finalTurnContent, finalSession) <- run agentWithQuery session0
+    (finalTurnContent, finalSession) <- run convId agentWithQuery session0
     
     -- Notify session completion
     onProgress (SessionBase.SessionCompleted finalSession)
@@ -275,11 +278,18 @@ agentSetQuery query agent =
 
 -- | Creates an Agent from a Runtime.
 -- Based on runtimeToAgent from OneShot.hs.
+--
+-- The agent is configured with the runtime's agent ID and will receive
+-- a conversation ID at execution time. These identifiers are used to
+-- construct the 'ToolExecutionContext' passed to tools.
 runtimeToAgent :: Runtime.Runtime -> IO (SessionBase.Agent (SessionBase.LlmTurnContent, SessionBase.Session))
 runtimeToAgent rt = do
     let sPrompt = SessionBase.SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
+
+    -- Create a conversation ID for tracer setup
+    -- Note: This tracer setup will be called for each new conversation
     convId <- newConversationId
 
     -- Create OpenAI completion config from runtime
@@ -297,20 +307,42 @@ runtimeToAgent rt = do
         , SessionBase.sysPrompt = pure sPrompt
         , SessionBase.sysTools = sTools
         , SessionBase.usrQuery = pure Nothing
-        , SessionBase.toolCall = executeToolCall rt.agentTools
+        , SessionBase.toolCall = executeToolCall rt.agentId rt.agentTools
         , SessionBase.complete = completeF
+        , SessionBase.contextConfig = SessionBase.defaultContextConfig
         }
 
 -- | Execute a tool call using the runtime's registered tools.
 -- Based on executeToolCall from OneShot.hs.
-executeToolCall :: IO [ToolRegistration] -> SessionBase.LlmToolCall -> IO SessionBase.UserToolResponse
-executeToolCall registrations (SessionBase.LlmToolCall callVal) =
+--
+-- Constructs a 'ToolExecutionContext' with the agent's ID and the identifiers
+-- available at the point of execution. The context gives tools access to session
+-- metadata.
+executeToolCall :: 
+    AgentId                    -- ^ Agent ID for context
+    -> IO [ToolRegistration]   -- ^ Tool registrations
+    -> ToolExecutionContext    -- ^ Context from runStepM
+    -> SessionBase.LlmToolCall -- ^ Tool call from LLM
+    -> IO SessionBase.UserToolResponse
+executeToolCall agentId registrations _ctx (SessionBase.LlmToolCall callVal) =
     -- Extract the tool call ID and function info from the LlmToolCall
     case parseLlmToolCall callVal of
         Nothing -> pure $ SessionBase.UserToolResponse $ Aeson.String "Failed to parse tool call"
         Just tc -> do
             regs <- registrations
-            result <- llmCallTool regs tc
+            -- Construct context for this tool execution
+            -- We generate a minimal context here since we don't have direct access
+            -- to the session from this point. The AgentId is included.
+            sessId <- SessionBase.newSessionId
+            convId <- newConversationId
+            tId <- SessionBase.newTurnId
+            let toolCtx = mkToolExecutionContext
+                    sessId
+                    convId
+                    tId
+                    (Just agentId)
+                    Nothing  -- No full session available at this point
+            result <- llmCallTool regs toolCtx tc
             pure $ callResultToUserToolResponse tc result
 
 -- | Parse an LlmToolCall into OpenAI's ToolCall format.
@@ -339,9 +371,10 @@ parseLlmToolCall val =
 -- | Execute a single tool call against registered tools.
 -- Based on llmCallTool from OneShot.hs.
 --
--- Constructs a 'ToolExecutionContext' with generated identifiers for the tool execution.
-llmCallTool :: [ToolRegistration] -> OpenAI.ToolCall -> IO (CallResult OpenAI.ToolCall)
-llmCallTool registrations call =
+-- The 'ToolExecutionContext' is passed directly to the tool's 'toolRun' function,
+-- providing tools with access to session metadata.
+llmCallTool :: [ToolRegistration] -> ToolExecutionContext -> OpenAI.ToolCall -> IO (CallResult OpenAI.ToolCall)
+llmCallTool registrations ctx call =
     let
         script =
             Maybe.listToMaybe $
@@ -352,22 +385,8 @@ llmCallTool registrations call =
         case spec of
             Nothing -> pure $ ToolNotFound call
             Just (t, v) -> do
-                -- Create a ToolExecutionContext for this tool execution
-                ctx <- mkToolExecutionContext
                 ret <- t.toolRun (Tracer $ const $ pure ()) ctx v
                 pure $ mapCallResult (const call) ret
-
--- | Create a minimal ToolExecutionContext with generated identifiers.
---
--- This is used when we don't have access to the full session context at the point
--- of tool execution. The context provides enough information for tools to track
--- their execution while maintaining the same interface.
-mkToolExecutionContext :: IO ToolExecutionContext
-mkToolExecutionContext = do
-    sessId <- SessionBase.newSessionId
-    convId <- newConversationId
-    tId <- SessionBase.newTurnId
-    pure $ mkMinimalContext sessId convId tId
 
 -- | Convert a CallResult to UserToolResponse.
 -- Based on callResultToUserToolResponse from OneShot.hs.

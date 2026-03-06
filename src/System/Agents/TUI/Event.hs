@@ -356,7 +356,8 @@ runConversation baseTuiAgent session = do
     let notifyProgress = buildOnProgress convId outChan
     
     -- Create the agent with the progress callback
-    agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing (baseTuiAgent.agentTree.agentRuntime)
+    -- Note: runtimeToAgent now requires convId as a parameter
+    agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.agentTree.agentRuntime)
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
     let a = agent0 {
         step = \sess -> do
@@ -373,7 +374,8 @@ runConversation baseTuiAgent session = do
     let tuiAgent = TuiAgent a baseTuiAgent.agentTree
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
-        void $ Loop.run a session
+        -- Loop.run now requires convId as first parameter
+        void $ Loop.run convId a session
         notifyProgress (SessionCompleted session)
     let conv =
             Conversation

@@ -38,6 +38,11 @@ newStepId =
     StepId <$> UUID.nextRandom
 
 -------------------------------------------------------------------------------
+-- Note: SessionId and TurnId are defined in System.Agents.Session.Types
+-- to avoid circular dependencies between Session.Base and Tools.Context.
+-- They are re-exported from Session.Base for convenience.
+-------------------------------------------------------------------------------
+
 data Agent
     = Agent
     { slug :: Text
@@ -100,3 +105,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+
