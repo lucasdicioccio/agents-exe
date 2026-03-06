@@ -36,6 +36,7 @@ import System.Agents.ToolRegistration
 import System.Agents.Tools
 import System.Agents.Tools.Base
 import System.Agents.ToolSchema
+import System.Agents.Tools.Context (ToolExecutionContext, mkMinimalContext)
 
 import qualified Data.Aeson.Key as AesonKey
 import Prod.Tracer (Tracer (..), contramap)
@@ -174,6 +175,10 @@ parseLlmToolCall val =
                 _ -> Nothing
 
 -- | Execute a single tool call against registered tools.
+--
+-- Constructs a 'ToolExecutionContext' with generated identifiers for the tool execution.
+-- The context provides tools access to session metadata without exposing these details
+-- to the LLM.
 llmCallTool :: [ToolRegistration] -> OpenAI.ToolCall -> IO (CallResult OpenAI.ToolCall)
 llmCallTool registrations call =
     let
@@ -186,10 +191,23 @@ llmCallTool registrations call =
         case spec of
             Nothing -> pure $ ToolNotFound call
             Just (t, v) -> do
-                -- Use a dummy conversation ID for one-shot execution
-                convId <- newConversationId
-                ret <- t.toolRun (Tracer $ const $ pure ()) convId v
+                -- Create a ToolExecutionContext for this tool execution
+                -- We generate fresh identifiers since we don't have access to the full session here
+                ctx <- mkToolExecutionContext
+                ret <- t.toolRun (Tracer $ const $ pure ()) ctx v
                 pure $ mapCallResult (const call) ret
+
+-- | Create a minimal ToolExecutionContext with generated identifiers.
+--
+-- This is used when we don't have access to the full session context at the point
+-- of tool execution. The context provides enough information for tools to track
+-- their execution while maintaining the same interface.
+mkToolExecutionContext :: IO ToolExecutionContext
+mkToolExecutionContext = do
+    sessId <- newSessionId
+    convId <- newConversationId
+    tId <- newTurnId
+    pure $ mkMinimalContext sessId convId tId
 
 -- | Convert a CallResult to UserToolResponse.
 callResultToUserToolResponse :: OpenAI.ToolCall -> CallResult OpenAI.ToolCall -> UserToolResponse

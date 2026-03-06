@@ -11,6 +11,7 @@ module System.Agents.LLMs.OpenAI (
  , callLLMPayload
  , parseLLMResponse
  , waitRateLimit
+ , parseRateLimitDelay
  , ApiLimits(..)
  , WaitAction(..)
 ) where
@@ -320,3 +321,4 @@ instance FromJSON Response where
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
+

@@ -35,14 +35,19 @@ import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.Trace
+import System.Agents.Tools.Context (ToolExecutionContext)
 
 -------------------------------------------------------------------------------
 
 -- | Captures tools that are defined in a various ways but have a similar "run" interface.
-data Tool rtVal call
+--
+-- The 'toolRun' function now receives a 'ToolExecutionContext' instead of a generic
+-- runtime value. This provides tools with access to session metadata (session ID,
+-- conversation ID, turn ID, etc.) without exposing these details to the LLM.
+data Tool call
     = Tool
     { toolDef :: ToolDef
-    , toolRun :: Tracer IO ToolTrace -> rtVal -> Aeson.Value -> IO (CallResult call)
+    , toolRun :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult call)
     }
 
 data ToolDef
@@ -56,7 +61,7 @@ data ToolDef
 -- | Builder for a tool based on a Bash script-description.
 bashTool ::
     BashTools.ScriptDescription ->
-    Tool a ()
+    Tool ()
 bashTool script =
     Tool
         { toolDef = BashTool script
@@ -64,7 +69,7 @@ bashTool script =
         }
   where
     call = ()
-    run tracer _ v = do
+    run tracer _ctx v = do
         ret <- BashTools.runValue (contramap BashToolsTrace tracer) script v
         case ret of
             Left err -> pure $ BashToolError call err
@@ -74,7 +79,7 @@ bashTool script =
 mcpTool ::
     McpTools.Toolbox ->
     McpTools.ToolDescription ->
-    Tool a ()
+    Tool ()
 mcpTool toolbox desc =
     Tool
         { toolDef = MCPTool desc
@@ -82,12 +87,12 @@ mcpTool toolbox desc =
         }
   where
     call = ()
-    run _ _ (Aeson.Object v) = do
+    run _tracer _ctx (Aeson.Object v) = do
         ret <- McpTools.callTool toolbox desc (Just v)
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
             err -> pure $ McpToolError call (mconcat ["calling error: ", show err])
-    run _ _ _ = do
+    run _tracer _ctx _ = do
         pure $ McpToolError call ("can only call McpTools with Aeson.Object")
     extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()
     extractContentsFromToolCall rsp =
@@ -96,10 +101,14 @@ mcpTool toolbox desc =
 -------------------------------------------------------------------------------
 
 -- | Builder for a tool based on an IO-tool script-description.
+--
+-- Note: The IO action receives the full 'ToolExecutionContext' giving it access
+-- to session metadata. If the IO action only needs specific fields, it should
+-- extract them from the context.
 ioTool ::
     (Aeson.FromJSON llmArg) =>
-    IOTools.IOScript rtVal llmArg ByteString ->
-    Tool rtVal ()
+    IOTools.IOScript ToolExecutionContext llmArg ByteString ->
+    Tool ()
 ioTool script =
     Tool
         { toolDef = IOTool script.description
@@ -107,10 +116,10 @@ ioTool script =
         }
   where
     call = ()
-    run tracer runtimeValue v = do
+    run tracer ctx v = do
         -- we trace the original input object
         let adaptTrace = IOToolsTrace . IOTools.adaptTraceInput (const v)
-        ret <- IOTools.runValue (contramap adaptTrace tracer) script runtimeValue v
+        ret <- IOTools.runValue (contramap adaptTrace tracer) script ctx v
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
@@ -140,6 +149,7 @@ mapCallResult f c =
         (McpToolError v b) -> McpToolError (f v) b
 
 -- | Explicit helper to map on the results a Tool makes.
-mapToolResult :: (a -> b) -> Tool x a -> Tool x b
+mapToolResult :: (a -> b) -> Tool a -> Tool b
 mapToolResult f (Tool d run) =
-    Tool d (\tracer rtval v -> fmap (mapCallResult f) (run tracer rtval v))
+    Tool d (\tracer ctx v -> fmap (mapCallResult f) (run tracer ctx v))
+

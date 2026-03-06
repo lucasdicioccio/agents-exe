@@ -19,17 +19,19 @@ import System.Agents.ToolSchema
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import System.Agents.Tools.Context (ToolExecutionContext)
 
 -------------------------------------------------------------------------------
 
--- | We register tool that will take as extra inner information a ConversationId
-type ToolRuntimeArg = ConversationId
-
+-- | We register tools that will take a ToolExecutionContext for execution.
+--
+-- The 'innerTool' field uses 'Tool ()' since the tool execution context
+-- is passed at runtime via 'toolRun', not stored in the tool itself.
 data ToolRegistration
     = ToolRegistration
-    { innerTool :: Tool ToolRuntimeArg ()
+    { innerTool :: Tool ()
     , declareTool :: OpenAI.Tool
-    , findTool :: OpenAI.ToolCall -> Maybe (Tool ConversationId OpenAI.ToolCall)
+    , findTool :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
     }
 instance Show ToolRegistration where
     show (ToolRegistration d _ _) = Prelude.unwords ["ToolRegistration(", show d.toolDef, ")"]
@@ -37,7 +39,7 @@ instance Show ToolRegistration where
 -------------------------------------------------------------------------------
 
 -- naming policy for IO tools
-io2LLMName :: forall a b. IOTools.IOScript ToolRuntimeArg a b -> OpenAI.ToolName
+io2LLMName :: forall a b. IOTools.IOScript ToolExecutionContext a b -> OpenAI.ToolName
 io2LLMName io = OpenAI.ToolName (mconcat ["io_", io.description.ioSlug])
 
 -- naming policy for Bash tools
@@ -75,10 +77,10 @@ registerBashToolInLLM script =
                 , propertyDescription = arg.argDescription
                 }
 
-        tool :: Tool ToolRuntimeArg ()
+        tool :: Tool ()
         tool = bashTool script
 
-        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
      in
         ToolRegistration tool (mapToolDescriptionBash2LLM script) find
@@ -88,18 +90,18 @@ shape of the tool for IOScript (ideally some generics or something like Data.Aes
 -}
 registerIOScriptInLLM ::
     (Aeson.FromJSON a) =>
-    IOTools.IOScript ToolRuntimeArg a ByteString ->
+    IOTools.IOScript ToolExecutionContext a ByteString ->
     [ParamProperty] ->
     ToolRegistration
 registerIOScriptInLLM script llmProps =
     let
-        matchName :: IOTools.IOScript ToolRuntimeArg a b -> OpenAI.ToolCall -> Bool
+        matchName :: IOTools.IOScript ToolExecutionContext a b -> OpenAI.ToolCall -> Bool
         matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
 
-        tool :: Tool ToolRuntimeArg ()
+        tool :: Tool ()
         tool = ioTool script
 
-        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
 
         llmTool :: OpenAI.Tool
@@ -138,10 +140,10 @@ registerMcpToolInLLM box mcp =
                 , OpenAI.toolParamProperties = schema
                 }
 
-        tool :: Tool ToolRuntimeArg ()
+        tool :: Tool ()
         tool = mcpTool box mcp
 
-        find :: OpenAI.ToolCall -> Maybe (Tool ToolRuntimeArg OpenAI.ToolCall)
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
         find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
      in
         case llmBasedSchema of
@@ -183,3 +185,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

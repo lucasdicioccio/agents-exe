@@ -48,6 +48,7 @@ import System.Agents.ToolRegistration
     )
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import qualified System.Agents.Tools.IO as IOTools
+import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 
 -------------------------------------------------------------------------------
 -- | Data type for the prompt argument to the sub-agent.
@@ -98,9 +99,14 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
             )
             runSubAgent
 
-    -- Run the sub-agent with the given prompt and conversation ID
-    runSubAgent :: ConversationId -> PromptOtherAgent -> IO CByteString.ByteString
-    runSubAgent parentConversationId (PromptOtherAgent query) = do
+    -- Run the sub-agent with the given prompt and execution context
+    -- The ToolExecutionContext provides access to session metadata including
+    -- the conversation ID for tracing and session management.
+    runSubAgent :: ToolExecutionContext -> PromptOtherAgent -> IO CByteString.ByteString
+    runSubAgent ctx (PromptOtherAgent query) = do
+        -- Extract the conversation ID from the execution context for tracing
+        let parentConversationId = ctx.ctxConversationId
+
         -- Create the agent from the runtime with the OneShot configuration
         agent <- runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConversationId
 
