@@ -21,7 +21,21 @@
     "- Follow consistent formatting",
     "Use list-files to explore the project structure, read-file to understand existing code, write-file to create or modify files, and check-code to verify your work.",
     "Always compile code before considering the job done.",
-    "Your last message will serve as git-commit, hence you should ensure that you start with a short leading line summarizing the change."
+    "Your last message will serve as git-commit. Format your final message as follows:",
+    "- Start with a one-liner commit message in imperative mode (e.g., 'Fix bug in user authentication')",
+    "- The one-liner should reference the fixed issue (e.g., 'Fix bug in user authentication (#12345)')",
+    "- Follow with a blank line, then a body with a nice summary of the changes",
+    "- In the body, reference the fixed issue using 'Closes #12345' format",
+    "",
+    "Example format:",
+    "Fix critical bug in session handling (#75)",
+    "",
+    "This commit resolves the memory leak caused by not properly",
+    "closing session handles. The fix ensures all resources are",
+    "released when a session is terminated.",
+    "",
+    "Closes #75"
   ]
 }
 }
+
