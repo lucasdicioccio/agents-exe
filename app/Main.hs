@@ -18,7 +18,7 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
-import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr, traceUsefulPromptStdout)
+import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -28,7 +28,8 @@ import qualified System.Agents.MCP.Client as McpClient
 import qualified System.Agents.MCP.Client.Runtime as McpClient
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
-import qualified System.Agents.Runtime.Trace as Runtime
+import qualified System.Agents.Runtime as Runtime
+import qualified System.Agents.Runtime.Trace as RuntimeTrace
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
@@ -432,14 +433,17 @@ main = do
             Check -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ pargs.agentFiles $ \agentFile -> do
-                    OneShot.mainPrintAgent $
+                    -- Use silent tracer to suppress diagnostic output during agent loading
+                    AgentTree.withAgentTreeRuntime
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                Prod.traceBoth baseTracer traceUsefulPromptStdout
+                            , AgentTree.interactiveTracer = Prod.silent
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
+                        $ \result -> case result of
+                            AgentTree.Errors errs -> mapM_ print errs
+                            AgentTree.Initialized tree -> printAgentCheck tree
             TerminalUI _ -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
@@ -535,6 +539,23 @@ main = do
                 SessionPrint.handleSessionPrint opts
 
 -------------------------------------------------------------------------------
+-- Check Command Helper
+-------------------------------------------------------------------------------
+
+-- | Print agent check information in the format: slug: announce (n-tools)
+printAgentCheck :: AgentTree.AgentTree -> IO ()
+printAgentCheck tree = do
+    tools <- Runtime.agentTools tree.agentRuntime
+    let toolCount = length tools
+    Text.putStrLn $
+        Runtime.agentSlug tree.agentRuntime
+        <> ": "
+        <> Runtime.agentAnnounce tree.agentRuntime
+        <> " ("
+        <> Text.pack (show toolCount)
+        <> " tools)"
+
+-------------------------------------------------------------------------------
 -- Utility Functions
 -------------------------------------------------------------------------------
 
@@ -549,23 +570,23 @@ toJsonTrace x = case x of
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
   where
-    encodeAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
+    encodeAgentTrace :: RuntimeTrace.Trace -> Maybe Aeson.Value
     encodeAgentTrace tr = do
         baseVal <- encodeBaseAgentTrace tr
         Just $
             Aeson.object
                 [ "e"
                     .= Aeson.object
-                        [ "slug" .= Runtime.traceAgentSlug tr
-                        , "agent-id" .= Runtime.traceAgentId tr
+                        [ "slug" .= RuntimeTrace.traceAgentSlug tr
+                        , "agent-id" .= RuntimeTrace.traceAgentId tr
                         , "val" .= baseVal
                         ]
                 ]
 
-    encodeBaseAgentTrace :: Runtime.Trace -> Maybe Aeson.Value
-    encodeBaseAgentTrace (Runtime.AgentTrace_Loading _ _ tr) =
+    encodeBaseAgentTrace :: RuntimeTrace.Trace -> Maybe Aeson.Value
+    encodeBaseAgentTrace (RuntimeTrace.AgentTrace_Loading _ _ tr) =
         encodeBaseTrace_Loading tr
-    encodeBaseAgentTrace (Runtime.AgentTrace_Conversation _ _ convId tr) = do
+    encodeBaseAgentTrace (RuntimeTrace.AgentTrace_Conversation _ _ convId tr) = do
         baseVal <- encodeBaseTrace_Conversation tr
         Just $
             Aeson.object
@@ -579,19 +600,19 @@ toJsonTrace x = case x of
             (BashToolbox.BashToolsLoadingTrace _) -> Nothing
             (BashToolbox.ReloadToolsTrace _) -> Nothing
 
-    encodeBaseTrace_Conversation :: Runtime.ConversationTrace -> Maybe Aeson.Value
+    encodeBaseTrace_Conversation :: RuntimeTrace.ConversationTrace -> Maybe Aeson.Value
     encodeBaseTrace_Conversation bt =
         case bt of
-            (Runtime.NewConversation) ->
+            (RuntimeTrace.NewConversation) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("new-conversation" :: Text.Text)
                         ]
-            (Runtime.WaitingForPrompt) ->
+            (RuntimeTrace.WaitingForPrompt) ->
                 Nothing
-            (Runtime.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
+            (RuntimeTrace.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
-            (Runtime.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
+            (RuntimeTrace.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
@@ -599,7 +620,7 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
-            (Runtime.LLMTrace uuid (LLMTrace.GotChatCompletion val)) ->
+            (RuntimeTrace.LLMTrace uuid (LLMTrace.GotChatCompletion val)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text.Text)
@@ -607,7 +628,7 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd targs))) ->
+            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStart cmd targs))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -617,7 +638,7 @@ toJsonTrace x = case x of
                         , "cmd" .= cmd
                         , "args" .= targs
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd targs code _ _))) ->
+            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.BashToolsTrace (ToolsTrace.RunCommandStopped cmd targs code _ _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -628,7 +649,7 @@ toJsonTrace x = case x of
                         , "cmd" .= cmd
                         , "args" .= targs
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
+            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -638,7 +659,7 @@ toJsonTrace x = case x of
                         , "tool" .= desc.ioSlug
                         , "input" .= input
                         ]
-            (Runtime.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input _))) ->
+            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -649,7 +670,7 @@ toJsonTrace x = case x of
                         , "input" .= input
                         -- , "output" .= output
                         ]
-            (Runtime.ChildrenTrace sub) -> do
+            (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text.Text), "sub" .= subVal]
 
@@ -699,9 +720,9 @@ toJsonTrace x = case x of
         (McpTools.McpClientLoopTrace (McpClient.StartToolCall n _)) =
             Just $
                 Aeson.object
-                    [ "x" .= ("tool-call-start" :: Text.Text)
-                    , "name" .= n
-                    ]
+                        [ "x" .= ("tool-call-start" :: Text.Text)
+                        , "name" .= n
+                        ]
     encodeBaseMcpTrace
         (McpTools.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
             Just $
