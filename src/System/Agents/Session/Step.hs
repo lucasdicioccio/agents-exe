@@ -8,7 +8,7 @@ import Data.Void (Void)
 
 import System.Agents.Base (ConversationId)
 import System.Agents.Session.Base
-import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
 
 -- | Runs a single step of agent for a given session.
 -- Agent may be modified, may decide to return a session, or decide to stop.
@@ -47,6 +47,9 @@ runStepM convId agent sess =
 -- The context is populated according to 'ContextConfig' settings:
 -- * 'includeFullSession' controls whether 'ctxFullSession' is populated
 -- * 'includeAgentId' controls whether 'ctxAgentId' is included (as Nothing or Just)
+--
+-- This creates a root-level context with a single "root" entry in the call stack
+-- at depth 0, and no recursion depth limit.
 buildContext :: ContextConfig -> Session -> ConversationId -> ToolExecutionContext
 buildContext config sess convId =
     mkToolExecutionContext
@@ -55,6 +58,8 @@ buildContext config sess convId =
         sess.turnId
         (if config.includeAgentId then Nothing else Nothing)  -- AgentId not available in Session, use Nothing
         (if config.includeFullSession then Just sess else Nothing)
+        [CallStackEntry "root" convId 0]  -- Root call stack entry
+        Nothing  -- No max recursion depth by default
 
 -- Naive action selection function that merely parrots the least surprising
 -- thing: it never evolves or stops the agent, always ask for a user query or a prompt.

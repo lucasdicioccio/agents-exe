@@ -36,7 +36,7 @@ import System.Agents.ToolRegistration
 import System.Agents.Tools
 import System.Agents.Tools.Base
 import System.Agents.ToolSchema
-import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
 
 import qualified Data.Aeson.Key as AesonKey
 import Prod.Tracer (Tracer (..), contramap)
@@ -180,6 +180,8 @@ executeToolCall agentId convId registrations _ctx (LlmToolCall callVal) =
                     tId
                     (Just agentId)
                     Nothing  -- No full session available at this point
+                    [CallStackEntry "root" convId 0]  -- Root call stack entry
+                    Nothing  -- No max recursion depth by default
             result <- llmCallTool regs toolCtx tc
             pure $ callResultToUserToolResponse tc result
 
