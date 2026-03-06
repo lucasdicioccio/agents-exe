@@ -74,13 +74,13 @@ agentSerializationTests =
             let json = Text.unlines
                     [ "{"
                     , "  \"slug\": \"test-agent\","
-                    , "  \"api-key-id\": \"openai\","
+                    , "  \"apiKeyId\": \"openai\","
                     , "  \"flavor\": \"openai\","
-                    , "  \"model-url\": \"https://api.openai.com/v1\","
-                    , "  \"model-name\": \"gpt-4\","
+                    , "  \"modelUrl\": \"https://api.openai.com/v1\","
+                    , "  \"modelName\": \"gpt-4\","
                     , "  \"announce\": \"A test agent\","
-                    , "  \"system-prompt\": [\"You are helpful\"],"
-                    , "  \"tool-directory\": \"tools\""
+                    , "  \"systemPrompt\": [\"You are helpful\"],"
+                    , "  \"toolDirectory\": \"tools\""
                     , "}"
                     ]
             let mAgent = decode (encodeUtf8 json) :: Maybe Base.Agent
@@ -93,17 +93,17 @@ agentSerializationTests =
             let json = Text.unlines
                     [ "{"
                     , "  \"slug\": \"boss-kimi\","
-                    , "  \"api-key-id\": \"openrouter\","
+                    , "  \"apiKeyId\": \"openrouter\","
                     , "  \"flavor\": \"openai\","
-                    , "  \"model-url\": \"https://openrouter.ai/api/v1\","
-                    , "  \"model-name\": \"moonshot-ai/kimi-k2\","
-                    , "  \"tool-directory\": \"tools\","
-                    , "  \"extra-agents\": ["
+                    , "  \"modelUrl\": \"https://openrouter.ai/api/v1\","
+                    , "  \"modelName\": \"moonshot-ai/kimi-k2\","
+                    , "  \"toolDirectory\": \"tools\","
+                    , "  \"extraAgents\": ["
                     , "    {\"slug\": \"superb-agent\", \"path\": \"../superb/agent.json\"},"
                     , "    {\"slug\": \"helper-bot\", \"path\": \"./helpers/bot.json\"}"
                     , "  ],"
                     , "  \"announce\": \"The agent\","
-                    , "  \"system-prompt\": [\"You are a helpful software agent\"]"
+                    , "  \"systemPrompt\": [\"You are a helpful software agent\"]"
                     , "}"
                     ]
             let mAgent = decode (encodeUtf8 json) :: Maybe Base.Agent

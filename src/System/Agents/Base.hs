@@ -101,9 +101,10 @@ data Agent
 -- | Custom JSON options for Agent to use hyphenated field names
 agentOptions :: Aeson.Options
 agentOptions = Aeson.defaultOptions
-    { Aeson.fieldLabelModifier = kebabCase
+    { Aeson.fieldLabelModifier = id
     , Aeson.omitNothingFields = True
     }
+{-
   where
     -- Convert camelCase to kebab-case
     kebabCase [] = []
@@ -113,6 +114,7 @@ agentOptions = Aeson.defaultOptions
         go (x:xs)
             | x `elem` ['A'..'Z'] = '-' : toLower x : go xs
             | otherwise = x : go xs
+-}
 
 instance ToJSON Agent where
     toJSON = Aeson.genericToJSON agentOptions
