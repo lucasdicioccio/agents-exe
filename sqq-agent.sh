@@ -116,7 +116,7 @@ cmd_from_github() {
             echo -e "\n---\nPlease mention issue #$number in the commit message." >> "$taskfile"
         fi
 
-        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$0 worktree_exec \"$label\" \"$branch\" \"$taskfile\"")
+        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$branch\" \"$taskfile\"")
         gh issue edit "$number" --remove-label "agents/to-be-taken" --add-label "agents/taken"
         echo "Enqueued GitHub issue #$number as $label task."
     done
