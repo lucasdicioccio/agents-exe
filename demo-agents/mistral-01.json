@@ -1,0 +1,18 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "demo-mistral",
+    "flavor": "MistralV1",
+    "modelUrl": "https://api.mistral.ai/v1",
+    "apiKeyId": "mistral",
+    "modelName": "open-codestral-mamba",
+    "toolDirectory": "tools",
+    "announce": "The main agent, capable of reasoning.",
+    "systemPrompt":
+            [ "You are a helpful software agent trying to solve user requests."
+            ]
+  }
+}
+
+
+
