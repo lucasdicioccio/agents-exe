@@ -59,6 +59,18 @@ data ToolDef
 -------------------------------------------------------------------------------
 
 -- | Builder for a tool based on a Bash script-description.
+--
+-- When executed, the script will have access to session context via environment
+-- variables (see 'System.Agents.Tools.Bash.runValue' for details):
+--
+-- * @AGENT_SESSION_ID@ - The current session UUID
+-- * @AGENT_CONVERSATION_ID@ - The conversation UUID
+-- * @AGENT_TURN_ID@ - The current turn UUID
+-- * @AGENT_AGENT_ID@ - The agent UUID (if available)
+-- * @AGENT_SESSION_JSON@ - Full session as JSON (if available)
+--
+-- Scripts can use these variables for logging, audit trails, or context-aware
+-- processing without requiring explicit parameters from the LLM.
 bashTool ::
     BashTools.ScriptDescription ->
     Tool ()
@@ -69,8 +81,8 @@ bashTool script =
         }
   where
     call = ()
-    run tracer _ctx v = do
-        ret <- BashTools.runValue (contramap BashToolsTrace tracer) script v
+    run tracer ctx v = do
+        ret <- BashTools.runValue (contramap BashToolsTrace tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp

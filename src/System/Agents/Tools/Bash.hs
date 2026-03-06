@@ -11,14 +11,22 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Either (partitionEithers)
 import Data.List as List
+import Data.Maybe (maybeToList)
 import Data.Text as Text
 import Data.Text.Encoding as Text
+import Data.UUID (toString)
 import Prod.Tracer (Tracer, runTracer)
 import System.Directory (listDirectory)
+import System.Environment (getEnvironment)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.Posix.Files as Posix
-import System.Process.ByteString (readProcessWithExitCode)
+import System.Process (CreateProcess (..), proc)
+import System.Process.ByteString (readCreateProcessWithExitCode, readProcessWithExitCode)
+
+import System.Agents.Tools.Context (ToolExecutionContext (..))
+import System.Agents.Session.Base (SessionId (..), TurnId (..))
+import System.Agents.Base (ConversationId (..), AgentId (..))
 
 -------------------------------------------------------------------------------
 data LoadTrace
@@ -277,9 +285,87 @@ parseArgsForValue script val = do
     args <- Aeson.parseEither (translateArguments script.scriptInfo) val
     pure (flattenArguments args, flattenInput args)
 
+-------------------------------------------------------------------------------
+-- Environment Variable Names for Session Context
+-------------------------------------------------------------------------------
+
+-- | Environment variable name for the session ID.
+-- The value is the UUID of the current session.
+sessionIdEnvVar :: String
+sessionIdEnvVar = "AGENT_SESSION_ID"
+
+-- | Environment variable name for the conversation ID.
+-- The value is the UUID of the conversation this session belongs to.
+conversationIdEnvVar :: String
+conversationIdEnvVar = "AGENT_CONVERSATION_ID"
+
+-- | Environment variable name for the turn ID.
+-- The value is the UUID of the current turn within the session.
+turnIdEnvVar :: String
+turnIdEnvVar = "AGENT_TURN_ID"
+
+-- | Environment variable name for the agent ID.
+-- The value is the UUID of the agent executing the tool, if available.
+agentIdEnvVar :: String
+agentIdEnvVar = "AGENT_AGENT_ID"
+
+-- | Environment variable name for the full session JSON.
+-- When present, contains the complete serialized session as JSON.
+-- This is only included when 'ctxFullSession' is 'Just' in the context.
+sessionJsonEnvVar :: String
+sessionJsonEnvVar = "AGENT_SESSION_JSON"
+
+-- | Convert a 'SessionId' to its string representation.
+sessionIdToString :: SessionId -> String
+sessionIdToString (SessionId uuid) = toString uuid
+
+-- | Convert a 'ConversationId' to its string representation.
+conversationIdToString :: ConversationId -> String
+conversationIdToString (ConversationId uuid) = toString uuid
+
+-- | Convert a 'TurnId' to its string representation.
+turnIdToString :: TurnId -> String
+turnIdToString (TurnId uuid) = toString uuid
+
+-- | Convert an 'AgentId' to its string representation.
+agentIdToString :: AgentId -> String
+agentIdToString (AgentId uuid) = toString uuid
+
+-- | Build the environment variable list for a tool execution context.
+-- This adds session context variables to the base environment.
+buildToolEnvironment :: Maybe ToolExecutionContext -> [(String, String)] -> [(String, String)]
+buildToolEnvironment Nothing baseEnv = baseEnv
+buildToolEnvironment (Just ctx) baseEnv =
+    baseEnv ++ contextVars
+  where
+    contextVars =
+        [ (sessionIdEnvVar, sessionIdToString ctx.ctxSessionId)
+        , (conversationIdEnvVar, conversationIdToString ctx.ctxConversationId)
+        , (turnIdEnvVar, turnIdToString ctx.ctxTurnId)
+        ]
+        ++ maybeToList (fmap (\aid -> (agentIdEnvVar, agentIdToString aid)) ctx.ctxAgentId)
+        ++ maybeToList (fmap (\sess -> (sessionJsonEnvVar, Text.unpack $ Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode sess)) ctx.ctxFullSession)
+
 -- | Executes a script given an opaque JSON object containing parameter values.
-runValue :: Tracer IO RunTrace -> ScriptDescription -> Aeson.Value -> IO (Either RunScriptError ByteString)
-runValue tracer script val = do
+--
+-- When a 'ToolExecutionContext' is provided, the following environment variables
+-- are set for the script:
+--
+-- * @AGENT_SESSION_ID@ - The UUID of the current session
+-- * @AGENT_CONVERSATION_ID@ - The UUID of the conversation
+-- * @AGENT_TURN_ID@ - The UUID of the current turn
+-- * @AGENT_AGENT_ID@ - The UUID of the agent (if available)
+-- * @AGENT_SESSION_JSON@ - The full serialized session as JSON (if requested)
+--
+-- Scripts can access these variables to correlate their actions with the
+-- current execution context without needing explicit parameters.
+runValue ::
+    Tracer IO RunTrace
+    -> ScriptDescription
+    -> Maybe ToolExecutionContext
+    -> Aeson.Value
+    -> IO (Either RunScriptError ByteString)
+runValue tracer script mCtx val = do
     let path = script.scriptPath
     let maybeBehavior = script.scriptInfo.scriptEmptyResultBehavior
     case parseArgsForValue script val of
@@ -288,7 +374,15 @@ runValue tracer script val = do
         Right (argz, stdin) -> do
             let args = "run" : [Text.unpack arg | arg <- argz]
             runTracer tracer (RunCommandStart path args)
-            (code, out, err) <- readProcessWithExitCode path args (Text.encodeUtf8 stdin)
+
+            -- Get the current environment and add session context
+            baseEnv <- getEnvironment
+            let toolEnv = buildToolEnvironment mCtx baseEnv
+
+            -- Create the process with the modified environment
+            let process = (proc path args) { env = Just toolEnv }
+
+            (code, out, err) <- readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
             runTracer tracer (RunCommandStopped path args code out err)
             if code /= ExitSuccess
                 then pure $ Left $ ScriptExecutionError path code err
@@ -298,3 +392,4 @@ runValue tracer script val = do
                             Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
                             Nothing       -> out
                     in pure $ Right adjusted
+
