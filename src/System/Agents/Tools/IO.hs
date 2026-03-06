@@ -7,6 +7,8 @@ import qualified Data.Aeson.Types as Aeson
 import Data.Text as Text
 import Prod.Tracer (Tracer, runTracer)
 
+import System.Agents.Tools.Context (ToolExecutionContext)
+
 data Trace a b
     = IOScriptStarted IOScriptDescription a
     | IOScriptStopped IOScriptDescription a b
@@ -25,10 +27,29 @@ data IOScriptDescription
     }
     deriving (Show)
 
-data IOScript rtVal llmArg b
+-- | An IO script that executes a Haskell IO action with access to session context.
+--
+-- Unlike bash tools that receive context via environment variables, IO tools
+-- receive the 'ToolExecutionContext' directly as a function argument. This provides
+-- type-safe access to session metadata (session ID, conversation ID, turn ID, etc.)
+-- without exposing these details to the LLM.
+--
+-- Example:
+--
+-- @
+-- myTool :: IOScript MyArg ByteString
+-- myTool = IOScript
+--     { description = IOScriptDescription "my-tool" "Does something"
+--     , ioRun = \ctx arg -> do
+--         let sessionId = ctxSessionId ctx
+--         -- Access complete session context
+--         pure $ result arg
+--     }
+-- @
+data IOScript llmArg b
     = IOScript
     { description :: IOScriptDescription
-    , ioRun :: rtVal -> llmArg -> IO b
+    , ioRun :: ToolExecutionContext -> llmArg -> IO b
     }
 
 data RunError
@@ -36,13 +57,24 @@ data RunError
     | ScriptExecutionError String
     deriving (Show)
 
-runValue :: (FromJSON llmArg) => Tracer IO (Trace llmArg b) -> IOScript rtVal llmArg b -> rtVal -> Aeson.Value -> IO (Either RunError b)
-runValue tracer script runtimeValue val = do
+-- | Run an IO script with the given execution context and JSON argument.
+--
+-- The 'ToolExecutionContext' provides the script with access to session metadata
+-- without exposing these details to the LLM.
+runValue ::
+    (FromJSON llmArg) =>
+    Tracer IO (Trace llmArg b) ->
+    IOScript llmArg b ->
+    ToolExecutionContext ->
+    Aeson.Value ->
+    IO (Either RunError b)
+runValue tracer script ctx val = do
     case Aeson.parseEither Aeson.parseJSON val of
         Left err ->
             pure $ Left $ SerializeArgumentErrors err
         Right argz -> do
             runTracer tracer (IOScriptStarted script.description argz)
-            out <- script.ioRun runtimeValue argz
+            out <- script.ioRun ctx argz
             runTracer tracer (IOScriptStopped script.description argz out)
             pure $ Right out
+

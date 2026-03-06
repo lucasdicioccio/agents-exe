@@ -114,12 +114,44 @@ mcpTool toolbox desc =
 
 -- | Builder for a tool based on an IO-tool script-description.
 --
--- Note: The IO action receives the full 'ToolExecutionContext' giving it access
--- to session metadata. If the IO action only needs specific fields, it should
--- extract them from the context.
+-- The IO action receives the full 'ToolExecutionContext', giving it direct access
+-- to session metadata including:
+--
+-- * 'ctxSessionId' - The current session identifier
+-- * 'ctxConversationId' - The conversation identifier
+-- * 'ctxTurnId' - The current turn identifier
+-- * 'ctxAgentId' - Optional agent identifier
+-- * 'ctxFullSession' - Optional complete session data
+--
+-- This is a breaking change from the previous API where IO scripts received a
+-- 'ConversationId'. To migrate existing tools:
+--
+-- @
+-- -- Before:
+-- ioRun :: ConversationId -> MyArg -> IO ByteString
+-- ioRun _convId arg = ...
+--
+-- -- After:
+-- ioRun :: ToolExecutionContext -> MyArg -> IO ByteString
+-- ioRun ctx arg = ...
+-- -- Use ctx when needed, or ignore with _ctx if not needed
+-- @
+--
+-- Example tool using context:
+--
+-- @
+-- logTool :: IOScript LogArg ByteString
+-- logTool = IOScript
+--     { description = IOScriptDescription "log-tool" "Logs with session context"
+--     , ioRun = \ctx arg -> do
+--         let sessionId = ctxSessionId ctx
+--         logWithSession sessionId arg.message
+--         pure "logged"
+--     }
+-- @
 ioTool ::
     (Aeson.FromJSON llmArg) =>
-    IOTools.IOScript ToolExecutionContext llmArg ByteString ->
+    IOTools.IOScript llmArg ByteString ->
     Tool ()
 ioTool script =
     Tool
