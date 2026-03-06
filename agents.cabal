@@ -67,6 +67,9 @@ library agents-lib
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.InitProject
+                    , System.Agents.ExportImport.Git
+                    , System.Agents.ExportImport.Git.Index
+                    , System.Agents.ExportImport.Types
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
@@ -137,6 +140,7 @@ library agents-lib
                       stm,
                       stm-chans,
                       stm-conduit,
+                      temporary,
                       text,
                       text-zipper,
                       time,
@@ -174,7 +178,7 @@ executable agents-exe
                       prodapi,
                       optparse-applicative
 
-    -- Directories containing source files.
+    -- Directories containing source source files.
     hs-source-dirs:   app
 
     -- Base language which the package written in.
