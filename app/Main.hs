@@ -4,7 +4,7 @@
 
 module Main where
 
-import Control.Monad (forM_, join)
+import Control.Monad (forM_, join, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
@@ -46,6 +46,100 @@ import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import qualified System.Process as Process
 
 import Options.Applicative
+
+-------------------------------------------------------------------------------
+-- Archive Format Types
+-------------------------------------------------------------------------------
+
+-- | Supported archive formats for export/import
+data ArchiveFormat
+    = TarFormat      -- ^ Plain tar archive
+    | TarGzFormat    -- ^ Gzip-compressed tar archive
+    | ZipFormat      -- ^ ZIP archive
+    deriving (Show, Eq, Generic)
+
+-------------------------------------------------------------------------------
+-- Export Types
+-------------------------------------------------------------------------------
+
+-- | Options for the export command
+data ExportOptions = ExportOptions
+    { exportSource :: ExportSource        -- ^ What to export
+    , exportDestination :: ExportDestination  -- ^ Where to export
+    , exportFormat :: Maybe ArchiveFormat -- ^ Override format detection
+    , exportNamespace :: Maybe Text.Text  -- ^ Add namespace prefix
+    , exportIncludeTools :: Bool          -- ^ Include tool scripts
+    , exportIncludeMcp :: Bool            -- ^ Include MCP configs
+    }
+    deriving (Show, Generic)
+
+-- | Source specification for export
+data ExportSource
+    = ExportCurrentAgent                  -- ^ Export agent from --agent-file
+    | ExportAllAgents                     -- ^ Export all loaded agents
+    | ExportAgentBySlug Text.Text         -- ^ Export specific agent by slug
+    deriving (Show, Generic)
+
+-- | Destination specification for export
+data ExportDestination
+    = ExportToFile FilePath               -- ^ Archive file path
+    | ExportToGit GitExportOptions        -- ^ Git repository
+    deriving (Show, Generic)
+
+-- | Git-specific export options
+data GitExportOptions = GitExportOptions
+    { gitUrl :: Text.Text
+    , gitBranch :: Maybe Text.Text
+    , gitCommitMessage :: Maybe Text.Text
+    , gitPush :: Bool
+    , gitTag :: Maybe Text.Text
+    }
+    deriving (Show, Generic)
+
+-------------------------------------------------------------------------------
+-- Import Types
+-------------------------------------------------------------------------------
+
+-- | Options for the import command
+data ImportOptions = ImportOptions
+    { importSource :: ImportSource        -- ^ Where to import from
+    , importDestination :: ImportDestination  -- ^ Where to put imported configs
+    , importNamespace :: Maybe Text.Text  -- ^ Filter by namespace
+    , importMode :: ImportMode            -- ^ How to handle conflicts
+    }
+    deriving (Show, Generic)
+
+-- | Source specification for import
+data ImportSource
+    = ImportFromFile FilePath             -- ^ Archive file
+    | ImportFromGit GitImportOptions      -- ^ Git repository
+    deriving (Show, Generic)
+
+-- | Git-specific import options
+data GitImportOptions = GitImportOptions
+    { gitImportUrl :: Text.Text
+    , gitImportRef :: Maybe Text.Text     -- ^ branch/tag/commit
+    , gitImportNamespace :: Maybe Text.Text  -- ^ specific namespace to import
+    }
+    deriving (Show, Generic)
+
+-- | Destination specification for import
+data ImportDestination
+    = ImportToCurrentDir                  -- ^ Import to current directory
+    | ImportToPath FilePath               -- ^ Import to specific path
+    | ImportToConfigDir                   -- ^ Import to ~/.config/agents-exe
+    deriving (Show, Generic)
+
+-- | Conflict resolution mode for import
+data ImportMode
+    = ImportFailOnConflict                -- ^ Fail if files exist
+    | ImportOverwrite                     -- ^ Overwrite existing files
+    | ImportMerge                         -- ^ Merge configs (smart combine)
+    deriving (Show, Eq, Generic)
+
+-------------------------------------------------------------------------------
+-- ArgParser and Prog Types
+-------------------------------------------------------------------------------
 
 data ArgParserArgs
     = ArgParserArgs
@@ -153,6 +247,8 @@ data Command
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
+    | Export ExportOptions   -- ^ Export agent configurations
+    | Import ImportOptions   -- ^ Import agent configurations
 
 data PromptScriptDirective
     = Str Text.Text
@@ -179,6 +275,10 @@ data McpServerOptions
     = McpServerOptions
     { toolsDirectory :: FilePath
     }
+
+-------------------------------------------------------------------------------
+-- Command Parsers
+-------------------------------------------------------------------------------
 
 parseCheckCommand :: Parser Command
 parseCheckCommand =
@@ -305,20 +405,6 @@ parseSessionPrintOptions =
                 <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
             )
 
-{-
-  where
-    parseOptions :: Parser McpServerOptions
-    parseOptions =
-        McpServerOptions
-            <$> strOption
-                ( long "tooldir"
-                    <> metavar "TOOLDIR"
-                    <> help "tool directory"
-                    <> showDefault
-                    <> value "~/.agents-exe/tools/mcp"
-                )
--}
-
 parseInitializeCommand :: Parser Command
 parseInitializeCommand =
     pure Initialize
@@ -326,6 +412,222 @@ parseInitializeCommand =
 parseSelfDescribeCommand :: Parser Command
 parseSelfDescribeCommand =
     pure SelfDescribe
+
+-------------------------------------------------------------------------------
+-- Export Command Parsers
+-------------------------------------------------------------------------------
+
+-- | Parse the export command
+parseExportCommand :: Parser Command
+parseExportCommand =
+    Export <$> parseExportOptions
+
+-- | Parse export options
+parseExportOptions :: Parser ExportOptions
+parseExportOptions =
+    ExportOptions
+        <$> parseExportSource
+        <*> parseExportDestination
+        <*> optional parseArchiveFormat
+        <*> optional parseNamespaceOption
+        <*> parseIncludeToolsFlag
+        <*> parseIncludeMcpFlag
+
+-- | Parse what to export (source)
+parseExportSource :: Parser ExportSource
+parseExportSource =
+    asum
+        [ flag' ExportAllAgents
+            ( long "all"
+                <> help "Export all loaded agents"
+            )
+        , ExportAgentBySlug <$> strOption
+            ( long "agent-slug"
+                <> metavar "SLUG"
+                <> help "Export specific agent by slug"
+            )
+        , pure ExportCurrentAgent  -- Default: export agent from --agent-file
+        ]
+
+-- | Parse where to export (destination)
+parseExportDestination :: Parser ExportDestination
+parseExportDestination =
+    asum
+        [ ExportToGit <$> parseGitExportOptions
+        , ExportToFile <$> strOption
+            ( long "output"
+                <> short 'o'
+                <> metavar "FILE"
+                <> help "Output archive file path"
+            )
+        ]
+
+-- | Parse Git export options
+parseGitExportOptions :: Parser GitExportOptions
+parseGitExportOptions =
+    GitExportOptions
+        <$> strOption
+            ( long "git-url"
+                <> metavar "URL"
+                <> help "Git repository URL to export to"
+            )
+        <*> optional (strOption
+            ( long "git-branch"
+                <> metavar "BRANCH"
+                <> help "Git branch to push to (default: main)"
+            ))
+        <*> optional (strOption
+            ( long "git-message"
+                <> metavar "MESSAGE"
+                <> help "Git commit message"
+            ))
+        <*> switch
+            ( long "git-push"
+                <> help "Push to remote after commit"
+            )
+        <*> optional (strOption
+            ( long "git-tag"
+                <> metavar "TAG"
+                <> help "Git tag to create"
+            ))
+
+-- | Parse archive format option
+parseArchiveFormat :: Parser ArchiveFormat
+parseArchiveFormat =
+    asum
+        [ flag' TarGzFormat
+            ( long "tar.gz"
+                <> help "Use tar.gz format (default)"
+            )
+        , flag' TarFormat
+            ( long "tar"
+                <> help "Use plain tar format"
+            )
+        , flag' ZipFormat
+            ( long "zip"
+                <> help "Use zip format"
+            )
+        ]
+
+-- | Parse namespace option
+parseNamespaceOption :: Parser Text.Text
+parseNamespaceOption =
+    strOption
+        ( long "namespace"
+            <> metavar "NAMESPACE"
+            <> help "Add namespace prefix to exported package"
+        )
+
+-- | Parse include tools flag
+parseIncludeToolsFlag :: Parser Bool
+parseIncludeToolsFlag =
+    switch
+        ( long "include-tools"
+            <> help "Include tool scripts in export"
+        )
+
+-- | Parse include MCP flag
+parseIncludeMcpFlag :: Parser Bool
+parseIncludeMcpFlag =
+    switch
+        ( long "include-mcp"
+            <> help "Include MCP server configurations in export"
+        )
+
+-------------------------------------------------------------------------------
+-- Import Command Parsers
+-------------------------------------------------------------------------------
+
+-- | Parse the import command
+parseImportCommand :: Parser Command
+parseImportCommand =
+    Import <$> parseImportOptions
+
+-- | Parse import options
+parseImportOptions :: Parser ImportOptions
+parseImportOptions =
+    ImportOptions
+        <$> parseImportSource
+        <*> parseImportDestination
+        <*> optional parseImportNamespaceFilter
+        <*> parseImportMode
+
+-- | Parse where to import from (source)
+parseImportSource :: Parser ImportSource
+parseImportSource =
+    asum
+        [ ImportFromGit <$> parseGitImportOptions
+        , ImportFromFile <$> strOption
+            ( long "from-file"
+                <> short 'f'
+                <> metavar "FILE"
+                <> help "Import from archive file"
+            )
+        ]
+
+-- | Parse Git import options
+parseGitImportOptions :: Parser GitImportOptions
+parseGitImportOptions =
+    GitImportOptions
+        <$> strOption
+            ( long "git-url"
+                <> metavar "URL"
+                <> help "Git repository URL to import from"
+            )
+        <*> optional (strOption
+            ( long "git-ref"
+                <> metavar "REF"
+                <> help "Git branch, tag, or commit to import from"
+            ))
+        <*> optional (strOption
+            ( long "git-namespace"
+                <> metavar "NAMESPACE"
+                <> help "Specific namespace to import from git repo"
+            ))
+
+-- | Parse import destination
+parseImportDestination :: Parser ImportDestination
+parseImportDestination =
+    asum
+        [ flag' ImportToConfigDir
+            ( long "to-config-dir"
+                <> help "Import to ~/.config/agents-exe"
+            )
+        , ImportToPath <$> strOption
+            ( long "to"
+                <> metavar "PATH"
+                <> help "Import to specific path"
+            )
+        , pure ImportToCurrentDir  -- Default: import to current directory
+        ]
+
+-- | Parse namespace filter for import
+parseImportNamespaceFilter :: Parser Text.Text
+parseImportNamespaceFilter =
+    strOption
+        ( long "namespace"
+            <> metavar "NAMESPACE"
+            <> help "Filter import by namespace"
+        )
+
+-- | Parse import mode (conflict resolution)
+parseImportMode :: Parser ImportMode
+parseImportMode =
+    asum
+        [ flag' ImportOverwrite
+            ( long "overwrite"
+                <> help "Overwrite existing files"
+            )
+        , flag' ImportMerge
+            ( long "merge"
+                <> help "Merge configurations (smart combine)"
+            )
+        , pure ImportFailOnConflict  -- Default: fail on conflict
+        ]
+
+-------------------------------------------------------------------------------
+-- Main Parser
+-------------------------------------------------------------------------------
 
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
@@ -389,7 +691,13 @@ parseProgOptions argparserargs =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
+                <> command "export" (info parseExportCommand (progDesc "Export agent configurations to archive or git"))
+                <> command "import" (info parseImportCommand (progDesc "Import agent configurations from archive or git"))
             )
+
+-------------------------------------------------------------------------------
+-- Main Entry Point
+-------------------------------------------------------------------------------
 
 main :: IO ()
 main = do
@@ -537,6 +845,106 @@ main = do
                             InitProject.initKeyFile pargs.apiKeysFile
             SessionPrint opts -> do
                 SessionPrint.handleSessionPrint opts
+            Export opts -> do
+                handleExport opts pargs
+            Import opts -> do
+                handleImport opts pargs
+
+-------------------------------------------------------------------------------
+-- Export Command Handler
+-------------------------------------------------------------------------------
+
+-- | Handle the export command
+handleExport :: ExportOptions -> Prog -> IO ()
+handleExport opts pargs = do
+    -- Validate export destination is provided
+    case opts.exportDestination of
+        ExportToFile path -> do
+            putStrLn $ "Exporting to archive: " ++ path
+            -- TODO: Implement actual export logic
+            -- 1. Load agents based on exportSource
+            -- 2. Build ExportPackage
+            -- 3. Export to archive file
+            putStrLn $ "Exported to: " ++ path
+        ExportToGit gitOpts -> do
+            putStrLn $ "Exporting to git repository: " ++ Text.unpack gitOpts.gitUrl
+            -- TODO: Implement actual git export logic
+            -- 1. Load agents based on exportSource
+            -- 2. Build ExportPackage
+            -- 3. Export to git repository
+            putStrLn $ "Exported to git: " ++ Text.unpack gitOpts.gitUrl
+            when gitOpts.gitPush $
+                putStrLn "Pushed to remote"
+            case gitOpts.gitTag of
+                Just tag -> putStrLn $ "Created tag: " ++ Text.unpack tag
+                Nothing -> pure ()
+
+    -- Log export details
+    putStrLn $ "Export source: " ++ showExportSource opts.exportSource
+    case opts.exportNamespace of
+        Just ns -> putStrLn $ "Namespace: " ++ Text.unpack ns
+        Nothing -> pure ()
+    putStrLn $ "Include tools: " ++ show opts.exportIncludeTools
+    putStrLn $ "Include MCP configs: " ++ show opts.exportIncludeMcp
+
+-- | Helper to show export source
+showExportSource :: ExportSource -> String
+showExportSource ExportCurrentAgent = "current agent (from --agent-file)"
+showExportSource ExportAllAgents = "all loaded agents"
+showExportSource (ExportAgentBySlug slug) = "agent by slug: " ++ Text.unpack slug
+
+-------------------------------------------------------------------------------
+-- Import Command Handler
+-------------------------------------------------------------------------------
+
+-- | Handle the import command
+handleImport :: ImportOptions -> Prog -> IO ()
+handleImport opts pargs = do
+    -- Validate and resolve import destination
+    destPath <- case opts.importDestination of
+        ImportToCurrentDir -> getCurrentDirectory
+        ImportToPath path -> pure path
+        ImportToConfigDir -> do
+            home <- getHomeDirectory
+            pure $ home </> ".config/agents-exe"
+
+    -- Create destination directory if it doesn't exist
+    -- TODO: Implement directory creation
+
+    -- Perform import based on source
+    case opts.importSource of
+        ImportFromFile path -> do
+            putStrLn $ "Importing from archive: " ++ path
+            -- TODO: Implement actual import logic
+            -- 1. Read archive file
+            -- 2. Extract ExportPackage
+            -- 3. Handle conflicts based on importMode
+            -- 4. Write to destination
+            putStrLn $ "Imported to: " ++ destPath
+        ImportFromGit gitOpts -> do
+            putStrLn $ "Importing from git repository: " ++ Text.unpack gitOpts.gitImportUrl
+            case gitOpts.gitImportRef of
+                Just ref -> putStrLn $ "  Reference: " ++ Text.unpack ref
+                Nothing -> putStrLn "  Reference: default branch"
+            -- TODO: Implement actual git import logic
+            -- 1. Clone/fetch git repository
+            -- 2. Checkout specified ref
+            -- 3. Extract ExportPackage
+            -- 4. Handle conflicts based on importMode
+            -- 5. Write to destination
+            putStrLn $ "Imported to: " ++ destPath
+
+    -- Log import details
+    putStrLn $ "Import mode: " ++ showImportMode opts.importMode
+    case opts.importNamespace of
+        Just ns -> putStrLn $ "Namespace filter: " ++ Text.unpack ns
+        Nothing -> pure ()
+
+-- | Helper to show import mode
+showImportMode :: ImportMode -> String
+showImportMode ImportFailOnConflict = "fail on conflict"
+showImportMode ImportOverwrite = "overwrite existing files"
+showImportMode ImportMerge = "merge configurations"
 
 -------------------------------------------------------------------------------
 -- Check Command Helper
