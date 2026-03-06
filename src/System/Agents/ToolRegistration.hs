@@ -19,7 +19,6 @@ import System.Agents.ToolSchema
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
-import System.Agents.Tools.Context (ToolExecutionContext)
 
 -------------------------------------------------------------------------------
 
@@ -39,7 +38,7 @@ instance Show ToolRegistration where
 -------------------------------------------------------------------------------
 
 -- naming policy for IO tools
-io2LLMName :: forall a b. IOTools.IOScript ToolExecutionContext a b -> OpenAI.ToolName
+io2LLMName :: forall a b. IOTools.IOScript a b -> OpenAI.ToolName
 io2LLMName io = OpenAI.ToolName (mconcat ["io_", io.description.ioSlug])
 
 -- naming policy for Bash tools
@@ -90,12 +89,12 @@ shape of the tool for IOScript (ideally some generics or something like Data.Aes
 -}
 registerIOScriptInLLM ::
     (Aeson.FromJSON a) =>
-    IOTools.IOScript ToolExecutionContext a ByteString ->
+    IOTools.IOScript a ByteString ->
     [ParamProperty] ->
     ToolRegistration
 registerIOScriptInLLM script llmProps =
     let
-        matchName :: IOTools.IOScript ToolExecutionContext a b -> OpenAI.ToolCall -> Bool
+        matchName :: IOTools.IOScript a b -> OpenAI.ToolCall -> Bool
         matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
 
         tool :: Tool ()
