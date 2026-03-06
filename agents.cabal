@@ -202,6 +202,7 @@ test-suite agents-tests
     build-depends:    base >=4.18.3.0,
                       agents-lib,
                       aeson,
+                      bytestring,
                       text,
                       tasty,
                       tasty-hunit
