@@ -19,11 +19,13 @@ GITHUB_USERNAME="${GITHUB_USERNAME:-lucasdicioccio}"
 # Mapping: Label -> Relative path from worktree root
 declare -A PROJECT_MAP=(
     ["root"]="."
+    ["architect"]="."
 )
 
 # Mapping: Label -> Agent configuration file path
 declare -A AGENT_MAP=(
     ["default"]="tasks-agents/kimi-agent-oneshot.json"
+    ["architect"]="tasks-agents/kimi-architect.json"
 )
 
 # ==============================================================================
