@@ -4,11 +4,11 @@
 
 module Main where
 
-import Control.Monad (forM_, join)
+import Control.Monad (forM_, join, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor.Contravariant.Divisible (choose)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
@@ -19,6 +19,16 @@ import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinar
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
+import System.Agents.ExportImport.Types
+    ( ArchiveFormat(..)
+    , InstallOptions(..)
+    , ToolPackage(..)
+    , StandaloneToolExport(..)
+    , defaultInstallOptions
+    )
+import qualified System.Agents.ExportImport.Archive as ExportArchive
+import qualified System.Agents.ExportImport.Git as ExportGit
+import qualified System.Agents.ExportImport.ToolInstall as ToolInstall
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -39,9 +49,10 @@ import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import System.Agents.ToolRegistration (ToolRegistration(..))
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
-import System.Directory (doesFileExist, getCurrentDirectory, getHomeDirectory)
-import System.FilePath (takeDirectory, (</>))
+import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory)
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import qualified System.Process as Process
 
@@ -153,6 +164,9 @@ data Command
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
+    | Export ExportOptions
+    | Import ImportOptions
+    | ToolList ToolListOptions
 
 data PromptScriptDirective
     = Str Text.Text
@@ -179,6 +193,236 @@ data McpServerOptions
     = McpServerOptions
     { toolsDirectory :: FilePath
     }
+
+-- Dummy tool registration for config loading
+dummyToolRegistration :: ToolRegistration
+dummyToolRegistration = ToolRegistration
+    (error "dummy tool") 
+    (error "dummy tool") 
+    (const Nothing)
+
+-------------------------------------------------------------------------------
+-- Export Types and Parsers
+-------------------------------------------------------------------------------
+
+data ExportSource
+    = ExportCurrentAgent
+    | ExportAllAgents
+    | ExportAgentBySlug Text.Text
+    | ExportCurrentTools
+    | ExportToolByName Text.Text
+    deriving (Show)
+
+data ExportOptions = ExportOptions
+    { exportSource :: ExportSource
+    , exportOutput :: FilePath
+    , exportFormat :: ArchiveFormat
+    , exportToolsOnly :: Bool
+    }
+    deriving (Show)
+
+parseExportCommand :: Parser Command
+parseExportCommand =
+    Export <$> parseExportOptions
+
+parseExportOptions :: Parser ExportOptions
+parseExportOptions =
+    ExportOptions
+        <$> parseExportSource
+        <*> strOption
+            ( long "output"
+                <> short 'o'
+                <> metavar "OUTPUT"
+                <> help "Output file path for export"
+            )
+        <*> flag TarGz TarGz
+            ( long "tar-gz"
+                <> help "Export as tar.gz (default)"
+            )
+        <*> switch
+            ( long "tools-only"
+                <> short 't'
+                <> help "Export only tools, not agent configuration"
+            )
+
+parseExportSource :: Parser ExportSource
+parseExportSource =
+    asum
+        [ flag' ExportCurrentTools
+            ( long "tools-only"
+                <> short 't'
+                <> help "Export only tools from current agent"
+            )
+        , ExportToolByName <$> strOption
+            ( long "tool"
+                <> metavar "TOOLNAME"
+                <> help "Export a specific tool by name"
+            )
+        , pure ExportCurrentAgent
+        ]
+
+-------------------------------------------------------------------------------
+-- Import Types and Parsers
+-------------------------------------------------------------------------------
+
+data ImportDestination
+    = ImportToCurrentDir
+    | ImportToPath FilePath
+    | ImportToConfigDir
+    | ImportToAgent FilePath
+    | ImportToToolDir FilePath
+    deriving (Show)
+
+data ImportOptions = ImportOptions
+    { importSource :: ImportSource
+    , importDestination :: ImportDestination
+    , importToolsOnly :: Bool
+    , importForce :: Bool
+    , importLink :: Bool
+    }
+    deriving (Show)
+
+data ImportSource
+    = ImportFromFile FilePath
+    | ImportFromGit String (Maybe Text.Text)
+    | ImportFromAgent FilePath
+    deriving (Show)
+
+parseImportCommand :: Parser Command
+parseImportCommand =
+    Import <$> parseImportOptions
+
+parseImportOptions :: Parser ImportOptions
+parseImportOptions =
+    ImportOptions
+        <$> parseImportSource
+        <*> parseImportDestination
+        <*> switch
+            ( long "tools-only"
+                <> short 't'
+                <> help "Import only tools, not agent configuration"
+            )
+        <*> switch
+            ( long "force"
+                <> short 'f'
+                <> help "Overwrite existing tools"
+            )
+        <*> switch
+            ( long "link"
+                <> short 'l'
+                <> help "Use symlinks instead of copy (for git-based tools)"
+            )
+
+parseImportSource :: Parser ImportSource
+parseImportSource =
+    asum
+        [ ImportFromGit
+            <$> strOption
+                ( long "git-url"
+                    <> metavar "URL"
+                    <> help "Import from a git repository"
+                )
+            <*> optional (strOption
+                ( long "git-ref"
+                    <> metavar "REF"
+                    <> help "Git reference (branch/tag/commit)"
+                ))
+        , ImportFromAgent <$> strOption
+            ( long "from-agent"
+                <> metavar "AGENTFILE"
+                <> help "Copy tools from another agent"
+            )
+        , ImportFromFile <$> strOption
+            ( long "from-file"
+                <> metavar "FILE"
+                <> help "Import from an archive file"
+            )
+        ]
+
+parseImportDestination :: Parser ImportDestination
+parseImportDestination =
+    asum
+        [ ImportToAgent <$> strOption
+            ( long "install-to-agent"
+                <> metavar "AGENTFILE"
+                <> help "Install tools to this agent's tool directory"
+            )
+        , ImportToToolDir <$> strOption
+            ( long "to"
+                <> metavar "TOOLDIR"
+                <> help "Install tools to a specific directory"
+            )
+        , pure ImportToCurrentDir
+        ]
+
+-------------------------------------------------------------------------------
+-- Tool List Types and Parsers
+-------------------------------------------------------------------------------
+
+data ToolListOptions = ToolListOptions
+    { toolListSource :: ToolListSource
+    , toolListFormat :: ToolListFormat
+    }
+    deriving (Show)
+
+data ToolListSource
+    = ToolListFromAgent FilePath
+    | ToolListFromGit String
+    | ToolListFromDir FilePath
+    deriving (Show)
+
+data ToolListFormat
+    = ToolListSimple
+    | ToolListDetailed
+    | ToolListJson
+    deriving (Show)
+
+parseToolListCommand :: Parser Command
+parseToolListCommand =
+    ToolList <$> parseToolListOptions
+
+parseToolListOptions :: Parser ToolListOptions
+parseToolListOptions =
+    ToolListOptions
+        <$> parseToolListSource
+        <*> parseToolListFormat
+
+parseToolListSource :: Parser ToolListSource
+parseToolListSource =
+    asum
+        [ ToolListFromGit <$> strOption
+            ( long "git-url"
+                <> metavar "URL"
+                <> help "List tools from a git repository"
+            )
+        , ToolListFromAgent <$> strOption
+            ( long "agent-file"
+                <> metavar "AGENTFILE"
+                <> help "List tools from an agent"
+            )
+        , ToolListFromDir <$> strArgument
+            ( metavar "DIRECTORY"
+                <> help "Directory to list tools from"
+                <> value "."
+            )
+        ]
+
+parseToolListFormat :: Parser ToolListFormat
+parseToolListFormat =
+    flag ToolListSimple ToolListDetailed
+        ( long "detailed"
+            <> short 'd'
+            <> help "Show detailed tool information"
+        )
+    <|> flag' ToolListJson
+        ( long "json"
+            <> help "Output as JSON"
+        )
+    <|> pure ToolListSimple
+
+-------------------------------------------------------------------------------
+-- Original Parsers
+-------------------------------------------------------------------------------
 
 parseCheckCommand :: Parser Command
 parseCheckCommand =
@@ -305,20 +549,6 @@ parseSessionPrintOptions =
                 <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
             )
 
-{-
-  where
-    parseOptions :: Parser McpServerOptions
-    parseOptions =
-        McpServerOptions
-            <$> strOption
-                ( long "tooldir"
-                    <> metavar "TOOLDIR"
-                    <> help "tool directory"
-                    <> showDefault
-                    <> value "~/.agents-exe/tools/mcp"
-                )
--}
-
 parseInitializeCommand :: Parser Command
 parseInitializeCommand =
     pure Initialize
@@ -389,7 +619,14 @@ parseProgOptions argparserargs =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
+                <> command "export" (info parseExportCommand (progDesc "Export agent or tools"))
+                <> command "import" (info parseImportCommand (progDesc "Import agent or tools"))
+                <> command "list-tools" (info parseToolListCommand (progDesc "List available tools"))
             )
+
+-------------------------------------------------------------------------------
+-- Main Entry Point
+-------------------------------------------------------------------------------
 
 main :: IO ()
 main = do
@@ -472,8 +709,7 @@ main = do
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                baseTracer
+                            , AgentTree.interactiveTracer = baseTracer
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
             SelfDescribe -> do
@@ -537,6 +773,256 @@ main = do
                             InitProject.initKeyFile pargs.apiKeysFile
             SessionPrint opts -> do
                 SessionPrint.handleSessionPrint opts
+            
+            -- NEW: Export command handler
+            Export opts -> handleExportCommand pargs opts
+            
+            -- NEW: Import command handler  
+            Import opts -> handleImportCommand pargs opts
+            
+            -- NEW: List tools command handler
+            ToolList opts -> handleToolListCommand opts
+
+-------------------------------------------------------------------------------
+-- Export Command Handler
+-------------------------------------------------------------------------------
+
+handleExportCommand :: Prog -> ExportOptions -> IO ()
+handleExportCommand pargs opts = do
+    case exportSource opts of
+        ExportCurrentTools -> do
+            -- Export tools from current agent's tool directory
+            forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
+                eTree <- AgentTree.loadAgentTreeConfig $
+                    AgentTree.Props
+                        { AgentTree.apiKeys = []  -- Not needed for config loading
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer = Prod.silent
+                        , AgentTree.agentToTool = \_ _ _ -> dummyToolRegistration
+                        }
+                case eTree of
+                    Left errs -> do
+                        Text.putStrLn $ "Error loading agent config: " <> Text.pack (show errs)
+                    Right cfg -> do
+                        let toolDir = AgentTree.agentRootDir cfg </> (AgentTree.agentConfig cfg).toolDirectory
+                        exportToolsFromDirectory toolDir opts
+                        
+        ExportToolByName toolName -> do
+            -- Export a specific tool by name
+            forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
+                eTree <- AgentTree.loadAgentTreeConfig $
+                    AgentTree.Props
+                        { AgentTree.apiKeys = []
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer = Prod.silent
+                        , AgentTree.agentToTool = \_ _ _ -> dummyToolRegistration
+                        }
+                case eTree of
+                    Left errs -> do
+                        Text.putStrLn $ "Error loading agent config: " <> Text.pack (show errs)
+                    Right cfg -> do
+                        let toolDir = AgentTree.agentRootDir cfg </> (AgentTree.agentConfig cfg).toolDirectory
+                        exportSingleTool toolDir toolName opts
+                        
+        _ -> do
+            Text.putStrLn "Export of full agents not yet implemented. Use --tools-only for now."
+
+exportToolsFromDirectory :: FilePath -> ExportOptions -> IO ()
+exportToolsFromDirectory toolDir opts = do
+    exists <- doesDirectoryExist toolDir
+    if not exists
+        then Text.putStrLn $ "Tool directory not found: " <> Text.pack toolDir
+        else do
+            -- Discover tools in the directory
+            toolDescs <- ExportArchive.discoverTools toolDir
+            
+            if null toolDescs
+                then Text.putStrLn "No tools found in directory"
+                else do
+                    -- Convert to StandaloneToolExport
+                    exports <- mapM ExportArchive.exportToolFromDescription toolDescs
+                    
+                    -- Export to archive
+                    ExportArchive.exportToolsToArchive exports (exportFormat opts) (exportOutput opts)
+                    Text.putStrLn $ "Exported " <> Text.pack (show (length exports)) <> " tools to " <> Text.pack (exportOutput opts)
+
+exportSingleTool :: FilePath -> Text.Text -> ExportOptions -> IO ()
+exportSingleTool toolDir toolName opts = do
+    exists <- doesDirectoryExist toolDir
+    if not exists
+        then Text.putStrLn $ "Tool directory not found: " <> Text.pack toolDir
+        else do
+            -- Discover tools in the directory
+            toolDescs <- ExportArchive.discoverTools toolDir
+            
+            -- Find the specific tool - FIXED: Use proper field accessor
+            case filter (\d -> Bash.scriptSlug (Bash.scriptInfo d) == toolName) toolDescs of
+                [] -> Text.putStrLn $ "Tool not found: " <> toolName
+                (desc:_) -> do
+                    export <- ExportArchive.exportToolFromDescription desc
+                    ExportArchive.exportToolsToArchive [export] (exportFormat opts) (exportOutput opts)
+                    Text.putStrLn $ "Exported tool '" <> toolName <> "' to " <> Text.pack (exportOutput opts)
+
+-------------------------------------------------------------------------------
+-- Import Command Handler
+-------------------------------------------------------------------------------
+
+handleImportCommand :: Prog -> ImportOptions -> IO ()
+handleImportCommand pargs opts = do
+    let installOpts = defaultInstallOptions
+            { installForce = importForce opts
+            , installLink = importLink opts
+            }
+    
+    case importSource opts of
+        ImportFromFile filePath -> do
+            -- Import from archive file
+            result <- ExportArchive.importToolsFromArchive filePath
+            case result of
+                Left err -> Text.putStrLn $ "Import failed: " <> Text.pack (show err)
+                Right pkg -> installToolPackage pkg (importDestination opts) pargs installOpts
+                
+        ImportFromGit url _mRef -> do
+            -- Import from git
+            let gitUrl = ExportGit.GitUrl $ Text.pack url
+            result <- ExportGit.importToolsFromGit gitUrl Nothing
+            case result of
+                Left err -> Text.putStrLn $ "Git import failed: " <> Text.pack (show err)
+                Right pkg -> installToolPackage pkg (importDestination opts) pargs installOpts
+                
+        ImportFromAgent agentFile -> do
+            -- Copy tools from another agent
+            eSourceTree <- AgentTree.loadAgentTreeConfig $
+                AgentTree.Props
+                    { AgentTree.apiKeys = []
+                    , AgentTree.rootAgentFile = agentFile
+                    , AgentTree.interactiveTracer = Prod.silent
+                    , AgentTree.agentToTool = \_ _ _ -> dummyToolRegistration
+                    }
+            case eSourceTree of
+                Left errs -> Text.putStrLn $ "Error loading source agent: " <> Text.pack (show errs)
+                Right sourceCfg -> do
+                    case importDestination opts of
+                        ImportToAgent targetFile -> do
+                            eTargetTree <- AgentTree.loadAgentTreeConfig $
+                                AgentTree.Props
+                                    { AgentTree.apiKeys = []
+                                    , AgentTree.rootAgentFile = targetFile
+                                    , AgentTree.interactiveTracer = Prod.silent
+                                    , AgentTree.agentToTool = \_ _ _ -> dummyToolRegistration
+                                    }
+                            case eTargetTree of
+                                Left errs -> Text.putStrLn $ "Error loading target agent: " <> Text.pack (show errs)
+                                Right targetCfg -> do
+                                    result <- ToolInstall.copyToolsBetweenAgents sourceCfg targetCfg installOpts
+                                    case result of
+                                        Left err -> Text.putStrLn $ "Copy failed: " <> Text.pack (show err)
+                                        Right () -> Text.putStrLn "Tools copied successfully"
+                        _ -> Text.putStrLn "Must specify --install-to-agent when copying from another agent"
+
+installToolPackage :: ToolPackage -> ImportDestination -> Prog -> InstallOptions -> IO ()
+installToolPackage pkg dest pargs opts = do
+    case dest of
+        ImportToAgent agentFile -> do
+            eTree <- AgentTree.loadAgentTreeConfig $
+                AgentTree.Props
+                    { AgentTree.apiKeys = []
+                    , AgentTree.rootAgentFile = agentFile
+                    , AgentTree.interactiveTracer = Prod.silent
+                    , AgentTree.agentToTool = \_ _ _ -> dummyToolRegistration
+                    }
+            case eTree of
+                Left errs -> Text.putStrLn $ "Error loading agent: " <> Text.pack (show errs)
+                Right cfg -> do
+                    let agent = AgentTree.agentConfig cfg
+                    result <- ToolInstall.installToolsToAgent (toolPackageTools pkg) agent agentFile opts
+                    case result of
+                        Left err -> Text.putStrLn $ "Installation failed: " <> Text.pack (show err)
+                        Right () -> Text.putStrLn $ "Installed " <> Text.pack (show (length (toolPackageTools pkg))) <> " tools to agent"
+                        
+        ImportToToolDir toolDir -> do
+            result <- ToolInstall.installToolsGlobally (toolPackageTools pkg) toolDir opts
+            case result of
+                Left err -> Text.putStrLn $ "Installation failed: " <> Text.pack (show err)
+                Right () -> Text.putStrLn $ "Installed " <> Text.pack (show (length (toolPackageTools pkg))) <> " tools to " <> Text.pack toolDir
+                
+        ImportToCurrentDir -> do
+            -- Install to current directory as "tools/"
+            result <- ToolInstall.installToolsGlobally (toolPackageTools pkg) "tools" opts
+            case result of
+                Left err -> Text.putStrLn $ "Installation failed: " <> Text.pack (show err)
+                Right () -> Text.putStrLn $ "Installed " <> Text.pack (show (length (toolPackageTools pkg))) <> " tools to ./tools"
+                
+        ImportToPath path -> do
+            result <- ToolInstall.installToolsGlobally (toolPackageTools pkg) path opts
+            case result of
+                Left err -> Text.putStrLn $ "Installation failed: " <> Text.pack (show err)
+                Right () -> Text.putStrLn $ "Installed " <> Text.pack (show (length (toolPackageTools pkg))) <> " tools to " <> Text.pack path
+                
+        ImportToConfigDir -> do
+            Text.putStrLn "Import to config directory not yet implemented"
+
+-------------------------------------------------------------------------------
+-- Tool List Command Handler
+-------------------------------------------------------------------------------
+
+handleToolListCommand :: ToolListOptions -> IO ()
+handleToolListCommand opts = do
+    tools <- case toolListSource opts of
+        ToolListFromDir dir -> do
+            exists <- doesDirectoryExist dir
+            if not exists
+                then do
+                    Text.putStrLn $ "Directory not found: " <> Text.pack dir
+                    pure []
+                else do
+                    descs <- ExportArchive.discoverTools dir
+                    pure $ map Bash.scriptInfo descs
+                    
+        ToolListFromAgent agentFile -> do
+            eTree <- AgentTree.loadAgentTreeConfig $
+                AgentTree.Props
+                    { AgentTree.apiKeys = []
+                    , AgentTree.rootAgentFile = agentFile
+                    , AgentTree.interactiveTracer = Prod.silent
+                    , AgentTree.agentToTool = \_ _ _ -> dummyToolRegistration
+                    }
+            case eTree of
+                Left errs -> do
+                    Text.putStrLn $ "Error loading agent: " <> Text.pack (show errs)
+                    pure []
+                Right cfg -> do
+                    let toolDir = AgentTree.agentRootDir cfg </> (AgentTree.agentConfig cfg).toolDirectory
+                    exists <- doesDirectoryExist toolDir
+                    if not exists
+                        then pure []
+                        else do
+                            descs <- ExportArchive.discoverTools toolDir
+                            pure $ map Bash.scriptInfo descs
+                            
+        ToolListFromGit url -> do
+            let gitUrl = ExportGit.GitUrl $ Text.pack url
+            result <- ExportGit.listGitTools gitUrl
+            case result of
+                Left err -> do
+                    Text.putStrLn $ "Git list failed: " <> Text.pack (show err)
+                    pure []
+                Right listings -> do
+                    pure $ map snd listings
+    
+    -- Output based on format
+    case toolListFormat opts of
+        ToolListJson -> do
+            Aeson.encodeFile "/dev/stdout" tools
+        ToolListDetailed -> do
+            forM_ tools $ \tool -> do
+                Text.putStrLn $ ""
+                Text.putStrLn $ "Name: " <> Bash.scriptSlug tool
+                Text.putStrLn $ "Description: " <> Bash.scriptDescription tool
+                Text.putStrLn $ "Arguments: " <> Text.pack (show (length (Bash.scriptArgs tool)))
+        ToolListSimple -> do
+            forM_ tools $ \tool -> do
+                Text.putStrLn $ Bash.scriptSlug tool <> ": " <> Bash.scriptDescription tool
 
 -------------------------------------------------------------------------------
 -- Check Command Helper
