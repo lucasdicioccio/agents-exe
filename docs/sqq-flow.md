@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `sqq-agent` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests with the results.
+The `sqq-agent.sh` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests with the results.
 
 ## Architecture Components
 
@@ -51,7 +51,7 @@ The `sqq-agent` is a task queue automation system that manages AI agent executio
 ### 1. Initialization (`init`)
 
 ```bash
-sqq-agent init
+sqq-agent.sh init
 ```
 
 1. Creates `TASK_DIR` and `SESSIONS_DIR` directories
@@ -60,18 +60,18 @@ sqq-agent init
 ### 2. Manual Task Addition (`add`)
 
 ```bash
-sqq-agent add <label> <branch>
+sqq-agent.sh add <label> <branch>
 ```
 
 1. Validates the project label exists in `PROJECT_MAP`
 2. Finds or creates a numbered task file (format: `NNNN-<branch>.md`)
 3. Opens `$EDITOR` for user to write instructions
-4. Enqueues job: `sqq-agent worktree_exec "<label>" "<branch>" "<taskfile>"`
+4. Enqueues job: `sqq-agent.sh worktree_exec "<label>" "<branch>" "<taskfile>"`
 
 ### 3. GitHub Issue Import (`from_github`)
 
 ```bash
-sqq-agent from_github
+sqq-agent.sh from_github
 ```
 
 1. Queries GitHub for issues labeled `agents/to-be-taken` **from the configured author only**
@@ -87,7 +87,7 @@ sqq-agent from_github
 ### 4. Queue Processing (`process`)
 
 ```bash
-sqq-agent process
+sqq-agent.sh process
 ```
 
 1. Runs `sqq process --action Exec` in a loop
@@ -97,7 +97,7 @@ sqq-agent process
 ### 5. Worktree Execution (`worktree_exec`) - Core Engine
 
 ```bash
-sqq-agent worktree_exec <label> <name> <instruction_file>
+sqq-agent.sh worktree_exec <label> <name> <instruction_file>
 ```
 
 #### Phase 1: Worktree Setup
