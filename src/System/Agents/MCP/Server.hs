@@ -35,7 +35,7 @@ import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools (mapCallResult, toolRun)
-import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
 
 import System.Agents.MCP.Server.Runtime
 
@@ -342,6 +342,8 @@ executeToolCall agentId registrations _ctx (SessionBase.LlmToolCall callVal) =
                     tId
                     (Just agentId)
                     Nothing  -- No full session available at this point
+                    [CallStackEntry "root" convId 0]  -- Root call stack entry
+                    Nothing  -- No max recursion depth by default
             result <- llmCallTool regs toolCtx tc
             pure $ callResultToUserToolResponse tc result
 
