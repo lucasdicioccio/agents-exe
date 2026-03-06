@@ -4,21 +4,30 @@
 
 module Main where
 
-import Control.Monad (forM_, join)
+import Control.Monad (forM_, join, when)
+import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
+import System.Agents.Base (Agent (..), AgentDescription (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
+import qualified System.Agents.ExportImport.Archive as ExportImport
+import qualified System.Agents.ExportImport.Git as ExportImport
+import qualified System.Agents.ExportImport.ToolInstall as ExportInstall
+import qualified System.Agents.ExportImport.Types as ExportImport
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -40,12 +49,18 @@ import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
-import System.Directory (doesFileExist, getCurrentDirectory, getHomeDirectory)
-import System.FilePath (takeDirectory, (</>))
+import System.Directory (doesFileExist, doesDirectoryExist, getCurrentDirectory, getHomeDirectory)
+import System.Exit (ExitCode(..), exitFailure, exitSuccess)
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import qualified System.Process as Process
 
 import Options.Applicative
+import Data.Time (getCurrentTime)
+
+-------------------------------------------------------------------------------
+-- CLI Argument Parsing
+-------------------------------------------------------------------------------
 
 data ArgParserArgs
     = ArgParserArgs
@@ -153,6 +168,20 @@ data Command
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
+    | Export ExportOptions
+    | Import ImportOptions
+
+instance Show Command where
+    show Check = "Check"
+    show (TerminalUI _) = "TerminalUI"
+    show (OneShot _) = "OneShot"
+    show (EchoPrompt _) = "EchoPrompt"
+    show SelfDescribe = "SelfDescribe"
+    show Initialize = "Initialize"
+    show McpServer = "McpServer"
+    show (SessionPrint _) = "SessionPrint"
+    show (Export _) = "Export"
+    show (Import _) = "Import"
 
 data PromptScriptDirective
     = Str Text.Text
@@ -168,17 +197,91 @@ data TuiOptions
     = TuiOptions
     {
     }
+    deriving (Show)
 
 data OneShotOptions
     = OneShotOptions
     { sessionFile :: Maybe FilePath
     , promptScript :: PromptScript
     }
+    deriving (Show)
 
-data McpServerOptions
-    = McpServerOptions
-    { toolsDirectory :: FilePath
+-- | Export options for the export command
+data ExportOptions = ExportOptions
+    { exportSource :: ExportSource
+    , exportDestination :: ExportDestination
+    , exportFormat :: Maybe ExportImport.ArchiveFormat
+    , exportNamespace :: Maybe Text
+    , exportIncludeTools :: Bool
+    , exportIncludeMcp :: Bool
+    , exportGitOptions :: Maybe GitExportOptions
     }
+    deriving (Show)
+
+data ExportSource
+    = ExportCurrentAgent
+    | ExportAllAgents
+    | ExportAgentBySlug Text
+    | ExportCurrentTools         -- Tools only
+    | ExportToolByName Text      -- Specific tool
+    deriving (Show)
+
+data ExportDestination
+    = ExportToFile FilePath
+    | ExportToGit GitExportDest
+    deriving (Show)
+
+data GitExportDest = GitExportDest
+    { gitUrl :: Text
+    , gitBranch :: Maybe Text
+    , gitCommitMessage :: Maybe Text
+    , gitPush :: Bool
+    , gitTag :: Maybe Text
+    }
+    deriving (Show)
+
+data GitExportOptions = GitExportOptions
+    { gitDestUrl :: Text
+    , gitDestBranch :: Maybe Text
+    , gitDestCommitMessage :: Text
+    , gitDestPush :: Bool
+    , gitDestTag :: Maybe Text
+    }
+    deriving (Show)
+
+-- | Import options for the import command
+data ImportOptions = ImportOptions
+    { importSource :: ImportSource
+    , importDestination :: ExportInstall.ImportDestination
+    , importNamespace :: Maybe Text
+    , importMode :: ImportMode
+    , importToolsOnly :: Bool
+    , importListNamespaces :: Bool
+    , importListTools :: Bool
+    }
+    deriving (Show)
+
+data ImportSource
+    = ImportFromFile FilePath
+    | ImportFromGit GitImportSource
+    deriving (Show)
+
+data GitImportSource = GitImportSource
+    { gitImportUrl :: Text
+    , gitImportRef :: Maybe Text
+    , gitImportNamespace :: Maybe Text
+    }
+    deriving (Show)
+
+data ImportMode
+    = ImportFailOnConflict
+    | ImportOverwrite
+    | ImportMerge
+    deriving (Show, Eq)
+
+-------------------------------------------------------------------------------
+-- Parsers
+-------------------------------------------------------------------------------
 
 parseCheckCommand :: Parser Command
 parseCheckCommand =
@@ -305,20 +408,6 @@ parseSessionPrintOptions =
                 <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
             )
 
-{-
-  where
-    parseOptions :: Parser McpServerOptions
-    parseOptions =
-        McpServerOptions
-            <$> strOption
-                ( long "tooldir"
-                    <> metavar "TOOLDIR"
-                    <> help "tool directory"
-                    <> showDefault
-                    <> value "~/.agents-exe/tools/mcp"
-                )
--}
-
 parseInitializeCommand :: Parser Command
 parseInitializeCommand =
     pure Initialize
@@ -326,6 +415,262 @@ parseInitializeCommand =
 parseSelfDescribeCommand :: Parser Command
 parseSelfDescribeCommand =
     pure SelfDescribe
+
+-- | Parse the export command
+parseExportCommand :: Parser Command
+parseExportCommand =
+    Export <$> parseExportOptions
+
+parseExportOptions :: Parser ExportOptions
+parseExportOptions =
+    ExportOptions
+        <$> parseExportSource
+        <*> parseExportDestination
+        <*> optional parseArchiveFormat
+        <*> optional parseNamespace
+        <*> parseIncludeTools
+        <*> parseIncludeMcp
+        <*> optional parseGitExportOptions
+
+parseExportSource :: Parser ExportSource
+parseExportSource =
+    asum
+        [ flag' ExportCurrentTools
+            ( long "tools-only"
+                <> help "Export only tools, not the agent configuration"
+            )
+        , ExportToolByName <$> strOption
+            ( long "tool"
+                <> metavar "TOOLNAME"
+                <> help "Export a specific tool by name"
+            )
+        , flag' ExportAllAgents
+            ( long "all"
+                <> help "Export all loaded agents"
+            )
+        , ExportAgentBySlug <$> strOption
+            ( long "agent-slug"
+                <> metavar "SLUG"
+                <> help "Export agent by slug"
+            )
+        , pure ExportCurrentAgent
+        ]
+
+parseExportDestination :: Parser ExportDestination
+parseExportDestination =
+    asum
+        [ ExportToGit <$> parseGitExportDest
+        , ExportToFile <$> strOption
+            ( long "output"
+                <> short 'o'
+                <> metavar "OUTPUT"
+                <> help "Output file path"
+            )
+        ]
+
+parseGitExportDest :: Parser GitExportDest
+parseGitExportDest =
+    GitExportDest
+        <$> strOption
+            ( long "git-url"
+                <> metavar "URL"
+                <> help "Git remote URL"
+            )
+        <*> optional (strOption
+            ( long "git-branch"
+                <> metavar "BRANCH"
+                <> help "Git branch"
+            ))
+        <*> optional (strOption
+            ( long "git-message"
+                <> metavar "MESSAGE"
+                <> help "Git commit message"
+            ))
+        <*> switch
+            ( long "git-push"
+                <> help "Push to remote after commit"
+            )
+        <*> optional (strOption
+            ( long "git-tag"
+                <> metavar "TAG"
+                <> help "Git tag to create"
+            ))
+
+parseGitExportOptions :: Parser GitExportOptions
+parseGitExportOptions =
+    GitExportOptions
+        <$> strOption
+            ( long "git-url"
+                <> metavar "URL"
+                <> help "Git remote URL"
+            )
+        <*> optional (strOption
+            ( long "git-branch"
+                <> metavar "BRANCH"
+                <> help "Git branch"
+            ))
+        <*> (fromMaybe "Update agent configurations" <$> optional (strOption
+            ( long "git-message"
+                <> metavar "MESSAGE"
+                <> help "Git commit message"
+                <> value "Update agent configurations"
+            )))
+        <*> switch
+            ( long "git-push"
+                <> help "Push to remote after commit"
+            )
+        <*> optional (strOption
+            ( long "git-tag"
+                <> metavar "TAG"
+                <> help "Git tag to create"
+            ))
+
+parseArchiveFormat :: Parser ExportImport.ArchiveFormat
+parseArchiveFormat =
+    option (maybeReader parseFormat)
+        ( long "format"
+            <> metavar "FORMAT"
+            <> help "Archive format: tar, tar.gz, zip (auto-detected from output if not specified)"
+        )
+  where
+    parseFormat :: String -> Maybe ExportImport.ArchiveFormat
+    parseFormat "tar" = Just ExportImport.TarFormat
+    parseFormat "tar.gz" = Just ExportImport.TarGzFormat
+    parseFormat "zip" = Just ExportImport.ZipFormat
+    parseFormat _ = Nothing
+
+parseNamespace :: Parser Text
+parseNamespace =
+    strOption
+        ( long "namespace"
+            <> metavar "NAMESPACE"
+            <> help "Namespace for export (e.g., 'team-a.project')"
+        )
+
+parseIncludeTools :: Parser Bool
+parseIncludeTools =
+    not <$> switch
+        ( long "no-tools"
+            <> help "Exclude tools from export"
+        )
+
+parseIncludeMcp :: Parser Bool
+parseIncludeMcp =
+    not <$> switch
+        ( long "no-mcp"
+            <> help "Exclude MCP servers from export"
+        )
+
+-- | Parse the import command
+parseImportCommand :: Parser Command
+parseImportCommand =
+    Import <$> parseImportOptions
+
+parseImportOptions :: Parser ImportOptions
+parseImportOptions =
+    ImportOptions
+        <$> parseImportSource
+        <*> parseImportDestination
+        <*> optional parseNamespace
+        <*> parseImportMode
+        <*> parseImportToolsOnly
+        <*> parseListNamespaces
+        <*> parseListTools
+
+parseImportSource :: Parser ImportSource
+parseImportSource =
+    asum
+        [ ImportFromGit <$> parseGitImportSource
+        , ImportFromFile <$> strOption
+            ( long "from-file"
+                <> short 'f'
+                <> metavar "FILE"
+                <> help "Import from archive file"
+            )
+        ]
+
+parseGitImportSource :: Parser GitImportSource
+parseGitImportSource =
+    GitImportSource
+        <$> strOption
+            ( long "git-url"
+                <> metavar "URL"
+                <> help "Git remote URL"
+            )
+        <*> optional (strOption
+            ( long "git-ref"
+                <> metavar "REF"
+                <> help "Git ref (branch, tag, or commit)"
+            ))
+        <*> optional (strOption
+            ( long "namespace"
+                <> metavar "NAMESPACE"
+                <> help "Namespace to import from"
+            ))
+
+parseImportDestination :: Parser ExportInstall.ImportDestination
+parseImportDestination =
+    asum
+        [ flag' ExportInstall.ImportToCurrentDir
+            ( long "to-current"
+                <> help "Import to current directory"
+            )
+        , ExportInstall.ImportToPath <$> strOption
+            ( long "to"
+                <> metavar "PATH"
+                <> help "Import to specific path"
+            )
+        , flag' ExportInstall.ImportToConfigDir
+            ( long "to-config-dir"
+                <> help "Import to config directory"
+            )
+        , ExportInstall.ImportToAgent <$> strOption
+            ( long "install-to-agent"
+                <> metavar "AGENTFILE"
+                <> help "Install tools to agent's tool directory"
+            )
+        , ExportInstall.ImportToToolDir <$> strOption
+            ( long "install-to-tooldir"
+                <> metavar "TOOLDIR"
+                <> help "Install tools to specific tool directory"
+            )
+        , pure ExportInstall.ImportToCurrentDir
+        ]
+
+parseImportMode :: Parser ImportMode
+parseImportMode =
+    asum
+        [ flag' ImportOverwrite
+            ( long "overwrite"
+                <> help "Overwrite existing files on conflict"
+            )
+        , flag' ImportMerge
+            ( long "merge"
+                <> help "Merge with existing files"
+            )
+        , pure ImportFailOnConflict
+        ]
+
+parseImportToolsOnly :: Parser Bool
+parseImportToolsOnly =
+    switch
+        ( long "tools-only"
+            <> help "Import only tools"
+        )
+
+parseListNamespaces :: Parser Bool
+parseListNamespaces =
+    switch
+        ( long "list-namespaces"
+            <> help "List available namespaces in git repo"
+        )
+
+parseListTools :: Parser Bool
+parseListTools =
+    switch
+        ( long "list-tools"
+            <> help "List available tools in git repo"
+        )
 
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
@@ -389,7 +734,15 @@ parseProgOptions argparserargs =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
+                <> command "export" (info parseExportCommand 
+                    (progDesc "Export agent/tool configurations"))
+                <> command "import" (info parseImportCommand
+                    (progDesc "Import agent/tool configurations"))
             )
+
+-------------------------------------------------------------------------------
+-- Main Entry Point
+-------------------------------------------------------------------------------
 
 main :: IO ()
 main = do
@@ -472,8 +825,7 @@ main = do
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
                             , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                baseTracer
+                            , AgentTree.interactiveTracer = baseTracer
                             , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                             }
             SelfDescribe -> do
@@ -537,12 +889,402 @@ main = do
                             InitProject.initKeyFile pargs.apiKeysFile
             SessionPrint opts -> do
                 SessionPrint.handleSessionPrint opts
+            Export opts -> handleExport opts pargs
+            Import opts -> handleImport opts pargs
+
+-------------------------------------------------------------------------------
+-- Export Handler
+-------------------------------------------------------------------------------
+
+handleExport :: ExportOptions -> Prog -> IO ()
+handleExport opts pargs = do
+    -- Determine archive format
+    let archiveFormat = case (opts.exportDestination, opts.exportFormat) of
+            (ExportToFile path, Nothing) -> fromMaybe ExportImport.TarGzFormat (ExportImport.detectArchiveFormat path)
+            (_, Just fmt) -> fmt
+            (_, Nothing) -> ExportImport.TarGzFormat
+    
+    -- Build export package
+    ePackage <- buildExportPackage opts pargs
+    
+    case ePackage of
+        Left err -> do
+            Text.hPutStrLn stderr $ "Export error: " <> err
+            exitFailure
+        Right pkg -> do
+            case opts.exportDestination of
+                ExportToFile path -> do
+                    result <- ExportImport.exportToArchive pkg archiveFormat path
+                    case result of
+                        Left err -> do
+                            Text.hPutStrLn stderr $ "Export failed: " <> Text.pack (show err)
+                            exitFailure
+                        Right () -> do
+                            Text.putStrLn $ "Exported to " <> Text.pack path
+                            exitSuccess
+                
+                ExportToGit gitDest -> do
+                    -- Convert to GitUrl and GitExportOptions
+                    let gitUrl = ExportImport.GitUrl
+                            { ExportImport.gitRemote = gitDest.gitUrl
+                            , ExportImport.gitBranch = gitDest.gitBranch
+                            , ExportImport.gitPath = parseNamespaceToMaybeNs opts.exportNamespace
+                            }
+                    let gitOpts = ExportImport.GitExportOptions
+                            { ExportImport.gitCommitMessage = fromMaybe "Update agent configurations" gitDest.gitCommitMessage
+                            , ExportImport.gitTag = gitDest.gitTag
+                            , ExportImport.gitPush = gitDest.gitPush
+                            }
+                    
+                    result <- ExportImport.exportToGit pkg gitUrl gitOpts
+                    case result of
+                        Left err -> do
+                            Text.hPutStrLn stderr $ "Git export failed: " <> Text.pack (show err)
+                            exitFailure
+                        Right () -> do
+                            Text.putStrLn "Exported to git repository"
+                            when gitDest.gitPush $ Text.putStrLn "Changes pushed to remote"
+                            exitSuccess
+
+-- Helper to parse namespace text to Maybe Namespace
+parseNamespaceToMaybeNs :: Maybe Text -> Maybe ExportImport.Namespace
+parseNamespaceToMaybeNs Nothing = Nothing
+parseNamespaceToMaybeNs (Just txt) = 
+    case ExportImport.parseNamespace txt of
+        Left _ -> Nothing
+        Right ns -> Just ns
+
+buildExportPackage :: ExportOptions -> Prog -> IO (Either Text ExportImport.ExportPackage)
+buildExportPackage opts pargs = do
+    now <- getCurrentTime
+    let metadata = ExportImport.PackageMetadata
+            { ExportImport.packageVersion = ExportImport.exportSchemaVersion
+            , ExportImport.packageCreatedAt = now
+            , ExportImport.packageDescription = Nothing
+            , ExportImport.packageSource = Nothing
+            }
+    
+    case opts.exportSource of
+        ExportCurrentAgent -> do
+            case pargs.agentFiles of
+                [] -> pure $ Left "No agent file specified"
+                (agentFile:_) -> do
+                    -- Load agent
+                    eAgent <- loadAgentFromFile agentFile
+                    case eAgent of
+                        Left err -> pure $ Left err
+                        Right agent -> do
+                            -- Load agent tools
+                            tools <- if opts.exportIncludeTools
+                                then loadToolsForAgent agentFile agent
+                                else pure []
+                            
+                            let agentExport = ExportImport.AgentExport
+                                    { ExportImport.agentConfig = agent
+                                    , ExportImport.agentNamespace = opts.exportNamespace
+                                    , ExportImport.agentTools = tools
+                                    }
+                            
+                            pure $ Right $ ExportImport.ExportPackage
+                                { ExportImport.packageMetadata = metadata
+                                , ExportImport.packageAgents = [agentExport]
+                                , ExportImport.packageTools = []
+                                , ExportImport.packageMcpServers = if opts.exportIncludeMcp
+                                    then maybe [] (map (\m -> ExportImport.McpServerExport m opts.exportNamespace)) (mcpServers agent)
+                                    else []
+                                }
+        
+        ExportAllAgents -> do
+            -- Export all loaded agents
+            agentExports <- mapM (\agentFile -> do
+                eAgent <- loadAgentFromFile agentFile
+                case eAgent of
+                    Left _ -> pure Nothing
+                    Right agent -> do
+                        tools <- if opts.exportIncludeTools
+                            then loadToolsForAgent agentFile agent
+                            else pure []
+                        pure $ Just $ ExportImport.AgentExport
+                            { ExportImport.agentConfig = agent
+                            , ExportImport.agentNamespace = opts.exportNamespace
+                            , ExportImport.agentTools = tools
+                            }) pargs.agentFiles
+            
+            pure $ Right $ ExportImport.ExportPackage
+                { ExportImport.packageMetadata = metadata
+                , ExportImport.packageAgents = [a | Just a <- agentExports]
+                , ExportImport.packageTools = []
+                , ExportImport.packageMcpServers = []
+                }
+        
+        ExportAgentBySlug targetSlug -> do
+            -- Find agent with matching slug
+            agents <- mapM loadAgentFromFile pargs.agentFiles
+            case [a | Right a <- agents, targetSlug == slug a] of
+                [] -> pure $ Left $ "Agent with slug '" <> targetSlug <> "' not found"
+                (agent:_) -> do
+                    let agentFile = case [f | (f, Right a) <- zip pargs.agentFiles agents, slug a == targetSlug] of
+                            (f:_) -> f
+                            [] -> head pargs.agentFiles
+                    tools <- if opts.exportIncludeTools
+                        then loadToolsForAgent agentFile agent
+                        else pure []
+                    
+                    pure $ Right $ ExportImport.ExportPackage
+                        { ExportImport.packageMetadata = metadata
+                        , ExportImport.packageAgents = 
+                            [ ExportImport.AgentExport
+                                { ExportImport.agentConfig = agent
+                                , ExportImport.agentNamespace = opts.exportNamespace
+                                , ExportImport.agentTools = tools
+                                }
+                            ]
+                        , ExportImport.packageTools = []
+                        , ExportImport.packageMcpServers = if opts.exportIncludeMcp
+                            then maybe [] (map (\m -> ExportImport.McpServerExport m opts.exportNamespace)) (mcpServers agent)
+                            else []
+                        }
+        
+        ExportCurrentTools -> do
+            -- Export tools from current agent
+            case pargs.agentFiles of
+                [] -> pure $ Left "No agent file specified"
+                (agentFile:_) -> do
+                    eAgent <- loadAgentFromFile agentFile
+                    case eAgent of
+                        Left err -> pure $ Left err
+                        Right agent -> do
+                            standaloneTools <- loadStandaloneToolsForAgent agentFile agent
+                            pure $ Right $ ExportImport.ExportPackage
+                                { ExportImport.packageMetadata = metadata
+                                , ExportImport.packageAgents = []
+                                , ExportImport.packageTools = standaloneTools
+                                , ExportImport.packageMcpServers = []
+                                }
+        
+        ExportToolByName toolName -> do
+            -- Find and export specific tool
+            case pargs.agentFiles of
+                [] -> pure $ Left "No agent file specified"
+                (agentFile:_) -> do
+                    eAgent <- loadAgentFromFile agentFile
+                    case eAgent of
+                        Left err -> pure $ Left err
+                        Right agent -> do
+                            standaloneTools <- loadStandaloneToolsForAgent agentFile agent
+                            case [t | t <- standaloneTools, (Bash.scriptSlug . ExportImport.standaloneToolInfo) t == toolName] of
+                                [] -> pure $ Left $ "Tool '" <> toolName <> "' not found"
+                                (tool:_) -> pure $ Right $ ExportImport.ExportPackage
+                                    { ExportImport.packageMetadata = metadata
+                                    , ExportImport.packageAgents = []
+                                    , ExportImport.packageTools = [tool]
+                                    , ExportImport.packageMcpServers = []
+                                    }
+
+-------------------------------------------------------------------------------
+-- Import Handler
+-------------------------------------------------------------------------------
+
+handleImport :: ImportOptions -> Prog -> IO ()
+handleImport opts pargs
+    | importListNamespaces opts = handleListNamespaces opts
+    | importListTools opts = handleListTools opts
+    | otherwise = do
+        -- Perform import
+        eResult <- case importSource opts of
+            ImportFromFile path -> do
+                if importToolsOnly opts
+                    then do
+                        ePkg <- ExportImport.importToolsFromArchive path
+                        case ePkg of
+                            Left err -> pure $ Left $ Text.pack $ show err
+                            Right pkg -> do
+                                let installOpts = ExportInstall.InstallOptions
+                                        { ExportInstall.installForce = importMode opts == ImportOverwrite || importMode opts == ImportMerge
+                                        , ExportInstall.installLink = False
+                                        , ExportInstall.installPrefix = importNamespace opts
+                                        }
+                                result <- ExportInstall.importToolPackage pkg (importDestination opts) installOpts
+                                case result of
+                                    Left err -> pure $ Left $ Text.pack $ show err
+                                    Right () -> pure $ Right ()
+                    else do
+                        ePkg <- ExportImport.importFromArchive path
+                        case ePkg of
+                            Left err -> pure $ Left $ Text.pack $ show err
+                            Right pkg -> do
+                                -- TODO: Handle full package import
+                                pure $ Right ()
+            
+            ImportFromGit gitSource -> do
+                let gitUrl = ExportImport.GitUrl
+                        { ExportImport.gitRemote = gitImportUrl gitSource
+                        , ExportImport.gitBranch = gitImportRef gitSource
+                        , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
+                        }
+                let gitOpts = ExportImport.GitImportOptions
+                        { ExportImport.gitRef = gitImportRef gitSource
+                        , ExportImport.gitSparsePaths = []
+                        }
+                
+                if importToolsOnly opts
+                    then do
+                        ePkg <- ExportImport.importToolsFromGit gitUrl (parseNamespaceToMaybeNs (importNamespace opts))
+                        case ePkg of
+                            Left err -> pure $ Left $ Text.pack $ show err
+                            Right pkg -> do
+                                let installOpts = ExportInstall.InstallOptions
+                                        { ExportInstall.installForce = importMode opts == ImportOverwrite || importMode opts == ImportMerge
+                                        , ExportInstall.installLink = False
+                                        , ExportInstall.installPrefix = Nothing
+                                        }
+                                result <- ExportInstall.importToolPackage pkg (importDestination opts) installOpts
+                                case result of
+                                    Left err -> pure $ Left $ Text.pack $ show err
+                                    Right () -> pure $ Right ()
+                    else do
+                        ePkg <- ExportImport.importFromGit gitUrl gitOpts
+                        case ePkg of
+                            Left err -> pure $ Left $ Text.pack $ show err
+                            Right pkg -> do
+                                -- TODO: Handle full package import
+                                pure $ Right ()
+        
+        case eResult of
+            Left err -> do
+                Text.hPutStrLn stderr $ "Import failed: " <> err
+                exitFailure
+            Right () -> do
+                Text.putStrLn "Import successful"
+                exitSuccess
+
+handleListNamespaces :: ImportOptions -> IO ()
+handleListNamespaces opts = do
+    case importSource opts of
+        ImportFromGit gitSource -> do
+            let gitUrl = ExportImport.GitUrl
+                    { ExportImport.gitRemote = gitImportUrl gitSource
+                    , ExportImport.gitBranch = gitImportRef gitSource
+                    , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
+                    }
+            result <- ExportImport.listGitNamespaces gitUrl
+            case result of
+                Left err -> do
+                    Text.hPutStrLn stderr $ "Failed to list namespaces: " <> Text.pack (show err)
+                    exitFailure
+                Right namespaces -> do
+                    Text.putStrLn "Available namespaces:"
+                    mapM_ (Text.putStrLn . ("  " <>) . Text.intercalate "." . ExportImport.unNamespace) namespaces
+                    exitSuccess
+        _ -> do
+            Text.hPutStrLn stderr "List namespaces only supported for git sources"
+            exitFailure
+
+handleListTools :: ImportOptions -> IO ()
+handleListTools opts = do
+    case importSource opts of
+        ImportFromGit gitSource -> do
+            let gitUrl = ExportImport.GitUrl
+                    { ExportImport.gitRemote = gitImportUrl gitSource
+                    , ExportImport.gitBranch = gitImportRef gitSource
+                    , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
+                    }
+            result <- ExportImport.listGitTools gitUrl
+            case result of
+                Left err -> do
+                    Text.hPutStrLn stderr $ "Failed to list tools: " <> Text.pack (show err)
+                    exitFailure
+                Right tools -> do
+                    Text.putStrLn "Available tools:"
+                    mapM_ (\(ns, info) -> do
+                        Text.putStrLn $ "  " <> Text.intercalate "." (ExportImport.unNamespace ns) <> ":"
+                        Text.putStrLn $ "    " <> Bash.scriptSlug info <> " - " <> Bash.scriptDescription info
+                        ) tools
+                    exitSuccess
+        _ -> do
+            Text.hPutStrLn stderr "List tools only supported for git sources"
+            exitFailure
+
+-------------------------------------------------------------------------------
+-- Helper Functions
+-------------------------------------------------------------------------------
+
+loadAgentFromFile :: FilePath -> IO (Either Text Agent)
+loadAgentFromFile path = do
+    result <- Aeson.eitherDecodeFileStrict' path
+    case result of
+        Left err -> pure $ Left $ Text.pack $ "Failed to parse agent file: " <> err
+        Right (AgentDescription agent) -> pure $ Right agent
+
+loadToolsForAgent :: FilePath -> Agent -> IO [ExportImport.ToolExport]
+loadToolsForAgent agentFile agent = do
+    let toolDir = takeDirectory agentFile </> toolDirectory agent
+    exists <- doesDirectoryExist toolDir
+    if not exists
+        then pure []
+        else do
+            toolFiles <- ExportInstall.discoverTools toolDir
+            mapM (loadToolExport toolDir) toolFiles
+  where
+    loadToolExport :: FilePath -> FilePath -> IO ExportImport.ToolExport
+    loadToolExport baseDir toolPath = do
+        content <- ByteString.readFile toolPath
+        perms <- ExportImport.getFileMode toolPath
+        let tName = Text.pack $ takeFileName toolPath
+        -- Run describe to get metadata
+        result <- ExportInstall.validateTool toolPath
+        let metadata = case result of
+                Right () -> Nothing  -- We'd need to actually parse the describe output
+                Left _ -> Nothing
+        pure $ ExportImport.ToolExport
+            { ExportImport.toolName = tName
+            , ExportImport.toolContent = content
+            , ExportImport.toolPermissions = perms
+            , ExportImport.toolMetadata = Nothing  -- Could be populated by running describe
+            , ExportImport.toolNamespace = Nothing
+            }
+
+loadStandaloneToolsForAgent :: FilePath -> Agent -> IO [ExportImport.StandaloneToolExport]
+loadStandaloneToolsForAgent agentFile agent = do
+    let toolDir = takeDirectory agentFile </> toolDirectory agent
+    exists <- doesDirectoryExist toolDir
+    if not exists
+        then pure []
+        else do
+            toolFiles <- ExportInstall.discoverTools toolDir
+            mapM (loadStandaloneTool toolDir) toolFiles
+  where
+    loadStandaloneTool :: FilePath -> FilePath -> IO ExportImport.StandaloneToolExport
+    loadStandaloneTool baseDir toolPath = do
+        content <- ByteString.readFile toolPath
+        perms <- ExportImport.getFileMode toolPath
+        -- Run describe to get metadata
+        (code, out, _) <- Process.readProcessWithExitCode toolPath ["describe"] ""
+        let metadata = case code of
+                ExitSuccess ->
+                    case Aeson.eitherDecode (LByteString.fromStrict $ TextEncoding.encodeUtf8 $ Text.pack out) of
+                        Left _ -> defaultMetadata toolPath
+                        Right info -> info
+                _ -> defaultMetadata toolPath
+        pure $ ExportImport.StandaloneToolExport
+            { ExportImport.standaloneToolInfo = metadata
+            , ExportImport.standaloneToolScript = content
+            , ExportImport.standaloneToolPermissions = perms
+            , ExportImport.standaloneToolAuxFiles = []
+            }
+    
+    defaultMetadata :: FilePath -> Bash.ScriptInfo
+    defaultMetadata path = Bash.ScriptInfo
+        { Bash.scriptArgs = []
+        , Bash.scriptSlug = Text.pack $ takeFileName path
+        , Bash.scriptDescription = "Imported tool"
+        , Bash.scriptEmptyResultBehavior = Nothing
+        }
 
 -------------------------------------------------------------------------------
 -- Check Command Helper
 -------------------------------------------------------------------------------
 
--- | Print agent check information in the format: slug: announce (n-tools)
 printAgentCheck :: AgentTree.AgentTree -> IO ()
 printAgentCheck tree = do
     tools <- Runtime.agentTools tree.agentRuntime
@@ -645,7 +1387,7 @@ toJsonTrace x = case x of
                         , "run-id" .= uuid
                         , "flavor" .= ("bash" :: Text.Text)
                         , "action" .= ("stop" :: Text.Text)
-                        , "code-str" .= show code -- todo: code
+                        , "code-str" .= show code
                         , "cmd" .= cmd
                         , "args" .= targs
                         ]
@@ -668,7 +1410,6 @@ toJsonTrace x = case x of
                         , "action" .= ("stop" :: Text.Text)
                         , "tool" .= desc.ioSlug
                         , "input" .= input
-                        -- , "output" .= output
                         ]
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
@@ -693,43 +1434,43 @@ toJsonTrace x = case x of
             Nothing
     encodeBaseMcpTrace
         (McpTools.McpClientRunTrace (McpClient.RunCommandStart _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("program-start" :: Text.Text)
-                    ]
-    encodeBaseMcpTrace
-        (McpTools.McpClientRunTrace (McpClient.RunCommandStopped _ code)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("program-end" :: Text.Text)
-                    , "code-str" .= show code -- todo: code
-                    ]
-    encodeBaseMcpTrace
-        (McpTools.McpClientLoopTrace McpClient.ExitingToolCallLoop) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("loop-end" :: Text.Text)
-                    ]
-    encodeBaseMcpTrace
-        (McpTools.McpClientLoopTrace (McpClient.ToolsRefreshed _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("tools-reloaded" :: Text.Text)
-                    ]
-    encodeBaseMcpTrace
-        (McpTools.McpClientLoopTrace (McpClient.StartToolCall n _)) =
-            Just $
-                Aeson.object
-                        [ "x" .= ("tool-call-start" :: Text.Text)
-                        , "name" .= n
+                Just $
+                    Aeson.object
+                        [ "x" .= ("program-start" :: Text.Text)
                         ]
     encodeBaseMcpTrace
+        (McpTools.McpClientRunTrace (McpClient.RunCommandStopped _ code)) =
+                Just $
+                    Aeson.object
+                        [ "x" .= ("program-end" :: Text.Text)
+                        , "code-str" .= show code
+                        ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace McpClient.ExitingToolCallLoop) =
+                Just $
+                    Aeson.object
+                        [ "x" .= ("loop-end" :: Text.Text)
+                        ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace (McpClient.ToolsRefreshed _)) =
+                Just $
+                    Aeson.object
+                        [ "x" .= ("tools-reloaded" :: Text.Text)
+                        ]
+    encodeBaseMcpTrace
+        (McpTools.McpClientLoopTrace (McpClient.StartToolCall n _)) =
+                    Just $
+                        Aeson.object
+                                [ "x" .= ("tool-call-start" :: Text.Text)
+                                , "name" .= n
+                                ]
+    encodeBaseMcpTrace
         (McpTools.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("tool-call-end" :: Text.Text)
-                    , "name" .= n
-                    ]
+                Just $
+                    Aeson.object
+                        [ "x" .= ("tool-call-end" :: Text.Text)
+                        , "name" .= n
+                        ]
 
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text.Text -> IO (Prod.Tracer IO a)
 makeHttpJsonTrace baseTracer url = do
