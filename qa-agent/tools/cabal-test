@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+if [ "$1" == "describe" ]; then
+    cat <<'EOF'
+{
+  "slug": "cabal_test",
+  "description": "Runs the agents-exe test suite using cabal test. Reports test results and failures.",
+  "args": []
+}
+EOF
+    exit 0
+fi
+
+if [ "$1" == "run" ]; then
+    echo "Running: cabal test"
+    cabal test 2>&1
+    EXIT_CODE=$?
+
+    echo ""
+    echo "Exit code: $EXIT_CODE"
+    exit $EXIT_CODE
+fi
+
