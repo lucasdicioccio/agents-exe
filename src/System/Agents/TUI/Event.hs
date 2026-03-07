@@ -76,11 +76,9 @@ tui_appHandleEvent ev = do
             handleRestoredConversation
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
-        -- Markdown export: Ctrl+m - dump to file
-        VtyEvent (Vty.EvKey (Vty.KChar 'm') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) ->
             handleDumpSessionToMarkdown
-        -- Markdown export: Ctrl+Shift+m - view with external viewer
-        VtyEvent (Vty.EvKey (Vty.KChar 'M') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
             handleViewSessionWithExternalViewer
 
         -- Delegate to focused widget
@@ -260,11 +258,18 @@ handleDumpSessionToMarkdown = do
     case (mSession, mConvId) of
         (Just session, Just (ConversationId cid)) -> do
             let markdown = formatSessionMarkdown session
-                fileName = show cid <.> "md"
+                fileName = "conv." <> show cid <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
             -- Could show a status message here in the future
             pure ()
-        _ -> pure ()  -- No session or conversation selected
+        (Just session, Nothing ) -> do
+            let markdown = formatSessionMarkdown session
+                fileName = "sess." <> show session.sessionId <.> "md"
+            liftIO $ TextIO.writeFile fileName markdown
+            -- Could show a status message here in the future
+            pure ()
+        _ -> do
+            pure ()  -- No session or conversation selected
 
 -- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
 -- Uses the AGENT_MD_VIEWER environment variable if set.

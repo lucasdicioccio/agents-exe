@@ -131,7 +131,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+m: export md | Ctrl+Shift+m: view md"
+            [ txt "Ctrl+p: export md | Ctrl+t: view md"
             ]
 
 -- | Conversation area with message input and conversation history.
