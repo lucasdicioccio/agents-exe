@@ -155,11 +155,11 @@ cmd_clean() {
 
     # Parse git worktree list output
     while IFS= read -r line; do
-        # Skip empty lines and the main worktree (which typically has bare repo path)
+        # Skip empty lines
         [[ -z "$line" ]] && continue
 
-        # Extract worktree path (first column)
-        local worktree_path=$(echo "$line" | awk '{print $1}')
+        # Extract worktree path (it is the second word in porcelain output)
+        local worktree_path=$(echo "$line" | cut -d' ' -f2-)
         local worktree_name=$(basename "$worktree_path")
 
         # Skip if this is the main repository worktree (same as repo root)
@@ -172,7 +172,7 @@ cmd_clean() {
             worktrees_to_clean+=("$worktree_path")
             branches_to_delete+=("$worktree_name")
         fi
-    done < <(git worktree list --porcelain 2>/dev/null | grep -E '^worktree' || git worktree list)
+    done < <(git worktree list --porcelain 2>/dev/null | grep -E '^worktree')
 
     # If no worktrees to clean
     if [[ ${#worktrees_to_clean[@]} -eq 0 ]]; then
