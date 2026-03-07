@@ -19,7 +19,7 @@
       "You mention important tradeoffs.",
       "You can ask user questions, when doing so always assume the answer could be 'i do not know'.",
       "Do not create tracking issues.",
-      "Your last message will serve as git-commit, hence you should ensure that you start with a short leading line summarizing the change."
+      "Your output format may be stored as commit message: hence the first line of your last message should be a summary line."
     ]
   }
 }
