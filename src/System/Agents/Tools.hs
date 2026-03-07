@@ -5,6 +5,8 @@
 To date, there are two ways to provide tools:
 * bash tools (arbitrary code running in a separate process, and defined with an external command)
 * IO tools (arbitrary code running in the same process, and defined with Haskell code)
+* MCP tools (tools exposed via Model Context Protocol)
+* OpenAPI tools (tools generated from OpenAPI specifications)
 
 Technically, we could implement bash-tools as a sepecific implementation of
 IO-tools however having a separate constructor enables to surface a bit more
@@ -12,20 +14,30 @@ information (when announcing a tool to an LLM, when logging etc.).
 Thus, a merge may happen at some point, but not just yet.
 -}
 module System.Agents.Tools (
-    module System.Agents.Tools.Trace,
+    -- * Re-exports from Base
     Tool (..),
     ToolDef (..),
-    ioTool,
-    bashTool,
-    mcpTool,
+    CallResult (..),
     mapToolResult,
     mapCallResult,
     extractCall,
+    
+    -- * Re-exports from Trace
+    module System.Agents.Tools.Trace,
+    
+    -- * Tool builders
+    ioTool,
+    bashTool,
+    mcpTool,
+    openapiTool,
 ) where
 
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 as CByteString
-import Prod.Tracer (Tracer, contramap)
+import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import Prod.Tracer (Tracer, contramap, runTracer)
 
 -------------------------------------------------------------------------------
 
@@ -34,27 +46,10 @@ import System.Agents.Tools.Base
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
+import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import System.Agents.Tools.Trace
 import System.Agents.Tools.Context (ToolExecutionContext)
-
--------------------------------------------------------------------------------
-
--- | Captures tools that are defined in a various ways but have a similar "run" interface.
---
--- The 'toolRun' function now receives a 'ToolExecutionContext' instead of a generic
--- runtime value. This provides tools with access to session metadata (session ID,
--- conversation ID, turn ID, etc.) without exposing these details to the LLM.
-data Tool call
-    = Tool
-    { toolDef :: ToolDef
-    , toolRun :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult call)
-    }
-
-data ToolDef
-    = BashTool !BashTools.ScriptDescription
-    | MCPTool !McpTools.ToolDescription
-    | IOTool !IOTools.IOScriptDescription
-    deriving (Show)
 
 -------------------------------------------------------------------------------
 
@@ -88,6 +83,11 @@ bashTool script =
             Right rsp -> pure $ BlobToolSuccess call rsp
 
 -------------------------------------------------------------------------------
+
+-- | Builder for a tool based on an MCP toolbox tool.
+--
+-- MCP tools are exposed via the Model Context Protocol and provide
+-- standardized tool definitions with structured schemas.
 mcpTool ::
     McpTools.Toolbox ->
     McpTools.ToolDescription ->
@@ -109,6 +109,50 @@ mcpTool toolbox desc =
     extractContentsFromToolCall :: McpClient.CallToolResultRsp -> CallResult ()
     extractContentsFromToolCall rsp =
         McpToolResult call rsp.getCallToolResult
+
+-------------------------------------------------------------------------------
+
+-- | Builder for an OpenAPI-based tool.
+--
+-- This creates a tool from an OpenAPI operation that can be executed
+-- against an API endpoint. The tool handles:
+--
+-- * Path parameter substitution (parameters prefixed with 'p_')
+-- * Query parameter construction (parameters prefixed with 'p_')
+-- * Request body serialization (parameter 'b')
+-- * HTTP method execution
+-- * Response parsing
+--
+-- Example usage:
+--
+-- @
+-- let toolbox = ... -- initialized OpenAPI toolbox
+-- let apiTool = head (OpenAPIToolbox.toolboxTools toolbox)
+-- let tool = openapiTool toolbox apiTool
+-- -- Use tool with agent runtime...
+-- @
+--
+-- The tool name and description are derived from the OpenAPI operation,
+-- and the execution uses the HTTP runtime from the toolbox.
+openapiTool ::
+    OpenAPIToolbox.Toolbox ->
+    OpenAPI.OpenAPITool ->
+    Tool ()
+openapiTool toolbox apiTool =
+    let opId = fromMaybe (OpenAPI.toolName apiTool) (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation apiTool))
+    in Tool
+        { toolDef = OpenAPITool (OpenAPIToolbox.toolboxName toolbox) opId
+        , toolRun = run
+        }
+  where
+    call = ()
+    run tracer _ctx args = do
+        result <- OpenAPIToolbox.handleToolCall toolbox apiTool args
+        case result of
+            Left err -> do
+                pure $ OpenAPIToolError call (Text.unpack err)
+            Right (_textResult, toolResult) -> do
+                pure $ OpenAPIToolResult call toolResult
 
 -------------------------------------------------------------------------------
 
@@ -167,33 +211,4 @@ ioTool script =
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
-
--------------------------------------------------------------------------------
-
-{- | Extracts the call definition out of a CallResut.
-Note that a result is always bound to a CallResut, thus this function is total.
--}
-extractCall :: CallResult call -> call
-extractCall (ToolNotFound c) = c
-extractCall (BashToolError c _) = c
-extractCall (IOToolError c _) = c
-extractCall (BlobToolSuccess c _) = c
-extractCall (McpToolResult c _) = c
-extractCall (McpToolError c _) = c
-
--- | Explicit helper to map on the result of a CallResult.
-mapCallResult :: (a -> b) -> CallResult a -> CallResult b
-mapCallResult f c =
-    case c of
-        (ToolNotFound v) -> ToolNotFound (f v)
-        (BashToolError v e) -> BashToolError (f v) e
-        (IOToolError v e) -> IOToolError (f v) e
-        (BlobToolSuccess v b) -> BlobToolSuccess (f v) b
-        (McpToolResult v b) -> McpToolResult (f v) b
-        (McpToolError v b) -> McpToolError (f v) b
-
--- | Explicit helper to map on the results a Tool makes.
-mapToolResult :: (a -> b) -> Tool a -> Tool b
-mapToolResult f (Tool d run) =
-    Tool d (\tracer ctx v -> fmap (mapCallResult f) (run tracer ctx v))
 

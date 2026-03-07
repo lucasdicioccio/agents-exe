@@ -16,19 +16,26 @@
 -- Example usage:
 --
 -- @
--- let config = Config
---         { configUrl = "https://api.example.com/openapi.json"
---         , configBaseUrl = "https://api.example.com"
---         , configHeaders = Map.empty
---         , configToken = Just "my-bearer-token"
---         }
--- result <- initializeToolbox tracer config
--- case result of
---     Right toolbox -> do
---         -- Register tools with LLM
---         let registrations = map (registerOpenAPIToolInLLM toolbox) toolboxTools
---         -- Use registrations...
---     Left err -> handleError err
+-- import System.Agents
+-- import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPI
+--
+-- main :: IO ()
+-- main = do
+--     let config = OpenAPI.Config
+--             { configUrl = "https://api.example.com/openapi.json"
+--             , configBaseUrl = "https://api.example.com"
+--             , configHeaders = Map.empty
+--             , configToken = Just "my-bearer-token"
+--             }
+--     result <- OpenAPI.initializeToolbox tracer config
+--     case result of
+--         Right toolbox -> do
+--             -- Register tools with LLM
+--             regResult <- registerOpenAPITools toolbox
+--             case regResult of
+--                 Right registrations -> useWithAgent registrations
+--                 Left err -> handleError err
+--         Left err -> handleError err
 -- @
 module System.Agents.Tools.OpenAPIToolbox (
     -- * Core types
@@ -36,27 +43,36 @@ module System.Agents.Tools.OpenAPIToolbox (
     Toolbox (..),
     Config (..),
     InitializationError (..),
-    ToolResult (..),
-
+    
+    -- * Re-export ToolResult from Types
+    ToolResult,
+    
+    -- * Toolbox accessors
+    toolboxName,
+    toolboxBaseUrl,
+    toolboxTools,
+    
     -- * Initialization
     initializeToolbox,
-
+    
     -- * Tool execution
     createToolHandler,
     handleToolCall,
-
+    
     -- * Path formatting
     formatPath,
-
+    
     -- * HTTP building
     buildRequest,
     buildFullUrl,
-
+    
     -- * Response handling
     handleResponse,
-
-    -- * Integration with ToolRegistration
-    registerOpenAPIToolInLLM,
+    
+    -- * Operation helpers
+    getOperationId,
+    
+    -- * Naming helper
     openapi2LLMName,
 ) where
 
@@ -78,13 +94,20 @@ import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), runTracer)
 import System.Agents.Tools.OpenAPI.Converter (OpenAPITool (..), convertOpenAPIToTools, toOpenAITool)
 import System.Agents.Tools.OpenAPI.Resolver (dereferenceSpec)
-import System.Agents.Tools.OpenAPI.Types (Method, ParamLocation (..), Parameter (..), Path, Operation (..))
+import System.Agents.Tools.OpenAPI.Types (
+    Method,
+    ParamLocation (..),
+    Parameter (..),
+    Path,
+    Operation (..),
+    ToolResult (..),
+  )
 import qualified System.Agents.HttpClient as HttpClient
-import System.Agents.ToolRegistration (ToolRegistration (..))
-import qualified System.Agents.Tools as Tools
-import qualified System.Agents.Tools.Base as Tools
-import qualified System.Agents.Tools.Context as Tools
+import System.Agents.Tools.Base (CallResult (..))
+import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.IO (RunError (..))
 import qualified System.Agents.Tools.IO as IOTools
+import System.Agents.Tools.Trace (ToolTrace (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -- -------------------------------------------------------------------------
@@ -162,19 +185,6 @@ data Toolbox = Toolbox
     , staticHeaders :: Map Text Text
     -- ^ Static headers from config
     }
-
--- | Result of executing an OpenAPI tool.
-data ToolResult = ToolResult
-    { resultPath :: Text
-    -- ^ Path that was called
-    , resultMethod :: Text
-    -- ^ HTTP method used
-    , resultStatus :: Int
-    -- ^ HTTP status code
-    , resultPayload :: Value
-    -- ^ Response payload as JSON
-    }
-    deriving (Show)
 
 -- -------------------------------------------------------------------------
 -- Initialization
@@ -260,20 +270,20 @@ fetchSpec runtime url = do
 createToolHandler ::
     Toolbox ->
     OpenAPITool ->
-    Tracer IO Tools.ToolTrace ->
-    Tools.ToolExecutionContext ->
+    Tracer IO ToolTrace ->
+    ToolExecutionContext ->
     Value ->
-    IO (Tools.CallResult ())
+    IO (CallResult ())
 createToolHandler toolbox tool tracer _ctx args = do
     result <- handleToolCall toolbox tool args
     case result of
         Left err -> do
             runTracer (contramapTrace tracer) (ToolExecutionErrorTrace err)
-            pure $ Tools.IOToolError () (IOTools.ScriptExecutionError (Text.unpack err))
+            pure $ IOToolError () (ScriptExecutionError (Text.unpack err))
         Right (textResult, _toolResult) -> do
-            pure $ Tools.BlobToolSuccess () (ByteString.pack $ Text.unpack textResult)
+            pure $ BlobToolSuccess () (ByteString.pack $ Text.unpack textResult)
   where
-    contramapTrace :: Tracer IO Tools.ToolTrace -> Tracer IO Trace
+    contramapTrace :: Tracer IO ToolTrace -> Tracer IO Trace
     contramapTrace _t = Tracer $ \_traceEvent -> do
         -- Convert Trace to ToolTrace if needed
         -- For now, we just don't trace these events to the main tool tracer
@@ -523,7 +533,17 @@ handleResponse (method, url) response = do
         )
 
 -- -------------------------------------------------------------------------
--- Tool Registration Integration
+-- Operation helpers
+-- -------------------------------------------------------------------------
+
+-- | Get operation ID from operation, falling back to tool name.
+--
+-- This is used for tool registration when creating unique tool names.
+getOperationId :: Operation -> Maybe Text
+getOperationId = opOperationId
+
+-- -------------------------------------------------------------------------
+-- Naming helper
 -- -------------------------------------------------------------------------
 
 -- | Convert an OpenAPI operation ID to an LLM tool name.
@@ -538,55 +558,4 @@ handleResponse (method, url) response = do
 openapi2LLMName :: Text -> Text -> OpenAI.ToolName
 openapi2LLMName tboxName operationId =
     OpenAI.ToolName ("openapi_" <> tboxName <> "_" <> operationId)
-
--- | Register an OpenAPI tool in the LLM system.
---
--- This creates a 'ToolRegistration' that can be used with the
--- agent's tool system.
-registerOpenAPIToolInLLM ::
-    Toolbox ->
-    OpenAPITool ->
-    Either String ToolRegistration
-registerOpenAPIToolInLLM toolbox tool =
-    let opId = fromMaybe (toolName tool) (getOperationId (toolOperation tool))
-        llmName = openapi2LLMName (toolboxName toolbox) opId
-
-        -- Convert to OpenAI Tool format
-        openaiTool = toOpenAITool tool
-
-        -- Create the tool handler
-        toolDef = Tools.IOTool $ IOTools.IOScriptDescription
-            { IOTools.ioSlug = OpenAI.getToolName llmName
-            , IOTools.ioDescription = toolDescription tool
-            }
-
-        -- Create the run function
-        runFunc :: Tracer IO Tools.ToolTrace -> Tools.ToolExecutionContext -> Value -> IO (Tools.CallResult ())
-        runFunc tr ctx argz = createToolHandler toolbox tool tr ctx argz
-
-        -- Create the Tool
-        tool' = Tools.Tool
-            { Tools.toolDef = toolDef
-            , Tools.toolRun = runFunc
-            }
-
-        -- Find function
-        find :: OpenAI.ToolCall -> Maybe (Tools.Tool OpenAI.ToolCall)
-        find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
-                then Just $ Tools.mapToolResult (const call) tool'
-                else Nothing
-
-        -- Declare function
-        declare :: OpenAI.Tool
-        declare = openaiTool{OpenAI.toolName = llmName}
-     in Right $ ToolRegistration
-            { innerTool = Tools.mapToolResult (const ()) tool'
-            , declareTool = declare
-            , findTool = find
-            }
-
--- | Get operation ID from operation, falling back to tool name.
-getOperationId :: Operation -> Maybe Text
-getOperationId = opOperationId
 

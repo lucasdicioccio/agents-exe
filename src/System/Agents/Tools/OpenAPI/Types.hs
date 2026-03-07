@@ -9,7 +9,30 @@
 --
 -- Note: This is not a full OpenAPI implementation - only the subset
 -- needed for tool generation is supported.
-module System.Agents.Tools.OpenAPI.Types where
+module System.Agents.Tools.OpenAPI.Types (
+    -- * OpenAPI spec types
+    OpenAPISpec (..),
+    Path,
+    Method,
+    Operation (..),
+    Parameter (..),
+    ParamLocation (..),
+    RequestBody (..),
+    Schema (..),
+    Components (..),
+    MediaType,
+    
+    -- * Tool execution result
+    ToolResult (..),
+    
+    -- * JSON helpers
+    Pair,
+    object,
+    parseParamLocation,
+    paramLocationToText,
+    (.=?),
+    (.=),
+) where
 
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withObject, (.:), (.:?))
@@ -346,6 +369,26 @@ instance ToJSON Components where
 -- | Convert schema definition to an Aeson pair.
 schemaDefinitionToPair :: (Text, Schema) -> Pair
 schemaDefinitionToPair (key, val) = (fromText key, toJSON val)
+
+-- -------------------------------------------------------------------------
+-- Tool execution result
+-- -------------------------------------------------------------------------
+
+-- | Result of executing an OpenAPI tool.
+--
+-- This type captures the structured result from executing an OpenAPI-based
+-- tool call, including the HTTP response details.
+data ToolResult = ToolResult
+    { resultPath :: Text
+    -- ^ Path that was called
+    , resultMethod :: Text
+    -- ^ HTTP method used
+    , resultStatus :: Int
+    -- ^ HTTP status code
+    , resultPayload :: Value
+    -- ^ Response payload as JSON
+    }
+    deriving (Show)
 
 -- -------------------------------------------------------------------------
 -- Helper functions for JSON construction
