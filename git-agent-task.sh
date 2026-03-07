@@ -8,7 +8,7 @@ set -Eeuo pipefail
 usage() {
   cat <<EOF
 Usage:
-  $0 <command>
+  $0 <command> [label] [name] [instruction-file]
 
 Description:
   A wrapper script to run git-agent-task.sh in multiple project directories.
@@ -35,6 +35,9 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
 fi
 
 command="$1"
+label="${2:-}"
+name="${3:-}"
+instruction_rel="${4:-}"
 
 case "$command" in
   prepare)
@@ -43,16 +46,16 @@ case "$command" in
   preview)
     set -x
     echo "Checking configs"
-    cabal run -- agents-exe check
+    mkdir -p checks
+    cabal run -- agents-exe check > "checks/${name}.check.txt" 2>&1
 
     echo "Running checks"
-    mkdir -p checks
-    cabal run -- agents-exe --session-json-file-prefix checks/conv. --agent-file demo-agents/ollama-01.json run -p "hi, test the three tools"
+    cabal run -- agents-exe --session-json-file-prefix checks/conv. --agent-file demo-agents/ollama-01.json run --prompt "hi, test the notification and the markdown preview tool"
     
     latest_check=$(ls -t checks/conv.*.json 2>/dev/null | head -n 1 || true)
     if [[ -n "$latest_check" ]]; then
       if command -v markdown-eye >/dev/null 2>&1; then
-        cabal run -- agents-exe session-print "$latest_check" | markdown-eye
+        cabal run -- agents-exe session-print "$latest_check" | markdown-eye /dev/stdin "$instruction_rel"
       else
         cabal run -- agents-exe session-print "$latest_check"
       fi

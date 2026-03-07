@@ -2,6 +2,14 @@
 set -Eeuo pipefail
 
 # ==============================================================================
+# IMPORTANT
+# ==============================================================================
+
+# Since we are using `agents-exe` to build and check new versions of
+# `agents-exe`, this file should always use `agents-exe` as a trusted version
+# and never use `cabal run -- agents-exe`.
+
+# ==============================================================================
 # CONFIGURATION
 # ==============================================================================
 
@@ -71,17 +79,17 @@ cmd_init() {
 
 cmd_add() {
     [[ $# -ne 2 ]] && usage
-    local label="$1" branch="$2"
+    local label="$1" name="$2"
     
     [[ -z "$(get_project_dir "$label")" ]] && { echo "Error: Invalid label '$label'"; exit 1; }
 
     mkdir -p "$TASK_DIR"
-    local taskfile=$(find_or_create_taskfile "$branch")
+    local instruction_rel=$(find_or_create_taskfile "$name")
     
-    ${EDITOR:-vim} "$taskfile"
+    ${EDITOR:-vim} "$instruction_rel"
 
-    "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$branch\" \"$taskfile\"")
-    echo "Enqueued task: $branch ($label)"
+    "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$name\" \"$instruction_rel\"")
+    echo "Enqueued task: $name ($label)"
 }
 
 cmd_from_github() {
@@ -105,18 +113,18 @@ cmd_from_github() {
 
         [[ -z "$label" ]] && { echo "Skipping issue #$number: No valid project label found."; continue; }
 
-        local branch="gh-$number"
-        local taskfile=$(find_or_create_taskfile "$branch")
+        local name="gh-$number"
+        local instruction_rel=$(find_or_create_taskfile "$name")
 
         # Populate from GitHub if new
-        if [[ ! -s "$taskfile" ]]; then
+        if [[ ! -s "$instruction_rel" ]]; then
             gh issue view "$number" --json title,body,comments \
               --jq '"# " + .title + "\n\n" + .body + "\n\n" + (.comments | map("## @" + .author.login + "\n" + .body) | join("\n\n"))' \
-              > "$taskfile"
-            echo -e "\n---\nPlease mention issue #$number in the commit message." >> "$taskfile"
+              > "$instruction_rel"
+            echo -e "\n---\nPlease mention issue #$number in the commit message." >> "$instruction_rel"
         fi
 
-        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$branch\" \"$taskfile\"")
+        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$name\" \"$instruction_rel\"")
         gh issue edit "$number" --remove-label "agents/to-be-taken" --add-label "agents/taken"
         echo "Enqueued GitHub issue #$number as $label task."
     done
@@ -258,7 +266,7 @@ cmd_worktree_exec() {
 
     # 3. Environment Preparation
     if [[ -x "./git-agent-task.sh" ]]; then
-        ./git-agent-task.sh prepare
+        ./git-agent-task.sh prepare $label $name $instruction_rel
     else
         echo "Warning: git-agent-task.sh not found. Skipping preparation."
     fi
@@ -293,7 +301,7 @@ cmd_worktree_exec() {
         
         # Optional Preview
         if [[ -x "./git-agent-task.sh" ]] && [[ "$name" != gh-* ]]; then
-            ./git-agent-task.sh preview || true
+            ./git-agent-task.sh preview $label $name $instruction_rel || true
         fi
     fi
 }
