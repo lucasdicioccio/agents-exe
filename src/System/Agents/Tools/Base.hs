@@ -13,6 +13,7 @@ import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.PostgREST.Types as PostgRESTTypes
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.Trace (ToolTrace)
 
@@ -35,6 +36,7 @@ data ToolDef
     | MCPTool !McpTools.ToolDescription
     | IOTool !IOTools.IOScriptDescription
     | OpenAPITool !Text !Text  -- ^ Toolbox name and operation ID
+    | PostgRESTool !Text !Text  -- ^ Toolbox name and table path
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -60,6 +62,10 @@ data CallResult call
     -- ^ OpenAPI tool executed successfully with structured result
     | OpenAPIToolError call String
     -- ^ OpenAPI tool execution failed
+    | PostgRESToolResult call PostgRESTTypes.ToolResult
+    -- ^ PostgREST tool executed successfully with structured result
+    | PostgRESToolError call String
+    -- ^ PostgREST tool execution failed
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -75,6 +81,8 @@ mapCallResult f c =
         (McpToolError v b) -> McpToolError (f v) b
         (OpenAPIToolResult v r) -> OpenAPIToolResult (f v) r
         (OpenAPIToolError v e) -> OpenAPIToolError (f v) e
+        (PostgRESToolResult v r) -> PostgRESToolResult (f v) r
+        (PostgRESToolError v e) -> PostgRESToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -94,4 +102,6 @@ extractCall (McpToolResult c _) = c
 extractCall (McpToolError c _) = c
 extractCall (OpenAPIToolResult c _) = c
 extractCall (OpenAPIToolError c _) = c
+extractCall (PostgRESToolResult c _) = c
+extractCall (PostgRESToolError c _) = c
 
