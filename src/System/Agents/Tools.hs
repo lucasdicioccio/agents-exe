@@ -7,6 +7,7 @@ To date, there are two ways to provide tools:
 * IO tools (arbitrary code running in the same process, and defined with Haskell code)
 * MCP tools (tools exposed via Model Context Protocol)
 * OpenAPI tools (tools generated from OpenAPI specifications)
+* PostgREST tools (tools generated from PostgREST database APIs)
 
 Technically, we could implement bash-tools as a sepecific implementation of
 IO-tools however having a separate constructor enables to surface a bit more
@@ -30,6 +31,7 @@ module System.Agents.Tools (
     bashTool,
     mcpTool,
     openapiTool,
+    postgrestTool,
 ) where
 
 import qualified Data.Aeson.Types as Aeson
@@ -47,6 +49,8 @@ import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
+import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
+import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import System.Agents.Tools.Trace
 
 -------------------------------------------------------------------------------
@@ -138,10 +142,10 @@ openapiTool ::
     Tool ()
 openapiTool toolbox apiTool =
     let opId = fromMaybe (OpenAPI.toolName apiTool) (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation apiTool))
-    in Tool
-        { toolDef = OpenAPITool (OpenAPIToolbox.toolboxName toolbox) opId
-        , toolRun = run
-        }
+     in Tool
+            { toolDef = OpenAPITool (OpenAPIToolbox.toolboxName toolbox) opId
+            , toolRun = run
+            }
   where
     call = ()
     run _tracer _ctx args = do
@@ -151,6 +155,48 @@ openapiTool toolbox apiTool =
                 pure $ OpenAPIToolError call (Text.unpack err)
             Right (_textResult, toolResult) -> do
                 pure $ OpenAPIToolResult call toolResult
+
+-------------------------------------------------------------------------------
+
+-- | Builder for a PostgREST-based tool.
+--
+-- This creates a tool from a PostgREST table endpoint that can be executed
+-- against a PostgREST API. The tool handles:
+--
+-- * Structured query parameters (filters, subset, ranking)
+-- * Column-based row filtering
+-- * Pagination (limit/offset)
+-- * Column selection (select parameter)
+-- * Ordering (order parameter)
+--
+-- Example usage:
+--
+-- @
+-- let toolbox = ... -- initialized PostgREST toolbox
+-- let prTool = head (PostgRESToolbox.toolboxTools toolbox)
+-- let tool = postgrestTool toolbox prTool
+-- -- Use tool with agent runtime...
+-- @
+--
+-- The tool name format is: postgrest_{toolbox}_{table}
+postgrestTool ::
+    PostgRESToolbox.Toolbox ->
+    PostgREST.PostgRESTool ->
+    Tool ()
+postgrestTool toolbox prTool =
+    Tool
+        { toolDef = PostgRESTool (PostgRESToolbox.toolboxName toolbox) (PostgREST.prtPath prTool)
+        , toolRun = run
+        }
+  where
+    call = ()
+    run _tracer _ctx args = do
+        result <- PostgRESToolbox.handleToolCall toolbox prTool args
+        case result of
+            Left err -> do
+                pure $ PostgRESToolError call (Text.unpack err)
+            Right (_textResult, toolResult) -> do
+                pure $ PostgRESToolResult call toolResult
 
 -------------------------------------------------------------------------------
 

@@ -10,6 +10,7 @@
 -- * IO tools - Haskell functions executed in-process
 -- * MCP tools - Tools exposed via Model Context Protocol
 -- * OpenAPI tools - Tools generated from OpenAPI specifications
+-- * PostgREST tools - Tools generated from PostgREST database APIs
 --
 -- For OpenAPI tools, special handling is done for name normalization:
 -- OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
@@ -26,12 +27,16 @@ module System.Agents.ToolRegistration (
     registerOpenAPIToolInLLM,
     registerOpenAPITools,
     registerOpenAPITool,
+    registerPostgRESToolInLLM,
+    registerPostgRESTools,
+    registerPostgRESTool,
     
     -- * Naming policies
     io2LLMName,
     bash2LLMName,
     mcp2LLMName,
     openapi2LLMName,
+    postgrest2LLMName,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -73,6 +78,17 @@ import System.Agents.Tools.OpenAPIToolbox (
     openapi2LLMName,
  )
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
+import System.Agents.Tools.PostgREST.Converter (
+    PostgRESTool (..),
+    buildToolParameters,
+    ToolParameters (..),
+    FilterSchema (..),
+    ColumnFilterSchema (..),
+    SubsetSchema (..),
+    RankingSchema (..),
+ )
+import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
+import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import System.Agents.ToolSchema
 import System.Agents.Tools.Trace (ToolTrace (..))
 import Prod.Tracer (Tracer, contramap)
@@ -106,6 +122,16 @@ bash2LLMName bash = OpenAI.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlu
 mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> OpenAI.ToolName
 mcp2LLMName box mcp =
     OpenAI.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
+
+-- naming policy for PostgREST tools
+postgrest2LLMName :: PostgRESToolbox.Toolbox -> PostgRESTool -> OpenAI.ToolName
+postgrest2LLMName box tool =
+    let normalizedToolbox = normalizeForLLM box.toolboxName
+        -- Extract table name from path (e.g., "/users" -> "users")
+        tableName = Text.dropWhile (== '/') tool.prtPath
+        normalizedTable = normalizeForLLM tableName
+        methodPart = Text.toLower tool.prtMethod
+     in OpenAI.ToolName (mconcat ["postgrest_", normalizedToolbox, "_", methodPart, "_", normalizedTable])
 
 -------------------------------------------------------------------------------
 
@@ -350,6 +376,176 @@ registerOpenAPIToolInLLM ::
     OpenAPI.OpenAPITool ->
     Either String ToolRegistration
 registerOpenAPIToolInLLM = registerOpenAPITool
+
+-------------------------------------------------------------------------------
+-- PostgREST Tool Registration
+-------------------------------------------------------------------------------
+
+-- | Register a single PostgREST tool with the LLM system.
+--
+-- This function creates a 'ToolRegistration' from a PostgREST tool and its
+-- parent toolbox. The tool name follows the format:
+-- postgrest_{toolbox}_{method}_{table}
+--
+-- The tool parameters are structured into three groups:
+-- * filters: Column-based row filters
+-- * subset: Pagination (limit/offset) and column selection
+-- * ranking: Ordering clause
+--
+-- Returns 'Left' if the tool cannot be registered.
+--
+-- Example:
+--
+-- @
+-- case registerPostgRESTool toolbox prTool of
+--     Left err -> putStrLn $ "Failed to register: " ++ err
+--     Right registration -> useWithAgent registration
+-- @
+registerPostgRESTool ::
+    PostgRESToolbox.Toolbox ->
+    PostgRESTool ->
+    Either String ToolRegistration
+registerPostgRESTool toolbox tool =
+    let llmName = postgrest2LLMName toolbox tool
+        params = buildToolParameters tool
+        
+        -- Build parameter properties from structured parameters
+        paramProps = buildPostgRESTParamProperties params
+        
+        -- Create the OpenAI Tool declaration
+        openaiTool = OpenAI.Tool
+            { OpenAI.toolName = llmName
+            , OpenAI.toolDescription = prtDescription tool
+            , OpenAI.toolParamProperties = paramProps
+            }
+
+        -- Create the tool handler
+        runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+        runFunc tr ctx argz = PostgRESToolbox.createToolHandler toolbox tool tr ctx argz
+
+        -- Create the Tool definition
+        toolDef0 = IOTool $ IOScriptDescription
+            { ioSlug = OpenAI.getToolName llmName
+            , ioDescription = prtDescription tool
+            }
+
+        tool' = Tool
+            { toolDef = toolDef0
+            , toolRun = runFunc
+            }
+
+        -- Find function - matches on the LLM name
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find call =
+            if call.toolCallFunction.toolCallFunctionName == llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+     in Right $ ToolRegistration
+            { innerTool = mapToolResult (const ()) tool'
+            , declareTool = openaiTool
+            , findTool = find
+            }
+
+-- | Build parameter properties for PostgREST tool from structured parameters.
+buildPostgRESTParamProperties :: ToolParameters -> [ParamProperty]
+buildPostgRESTParamProperties params =
+    let filterProp = case tpFilters params of
+            Just fs -> Just $ ParamProperty
+                { propertyKey = "filters"
+                , propertyType = ObjectParamType (buildFilterSubProperties fs)
+                , propertyDescription = fsDescription fs
+                }
+            Nothing -> Nothing
+        
+        subsetProp = case tpSubset params of
+            Just ss -> Just $ ParamProperty
+                { propertyKey = "subset"
+                , propertyType = ObjectParamType (buildSubsetSubProperties ss)
+                , propertyDescription = "Pagination and column selection"
+                }
+            Nothing -> Nothing
+        
+        rankingProp = case tpRanking params of
+            Just rs -> Just $ ParamProperty
+                { propertyKey = "ranking"
+                , propertyType = ObjectParamType (buildRankingSubProperties rs)
+                , propertyDescription = "Result ordering"
+                }
+            Nothing -> Nothing
+     in Maybe.catMaybes [filterProp, subsetProp, rankingProp]
+  where
+    buildFilterSubProperties :: FilterSchema -> [ParamProperty]
+    buildFilterSubProperties fs =
+        map (\(col, schema) -> ParamProperty
+            { propertyKey = col
+            , propertyType = OpaqueParamType "string"
+            , propertyDescription = cfsDescription schema
+            }) (Map.toList $ fsProperties fs)
+    
+    buildSubsetSubProperties :: SubsetSchema -> [ParamProperty]
+    buildSubsetSubProperties ss =
+        Maybe.catMaybes
+            [ fmap (\desc -> ParamProperty "offset" (OpaqueParamType "string") desc) (ssOffset ss)
+            , fmap (\desc -> ParamProperty "limit" (OpaqueParamType "string") desc) (ssLimit ss)
+            , fmap (\desc -> ParamProperty "columns" (OpaqueParamType "string") desc) (ssColumns ss)
+            ]
+    
+    buildRankingSubProperties :: RankingSchema -> [ParamProperty]
+    buildRankingSubProperties rs =
+        Maybe.catMaybes
+            [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc) (rsOrder rs)
+            ]
+
+-- | Register all tools from a PostgREST toolbox.
+--
+-- This function iterates through all tools in the toolbox and attempts to
+-- register each one.
+--
+-- If any registration fails, the entire operation fails fast with the first
+-- error encountered.
+--
+-- For partial success handling, use 'registerPostgRESTool' on individual tools.
+--
+-- Example:
+--
+-- @
+-- result <- PostgREST.initializeToolbox tracer config
+-- case result of
+--     Left err -> print err
+--     Right toolbox -> do
+--         regResult <- registerPostgRESTools toolbox
+--         case regResult of
+--             Left err -> putStrLn $ "Registration failed: " ++ err
+--             Right registrations -> do
+--                 -- Use registrations with agent runtime
+--                 mapM_ (addToAgent agent) registrations
+-- @
+registerPostgRESTools ::
+    PostgRESToolbox.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerPostgRESTools toolbox =
+    -- Fail fast - return first error encountered
+    let registerAll :: [PostgRESTool] -> Either String [ToolRegistration] -> Either String [ToolRegistration]
+        registerAll [] acc = acc
+        registerAll (t:ts) (Right regs) =
+            case registerPostgRESTool toolbox t of
+                Left err -> Left err
+                Right reg -> registerAll ts (Right (reg:regs))
+        registerAll _ err = err
+        
+        tools = PostgRESToolbox.toolboxTools toolbox
+     in pure $ case registerAll tools (Right []) of
+            Left err -> Left err
+            Right regs -> Right (reverse regs)
+
+-- | Register a PostgREST tool in the LLM system (alias for 'registerPostgRESTool').
+--
+-- Provided for consistency with other registration functions.
+registerPostgRESToolInLLM ::
+    PostgRESToolbox.Toolbox ->
+    PostgRESTool ->
+    Either String ToolRegistration
+registerPostgRESToolInLLM = registerPostgRESTool
 
 -------------------------------------------------------------------------------
 -- Internal tool builders (copied from Tools to avoid import cycle)

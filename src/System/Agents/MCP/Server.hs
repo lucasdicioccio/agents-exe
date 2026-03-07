@@ -411,6 +411,10 @@ callResultToUserToolResponse _ result =
             SessionBase.UserToolResponse $ Aeson.toJSON toolResult
         OpenAPIToolError _ err ->
             SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "OpenAPI tool error: " <> err
+        PostgRESToolResult _ toolResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
+        PostgRESToolError _ err ->
+            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "PostgREST tool error: " <> err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 -- Based on toolRegistrationToSystemTool from OneShot.hs.
