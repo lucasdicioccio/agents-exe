@@ -24,6 +24,20 @@ case $1 in
     , "arity": "single"
     , "mode": "positional"
     }
+  ,{ "name": "branch_name"
+    , "description": "The base branch for this issue (e.g., 'gh-123'). All PRs for this issue will be against this branch. Defaults to 'main'."
+    , "type": "string"
+    , "backing_type": "string"
+    , "arity": "single"
+    , "mode": "positional"
+    }
+  ,{ "name": "is_final"
+    , "description": "Set to 'true' if this is the final task that merges the feature branch into 'main'."
+    , "type": "string"
+    , "backing_type": "string"
+    , "arity": "single"
+    , "mode": "positional"
+    }
   ,{ "name": "body"
     , "description": "the detailed description/body of the issue"
     , "type": "text"
@@ -39,6 +53,8 @@ EOD
   run)
     title="$2"
     dependencies="$3"
+    branch_name="${4:-main}"
+    is_final="${5:-false}"
     scope="root"
 
     case "${scope}" in
@@ -62,12 +78,14 @@ EOD
     labels="${agent_label},${scope}"
 
     # Use --body-file - to read the body from stdin
-    # Prepend dependency metadata to the body if present
-    if [[ -n "${dependencies}" ]] && [[ ! "${dependencies}" =~ ^[[:space:]]*$ ]]; then
-        (echo "Depends-on: ${dependencies}"; echo ""; cat) | gh issue create --title "${title}" --body-file - --label "${labels}"
-    else
-        gh issue create --title "${title}" --body-file - --label "${labels}"
-    fi
+    # Prepend metadata to the body
+    (
+        echo "Depends-on: ${dependencies}"
+        echo "Base-branch: ${branch_name}"
+        echo "Final: ${is_final}"
+        echo ""
+        cat
+    ) | gh issue create --title "${title}" --body-file - --label "${labels}"
   ;;
 esac
 
