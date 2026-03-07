@@ -6,6 +6,7 @@ import System.Agents.Tools.Context as Context
 import System.Agents.Session.Types (SessionId(..), TurnId(..))
 import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
+import System.Agents.Tools.OpenAPI.Types as OpenAPI
 
 import Data.Aeson (decode, encode)
 import qualified Data.ByteString.Lazy as LBS
@@ -32,6 +33,7 @@ tests =
         , agentConfigGraphTests
         , referenceValidationTests
         , cycleDetectionTests
+        , openAPITypesTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -182,6 +184,192 @@ agentSerializationTests =
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- OpenAPI Types Tests
+-------------------------------------------------------------------------------
+
+openAPITypesTests :: TestTree
+openAPITypesTests =
+    testGroup
+        "OpenAPI Types"
+        [ testCase "parse minimal OpenAPI spec" $ do
+            let json = "{\"paths\": {}}"
+            let mSpec = decode (encodeUtf8 json) :: Maybe OpenAPI.OpenAPISpec
+            case mSpec of
+                Nothing -> assertFailure "Failed to parse minimal OpenAPI spec"
+                Just spec -> do
+                    Map.null (OpenAPI.specPaths spec) @?= True
+                    OpenAPI.specComponents spec @?= Nothing
+        , testCase "parse OpenAPI spec with simple path" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"paths\": {"
+                    , "    \"/pets\": {"
+                    , "      \"get\": {"
+                    , "        \"operationId\": \"listPets\","
+                    , "        \"summary\": \"List all pets\""
+                    , "      }"
+                    , "    }"
+                    , "  }"
+                    , "}"
+                    ]
+            let mSpec = decode (encodeUtf8 json) :: Maybe OpenAPI.OpenAPISpec
+            case mSpec of
+                Nothing -> assertFailure "Failed to parse OpenAPI spec with path"
+                Just spec -> do
+                    Map.size (OpenAPI.specPaths spec) @?= 1
+                    case Map.lookup "/pets" (OpenAPI.specPaths spec) of
+                        Nothing -> assertFailure "Path /pets not found"
+                        Just methods -> do
+                            Map.size methods @?= 1
+                            case Map.lookup "GET" methods of
+                                Nothing -> assertFailure "GET method not found"
+                                Just op -> do
+                                    OpenAPI.opOperationId op @?= Just "listPets"
+                                    OpenAPI.opSummary op @?= Just "List all pets"
+        , testCase "parse parameter with path location" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"name\": \"petId\","
+                    , "  \"in\": \"path\","
+                    , "  \"required\": true,"
+                    , "  \"schema\": {"
+                    , "    \"type\": \"string\""
+                    , "  }"
+                    , "}"
+                    ]
+            let mParam = decode (encodeUtf8 json) :: Maybe OpenAPI.Parameter
+            case mParam of
+                Nothing -> assertFailure "Failed to parse parameter"
+                Just param -> do
+                    OpenAPI.paramName param @?= "petId"
+                    OpenAPI.paramIn param @?= OpenAPI.ParamInPath
+                    OpenAPI.paramRequired param @?= True
+                    OpenAPI.paramDescription param @?= Nothing
+        , testCase "parse parameter with query location" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"name\": \"limit\","
+                    , "  \"in\": \"query\","
+                    , "  \"description\": \"Maximum number of results\","
+                    , "  \"schema\": {"
+                    , "    \"type\": \"integer\""
+                    , "  }"
+                    , "}"
+                    ]
+            let mParam = decode (encodeUtf8 json) :: Maybe OpenAPI.Parameter
+            case mParam of
+                Nothing -> assertFailure "Failed to parse query parameter"
+                Just param -> do
+                    OpenAPI.paramName param @?= "limit"
+                    OpenAPI.paramIn param @?= OpenAPI.ParamInQuery
+                    OpenAPI.paramRequired param @?= False
+                    OpenAPI.paramDescription param @?= Just "Maximum number of results"
+        , testCase "parse schema with $ref" $ do
+            let json = "{\"$ref\": \"#/components/schemas/Pet\"}"
+            let mSchema = decode (encodeUtf8 json) :: Maybe OpenAPI.Schema
+            case mSchema of
+                Nothing -> assertFailure "Failed to parse $ref schema"
+                Just schema -> do
+                    OpenAPI.schemaRef schema @?= Just "#/components/schemas/Pet"
+                    OpenAPI.schemaType schema @?= Nothing
+        , testCase "parse inline schema with properties" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"type\": \"object\","
+                    , "  \"properties\": {"
+                    , "    \"name\": { \"type\": \"string\" },"
+                    , "    \"age\": { \"type\": \"integer\" }"
+                    , "  },"
+                    , "  \"required\": [\"name\"]"
+                    , "}"
+                    ]
+            let mSchema = decode (encodeUtf8 json) :: Maybe OpenAPI.Schema
+            case mSchema of
+                Nothing -> assertFailure "Failed to parse inline schema"
+                Just schema -> do
+                    OpenAPI.schemaType schema @?= Just "object"
+                    case OpenAPI.schemaProperties schema of
+                        Nothing -> assertFailure "Properties not found"
+                        Just props -> Map.size props @?= 2
+                    OpenAPI.schemaRequired schema @?= Just ["name"]
+        , testCase "parse request body with content" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"description\": \"Pet to create\","
+                    , "  \"required\": true,"
+                    , "  \"content\": {"
+                    , "    \"application/json\": {"
+                    , "      \"schema\": { \"type\": \"object\" }"
+                    , "    }"
+                    , "  }"
+                    , "}"
+                    ]
+            let mBody = decode (encodeUtf8 json) :: Maybe OpenAPI.RequestBody
+            case mBody of
+                Nothing -> assertFailure "Failed to parse request body"
+                Just body -> do
+                    OpenAPI.reqBodyDescription body @?= Just "Pet to create"
+                    OpenAPI.reqBodyRequired body @?= True
+                    Map.size (OpenAPI.reqBodyContent body) @?= 1
+                    case Map.lookup "application/json" (OpenAPI.reqBodyContent body) of
+                        Nothing -> assertFailure "application/json content not found"
+                        Just _ -> pure ()
+        , testCase "parse components with schemas" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"schemas\": {"
+                    , "    \"Pet\": {"
+                    , "      \"type\": \"object\","
+                    , "      \"properties\": {"
+                    , "        \"name\": { \"type\": \"string\" }"
+                    , "      }"
+                    , "    }"
+                    , "  }"
+                    , "}"
+                    ]
+            let mComponents = decode (encodeUtf8 json) :: Maybe OpenAPI.Components
+            case mComponents of
+                Nothing -> assertFailure "Failed to parse components"
+                Just comps -> do
+                    case OpenAPI.componentsSchemas comps of
+                        Nothing -> assertFailure "Schemas not found"
+                        Just schemas -> do
+                            Map.size schemas @?= 1
+                            case Map.lookup "Pet" schemas of
+                                Nothing -> assertFailure "Pet schema not found"
+                                Just petSchema ->
+                                    OpenAPI.schemaType petSchema @?= Just "object"
+        , testCase "round-trip: OpenAPISpec serialization" $ do
+            let spec = OpenAPI.OpenAPISpec
+                    { OpenAPI.specPaths = Map.singleton "/test" (Map.singleton "GET" testOperation)
+                    , OpenAPI.specComponents = Nothing
+                    }
+            let json = encode spec
+            let mSpec = decode json :: Maybe OpenAPI.OpenAPISpec
+            mSpec @?= Just spec
+        , testCase "round-trip: Parameter serialization" $ do
+            let param = OpenAPI.Parameter
+                    { OpenAPI.paramName = "id"
+                    , OpenAPI.paramIn = OpenAPI.ParamInQuery
+                    , OpenAPI.paramDescription = Just "The ID"
+                    , OpenAPI.paramRequired = True
+                    , OpenAPI.paramSchema = Just (OpenAPI.Schema Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing)
+                    }
+            let json = encode param
+            let mParam = decode json :: Maybe OpenAPI.Parameter
+            mParam @?= Just param
+        ]
+  where
+    encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
+    testOperation = OpenAPI.Operation
+        { OpenAPI.opOperationId = Just "testOp"
+        , OpenAPI.opSummary = Just "Test operation"
+        , OpenAPI.opDescription = Nothing
+        , OpenAPI.opParameters = []
+        , OpenAPI.opRequestBody = Nothing
+        }
 
 -------------------------------------------------------------------------------
 -- CallStackEntry Tests
