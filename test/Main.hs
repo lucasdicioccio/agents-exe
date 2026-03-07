@@ -19,8 +19,9 @@ import qualified Data.Text.Encoding as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
--- Import the comprehensive OpenAPI Toolbox tests
+-- Import the comprehensive test modules
 import qualified OpenAPIToolboxTests
+import qualified IssueMetadataTests
 
 main :: IO ()
 main = defaultMain tests
@@ -41,7 +42,8 @@ tests =
         , openAPITypesTests
         , openAPIResolverTests
         , openAPIConverterTests
-        , OpenAPIToolboxTests.tests  -- New comprehensive OpenAPI Toolbox tests
+        , OpenAPIToolboxTests.tests
+        , IssueMetadataTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

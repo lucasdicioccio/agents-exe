@@ -78,6 +78,7 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Context
+                    , System.Agents.Tools.GitHub.IssueMetadata
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
@@ -202,6 +203,7 @@ test-suite agents-tests
     hs-source-dirs: test
     main-is: Main.hs
     other-modules: OpenAPIToolboxTests
+                   , IssueMetadataTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
