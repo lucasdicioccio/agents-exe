@@ -35,9 +35,8 @@ module System.Agents.Tools (
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 as CByteString
 import Data.Maybe (fromMaybe)
-import Data.Text (Text)
 import qualified Data.Text as Text
-import Prod.Tracer (Tracer, contramap, runTracer)
+import Prod.Tracer (contramap)
 
 -------------------------------------------------------------------------------
 
@@ -49,7 +48,6 @@ import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import System.Agents.Tools.Trace
-import System.Agents.Tools.Context (ToolExecutionContext)
 
 -------------------------------------------------------------------------------
 
@@ -146,7 +144,7 @@ openapiTool toolbox apiTool =
         }
   where
     call = ()
-    run tracer _ctx args = do
+    run _tracer _ctx args = do
         result <- OpenAPIToolbox.handleToolCall toolbox apiTool args
         case result of
             Left err -> do

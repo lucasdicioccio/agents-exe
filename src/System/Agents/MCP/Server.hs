@@ -407,6 +407,10 @@ callResultToUserToolResponse _ result =
             SessionBase.UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
             SessionBase.UserToolResponse $ Aeson.String $ TextEncoding.decodeUtf8 v
+        OpenAPIToolResult _ toolResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
+        OpenAPIToolError _ err ->
+            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "OpenAPI tool error: " <> err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 -- Based on toolRegistrationToSystemTool from OneShot.hs.

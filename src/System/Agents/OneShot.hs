@@ -34,9 +34,8 @@ import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
 import System.Agents.Tools
-import System.Agents.Tools.Base
-import System.Agents.ToolSchema
 import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 
 import qualified Data.Aeson.Key as AesonKey
 import Prod.Tracer (Tracer (..), contramap)
@@ -246,6 +245,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
             UserToolResponse $ Aeson.String $ Text.decodeUtf8 v
+        OpenAPIToolResult _ toolResult ->
+            UserToolResponse $ Aeson.toJSON toolResult
+        OpenAPIToolError _ err ->
+            UserToolResponse $ Aeson.String $ Text.pack $ "OpenAPI tool error: " <> err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
