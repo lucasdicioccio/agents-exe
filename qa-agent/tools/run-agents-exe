@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+if [ "$1" == "describe" ]; then
+    cat <<'EOF'
+{
+  "slug": "run_agents_exe",
+  "description": "Runs agents-exe with specified arguments. Useful for testing CLI commands like init, check, run, describe, etc.",
+  "args": [
+    {
+      "name": "args",
+      "description": "Arguments to pass to agents-exe (e.g., 'check', 'describe', 'run --prompt hello')",
+      "type": "string",
+      "backing_type": "string",
+      "arity": "single",
+      "mode": "dashdashspace"
+    }
+  ]
+}
+EOF
+    exit 0
+fi
+
+if [ "$1" == "run" ]; then
+    # Parse arguments
+    ARGS=""
+    shift  # Remove 'run' from arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --args)
+                ARGS="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$ARGS" ]; then
+        echo "Error: No arguments provided. Use --args to specify agents-exe arguments."
+        exit 1
+    fi
+
+    echo "Running: cabal run -- agents-exe $ARGS"
+    eval "cabal run -- agents-exe $ARGS" 2>&1
+    EXIT_CODE=$?
+
+    echo ""
+    echo "Exit code: $EXIT_CODE"
+    exit $EXIT_CODE
+fi
+

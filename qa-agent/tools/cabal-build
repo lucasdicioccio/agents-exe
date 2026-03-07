@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+if [ "$1" == "describe" ]; then
+    cat <<'EOF'
+{
+  "slug": "cabal_build",
+  "description": "Builds the agents-exe project using cabal build. Reports compilation errors and warnings.",
+  "args": []
+}
+EOF
+    exit 0
+fi
+
+if [ "$1" == "run" ]; then
+    echo "Running: cabal build"
+    cabal build 2>&1
+    EXIT_CODE=$?
+
+    echo ""
+    echo "Exit code: $EXIT_CODE"
+    exit $EXIT_CODE
+fi
+
