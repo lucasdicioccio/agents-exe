@@ -125,9 +125,15 @@ cmd_from_github() {
             echo -e "\n---\nPlease mention issue #$number in the commit message." >> "$instruction_rel"
         fi
 
-        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$name\" \"$instruction_rel\"")
+        # Parse metadata from instruction file
+        local base_branch=$(grep -i "^Base-branch:" "$instruction_rel" | head -n1 | awk '{print $2}' || true)
+        base_branch="${base_branch:-main}"
+        local is_final=$(grep -i "^Final:" "$instruction_rel" | head -n1 | awk '{print $2}' || true)
+        is_final="${is_final:-false}"
+
+        "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$name\" \"$instruction_rel\" \"$base_branch\" \"$is_final\"")
         gh issue edit "$number" --remove-label "agents/to-be-taken" --add-label "agents/taken"
-        echo "Enqueued GitHub issue #$number as $label task."
+        echo "Enqueued GitHub issue #$number as $label task (base: $base_branch, final: $is_final)."
     done
 }
 
@@ -297,6 +303,8 @@ cmd_clean() {
 cmd_worktree_exec() {
     set -x
     local label="$1" name="$2" instruction_rel="$3"
+    local base_branch="${4:-$BASE_BRANCH}"
+    local is_final="${5:-false}"
     local orig_cwd="$PWD"
     local instruction_abs="${orig_cwd}/${instruction_rel}"
     local repo_root=$(git rev-parse --show-toplevel)
@@ -305,8 +313,14 @@ cmd_worktree_exec() {
     cd "$repo_root"
     [[ -d "$name" ]] && git worktree remove --force "$name"
     git worktree prune
-    git fetch origin "$BASE_BRANCH"
-    git worktree add "$name" "origin/$BASE_BRANCH"
+    
+    # Ensure base_branch exists (fetch it)
+    if ! git fetch origin "$base_branch"; then
+        echo "Warning: Failed to fetch origin/$base_branch. Using main."
+        base_branch="main"
+        git fetch origin "$base_branch"
+    fi
+    git worktree add "$name" "origin/$base_branch"
 
     # 2. Navigate to Project
     local rel_path=$(get_project_dir "$label")
@@ -346,7 +360,12 @@ cmd_worktree_exec() {
         git push -u origin "$name"
 
         local pr_title=$(echo "$commit_message" | head -n1)
-        gh pr create --base "$BASE_BRANCH" --head "$name" --title "$pr_title" --body "$commit_message"
+        local target_base="$base_branch"
+        if [[ "$is_final" == "true" ]]; then
+            target_base="main"
+        fi
+
+        gh pr create --base "$target_base" --head "$name" --title "$pr_title" --body "$commit_message"
         
         # Optional Preview
         if [[ -x "./git-agent-task.sh" ]] && [[ "$name" != gh-* ]]; then
