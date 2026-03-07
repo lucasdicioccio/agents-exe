@@ -515,7 +515,11 @@ buildRequest method fullUrl queryParams mbody headers = do
 
     pure finalReq
 
--- | Execute an HTTP request.
+-- | Execute an HTTP request with custom headers.
+--
+-- This function builds a request with all parameters (method, URL, query params,
+-- body, and custom headers) and executes it using the runtime's 'runRequest'
+-- function.
 executeRequest ::
     HttpClient.Runtime ->
     Method ->
@@ -525,29 +529,16 @@ executeRequest ::
     Map Text Text ->
     IO (Either Text (Text, ToolResult))
 executeRequest runtime method fullUrl queryParams mbody headers = do
-    _ <- buildRequest method fullUrl queryParams mbody headers
-
-    -- Use the runtime to make the request
-    -- Note: We're using a simplified approach here
-    -- In a real implementation, we'd use the HttpClient.Runtime properly
+    -- Build the request with all headers and parameters
+    req <- buildRequest method fullUrl queryParams mbody headers
+    
+    -- Execute the request using the runtime
     let tracer = Tracer (const (pure ()))
-    result <- executeRequest' runtime tracer method fullUrl mbody
+    result <- HttpClient.runRequest runtime tracer req
 
     case result of
-        Left err -> pure $ Left err
-        Right response -> handleResponse toolInfo response
-  where
-    toolInfo = (method, fullUrl)
-    executeRequest' rt tr m url mb
-        | m == "GET" = do
-            res <- HttpClient.get rt tr url
-            pure $ either (Left . Text.pack . show) Right res
-        | m == "POST" = do
-            res <- HttpClient.post rt tr url mb
-            pure $ either (Left . Text.pack . show) Right res
-        | otherwise = do
-            -- For other methods, we need to use the underlying manager
-            pure $ Left $ "Method not supported: " <> m
+        Left err -> pure $ Left (Text.pack $ show err)
+        Right response -> handleResponse (method, fullUrl) response
 
 -- -------------------------------------------------------------------------
 -- Response Handling
