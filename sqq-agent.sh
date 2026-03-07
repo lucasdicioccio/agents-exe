@@ -48,6 +48,7 @@ Commands:
   init                     Initialize the task queue
   add <label> <branch>     Manually enqueue a task (opens editor for instructions)
   from_github              Fetch tasks from GitHub issues (label: "agents/to-be-taken")
+  promote_github           Promote issues from "agents/wait" to "agents/to-be-taken" if deps are met
   process                  Start processing the queue
   clean [--do-it] [--force]
                            Clean worktrees with completed sessions (preview mode by default)
@@ -127,6 +128,54 @@ cmd_from_github() {
         "$SQQ_BIN" enqueue --queue "$QUEUE_DB" --jobs <(echo "$SELF worktree_exec \"$label\" \"$name\" \"$instruction_rel\"")
         gh issue edit "$number" --remove-label "agents/to-be-taken" --add-label "agents/taken"
         echo "Enqueued GitHub issue #$number as $label task."
+    done
+}
+
+cmd_promote_github() {
+    echo "Checking for issues to promote from 'agents/wait' to 'agents/to-be-taken'..."
+    local issues=$(gh issue list --label "agents/wait" --author "$GITHUB_USERNAME" --json number,title)
+    local count=$(echo "$issues" | jq 'length')
+
+    [[ "$count" -eq 0 ]] && { echo "No issues in 'agents/wait'."; return 0; }
+
+    for (( i=0; i<count; i++ )); do
+        local number=$(echo "$issues" | jq -r ".[$i].number")
+        local title=$(echo "$issues" | jq -r ".[$i].title")
+        
+        echo "Checking dependencies for issue #$number: $title"
+        
+        # Get issue body to find dependencies
+        local body=$(gh issue view "$number" --json body --jq '.body')
+        
+        # Extract dependencies from "Depends-on: #123, #124" format
+        local deps_line=$(echo "$body" | grep -i "^Depends-on:" | head -n1 || true)
+        
+        if [[ -z "$deps_line" ]]; then
+            echo "  No 'Depends-on' metadata found. Manual intervention required or issue incorrectly labeled."
+            continue
+        fi
+
+        # Extract issue numbers (e.g., #123 -> 123)
+        local dep_numbers=$(echo "$deps_line" | grep -oE '#[0-9]+' | sed 's/#//g')
+        
+        local all_satisfied=true
+        for dep in $dep_numbers; do
+            local state=$(gh issue view "$dep" --json state --jq '.state')
+            if [[ "$state" != "CLOSED" ]]; then
+                # Check if it's a PR and if it's merged
+                local pr_state=$(gh pr view "$dep" --json state --jq '.state' 2>/dev/null || echo "NOT_A_PR")
+                if [[ "$pr_state" != "MERGED" && "$pr_state" != "CLOSED" ]]; then
+                    echo "  Dependency #$dep is still $state (PR state: $pr_state). Skipping."
+                    all_satisfied=false
+                    break
+                fi
+            fi
+        done
+
+        if [[ "$all_satisfied" == true ]]; then
+            echo "  All dependencies satisfied. Promoting to 'agents/to-be-taken'..."
+            gh issue edit "$number" --remove-label "agents/wait" --add-label "agents/to-be-taken"
+        fi
     done
 }
 
@@ -333,7 +382,7 @@ find_or_create_taskfile() {
 COMMAND="$1"; shift
 
 case "$COMMAND" in
-    init|add|from_github|process|worktree_exec|clean) "cmd_$COMMAND" "$@" ;;
+    init|add|from_github|promote_github|process|worktree_exec|clean) "cmd_$COMMAND" "$@" ;;
     *) usage ;;
 esac
 

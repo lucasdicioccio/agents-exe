@@ -62,7 +62,12 @@ EOD
     labels="${agent_label},${scope}"
 
     # Use --body-file - to read the body from stdin
-    gh issue create --title "${title}" --body-file - --label "${labels}"
+    # Prepend dependency metadata to the body if present
+    if [[ -n "${dependencies}" ]] && [[ ! "${dependencies}" =~ ^[[:space:]]*$ ]]; then
+        (echo "Depends-on: ${dependencies}"; echo ""; cat) | gh issue create --title "${title}" --body-file - --label "${labels}"
+    else
+        gh issue create --title "${title}" --body-file - --label "${labels}"
+    fi
   ;;
 esac
 
