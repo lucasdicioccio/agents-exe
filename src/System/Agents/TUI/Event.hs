@@ -88,7 +88,7 @@ tui_appHandleEvent ev = do
                     handleAgentInfoEvent vtyEv
                 Just AgentToolsWidget ->
                     handleAgentToolsEvent vtyEv
-                Nothing ->
+                _ ->
                     pure ()
 
         _ -> pure ()

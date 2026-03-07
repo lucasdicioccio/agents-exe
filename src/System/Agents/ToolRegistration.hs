@@ -11,7 +11,6 @@ import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 
-import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.Tools

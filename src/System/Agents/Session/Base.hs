@@ -36,7 +36,6 @@ module System.Agents.Session.Base (
 ) where
 
 import Data.Text (Text)
-import GHC.Generics (Generic)
 
 import System.Agents.Tools.Context (ToolExecutionContext)
 -- Re-export all session types from Session.Types for backward compatibility

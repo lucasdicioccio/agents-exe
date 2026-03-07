@@ -4,38 +4,34 @@
 
 module System.Agents.ExportImport.ToolInstall where
 
-import Control.Exception (try, IOException, bracket)
-import Control.Monad (forM_, unless, when)
+import Control.Exception (try, IOException)
+import Control.Monad (forM_, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Either (partitionEithers)
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (getCurrentTime)
 import System.Directory
-    ( copyFile
-    , createDirectoryIfMissing
+    ( createDirectoryIfMissing
     , doesDirectoryExist
     , doesFileExist
     , getCurrentDirectory
     , getHomeDirectory
     , listDirectory
-    , removeFile
     , renameFile
     )
 import System.Exit (ExitCode(..))
-import System.FilePath ((</>), takeDirectory, takeFileName)
-import System.Posix.Files (unionFileModes, ownerExecuteMode, ownerReadMode, ownerWriteMode, setFileMode, fileMode, getFileStatus)
+import System.FilePath ((</>), takeDirectory)
+import System.Posix.Files (unionFileModes, ownerExecuteMode, setFileMode, fileMode, getFileStatus)
 import System.Posix.Types (FileMode)
 import System.Process (readProcessWithExitCode)
 
 import System.Agents.Base (Agent(..), AgentDescription(..))
 import System.Agents.ExportImport.Types
-import System.Agents.Tools.Bash (ScriptInfo(..), ScriptDescription(..), ScriptEmptyResultBehavior(..), ScriptArg(..), ScriptArgArity(..), ScriptArgCallingMode(..))
-import qualified System.Agents.ExportImport.Archive as Archive
+import System.Agents.Tools.Bash (ScriptInfo(..))
 
 -------------------------------------------------------------------------------
 -- Install Options
@@ -111,11 +107,11 @@ copyToolsBetweenAgents fromAgent toAgent opts = do
 
 installTool :: FilePath -> InstallOptions -> StandaloneToolExport -> IO (Either InstallError ())
 installTool targetDir opts tool = do
-    let toolName = case installPrefix opts of
+    let toolName0 = case installPrefix opts of
             Just prefix -> Text.unpack prefix ++ Text.unpack (scriptSlug $ standaloneToolInfo tool)
             Nothing -> Text.unpack (scriptSlug $ standaloneToolInfo tool)
     
-    let targetPath = targetDir </> toolName
+    let targetPath = targetDir </> toolName0
     
     -- Check if tool already exists
     exists <- doesFileExist targetPath
@@ -134,11 +130,11 @@ installTool targetDir opts tool = do
 
 installToolCopy :: FilePath -> InstallOptions -> StandaloneToolExport -> IO (Either InstallError ())
 installToolCopy targetDir opts tool = do
-    let toolName = case installPrefix opts of
+    let toolName0 = case installPrefix opts of
             Just prefix -> Text.unpack prefix ++ Text.unpack (scriptSlug $ standaloneToolInfo tool)
             Nothing -> Text.unpack (scriptSlug $ standaloneToolInfo tool)
     
-    let targetPath = targetDir </> toolName
+    let targetPath = targetDir </> toolName0
     
     result <- try $ do
         -- Write the script
@@ -197,8 +193,8 @@ validateTools paths = do
 
 -- | Load a tool from a file path, creating a StandaloneToolExport
 loadToolFromPath :: FilePath -> FilePath -> IO (Either InstallError StandaloneToolExport)
-loadToolFromPath baseDir toolName = do
-    let toolPath = baseDir </> toolName
+loadToolFromPath baseDir toolName0 = do
+    let toolPath = baseDir </> toolName0
     
     result <- try $ do
         isFile <- doesFileExist toolPath
