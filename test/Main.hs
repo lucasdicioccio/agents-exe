@@ -7,8 +7,9 @@ import System.Agents.Session.Types (SessionId(..), TurnId(..))
 import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Tools.OpenAPI.Types as OpenAPI
+import System.Agents.Tools.OpenAPI.Resolver as Resolver
 
-import Data.Aeson (decode, encode)
+import Data.Aeson (decode, encode, Value)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -34,6 +35,7 @@ tests =
         , referenceValidationTests
         , cycleDetectionTests
         , openAPITypesTests
+        , openAPIResolverTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -372,6 +374,169 @@ openAPITypesTests =
         }
 
 -------------------------------------------------------------------------------
+-- OpenAPI Resolver Tests
+-------------------------------------------------------------------------------
+
+openAPIResolverTests :: TestTree
+openAPIResolverTests =
+    testGroup
+        "OpenAPI Resolver"
+        [ testCase "parseRef parses valid internal reference" $ do
+            case Resolver.parseRef "#/components/schemas/Pet" of
+                Nothing -> assertFailure "Failed to parse valid ref"
+                Just refPath -> do
+                    Resolver.refComponents refPath @?= "components"
+                    Resolver.refSection refPath @?= "schemas"
+                    Resolver.refName refPath @?= "Pet"
+        , testCase "parseRef returns Nothing for external http refs" $ do
+            Resolver.parseRef "http://example.com/schema.json" @?= Nothing
+        , testCase "parseRef returns Nothing for external https refs" $ do
+            Resolver.parseRef "https://example.com/schema.json" @?= Nothing
+        , testCase "parseRef handles nested paths" $ do
+            case Resolver.parseRef "#/components/schemas/Nested/Deep" of
+                Nothing -> assertFailure "Failed to parse nested ref"
+                Just refPath -> do
+                    Resolver.refComponents refPath @?= "components"
+                    Resolver.refSection refPath @?= "schemas"
+                    Resolver.refName refPath @?= "Nested"
+        , testCase "resolveSchema resolves simple $ref" $ do
+            let petSchema = mkSchema (Just "object") (Just "A pet") Nothing Nothing Nothing Nothing Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("Pet", petSchema)]))
+            let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
+            let resolved = Resolver.resolveSchema refSchema components
+            OpenAPI.schemaType resolved @?= Just "object"
+            OpenAPI.schemaDescription resolved @?= Just "A pet"
+            OpenAPI.schemaRef resolved @?= Nothing
+        , testCase "resolveSchema returns unchanged for non-ref schema" $ do
+            let schema = mkSchema (Just "string") (Just "A string") Nothing Nothing Nothing Nothing Nothing Nothing
+            let components = OpenAPI.Components Nothing
+            let resolved = Resolver.resolveSchema schema components
+            resolved @?= schema
+        , testCase "resolveSchema handles nested references" $ do
+            -- Pet refs Owner, Owner has no refs
+            let ownerSchema = mkSchema (Just "object") (Just "An owner") Nothing Nothing Nothing Nothing Nothing Nothing
+            let ownerRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Owner") Nothing
+            let petSchema = mkSchema (Just "object") Nothing Nothing (Just (Map.fromList [("owner", ownerRef)])) Nothing Nothing Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("Pet", petSchema), ("Owner", ownerSchema)]))
+            let petRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
+            let resolved = Resolver.resolveSchema petRef components
+            OpenAPI.schemaType resolved @?= Just "object"
+            case OpenAPI.schemaProperties resolved of
+                Nothing -> assertFailure "Expected properties"
+                Just props -> case Map.lookup "owner" props of
+                    Nothing -> assertFailure "Expected owner property"
+                    Just owner -> do
+                        OpenAPI.schemaType owner @?= Just "object"
+                        OpenAPI.schemaDescription owner @?= Just "An owner"
+        , testCase "resolveSchema handles array item references" $ do
+            let itemSchema = mkSchema (Just "string") (Just "A tag") Nothing Nothing Nothing Nothing Nothing Nothing
+            let itemRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Tag") Nothing
+            let arraySchema = mkSchema (Just "array") Nothing Nothing Nothing (Just itemRef) Nothing Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("Tag", itemSchema), ("Tags", arraySchema)]))
+            let tagsRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Tags") Nothing
+            let resolved = Resolver.resolveSchema tagsRef components
+            OpenAPI.schemaType resolved @?= Just "array"
+            case OpenAPI.schemaItems resolved of
+                Nothing -> assertFailure "Expected items"
+                Just items -> do
+                    OpenAPI.schemaType items @?= Just "string"
+                    OpenAPI.schemaDescription items @?= Just "A tag"
+        , testCase "resolveSchema handles anyOf references" $ do
+            let catSchema = mkSchema (Just "object") (Just "A cat") Nothing Nothing Nothing Nothing Nothing Nothing
+            let dogSchema = mkSchema (Just "object") (Just "A dog") Nothing Nothing Nothing Nothing Nothing Nothing
+            let catRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Cat") Nothing
+            let dogRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Dog") Nothing
+            let anyOfSchema = mkSchema Nothing Nothing Nothing Nothing Nothing (Just [catRef, dogRef]) Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("Cat", catSchema), ("Dog", dogSchema), ("Pet", anyOfSchema)]))
+            let petRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
+            let resolved = Resolver.resolveSchema petRef components
+            case OpenAPI.schemaAnyOf resolved of
+                Nothing -> assertFailure "Expected anyOf"
+                Just schemas -> do
+                    length schemas @?= 2
+                    OpenAPI.schemaType (head schemas) @?= Just "object"
+        , testCase "resolveSchemaWithDepth detects circular references" $ do
+            -- Schema A refs B, B refs A (circular)
+            let aRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/A") Nothing
+            let bRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/B") Nothing
+            let schemaA = mkSchema (Just "object") Nothing Nothing (Just (Map.fromList [("b", bRef)])) Nothing Nothing Nothing Nothing
+            let schemaB = mkSchema (Just "object") Nothing Nothing (Just (Map.fromList [("a", aRef)])) Nothing Nothing Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("A", schemaA), ("B", schemaB)]))
+            let result = Resolver.resolveSchemaWithDepth aRef components 0 mempty
+            case result of
+                Left (Resolver.CircularReference _) -> pure ()
+                _ -> assertFailure "Expected CircularReference error"
+        , testCase "resolveSchema handles missing reference gracefully" $ do
+            let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Missing") Nothing
+            let components = OpenAPI.Components (Just Map.empty)
+            let resolved = Resolver.resolveSchema refSchema components
+            -- Should return schema with error description
+            case OpenAPI.schemaDescription resolved of
+                Just desc -> assertBool "Expected error message" ("Reference resolution failed" `Text.isInfixOf` desc)
+                Nothing -> assertFailure "Expected error description"
+        , testCase "resolveRef finds schema in components" $ do
+            let petSchema = mkSchema (Just "object") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("Pet", petSchema)]))
+            case Resolver.resolveRef "#/components/schemas/Pet" components of
+                Left err -> assertFailure $ "Unexpected error: " ++ show err
+                Right schema -> OpenAPI.schemaType schema @?= Just "object"
+        , testCase "resolveRef returns error for missing schema" $ do
+            let components = OpenAPI.Components (Just Map.empty)
+            case Resolver.resolveRef "#/components/schemas/Missing" components of
+                Left (Resolver.SchemaNotFound _) -> pure ()
+                _ -> assertFailure "Expected SchemaNotFound error"
+        , testCase "resolveRef returns error for invalid ref path" $ do
+            let components = OpenAPI.Components Nothing
+            case Resolver.resolveRef "invalid-ref" components of
+                Left (Resolver.InvalidRefPath _) -> pure ()
+                _ -> assertFailure "Expected InvalidRefPath error"
+        , testCase "dereferenceSpec resolves all schemas in spec" $ do
+            let petSchema = mkSchema (Just "object") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let components = OpenAPI.Components (Just (Map.fromList [("Pet", petSchema)]))
+            let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
+            let param = OpenAPI.Parameter "petId" OpenAPI.ParamInPath Nothing True (Just refSchema)
+            let operation = OpenAPI.Operation (Just "getPet") Nothing Nothing [param] Nothing
+            let spec = OpenAPI.OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) (Just components)
+            let dereferenced = Resolver.dereferenceSpec spec
+            case Map.lookup "/pets/{petId}" (OpenAPI.specPaths dereferenced) of
+                Nothing -> assertFailure "Path not found"
+                Just methods -> case Map.lookup "GET" methods of
+                    Nothing -> assertFailure "GET method not found"
+                    Just op -> case OpenAPI.opParameters op of
+                        [] -> assertFailure "Expected parameters"
+                        (p:_) -> case OpenAPI.paramSchema p of
+                            Nothing -> assertFailure "Expected schema"
+                            Just schema -> do
+                                OpenAPI.schemaType schema @?= Just "object"
+                                OpenAPI.schemaRef schema @?= Nothing
+        , testCase "dereferenceSpec handles missing components" $ do
+            let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
+            let param = OpenAPI.Parameter "petId" OpenAPI.ParamInPath Nothing True (Just refSchema)
+            let operation = OpenAPI.Operation (Just "getPet") Nothing Nothing [param] Nothing
+            let spec = OpenAPI.OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) Nothing
+            let dereferenced = Resolver.dereferenceSpec spec
+            -- Should not crash, schema remains unresolved
+            case Map.lookup "/pets/{petId}" (OpenAPI.specPaths dereferenced) of
+                Nothing -> assertFailure "Path not found"
+                Just methods -> case Map.lookup "GET" methods of
+                    Nothing -> assertFailure "GET method not found"
+                    Just op -> case OpenAPI.opParameters op of
+                        [] -> assertFailure "Expected parameters"
+                        (p:_) -> case OpenAPI.paramSchema p of
+                            Nothing -> assertFailure "Expected schema"
+                            Just schema -> do
+                                -- Schema should have error description
+                                case OpenAPI.schemaDescription schema of
+                                    Just desc -> assertBool "Expected error" ("failed" `Text.isInfixOf` desc)
+                                    Nothing -> pure ()  -- Original schema preserved
+        ]
+  where
+    -- Helper to construct Schema with correct field order:
+    -- schemaType, schemaDescription, schemaEnum, schemaProperties, schemaItems, schemaAnyOf, schemaRef, schemaRequired
+    mkSchema :: Maybe Text -> Maybe Text -> Maybe [Value] -> Maybe (Map.Map Text OpenAPI.Schema) -> Maybe OpenAPI.Schema -> Maybe [OpenAPI.Schema] -> Maybe Text -> Maybe [Text] -> OpenAPI.Schema
+    mkSchema t d e p i a r req = OpenAPI.Schema t d e p i a r req
+
+-------------------------------------------------------------------------------
 -- CallStackEntry Tests
 -------------------------------------------------------------------------------
 
@@ -665,7 +830,8 @@ agentConfigGraphTests =
                     }
 
             let nodes = Map.fromList [("main-agent", mainNode), ("helper-a", nodeA), ("helper-b", nodeB)]
-            let graph = AgentTree.AgentConfigGraph nodes (Map.map (\n -> AgentTree.nodeChildren n ++ AgentTree.nodeExtraRefs n) nodes)
+            let edges = Map.fromList [("main-agent", ["helper-a", "helper-b"]), ("helper-a", []), ("helper-b", [])]
+            let graph = AgentTree.AgentConfigGraph nodes edges
 
             AgentTree.nodeExtraRefs mainNode @?= ["helper-a", "helper-b"]
             Map.size (AgentTree.graphNodes graph) @?= 3
