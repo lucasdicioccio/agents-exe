@@ -460,7 +460,9 @@ openAPIResolverTests =
                 Nothing -> assertFailure "Expected anyOf"
                 Just schemas -> do
                     length schemas @?= 2
-                    OpenAPI.schemaType (head schemas) @?= Just "object"
+                    case schemas of
+                        (first:_) -> OpenAPI.schemaType first @?= Just "object"
+                        [] -> assertFailure "Expected non-empty schemas list"
         , testCase "resolveSchemaWithDepth detects circular references" $ do
             -- Schema A refs B, B refs A (circular)
             let aRef = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/A") Nothing

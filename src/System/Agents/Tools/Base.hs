@@ -3,7 +3,6 @@
 module System.Agents.Tools.Base where
 
 -------------------------------------------------------------------------------
-import Data.Aeson (Value)
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 (ByteString)
 import Data.Text (Text)

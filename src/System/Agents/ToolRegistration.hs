@@ -46,20 +46,18 @@ import System.Agents.Tools.Base (
     CallResult (..),
     Tool (..),
     ToolDef (..),
-    mapCallResult,
     mapToolResult,
-  )
+ )
 import System.Agents.Tools.Context (ToolExecutionContext)
-import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..), RunError (..))
+import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
-import System.Agents.Tools.Bash (ScriptDescription (..), ScriptArg (..), RunScriptError)
+import System.Agents.Tools.Bash (ScriptDescription (..), ScriptArg (..))
 import qualified System.Agents.Tools.Bash as BashTools
-import System.Agents.Tools.McpToolbox (Toolbox, ToolDescription, callTool)
+import System.Agents.Tools.McpToolbox (callTool)
 import qualified System.Agents.Tools.McpToolbox as McpTools
-import System.Agents.Tools.OpenAPI.Converter (OpenAPITool (..), toOpenAITool)
+import System.Agents.Tools.OpenAPI.Converter (toOpenAITool)
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import System.Agents.Tools.OpenAPIToolbox (
-    Toolbox (..),
     createToolHandler,
     openapi2LLMName,
   )
@@ -236,7 +234,7 @@ registerOpenAPITool toolbox tool =
         openaiTool = toOpenAITool tool
 
         -- Create the tool handler
-        toolDef = IOTool $ IOScriptDescription
+        toolDef0 = IOTool $ IOScriptDescription
             { ioSlug = OpenAI.getToolName llmName
             , ioDescription = OpenAPI.toolDescription tool
             }
@@ -247,7 +245,7 @@ registerOpenAPITool toolbox tool =
 
         -- Create the Tool
         tool' = Tool
-            { toolDef = toolDef
+            { toolDef = toolDef0
             , toolRun = runFunc
             }
 
@@ -351,7 +349,7 @@ mcpTool toolbox desc =
   where
     call = ()
     run _tracer _ctx (Aeson.Object v) = do
-        ret <- McpTools.callTool toolbox desc (Just v)
+        ret <- callTool toolbox desc (Just v)
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
             err -> pure $ McpToolError call (mconcat ["calling error: ", show err])

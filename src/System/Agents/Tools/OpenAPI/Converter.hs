@@ -55,7 +55,7 @@ import Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -65,7 +65,6 @@ import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),
     Operation (..),
-    ParamLocation (..),
     Parameter (..),
     Path,
     RequestBody (..),

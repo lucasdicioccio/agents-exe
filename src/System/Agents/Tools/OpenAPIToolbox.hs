@@ -47,11 +47,6 @@ module System.Agents.Tools.OpenAPIToolbox (
     -- * Re-export ToolResult from Types
     ToolResult,
     
-    -- * Toolbox accessors
-    toolboxName,
-    toolboxBaseUrl,
-    toolboxTools,
-    
     -- * Initialization
     initializeToolbox,
     
@@ -85,14 +80,13 @@ import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.CaseInsensitive as CI
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Agents.Tools.OpenAPI.Converter (OpenAPITool (..), convertOpenAPIToTools, toOpenAITool)
+import System.Agents.Tools.OpenAPI.Converter (OpenAPITool (..), convertOpenAPIToTools)
 import System.Agents.Tools.OpenAPI.Resolver (dereferenceSpec)
 import System.Agents.Tools.OpenAPI.Types (
     Method,
@@ -106,7 +100,6 @@ import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.IO (RunError (..))
-import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Trace (ToolTrace (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 

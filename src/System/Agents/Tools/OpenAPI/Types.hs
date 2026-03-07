@@ -390,6 +390,15 @@ data ToolResult = ToolResult
     }
     deriving (Show)
 
+instance ToJSON ToolResult where
+    toJSON tr =
+        Aeson.object
+            [ "path" Aeson..= resultPath tr
+            , "method" Aeson..= resultMethod tr
+            , "status" Aeson..= resultStatus tr
+            , "payload" Aeson..= resultPayload tr
+            ]
+
 -- -------------------------------------------------------------------------
 -- Helper functions for JSON construction
 -- -------------------------------------------------------------------------
