@@ -46,9 +46,19 @@ case "$command" in
     cabal run -- agents-exe check
 
     echo "Running checks"
-    cabal run -- agents-exe --session-json-file-prefix conv.check --agent-file demo-agents/ollama-01.json run -p "hi, test the three tools"
     mkdir -p checks
-    cabal run -- agents-exe session-print checks/conv.checkconv.*.json | markdown-eye
+    cabal run -- agents-exe --session-json-file-prefix checks/conv. --agent-file demo-agents/ollama-01.json run -p "hi, test the three tools"
+    
+    latest_check=$(ls -t checks/conv.*.json 2>/dev/null | head -n 1 || true)
+    if [[ -n "$latest_check" ]]; then
+      if command -v markdown-eye >/dev/null 2>&1; then
+        cabal run -- agents-exe session-print "$latest_check" | markdown-eye
+      else
+        cabal run -- agents-exe session-print "$latest_check"
+      fi
+    else
+      echo "No check files found in checks/"
+    fi
     ;;
   *)
     echo "Error: Unknown command '$command'"
