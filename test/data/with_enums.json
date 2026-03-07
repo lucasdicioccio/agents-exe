@@ -1,0 +1,126 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "API with Enums",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "summary": "List orders",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by order status",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "processing", "shipped", "delivered", "cancelled"]
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "description": "Filter by priority level",
+            "schema": {
+              "type": "string",
+              "enum": ["low", "medium", "high", "urgent"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of orders"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createOrder",
+        "summary": "Create an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order created"
+          }
+        }
+      }
+    },
+    "/orders/{orderId}/status": {
+      "patch": {
+        "operationId": "updateOrderStatus",
+        "summary": "Update order status",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "processing", "shipped", "delivered", "cancelled"]
+                  }
+                },
+                "required": ["status"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OrderInput": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "urgent"]
+          },
+          "shippingMethod": {
+            "type": "string",
+            "enum": ["standard", "express", "overnight"]
+          }
+        },
+        "required": ["productId", "quantity"]
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": ["pending", "processing", "shipped", "delivered", "cancelled"]
+      }
+    }
+  }
+}
+
