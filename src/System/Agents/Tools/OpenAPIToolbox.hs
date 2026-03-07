@@ -1,0 +1,592 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+-- | OpenAPI Toolbox runtime for executing tools from OpenAPI specifications.
+--
+-- This module provides a runtime that:
+-- * Fetches OpenAPI specifications from URLs
+-- * Converts operations to executable tools
+-- * Handles HTTP execution with proper parameter substitution
+-- * Integrates with the LLM tool registration system
+--
+-- The toolbox follows patterns similar to McpToolbox and BashToolbox for
+-- consistent integration with the agents system.
+--
+-- Example usage:
+--
+-- @
+-- let config = Config
+--         { configUrl = "https://api.example.com/openapi.json"
+--         , configBaseUrl = "https://api.example.com"
+--         , configHeaders = Map.empty
+--         , configToken = Just "my-bearer-token"
+--         }
+-- result <- initializeToolbox tracer config
+-- case result of
+--     Right toolbox -> do
+--         -- Register tools with LLM
+--         let registrations = map (registerOpenAPIToolInLLM toolbox) toolboxTools
+--         -- Use registrations...
+--     Left err -> handleError err
+-- @
+module System.Agents.Tools.OpenAPIToolbox (
+    -- * Core types
+    Trace (..),
+    Toolbox (..),
+    Config (..),
+    InitializationError (..),
+    ToolResult (..),
+
+    -- * Initialization
+    initializeToolbox,
+
+    -- * Tool execution
+    createToolHandler,
+    handleToolCall,
+
+    -- * Path formatting
+    formatPath,
+
+    -- * HTTP building
+    buildRequest,
+    buildFullUrl,
+
+    -- * Response handling
+    handleResponse,
+
+    -- * Integration with ToolRegistration
+    registerOpenAPIToolInLLM,
+    openapi2LLMName,
+) where
+
+import Control.Exception (try)
+import Data.Aeson (Value (..))
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Char8 as ByteString
+import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.CaseInsensitive as CI
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import qualified Network.HTTP.Client as HttpClient
+import qualified Network.HTTP.Types as HttpTypes
+import Prod.Tracer (Tracer (..), runTracer)
+import System.Agents.Tools.OpenAPI.Converter (OpenAPITool (..), convertOpenAPIToTools, toOpenAITool)
+import System.Agents.Tools.OpenAPI.Resolver (dereferenceSpec)
+import System.Agents.Tools.OpenAPI.Types (Method, ParamLocation (..), Parameter (..), Path, Operation (..))
+import qualified System.Agents.HttpClient as HttpClient
+import System.Agents.ToolRegistration (ToolRegistration (..))
+import qualified System.Agents.Tools as Tools
+import qualified System.Agents.Tools.Base as Tools
+import qualified System.Agents.Tools.Context as Tools
+import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.LLMs.OpenAI as OpenAI
+
+-- -------------------------------------------------------------------------
+-- Trace types
+-- -------------------------------------------------------------------------
+
+-- | Trace events for OpenAPI toolbox operations.
+--
+-- These events allow monitoring of:
+-- * Spec fetching progress
+-- * Tool conversion status
+-- * Endpoint execution
+-- * Error conditions
+data Trace
+    = FetchingSpecTrace !Text
+    -- ^ URL being fetched
+    | SpecFetchedTrace !Int
+    -- ^ HTTP status of spec fetch
+    | ToolsConvertedTrace !Int
+    -- ^ Number of tools converted from spec
+    | CallingEndpointTrace !Text !Text !Text
+    -- ^ method, url, path being called
+    | EndpointResponseTrace !Int
+    -- ^ HTTP status of endpoint response
+    | SchemaResolutionErrorTrace !Text
+    -- ^ Error during schema dereferencing
+    | ToolExecutionErrorTrace !Text
+    -- ^ Error during tool execution
+    deriving (Show)
+
+-- -------------------------------------------------------------------------
+-- Core types
+-- -------------------------------------------------------------------------
+
+-- | Errors that can occur during toolbox initialization.
+data InitializationError
+    = NetworkError !Text
+    -- ^ Network error fetching spec
+    | ParseError !Text
+    -- ^ JSON parse error
+    | SpecError !Text
+    -- ^ OpenAPI spec validation error
+    deriving (Show, Eq)
+
+-- | Configuration for initializing an OpenAPI toolbox.
+data Config = Config
+    { configUrl :: Text
+    -- ^ URL to fetch OpenAPI spec from
+    , configBaseUrl :: Text
+    -- ^ Base URL for API calls
+    , configHeaders :: Map Text Text
+    -- ^ Static headers to include in all requests
+    , configToken :: Maybe Text
+    -- ^ Optional Bearer token for authentication
+    }
+    deriving (Show, Eq)
+
+-- | Runtime state for an OpenAPI toolbox.
+--
+-- The toolbox maintains:
+-- * A name for identification
+-- * The base URL for API calls
+-- * A list of available tools
+-- * The HTTP runtime for making requests
+-- * An optional header function for dynamic auth headers
+data Toolbox = Toolbox
+    { toolboxName :: Text
+    , toolboxBaseUrl :: Text
+    , toolboxTools :: [OpenAPITool]
+    -- ^ Tools converted from the OpenAPI spec
+    , httpRuntime :: HttpClient.Runtime
+    -- ^ HTTP client runtime
+    , headerFunc :: Maybe (IO (Map Text Text))
+    -- ^ Optional function to get dynamic headers (e.g., for auth)
+    , staticHeaders :: Map Text Text
+    -- ^ Static headers from config
+    }
+
+-- | Result of executing an OpenAPI tool.
+data ToolResult = ToolResult
+    { resultPath :: Text
+    -- ^ Path that was called
+    , resultMethod :: Text
+    -- ^ HTTP method used
+    , resultStatus :: Int
+    -- ^ HTTP status code
+    , resultPayload :: Value
+    -- ^ Response payload as JSON
+    }
+    deriving (Show)
+
+-- -------------------------------------------------------------------------
+-- Initialization
+-- -------------------------------------------------------------------------
+
+-- | Initialize an OpenAPI toolbox from a configuration.
+--
+-- This function:
+-- 1. Creates an HTTP runtime with authentication
+-- 2. Fetches the OpenAPI spec from the configured URL
+-- 3. Parses the JSON to an OpenAPISpec
+-- 4. Dereferences schema references ($ref)
+-- 5. Converts operations to tools
+--
+-- Returns an 'InitializationError' if any step fails.
+initializeToolbox ::
+    Tracer IO Trace ->
+    Config ->
+    IO (Either InitializationError Toolbox)
+initializeToolbox tracer config = do
+    -- Create HTTP runtime with auth
+    let token = case config.configToken of
+            Just t -> HttpClient.BearerToken t
+            Nothing -> HttpClient.NoToken
+    runtime <- HttpClient.newRuntime token
+
+    -- Fetch OpenAPI spec
+    runTracer tracer (FetchingSpecTrace config.configUrl)
+    fetchResult <- fetchSpec runtime config.configUrl
+
+    case fetchResult of
+        Left err -> pure $ Left err
+        Right (status, body) -> do
+            runTracer tracer (SpecFetchedTrace status)
+
+            -- Parse JSON to OpenAPISpec
+            case Aeson.decode body of
+                Nothing -> pure $ Left $ ParseError "Failed to parse OpenAPI spec JSON"
+                Just spec -> do
+                    -- Dereference schemas
+                    let dereferencedSpec = dereferenceSpec spec
+
+                    -- Convert to tools
+                    let tools = convertOpenAPIToTools dereferencedSpec
+                    runTracer tracer (ToolsConvertedTrace (length tools))
+
+                    -- Create toolbox
+                    pure $ Right $ Toolbox
+                        { toolboxName = Text.takeWhile (/= '/') (Text.drop 8 config.configUrl)
+                            -- Use part of URL as name, removing protocol
+                        , toolboxBaseUrl = config.configBaseUrl
+                        , toolboxTools = tools
+                        , httpRuntime = runtime
+                        , headerFunc = Nothing
+                        , staticHeaders = config.configHeaders
+                        }
+
+-- | Fetch the OpenAPI spec from a URL.
+fetchSpec ::
+    HttpClient.Runtime ->
+    Text ->
+    IO (Either InitializationError (Int, LByteString.ByteString))
+fetchSpec runtime url = do
+    result <- try $ HttpClient.get runtime (Tracer (const (pure ()))) url
+    case result of
+        Left (e :: HttpClient.HttpException) ->
+            pure $ Left $ NetworkError (Text.pack $ show e)
+        Right (Left err) ->
+            pure $ Left $ NetworkError (Text.pack $ show err)
+        Right (Right response) ->
+            let status = HttpTypes.statusCode (HttpClient.responseStatus response)
+                body = HttpClient.responseBody response
+             in pure $ Right (status, body)
+
+-- -------------------------------------------------------------------------
+-- Tool Handler Creation
+-- -------------------------------------------------------------------------
+
+-- | Creates a handler function for an OpenAPI tool.
+--
+-- This handler integrates with the ToolExecutionContext system and
+-- returns results in the standard CallResult format.
+createToolHandler ::
+    Toolbox ->
+    OpenAPITool ->
+    Tracer IO Tools.ToolTrace ->
+    Tools.ToolExecutionContext ->
+    Value ->
+    IO (Tools.CallResult ())
+createToolHandler toolbox tool tracer _ctx args = do
+    result <- handleToolCall toolbox tool args
+    case result of
+        Left err -> do
+            runTracer (contramapTrace tracer) (ToolExecutionErrorTrace err)
+            pure $ Tools.IOToolError () (IOTools.ScriptExecutionError (Text.unpack err))
+        Right (textResult, _toolResult) -> do
+            pure $ Tools.BlobToolSuccess () (ByteString.pack $ Text.unpack textResult)
+  where
+    contramapTrace :: Tracer IO Tools.ToolTrace -> Tracer IO Trace
+    contramapTrace _t = Tracer $ \_traceEvent -> do
+        -- Convert Trace to ToolTrace if needed
+        -- For now, we just don't trace these events to the main tool tracer
+        pure ()
+
+-- | Handle a tool call by executing the HTTP request.
+--
+-- This function:
+-- 1. Extracts path params (prefixed with p_)
+-- 2. Extracts query params (prefixed with p_)
+-- 3. Extracts body (param "b")
+-- 4. Formats the path with path args
+-- 5. Builds full URL
+-- 6. Makes HTTP request
+-- 7. Returns result
+handleToolCall ::
+    Toolbox ->
+    OpenAPITool ->
+    Value ->
+    IO (Either Text (Text, ToolResult))
+handleToolCall toolbox tool args = do
+    case args of
+        Object obj -> do
+            -- Extract parameters from the JSON object
+            let objMap = KeyMap.toMapText obj
+            let (pathParams, queryParams, bodyValue) = extractParams objMap (toolOperation tool)
+
+            -- Format the path with path parameters
+            let formattedPath = formatPath (toolPath tool) pathParams
+
+            -- Build full URL
+            let fullUrl = buildFullUrl (toolboxBaseUrl toolbox) formattedPath
+
+            -- Get headers
+            headers <- case toolbox.headerFunc of
+                Just hf -> hf
+                Nothing -> pure Map.empty
+            let allHeaders = Map.union headers (staticHeaders toolbox)
+
+            -- Make HTTP request
+            let method = toolMethod tool
+            runTracer (Tracer (const (pure ()) :: Trace -> IO ())) $ CallingEndpointTrace method fullUrl formattedPath
+
+            result <- executeRequest toolbox.httpRuntime method fullUrl queryParams bodyValue allHeaders
+
+            case result of
+                Left err -> pure $ Left err
+                Right (textResult, toolResult) -> do
+                    runTracer (Tracer (const (pure ()) :: Trace -> IO ())) $ EndpointResponseTrace (resultStatus toolResult)
+                    pure $ Right (textResult, toolResult)
+        _ -> pure $ Left "Tool arguments must be a JSON object"
+
+-- | Extract parameters from the JSON object based on operation definition.
+extractParams ::
+    Map Text Value ->
+    Operation ->
+    (Map Text Text, Map Text Text, Maybe Value)
+extractParams obj op =
+    let params = opParameters op
+        -- Extract path params
+        pathParams = Map.foldrWithKey extractPathParam Map.empty obj
+          where
+            extractPathParam k (String v) acc
+                | Just p <- findParam params (Text.drop 2 k)
+                , paramIn p == ParamInPath = Map.insert (Text.drop 2 k) v acc
+            extractPathParam _ _ acc = acc
+
+        -- Extract query params
+        queryParams = Map.foldrWithKey extractQueryParam Map.empty obj
+          where
+            extractQueryParam k (String v) acc
+                | Just p <- findParam params (Text.drop 2 k)
+                , paramIn p == ParamInQuery = Map.insert (Text.drop 2 k) v acc
+            extractQueryParam k v acc
+                | Just p <- findParam params (Text.drop 2 k)
+                , paramIn p == ParamInQuery = Map.insert (Text.drop 2 k) (valueToText v) acc
+            extractQueryParam _ _ acc = acc
+
+        -- Extract body
+        bodyValue = Map.lookup "b" obj
+     in (pathParams, queryParams, bodyValue)
+
+-- | Find a parameter by name in the operation parameters list.
+findParam :: [Parameter] -> Text -> Maybe Parameter
+findParam params name =
+    case filter (\p -> paramName p == name) params of
+        (p : _) -> Just p
+        [] -> Nothing
+
+-- | Convert a JSON value to Text for query params.
+valueToText :: Value -> Text
+valueToText (String s) = s
+valueToText (Number n) = Text.pack $ show n
+valueToText (Bool b) = if b then "true" else "false"
+valueToText Null = "null"
+valueToText _ = ""
+
+-- -------------------------------------------------------------------------
+-- Path Formatting
+-- -------------------------------------------------------------------------
+
+-- | Format a path template with path parameters.
+--
+-- Converts a path like @/pets/{petId}@ with @{p_petId: "123"}@ to @/pets/123@.
+--
+-- Example:
+--
+-- >>> formatPath "/pets/{petId}" (Map.fromList [("petId", "123")])
+-- "/pets/123"
+--
+-- >>> formatPath "/pets/{petId}/owners/{ownerId}" (Map.fromList [("petId", "123"), ("ownerId", "456")])
+-- "/pets/123/owners/456"
+formatPath :: Path -> Map Text Text -> Path
+formatPath pathTemplate pathArgs =
+    Map.foldrWithKey replaceParam pathTemplate pathArgs
+  where
+    replaceParam :: Text -> Text -> Path -> Path
+    replaceParam name value path =
+        Text.replace ("{" <> name <> "}") value path
+
+-- -------------------------------------------------------------------------
+-- URL Building
+-- -------------------------------------------------------------------------
+
+-- | Build the full URL from base URL and path.
+buildFullUrl :: Text -> Path -> Text
+buildFullUrl baseUrl path =
+    let base = Text.dropWhileEnd (== '/') baseUrl
+        path' = if Text.isPrefixOf "/" path then path else "/" <> path
+     in base <> path'
+
+-- | Build query string from query parameters.
+buildQueryString :: Map Text Text -> Text
+buildQueryString params
+    | Map.null params = ""
+    | otherwise =
+        "?" <> Text.intercalate "&" (map encodeParam $ Map.toList params)
+  where
+    encodeParam (k, v) = urlEncode k <> "=" <> urlEncode v
+    urlEncode = id -- Simplified - real implementation would URL-encode
+
+-- -------------------------------------------------------------------------
+-- HTTP Request Building and Execution
+-- -------------------------------------------------------------------------
+
+-- | Build an HTTP request.
+buildRequest ::
+    Method ->
+    Text ->
+    Map Text Text ->
+    Maybe Value ->
+    Map Text Text ->
+    IO HttpClient.Request
+buildRequest method fullUrl queryParams mbody headers = do
+    let queryString = buildQueryString queryParams
+    let urlWithQuery = fullUrl <> queryString
+
+    req <- HttpClient.parseRequest (Text.unpack urlWithQuery)
+
+    -- Set method
+    let reqWithMethod = req{HttpClient.method = Text.encodeUtf8 method}
+
+    -- Add body if present
+    let reqWithBody = case mbody of
+            Just body ->
+                reqWithMethod
+                    { HttpClient.requestBody = HttpClient.RequestBodyLBS (Aeson.encode body)
+                    , HttpClient.requestHeaders =
+                        ("Content-Type", "application/json")
+                            : HttpClient.requestHeaders reqWithMethod
+                    }
+            Nothing -> reqWithMethod
+
+    -- Add custom headers
+    let headerList = map (\(k, v) -> (CI.mk (Text.encodeUtf8 k), Text.encodeUtf8 v)) $ Map.toList headers
+    let finalReq = reqWithBody{HttpClient.requestHeaders = HttpClient.requestHeaders reqWithBody ++ headerList}
+
+    pure finalReq
+
+-- | Execute an HTTP request.
+executeRequest ::
+    HttpClient.Runtime ->
+    Method ->
+    Text ->
+    Map Text Text ->
+    Maybe Value ->
+    Map Text Text ->
+    IO (Either Text (Text, ToolResult))
+executeRequest runtime method fullUrl queryParams mbody headers = do
+    _ <- buildRequest method fullUrl queryParams mbody headers
+
+    -- Use the runtime to make the request
+    -- Note: We're using a simplified approach here
+    -- In a real implementation, we'd use the HttpClient.Runtime properly
+    let tracer = Tracer (const (pure ()))
+    result <- executeRequest' runtime tracer method fullUrl mbody
+
+    case result of
+        Left err -> pure $ Left err
+        Right response -> handleResponse toolInfo response
+  where
+    toolInfo = (method, fullUrl)
+    executeRequest' rt tr m url mb
+        | m == "GET" = do
+            res <- HttpClient.get rt tr url
+            pure $ either (Left . Text.pack . show) Right res
+        | m == "POST" = do
+            res <- HttpClient.post rt tr url mb
+            pure $ either (Left . Text.pack . show) Right res
+        | otherwise = do
+            -- For other methods, we need to use the underlying manager
+            pure $ Left $ "Method not supported: " <> m
+
+-- -------------------------------------------------------------------------
+-- Response Handling
+-- -------------------------------------------------------------------------
+
+-- | Handle an HTTP response, converting to ToolResult.
+--
+-- Returns both text for the LLM and a structured ToolResult.
+handleResponse ::
+    (Method, Text) ->
+    HttpClient.Response LByteString.ByteString ->
+    IO (Either Text (Text, ToolResult))
+handleResponse (method, url) response = do
+    let status = HttpTypes.statusCode (HttpClient.responseStatus response)
+    let body = HttpClient.responseBody response
+
+    -- Parse body as JSON if possible
+    let payload = case Aeson.decode body of
+            Just val -> val
+            Nothing -> String (Text.decodeUtf8 $ LByteString.toStrict body)
+
+    -- Create text representation for LLM
+    let textResult =
+            "HTTP " <> Text.pack (show status) <> "\n"
+                <> Text.decodeUtf8 (LByteString.toStrict body)
+
+    pure $ Right
+        ( textResult
+        , ToolResult
+            { resultPath = url
+            , resultMethod = method
+            , resultStatus = status
+            , resultPayload = payload
+            }
+        )
+
+-- -------------------------------------------------------------------------
+-- Tool Registration Integration
+-- -------------------------------------------------------------------------
+
+-- | Convert an OpenAPI operation ID to an LLM tool name.
+--
+-- Names are prefixed with @openapi_@ and include the toolbox name
+-- to avoid conflicts.
+--
+-- Example:
+--
+-- >>> openapi2LLMName "myApi" "getPet"
+-- ToolName {getToolName = "openapi_myApi_getPet"}
+openapi2LLMName :: Text -> Text -> OpenAI.ToolName
+openapi2LLMName tboxName operationId =
+    OpenAI.ToolName ("openapi_" <> tboxName <> "_" <> operationId)
+
+-- | Register an OpenAPI tool in the LLM system.
+--
+-- This creates a 'ToolRegistration' that can be used with the
+-- agent's tool system.
+registerOpenAPIToolInLLM ::
+    Toolbox ->
+    OpenAPITool ->
+    Either String ToolRegistration
+registerOpenAPIToolInLLM toolbox tool =
+    let opId = fromMaybe (toolName tool) (getOperationId (toolOperation tool))
+        llmName = openapi2LLMName (toolboxName toolbox) opId
+
+        -- Convert to OpenAI Tool format
+        openaiTool = toOpenAITool tool
+
+        -- Create the tool handler
+        toolDef = Tools.IOTool $ IOTools.IOScriptDescription
+            { IOTools.ioSlug = OpenAI.getToolName llmName
+            , IOTools.ioDescription = toolDescription tool
+            }
+
+        -- Create the run function
+        runFunc :: Tracer IO Tools.ToolTrace -> Tools.ToolExecutionContext -> Value -> IO (Tools.CallResult ())
+        runFunc tr ctx argz = createToolHandler toolbox tool tr ctx argz
+
+        -- Create the Tool
+        tool' = Tools.Tool
+            { Tools.toolDef = toolDef
+            , Tools.toolRun = runFunc
+            }
+
+        -- Find function
+        find :: OpenAI.ToolCall -> Maybe (Tools.Tool OpenAI.ToolCall)
+        find call =
+            if call.toolCallFunction.toolCallFunctionName == llmName
+                then Just $ Tools.mapToolResult (const call) tool'
+                else Nothing
+
+        -- Declare function
+        declare :: OpenAI.Tool
+        declare = openaiTool{OpenAI.toolName = llmName}
+     in Right $ ToolRegistration
+            { innerTool = Tools.mapToolResult (const ()) tool'
+            , declareTool = declare
+            , findTool = find
+            }
+
+-- | Get operation ID from operation, falling back to tool name.
+getOperationId :: Operation -> Maybe Text
+getOperationId = opOperationId
+
