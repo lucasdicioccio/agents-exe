@@ -343,13 +343,27 @@ toggleZoom = tuiUI . zoomed %= not
 -------------------------------------------------------------------------------
 
 -- | Handle heartbeat - refresh UI state and auto-clear expired status messages.
+-- Preserves the currently selected conversation when refreshing the list.
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
+    -- Save the currently selected conversation ID before refreshing
+    mSelectedConvId <- getFocusedConversationId
+
     -- Refresh conversations from core
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList convs) 1
+
+    -- Restore the selection if the conversation still exists
+    case mSelectedConvId of
+        Just selectedConvId -> do
+            let newConvs = Vector.fromList convs
+            case Vector.findIndex (\c -> conversationId c == selectedConvId) newConvs of
+                Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
+                Nothing -> pure ()  -- Conversation was removed, keep no selection
+        Nothing -> pure ()
+
     -- Refresh tools.
     let itrees = fmap agentTree coreState.coreAgents
     agentTools <- liftIO $ traverse (\itree -> itree.agentRuntime.agentTools) itrees
