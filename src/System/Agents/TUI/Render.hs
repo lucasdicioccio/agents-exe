@@ -45,6 +45,18 @@ llmMessageAttr = attrName "llmMessage"
 thinkingAttr :: AttrName
 thinkingAttr = attrName "thinking"
 
+-- | Attribute for info status messages.
+statusInfoAttr :: AttrName
+statusInfoAttr = attrName "statusInfo"
+
+-- | Attribute for warning status messages.
+statusWarningAttr :: AttrName
+statusWarningAttr = attrName "statusWarning"
+
+-- | Attribute for error status messages.
+statusErrorAttr :: AttrName
+statusErrorAttr = attrName "statusError"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -73,9 +85,12 @@ render_ui st
 -- | Main layout with sidebar and content area.
 render_mainLayout :: TuiState -> Widget N
 render_mainLayout st =
-    hBox
-        [ render_sidebar st
-        , render_contentArea st
+    vBox
+        [ hBox
+            [ render_sidebar st
+            , render_contentArea st
+            ]
+        , render_statusBar (st ^. tuiUI . statusMessage)
         ]
 
 -- | Sidebar with agent and conversation lists.
@@ -146,6 +161,23 @@ render_sessionArea st =
             hBox
                 [ render_sessionView st
                 ]
+
+-------------------------------------------------------------------------------
+-- Status Bar Rendering
+-------------------------------------------------------------------------------
+
+-- | Render status bar if there's a message.
+render_statusBar :: Maybe StatusMessage -> Widget N
+render_statusBar Nothing = emptyWidget
+render_statusBar (Just msg) =
+    withAttr (statusAttr msg.statusSeverity) $
+        txt $ " " <> statusText msg
+
+-- | Get the appropriate attribute for a status severity level.
+statusAttr :: StatusSeverity -> AttrName
+statusAttr StatusInfo = statusInfoAttr
+statusAttr StatusWarning = statusWarningAttr
+statusAttr StatusError = statusErrorAttr
 
 -------------------------------------------------------------------------------
 -- Agent List Rendering
@@ -356,5 +388,8 @@ tui_appAttrMap _ =
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
         , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
         , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
+        , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (statusWarningAttr, BrickUtil.fg Vty.yellow)
+        , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         ]
 

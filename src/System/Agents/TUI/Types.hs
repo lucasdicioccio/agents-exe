@@ -17,6 +17,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Vector as Vector
+import Data.Time (UTCTime)
 
 import System.Agents.AgentTree (AgentTree)
 import System.Agents.ToolRegistration (ToolRegistration)
@@ -45,6 +46,25 @@ data WidgetName
 type N = WidgetName
 
 -------------------------------------------------------------------------------
+-- Status Message Types
+-------------------------------------------------------------------------------
+
+-- | Severity level for status messages.
+data StatusSeverity
+    = StatusInfo
+    | StatusWarning
+    | StatusError
+    deriving (Show, Eq)
+
+-- | A status message with timestamp for auto-clear logic.
+data StatusMessage = StatusMessage
+    { statusText :: Text
+    , statusSeverity :: StatusSeverity
+    , statusTimestamp :: UTCTime
+    }
+    deriving (Show)
+
+-------------------------------------------------------------------------------
 -- Application Events
 -------------------------------------------------------------------------------
 
@@ -54,6 +74,8 @@ data AppEvent
     | AppEvent_AgentStepProgrress ConversationId Session
     | AppEvent_AgentNeedsInput ConversationId
     | AppEvent_AgentTrace Runtime.Trace
+    | AppEvent_ShowStatus StatusSeverity Text
+    | AppEvent_ClearStatus
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -131,6 +153,8 @@ data UIState = UIState
     , _ongoingConversations :: Set ConversationId
     -- ^ Conversations currently being processed by an agent
     , _coreAgentTools :: [(AgentId,[ToolRegistration])]
+    , _statusMessage :: Maybe StatusMessage
+    -- ^ Current status message to display (if any)
     }
 
 makeLenses ''UIState
@@ -176,6 +200,7 @@ initUIState agents loadedSessions =
         , _unreadConversations = Set.empty
         , _ongoingConversations = Set.empty
         , _coreAgentTools = []
+        , _statusMessage = Nothing
         }
 
 -------------------------------------------------------------------------------
