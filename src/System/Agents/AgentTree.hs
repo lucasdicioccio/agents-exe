@@ -206,8 +206,10 @@ discoverAgentConfigs ::
     Props ->
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigGraph)
 discoverAgentConfigs props = do
+    -- Normalize the root file path for consistent comparison
+    let normalizedRoot = FilePath.normalise props.rootAgentFile
     -- Use BFS to discover all agents starting from root
-    result <- bfsDiscovery props [(props.rootAgentFile, Nothing)] Map.empty
+    result <- bfsDiscovery props [(normalizedRoot, Nothing)] Map.empty
     case result of
         Left errs -> pure $ Left errs
         Right nodes -> do
@@ -231,8 +233,10 @@ bfsDiscovery ::
     IO (Either (NonEmpty.NonEmpty LoadingError) (Map.Map AgentSlug AgentConfigNode))
 bfsDiscovery _ [] visited = pure $ Right visited
 bfsDiscovery props ((filePath, mParent) : queue) visited = do
+    -- Normalize the file path for consistent comparison
+    let normalizedFilePath = FilePath.normalise filePath
     -- Check if we've already loaded this file
-    case findNodeByFile filePath visited of
+    case findNodeByFile normalizedFilePath visited of
         Just (slug, _) -> do
             -- File already loaded, check for parent reference
             let visited' = case mParent of
@@ -271,6 +275,9 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                             let extraRefs = maybe [] (fmap extraAgentSlug) agent.extraAgents
                             let extraPaths = maybe [] (fmap extraAgentPath) agent.extraAgents
 
+                            -- Resolve extra agent paths to absolute/normalized paths
+                            let resolvedExtraPaths = map (\p -> FilePath.normalise (rootDir </> p)) extraPaths
+
                             -- Create node
                             let node =
                                     AgentConfigNode
@@ -285,15 +292,18 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                             -- Add children to queue (with this slug as parent)
                             let childQueue = [(f, Just slug) | f <- childFiles]
 
-                            -- Add extra agents to queue (no parent relationship)
-                            let extraQueue = [(f, Nothing) | f <- extraPaths]
+                            -- Add extra agents to queue (with this slug as parent for tracking)
+                            -- Pass the resolved absolute paths for proper file matching
+                            let extraQueue = [(f, Just slug) | f <- resolvedExtraPaths]
 
                             bfsDiscovery props (queue ++ childQueue ++ extraQueue) visited'
 
--- | Find a node by its file path
+-- | Find a node by its file path using normalized comparison.
+-- Both the search path and stored paths are normalized before comparison.
 findNodeByFile :: FilePath -> Map.Map AgentSlug AgentConfigNode -> Maybe (AgentSlug, AgentConfigNode)
 findNodeByFile file nodes =
-    List.find (\(_, n) -> n.nodeFile == file) (Map.toList nodes)
+    let normalizedSearchPath = FilePath.normalise file
+    in List.find (\(_, n) -> FilePath.normalise n.nodeFile == normalizedSearchPath) (Map.toList nodes)
 
 -------------------------------------------------------------------------------
 -- Phase 1: Reference Validation
