@@ -13,6 +13,10 @@
 -- The toolbox follows patterns similar to McpToolbox and BashToolbox for
 -- consistent integration with the agents system.
 --
+-- Key feature: Name normalization for LLM compatibility.
+-- OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
+-- which are normalized to LLM-safe names using 'normalizeForLLM'.
+--
 -- Example usage:
 --
 -- @
@@ -66,9 +70,11 @@ module System.Agents.Tools.OpenAPIToolbox (
     
     -- * Operation helpers
     getOperationId,
+    getToolByNormalizedName,
     
-    -- * Naming helper
+    -- * Naming helpers
     openapi2LLMName,
+    normalizeToolName,
 ) where
 
 import Control.Exception (try)
@@ -78,15 +84,24 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.CaseInsensitive as CI
+import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Agents.Tools.OpenAPI.Converter (OpenAPITool (..), convertOpenAPIToTools)
+import System.Agents.Tools.OpenAPI.Converter (
+    OpenAPITool (..),
+    NameMapping (..),
+    buildToolNameMapping,
+    findToolByNormalizedName,
+    normalizeForLLM,
+    convertOpenAPIToTools,
+ )
 import System.Agents.Tools.OpenAPI.Resolver (dereferenceSpec)
 import System.Agents.Tools.OpenAPI.Types (
     Method,
@@ -129,6 +144,8 @@ data Trace
     -- ^ Error during schema dereferencing
     | ToolExecutionErrorTrace !Text
     -- ^ Error during tool execution
+    | ToolNameNormalizedTrace !Text !Text
+    -- ^ Original name and normalized name (for debugging)
     deriving (Show)
 
 -- -------------------------------------------------------------------------
@@ -164,6 +181,7 @@ data Config = Config
 -- * A name for identification
 -- * The base URL for API calls
 -- * A list of available tools
+-- * A name mapping for LLM-safe tool names
 -- * The HTTP runtime for making requests
 -- * An optional header function for dynamic auth headers
 data Toolbox = Toolbox
@@ -171,6 +189,8 @@ data Toolbox = Toolbox
     , toolboxBaseUrl :: Text
     , toolboxTools :: [OpenAPITool]
     -- ^ Tools converted from the OpenAPI spec
+    , toolboxNameMapping :: Map Text NameMapping
+    -- ^ Mapping from normalized LLM names to original operation IDs
     , httpRuntime :: HttpClient.Runtime
     -- ^ HTTP client runtime
     , headerFunc :: Maybe (IO (Map Text Text))
@@ -191,6 +211,7 @@ data Toolbox = Toolbox
 -- 3. Parses the JSON to an OpenAPISpec
 -- 4. Dereferences schema references ($ref)
 -- 5. Converts operations to tools
+-- 6. Builds the name mapping for LLM-safe names
 --
 -- Returns an 'InitializationError' if any step fails.
 initializeToolbox ::
@@ -224,16 +245,34 @@ initializeToolbox tracer config = do
                     let tools = convertOpenAPIToTools dereferencedSpec
                     runTracer tracer (ToolsConvertedTrace (length tools))
 
+                    -- Build name mapping for LLM-safe names
+                    let nameMapping = buildToolNameMapping toolboxName tools
+                    
+                    -- Trace name normalizations (for debugging)
+                    mapM_ (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m))) 
+                          (Map.elems nameMapping)
+
                     -- Create toolbox
                     pure $ Right $ Toolbox
-                        { toolboxName = Text.takeWhile (/= '/') (Text.drop 8 config.configUrl)
-                            -- Use part of URL as name, removing protocol
+                        { toolboxName = toolboxName
                         , toolboxBaseUrl = config.configBaseUrl
                         , toolboxTools = tools
+                        , toolboxNameMapping = nameMapping
                         , httpRuntime = runtime
                         , headerFunc = Nothing
                         , staticHeaders = config.configHeaders
                         }
+  where
+    toolboxName = extractToolboxName config.configUrl
+
+-- | Extract a toolbox name from the spec URL.
+extractToolboxName :: Text -> Text
+extractToolboxName url = 
+    let withoutProtocol = Text.dropWhile (/= '/') $ Text.drop 8 url
+        hostPart = Text.takeWhile (/= '/') withoutProtocol
+    in if Text.null hostPart 
+       then "openapi" 
+       else normalizeForLLM hostPart
 
 -- | Fetch the OpenAPI spec from a URL.
 fetchSpec ::
@@ -251,6 +290,26 @@ fetchSpec runtime url = do
             let status = HttpTypes.statusCode (HttpClient.responseStatus response)
                 body = HttpClient.responseBody response
              in pure $ Right (status, body)
+
+-- -------------------------------------------------------------------------
+-- Tool Lookup
+-- -------------------------------------------------------------------------
+
+-- | Get a tool by its normalized LLM name.
+--
+-- This is used during tool execution to find the original tool
+-- when the LLM calls a tool by its normalized name.
+--
+-- Returns 'Nothing' if no tool with that normalized name exists.
+getToolByNormalizedName ::
+    Toolbox ->
+    Text ->
+    Maybe OpenAPITool
+getToolByNormalizedName toolbox normalizedName = do
+    -- Look up the original operation ID from the mapping
+    originalOpId <- findToolByNormalizedName (toolboxNameMapping toolbox) normalizedName
+    -- Find the tool with that original operation ID
+    find ((== Just originalOpId) . opOperationId . toolOperation) (toolboxTools toolbox)
 
 -- -------------------------------------------------------------------------
 -- Tool Handler Creation
@@ -456,7 +515,11 @@ buildRequest method fullUrl queryParams mbody headers = do
 
     pure finalReq
 
--- | Execute an HTTP request.
+-- | Execute an HTTP request with custom headers.
+--
+-- This function builds a request with all parameters (method, URL, query params,
+-- body, and custom headers) and executes it using the runtime's 'runRequest'
+-- function.
 executeRequest ::
     HttpClient.Runtime ->
     Method ->
@@ -466,29 +529,16 @@ executeRequest ::
     Map Text Text ->
     IO (Either Text (Text, ToolResult))
 executeRequest runtime method fullUrl queryParams mbody headers = do
-    _ <- buildRequest method fullUrl queryParams mbody headers
-
-    -- Use the runtime to make the request
-    -- Note: We're using a simplified approach here
-    -- In a real implementation, we'd use the HttpClient.Runtime properly
+    -- Build the request with all headers and parameters
+    req <- buildRequest method fullUrl queryParams mbody headers
+    
+    -- Execute the request using the runtime
     let tracer = Tracer (const (pure ()))
-    result <- executeRequest' runtime tracer method fullUrl mbody
+    result <- HttpClient.runRequest runtime tracer req
 
     case result of
-        Left err -> pure $ Left err
-        Right response -> handleResponse toolInfo response
-  where
-    toolInfo = (method, fullUrl)
-    executeRequest' rt tr m url mb
-        | m == "GET" = do
-            res <- HttpClient.get rt tr url
-            pure $ either (Left . Text.pack . show) Right res
-        | m == "POST" = do
-            res <- HttpClient.post rt tr url mb
-            pure $ either (Left . Text.pack . show) Right res
-        | otherwise = do
-            -- For other methods, we need to use the underlying manager
-            pure $ Left $ "Method not supported: " <> m
+        Left err -> pure $ Left (Text.pack $ show err)
+        Right response -> handleResponse (method, fullUrl) response
 
 -- -------------------------------------------------------------------------
 -- Response Handling
@@ -536,19 +586,39 @@ getOperationId :: Operation -> Maybe Text
 getOperationId = opOperationId
 
 -- -------------------------------------------------------------------------
--- Naming helper
+-- Naming helpers
 -- -------------------------------------------------------------------------
+
+-- | Normalize a tool name for LLM compatibility.
+--
+-- This is a re-export of 'normalizeForLLM' for convenience.
+normalizeToolName :: Text -> Text
+normalizeToolName = normalizeForLLM
 
 -- | Convert an OpenAPI operation ID to an LLM tool name.
 --
--- Names are prefixed with @openapi_@ and include the toolbox name
--- to avoid conflicts.
+-- Names are prefixed with @openapi_@ and include the normalized toolbox name
+-- and normalized operation ID to avoid conflicts and ensure LLM compatibility.
+--
+-- The operation ID is normalized to replace invalid characters:
+-- - Dots (.) become underscores (_)
+-- - Slashes (/) become underscores (_)
+-- - Other invalid characters become underscores
+-- - Names starting with digits are prefixed with 't'
 --
 -- Example:
 --
 -- >>> openapi2LLMName "myApi" "getPet"
 -- ToolName {getToolName = "openapi_myApi_getPet"}
+--
+-- >>> openapi2LLMName "myApi" "pet.findByStatus"
+-- ToolName {getToolName = "openapi_myApi_pet_findByStatus"}
+--
+-- >>> openapi2LLMName "myApi" "2.0/getPet"
+-- ToolName {getToolName = "openapi_myApi_t2_0_getPet"}
 openapi2LLMName :: Text -> Text -> OpenAI.ToolName
 openapi2LLMName tboxName operationId =
-    OpenAI.ToolName ("openapi_" <> tboxName <> "_" <> operationId)
+    let normalizedToolbox = normalizeForLLM tboxName
+        normalizedOpId = normalizeForLLM operationId
+    in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
 

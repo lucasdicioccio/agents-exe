@@ -6,3 +6,4 @@ logs.json
 conv.*.json
 dist-newstyle/
 salvaged/
+localdev-agents/

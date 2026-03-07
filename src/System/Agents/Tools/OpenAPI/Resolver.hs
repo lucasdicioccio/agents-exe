@@ -4,8 +4,11 @@
 -- | JSON Schema reference resolution ($ref dereferencing) for OpenAPI specs.
 --
 -- This module provides functions to recursively resolve '$ref' pointers in
--- OpenAPI schemas. This is essential because OpenAPI specs use references
--- to avoid duplication and improve maintainability.
+-- OpenAPI and Swagger 2.0 specs. This is essential because OpenAPI specs use
+-- references to avoid duplication and improve maintainability.
+--
+-- Supports both OpenAPI 3.x refs (@#/components/schemas/Name@) and
+-- Swagger 2.0 refs (@#/definitions/Name@).
 --
 -- Example:
 -- >>> import qualified Data.Map.Strict as Map
@@ -18,14 +21,14 @@ module System.Agents.Tools.OpenAPI.Resolver (
     -- * Core resolution functions
     resolveSchema,
     dereferenceSpec,
-    
+
     -- * Reference path handling
     RefPath (..),
     parseRef,
-    
+
     -- * Resolution errors
     ResolutionError (..),
-    
+
     -- * Low-level resolution
     resolveRef,
     resolveSchemaWithDepth,
@@ -62,11 +65,19 @@ import System.Agents.Tools.OpenAPI.Types (
 --         , refName = "Pet"
 --         }
 -- @
+--
+-- For Swagger 2.0 refs like @#/definitions/Pet@:
+-- @
+-- RefPath { refComponents = "definitions"
+--         , refSection = ""
+--         , refName = "Pet"
+--         }
+-- @
 data RefPath = RefPath
     { refComponents :: Text
-    -- ^ The first path segment (usually "components")
+    -- ^ The first path segment (usually "components" or "definitions")
     , refSection :: Text
-    -- ^ The second path segment (e.g., "schemas", "parameters")
+    -- ^ The second path segment (e.g., "schemas", "parameters") or empty for Swagger 2.0
     , refName :: Text
     -- ^ The name of the referenced entity
     }
@@ -74,12 +85,18 @@ data RefPath = RefPath
 
 -- | Parse a reference string into a 'RefPath'.
 --
--- Supports internal references of the form @#/components/schemas/Name@.
+-- Supports internal references of the form:
+-- * @#/components/schemas/Name@ (OpenAPI 3.x)
+-- * @#/definitions/Name@ (Swagger 2.0)
+--
 -- External references (URLs) are not supported and will return 'Nothing'.
 --
 -- Examples:
 -- >>> parseRef "#/components/schemas/Pet"
 -- Just (RefPath {refComponents = "components", refSection = "schemas", refName = "Pet"})
+--
+-- >>> parseRef "#/definitions/Pet"
+-- Just (RefPath {refComponents = "definitions", refSection = "", refName = "Pet"})
 --
 -- >>> parseRef "http://example.com/schema.json"
 -- Nothing
@@ -92,8 +109,15 @@ parseRef ref
     | Text.isPrefixOf "#/" ref =
         let parts = Text.splitOn "/" (Text.drop 2 ref)
          in case parts of
-                (comp : sect : name : _) ->
-                    Just $ RefPath comp sect name
+                -- OpenAPI 3.x format: #/components/schemas/Name
+                ("components" : "schemas" : name : _) ->
+                    Just $ RefPath "components" "schemas" name
+                -- Swagger 2.0 format: #/definitions/Name
+                ("definitions" : name : _) ->
+                    Just $ RefPath "definitions" "" name
+                -- Generic format: try to extract name from the last segment
+                parts' | not (null parts') ->
+                    Just $ RefPath (head parts') (if length parts' > 2 then parts' !! 1 else "") (last parts')
                 _ -> Nothing
     -- Relative refs not starting with #/ are not supported
     | otherwise = Nothing
@@ -189,6 +213,8 @@ resolveSchemaWithDepth schema components depth visited = do
 -- | Resolve a reference path to a schema from components.
 --
 -- Looks up the schema in the components/schemas section.
+-- Supports both OpenAPI 3.x refs (#/components/schemas/Name) and
+-- Swagger 2.0 refs (#/definitions/Name).
 resolveRef :: Text -> Components -> Either ResolutionError Schema
 resolveRef ref components = do
     refPath <- maybe (Left $ InvalidRefPath ref) Right (parseRef ref)
@@ -205,7 +231,7 @@ resolveRef ref components = do
 --
 -- This is the main entry point for schema resolution. It handles:
 --
--- * Simple references like @#/components/schemas/Pet@
+-- * Simple references like @#/components/schemas/Pet@ or @#/definitions/Pet@
 -- * Nested references (schema A refs B refs C)
 -- * Arrays with item references
 -- * Object properties with references

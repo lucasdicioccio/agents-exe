@@ -8,9 +8,20 @@
     "modelName": "kimi-k2.5",
     "toolDirectory": "tools",
     "announce": "The main agent, capable of reasoning.",
-    "systemPrompt":
-            [ "You are a helpful software agent trying to solve user requests"
-            ]
+    "systemPrompt": [
+      "You are a helpful software agent trying to solve user requests"
+    ],
+    "openApiToolboxes": [
+      {
+        "tag": "OpenAPIServer",
+        "contents": {
+          "SpecUrl": "http://localhost:8001/openapi.json",
+          "BaseUrl": "http://localhost:8001",
+          "Headers": {},
+          "Token": "jqNecn]ou_ime$@q13m_231~@xmwWEE"
+        }
+      }
+    ]
   }
 }
 

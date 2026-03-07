@@ -62,8 +62,10 @@ newRuntime ::
     ToolboxDirectory ->
     [IOToolBuilder] ->
     [McpToolConfig] ->
+    -- | OpenAPI tool registrations - initialized and ready to use
+    [ToolRegistration] ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
+newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
     toolz <- BashToolbox.initializeBackroundToolbox (contramap (AgentTrace_Loading slug uid) tracer) tooldir
@@ -76,13 +78,20 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes = do
             let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
 
-            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readMcpToolsRegistrations
+            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools
             let rt = Runtime slug uid announce tracer httpRt model readTools toolbox.triggerReload
             pure $ Right rt
   where
+    readAdditionalTools :: IO [ToolRegistration]
+    readAdditionalTools = do
+        mcpTools <- readMcpToolsRegistrations
+        -- OpenAPI tools are pre-registered and static
+        pure $ mcpTools <> openApiToolRegs
+
     readMcpToolsRegistrations :: IO [ToolRegistration]
     readMcpToolsRegistrations = do
         -- TODO: would be nice to collect the lefts and trace errors upon relaoding
         lists <- traverse (atomically . readTVar . McpTools.toolsList) $ mcpToolboxes
         let reg tb tds = rights [registerMcpToolInLLM tb td | td <- tds]
         pure $ mconcat $ zipWith reg mcpToolboxes lists
+

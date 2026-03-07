@@ -48,6 +48,7 @@ tests =
         , converterTests
         , integrationTests
         , propertyTests
+        , swaggerV2Tests
         ]
 
 -- -------------------------------------------------------------------------
@@ -706,7 +707,99 @@ test_findParam = testCase "Finds parameter by name" $ do
         Nothing -> pure ()
 
 -- -------------------------------------------------------------------------
--- 5. Property Tests (Manual Properties)
+-- 5. Swagger V2 Tests
+-- -------------------------------------------------------------------------
+
+-- | Tests for Swagger 2.0 format support.
+swaggerV2Tests :: TestTree
+swaggerV2Tests =
+    testGroup
+        "Swagger 2.0 Support"
+        [ test_parseSwaggerV2Spec
+        , test_swaggerV2Definitions
+        , test_swaggerV2BodyParam
+        , test_swaggerV2FormDataParam
+        , test_swaggerV2InitializeToolbox
+        ]
+
+-- | Test that Swagger 2.0 petstore spec can be parsed.
+test_parseSwaggerV2Spec :: TestTree
+test_parseSwaggerV2Spec = testCase "Can parse Swagger 2.0 (OpenAPI v2) Petstore spec" $ do
+    spec <- loadTestSpec "petstore-v2.json"
+    assertBool "Has paths" (not $ Map.null $ specPaths spec)
+    -- Swagger 2.0 specs should be converted to have components
+    assertBool "Has components" (isJust $ specComponents spec)
+
+-- | Test that Swagger 2.0 definitions are accessible.
+test_swaggerV2Definitions :: TestTree
+test_swaggerV2Definitions = testCase "Swagger 2.0 definitions are accessible as components" $ do
+    spec <- loadTestSpec "petstore-v2.json"
+    case specComponents spec of
+        Nothing -> assertFailure "Expected components"
+        Just comps -> case componentsSchemas comps of
+            Nothing -> assertFailure "Expected schemas in components"
+            Just schemas -> do
+                -- Check that Pet, Order, User definitions are present
+                assertBool "Has Pet schema" (Map.member "Pet" schemas)
+                assertBool "Has Order schema" (Map.member "Order" schemas)
+                assertBool "Has User schema" (Map.member "User" schemas)
+                assertBool "Has Category schema" (Map.member "Category" schemas)
+                assertBool "Has Tag schema" (Map.member "Tag" schemas)
+
+-- | Test that Swagger 2.0 body parameters are converted to requestBody.
+test_swaggerV2BodyParam :: TestTree
+test_swaggerV2BodyParam = testCase "Swagger 2.0 body params converted to requestBody" $ do
+    spec <- loadTestSpec "petstore-v2.json"
+    -- Find the POST /pet operation which has a body parameter
+    case Map.lookup "/pet" (specPaths spec) of
+        Nothing -> assertFailure "Path /pet not found"
+        Just methods -> case Map.lookup "POST" methods of
+            Nothing -> assertFailure "POST method not found"
+            Just op -> do
+                -- Should have requestBody converted from body parameter
+                assertBool "Has requestBody" (isJust $ opRequestBody op)
+                case opRequestBody op of
+                    Just rb -> do
+                        assertBool "Request body is required" (reqBodyRequired rb)
+                        assertBool "Has content" (not $ Map.null $ reqBodyContent rb)
+                    Nothing -> pure ()
+
+-- | Test that Swagger 2.0 formData parameters are handled.
+test_swaggerV2FormDataParam :: TestTree
+test_swaggerV2FormDataParam = testCase "Swagger 2.0 formData params are handled" $ do
+    spec <- loadTestSpec "petstore-v2.json"
+    -- Find the POST /pet/{petId}/uploadImage operation which has formData params
+    case Map.lookup "/pet/{petId}/uploadImage" (specPaths spec) of
+        Nothing -> assertFailure "Path /pet/{petId}/uploadImage not found"
+        Just methods -> case Map.lookup "POST" methods of
+            Nothing -> assertFailure "POST method not found"
+            Just op -> do
+                -- Should have parameters (including the formData ones)
+                assertBool "Has parameters" (not $ null $ opParameters op)
+                -- Check that the file parameter exists
+                let hasFileParam = any (\p -> paramName p == "file") (opParameters op)
+                assertBool "Has file parameter" hasFileParam
+
+-- | Test that initializeToolbox can handle Swagger 2.0 specs.
+test_swaggerV2InitializeToolbox :: TestTree
+test_swaggerV2InitializeToolbox = testCase "initializeToolbox works with Swagger 2.0 spec" $ do
+    -- Read the spec file directly
+    content <- LBS.readFile "test/data/petstore-v2.json"
+    case decode content of
+        Nothing -> assertFailure "Failed to parse Swagger 2.0 spec"
+        Just spec -> do
+            -- Verify it has paths
+            assertBool "Spec has paths" (not $ Map.null $ specPaths spec)
+            -- Verify tools can be converted
+            let tools = convertOpenAPIToTools spec
+            assertBool "Tools were converted" (not $ null tools)
+            -- Should have tools for pet operations
+            let toolNames = map toolName tools
+            assertBool "Has addPet tool" (any ("addPet" `Text.isInfixOf`) toolNames)
+            assertBool "Has getPetById tool" (any ("getPetById" `Text.isInfixOf`) toolNames)
+
+-- -------------------------------------------------------------------------
+-- 6. Property Tests (Manual Properties)
 -- -------------------------------------------------------------------------
 
 -- | Property-like tests using standard assertions.
