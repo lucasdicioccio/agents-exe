@@ -203,8 +203,8 @@ test-suite agents-tests
                       agents-lib,
                       aeson,
                       bytestring,
+                      containers,
                       text,
                       tasty,
                       tasty-hunit
-  
 
