@@ -22,6 +22,7 @@ import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
+import Data.Time (getCurrentTime, diffUTCTime)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode(..))
 import System.FilePath ((<.>))
@@ -56,6 +57,10 @@ tui_appHandleEvent ev = do
             handleConversationNeedsInput convId
         AppEvent (AppEvent_AgentTrace trace) ->
             handleAgentTrace trace
+        AppEvent (AppEvent_ShowStatus severity text) ->
+            handleShowStatus severity text
+        AppEvent AppEvent_ClearStatus ->
+            handleClearStatus
 
         -- VTY events
         VtyEvent (Vty.EvKey Vty.KEsc _) ->
@@ -212,6 +217,16 @@ handleAgentToolsEvent ev =
         _ -> pure ()
 
 -------------------------------------------------------------------------------
+-- Status Message Helpers
+-------------------------------------------------------------------------------
+
+-- | Show a status message in the TUI.
+showStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
+showStatus severity text = do
+    chan <- use eventChan
+    liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
+
+-------------------------------------------------------------------------------
 -- Markdown Export Handlers
 -------------------------------------------------------------------------------
 
@@ -260,16 +275,14 @@ handleDumpSessionToMarkdown = do
             let markdown = formatSessionMarkdown session
                 fileName = "conv." <> show cid <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
-            -- Could show a status message here in the future
-            pure ()
+            showStatus StatusInfo $ "Exported to " <> Text.pack fileName
         (Just session, Nothing ) -> do
             let markdown = formatSessionMarkdown session
                 fileName = "sess." <> show session.sessionId <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
-            -- Could show a status message here in the future
-            pure ()
+            showStatus StatusInfo $ "Exported to " <> Text.pack fileName
         _ -> do
-            pure ()  -- No session or conversation selected
+            showStatus StatusWarning "No session or conversation selected"
 
 -- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
 -- Uses the AGENT_MD_VIEWER environment variable if set.
@@ -291,9 +304,11 @@ handleViewSessionWithExternalViewer = do
                             (ExitFailure code, _, err) ->
                                 hPutStrLn stderr $ "AGENT_MD_VIEWER failed with exit code " ++ show code ++ ": " ++ err
                             _ -> pure ()
-                    pure ()
-                Nothing -> pure ()  -- No session selected
-        Nothing -> pure ()  -- AGENT_MD_VIEWER not set
+                    showStatus StatusInfo $ "Opening with " <> Text.pack viewerCmd
+                Nothing -> do
+                    showStatus StatusWarning "No session selected"
+        Nothing -> do
+            showStatus StatusWarning "AGENT_MD_VIEWER not set"
 
 -------------------------------------------------------------------------------
 -- Focus Management
@@ -319,7 +334,7 @@ toggleZoom = tuiUI . zoomed %= not
 -- Application Event Handlers
 -------------------------------------------------------------------------------
 
--- | Handle heartbeat - refresh UI state.
+-- | Handle heartbeat - refresh UI state and auto-clear expired status messages.
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
     -- Refresh conversations from core
@@ -332,6 +347,26 @@ handleHeartbeat = do
     agentTools <- liftIO $ traverse (\itree -> itree.agentRuntime.agentTools) itrees
     let toolz = zipWith (,) [ itree.agentRuntime.agentId | itree <- itrees] agentTools
     tuiUI . coreAgentTools .= toolz
+
+    -- Auto-clear status messages after 5 seconds
+    mStatus <- use (tuiUI . statusMessage)
+    case mStatus of
+        Just status -> do
+            now <- liftIO getCurrentTime
+            when (diffUTCTime now status.statusTimestamp > 5) $
+                tuiUI . statusMessage .= Nothing
+        Nothing -> pure ()
+
+-- | Handle show status event.
+handleShowStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
+handleShowStatus severity text = do
+    now <- liftIO getCurrentTime
+    tuiUI . statusMessage .= Just (StatusMessage text severity now)
+
+-- | Handle clear status event.
+handleClearStatus :: EventM N TuiState ()
+handleClearStatus =
+    tuiUI . statusMessage .= Nothing
 
 -- | Handle new conversation event.
 handleNewConversation :: ConversationId -> EventM N TuiState ()
