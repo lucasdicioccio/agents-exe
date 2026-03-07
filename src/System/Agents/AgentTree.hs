@@ -71,7 +71,7 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
 
-import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..), McpServerDescription (..))
+import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..), McpServerDescription (..), OpenAPIToolboxDescription (..), OpenAPIServerDescription (..))
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
@@ -80,6 +80,7 @@ import System.Agents.Runtime (Runtime (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 
 import System.Agents.ApiKeys
 
@@ -87,6 +88,7 @@ import System.Agents.ApiKeys
 data Trace
     = AgentTrace Runtime.Trace
     | McpTrace McpServerDescription McpTools.Trace
+    | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     | CyclicReferencesWarning [[AgentSlug]]
@@ -185,6 +187,7 @@ data ReferenceError
 data LoadingError
     = AgentLoadingError FileLoader.InvalidAgentError
     | ReferenceError ReferenceError
+    | OpenAPIInitError Text String  -- ^ Description and error message
     | OtherError String
     deriving (Show)
 
@@ -716,6 +719,51 @@ withAgentTreeRuntime props continue = do
 
 type PromptModifier = Text -> Text
 
+-- | Convert OpenAPI toolbox description to toolbox configuration.
+openApiDescToConfig :: OpenAPIServerDescription -> OpenAPIToolbox.Config
+openApiDescToConfig desc =
+    OpenAPIToolbox.Config
+        { OpenAPIToolbox.configUrl = openApiSpecUrl desc
+        , OpenAPIToolbox.configBaseUrl = openApiBaseUrl desc
+        , OpenAPIToolbox.configHeaders = Maybe.fromMaybe Map.empty (openApiHeaders desc)
+        , OpenAPIToolbox.configToken = openApiToken desc
+        }
+
+-- | Initialize OpenAPI toolboxes and return their tool registrations.
+--
+-- This function takes OpenAPI toolbox descriptions, initializes each toolbox,
+-- and registers all tools. If any toolbox fails to initialize, an error is returned.
+initializeOpenAPIToolboxes ::
+    Tracer IO Trace ->
+    [OpenAPIToolboxDescription] ->
+    IO (Either LoadingError [ToolRegistration])
+initializeOpenAPIToolboxes tracer descriptions = do
+    results <- mapM initializeOne descriptions
+    case concatEithers results of
+        Left [] -> pure $ Left $ OtherError "Unknown OpenAPI initialization error"
+        Left (err : _) -> pure $ Left err  -- Return first error
+        Right allTools -> pure $ Right $ concat allTools
+  where
+    initializeOne :: OpenAPIToolboxDescription -> IO (Either LoadingError [ToolRegistration])
+    initializeOne desc@(OpenAPIServer srvDesc) = do
+        let config = openApiDescToConfig srvDesc
+        initResult <- OpenAPIToolbox.initializeToolbox (contramap (OpenAPITrace desc) tracer) config
+        case initResult of
+            Left err ->
+                pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) (show err)
+            Right toolbox -> do
+                regResult <- registerOpenAPITools toolbox
+                case regResult of
+                    Left err ->
+                        pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) err
+                    Right tools ->
+                        pure $ Right tools
+
+    concatEithers :: [Either a b] -> Either [a] [b]
+    concatEithers eithers =
+        let (lefts, rights) = Either.partitionEithers eithers
+         in if null lefts then Right rights else Left lefts
+
 -- | Initialize a runtime with deferred tool resolution for extra agents.
 --
 -- This function creates a runtime where the tool list is built dynamically.
@@ -740,26 +788,32 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            -- Create the runtime with deferred tool resolution
-            -- The tools action will combine helper agents (immediate) with
-            -- extra agents (resolved via registry at call time)
-            Runtime.newRuntime
-                desc.slug
-                desc.announce
-                (contramap AgentTrace tracer)
-                key
-                ( OpenAI.Model
-                    flavor
-                    (OpenAI.ApiBaseUrl desc.modelUrl)
-                    desc.modelName
-                    ( OpenAI.SystemPrompt $
-                        modifyPrompt $
-                            Text.unlines desc.systemPrompt
-                    )
-                )
-                (rootDir </> desc.toolDirectory)
-                [agentToTool' rt | rt <- helperAgents]
-                mcpToolboxes
+            -- Initialize OpenAPI toolboxes
+            openApiToolsResult <- initializeOpenAPIToolboxes tracer (Maybe.fromMaybe [] desc.openApiToolboxes)
+            case openApiToolsResult of
+                Left err -> pure $ Left (show err)
+                Right openApiToolRegs -> do
+                    -- Create the runtime with deferred tool resolution
+                    -- The tools action will combine helper agents (immediate) with
+                    -- extra agents (resolved via registry at call time)
+                    Runtime.newRuntime
+                        desc.slug
+                        desc.announce
+                        (contramap AgentTrace tracer)
+                        key
+                        ( OpenAI.Model
+                            flavor
+                            (OpenAI.ApiBaseUrl desc.modelUrl)
+                            desc.modelName
+                            ( OpenAI.SystemPrompt $
+                                modifyPrompt $
+                                    Text.unlines desc.systemPrompt
+                            )
+                        )
+                        (rootDir </> desc.toolDirectory)
+                        [agentToTool' rt | rt <- helperAgents]
+                        mcpToolboxes
+                        openApiToolRegs
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
@@ -787,23 +841,29 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            Runtime.newRuntime
-                desc.slug
-                desc.announce
-                (contramap AgentTrace tracer)
-                key
-                ( OpenAI.Model
-                    flavor
-                    (OpenAI.ApiBaseUrl desc.modelUrl)
-                    desc.modelName
-                    ( OpenAI.SystemPrompt $
-                        modifyPrompt $
-                            Text.unlines desc.systemPrompt
-                    )
-                )
-                (rootDir </> desc.toolDirectory)
-                [agentToTool' rt | rt <- helperAgents]
-                mcpToolboxes
+            -- Initialize OpenAPI toolboxes
+            openApiToolsResult <- initializeOpenAPIToolboxes tracer (Maybe.fromMaybe [] desc.openApiToolboxes)
+            case openApiToolsResult of
+                Left err -> pure $ Left (show err)
+                Right openApiToolRegs -> do
+                    Runtime.newRuntime
+                        desc.slug
+                        desc.announce
+                        (contramap AgentTrace tracer)
+                        key
+                        ( OpenAI.Model
+                            flavor
+                            (OpenAI.ApiBaseUrl desc.modelUrl)
+                            desc.modelName
+                            ( OpenAI.SystemPrompt $
+                                modifyPrompt $
+                                    Text.unlines desc.systemPrompt
+                            )
+                        )
+                        (rootDir </> desc.toolDirectory)
+                        [agentToTool' rt | rt <- helperAgents]
+                        mcpToolboxes
+                        openApiToolRegs
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =

@@ -8,9 +8,9 @@
     "modelName": "kimi-k2.5",
     "toolDirectory": "tools",
     "announce": "The main agent, capable of reasoning.",
-    "systemPrompt":
-            [ "You are a helpful software agent trying to solve user requests"
-            ]
+    "systemPrompt": [
+      "You are a helpful software agent trying to solve user requests"
+    ]
   }
 }
 

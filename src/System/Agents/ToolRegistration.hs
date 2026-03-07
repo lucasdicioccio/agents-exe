@@ -11,8 +11,10 @@
 -- * MCP tools - Tools exposed via Model Context Protocol
 -- * OpenAPI tools - Tools generated from OpenAPI specifications
 --
--- Each tool type has specific registration functions that handle the
--- conversion to LLM-compatible format.
+-- For OpenAPI tools, special handling is done for name normalization:
+-- OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
+-- which are normalized to LLM-safe names. The 'NameMapping' system maintains
+-- bidirectional mapping between normalized and original names.
 module System.Agents.ToolRegistration (
     -- * Core types
     ToolRegistration (..),
@@ -36,8 +38,11 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import Data.ByteString (ByteString)
 import Data.Foldable.WithIndex (ifoldl')
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
+import qualified Data.Text as Text
 
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
@@ -55,12 +60,18 @@ import System.Agents.Tools.Bash (ScriptDescription (..), ScriptArg (..))
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.McpToolbox (callTool)
 import qualified System.Agents.Tools.McpToolbox as McpTools
-import System.Agents.Tools.OpenAPI.Converter (toOpenAITool)
+import System.Agents.Tools.OpenAPI.Converter (
+    OpenAPITool (..),
+    NameMapping (..),
+    toOpenAITool,
+    normalizeForLLM,
+ )
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import System.Agents.Tools.OpenAPIToolbox (
     createToolHandler,
+    getToolByNormalizedName,
     openapi2LLMName,
-  )
+ )
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import System.Agents.ToolSchema
 import System.Agents.Tools.Trace (ToolTrace (..))
@@ -211,9 +222,15 @@ registerMcpToolInLLM box mcp =
 -- | Register a single OpenAPI tool with the LLM system.
 --
 -- This function creates a 'ToolRegistration' from an OpenAPI tool and its
--- parent toolbox. The tool must have a valid operation ID.
+-- parent toolbox. The tool name is normalized for LLM compatibility.
 --
--- Returns 'Left' if the tool cannot be registered (e.g., no operation ID).
+-- The name normalization handles OpenAPI operation IDs that may contain
+-- invalid characters (dots, slashes, etc.) by:
+-- 1. Replacing invalid characters with underscores
+-- 2. Ensuring the name starts with a letter
+-- 3. Using the toolbox's name mapping for bidirectional lookup
+--
+-- Returns 'Left' if the tool cannot be registered.
 --
 -- Example:
 --
@@ -224,52 +241,71 @@ registerMcpToolInLLM box mcp =
 -- @
 registerOpenAPITool ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPI.OpenAPITool ->
+    OpenAPITool ->
     Either String ToolRegistration
 registerOpenAPITool toolbox tool =
-    let opId = Maybe.fromMaybe (OpenAPI.toolName tool) (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation tool))
-        llmName = openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) opId
+    let 
+        -- Get the original operation ID
+        originalOpId = Maybe.fromMaybe (OpenAPI.toolName tool) 
+                       (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation tool))
+        
+        -- Get the normalized name from the mapping
+        mNameMapping = findNameMapping toolbox originalOpId
+        
+        -- Generate LLM name using the normalized operation ID
+        llmName = case mNameMapping of
+            Just nm -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) (nmNormalized nm)
+            Nothing -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) originalOpId
+     in case mNameMapping of
+        Nothing -> Left $ "Tool not found in name mapping: " ++ Text.unpack originalOpId
+        Just nameMapping ->
+            let -- Convert to OpenAI Tool format with normalized name
+                openaiTool = (toOpenAITool tool)
+                    { OpenAI.toolName = llmName }
 
-        -- Convert to OpenAI Tool format
-        openaiTool = toOpenAITool tool
+                -- Create the tool handler that uses the mapping
+                runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+                runFunc tr ctx argz = createToolHandler toolbox tool tr ctx argz
 
-        -- Create the tool handler
-        toolDef0 = IOTool $ IOScriptDescription
-            { ioSlug = OpenAI.getToolName llmName
-            , ioDescription = OpenAPI.toolDescription tool
-            }
+                -- Create the Tool
+                toolDef0 = IOTool $ IOScriptDescription
+                    { ioSlug = OpenAI.getToolName llmName
+                    , ioDescription = OpenAPI.toolDescription tool
+                    }
 
-        -- Create the run function
-        runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-        runFunc tr ctx argz = createToolHandler toolbox tool tr ctx argz
+                tool' = Tool
+                    { toolDef = toolDef0
+                    , toolRun = runFunc
+                    }
 
-        -- Create the Tool
-        tool' = Tool
-            { toolDef = toolDef0
-            , toolRun = runFunc
-            }
+                -- Find function - matches on the normalized LLM name
+                find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+                find call =
+                    if call.toolCallFunction.toolCallFunctionName == llmName
+                        then Just $ mapToolResult (const call) tool'
+                        else Nothing
+             in Right $ ToolRegistration
+                    { innerTool = mapToolResult (const ()) tool'
+                    , declareTool = openaiTool
+                    , findTool = find
+                    }
 
-        -- Find function
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
-        find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
-                then Just $ mapToolResult (const call) tool'
-                else Nothing
-
-        -- Declare function
-        declare :: OpenAI.Tool
-        declare = openaiTool{OpenAI.toolName = llmName}
-     in Right $ ToolRegistration
-            { innerTool = mapToolResult (const ()) tool'
-            , declareTool = declare
-            , findTool = find
-            }
+-- | Find the name mapping for a given original operation ID.
+findNameMapping :: OpenAPIToolbox.Toolbox -> Text -> Maybe NameMapping
+findNameMapping toolbox originalOpId =
+    -- Look through the name mapping to find one with matching original name
+    case filter (\nm -> nmOriginal nm == originalOpId) 
+                (Map.elems $ OpenAPIToolbox.toolboxNameMapping toolbox) of
+        (nm:_) -> Just nm
+        [] -> Nothing
 
 -- | Register all tools from an OpenAPI toolbox.
 --
 -- This function iterates through all tools in the toolbox and attempts to
--- register each one. If any registration fails, the entire operation fails
--- fast with the first error encountered.
+-- register each one with normalized names for LLM compatibility.
+--
+-- If any registration fails, the entire operation fails fast with the first
+-- error encountered.
 --
 -- For partial success handling, use 'registerOpenAPITool' on individual tools.
 --

@@ -147,6 +147,7 @@ agentSerializationTests =
                     , Base.systemPrompt = ["You are helpful"]
                     , Base.toolDirectory = "tools"
                     , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
@@ -165,6 +166,7 @@ agentSerializationTests =
                     , Base.systemPrompt = ["You are helpful"]
                     , Base.toolDirectory = "tools"
                     , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -181,6 +183,7 @@ agentSerializationTests =
                     , Base.systemPrompt = ["You are helpful"]
                     , Base.toolDirectory = "tools"
                     , Base.mcpServers = Just []
+                    , Base.openApiToolboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
@@ -970,6 +973,7 @@ agentConfigGraphTests =
         , Base.systemPrompt = ["You are helpful"]
         , Base.toolDirectory = "tools"
         , Base.mcpServers = Nothing
+        , Base.openApiToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
 
@@ -983,6 +987,7 @@ agentConfigGraphTests =
         , Base.systemPrompt = ["You are helpful"]
         , Base.toolDirectory = "tools"
         , Base.mcpServers = Nothing
+        , Base.openApiToolboxes = Nothing
         , Base.extraAgents = Just [Base.ExtraAgentRef e (Text.unpack e <> ".json") | e <- extras]
         }
 
@@ -1038,6 +1043,7 @@ referenceValidationTests =
                 , Base.systemPrompt = ["Helpful"]
                 , Base.toolDirectory = "tools"
                 , Base.mcpServers = Nothing
+                , Base.openApiToolboxes = Nothing
                 , Base.extraAgents = Nothing
                 }
             agent2 = Base.Agent
@@ -1050,6 +1056,7 @@ referenceValidationTests =
                 , Base.systemPrompt = ["Helpful"]
                 , Base.toolDirectory = "tools"
                 , Base.mcpServers = Nothing
+                , Base.openApiToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "agent-1" "/agent-1.json"]
                 }
 
@@ -1081,6 +1088,7 @@ referenceValidationTests =
                 , Base.systemPrompt = ["Helpful"]
                 , Base.toolDirectory = "tools"
                 , Base.mcpServers = Nothing
+                , Base.openApiToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "nonexistent" "/nonexistent.json"]
                 }
 
@@ -1210,6 +1218,7 @@ cycleDetectionTests =
         , Base.systemPrompt = ["Helpful"]
         , Base.toolDirectory = "tools"
         , Base.mcpServers = Nothing
+        , Base.openApiToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
 
