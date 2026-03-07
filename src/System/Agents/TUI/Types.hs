@@ -10,6 +10,7 @@ import Brick.Focus (FocusRing, focusRing)
 import Brick.Widgets.Edit (Editor, editorText)
 import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
+import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM (TVar)
 import Control.Lens (makeLenses)
 import Data.Maybe (listToMaybe)
@@ -116,6 +117,20 @@ data Conversation = Conversation
     }
 
 -------------------------------------------------------------------------------
+-- Auxiliary Task Types
+-------------------------------------------------------------------------------
+
+-- | An auxiliary task running asynchronously in the background.
+-- These tasks don't block the TUI but are tracked for cleanup.
+data AuxiliaryTask
+    = Viewer (Async ()) ConversationId SessionId
+    -- ^ An external viewer process viewing a specific conversation/session
+
+instance Show AuxiliaryTask where
+    show (Viewer _ convId sessId) = 
+        "Viewer <async> " ++ show convId ++ " " ++ show sessId
+
+-------------------------------------------------------------------------------
 -- Session Configuration
 -------------------------------------------------------------------------------
 
@@ -152,6 +167,8 @@ data UIState = UIState
     , _unreadConversations :: Set ConversationId
     , _ongoingConversations :: Set ConversationId
     -- ^ Conversations currently being processed by an agent
+    , _auxiliaryTasks :: [AuxiliaryTask]
+    -- ^ Background async tasks (e.g., external viewers)
     , _coreAgentTools :: [(AgentId,[ToolRegistration])]
     , _statusMessage :: Maybe StatusMessage
     -- ^ Current status message to display (if any)
@@ -199,6 +216,7 @@ initUIState agents loadedSessions =
         , _selectedAgentInfo = listToMaybe agents
         , _unreadConversations = Set.empty
         , _ongoingConversations = Set.empty
+        , _auxiliaryTasks = []
         , _coreAgentTools = []
         , _statusMessage = Nothing
         }

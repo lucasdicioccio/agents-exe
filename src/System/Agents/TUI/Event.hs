@@ -11,9 +11,10 @@ import Brick.Widgets.Edit (handleEditorEvent, editContentsL, getEditContents)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listInsert, listSelectedL, listElements)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO)
+import Control.Concurrent.Async (Async, async, cancel, poll)
 import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (use, (%=), (.=), to)
-import Control.Monad (void, when)
+import Control.Monad (void, when, filterM)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
 import qualified Data.Set as Set
@@ -286,26 +287,33 @@ handleDumpSessionToMarkdown = do
 
 -- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
 -- Uses the AGENT_MD_VIEWER environment variable if set.
+-- The viewer is executed asynchronously and tracked as an auxiliary task.
 handleViewSessionWithExternalViewer :: EventM N TuiState ()
 handleViewSessionWithExternalViewer = do
     mViewer <- liftIO $ lookupEnv "AGENT_MD_VIEWER"
     case mViewer of
         Just viewerCmd -> do
             mSession <- getFocusedSession
-            case mSession of
-                Just session -> do
+            mConvId <- getFocusedConversationId
+            case (mSession, mConvId) of
+                (Just session, Just convId) -> do
                     let markdown = formatSessionMarkdown session
                     -- Create a temporary file with the markdown content
                     tempFile <- liftIO $ writeSystemTempFile "session-view-" (Text.unpack markdown)
-                    -- Spawn the viewer process
-                    liftIO $ void $ forkIO $ do
+                    -- Spawn the viewer process asynchronously
+                    viewerAsync <- liftIO $ async $ do
                         result <- readProcessWithExitCode viewerCmd [tempFile] ""
                         case result of
                             (ExitFailure code, _, err) ->
                                 hPutStrLn stderr $ "AGENT_MD_VIEWER failed with exit code " ++ show code ++ ": " ++ err
                             _ -> pure ()
+                    -- Track the async task
+                    let task = Viewer viewerAsync convId session.sessionId
+                    tuiUI . auxiliaryTasks %= (task :)
                     showStatus StatusInfo $ "Opening with " <> Text.pack viewerCmd
-                Nothing -> do
+                (Just _, Nothing) -> do
+                    showStatus StatusWarning "No conversation selected"
+                (Nothing, _) -> do
                     showStatus StatusWarning "No session selected"
         Nothing -> do
             showStatus StatusWarning "AGENT_MD_VIEWER not set"
@@ -356,6 +364,24 @@ handleHeartbeat = do
             when (diffUTCTime now status.statusTimestamp > 5) $
                 tuiUI . statusMessage .= Nothing
         Nothing -> pure ()
+
+    -- Cleanup completed auxiliary tasks
+    cleanupAuxiliaryTasks
+
+-- | Remove completed auxiliary tasks from the state.
+cleanupAuxiliaryTasks :: EventM N TuiState ()
+cleanupAuxiliaryTasks = do
+    tasks <- use (tuiUI . auxiliaryTasks)
+    -- Filter out completed tasks (poll returns Just)
+    activeTasks <- liftIO $ filterM isTaskActive tasks
+    tuiUI . auxiliaryTasks .= activeTasks
+  where
+    isTaskActive :: AuxiliaryTask -> IO Bool
+    isTaskActive (Viewer asyncHandle _ _) = do
+        mResult <- poll asyncHandle
+        pure $ case mResult of
+            Nothing -> True   -- Still running
+            Just _  -> False  -- Completed (success or failure)
 
 -- | Handle show status event.
 handleShowStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
