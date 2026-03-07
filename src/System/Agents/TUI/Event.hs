@@ -18,9 +18,16 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
+import System.Environment (lookupEnv)
+import System.Exit (ExitCode(..))
+import System.FilePath ((<.>))
+import System.IO (hPutStrLn, stderr)
+import System.IO.Temp (writeSystemTempFile)
+import System.Process (readProcessWithExitCode)
 
 import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId (..), newConversationId)
@@ -28,6 +35,8 @@ import System.Agents.OneShot (runtimeToAgent)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
 import qualified System.Agents.Session.Loop as Loop
+import System.Agents.SessionPrint (SessionPrintOptions(..), OrderPreference(..), formatSessionAsMarkdown)
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
 
 -------------------------------------------------------------------------------
@@ -67,6 +76,12 @@ tui_appHandleEvent ev = do
             handleRestoredConversation
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
+        -- Markdown export: Ctrl+m - dump to file
+        VtyEvent (Vty.EvKey (Vty.KChar 'm') [Vty.MCtrl]) ->
+            handleDumpSessionToMarkdown
+        -- Markdown export: Ctrl+Shift+m - view with external viewer
+        VtyEvent (Vty.EvKey (Vty.KChar 'M') [Vty.MCtrl]) ->
+            handleViewSessionWithExternalViewer
 
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
@@ -197,6 +212,83 @@ handleAgentToolsEvent ev =
         Vty.EvKey Vty.KRight _ ->
             hScrollBy (viewportScroll AgentToolsWidget) 1
         _ -> pure ()
+
+-------------------------------------------------------------------------------
+-- Markdown Export Handlers
+-------------------------------------------------------------------------------
+
+-- | Get the currently focused session, if any.
+getFocusedSession :: EventM N TuiState (Maybe Session)
+getFocusedSession = do
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    case mConv of
+        Just (_, conv) -> do
+            -- First try to get the session from the conversation's cached session
+            case conversationSession conv of
+                Just sess -> pure (Just sess)
+                Nothing -> do
+                    -- If not cached, try to read from session store
+                    config <- use sessionConfig
+                    liftIO $ SessionStore.readSession config.sessionStore (conversationId conv)
+        Nothing -> pure Nothing
+
+-- | Get the conversation ID of the currently focused conversation.
+getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
+getFocusedConversationId = do
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    pure $ fmap (conversationId . snd) mConv
+
+-- | Format a session as markdown with default options.
+formatSessionMarkdown :: Session -> Text.Text
+formatSessionMarkdown session =
+    let opts = SessionPrintOptions
+            { sessionPrintFile = ""  -- Not used for in-memory formatting
+            , showToolCallResults = True
+            , nTurns = Nothing
+            , repeatSystemPrompt = False
+            , repeatTools = False
+            , orderPreference = Chronological
+            }
+    in formatSessionAsMarkdown opts session
+
+-- | Handle Ctrl+m: Dump the currently focused session to a markdown file.
+-- The file is named `<conversation-id>.md`.
+handleDumpSessionToMarkdown :: EventM N TuiState ()
+handleDumpSessionToMarkdown = do
+    mSession <- getFocusedSession
+    mConvId <- getFocusedConversationId
+    case (mSession, mConvId) of
+        (Just session, Just (ConversationId cid)) -> do
+            let markdown = formatSessionMarkdown session
+                fileName = show cid <.> "md"
+            liftIO $ TextIO.writeFile fileName markdown
+            -- Could show a status message here in the future
+            pure ()
+        _ -> pure ()  -- No session or conversation selected
+
+-- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
+-- Uses the AGENT_MD_VIEWER environment variable if set.
+handleViewSessionWithExternalViewer :: EventM N TuiState ()
+handleViewSessionWithExternalViewer = do
+    mViewer <- liftIO $ lookupEnv "AGENT_MD_VIEWER"
+    case mViewer of
+        Just viewerCmd -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session -> do
+                    let markdown = formatSessionMarkdown session
+                    -- Create a temporary file with the markdown content
+                    tempFile <- liftIO $ writeSystemTempFile "session-view-" (Text.unpack markdown)
+                    -- Spawn the viewer process
+                    liftIO $ void $ forkIO $ do
+                        result <- readProcessWithExitCode viewerCmd [tempFile] ""
+                        case result of
+                            (ExitFailure code, _, err) ->
+                                hPutStrLn stderr $ "AGENT_MD_VIEWER failed with exit code " ++ show code ++ ": " ++ err
+                            _ -> pure ()
+                    pure ()
+                Nothing -> pure ()  -- No session selected
+        Nothing -> pure ()  -- AGENT_MD_VIEWER not set
 
 -------------------------------------------------------------------------------
 -- Focus Management
