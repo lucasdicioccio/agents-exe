@@ -4,14 +4,13 @@
 
 module Main where
 
-import Control.Monad (forM_, join, when)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad (forM_, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
@@ -802,7 +801,6 @@ main = do
                             AgentTree.Initialized tree -> printAgentCheck tree
             TerminalUI _ -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile = do
                         registry <- AgentTree.newRuntimeRegistry
                         pure $ AgentTree.Props
@@ -822,11 +820,10 @@ main = do
                 promptContents <- interpretPromptScript opts.promptScript
                 Text.putStr promptContents
             OneShot opts -> do
-                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
                     promptContents <- interpretPromptScript opts.promptScript
-                    mSession <- join <$> traverse SessionStore.readSessionFromFile opts.sessionFile
+                    mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
                     registry <- AgentTree.newRuntimeRegistry
                     let oneShot text props = OneShot.mainOneShotText sessionStore opts.sessionFile mSession props text
                     oneShot promptContents $
@@ -855,7 +852,6 @@ main = do
                         (Just $ Bash.AddMessage "--no output--")
             McpServer -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
                 let oneAgent agentFile = do
                         registry <- AgentTree.newRuntimeRegistry
                         pure $ AgentTree.Props
@@ -904,7 +900,7 @@ main = do
             SessionPrint opts -> do
                 SessionPrint.handleSessionPrint opts
             Export opts -> handleExport opts pargs
-            Import opts -> handleImport opts pargs
+            Import opts -> handleImport opts
 
 -------------------------------------------------------------------------------
 -- Export Handler
@@ -939,7 +935,7 @@ handleExport opts pargs = do
                 
                 ExportToGit gitDest -> do
                     -- Convert to GitUrl and GitExportOptions
-                    let gitUrl = ExportImport.GitUrl
+                    let gitUrl0 = ExportImport.GitUrl
                             { ExportImport.gitRemote = gitDest.gitUrl
                             , ExportImport.gitBranch = gitDest.gitBranch
                             , ExportImport.gitPath = parseNamespaceToMaybeNs opts.exportNamespace
@@ -950,7 +946,7 @@ handleExport opts pargs = do
                             , ExportImport.gitPush = gitDest.gitPush
                             }
                     
-                    result <- ExportImport.exportToGit pkg gitUrl gitOpts
+                    result <- ExportImport.exportToGit pkg gitUrl0 gitOpts
                     case result of
                         Left err -> do
                             Text.hPutStrLn stderr $ "Git export failed: " <> Text.pack (show err)
@@ -1039,7 +1035,9 @@ buildExportPackage opts pargs = do
                 (agent:_) -> do
                     let agentFile = case [f | (f, Right a) <- zip pargs.agentFiles agents, slug a == targetSlug] of
                             (f:_) -> f
-                            [] -> head pargs.agentFiles
+                            [] -> case pargs.agentFiles of
+                                (first:_) -> first
+                                [] -> error "No agent files available"
                     tools <- if opts.exportIncludeTools
                         then loadToolsForAgent agentFile agent
                         else pure []
@@ -1099,8 +1097,8 @@ buildExportPackage opts pargs = do
 -- Import Handler
 -------------------------------------------------------------------------------
 
-handleImport :: ImportOptions -> Prog -> IO ()
-handleImport opts pargs
+handleImport :: ImportOptions -> IO ()
+handleImport opts
     | importListNamespaces opts = handleListNamespaces opts
     | importListTools opts = handleListTools opts
     | otherwise = do
@@ -1126,12 +1124,12 @@ handleImport opts pargs
                         ePkg <- ExportImport.importFromArchive path
                         case ePkg of
                             Left err -> pure $ Left $ Text.pack $ show err
-                            Right pkg -> do
+                            Right _pkg -> do
                                 -- TODO: Handle full package import
                                 pure $ Right ()
             
             ImportFromGit gitSource -> do
-                let gitUrl = ExportImport.GitUrl
+                let gitUrl0 = ExportImport.GitUrl
                         { ExportImport.gitRemote = gitImportUrl gitSource
                         , ExportImport.gitBranch = gitImportRef gitSource
                         , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
@@ -1143,7 +1141,7 @@ handleImport opts pargs
                 
                 if importToolsOnly opts
                     then do
-                        ePkg <- ExportImport.importToolsFromGit gitUrl (parseNamespaceToMaybeNs (importNamespace opts))
+                        ePkg <- ExportImport.importToolsFromGit gitUrl0 (parseNamespaceToMaybeNs (importNamespace opts))
                         case ePkg of
                             Left err -> pure $ Left $ Text.pack $ show err
                             Right pkg -> do
@@ -1157,10 +1155,10 @@ handleImport opts pargs
                                     Left err -> pure $ Left $ Text.pack $ show err
                                     Right () -> pure $ Right ()
                     else do
-                        ePkg <- ExportImport.importFromGit gitUrl gitOpts
+                        ePkg <- ExportImport.importFromGit gitUrl0 gitOpts
                         case ePkg of
                             Left err -> pure $ Left $ Text.pack $ show err
-                            Right pkg -> do
+                            Right _pkg -> do
                                 -- TODO: Handle full package import
                                 pure $ Right ()
         
@@ -1176,12 +1174,12 @@ handleListNamespaces :: ImportOptions -> IO ()
 handleListNamespaces opts = do
     case importSource opts of
         ImportFromGit gitSource -> do
-            let gitUrl = ExportImport.GitUrl
+            let gitUrl0 = ExportImport.GitUrl
                     { ExportImport.gitRemote = gitImportUrl gitSource
                     , ExportImport.gitBranch = gitImportRef gitSource
                     , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
                     }
-            result <- ExportImport.listGitNamespaces gitUrl
+            result <- ExportImport.listGitNamespaces gitUrl0
             case result of
                 Left err -> do
                     Text.hPutStrLn stderr $ "Failed to list namespaces: " <> Text.pack (show err)
@@ -1198,21 +1196,21 @@ handleListTools :: ImportOptions -> IO ()
 handleListTools opts = do
     case importSource opts of
         ImportFromGit gitSource -> do
-            let gitUrl = ExportImport.GitUrl
+            let gitUrl0 = ExportImport.GitUrl
                     { ExportImport.gitRemote = gitImportUrl gitSource
                     , ExportImport.gitBranch = gitImportRef gitSource
-                    , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
+                        , ExportImport.gitPath = parseNamespaceToMaybeNs (importNamespace opts)
                     }
-            result <- ExportImport.listGitTools gitUrl
+            result <- ExportImport.listGitTools gitUrl0
             case result of
                 Left err -> do
                     Text.hPutStrLn stderr $ "Failed to list tools: " <> Text.pack (show err)
                     exitFailure
                 Right tools -> do
                     Text.putStrLn "Available tools:"
-                    mapM_ (\(ns, info) -> do
+                    mapM_ (\(ns, info0) -> do
                         Text.putStrLn $ "  " <> Text.intercalate "." (ExportImport.unNamespace ns) <> ":"
-                        Text.putStrLn $ "    " <> Bash.scriptSlug info <> " - " <> Bash.scriptDescription info
+                        Text.putStrLn $ "    " <> Bash.scriptSlug info0 <> " - " <> Bash.scriptDescription info0
                         ) tools
                     exitSuccess
         _ -> do
@@ -1227,7 +1225,7 @@ loadAgentFromFile :: FilePath -> IO (Either Text Agent)
 loadAgentFromFile path = do
     result <- Aeson.eitherDecodeFileStrict' path
     case result of
-        Left err -> pure $ Left $ Text.pack $ "Failed to parse agent file: " <> err
+        Left err -> pure $ Left $ Text.pack $ "Failed to parse agent file: " ++ err
         Right (AgentDescription agent) -> pure $ Right agent
 
 loadToolsForAgent :: FilePath -> Agent -> IO [ExportImport.ToolExport]
@@ -1241,15 +1239,12 @@ loadToolsForAgent agentFile agent = do
             mapM (loadToolExport toolDir) toolFiles
   where
     loadToolExport :: FilePath -> FilePath -> IO ExportImport.ToolExport
-    loadToolExport baseDir toolPath = do
+    loadToolExport _baseDir toolPath = do
         content <- ByteString.readFile toolPath
         perms <- ExportImport.getFileMode toolPath
         let tName = Text.pack $ takeFileName toolPath
         -- Run describe to get metadata
-        result <- ExportInstall.validateTool toolPath
-        let metadata = case result of
-                Right () -> Nothing  -- We'd need to actually parse the describe output
-                Left _ -> Nothing
+        _ <- ExportInstall.validateTool toolPath
         pure $ ExportImport.ToolExport
             { ExportImport.toolName = tName
             , ExportImport.toolContent = content
@@ -1269,7 +1264,7 @@ loadStandaloneToolsForAgent agentFile agent = do
             mapM (loadStandaloneTool toolDir) toolFiles
   where
     loadStandaloneTool :: FilePath -> FilePath -> IO ExportImport.StandaloneToolExport
-    loadStandaloneTool baseDir toolPath = do
+    loadStandaloneTool _baseDir toolPath = do
         content <- ByteString.readFile toolPath
         perms <- ExportImport.getFileMode toolPath
         -- Run describe to get metadata
@@ -1278,7 +1273,7 @@ loadStandaloneToolsForAgent agentFile agent = do
                 ExitSuccess ->
                     case Aeson.eitherDecode (LByteString.fromStrict $ TextEncoding.encodeUtf8 $ Text.pack out) of
                         Left _ -> defaultMetadata toolPath
-                        Right info -> info
+                        Right info0 -> info0
                 _ -> defaultMetadata toolPath
         pure $ ExportImport.StandaloneToolExport
             { ExportImport.standaloneToolInfo = metadata
@@ -1325,6 +1320,8 @@ toJsonTrace x = case x of
     AgentTree.McpTrace cfg v -> encodeMcpTrace cfg v
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
+    AgentTree.CyclicReferencesWarning _ -> Nothing
+    AgentTree.ReferenceValidationTrace _ -> Nothing
   where
     encodeAgentTrace :: RuntimeTrace.Trace -> Maybe Aeson.Value
     encodeAgentTrace tr = do

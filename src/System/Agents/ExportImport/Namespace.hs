@@ -3,14 +3,13 @@
 
 module System.Agents.ExportImport.Namespace where
 
-import Data.List (inits, intercalate, isPrefixOf)
-import Data.Maybe (mapMaybe)
+import Data.List (inits, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import System.FilePath (joinPath, splitDirectories, (</>))
 import qualified System.Directory
 
-import System.Agents.ExportImport.Types (Namespace(..), parseNamespace, namespaceToPath)
+import System.Agents.ExportImport.Types (Namespace(..), parseNamespace)
 
 -------------------------------------------------------------------------------
 -- Namespace Operations
@@ -33,7 +32,7 @@ mkNamespaceFromPath path =
 -- | Get all parent namespaces including the namespace itself
 namespaceHierarchy :: Namespace -> [Namespace]
 namespaceHierarchy (Namespace parts) =
-    map Namespace $ tail $ inits parts
+    map Namespace $ drop 1 $ inits parts
 
 -- | Check if one namespace is a parent of (or equal to) another
 namespaceContains :: Namespace -> Namespace -> Bool

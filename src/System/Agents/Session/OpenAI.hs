@@ -144,6 +144,13 @@ mkOpenAICompletion config completion = do
                 _ -> ObjectParamType []
         parseParamType "array" _ = OpaqueParamType "array"
         parseParamType other _ = OpaqueParamType other
+    systemToolToOpenAI (SystemTool (V0 other)) =
+        -- Handle non-object V0 values by creating a minimal tool
+        OpenAI.Tool
+            { OpenAI.toolName = OpenAI.ToolName "unknown_tool"
+            , OpenAI.toolDescription = "Unknown tool format: " <> Text.pack (show other)
+            , OpenAI.toolParamProperties = []
+            }
 
     -- Build the messages array for the OpenAI API
     buildMessages :: LlmCompletion -> [Aeson.Value]

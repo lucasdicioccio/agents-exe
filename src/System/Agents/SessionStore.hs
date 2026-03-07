@@ -38,7 +38,7 @@ import System.Directory (doesFileExist, getModificationTime, listDirectory)
 import System.FilePath ((</>), takeFileName)
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Session.Base (Session (..), newSessionId, newTurnId)
+import System.Agents.Session.Base (Session (..))
 
 -------------------------------------------------------------------------------
 -- Session Store Configuration

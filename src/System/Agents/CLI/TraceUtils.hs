@@ -32,7 +32,12 @@ tracePrintingTextResponses = Tracer f
   where
     f (AgentTrace (Runtime.AgentTrace_Conversation slug _ _ trace)) =
         g [slug] trace
-    f _ = pure ()
+    f (AgentTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
+    f (McpTrace _ _) = pure ()
+    f (DataLoadingTrace _) = pure ()
+    f (ConfigLoadedTrace _) = pure ()
+    f (CyclicReferencesWarning _) = pure ()
+    f (ReferenceValidationTrace _) = pure ()
 
     g pfx (Runtime.LLMTrace _ (OpenAI.GotChatCompletion x)) =
         case Aeson.parseEither OpenAI.parseLLMResponse x of
@@ -41,7 +46,12 @@ tracePrintingTextResponses = Tracer f
                 Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent]
     g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_Conversation childSlug _ _ sub)) =
         g (childSlug : pfx) sub
-    g _ _ = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
+    g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
+    g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _)) = pure ()
+    g _ (Runtime.NewConversation) = pure ()
+    g _ (Runtime.WaitingForPrompt) = pure ()
+    g _ (Runtime.RunToolTrace _ _) = pure ()
 
 traceUsefulPromptStdout :: Tracer IO Trace
 traceUsefulPromptStdout = traceUsefulPromptHandle stdout
@@ -66,6 +76,10 @@ traceUsefulPromptHandle h = Tracer f
                 [ Text.concat [Text.replicate n "  ", Text.pack v.agentConfigFile]
                 , Text.unlines $ fmap (showTree (succ n)) v.agentConfigChildren
                 ]
+    f (CyclicReferencesWarning warns) =
+        Text.hPutStrLn h $ "Cyclic references warning: " <> Text.pack (show warns)
+    f (ReferenceValidationTrace refs) =
+        Text.hPutStrLn h $ "Reference validation trace: " <> Text.pack (show refs)
 
 renderAgentTrace :: Runtime.Trace -> Text
 renderAgentTrace (Runtime.AgentTrace_Loading slug _ tr) =
@@ -109,3 +123,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

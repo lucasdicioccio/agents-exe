@@ -43,7 +43,7 @@ import System.Posix.Types (FileMode)
 import qualified Codec.Archive.Tar as Tar
 import qualified Codec.Compression.GZip as GZip
 
-import System.Agents.Base (Agent(..), AgentDescription(..), McpServerDescription(..), McpSimpleBinaryConfiguration(..))
+import System.Agents.Base (Agent(..), McpServerDescription(..), McpSimpleBinaryConfiguration(..))
 import System.Agents.ExportImport.Types
 import System.Agents.Tools.Bash (ScriptInfo(..))
 
@@ -188,13 +188,13 @@ importFromArchive path = do
                         standaloneTools <- loadToolsFromDir (exportRoot </> toolsDirName)
                         
                         -- Load MCP servers
-                        mcpServers <- loadMcpServersFromDir (exportRoot </> mcpServersDirName)
+                        mcpServers0 <- loadMcpServersFromDir (exportRoot </> mcpServersDirName)
                         
                         pure $ Right $ ExportPackage
                             { packageMetadata = metadata
                             , packageAgents = agentExports
                             , packageTools = standaloneTools
-                            , packageMcpServers = mcpServers
+                            , packageMcpServers = mcpServers0
                             }
             
             case result of
@@ -307,7 +307,7 @@ loadAgentsFromDir agentsDir = do
             else Just $ Text.intercalate "." $ map Text.pack allParts
 
 loadAgentTools :: FilePath -> Agent -> IO [ToolExport]
-loadAgentTools agentDir agent = do
+loadAgentTools agentDir _agent = do
     let toolDir = agentDir </> toolsDirName
     exists <- doesDirectoryExist toolDir
     if not exists
@@ -339,7 +339,7 @@ loadAgentTools agentDir agent = do
                     else pure []
     
     loadToolFromDir :: FilePath -> FilePath -> IO [ToolExport]
-    loadToolFromDir dir name = do
+    loadToolFromDir dir name0 = do
         let scriptPath = dir </> "script"
         scriptExists <- doesFileExist scriptPath
         if scriptExists
@@ -357,7 +357,7 @@ loadAgentTools agentDir agent = do
                             Right info -> pure (Just info)
                     else pure Nothing
                 pure [ToolExport
-                    { toolName = Text.pack name
+                    { toolName = Text.pack name0
                     , toolContent = content
                     , toolPermissions = perms
                     , toolMetadata = metadata
@@ -372,7 +372,7 @@ loadAgentTools agentDir agent = do
                         content <- ByteString.readFile (dir </> firstExec)
                         perms <- getFileMode (dir </> firstExec)
                         pure [ToolExport
-                            { toolName = Text.pack name
+                            { toolName = Text.pack name0
                             , toolContent = content
                             , toolPermissions = perms
                             , toolMetadata = Nothing

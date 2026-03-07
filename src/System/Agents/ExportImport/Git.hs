@@ -5,42 +5,34 @@
 
 module System.Agents.ExportImport.Git where
 
-import Control.Exception (try, IOException, SomeException)
-import Control.Monad (forM_, unless, when)
+import Control.Exception (try, SomeException)
+import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isPrefixOf, isSuffixOf)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
 import Data.Time (getCurrentTime)
 import GHC.Generics (Generic)
 import System.Directory
-    ( copyFile
-    , createDirectoryIfMissing
+    ( createDirectoryIfMissing
     , doesDirectoryExist
     , doesFileExist
     , listDirectory
-    , removeDirectoryRecursive
-    , removeFile
     , withCurrentDirectory
     )
 import System.Exit (ExitCode(..))
 import System.FilePath
     ( (</>)
     , (<.>)
-    , joinPath
-    , normalise
-    , splitDirectories
     , takeDirectory
-    , takeFileName
     )
 import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Files (setFileMode)
-import System.Process (readProcess, readProcessWithExitCode, callProcess, proc)
+import System.Process (readProcessWithExitCode, callProcess)
 
 import System.Agents.Base (Agent(..), McpServerDescription(..), McpSimpleBinaryConfiguration(..))
 import System.Agents.ExportImport.Types
@@ -67,7 +59,7 @@ exportToGit pkg gitUrl opts = do
                     Left err -> pure $ Left err
                     Right () -> do
                         -- Switch to the target branch if specified
-                        case gitBranch gitUrl of
+                        _ <- case gitBranch gitUrl of
                             Just branch -> do
                                 branchResult <- checkoutBranch repoDir branch
                                 case branchResult of
@@ -125,10 +117,10 @@ exportToGit pkg gitUrl opts = do
                         -- Write MCP servers
                         createDirectoryIfMissing True (exportBase </> "mcp-servers")
                         forM_ (packageMcpServers pkg) $ \mcp -> do
-                            let mcpName = case mcpConfig mcp of
+                            let mcpName = case mcp.mcpConfig of
                                     McpSimpleBinary cfg -> Text.unpack cfg.name
                             let mcpFile = exportBase </> "mcp-servers" </> mcpName <.> "json"
-                            LByteString.writeFile mcpFile $ AesonPretty.encodePretty (mcpConfig mcp)
+                            LByteString.writeFile mcpFile $ AesonPretty.encodePretty mcp.mcpConfig
                         
                         -- Write/update index file
                         updateIndexFile exportBase pkg
@@ -142,7 +134,7 @@ exportToGit pkg gitUrl opts = do
                             Left err -> pure $ Left err
                             Right () -> do
                                 -- Tag if specified
-                                case gitTag opts of
+                                _ <- case gitTag opts of
                                     Just tag -> do
                                         tagResult <- gitTagRepo repoDir tag
                                         case tagResult of
@@ -193,7 +185,7 @@ importFromGit gitUrl opts = do
                     Left err -> pure $ Left err
                     Right () -> do
                         -- Checkout specific ref if provided
-                        case gitRef opts of
+                        _ <- case gitRef opts of
                             Just ref -> do
                                 checkoutResult <- gitCheckout repoDir ref
                                 case checkoutResult of
@@ -219,7 +211,7 @@ importFromGit gitUrl opts = do
                                 let standaloneTools = map toolExportToStandalone toolExports
                                 
                                 -- Load MCP servers
-                                mcpServers <- loadMcpServersFromGitDir (importBase </> "mcp-servers")
+                                mcpServers0 <- loadMcpServersFromGitDir (importBase </> "mcp-servers")
                                 
                                 now <- getCurrentTime
                                 let metadata = PackageMetadata
@@ -233,7 +225,7 @@ importFromGit gitUrl opts = do
                                     { packageMetadata = metadata
                                     , packageAgents = agentExports
                                     , packageTools = standaloneTools
-                                    , packageMcpServers = mcpServers
+                                    , packageMcpServers = mcpServers0
                                     }
             
             case result of
@@ -244,7 +236,7 @@ toolExportToStandalone :: ToolExport -> StandaloneToolExport
 toolExportToStandalone te =
     StandaloneToolExport
         { standaloneToolInfo = case toolMetadata te of
-            Just info -> info
+            Just info0 -> info0
             Nothing -> ScriptInfo
                 { scriptArgs = []
                 , scriptSlug = toolName te
@@ -339,7 +331,7 @@ checkGitAvailable = do
 cloneOrInitRepo :: GitUrl -> FilePath -> IO (Either GitError ())
 cloneOrInitRepo gitUrl repoDir = do
     -- Try to clone first, if fails try to init
-    (code, _, err) <- readProcessWithExitCode "git" ["clone", Text.unpack (gitRemote gitUrl), repoDir] ""
+    (code, _, _err) <- readProcessWithExitCode "git" ["clone", Text.unpack (gitRemote gitUrl), repoDir] ""
     case code of
         ExitSuccess -> pure $ Right ()
         ExitFailure _ -> do
@@ -358,20 +350,20 @@ cloneOrInitRepo gitUrl repoDir = do
 
 gitClone :: Text -> FilePath -> Maybe Text -> IO (Either GitError ())
 gitClone remote repoDir mbRef = do
-    let args = case mbRef of
+    let args0 = case mbRef of
             Just ref -> ["clone", "--branch", Text.unpack ref, "--single-branch", Text.unpack remote, repoDir]
             Nothing -> ["clone", Text.unpack remote, repoDir]
-    (code, _, err) <- readProcessWithExitCode "git" args ""
+    (code, _, _err) <- readProcessWithExitCode "git" args0 ""
     case code of
         ExitSuccess -> pure $ Right ()
-        ExitFailure _ -> pure $ Left $ GitCloneError err
+        ExitFailure _ -> pure $ Left $ GitCloneError _err
 
 gitCloneShallow :: Text -> FilePath -> IO (Either GitError ())
 gitCloneShallow remote repoDir = do
-    (code, _, err) <- readProcessWithExitCode "git" ["clone", "--depth", "1", Text.unpack remote, repoDir] ""
+    (code, _, _err) <- readProcessWithExitCode "git" ["clone", "--depth", "1", Text.unpack remote, repoDir] ""
     case code of
         ExitSuccess -> pure $ Right ()
-        ExitFailure _ -> pure $ Left $ GitCloneError err
+        ExitFailure _ -> pure $ Left $ GitCloneError _err
 
 gitCheckout :: FilePath -> Text -> IO (Either GitError ())
 gitCheckout repoDir ref = do
@@ -384,7 +376,7 @@ gitCheckout repoDir ref = do
 checkoutBranch :: FilePath -> Text -> IO (Either GitError ())
 checkoutBranch repoDir branch = do
     -- Check if branch exists
-    (code, out, _) <- withCurrentDirectory repoDir $ 
+    (_, out, _) <- withCurrentDirectory repoDir $ 
         readProcessWithExitCode "git" ["branch", "-a"] ""
     if Text.unpack branch `elem` lines out
         then do
@@ -533,7 +525,6 @@ loadToolsFromGitDir toolsDir = do
                 let scriptPath = toolDir </> "script"
                 let metaPath = toolDir </> "metadata.json"
                 scriptExists <- doesFileExist scriptPath
-                metaExists <- doesFileExist metaPath
                 if not scriptExists
                     then pure []
                     else do
@@ -545,7 +536,7 @@ loadToolsFromGitDir toolsDir = do
                                 metaBytes <- LByteString.readFile metaPath
                                 case Aeson.eitherDecode metaBytes of
                                     Left _ -> pure Nothing
-                                    Right info -> pure (Just info)
+                                    Right info0 -> pure (Just info0)
                             else pure Nothing
                         pure [ToolExport
                             { toolName = Text.pack entryName
@@ -593,8 +584,7 @@ findNamespacesInDir baseDir = do
         if isDir
             then do
                 let newParts = parts ++ [Text.pack entry]
-                subEntries <- listDirectory fullPath
-                nested <- fmap concat $ traverse (findNsRecursive fullPath newParts) subEntries
+                nested <- fmap concat $ traverse (findNsRecursive fullPath newParts) =<< listDirectory fullPath
                 pure $ Namespace newParts : nested
             else pure []
 
@@ -620,14 +610,10 @@ listToolsInDir baseDir nsPrefix = do
                     then do
                         metaBytes <- LByteString.readFile metaPath
                         case Aeson.eitherDecode metaBytes of
-                            Left _ -> recurse entry fullPath
-                            Right info -> do
+                            Left _ -> listToolsInDir fullPath (nsPrefix ++ [Text.pack entry])
+                            Right info0 -> do
                                 let ns = Namespace (nsPrefix ++ [Text.pack entry])
-                                pure [(ns, info)]
-                    else recurse entry fullPath
+                                pure [(ns, info0)]
+                    else listToolsInDir fullPath (nsPrefix ++ [Text.pack entry])
             else pure []
-    
-    recurse entry fullPath = do
-        subEntries <- listDirectory fullPath
-        listToolsInDir fullPath (nsPrefix ++ [Text.pack entry])
 

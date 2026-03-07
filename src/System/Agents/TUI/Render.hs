@@ -153,9 +153,9 @@ render_agentList st =
 -- | Render a single agent item.
 render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
-    txt $ " " <> agentSlug
+    txt $ " " <> agentSlug0
   where
-    agentSlug = agent.agentTree.agentRuntime.agentSlug
+    agentSlug0 = agent.agentTree.agentRuntime.agentSlug
 
 -------------------------------------------------------------------------------
 -- Conversation List Rendering

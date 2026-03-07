@@ -324,7 +324,7 @@ executeToolCall ::
     -> ToolExecutionContext    -- ^ Context from runStepM
     -> SessionBase.LlmToolCall -- ^ Tool call from LLM
     -> IO SessionBase.UserToolResponse
-executeToolCall agentId registrations _ctx (SessionBase.LlmToolCall callVal) =
+executeToolCall agentId0 registrations _ctx (SessionBase.LlmToolCall callVal) =
     -- Extract the tool call ID and function info from the LlmToolCall
     case parseLlmToolCall callVal of
         Nothing -> pure $ SessionBase.UserToolResponse $ Aeson.String "Failed to parse tool call"
@@ -340,7 +340,7 @@ executeToolCall agentId registrations _ctx (SessionBase.LlmToolCall callVal) =
                     sessId
                     convId
                     tId
-                    (Just agentId)
+                    (Just agentId0)
                     Nothing  -- No full session available at this point
                     [CallStackEntry "root" convId 0]  -- Root call stack entry
                     Nothing  -- No max recursion depth by default
