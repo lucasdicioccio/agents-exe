@@ -1,4 +1,4 @@
-{ "agentsDirectories":["./interactive-agents/", "./tasks-agents/", "./demo-agents"]
+{ "agentsDirectories":["./interactive-agents/", "./tasks-agents/", "./demo-agents", "./localdev-agents/"]
 , "agentsFiles":[]
 , "agentsLogs": {
     "logJsonPath": "logs.json"
