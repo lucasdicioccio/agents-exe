@@ -5,9 +5,11 @@ import System.Agents.Base as Base
 import System.Agents.Tools.Context as Context
 import System.Agents.Session.Types (SessionId(..), TurnId(..))
 import qualified System.Agents.Session.Base as SessionBase
+import qualified System.Agents.AgentTree as AgentTree
 
 import Data.Aeson (decode, encode)
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -27,6 +29,9 @@ tests =
         , callStackEntryTests
         , toolExecutionContextTests
         , recursionTrackingTests
+        , agentConfigGraphTests
+        , referenceValidationTests
+        , cycleDetectionTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -356,7 +361,9 @@ recursionTrackingTests =
                         let chain = Context.callChain ctx2
                         length chain @?= 3
                         -- Root should be first in callChain (last in internal stack)
-                        Context.callAgentSlug (head chain) @?= "root"
+                        case chain of
+                            (first:_) -> Context.callAgentSlug first @?= "root"
+                            [] -> assertFailure "Expected non-empty chain"
                         Context.callAgentSlug (chain !! 1) @?= "agent-1"
                         Context.callAgentSlug (chain !! 2) @?= "agent-2"
         , testCase "isAgentInCallStack detects agent in stack" $ do
@@ -392,4 +399,340 @@ recursionTrackingTests =
                     Context.ctxSessionId newCtx @?= sessionId
                     Context.ctxTurnId newCtx @?= turnId
         ]
+
+-------------------------------------------------------------------------------
+-- AgentConfigGraph Tests
+-------------------------------------------------------------------------------
+
+agentConfigGraphTests :: TestTree
+agentConfigGraphTests =
+    testGroup
+        "AgentConfigGraph"
+        [ testCase "empty graph" $ do
+            let graph = AgentTree.AgentConfigGraph Map.empty Map.empty
+            Map.null (AgentTree.graphNodes graph) @?= True
+            Map.null (AgentTree.graphEdges graph) @?= True
+        , testCase "graph with single node" $ do
+            let agent = mkTestAgent "root-agent"
+            let node = AgentTree.AgentConfigNode
+                    { AgentTree.nodeFile = "/agents/root.json"
+                    , AgentTree.nodeConfig = agent
+                    , AgentTree.nodeChildren = []
+                    , AgentTree.nodeExtraRefs = []
+                    }
+            let nodes = Map.fromList [("root-agent", node)]
+            let edges = Map.fromList [("root-agent", [])]
+            let graph = AgentTree.AgentConfigGraph nodes edges
+
+            Map.size (AgentTree.graphNodes graph) @?= 1
+            Map.size (AgentTree.graphEdges graph) @?= 1
+        , testCase "graph with parent and child" $ do
+            let parentAgent = mkTestAgent "parent"
+            let childAgent = mkTestAgent "child"
+
+            let childNode = AgentTree.AgentConfigNode
+                    { AgentTree.nodeFile = "/agents/tools/child.json"
+                    , AgentTree.nodeConfig = childAgent
+                    , AgentTree.nodeChildren = []
+                    , AgentTree.nodeExtraRefs = []
+                    }
+
+            let parentNode = AgentTree.AgentConfigNode
+                    { AgentTree.nodeFile = "/agents/parent.json"
+                    , AgentTree.nodeConfig = parentAgent
+                    , AgentTree.nodeChildren = ["child"]
+                    , AgentTree.nodeExtraRefs = []
+                    }
+
+            let nodes = Map.fromList [("parent", parentNode), ("child", childNode)]
+            let edges = Map.fromList [("parent", ["child"]), ("child", [])]
+            let graph = AgentTree.AgentConfigGraph nodes edges
+
+            Map.size (AgentTree.graphNodes graph) @?= 2
+            AgentTree.nodeChildren parentNode @?= ["child"]
+        , testCase "graph with extra refs" $ do
+            let mainAgent = mkTestAgentWithExtra "main-agent" ["helper-a", "helper-b"]
+            let helperA = mkTestAgent "helper-a"
+            let helperB = mkTestAgent "helper-b"
+
+            let mainNode = AgentTree.AgentConfigNode
+                    { AgentTree.nodeFile = "/agents/main.json"
+                    , AgentTree.nodeConfig = mainAgent
+                    , AgentTree.nodeChildren = []
+                    , AgentTree.nodeExtraRefs = ["helper-a", "helper-b"]
+                    }
+
+            let nodeA = AgentTree.AgentConfigNode
+                    { AgentTree.nodeFile = "/agents/helper-a.json"
+                    , AgentTree.nodeConfig = helperA
+                    , AgentTree.nodeChildren = []
+                    , AgentTree.nodeExtraRefs = []
+                    }
+
+            let nodeB = AgentTree.AgentConfigNode
+                    { AgentTree.nodeFile = "/agents/helper-b.json"
+                    , AgentTree.nodeConfig = helperB
+                    , AgentTree.nodeChildren = []
+                    , AgentTree.nodeExtraRefs = []
+                    }
+
+            let nodes = Map.fromList [("main-agent", mainNode), ("helper-a", nodeA), ("helper-b", nodeB)]
+            let graph = AgentTree.AgentConfigGraph nodes (Map.map (\n -> AgentTree.nodeChildren n ++ AgentTree.nodeExtraRefs n) nodes)
+
+            AgentTree.nodeExtraRefs mainNode @?= ["helper-a", "helper-b"]
+            Map.size (AgentTree.graphNodes graph) @?= 3
+        ]
+  where
+    mkTestAgent slug = Base.Agent
+        { Base.slug = slug
+        , Base.apiKeyId = "test-key"
+        , Base.flavor = "openai"
+        , Base.modelUrl = "https://api.openai.com/v1"
+        , Base.modelName = "gpt-4"
+        , Base.announce = "Test agent " <> slug
+        , Base.systemPrompt = ["You are helpful"]
+        , Base.toolDirectory = "tools"
+        , Base.mcpServers = Nothing
+        , Base.extraAgents = Nothing
+        }
+
+    mkTestAgentWithExtra slug extras = Base.Agent
+        { Base.slug = slug
+        , Base.apiKeyId = "test-key"
+        , Base.flavor = "openai"
+        , Base.modelUrl = "https://api.openai.com/v1"
+        , Base.modelName = "gpt-4"
+        , Base.announce = "Test agent " <> slug
+        , Base.systemPrompt = ["You are helpful"]
+        , Base.toolDirectory = "tools"
+        , Base.mcpServers = Nothing
+        , Base.extraAgents = Just [Base.ExtraAgentRef e (Text.unpack e <> ".json") | e <- extras]
+        }
+
+-------------------------------------------------------------------------------
+-- Reference Validation Tests
+-------------------------------------------------------------------------------
+
+referenceValidationTests :: TestTree
+referenceValidationTests =
+    testGroup
+        "Reference Validation"
+        [ testCase "valid references pass validation" $ do
+            let graph = mkValidGraph
+            case AgentTree.validateReferences graph of
+                Left errs -> assertFailure $ "Expected validation to pass, got: " ++ show errs
+                Right () -> pure ()
+        , testCase "detects missing reference" $ do
+            let graph = mkGraphWithMissingRef
+            case AgentTree.validateReferences graph of
+                Left errs -> do
+                    -- Should have at least one MissingAgentReference error
+                    let isMissingRef err = case err of
+                            AgentTree.ReferenceError (AgentTree.MissingAgentReference _ _ _) -> True
+                            _ -> False
+                    assertBool "Expected MissingAgentReference error" (any isMissingRef errs)
+                Right () -> assertFailure "Expected validation to fail due to missing reference"
+        , testCase "detects duplicate slug" $ do
+            -- Note: Duplicate detection happens during discovery, not validation
+            -- But we test the ReferenceError type here
+            let err = AgentTree.DuplicateAgentSlug "duplicate-slug" ["/a.json", "/b.json"]
+            case err of
+                AgentTree.DuplicateAgentSlug slug files -> do
+                    slug @?= "duplicate-slug"
+                    length files @?= 2
+                _ -> assertFailure "Expected DuplicateAgentSlug"
+        , testCase "MissingAgentReference contains correct info" $ do
+            let err = AgentTree.MissingAgentReference "referrer" "/referrer.json" "missing"
+            case err of
+                AgentTree.MissingAgentReference from file missing -> do
+                    from @?= "referrer"
+                    file @?= "/referrer.json"
+                    missing @?= "missing"
+        ]
+  where
+    mkValidGraph =
+        let agent1 = Base.Agent
+                { Base.slug = "agent-1"
+                , Base.apiKeyId = "test-key"
+                , Base.flavor = "openai"
+                , Base.modelUrl = "https://api.openai.com/v1"
+                , Base.modelName = "gpt-4"
+                , Base.announce = "Agent 1"
+                , Base.systemPrompt = ["Helpful"]
+                , Base.toolDirectory = "tools"
+                , Base.mcpServers = Nothing
+                , Base.extraAgents = Nothing
+                }
+            agent2 = Base.Agent
+                { Base.slug = "agent-2"
+                , Base.apiKeyId = "test-key"
+                , Base.flavor = "openai"
+                , Base.modelUrl = "https://api.openai.com/v1"
+                , Base.modelName = "gpt-4"
+                , Base.announce = "Agent 2"
+                , Base.systemPrompt = ["Helpful"]
+                , Base.toolDirectory = "tools"
+                , Base.mcpServers = Nothing
+                , Base.extraAgents = Just [Base.ExtraAgentRef "agent-1" "/agent-1.json"]
+                }
+
+            node1 = AgentTree.AgentConfigNode
+                { AgentTree.nodeFile = "/agent-1.json"
+                , AgentTree.nodeConfig = agent1
+                , AgentTree.nodeChildren = []
+                , AgentTree.nodeExtraRefs = []
+                }
+            node2 = AgentTree.AgentConfigNode
+                { AgentTree.nodeFile = "/agent-2.json"
+                , AgentTree.nodeConfig = agent2
+                , AgentTree.nodeChildren = []
+                , AgentTree.nodeExtraRefs = ["agent-1"]
+                }
+
+            nodes = Map.fromList [("agent-1", node1), ("agent-2", node2)]
+            edges = Map.fromList [("agent-1", []), ("agent-2", ["agent-1"])]
+        in AgentTree.AgentConfigGraph nodes edges
+
+    mkGraphWithMissingRef =
+        let agent = Base.Agent
+                { Base.slug = "agent-with-bad-ref"
+                , Base.apiKeyId = "test-key"
+                , Base.flavor = "openai"
+                , Base.modelUrl = "https://api.openai.com/v1"
+                , Base.modelName = "gpt-4"
+                , Base.announce = "Agent with bad ref"
+                , Base.systemPrompt = ["Helpful"]
+                , Base.toolDirectory = "tools"
+                , Base.mcpServers = Nothing
+                , Base.extraAgents = Just [Base.ExtraAgentRef "nonexistent" "/nonexistent.json"]
+                }
+
+            node = AgentTree.AgentConfigNode
+                { AgentTree.nodeFile = "/agent.json"
+                , AgentTree.nodeConfig = agent
+                , AgentTree.nodeChildren = []
+                , AgentTree.nodeExtraRefs = ["nonexistent"]
+                }
+
+            nodes = Map.fromList [("agent-with-bad-ref", node)]
+            edges = Map.fromList [("agent-with-bad-ref", ["nonexistent"])]
+        in AgentTree.AgentConfigGraph nodes edges
+
+-------------------------------------------------------------------------------
+-- Cycle Detection Tests
+-------------------------------------------------------------------------------
+
+cycleDetectionTests :: TestTree
+cycleDetectionTests =
+    testGroup
+        "Cycle Detection"
+        [ testCase "no cycles in linear chain" $ do
+            let graph = mkLinearGraph
+            let cycles = AgentTree.detectCycles graph
+            cycles @?= []
+        , testCase "detects self-reference cycle" $ do
+            let graph = mkSelfRefGraph
+            let cycles = AgentTree.detectCycles graph
+            assertBool "Expected at least one cycle" (not (null cycles))
+        , testCase "detects mutual reference cycle" $ do
+            let graph = mkMutualRefGraph
+            let cycles = AgentTree.detectCycles graph
+            assertBool "Expected at least one cycle" (not (null cycles))
+        , testCase "detects cycle in larger graph" $ do
+            let graph = mkComplexGraphWithCycle
+            let cycles = AgentTree.detectCycles graph
+            assertBool "Expected at least one cycle" (not (null cycles))
+        , testCase "no false positives in tree structure" $ do
+            let graph = mkTreeGraph
+            let cycles = AgentTree.detectCycles graph
+            cycles @?= []
+        ]
+  where
+    mkLinearGraph =
+        -- a -> b -> c (no cycle)
+        let nodes = Map.fromList
+                [ ("a", mkNode "a" ["b"] [])
+                , ("b", mkNode "b" ["c"] [])
+                , ("c", mkNode "c" [] [])
+                ]
+            edges = Map.fromList [("a", ["b"]), ("b", ["c"]), ("c", [])]
+        in AgentTree.AgentConfigGraph nodes edges
+
+    mkSelfRefGraph =
+        -- a -> a (self-reference cycle)
+        let nodes = Map.fromList [("a", mkNode "a" ["a"] [])]
+            edges = Map.fromList [("a", ["a"])]
+        in AgentTree.AgentConfigGraph nodes edges
+
+    mkMutualRefGraph =
+        -- a <-> b (mutual reference)
+        let nodes = Map.fromList
+                [ ("a", mkNode "a" [] ["b"])
+                , ("b", mkNode "b" [] ["a"])
+                ]
+            edges = Map.fromList [("a", ["b"]), ("b", ["a"])]
+        in AgentTree.AgentConfigGraph nodes edges
+
+    mkComplexGraphWithCycle =
+        -- a -> b -> c -> a (cycle)
+        -- plus d -> e (no cycle)
+        let nodes = Map.fromList
+                [ ("a", mkNode "a" ["b"] [])
+                , ("b", mkNode "b" ["c"] [])
+                , ("c", mkNode "c" [] ["a"])  -- closes the cycle
+                , ("d", mkNode "d" ["e"] [])
+                , ("e", mkNode "e" [] [])
+                ]
+            edges = Map.fromList
+                [ ("a", ["b"])
+                , ("b", ["c"])
+                , ("c", ["a"])
+                , ("d", ["e"])
+                , ("e", [])
+                ]
+        in AgentTree.AgentConfigGraph nodes edges
+
+    mkTreeGraph =
+        --     a
+        --    / \
+        --   b   c
+        --  /   / \
+        -- d   e   f
+        let nodes = Map.fromList
+                [ ("a", mkNode "a" ["b", "c"] [])
+                , ("b", mkNode "b" ["d"] [])
+                , ("c", mkNode "c" ["e", "f"] [])
+                , ("d", mkNode "d" [] [])
+                , ("e", mkNode "e" [] [])
+                , ("f", mkNode "f" [] [])
+                ]
+            edges = Map.fromList
+                [ ("a", ["b", "c"])
+                , ("b", ["d"])
+                , ("c", ["e", "f"])
+                , ("d", [])
+                , ("e", [])
+                , ("f", [])
+                ]
+        in AgentTree.AgentConfigGraph nodes edges
+
+    mkNode slug children extras = AgentTree.AgentConfigNode
+        { AgentTree.nodeFile = "/" <> Text.unpack slug <> ".json"
+        , AgentTree.nodeConfig = mkAgent slug
+        , AgentTree.nodeChildren = children
+        , AgentTree.nodeExtraRefs = extras
+        }
+
+    mkAgent slug = Base.Agent
+        { Base.slug = slug
+        , Base.apiKeyId = "test-key"
+        , Base.flavor = "openai"
+        , Base.modelUrl = "https://api.openai.com/v1"
+        , Base.modelName = "gpt-4"
+        , Base.announce = "Agent " <> slug
+        , Base.systemPrompt = ["Helpful"]
+        , Base.toolDirectory = "tools"
+        , Base.mcpServers = Nothing
+        , Base.extraAgents = Nothing
+        }
 
