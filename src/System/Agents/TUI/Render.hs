@@ -123,7 +123,16 @@ render_conversationArea st =
             vBox
                 [ render_messageEditor st
                 , render_conversationView st
+                , render_shortcutsHelp
                 ]
+
+-- | Render shortcuts help bar.
+render_shortcutsHelp :: Widget N
+render_shortcutsHelp =
+    withAttr (attrName "help") $
+        hBox
+            [ txt "Ctrl+m: export md | Ctrl+Shift+m: view md"
+            ]
 
 -- | Conversation area with message input and conversation history.
 render_sessionArea :: TuiState -> Widget N
@@ -346,5 +355,6 @@ tui_appAttrMap _ =
         , (userMessageAttr, BrickUtil.fg Vty.green)
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
         , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
+        , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         ]
 
