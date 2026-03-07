@@ -15,19 +15,10 @@
       {
         "tag": "OpenAPIServer",
         "contents": {
-          "SpecUrl": "https://petstore3.swagger.io/api/v3/openapi.json",
-          "BaseUrl": "https://petstore.swagger.io/v3",
+          "SpecUrl": "http://localhost:8001/openapi.json",
+          "BaseUrl": "http://localhost:8001",
           "Headers": {},
-          "Token": null
-        }
-      },
-      {
-        "tag": "OpenAPIServer",
-        "contents": {
-          "SpecUrl": "https://petstore.swagger.io/v2/swagger.json",
-          "BaseUrl": "https://petstore.swagger.io/v2",
-          "Headers": {},
-          "Token": null
+          "Token": "jqNecn]ou_ime$@q13m_231~@xmwWEE"
         }
       }
     ]

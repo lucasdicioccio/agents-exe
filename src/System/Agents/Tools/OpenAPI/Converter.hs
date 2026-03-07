@@ -10,6 +10,7 @@
 -- * Building tool parameter schemas from OpenAPI parameters
 -- * Naming conventions (operationId or path/method based)
 -- * Parameter naming (p_ prefix for path/query, b for body)
+-- * Name normalization for LLM compatibility
 --
 -- Example:
 -- >>> import qualified Data.Map.Strict as Map
@@ -44,6 +45,16 @@ module System.Agents.Tools.OpenAPI.Converter (
     deriveToolName,
     sanitizePathForName,
 
+    -- * Name normalization for LLM compatibility
+    normalizeForLLM,
+    isValidLLMNameChar,
+    ensureLetterStart,
+    collapseUnderscores,
+    NameMapping (..),
+    buildToolNameMapping,
+    findToolByNormalizedName,
+    generateUniqueNormalizedName,
+
     -- * OpenAI conversion
     toOpenAITool,
 
@@ -51,11 +62,14 @@ module System.Agents.Tools.OpenAPI.Converter (
     defaultHandler,
 ) where
 
+import Data.Char (isDigit, isLetter)
 import Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -119,6 +133,189 @@ data PropertySchema = PropertySchema
     deriving (Show, Eq)
 
 -- -------------------------------------------------------------------------
+-- Name Normalization for LLM Compatibility
+-- -------------------------------------------------------------------------
+
+-- | Mapping between original OpenAPI names and normalized LLM names.
+--
+-- This is used to maintain bidirectional mapping:
+-- - Original operation IDs may contain invalid characters (dots, slashes, etc.)
+-- - Normalized names are LLM-safe
+--
+-- Example:
+-- >>> NameMapping "pet.findByStatus" "pet_findByStatus" "myapi"
+-- NameMapping {nmOriginal = "pet.findByStatus", nmNormalized = "pet_findByStatus", nmToolbox = "myapi"}
+data NameMapping = NameMapping
+    { nmOriginal :: Text
+    -- ^ Original operationId from OpenAPI spec
+    , nmNormalized :: Text
+    -- ^ Normalized name safe for LLM (no dots, slashes, etc.)
+    , nmToolbox :: Text
+    -- ^ Toolbox name (prefix context)
+    }
+    deriving (Show, Eq)
+
+-- | Check if a character is valid for LLM tool names.
+--
+-- LLM APIs typically require: [a-zA-Z0-9_-]
+-- (letters, digits, underscores, hyphens)
+--
+-- Examples:
+-- >>> isValidLLMNameChar 'a'
+-- True
+-- >>> isValidLLMNameChar '5'
+-- True
+-- >>> isValidLLMNameChar '_'
+-- True
+-- >>> isValidLLMNameChar '-'
+-- True
+-- >>> isValidLLMNameChar '.'
+-- False
+-- >>> isValidLLMNameChar '/'
+-- False
+isValidLLMNameChar :: Char -> Bool
+isValidLLMNameChar c = isLetter c || isDigit c || c == '_' || c == '-'
+
+-- | Ensure a name starts with a letter.
+--
+-- LLM APIs require function names to start with a letter.
+-- If the name starts with a digit or other character, prefix with 't'.
+--
+-- Examples:
+-- >>> ensureLetterStart "getPet"
+-- "getPet"
+-- >>> ensureLetterStart "2.0_getPet"
+-- "t2_0_getPet"
+-- >>> ensureLetterStart ""
+-- "tool"
+ensureLetterStart :: Text -> Text
+ensureLetterStart t
+    | Text.null t = "tool"
+    | isLetter (Text.head t) = t
+    | otherwise = "t" <> t
+
+-- | Collapse multiple consecutive underscores into a single one.
+--
+-- Examples:
+-- >>> collapseUnderscores "pet__find__status"
+-- "pet_find_status"
+-- >>> collapseUnderscores "a___b__c"
+-- "a_b_c"
+-- >>> collapseUnderscores "valid_name"
+-- "valid_name"
+collapseUnderscores :: Text -> Text
+collapseUnderscores = Text.intercalate "_" . filter (not . Text.null) . Text.splitOn "_"
+
+-- | Normalize a tool name to be LLM-compatible.
+--
+-- This function ensures that tool names conform to LLM API requirements:
+-- 1. Must start with a letter (prefix with 't' if needed)
+-- 2. Replace invalid characters (anything not [a-zA-Z0-9_-]) with underscores
+-- 3. Collapse multiple consecutive underscores
+-- 4. Preserve case (some providers are case-sensitive)
+--
+-- This is essential for OpenAPI operation IDs that may contain dots,
+-- slashes, or other special characters.
+--
+-- Examples:
+-- >>> normalizeForLLM "pet.findByStatus"
+-- "pet_findByStatus"
+-- >>> normalizeForLLM "users/pets/get"
+-- "users_pets_get"
+-- >>> normalizeForLLM "2.0_getPet"
+-- "t2_0_getPet"
+-- >>> normalizeForLLM "get-pet_v2"
+-- "get-pet_v2"
+-- >>> normalizeForLLM "PetStore::getPet"
+-- "tPetStore__getPet"
+normalizeForLLM :: Text -> Text
+normalizeForLLM = collapseUnderscores . ensureLetterStart . Text.map replaceInvalid
+  where
+    replaceInvalid c
+        | isValidLLMNameChar c = c
+        | otherwise = '_'
+
+-- | Generate a unique normalized name, handling collisions.
+--
+-- If the normalized name already exists in the set of used names,
+-- append a numeric suffix to make it unique.
+--
+-- Examples:
+-- >>> generateUniqueNormalizedName "pet_find" Set.empty
+-- "pet_find"
+-- >>> generateUniqueNormalizedName "pet_find" (Set.fromList ["pet_find"])
+-- "pet_find_2"
+-- >>> generateUniqueNormalizedName "pet_find" (Set.fromList ["pet_find", "pet_find_2"])
+-- "pet_find_3"
+generateUniqueNormalizedName :: Text -> Set Text -> Text
+generateUniqueNormalizedName base usedNames
+    | Set.notMember base usedNames = base
+    | otherwise = findUnique 2
+  where
+    findUnique :: Int -> Text
+    findUnique n =
+        let candidate = base <> "_" <> Text.pack (show n)
+        in if Set.notMember candidate usedNames
+            then candidate
+            else findUnique (n + 1)
+
+-- | Build a mapping from normalized names to original names for all tools.
+--
+-- This creates a bidirectional mapping that allows us to:
+-- 1. Register tools with normalized LLM-safe names
+-- 2. Look up the original operation ID when executing tool calls
+--
+-- Handles name collisions by appending numeric suffixes.
+--
+-- The returned map is keyed by the /normalized/ name for efficient lookup
+-- when processing LLM tool calls.
+buildToolNameMapping ::
+    -- | Toolbox name (for context)
+    Text ->
+    -- | List of tools
+    [OpenAPITool] ->
+    -- | Map from normalized name to NameMapping
+    Map Text NameMapping
+buildToolNameMapping toolboxName tools =
+    fst $ foldl' addTool (Map.empty, Set.empty) tools
+  where
+    addTool :: (Map Text NameMapping, Set Text) -> OpenAPITool -> (Map Text NameMapping, Set Text)
+    addTool (mapping, used) tool =
+        let original = getOperationIdOrFallback tool
+            baseNormalized = normalizeForLLM original
+            uniqueNormalized = generateUniqueNormalizedName baseNormalized used
+            nameMap = NameMapping original uniqueNormalized toolboxName
+        in ( Map.insert uniqueNormalized nameMap mapping
+           , Set.insert uniqueNormalized used
+           )
+
+    -- Helper to get operation ID or fall back to generated name
+    getOperationIdOrFallback :: OpenAPITool -> Text
+    getOperationIdOrFallback tool =
+        fromMaybe (toolName tool) (opOperationId (toolOperation tool))
+
+    -- Local foldl' to avoid import
+    foldl' :: (a -> b -> a) -> a -> [b] -> a
+    foldl' f z [] = z
+    foldl' f z (x:xs) = let z' = f z x in z' `seq` foldl' f z' xs
+
+-- | Find a tool by its normalized LLM name.
+--
+-- Looks up the original operation ID from the name mapping,
+-- then finds the corresponding tool.
+--
+-- Returns 'Nothing' if no mapping exists for the given normalized name.
+findToolByNormalizedName ::
+    -- | Map from normalized name to NameMapping
+    Map Text NameMapping ->
+    -- | Normalized name to look up
+    Text ->
+    -- | Original operation ID if found
+    Maybe Text
+findToolByNormalizedName mapping normalizedName =
+    nmOriginal <$> Map.lookup normalizedName mapping
+
+-- -------------------------------------------------------------------------
 -- Main Conversion Functions
 -- -------------------------------------------------------------------------
 
@@ -148,6 +345,9 @@ convertOpenAPIToTools spec = do
 -- * Converts parameters to property schemas
 -- * Tracks required parameters
 --
+-- Note: The toolName field contains the /original/ name (potentially with
+-- invalid characters). Use 'normalizeForLLM' when registering with LLMs.
+--
 -- Example:
 -- >>> let op = Operation (Just "getPet") (Just "Get pet") (Just "Returns a pet") [] Nothing
 -- >>> let tool = convertOperation "/pets/{id}" "GET" op
@@ -176,6 +376,9 @@ convertOperation path method op =
 --
 -- Uses operationId if available, otherwise falls back to {method}_{path}.
 -- All names are prefixed with "openapi_".
+--
+-- Note: This returns the /original/ name which may contain invalid characters
+-- for LLM APIs. Use 'normalizeForLLM' before registering with LLMs.
 --
 -- Examples:
 -- >>> deriveToolName "/pets" "GET" (Operation (Just "listPets") Nothing Nothing [] Nothing)
@@ -396,6 +599,9 @@ getRequiredParams op =
 -- | Converts an OpenAPITool to the OpenAI Tool format.
 --
 -- This allows OpenAPITools to be used directly with the LLM interface.
+--
+-- Note: This uses the original tool name. For LLM registration,
+-- you typically want to use the normalized name via 'normalizeForLLM'.
 --
 -- Example:
 -- >>> let op = Operation (Just "test") (Just "Test op") (Just "A test") [] Nothing
