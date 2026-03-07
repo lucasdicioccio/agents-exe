@@ -890,6 +890,7 @@ main = do
                                 , "If an agent fails, do not retry and abdicate"
                                 ]
                             , mcpServers = Just []
+                            , openApiToolboxes = Nothing
                             , extraAgents = Nothing
                             }
                  in do
@@ -1318,6 +1319,7 @@ toJsonTrace :: AgentTree.Trace -> Maybe Aeson.Value
 toJsonTrace x = case x of
     AgentTree.AgentTrace v -> encodeAgentTrace v
     AgentTree.McpTrace cfg v -> encodeMcpTrace cfg v
+    AgentTree.OpenAPITrace _desc _v -> Nothing  -- OpenAPI traces not serialized to JSON for now
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
     AgentTree.CyclicReferencesWarning _ -> Nothing
