@@ -86,6 +86,7 @@ library agents-lib
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver
+                    , System.Agents.Tools.OpenAPI.Converter
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime

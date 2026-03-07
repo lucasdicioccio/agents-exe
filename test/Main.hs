@@ -8,8 +8,9 @@ import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Tools.OpenAPI.Types as OpenAPI
 import System.Agents.Tools.OpenAPI.Resolver as Resolver
+import System.Agents.Tools.OpenAPI.Converter as Converter
 
-import Data.Aeson (decode, encode, Value)
+import Data.Aeson (decode, encode, Value(..))
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -36,6 +37,7 @@ tests =
         , cycleDetectionTests
         , openAPITypesTests
         , openAPIResolverTests
+        , openAPIConverterTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -535,6 +537,121 @@ openAPIResolverTests =
     -- schemaType, schemaDescription, schemaEnum, schemaProperties, schemaItems, schemaAnyOf, schemaRef, schemaRequired
     mkSchema :: Maybe Text -> Maybe Text -> Maybe [Value] -> Maybe (Map.Map Text OpenAPI.Schema) -> Maybe OpenAPI.Schema -> Maybe [OpenAPI.Schema] -> Maybe Text -> Maybe [Text] -> OpenAPI.Schema
     mkSchema t d e p i a r req = OpenAPI.Schema t d e p i a r req
+
+-------------------------------------------------------------------------------
+-- OpenAPI Converter Tests
+-------------------------------------------------------------------------------
+
+openAPIConverterTests :: TestTree
+openAPIConverterTests =
+    testGroup
+        "OpenAPI Converter"
+        [ testCase "deriveToolName uses operationId when available" $ do
+            let op = OpenAPI.Operation (Just "getPetById") (Just "Get pet") Nothing [] Nothing
+            Converter.deriveToolName "/pets/{id}" "GET" op @?= "openapi_getPetById"
+        , testCase "deriveToolName falls back to path/method" $ do
+            let op = OpenAPI.Operation Nothing (Just "Get pet") Nothing [] Nothing
+            -- Note: sanitizePathForName collapses double underscores for cleaner names
+            Converter.deriveToolName "/pets/{id}" "GET" op @?= "openapi_get_pets_id_"
+        , testCase "sanitizePathForName handles simple path" $ do
+            Converter.sanitizePathForName "GET" "/pets" @?= "get_pets"
+        , testCase "sanitizePathForName handles path with path params" $ do
+            -- Note: consecutive underscores are collapsed for cleaner names
+            Converter.sanitizePathForName "POST" "/pets/{id}/owner" @?= "post_pets_id_owner"
+        , testCase "sanitizePathForName handles nested paths" $ do
+            Converter.sanitizePathForName "GET" "/api/v1/users" @?= "get_api_v1_users"
+        , testCase "buildToolDescription combines summary and description" $ do
+            let op = OpenAPI.Operation Nothing (Just "Get a pet") (Just "Returns a single pet") [] Nothing
+            Converter.buildToolDescription op @?= "Get a pet:\nReturns a single pet"
+        , testCase "paramToToolName prefixes with p_" $ do
+            let param = OpenAPI.Parameter "petId" OpenAPI.ParamInPath Nothing True Nothing
+            Converter.paramToToolName param @?= "p_petId"
+        , testCase "convertOperation creates tool with correct name" $ do
+            let op = OpenAPI.Operation (Just "listPets") (Just "List pets") (Just "Returns all pets") [] Nothing
+            let tool = Converter.convertOperation "/pets" "GET" op
+            Converter.toolName tool @?= "openapi_listPets"
+            Converter.toolPath tool @?= "/pets"
+            Converter.toolMethod tool @?= "GET"
+        , testCase "convertOperation creates tool with correct description" $ do
+            let op = OpenAPI.Operation (Just "listPets") (Just "List pets") (Just "Returns all pets") [] Nothing
+            let tool = Converter.convertOperation "/pets" "GET" op
+            Converter.toolDescription tool @?= "List pets:\nReturns all pets"
+        , testCase "buildToolParameters with no params" $ do
+            let op = OpenAPI.Operation (Just "test") Nothing Nothing [] Nothing
+            let params = Converter.buildToolParameters op
+            Converter.paramsType params @?= "object"
+            Map.null (Converter.paramsProperties params) @?= True
+            Converter.paramsRequired params @?= []
+        , testCase "buildToolParameters with path parameter" $ do
+            let schema = OpenAPI.Schema (Just "string") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let param = OpenAPI.Parameter "petId" OpenAPI.ParamInPath Nothing True (Just schema)
+            let op = OpenAPI.Operation (Just "getPet") Nothing Nothing [param] Nothing
+            let params = Converter.buildToolParameters op
+            Map.size (Converter.paramsProperties params) @?= 1
+            Converter.paramsRequired params @?= ["p_petId"]
+        , testCase "buildToolParameters with optional query parameter" $ do
+            let schema = OpenAPI.Schema (Just "integer") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let param = OpenAPI.Parameter "limit" OpenAPI.ParamInQuery (Just "Max results") False (Just schema)
+            let op = OpenAPI.Operation (Just "listPets") Nothing Nothing [param] Nothing
+            let params = Converter.buildToolParameters op
+            Map.size (Converter.paramsProperties params) @?= 1
+            Converter.paramsRequired params @?= []  -- Not required
+        , testCase "buildToolParameters with request body" $ do
+            let bodySchema = OpenAPI.Schema (Just "object") (Just "Pet object") Nothing Nothing Nothing Nothing Nothing Nothing
+            let content = Map.singleton "application/json" bodySchema
+            let body = OpenAPI.RequestBody (Just "Pet to create") True content
+            let op = OpenAPI.Operation (Just "createPet") Nothing Nothing [] (Just body)
+            let params = Converter.buildToolParameters op
+            Map.size (Converter.paramsProperties params) @?= 1
+            Converter.paramsRequired params @?= ["b"]  -- Body is required
+        , testCase "buildToolProperty with enum values" $ do
+            let schema = OpenAPI.Schema (Just "string") Nothing (Just [String "cat", String "dog"]) Nothing Nothing Nothing Nothing Nothing
+            let prop = Converter.buildToolProperty schema (Just "Pet type")
+            Converter.propType prop @?= Just "string"
+            Converter.propEnum prop @?= Just ["cat", "dog"]
+            assertBool "Description should contain enum info" ("Allowed values" `Text.isInfixOf` Converter.propDescription prop)
+        , testCase "buildToolProperty with array items" $ do
+            let itemSchema = OpenAPI.Schema (Just "string") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let schema = OpenAPI.Schema (Just "array") Nothing Nothing Nothing (Just itemSchema) Nothing Nothing Nothing
+            let prop = Converter.buildToolProperty schema (Just "Tags")
+            Converter.propType prop @?= Just "array"
+            case Converter.propItems prop of
+                Nothing -> assertFailure "Expected items schema"
+                Just items -> Converter.propType items @?= Just "string"
+        , testCase "getRequiredParams with required path param" $ do
+            let schema = OpenAPI.Schema (Just "string") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let param = OpenAPI.Parameter "id" OpenAPI.ParamInPath Nothing True (Just schema)
+            let op = OpenAPI.Operation Nothing Nothing Nothing [param] Nothing
+            Converter.getRequiredParams op @?= ["p_id"]
+        , testCase "getRequiredParams with optional query param" $ do
+            let schema = OpenAPI.Schema (Just "string") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let param = OpenAPI.Parameter "filter" OpenAPI.ParamInQuery Nothing False (Just schema)
+            let op = OpenAPI.Operation Nothing Nothing Nothing [param] Nothing
+            Converter.getRequiredParams op @?= []  -- Not required
+        , testCase "getRequiredParams with required body" $ do
+            let bodySchema = OpenAPI.Schema (Just "object") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let content = Map.singleton "application/json" bodySchema
+            let body = OpenAPI.RequestBody Nothing True content
+            let op = OpenAPI.Operation Nothing Nothing Nothing [] (Just body)
+            Converter.getRequiredParams op @?= ["b"]
+        , testCase "convertOpenAPIToTools converts all operations" $ do
+            let petSchema = OpenAPI.Schema (Just "object") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            let getOp = OpenAPI.Operation (Just "getPet") (Just "Get") Nothing [] Nothing
+            let postOp = OpenAPI.Operation (Just "createPet") (Just "Create") Nothing [] Nothing
+            let paths = Map.fromList
+                    [ ("/pets", Map.fromList [("GET", getOp), ("POST", postOp)])
+                    , ("/pets/{id}", Map.singleton "GET" getOp)
+                    ]
+            let spec = OpenAPI.OpenAPISpec paths Nothing
+            let tools = Converter.convertOpenAPIToTools spec
+            length tools @?= 3
+        , testCase "toOpenAITool converts tool correctly" $ do
+            let op = OpenAPI.Operation (Just "testOp") (Just "Test") (Just "A test op") [] Nothing
+            let apiTool = Converter.convertOperation "/test" "GET" op
+            let tool = Converter.toOpenAITool apiTool
+            OpenAI.toolName tool @?= OpenAI.ToolName "openapi_testOp"
+            OpenAI.toolDescription tool @?= "Test:\nA test op"
+        ]
 
 -------------------------------------------------------------------------------
 -- CallStackEntry Tests
