@@ -148,6 +148,7 @@ agentSerializationTests =
                     , Base.toolDirectory = "tools"
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
@@ -167,6 +168,7 @@ agentSerializationTests =
                     , Base.toolDirectory = "tools"
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -184,6 +186,7 @@ agentSerializationTests =
                     , Base.toolDirectory = "tools"
                     , Base.mcpServers = Just []
                     , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
@@ -974,6 +977,7 @@ agentConfigGraphTests =
         , Base.toolDirectory = "tools"
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
+        , Base.postgrestToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
 
@@ -988,6 +992,7 @@ agentConfigGraphTests =
         , Base.toolDirectory = "tools"
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
+        , Base.postgrestToolboxes = Nothing
         , Base.extraAgents = Just [Base.ExtraAgentRef e (Text.unpack e <> ".json") | e <- extras]
         }
 
@@ -1044,6 +1049,7 @@ referenceValidationTests =
                 , Base.toolDirectory = "tools"
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
+                , Base.postgrestToolboxes = Nothing
                 , Base.extraAgents = Nothing
                 }
             agent2 = Base.Agent
@@ -1057,6 +1063,7 @@ referenceValidationTests =
                 , Base.toolDirectory = "tools"
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
+                , Base.postgrestToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "agent-1" "/agent-1.json"]
                 }
 
@@ -1089,6 +1096,7 @@ referenceValidationTests =
                 , Base.toolDirectory = "tools"
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
+                , Base.postgrestToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "nonexistent" "/nonexistent.json"]
                 }
 
@@ -1219,6 +1227,7 @@ cycleDetectionTests =
         , Base.toolDirectory = "tools"
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
+        , Base.postgrestToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
 

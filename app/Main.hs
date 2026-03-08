@@ -891,6 +891,7 @@ main = do
                                 ]
                             , mcpServers = Just []
                             , openApiToolboxes = Nothing
+                            , postgrestToolboxes = Nothing
                             , extraAgents = Nothing
                             }
                  in do
@@ -1320,6 +1321,7 @@ toJsonTrace x = case x of
     AgentTree.AgentTrace v -> encodeAgentTrace v
     AgentTree.McpTrace cfg v -> encodeMcpTrace cfg v
     AgentTree.OpenAPITrace _desc _v -> Nothing  -- OpenAPI traces not serialized to JSON for now
+    AgentTree.PostgRESTTrace _desc _v -> Nothing  -- PostgREST traces not serialized to JSON for now
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
     AgentTree.CyclicReferencesWarning _ -> Nothing

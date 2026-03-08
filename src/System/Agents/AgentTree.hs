@@ -71,7 +71,7 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
 
-import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..), McpServerDescription (..), OpenAPIToolboxDescription (..), OpenAPIServerDescription (..))
+import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..), McpServerDescription (..), OpenAPIToolboxDescription (..), OpenAPIServerDescription (..), PostgRESTToolboxDescription (..), PostgRESTServerDescription (..))
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
@@ -81,7 +81,7 @@ import qualified System.Agents.Runtime as Runtime
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
-
+import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
 import System.Agents.ApiKeys
 
 -------------------------------------------------------------------------------
@@ -89,6 +89,7 @@ data Trace
     = AgentTrace Runtime.Trace
     | McpTrace McpServerDescription McpTools.Trace
     | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
+    | PostgRESTTrace PostgRESTToolboxDescription PostgREST.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     | CyclicReferencesWarning [[AgentSlug]]
@@ -188,6 +189,7 @@ data LoadingError
     = AgentLoadingError FileLoader.InvalidAgentError
     | ReferenceError ReferenceError
     | OpenAPIInitError Text String  -- ^ Description and error message
+    | PostgRESTInitError Text String  -- ^ Description and error message
     | OtherError String
     deriving (Show)
 
@@ -729,6 +731,16 @@ openApiDescToConfig desc =
         , OpenAPIToolbox.configToken = openApiToken desc
         }
 
+-- | Convert PostgREST toolbox description to toolbox configuration.
+postgrestDescToConfig :: PostgRESTServerDescription -> PostgREST.Config
+postgrestDescToConfig desc =
+    PostgREST.Config
+        { PostgREST.configUrl = postgrestSpecUrl desc
+        , PostgREST.configBaseUrl = postgrestBaseUrl desc
+        , PostgREST.configHeaders = Maybe.fromMaybe Map.empty (postgrestHeaders desc)
+        , PostgREST.configToken = postgrestToken desc
+        }
+
 -- | Initialize OpenAPI toolboxes and return their tool registrations.
 --
 -- This function takes OpenAPI toolbox descriptions, initializes each toolbox,
@@ -764,6 +776,41 @@ initializeOpenAPIToolboxes tracer descriptions = do
         let (lefts, rights) = Either.partitionEithers eithers
          in if null lefts then Right rights else Left lefts
 
+-- | Initialize PostgREST toolboxes and return their tool registrations.
+--
+-- This function takes PostgREST toolbox descriptions, initializes each toolbox,
+-- and registers all tools. If any toolbox fails to initialize, an error is returned.
+initializePostgRESToolboxes ::
+    Tracer IO Trace ->
+    [PostgRESTToolboxDescription] ->
+    IO (Either LoadingError [ToolRegistration])
+initializePostgRESToolboxes tracer descriptions = do
+    results <- mapM initializeOne descriptions
+    case concatEithers results of
+        Left [] -> pure $ Left $ OtherError "Unknown PostgREST initialization error"
+        Left (err : _) -> pure $ Left err  -- Return first error
+        Right allTools -> pure $ Right $ concat allTools
+  where
+    initializeOne :: PostgRESTToolboxDescription -> IO (Either LoadingError [ToolRegistration])
+    initializeOne desc@(PostgRESTServer srvDesc) = do
+        let config = postgrestDescToConfig srvDesc
+        initResult <- PostgREST.initializeToolbox (contramap (PostgRESTTrace desc) tracer) config
+        case initResult of
+            Left err ->
+                pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) (show err)
+            Right toolbox -> do
+                regResult <- registerPostgRESTools toolbox
+                case regResult of
+                    Left err ->
+                        pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) err
+                    Right tools ->
+                        pure $ Right tools
+
+    concatEithers :: [Either a b] -> Either [a] [b]
+    concatEithers eithers =
+        let (lefts, rights) = Either.partitionEithers eithers
+         in if null lefts then Right rights else Left lefts
+
 -- | Initialize a runtime with deferred tool resolution for extra agents.
 --
 -- This function creates a runtime where the tool list is built dynamically.
@@ -790,9 +837,12 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
             -- Initialize OpenAPI toolboxes
             openApiToolsResult <- initializeOpenAPIToolboxes tracer (Maybe.fromMaybe [] desc.openApiToolboxes)
-            case openApiToolsResult of
-                Left err -> pure $ Left (show err)
-                Right openApiToolRegs -> do
+            -- Initialize PostgREST toolboxes
+            postgrestToolsResult <- initializePostgRESToolboxes tracer (Maybe.fromMaybe [] desc.postgrestToolboxes)
+            case (openApiToolsResult, postgrestToolsResult) of
+                (Left err, _) -> pure $ Left (show err)
+                (_, Left err) -> pure $ Left (show err)
+                (Right openApiToolRegs, Right postgrestToolRegs) -> do
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
                     -- extra agents (resolved via registry at call time)
@@ -813,7 +863,7 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                         (rootDir </> desc.toolDirectory)
                         [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
-                        openApiToolRegs
+                        (openApiToolRegs ++ postgrestToolRegs)
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
@@ -843,9 +893,12 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
             -- Initialize OpenAPI toolboxes
             openApiToolsResult <- initializeOpenAPIToolboxes tracer (Maybe.fromMaybe [] desc.openApiToolboxes)
-            case openApiToolsResult of
-                Left err -> pure $ Left (show err)
-                Right openApiToolRegs -> do
+            -- Initialize PostgREST toolboxes
+            postgrestToolsResult <- initializePostgRESToolboxes tracer (Maybe.fromMaybe [] desc.postgrestToolboxes)
+            case (openApiToolsResult, postgrestToolsResult) of
+                (Left err, _) -> pure $ Left (show err)
+                (_, Left err) -> pure $ Left (show err)
+                (Right openApiToolRegs, Right postgrestToolRegs) -> do
                     Runtime.newRuntime
                         desc.slug
                         desc.announce
@@ -863,7 +916,7 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                         (rootDir </> desc.toolDirectory)
                         [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
-                        openApiToolRegs
+                        (openApiToolRegs ++ postgrestToolRegs)
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =

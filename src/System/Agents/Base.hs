@@ -161,6 +161,87 @@ instance FromJSON OpenAPIToolboxDescription where
             _ -> fail "expecting OpenAPIServer 'tag'"
 
 -------------------------------------------------------------------------------
+-- PostgREST Toolbox Configuration
+-------------------------------------------------------------------------------
+
+-- | Configuration for a PostgREST toolbox.
+--
+-- This describes a PostgREST API to load as a toolbox.
+-- PostgREST exposes PostgreSQL databases as REST APIs and provides
+-- an OpenAPI/Swagger spec at the root endpoint.
+--
+-- The toolbox will fetch the spec from 'postgrestSpecUrl' and make
+-- all table endpoints available as tools to the agent, with special
+-- handling for row filters, pagination, ordering, and column selection.
+--
+-- Example configuration:
+--
+-- @
+-- {
+--   "tag": "PostgRESTServer",
+--   "contents": {
+--     "specUrl": "http://localhost:3000/",
+--     "baseUrl": "http://localhost:3000",
+--     "headers": {"Accept-Profile": "myschema"},
+--     "token": "${POSTGREST_TOKEN}"
+--   }
+-- }
+-- @
+data PostgRESTServerDescription
+    = PostgRESTServerDescription
+    { postgrestSpecUrl :: Text
+    -- ^ URL to fetch the PostgREST OpenAPI specification from
+    -- (usually the root endpoint, e.g., "http://localhost:3000/")
+    , postgrestBaseUrl :: Text
+    -- ^ Base URL for API calls (can be different from spec URL)
+    , postgrestHeaders :: Maybe (Map Text Text)
+    -- ^ Optional static headers to include in all requests
+    -- (e.g., for schema selection via Accept-Profile)
+    , postgrestToken :: Maybe Text
+    -- ^ Optional Bearer token for JWT authentication
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for PostgRESTServerDescription to use camelCase field names
+postgrestServerOptions :: Aeson.Options
+postgrestServerOptions = Aeson.defaultOptions
+    { Aeson.fieldLabelModifier = dropPrefix "postgrest"
+    , Aeson.omitNothingFields = True
+    }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON PostgRESTServerDescription where
+    toJSON = Aeson.genericToJSON postgrestServerOptions
+    toEncoding = Aeson.genericToEncoding postgrestServerOptions
+
+instance FromJSON PostgRESTServerDescription where
+    parseJSON = Aeson.genericParseJSON postgrestServerOptions
+
+-- | Wrapper type for JSON serialization with tag.
+-- Similar to OpenAPIToolboxDescription, this allows extensible toolbox types.
+data PostgRESTToolboxDescription
+    = PostgRESTServer PostgRESTServerDescription
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON PostgRESTToolboxDescription where
+    toJSON (PostgRESTServer val) =
+        Aeson.object
+            [ "tag" .= ("PostgRESTServer" :: Text)
+            , "contents" .= val
+            ]
+
+instance FromJSON PostgRESTToolboxDescription where
+    parseJSON = Aeson.withObject "PostgRESTToolboxDescription" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "PostgRESTServer" ->
+                PostgRESTServer <$> v .: "contents"
+            _ -> fail "expecting PostgRESTServer 'tag'"
+
+-------------------------------------------------------------------------------
 data Agent
     = Agent
     { slug :: Text
@@ -173,6 +254,7 @@ data Agent
     , toolDirectory :: FilePath
     , mcpServers :: Maybe [McpServerDescription]
     , openApiToolboxes :: Maybe [OpenAPIToolboxDescription]
+    , postgrestToolboxes :: Maybe [PostgRESTToolboxDescription]
     , extraAgents :: Maybe [ExtraAgentRef]
     }
     deriving (Show, Ord, Eq, Generic)
