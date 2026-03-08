@@ -1,3 +1,10 @@
+```
+    λλ
+   λ⊙λ⊙
+  λλλλλλ
+ λλλλλλλλ
+```
+
 # an LLM-agent tool
 
 A handy LLM-agent tool, with a variety of calling and configuration modes so
