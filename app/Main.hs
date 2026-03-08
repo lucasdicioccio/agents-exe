@@ -48,7 +48,6 @@ import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.List as ToolsList
-import qualified System.Agents.Tools.McpServer as McpToolboxServer
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.Nest as Nest
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
@@ -341,7 +340,6 @@ data Command
     | Import ImportOptions
     | ToolboxNest NestOptions
     | ListTools ToolsList.ListToolsOptions
-    | ToolboxMcp McpToolboxServer.McpToolboxOptions
 
 instance Show Command where
     show Check = "Check"
@@ -356,7 +354,6 @@ instance Show Command where
     show (Import _) = "Import"
     show (ToolboxNest _) = "ToolboxNest"
     show (ListTools _) = "ListTools"
-    show (ToolboxMcp _) = "ToolboxMcp"
 
 data PromptScriptDirective
     = Str Text.Text
@@ -902,8 +899,6 @@ parseToolboxCommand =
             (progDesc "Nest multiple tools into a single bash-compatible tool"))
         <> command "list" (info parseListToolsCommand
             (progDesc "List available tools"))
-        <> command "mcp" (info parseToolboxMcpCommand
-            (progDesc "Run MCP server exposing tools directly without agent indirection"))
         )
 
 -- | Parse the list tools command
@@ -954,132 +949,6 @@ parseListFormat =
     parseFormat "json" = Just ToolsList.FormatJson
     parseFormat "names" = Just ToolsList.FormatNames
     parseFormat _ = Nothing
-
--- | Parse the toolbox mcp command
-parseToolboxMcpCommand :: Parser Command
-parseToolboxMcpCommand =
-    ToolboxMcp <$> parseMcpToolboxOptions
-
--- | Parse options for the toolbox mcp command
-parseMcpToolboxOptions :: Parser McpToolboxServer.McpToolboxOptions
-parseMcpToolboxOptions =
-    McpToolboxServer.McpToolboxOptions
-        <$> many parseToolSourceMcp
-        <*> parseServerName
-        <*> parseServerVersion
-        <*> parseMcpTransport
-        <*> optional parseLogLevel
-        <*> parseNameMappingStrategy
-
--- | Parse a tool source for MCP server
-parseToolSourceMcp :: Parser McpToolboxServer.ToolSource
-parseToolSourceMcp =
-    asum
-        [ McpToolboxServer.ToolSourceAgent <$> strOption
-            ( long "agent-file"
-                <> metavar "AGENTFILE"
-                <> help "Load tools from an agent configuration file"
-            )
-        , McpToolboxServer.ToolSourceDirectory <$> strOption
-            ( long "tool-dir"
-                <> metavar "TOOLDIR"
-                <> help "Load bash tools directly from a directory"
-            )
-        , parseMcpToolboxSource
-        , McpToolboxServer.ToolSourceOpenAPI <$> strOption
-            ( long "openapi-spec"
-                <> metavar "SPECFILE"
-                <> help "Load tools from an OpenAPI specification file"
-            )
-        , McpToolboxServer.ToolSourcePostgREST <$> strOption
-            ( long "postgrest-config"
-                <> metavar "CONFIGFILE"
-                <> help "Load tools from a PostgREST configuration file"
-            )
-        ]
-
--- | Parse MCP toolbox source (name:config format)
-parseMcpToolboxSource :: Parser McpToolboxServer.ToolSource
-parseMcpToolboxSource =
-    option (maybeReader parseMcpSource)
-        ( long "mcp-toolbox"
-            <> metavar "NAME:CONFIG"
-            <> help "Load tools from an MCP server (format: name:config.json)"
-        )
-  where
-    parseMcpSource :: String -> Maybe McpToolboxServer.ToolSource
-    parseMcpSource s = case break (== ':') s of
-        (name, ':':config) -> Just $ McpToolboxServer.ToolSourceMcpToolbox (Text.pack name) config
-        _ -> Nothing
-
--- | Parse the server name
-parseServerName :: Parser Text
-parseServerName =
-    fromMaybe "agents-exe-toolbox-mcp" <$> optional (strOption
-        ( long "server-name"
-            <> metavar "NAME"
-            <> help "Name of the MCP server (default: agents-exe-toolbox-mcp)"
-        ))
-
--- | Parse the server version
-parseServerVersion :: Parser Text
-parseServerVersion =
-    fromMaybe "0.1.0" <$> optional (strOption
-        ( long "server-version"
-            <> metavar "VERSION"
-            <> help "Version of the MCP server (default: 0.1.0)"
-        ))
-
--- | Parse the transport mechanism
-parseMcpTransport :: Parser McpToolboxServer.McpTransport
-parseMcpTransport =
-    asum
-        [ flag' McpToolboxServer.StdioTransport
-            ( long "stdio"
-                <> help "Use stdio transport (default)"
-            )
-        , McpToolboxServer.HttpTransport <$> option auto
-            ( long "http-port"
-                <> metavar "PORT"
-                <> help "Use HTTP transport on specified port (not yet implemented)"
-            )
-        , pure McpToolboxServer.StdioTransport
-        ]
-
--- | Parse the log level
-parseLogLevel :: Parser McpToolboxServer.LogLevel
-parseLogLevel =
-    option (maybeReader parseLevel)
-        ( long "log-level"
-            <> metavar "LEVEL"
-            <> help "Log level: debug, info, warning, error (default: none)"
-        )
-  where
-    parseLevel :: String -> Maybe McpToolboxServer.LogLevel
-    parseLevel "debug" = Just McpToolboxServer.LogDebug
-    parseLevel "info" = Just McpToolboxServer.LogInfo
-    parseLevel "warning" = Just McpToolboxServer.LogWarning
-    parseLevel "error" = Just McpToolboxServer.LogError
-    parseLevel _ = Nothing
-
--- | Parse the name mapping strategy
-parseNameMappingStrategy :: Parser McpToolboxServer.NameMappingStrategy
-parseNameMappingStrategy =
-    asum
-        [ flag' McpToolboxServer.KeepPrefixedNames
-            ( long "keep-prefixes"
-                <> help "Keep LLM prefixes in tool names (e.g., bash_hello)"
-            )
-        , flag' McpToolboxServer.StripPrefixes
-            ( long "strip-prefixes"
-                <> help "Strip LLM prefixes from tool names (e.g., hello)"
-            )
-        , flag' McpToolboxServer.UseOriginalNames
-            ( long "use-original-names"
-                <> help "Use original tool names where available"
-            )
-        , pure McpToolboxServer.StripPrefixes
-        ]
 
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
@@ -1317,22 +1186,11 @@ main = do
             Import opts -> handleImport opts
             ToolboxNest opts -> handleToolboxNest opts
             ListTools opts -> ToolsList.runListCommand opts
-            ToolboxMcp opts -> handleToolboxMcp opts
 
 -------------------------------------------------------------------------------
--- Toolbox MCP Handler
+-- Toolbox List Handler (moved to module)
 -------------------------------------------------------------------------------
-
-handleToolboxMcp :: McpToolboxServer.McpToolboxOptions -> IO ()
-handleToolboxMcp opts = do
-    -- Validate that at least one tool source is specified
-    when (null opts.mcpToolSources) $ do
-        Text.hPutStrLn stderr "Error: At least one tool source must be specified"
-        Text.hPutStrLn stderr "Use --agent-file, --tool-dir, --mcp-toolbox, --openapi-spec, or --postgrest-config"
-        exitFailure
-    
-    -- Run the MCP toolbox server
-    McpToolboxServer.runMcpToolboxServer opts
+-- The list command is now handled in System.Agents.Tools.List
 
 -------------------------------------------------------------------------------
 -- Toolbox Nest Handler
@@ -1678,7 +1536,7 @@ loadAgentFromFile path = do
 
 loadToolsForAgent :: FilePath -> Agent -> IO [ExportImport.ToolExport]
 loadToolsForAgent agentFile agent = do
-    let toolDir = takeDirectory agentFile </> agent.toolDirectory
+    let toolDir = takeDirectory agentFile </> toolDirectory agent
     exists <- doesDirectoryExist toolDir
     if not exists
         then pure []
@@ -1703,7 +1561,7 @@ loadToolsForAgent agentFile agent = do
 
 loadStandaloneToolsForAgent :: FilePath -> Agent -> IO [ExportImport.StandaloneToolExport]
 loadStandaloneToolsForAgent agentFile agent = do
-    let toolDir = takeDirectory agentFile </> agent.toolDirectory
+    let toolDir = takeDirectory agentFile </> toolDirectory agent
     exists <- doesDirectoryExist toolDir
     if not exists
         then pure []
