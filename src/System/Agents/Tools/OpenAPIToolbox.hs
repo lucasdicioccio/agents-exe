@@ -47,34 +47,38 @@ module System.Agents.Tools.OpenAPIToolbox (
     Toolbox (..),
     Config (..),
     InitializationError (..),
-    
+
     -- * Re-export ToolResult from Types
     ToolResult,
-    
+
     -- * Initialization
     initializeToolbox,
-    
+
     -- * Tool execution
     createToolHandler,
     handleToolCall,
-    
+
     -- * Path formatting
     formatPath,
-    
+
     -- * HTTP building
     buildRequest,
     buildFullUrl,
-    
+
     -- * Response handling
     handleResponse,
-    
+
     -- * Operation helpers
     getOperationId,
     getToolByNormalizedName,
-    
+
     -- * Naming helpers
     openapi2LLMName,
     normalizeToolName,
+
+    -- * URL helpers
+    isFileUrl,
+    fileUrlToPath,
 ) where
 
 import Control.Exception (try)
@@ -132,8 +136,12 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 data Trace
     = FetchingSpecTrace !Text
     -- ^ URL being fetched
+    | FetchingSpecFromFileTrace !Text
+    -- ^ Loading spec from file path
     | SpecFetchedTrace !Int
     -- ^ HTTP status of spec fetch
+    | SpecLoadedFromFileTrace !FilePath
+    -- ^ Successfully loaded spec from file
     | ToolsConvertedTrace !Int
     -- ^ Number of tools converted from spec
     | CallingEndpointTrace !Text !Text !Text
@@ -156,6 +164,8 @@ data Trace
 data InitializationError
     = NetworkError !Text
     -- ^ Network error fetching spec
+    | FileError !Text
+    -- ^ File error loading spec from disk
     | ParseError !Text
     -- ^ JSON parse error
     | SpecError !Text
@@ -165,7 +175,7 @@ data InitializationError
 -- | Configuration for initializing an OpenAPI toolbox.
 data Config = Config
     { configUrl :: Text
-    -- ^ URL to fetch OpenAPI spec from
+    -- ^ URL to fetch OpenAPI spec from (supports http/https or file://)
     , configBaseUrl :: Text
     -- ^ Base URL for API calls
     , configHeaders :: Map Text Text
@@ -200,6 +210,38 @@ data Toolbox = Toolbox
     }
 
 -- -------------------------------------------------------------------------
+-- URL Helpers
+-- -------------------------------------------------------------------------
+
+-- | Check if a URL is a file:// URL.
+--
+-- Example:
+--
+-- >>> isFileUrl "file:///path/to/spec.json"
+-- True
+--
+-- >>> isFileUrl "https://api.example.com/openapi.json"
+-- False
+isFileUrl :: Text -> Bool
+isFileUrl url = Text.isPrefixOf "file://" url
+
+-- | Convert a file:// URL to a file path.
+--
+-- Handles both "file:///absolute/path" and "file://relative/path" formats.
+--
+-- Example:
+--
+-- >>> fileUrlToPath "file:///home/user/spec.json"
+-- "/home/user/spec.json"
+--
+-- >>> fileUrlToPath "file://spec.json"
+-- "spec.json"
+fileUrlToPath :: Text -> FilePath
+fileUrlToPath url =
+    let withoutPrefix = Text.drop 7 url  -- Drop "file://"
+    in Text.unpack withoutPrefix
+
+-- -------------------------------------------------------------------------
 -- Initialization
 -- -------------------------------------------------------------------------
 
@@ -207,7 +249,7 @@ data Toolbox = Toolbox
 --
 -- This function:
 -- 1. Creates an HTTP runtime with authentication
--- 2. Fetches the OpenAPI spec from the configured URL
+-- 2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
 -- 3. Parses the JSON to an OpenAPISpec
 -- 4. Dereferences schema references ($ref)
 -- 5. Converts operations to tools
@@ -225,15 +267,12 @@ initializeToolbox tracer config = do
             Nothing -> HttpClient.NoToken
     runtime <- HttpClient.newRuntime token
 
-    -- Fetch OpenAPI spec
-    runTracer tracer (FetchingSpecTrace config.configUrl)
-    fetchResult <- fetchSpec runtime config.configUrl
+    -- Fetch OpenAPI spec (from URL or file)
+    fetchResult <- fetchSpec tracer runtime config.configUrl
 
     case fetchResult of
         Left err -> pure $ Left err
-        Right (status, body) -> do
-            runTracer tracer (SpecFetchedTrace status)
-
+        Right body -> do
             -- Parse JSON to OpenAPISpec
             case Aeson.decode body of
                 Nothing -> pure $ Left $ ParseError "Failed to parse OpenAPI spec JSON"
@@ -247,9 +286,9 @@ initializeToolbox tracer config = do
 
                     -- Build name mapping for LLM-safe names
                     let nameMapping = buildToolNameMapping toolboxName tools
-                    
+
                     -- Trace name normalizations (for debugging)
-                    mapM_ (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m))) 
+                    mapM_ (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m)))
                           (Map.elems nameMapping)
 
                     -- Create toolbox
@@ -267,19 +306,49 @@ initializeToolbox tracer config = do
 
 -- | Extract a toolbox name from the spec URL.
 extractToolboxName :: Text -> Text
-extractToolboxName url = 
+extractToolboxName url =
     let withoutProtocol = Text.dropWhile (/= '/') $ Text.drop 8 url
         hostPart = Text.takeWhile (/= '/') withoutProtocol
-    in if Text.null hostPart 
-       then "openapi" 
+    in if Text.null hostPart
+       then "openapi"
        else normalizeForLLM hostPart
 
--- | Fetch the OpenAPI spec from a URL.
+-- | Fetch the OpenAPI spec from a URL or file.
+--
+-- Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
+-- the spec is read directly from the filesystem.
 fetchSpec ::
+    Tracer IO Trace ->
     HttpClient.Runtime ->
     Text ->
-    IO (Either InitializationError (Int, LByteString.ByteString))
-fetchSpec runtime url = do
+    IO (Either InitializationError LByteString.ByteString)
+fetchSpec tracer runtime url
+    | isFileUrl url = fetchSpecFromFile tracer (fileUrlToPath url)
+    | otherwise = fetchSpecFromUrl tracer runtime url
+
+-- | Fetch the OpenAPI spec from a file on disk.
+fetchSpecFromFile ::
+    Tracer IO Trace ->
+    FilePath ->
+    IO (Either InitializationError LByteString.ByteString)
+fetchSpecFromFile tracer path = do
+    runTracer tracer (FetchingSpecFromFileTrace (Text.pack path))
+    result <- try $ LByteString.readFile path
+    case result of
+        Left (e :: IOError) ->
+            pure $ Left $ FileError (Text.pack $ show e)
+        Right content -> do
+            runTracer tracer (SpecLoadedFromFileTrace path)
+            pure $ Right content
+
+-- | Fetch the OpenAPI spec from an HTTP URL.
+fetchSpecFromUrl ::
+    Tracer IO Trace ->
+    HttpClient.Runtime ->
+    Text ->
+    IO (Either InitializationError LByteString.ByteString)
+fetchSpecFromUrl tracer runtime url = do
+    runTracer tracer (FetchingSpecTrace url)
     result <- try $ HttpClient.get runtime (Tracer (const (pure ()))) url
     case result of
         Left (e :: HttpClient.HttpException) ->
@@ -289,7 +358,9 @@ fetchSpec runtime url = do
         Right (Right response) ->
             let status = HttpTypes.statusCode (HttpClient.responseStatus response)
                 body = HttpClient.responseBody response
-             in pure $ Right (status, body)
+             in do
+                runTracer tracer (SpecFetchedTrace status)
+                pure $ Right body
 
 -- -------------------------------------------------------------------------
 -- Tool Lookup
@@ -531,7 +602,7 @@ executeRequest ::
 executeRequest runtime method fullUrl queryParams mbody headers = do
     -- Build the request with all headers and parameters
     req <- buildRequest method fullUrl queryParams mbody headers
-    
+
     -- Execute the request using the runtime
     let tracer = Tracer (const (pure ()))
     result <- HttpClient.runRequest runtime tracer req
@@ -621,4 +692,5 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
+
 
