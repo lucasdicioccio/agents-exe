@@ -4,9 +4,10 @@
 
 module Main where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, when, unless)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
@@ -19,7 +20,7 @@ import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import System.Agents.Base (Agent (..), AgentDescription (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
+import System.Agents.Base (Agent (..), AgentDescription (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..), ExtraAgentRef (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
@@ -48,7 +49,7 @@ import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
-import System.Directory (doesFileExist, doesDirectoryExist, getCurrentDirectory, getHomeDirectory)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (ExitCode(..), exitFailure, exitSuccess)
 import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
@@ -56,6 +57,166 @@ import qualified System.Process as Process
 
 import Options.Applicative
 import Data.Time (getCurrentTime)
+
+-------------------------------------------------------------------------------
+-- Default Configuration and Example Agents
+-------------------------------------------------------------------------------
+
+-- | Default API keys configuration template
+defaultApiKeysContent :: LByteString.ByteString
+defaultApiKeysContent = Aeson.encodePretty $ Aeson.object
+    [ "keys" .=
+        [ Aeson.object
+            [ "id" .= ("main-key" :: Text)
+            , "value" .= ("<insert-your-openai-api-key-here>" :: Text)
+            ]
+        , Aeson.object
+            [ "id" .= ("mistral-key" :: Text)
+            , "value" .= ("<insert-your-mistral-api-key-here>" :: Text)
+            ]
+        , Aeson.object
+            [ "id" .= ("ollama-key" :: Text)
+            , "value" .= ("ollama" :: Text)
+            ]
+        ]
+    ]
+
+-- | Default OpenAI agent configuration
+defaultOpenAIAgent :: Agent
+defaultOpenAIAgent = Agent
+    { slug = "openai-assistant"
+    , apiKeyId = "main-key"
+    , flavor = "OpenAIv1"
+    , modelUrl = "https://api.openai.com/v1"
+    , modelName = "gpt-4-turbo-preview"
+    , announce = "a helpful assistant powered by OpenAI GPT-4"
+    , systemPrompt =
+        [ "You are a helpful assistant."
+        , "You provide clear, accurate, and concise responses."
+        , "When using tools, you explain your actions to the user."
+        ]
+    , toolDirectory = "tools"
+    , mcpServers = Just []
+    , openApiToolboxes = Nothing
+    , postgrestToolboxes = Nothing
+    , extraAgents = Nothing
+    }
+
+-- | Mistral AI agent configuration
+mistralAgent :: Agent
+mistralAgent = Agent
+    { slug = "mistral-assistant"
+    , apiKeyId = "mistral-key"
+    , flavor = "OpenAIv1"
+    , modelUrl = "https://api.mistral.ai/v1"
+    , modelName = "mistral-large-latest"
+    , announce = "a helpful assistant powered by Mistral AI"
+    , systemPrompt =
+        [ "You are a helpful assistant powered by Mistral AI."
+        , "You provide clear, accurate, and concise responses."
+        , "You excel at reasoning and following instructions precisely."
+        ]
+    , toolDirectory = "tools"
+    , mcpServers = Just []
+    , openApiToolboxes = Nothing
+    , postgrestToolboxes = Nothing
+    , extraAgents = Nothing
+    }
+
+-- | Ollama local LLM agent configuration
+ollamaAgent :: Agent
+ollamaAgent = Agent
+    { slug = "ollama-assistant"
+    , apiKeyId = "ollama-key"
+    , flavor = "OpenAIv1"
+    , modelUrl = "http://localhost:11434/v1"
+    , modelName = "llama3.2"
+    , announce = "a helpful assistant running locally via Ollama"
+    , systemPrompt =
+        [ "You are a helpful assistant running locally on the user's machine."
+        , "You provide clear and accurate responses while respecting privacy."
+        , "Note: You are running on local hardware, which may limit capabilities."
+        ]
+    , toolDirectory = "tools"
+    , mcpServers = Just []
+    , openApiToolboxes = Nothing
+    , postgrestToolboxes = Nothing
+    , extraAgents = Nothing
+    }
+
+-- | Orchestrator agent that can delegate to other agents
+orchestratorAgent :: Agent
+orchestratorAgent = Agent
+    { slug = "orchestrator"
+    , apiKeyId = "main-key"
+    , flavor = "OpenAIv1"
+    , modelUrl = "https://api.openai.com/v1"
+    , modelName = "gpt-4-turbo-preview"
+    , announce = "a puppet-master capable of orchestrating other agents"
+    , systemPrompt =
+        [ "You are a helpful software agent trying to solve user requests."
+        , "Your preferred action mode is to act as a puppet master capable of driving other agents."
+        , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
+        , "You efficiently single-shot prompt other agents to efficiently use your token budget."
+        , "You only provide prompt examples when you think other agents may benefit."
+        , "You notify users as you progress."
+        , "If an agent fails, do not retry and abdicate."
+        ]
+    , toolDirectory = "tools"
+    , mcpServers = Just []
+    , openApiToolboxes = Nothing
+    , postgrestToolboxes = Nothing
+    , extraAgents = Just
+        [ ExtraAgentRef "openai-assistant" "openai-assistant.json"
+        , ExtraAgentRef "mistral-assistant" "mistral-assistant.json"
+        , ExtraAgentRef "ollama-assistant" "ollama-assistant.json"
+        ]
+    }
+
+-- | Ensure the config directory structure exists with default files
+ensureConfigStructure :: FilePath -> FilePath -> IO ()
+ensureConfigStructure configDir secretKeysPath = do
+    -- Create config directory
+    createDirectoryIfMissing True configDir
+
+    -- Create default agents directory
+    let defaultAgentsDir = configDir </> "default"
+    createDirectoryIfMissing True defaultAgentsDir
+
+    -- Create API keys file if it doesn't exist
+    keysExist <- doesFileExist secretKeysPath
+    unless keysExist $ do
+        LByteString.writeFile secretKeysPath defaultApiKeysContent
+        putStrLn $ "Created API keys template at: " ++ secretKeysPath
+        putStrLn "Please edit this file and add your actual API keys."
+
+    -- Create example agent files if the default directory is empty
+    defaultDirContents <- FileLoader.listJsonDirectory defaultAgentsDir
+    when (null defaultDirContents) $ do
+        createExampleAgents defaultAgentsDir
+        putStrLn $ "Created example agent configurations in: " ++ defaultAgentsDir
+
+-- | Create example agent configuration files
+createExampleAgents :: FilePath -> IO ()
+createExampleAgents agentsDir = do
+    -- Write OpenAI agent
+    LByteString.writeFile (agentsDir </> "openai-assistant.json") $
+        Aeson.encodePretty (AgentDescription defaultOpenAIAgent)
+
+    -- Write Mistral agent
+    LByteString.writeFile (agentsDir </> "mistral-assistant.json") $
+        Aeson.encodePretty (AgentDescription mistralAgent)
+
+    -- Write Ollama agent
+    LByteString.writeFile (agentsDir </> "ollama-assistant.json") $
+        Aeson.encodePretty (AgentDescription ollamaAgent)
+
+    -- Write orchestrator agent
+    LByteString.writeFile (agentsDir </> "orchestrator.json") $
+        Aeson.encodePretty (AgentDescription orchestratorAgent)
+
+    -- Create tools directory for orchestrator
+    createDirectoryIfMissing True (agentsDir </> "tools")
 
 -------------------------------------------------------------------------------
 -- CLI Argument Parsing
@@ -116,7 +277,14 @@ initArgParserArgs :: IO ArgParserArgs
 initArgParserArgs = do
     homedir <- getHomeDirectory
     agentsExecConfig <- locateAgentsExeConfig
-    maybe (initWithoutAgentsExeConfig homedir) (initFromAgentsExeConfig homedir) agentsExecConfig
+
+    let defaultConfigDir = homedir </> ".config/agents-exe"
+    let secretKeysPath = defaultConfigDir </> "secret-keys"
+
+    -- Ensure config structure exists before trying to load from it
+    ensureConfigStructure defaultConfigDir secretKeysPath
+
+    maybe (initWithoutAgentsExeConfig defaultConfigDir) (initFromAgentsExeConfig homedir) agentsExecConfig
   where
     initFromAgentsExeConfig :: FilePath -> FilePath -> IO ArgParserArgs
     initFromAgentsExeConfig homedir agentsexecfgpath = do
@@ -136,8 +304,7 @@ initArgParserArgs = do
                         (logSessionsJsonPrefix =<< obj.agentsLogs)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
-    initWithoutAgentsExeConfig homedir = do
-        let pconfigdir = homedir </> ".config/agents-exe"
+    initWithoutAgentsExeConfig pconfigdir = do
         jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
         pure $
             ArgParserArgs
@@ -661,14 +828,14 @@ parseListNamespaces :: Parser Bool
 parseListNamespaces =
     switch
         ( long "list-namespaces"
-            <> help "List available namespaces in git repo"
+                <> help "List available namespaces in git repo"
         )
 
 parseListTools :: Parser Bool
 parseListTools =
     switch
         ( long "list-tools"
-            <> help "List available tools in git repo"
+                <> help "List available tools in git repo"
         )
 
 parseProgOptions :: ArgParserArgs -> Parser Prog

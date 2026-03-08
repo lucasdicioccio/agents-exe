@@ -182,6 +182,7 @@ executable agents-exe
     build-depends:    base  >=4.18.3.0,
                       agents-lib,
                       aeson,
+                      aeson-pretty,
                       bytestring,
                       contravariant,
                       directory,
