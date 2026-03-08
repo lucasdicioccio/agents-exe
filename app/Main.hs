@@ -46,6 +46,7 @@ import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
+import qualified System.Agents.Tools.List as ToolsList
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.Nest as Nest
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
@@ -171,6 +172,7 @@ data Command
     | Export ExportOptions
     | Import ImportOptions
     | ToolboxNest NestOptions
+    | ListTools ToolsList.ListToolsOptions
 
 instance Show Command where
     show Check = "Check"
@@ -184,6 +186,7 @@ instance Show Command where
     show (Export _) = "Export"
     show (Import _) = "Import"
     show (ToolboxNest _) = "ToolboxNest"
+    show (ListTools _) = "ListTools"
 
 data PromptScriptDirective
     = Str Text.Text
@@ -721,6 +724,65 @@ parseNestOptions =
                 <> help "Exclude specific tool (can be specified multiple times)"
             ))
 
+-- | Parse toolbox subcommands
+parseToolboxCommand :: Parser Command
+parseToolboxCommand =
+    hsubparser
+        ( command "nest" (info parseToolboxNestCommand
+            (progDesc "Nest multiple tools into a single bash-compatible tool"))
+        <> command "list" (info parseListToolsCommand
+            (progDesc "List available tools"))
+        )
+
+-- | Parse the list tools command
+parseListToolsCommand :: Parser Command
+parseListToolsCommand =
+    ListTools <$> parseListToolsOptions
+
+-- | Parse options for the list tools command
+parseListToolsOptions :: Parser ToolsList.ListToolsOptions
+parseListToolsOptions =
+    ToolsList.ListToolsOptions
+        <$> parseToolSource
+        <*> parseListFormat
+
+-- | Parse the tool source (agent file, directory, or MCP config)
+parseToolSource :: Parser ToolsList.ToolSource
+parseToolSource =
+    asum
+        [ ToolsList.ToolSourceAgent <$> strOption
+            ( long "agent-file"
+                <> metavar "AGENTFILE"
+                <> help "Load tools from an agent's tool directory"
+            )
+        , ToolsList.ToolSourceDirectory <$> strOption
+            ( long "tool-dir"
+                <> metavar "TOOLDIR"
+                <> help "Load tools directly from a directory"
+            )
+        , ToolsList.ToolSourceMcp <$> strOption
+            ( long "mcp-config"
+                <> metavar "MCPCONFIG"
+                <> help "Load tools from an MCP server configuration"
+            )
+        ]
+
+-- | Parse the output format
+parseListFormat :: Parser ToolsList.ListFormat
+parseListFormat =
+    option (maybeReader parseFormat)
+        ( long "format"
+            <> metavar "FORMAT"
+            <> help "Output format: table, json, names (default: table)"
+            <> value ToolsList.FormatTable
+        )
+  where
+    parseFormat :: String -> Maybe ToolsList.ListFormat
+    parseFormat "table" = Just ToolsList.FormatTable
+    parseFormat "json" = Just ToolsList.FormatJson
+    parseFormat "names" = Just ToolsList.FormatNames
+    parseFormat _ = Nothing
+
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
@@ -790,14 +852,6 @@ parseProgOptions argparserargs =
                 <> command "toolbox" (info parseToolboxCommand
                     (progDesc "Toolbox manipulation commands"))
             )
-
--- | Parse toolbox subcommands
-parseToolboxCommand :: Parser Command
-parseToolboxCommand =
-    hsubparser
-        ( command "nest" (info parseToolboxNestCommand
-            (progDesc "Nest multiple tools into a single bash-compatible tool"))
-        )
 
 -------------------------------------------------------------------------------
 -- Main Entry Point
@@ -964,6 +1018,12 @@ main = do
             Export opts -> handleExport opts pargs
             Import opts -> handleImport opts
             ToolboxNest opts -> handleToolboxNest opts
+            ListTools opts -> ToolsList.runListCommand opts
+
+-------------------------------------------------------------------------------
+-- Toolbox List Handler (moved to module)
+-------------------------------------------------------------------------------
+-- The list command is now handled in System.Agents.Tools.List
 
 -------------------------------------------------------------------------------
 -- Toolbox Nest Handler
@@ -1357,8 +1417,8 @@ loadStandaloneToolsForAgent agentFile agent = do
         pure $ ExportImport.StandaloneToolExport
             { ExportImport.standaloneToolInfo = metadata
             , ExportImport.standaloneToolScript = content
-            , ExportImport.standaloneToolPermissions = perms
             , ExportImport.standaloneToolAuxFiles = []
+            , ExportImport.standaloneToolPermissions = perms
             }
     
     defaultMetadata :: FilePath -> Bash.ScriptInfo
