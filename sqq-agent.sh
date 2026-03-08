@@ -125,7 +125,7 @@ cmd_from_github() {
             gh issue view "$number" --json title,body,comments \
               --jq '"# " + .title + "\n\n" + .body + "\n\n" + (.comments | map("## @" + .author.login + "\n" + .body) | join("\n\n"))' \
               > "$instruction_rel"
-            echo -e "\n---\nPlease mention issue #$number in the commit message." >> "$instruction_rel"
+            echo -e "\n---\nPlease mention issue #$number with a keyword like 'Closes #$number' in the commit message." >> "$instruction_rel"
         fi
 
         # Parse metadata from instruction file
