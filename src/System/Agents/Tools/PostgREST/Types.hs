@@ -20,23 +20,23 @@
 module System.Agents.Tools.PostgREST.Types (
     -- * Configuration
     Config (..),
-    
+
     -- * Row filtering
     RowFilter (..),
-    
+
     -- * Trace events
     Trace (..),
-    
+
     -- * Tool representation
     PostgRESTool (..),
-    
+
     -- * Parameter schemas
     ToolParameters (..),
     FilterSchema (..),
     ColumnFilterSchema (..),
     SubsetSchema (..),
     RankingSchema (..),
-    
+
     -- * Tool result
     ToolResult (..),
 ) where
@@ -57,7 +57,7 @@ import Data.Text (Text)
 -- authentication credentials if needed.
 data Config = Config
     { configUrl :: Text
-    -- ^ URL to PostgREST OpenAPI spec (e.g., "http://localhost:3000/")
+    -- ^ URL to PostgREST OpenAPI spec (e.g., "http://localhost:3000/" or "file:///path/to/spec.json")
     , configBaseUrl :: Text
     -- ^ Base URL for API calls (e.g., "http://localhost:3000")
     , configHeaders :: Map Text Text
@@ -101,8 +101,12 @@ data RowFilter = RowFilter
 data Trace
     = FetchingSpecTrace !Text
     -- ^ URL being fetched for the OpenAPI spec
+    | FetchingSpecFromFileTrace !Text
+    -- ^ Loading spec from file path
     | SpecFetchedTrace !Int
     -- ^ HTTP status of spec fetch (e.g., 200)
+    | SpecLoadedFromFileTrace !FilePath
+    -- ^ Successfully loaded spec from file
     | TableConvertedTrace !Text
     -- ^ Table name that was converted to a tool (e.g., "users")
     | ColumnFiltersDetectedTrace !Text !Int
@@ -235,4 +239,5 @@ instance ToJSON ToolResult where
             , "status" Aeson..= resultStatus tr
             , "payload" Aeson..= resultPayload tr
             ]
+
 

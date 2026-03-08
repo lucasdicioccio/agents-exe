@@ -94,6 +94,10 @@ instance FromJSON ExtraAgentRef where
 -- The toolbox will fetch the spec from 'openApiSpecUrl' and make
 -- all operations available as tools to the agent.
 --
+-- The spec URL can be either:
+-- * An HTTP/HTTPS URL (e.g., "https://api.example.com/openapi.json")
+-- * A file URL (e.g., "file:///path/to/openapi.json")
+--
 -- Example configuration:
 --
 -- @
@@ -110,7 +114,7 @@ instance FromJSON ExtraAgentRef where
 data OpenAPIServerDescription
     = OpenAPIServerDescription
     { openApiSpecUrl :: Text
-    -- ^ URL to fetch the OpenAPI specification from
+    -- ^ URL to fetch the OpenAPI specification from (can be http/https or file://)
     , openApiBaseUrl :: Text
     -- ^ Base URL for API calls (can be different from spec URL)
     , openApiHeaders :: Maybe (Map Text Text)
@@ -139,16 +143,59 @@ instance ToJSON OpenAPIServerDescription where
 instance FromJSON OpenAPIServerDescription where
     parseJSON = Aeson.genericParseJSON openApiServerOptions
 
+-- | Reference to an OpenAPI server configuration stored on disk.
+--
+-- This allows the entire OpenAPI server configuration to be stored in a file
+-- rather than embedded directly in the agent configuration. The file should
+-- contain a JSON object matching the 'OpenAPIServerDescription' structure.
+--
+-- Example configuration:
+--
+-- @
+-- {
+--   "tag": "OpenAPIServerOnDisk",
+--   "contents": "/path/to/openapi-config.json"
+-- }
+-- @
+--
+-- The referenced file should contain:
+--
+-- @
+-- {
+--   "specUrl": "https://api.example.com/openapi.json",
+--   "baseUrl": "https://api.example.com",
+--   "headers": {"X-API-Version": "v1"},
+--   "token": "${API_TOKEN}"
+-- }
+-- @
+newtype OpenAPIServerOnDisk = OpenAPIServerOnDisk
+    { openApiConfigPath :: FilePath
+    -- ^ Path to the JSON file containing the OpenAPI server configuration
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON OpenAPIServerOnDisk where
+    toJSON (OpenAPIServerOnDisk path) = Aeson.toJSON path
+
+instance FromJSON OpenAPIServerOnDisk where
+    parseJSON v = OpenAPIServerOnDisk <$> Aeson.parseJSON v
+
 -- | Wrapper type for JSON serialization with tag.
 -- Similar to McpServerDescription, this allows extensible toolbox types.
 data OpenAPIToolboxDescription
     = OpenAPIServer OpenAPIServerDescription
+    | OpenAPIServerOnDiskDescription OpenAPIServerOnDisk
     deriving (Show, Ord, Eq, Generic)
 
 instance ToJSON OpenAPIToolboxDescription where
     toJSON (OpenAPIServer val) =
         Aeson.object
             [ "tag" .= ("OpenAPIServer" :: Text)
+            , "contents" .= val
+            ]
+    toJSON (OpenAPIServerOnDiskDescription val) =
+        Aeson.object
+            [ "tag" .= ("OpenAPIServerOnDisk" :: Text)
             , "contents" .= val
             ]
 
@@ -158,7 +205,9 @@ instance FromJSON OpenAPIToolboxDescription where
         case (tag :: Text) of
             "OpenAPIServer" ->
                 OpenAPIServer <$> v .: "contents"
-            _ -> fail "expecting OpenAPIServer 'tag'"
+            "OpenAPIServerOnDisk" ->
+                OpenAPIServerOnDiskDescription <$> v .: "contents"
+            _ -> fail "expecting 'OpenAPIServer' or 'OpenAPIServerOnDisk' tag"
 
 -------------------------------------------------------------------------------
 -- PostgREST Toolbox Configuration
@@ -173,6 +222,10 @@ instance FromJSON OpenAPIToolboxDescription where
 -- The toolbox will fetch the spec from 'postgrestSpecUrl' and make
 -- all table endpoints available as tools to the agent, with special
 -- handling for row filters, pagination, ordering, and column selection.
+--
+-- The spec URL can be either:
+-- * An HTTP/HTTPS URL (e.g., "http://localhost:3000/")
+-- * A file URL (e.g., "file:///path/to/postgrest-spec.json")
 --
 -- Example configuration:
 --
@@ -220,16 +273,59 @@ instance ToJSON PostgRESTServerDescription where
 instance FromJSON PostgRESTServerDescription where
     parseJSON = Aeson.genericParseJSON postgrestServerOptions
 
+-- | Reference to a PostgREST server configuration stored on disk.
+--
+-- This allows the entire PostgREST server configuration to be stored in a file
+-- rather than embedded directly in the agent configuration. The file should
+-- contain a JSON object matching the 'PostgRESTServerDescription' structure.
+--
+-- Example configuration:
+--
+-- @
+-- {
+--   "tag": "PostgRESTServerOnDisk",
+--   "contents": "/path/to/postgrest-config.json"
+-- }
+-- @
+--
+-- The referenced file should contain:
+--
+-- @
+-- {
+--   "specUrl": "http://localhost:3000/",
+--   "baseUrl": "http://localhost:3000",
+--   "headers": {"Accept-Profile": "myschema"},
+--   "token": "${POSTGREST_TOKEN}"
+-- }
+-- @
+newtype PostgRESTServerOnDisk = PostgRESTServerOnDisk
+    { postgrestConfigPath :: FilePath
+    -- ^ Path to the JSON file containing the PostgREST server configuration
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON PostgRESTServerOnDisk where
+    toJSON (PostgRESTServerOnDisk path) = Aeson.toJSON path
+
+instance FromJSON PostgRESTServerOnDisk where
+    parseJSON v = PostgRESTServerOnDisk <$> Aeson.parseJSON v
+
 -- | Wrapper type for JSON serialization with tag.
 -- Similar to OpenAPIToolboxDescription, this allows extensible toolbox types.
 data PostgRESTToolboxDescription
     = PostgRESTServer PostgRESTServerDescription
+    | PostgRESTServerOnDiskDescription PostgRESTServerOnDisk
     deriving (Show, Ord, Eq, Generic)
 
 instance ToJSON PostgRESTToolboxDescription where
     toJSON (PostgRESTServer val) =
         Aeson.object
             [ "tag" .= ("PostgRESTServer" :: Text)
+            , "contents" .= val
+            ]
+    toJSON (PostgRESTServerOnDiskDescription val) =
+        Aeson.object
+            [ "tag" .= ("PostgRESTServerOnDisk" :: Text)
             , "contents" .= val
             ]
 
@@ -239,7 +335,9 @@ instance FromJSON PostgRESTToolboxDescription where
         case (tag :: Text) of
             "PostgRESTServer" ->
                 PostgRESTServer <$> v .: "contents"
-            _ -> fail "expecting PostgRESTServer 'tag'"
+            "PostgRESTServerOnDisk" ->
+                PostgRESTServerOnDiskDescription <$> v .: "contents"
+            _ -> fail "expecting 'PostgRESTServer' or 'PostgRESTServerOnDisk' tag"
 
 -------------------------------------------------------------------------------
 data Agent
@@ -319,5 +417,6 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+
 
 

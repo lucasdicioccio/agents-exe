@@ -49,33 +49,37 @@ module System.Agents.Tools.PostgRESToolbox (
     Toolbox (..),
     Config (..),
     InitializationError (..),
-    
+
     -- * Re-exports from Types
     ToolResult,
     PostgRESTool (..),
     RowFilter (..),
-    
+
     -- * Initialization
     initializeToolbox,
-    
+
     -- * Tool execution
     createToolHandler,
     handleToolCall,
-    
+
     -- * Query string building
     buildQueryString,
     buildFilterParams,
     buildSubsetParams,
     buildRankingParams,
-    
+
     -- * Response handling
     handleResponse,
-    
+
     -- * Tool lookup
     getToolByName,
-    
+
     -- * Naming helpers
     postgrest2LLMName,
+
+    -- * URL helpers
+    isFileUrl,
+    fileUrlToPath,
 ) where
 
 import Control.Exception (try)
@@ -128,6 +132,8 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 data InitializationError
     = NetworkError !Text
     -- ^ Network error fetching spec
+    | FileError !Text
+    -- ^ File error loading spec from disk
     | ParseError !Text
     -- ^ JSON parse error
     | SpecError !Text
@@ -156,6 +162,38 @@ data Toolbox = Toolbox
     }
 
 -- -------------------------------------------------------------------------
+-- URL Helpers
+-- -------------------------------------------------------------------------
+
+-- | Check if a URL is a file:// URL.
+--
+-- Example:
+--
+-- >>> isFileUrl "file:///path/to/spec.json"
+-- True
+--
+-- >>> isFileUrl "http://localhost:3000/"
+-- False
+isFileUrl :: Text -> Bool
+isFileUrl url = Text.isPrefixOf "file://" url
+
+-- | Convert a file:// URL to a file path.
+--
+-- Handles both "file:///absolute/path" and "file://relative/path" formats.
+--
+-- Example:
+--
+-- >>> fileUrlToPath "file:///home/user/spec.json"
+-- "/home/user/spec.json"
+--
+-- >>> fileUrlToPath "file://spec.json"
+-- "spec.json"
+fileUrlToPath :: Text -> FilePath
+fileUrlToPath url =
+    let withoutPrefix = Text.drop 7 url  -- Drop "file://"
+    in Text.unpack withoutPrefix
+
+-- -------------------------------------------------------------------------
 -- Initialization
 -- -------------------------------------------------------------------------
 
@@ -163,7 +201,7 @@ data Toolbox = Toolbox
 --
 -- This function:
 -- 1. Creates an HTTP runtime with authentication
--- 2. Fetches the OpenAPI spec from the configured URL
+-- 2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
 -- 3. Parses the JSON to an OpenAPISpec
 -- 4. Converts table operations to tools
 -- 5. Detects row filters and builds parameter schemas
@@ -180,15 +218,12 @@ initializeToolbox tracer config = do
             Nothing -> HttpClient.NoToken
     runtime <- HttpClient.newRuntime token
 
-    -- Fetch OpenAPI spec
-    runTracer tracer (FetchingSpecTrace config.configUrl)
-    fetchResult <- fetchSpec runtime config.configUrl
+    -- Fetch OpenAPI spec (from URL or file)
+    fetchResult <- fetchSpec tracer runtime config.configUrl
 
     case fetchResult of
         Left err -> pure $ Left err
-        Right (status, body) -> do
-            runTracer tracer (SpecFetchedTrace status)
-
+        Right body -> do
             -- Parse JSON to OpenAPISpec
             case Aeson.decode body of
                 Nothing -> pure $ Left $ ParseError "Failed to parse PostgREST OpenAPI spec JSON"
@@ -196,10 +231,10 @@ initializeToolbox tracer config = do
                     -- Convert to tools
                     let toolboxName = extractToolboxName config.configUrl
                     let tools = convertPostgRESToTools toolboxName spec
-                    
+
                     -- Trace tool conversions
                     mapM_ (\t -> runTracer tracer (TableConvertedTrace (prtPath t))) tools
-                    
+
                     -- Trace filter detection
                     mapM_ (\t -> runTracer tracer (ColumnFiltersDetectedTrace (prtPath t) (length (prtRowFilters t)))) tools
 
@@ -224,12 +259,42 @@ extractToolboxName url =
             then "postgrest"
             else normalizeForLLM hostPart
 
--- | Fetch the OpenAPI spec from a URL.
+-- | Fetch the OpenAPI spec from a URL or file.
+--
+-- Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
+-- the spec is read directly from the filesystem.
 fetchSpec ::
+    Tracer IO Trace ->
     HttpClient.Runtime ->
     Text ->
-    IO (Either InitializationError (Int, LByteString.ByteString))
-fetchSpec runtime url = do
+    IO (Either InitializationError LByteString.ByteString)
+fetchSpec tracer runtime url
+    | isFileUrl url = fetchSpecFromFile tracer (fileUrlToPath url)
+    | otherwise = fetchSpecFromUrl tracer runtime url
+
+-- | Fetch the OpenAPI spec from a file on disk.
+fetchSpecFromFile ::
+    Tracer IO Trace ->
+    FilePath ->
+    IO (Either InitializationError LByteString.ByteString)
+fetchSpecFromFile tracer path = do
+    runTracer tracer (FetchingSpecFromFileTrace (Text.pack path))
+    result <- try $ LByteString.readFile path
+    case result of
+        Left (e :: IOError) ->
+            pure $ Left $ FileError (Text.pack $ show e)
+        Right content -> do
+            runTracer tracer (SpecLoadedFromFileTrace path)
+            pure $ Right content
+
+-- | Fetch the OpenAPI spec from an HTTP URL.
+fetchSpecFromUrl ::
+    Tracer IO Trace ->
+    HttpClient.Runtime ->
+    Text ->
+    IO (Either InitializationError LByteString.ByteString)
+fetchSpecFromUrl tracer runtime url = do
+    runTracer tracer (FetchingSpecTrace url)
     result <- try $ HttpClient.get runtime (Tracer (const (pure ()))) url
     case result of
         Left (e :: HttpClient.HttpException) ->
@@ -239,7 +304,9 @@ fetchSpec runtime url = do
         Right (Right response) ->
             let status = HttpTypes.statusCode (HttpClient.responseStatus response)
                 body = HttpClient.responseBody response
-             in pure $ Right (status, body)
+             in do
+                runTracer tracer (SpecFetchedTrace status)
+                pure $ Right body
 
 -- -------------------------------------------------------------------------
 -- Tool Lookup
@@ -362,22 +429,22 @@ buildGetRequest url headers = do
 buildQueryStringFromArgs :: Object -> ToolParameters -> Text
 buildQueryStringFromArgs obj params =
     let objMap = KeyMap.toMapText obj
-        
+
         -- Extract filters
         filterParams = case Map.lookup "filters" objMap of
             Just (Object filterObj) -> buildFilterParams filterObj
             _ -> Map.empty
-        
+
         -- Extract subset
         subsetParams = case Map.lookup "subset" objMap of
             Just (Object subsetObj) -> buildSubsetParams subsetObj
             _ -> Map.empty
-        
+
         -- Extract ranking
         rankingParams = case Map.lookup "ranking" objMap of
             Just (Object rankingObj) -> buildRankingParams rankingObj
             _ -> Map.empty
-        
+
         -- Combine all params
         allParams = Map.unions [filterParams, subsetParams, rankingParams]
      in if Map.null allParams
@@ -456,10 +523,10 @@ urlEncode = Text.concatMap encodeChar
         | c `elem` (safeChars :: [Char]) = Text.singleton c
         | c == ' ' = "+"
         | otherwise = percentEncode c
-    
+
     safeChars :: [Char]
     safeChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
-    
+
     percentEncode :: Char -> Text
     percentEncode c = Text.pack $ "%" ++ showHex (fromEnum c) ""
 
@@ -516,4 +583,5 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+
 

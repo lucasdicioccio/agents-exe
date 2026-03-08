@@ -50,6 +50,10 @@ module System.Agents.AgentTree (
     -- * Utility functions
     readOpenApiKeysFile,
     augmentMainAgentPromptWithSubAgents,
+
+    -- * Configuration loading helpers
+    loadOpenAPIToolboxDescription,
+    loadPostgRESTToolboxDescription,
 ) where
 
 import Control.Monad (void, unless)
@@ -65,13 +69,18 @@ import qualified Data.Set as Set
 import Data.Semigroup (sconcat)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
+import qualified Data.Text.Encoding as TextEncoding
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
 
-import System.Agents.Base (Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..), McpServerDescription (..), OpenAPIToolboxDescription (..), OpenAPIServerDescription (..), PostgRESTToolboxDescription (..), PostgRESTServerDescription (..))
+import System.Agents.Base (
+    Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..),
+    McpServerDescription (..), McpSimpleBinaryConfiguration (..),
+    OpenAPIToolboxDescription (..), OpenAPIServerDescription (..), OpenAPIServerOnDisk (..),
+    PostgRESTToolboxDescription (..), PostgRESTServerDescription (..), PostgRESTServerOnDisk (..)
+    )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
@@ -190,6 +199,7 @@ data LoadingError
     | ReferenceError ReferenceError
     | OpenAPIInitError Text String  -- ^ Description and error message
     | PostgRESTInitError Text String  -- ^ Description and error message
+    | ConfigFileError FilePath String  -- ^ Path and error message
     | OtherError String
     deriving (Show)
 
@@ -255,7 +265,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
             bfsDiscovery props queue visited'
         Nothing -> do
             -- Load the agent config
-            loadResult <- FileLoader.loadJsonFile (contramap DataLoadingTrace props.interactiveTracer) filePath
+            loadResult <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) filePath
             case loadResult of
                 Left err -> pure $ Left (NonEmpty.singleton $ AgentLoadingError err)
                 Right (AgentDescription agent) -> do
@@ -302,6 +312,8 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                             let extraQueue = [(f, Just slug) | f <- resolvedExtraPaths]
 
                             bfsDiscovery props (queue ++ childQueue ++ extraQueue) visited'
+  where
+    tracer = props.interactiveTracer
 
 -- | Find a node by its file path using normalized comparison.
 -- Both the search path and stored paths are normalized before comparison.
@@ -718,10 +730,11 @@ withAgentTreeRuntime props continue = do
     loadAgentTreeRuntime props >>= continue
 
 -------------------------------------------------------------------------------
-
 type PromptModifier = Text -> Text
 
 -- | Convert OpenAPI toolbox description to toolbox configuration.
+--
+-- Handles both inline configurations and on-disk configurations.
 openApiDescToConfig :: OpenAPIServerDescription -> OpenAPIToolbox.Config
 openApiDescToConfig desc =
     OpenAPIToolbox.Config
@@ -732,6 +745,8 @@ openApiDescToConfig desc =
         }
 
 -- | Convert PostgREST toolbox description to toolbox configuration.
+--
+-- Handles both inline configurations and on-disk configurations.
 postgrestDescToConfig :: PostgRESTServerDescription -> PostgREST.Config
 postgrestDescToConfig desc =
     PostgREST.Config
@@ -741,15 +756,52 @@ postgrestDescToConfig desc =
         , PostgREST.configToken = postgrestToken desc
         }
 
+-- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
+--
+-- For 'OpenAPIServer' descriptions, returns the configuration directly.
+-- For 'OpenAPIServerOnDisk' descriptions, loads the configuration from the specified file.
+loadOpenAPIToolboxDescription ::
+    FilePath  -- ^ Base directory for resolving relative paths
+    -> OpenAPIToolboxDescription
+    -> IO (Either LoadingError OpenAPIServerDescription)
+loadOpenAPIToolboxDescription _baseDir (OpenAPIServer desc) =
+    pure $ Right desc
+loadOpenAPIToolboxDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
+    let fullPath = if FilePath.isRelative path then baseDir </> path else path
+    result <- Aeson.eitherDecodeFileStrict' fullPath
+    case result of
+        Left err -> pure $ Left $ ConfigFileError fullPath err
+        Right desc -> pure $ Right desc
+
+-- | Load a PostgREST toolbox description, resolving on-disk references if needed.
+--
+-- For 'PostgRESTServer' descriptions, returns the configuration directly.
+-- For 'PostgRESTServerOnDisk' descriptions, loads the configuration from the specified file.
+loadPostgRESTToolboxDescription ::
+    FilePath  -- ^ Base directory for resolving relative paths
+    -> PostgRESTToolboxDescription
+    -> IO (Either LoadingError PostgRESTServerDescription)
+loadPostgRESTToolboxDescription _baseDir (PostgRESTServer desc) =
+    pure $ Right desc
+loadPostgRESTToolboxDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
+    let fullPath = if FilePath.isRelative path then baseDir </> path else path
+    result <- Aeson.eitherDecodeFileStrict' fullPath
+    case result of
+        Left err -> pure $ Left $ ConfigFileError fullPath err
+        Right desc -> pure $ Right desc
+
 -- | Initialize OpenAPI toolboxes and return their tool registrations.
 --
 -- This function takes OpenAPI toolbox descriptions, initializes each toolbox,
 -- and registers all tools. If any toolbox fails to initialize, an error is returned.
+--
+-- Supports both inline configurations and on-disk configurations.
 initializeOpenAPIToolboxes ::
     Tracer IO Trace ->
-    [OpenAPIToolboxDescription] ->
+    FilePath  -- ^ Base directory for resolving relative config paths
+    -> [OpenAPIToolboxDescription] ->
     IO (Either LoadingError [ToolRegistration])
-initializeOpenAPIToolboxes tracer descriptions = do
+initializeOpenAPIToolboxes tracer baseDir descriptions = do
     results <- mapM initializeOne descriptions
     case concatEithers results of
         Left [] -> pure $ Left $ OtherError "Unknown OpenAPI initialization error"
@@ -757,19 +809,24 @@ initializeOpenAPIToolboxes tracer descriptions = do
         Right allTools -> pure $ Right $ concat allTools
   where
     initializeOne :: OpenAPIToolboxDescription -> IO (Either LoadingError [ToolRegistration])
-    initializeOne desc@(OpenAPIServer srvDesc) = do
-        let config = openApiDescToConfig srvDesc
-        initResult <- OpenAPIToolbox.initializeToolbox (contramap (OpenAPITrace desc) tracer) config
-        case initResult of
-            Left err ->
-                pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) (show err)
-            Right toolbox -> do
-                regResult <- registerOpenAPITools toolbox
-                case regResult of
+    initializeOne desc = do
+        -- Load the configuration (from disk if needed)
+        loadResult <- loadOpenAPIToolboxDescription baseDir desc
+        case loadResult of
+            Left err -> pure $ Left err
+            Right srvDesc -> do
+                let config = openApiDescToConfig srvDesc
+                initResult <- OpenAPIToolbox.initializeToolbox (contramap (OpenAPITrace desc) tracer) config
+                case initResult of
                     Left err ->
-                        pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) err
-                    Right tools ->
-                        pure $ Right tools
+                        pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) (show err)
+                    Right toolbox -> do
+                        regResult <- registerOpenAPITools toolbox
+                        case regResult of
+                            Left err ->
+                                pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) err
+                            Right tools ->
+                                pure $ Right tools
 
     concatEithers :: [Either a b] -> Either [a] [b]
     concatEithers eithers =
@@ -780,11 +837,14 @@ initializeOpenAPIToolboxes tracer descriptions = do
 --
 -- This function takes PostgREST toolbox descriptions, initializes each toolbox,
 -- and registers all tools. If any toolbox fails to initialize, an error is returned.
+--
+-- Supports both inline configurations and on-disk configurations.
 initializePostgRESToolboxes ::
     Tracer IO Trace ->
-    [PostgRESTToolboxDescription] ->
+    FilePath  -- ^ Base directory for resolving relative config paths
+    -> [PostgRESTToolboxDescription] ->
     IO (Either LoadingError [ToolRegistration])
-initializePostgRESToolboxes tracer descriptions = do
+initializePostgRESToolboxes tracer baseDir descriptions = do
     results <- mapM initializeOne descriptions
     case concatEithers results of
         Left [] -> pure $ Left $ OtherError "Unknown PostgREST initialization error"
@@ -792,19 +852,24 @@ initializePostgRESToolboxes tracer descriptions = do
         Right allTools -> pure $ Right $ concat allTools
   where
     initializeOne :: PostgRESTToolboxDescription -> IO (Either LoadingError [ToolRegistration])
-    initializeOne desc@(PostgRESTServer srvDesc) = do
-        let config = postgrestDescToConfig srvDesc
-        initResult <- PostgREST.initializeToolbox (contramap (PostgRESTTrace desc) tracer) config
-        case initResult of
-            Left err ->
-                pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) (show err)
-            Right toolbox -> do
-                regResult <- registerPostgRESTools toolbox
-                case regResult of
+    initializeOne desc = do
+        -- Load the configuration (from disk if needed)
+        loadResult <- loadPostgRESTToolboxDescription baseDir desc
+        case loadResult of
+            Left err -> pure $ Left err
+            Right srvDesc -> do
+                let config = postgrestDescToConfig srvDesc
+                initResult <- PostgREST.initializeToolbox (contramap (PostgRESTTrace desc) tracer) config
+                case initResult of
                     Left err ->
-                        pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) err
-                    Right tools ->
-                        pure $ Right tools
+                        pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) (show err)
+                    Right toolbox -> do
+                        regResult <- registerPostgRESTools toolbox
+                        case regResult of
+                            Left err ->
+                                pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) err
+                            Right tools ->
+                                pure $ Right tools
 
     concatEithers :: [Either a b] -> Either [a] [b]
     concatEithers eithers =
@@ -835,10 +900,10 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            -- Initialize OpenAPI toolboxes
-            openApiToolsResult <- initializeOpenAPIToolboxes tracer (Maybe.fromMaybe [] desc.openApiToolboxes)
-            -- Initialize PostgREST toolboxes
-            postgrestToolsResult <- initializePostgRESToolboxes tracer (Maybe.fromMaybe [] desc.postgrestToolboxes)
+            -- Initialize OpenAPI toolboxes (with on-disk config support)
+            openApiToolsResult <- initializeOpenAPIToolboxes tracer rootDir (Maybe.fromMaybe [] desc.openApiToolboxes)
+            -- Initialize PostgREST toolboxes (with on-disk config support)
+            postgrestToolsResult <- initializePostgRESToolboxes tracer rootDir (Maybe.fromMaybe [] desc.postgrestToolboxes)
             case (openApiToolsResult, postgrestToolsResult) of
                 (Left err, _) -> pure $ Left (show err)
                 (_, Left err) -> pure $ Left (show err)
@@ -891,10 +956,10 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            -- Initialize OpenAPI toolboxes
-            openApiToolsResult <- initializeOpenAPIToolboxes tracer (Maybe.fromMaybe [] desc.openApiToolboxes)
-            -- Initialize PostgREST toolboxes
-            postgrestToolsResult <- initializePostgRESToolboxes tracer (Maybe.fromMaybe [] desc.postgrestToolboxes)
+            -- Initialize OpenAPI toolboxes (with on-disk config support)
+            openApiToolsResult <- initializeOpenAPIToolboxes tracer rootDir (Maybe.fromMaybe [] desc.openApiToolboxes)
+            -- Initialize PostgREST toolboxes (with on-disk config support)
+            postgrestToolsResult <- initializePostgRESToolboxes tracer rootDir (Maybe.fromMaybe [] desc.postgrestToolboxes)
             case (openApiToolsResult, postgrestToolsResult) of
                 (Left err, _) -> pure $ Left (show err)
                 (_, Left err) -> pure $ Left (show err)
@@ -959,7 +1024,7 @@ readOpenApiKeysFile keysPath =
   where
     flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
     flattenOpenAIKeys (ApiKeys keys) =
-        [(k.apiKeyId, OpenAI.ApiKey $ Text.encodeUtf8 k.apiKeyValue) | k <- keys]
+        [(k.apiKeyId, OpenAI.ApiKey $ TextEncoding.encodeUtf8 k.apiKeyValue) | k <- keys]
 
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
@@ -970,4 +1035,5 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+
 
