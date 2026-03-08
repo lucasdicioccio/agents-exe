@@ -47,6 +47,7 @@ import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.Nest as Nest
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Directory (doesFileExist, doesDirectoryExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (ExitCode(..), exitFailure, exitSuccess)
@@ -169,6 +170,7 @@ data Command
     | SessionPrint SessionPrint.SessionPrintOptions
     | Export ExportOptions
     | Import ImportOptions
+    | ToolboxNest NestOptions
 
 instance Show Command where
     show Check = "Check"
@@ -181,6 +183,7 @@ instance Show Command where
     show (SessionPrint _) = "SessionPrint"
     show (Export _) = "Export"
     show (Import _) = "Import"
+    show (ToolboxNest _) = "ToolboxNest"
 
 data PromptScriptDirective
     = Str Text.Text
@@ -277,6 +280,16 @@ data ImportMode
     | ImportOverwrite
     | ImportMerge
     deriving (Show, Eq)
+
+-- | Options for the toolbox nest command
+data NestOptions = NestOptions
+    { nestAgentFile :: FilePath
+    , nestOutputPath :: FilePath
+    , nestToolName :: Maybe Text
+    , nestIncludeTools :: [Text]
+    , nestExcludeTools :: [Text]
+    }
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -400,7 +413,8 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*> flag
+        <*>
+ flag
             SessionPrint.Chronological
             SessionPrint.Antichronological
             ( long "antichronological"
@@ -671,6 +685,42 @@ parseListTools =
             <> help "List available tools in git repo"
         )
 
+-- | Parse the toolbox nest command
+parseToolboxNestCommand :: Parser Command
+parseToolboxNestCommand =
+    ToolboxNest <$> parseNestOptions
+
+parseNestOptions :: Parser NestOptions
+parseNestOptions =
+    NestOptions
+        <$> strOption
+            ( long "agent-file"
+                <> metavar "AGENTFILE"
+                <> help "Path to the agent JSON file"
+            )
+        <*> strOption
+            ( long "output"
+                <> short 'o'
+                <> metavar "OUTPUT"
+                <> help "Output path for the nested tool script"
+            )
+        <*> optional (strOption
+            ( long "name"
+                <> short 'n'
+                <> metavar "NAME"
+                <> help "Name for the nested tool (defaults to agent slug)"
+            ))
+        <*> many (strOption
+            ( long "include-tool"
+                <> metavar "TOOL"
+                <> help "Include only specific tool (can be specified multiple times)"
+            ))
+        <*> many (strOption
+            ( long "exclude-tool"
+                <> metavar "TOOL"
+                <> help "Exclude specific tool (can be specified multiple times)"
+            ))
+
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
@@ -737,7 +787,17 @@ parseProgOptions argparserargs =
                     (progDesc "Export agent/tool configurations"))
                 <> command "import" (info parseImportCommand
                     (progDesc "Import agent/tool configurations"))
+                <> command "toolbox" (info parseToolboxCommand
+                    (progDesc "Toolbox manipulation commands"))
             )
+
+-- | Parse toolbox subcommands
+parseToolboxCommand :: Parser Command
+parseToolboxCommand =
+    hsubparser
+        ( command "nest" (info parseToolboxNestCommand
+            (progDesc "Nest multiple tools into a single bash-compatible tool"))
+        )
 
 -------------------------------------------------------------------------------
 -- Main Entry Point
@@ -903,6 +963,23 @@ main = do
                 SessionPrint.handleSessionPrint opts
             Export opts -> handleExport opts pargs
             Import opts -> handleImport opts
+            ToolboxNest opts -> handleToolboxNest opts
+
+-------------------------------------------------------------------------------
+-- Toolbox Nest Handler
+-------------------------------------------------------------------------------
+
+handleToolboxNest :: NestOptions -> IO ()
+handleToolboxNest opts = do
+    -- Convert our NestOptions to the library's NestOptions
+    let nestOpts = Nest.NestOptions
+            { Nest.nestAgentFile = nestAgentFile opts
+            , Nest.nestOutputPath = nestOutputPath opts
+            , Nest.nestToolName = nestToolName opts
+            , Nest.nestIncludeTools = nestIncludeTools opts
+            , Nest.nestExcludeTools = nestExcludeTools opts
+            }
+    Nest.runNestCommand nestOpts
 
 -------------------------------------------------------------------------------
 -- Export Handler
