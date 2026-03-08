@@ -50,6 +50,7 @@ Commands:
   from_github              Fetch tasks from GitHub issues (label: "agents/to-be-taken")
   promote_github           Promote issues from "agents/wait" to "agents/to-be-taken" if deps are met
   process                  Start processing the queue
+  merge-pr                 Automatically merge PRs with 'agents/agent-pr' label (excluding default branch)
   clean [--do-it] [--force]
                            Clean worktrees with completed sessions (preview mode by default)
   worktree_exec <label> <name> <instruction_file>
@@ -181,6 +182,32 @@ cmd_promote_github() {
         if [[ "$all_satisfied" == true ]]; then
             echo "  All dependencies satisfied. Promoting to 'agents/to-be-taken'..."
             gh issue edit "$number" --remove-label "agents/wait" --add-label "agents/to-be-taken"
+        fi
+    done
+}
+
+cmd_merge_pr() {
+    echo "Checking for PRs to merge..."
+    # Get the default branch name
+    local default_branch=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)
+    
+    # List PRs with label agents/agent-pr
+    local prs=$(gh pr list --label "agents/agent-pr" --json number,baseRefName,title)
+    local count=$(echo "$prs" | jq 'length')
+
+    [[ "$count" -eq 0 ]] && { echo "No PRs found with label 'agents/agent-pr'."; return 0; }
+
+    for (( i=0; i<count; i++ )); do
+        local number=$(echo "$prs" | jq -r ".[$i].number")
+        local base=$(echo "$prs" | jq -r ".[$i].baseRefName")
+        local title=$(echo "$prs" | jq -r ".[$i].title")
+
+        if [[ "$base" != "$default_branch" ]]; then
+            echo "Merging PR #$number ($title) targeting $base..."
+            # Using --merge and --auto to handle merge when checks pass
+            gh pr merge "$number" --merge --auto || echo "Failed to merge PR #$number"
+        else
+            echo "Skipping PR #$number ($title): targets default branch ($default_branch)."
         fi
     done
 }
@@ -365,7 +392,7 @@ cmd_worktree_exec() {
             target_base="main"
         fi
 
-        gh pr create --base "$target_base" --head "$name" --title "$pr_title" --body "$commit_message"
+        gh pr create --base "$target_base" --head "$name" --title "$pr_title" --body "$commit_message" --label "agents/agent-pr"
         
         # Optional Preview
         if [[ -x "./git-agent-task.sh" ]] && [[ "$name" != gh-* ]]; then
@@ -401,7 +428,8 @@ find_or_create_taskfile() {
 COMMAND="$1"; shift
 
 case "$COMMAND" in
-    init|add|from_github|promote_github|process|worktree_exec|clean) "cmd_$COMMAND" "$@" ;;
+    init|add|from_github|promote_github|process|worktree_exec|clean|merge_pr) "cmd_$COMMAND" "$@" ;;
+    merge-pr) "cmd_merge_pr" "$@" ;;
     *) usage ;;
 esac
 

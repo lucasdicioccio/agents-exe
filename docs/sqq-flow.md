@@ -129,8 +129,20 @@ sqq-agent.sh worktree_exec <label> <name> <instruction_file>
    - Stage all changes: `git add -A`
    - Commit with agent output as message (no verify)
    - Push to origin
-   - Create Pull Request via `gh pr create`
+   - Create Pull Request via `gh pr create` with label `agents/agent-pr`
 3. For non-GitHub tasks: optionally run `./git-agent-task.sh preview`
+
+### 6. Automatic Merging (`merge-pr`)
+
+```bash
+sqq-agent.sh merge-pr
+```
+
+1. Identifies the default branch of the repository.
+2. Lists all Pull Requests with the label `agents/agent-pr`.
+3. For each PR:
+   - If the base branch is **not** the default branch, it triggers an automatic merge (`gh pr merge --auto`).
+   - If the base branch is the default branch, it skips the PR to ensure manual review for main branch changes.
 
 ## File Naming Conventions
 
