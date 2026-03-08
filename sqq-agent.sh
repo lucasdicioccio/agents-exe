@@ -15,6 +15,7 @@ set -Eeuo pipefail
 
 # Path to the 'sqq' binary and queue database
 SELF="bash ./sqq-agent.sh"
+SQQ_BIN=`which sqq`
 SQQ_BIN="${SQQ_BIN:-/home/lucas/.cabal/bin/sqq}"
 QUEUE_DB="tasks/queue.sql"
 TASK_DIR="tasks"
