@@ -84,6 +84,7 @@ library agents-lib
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.IO
                     , System.Agents.Tools.McpToolbox
+                    , System.Agents.Tools.Nest
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver
                     , System.Agents.Tools.OpenAPI.Converter
