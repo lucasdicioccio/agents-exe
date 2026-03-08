@@ -11,7 +11,7 @@ module System.Agents.FileLoader (
 
 import qualified Data.List as List
 import Prod.Tracer (Tracer, runTracer)
-import System.Directory (listDirectory)
+import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeExtension, (</>))
 
 import System.Agents.Base (Agent (..), AgentDescription (..))
@@ -43,9 +43,16 @@ data InvalidAgentError
     = LoadFailure FilePath String
     deriving (Show)
 
+-- | List all JSON files in a directory.
+-- Returns an empty list if the directory does not exist.
 listJsonDirectory :: FilePath -> IO [FilePath]
 listJsonDirectory path = do
-    sources <$> listDirectory path
+    exists <- doesDirectoryExist path
+    if exists
+        then do
+            entries <- listDirectory path
+            pure $ sources entries
+        else pure []
   where
     sources :: [FilePath] -> [FilePath]
     sources xs =
@@ -57,3 +64,4 @@ listJsonDirectory path = do
 
     isJson :: FilePath -> Bool
     isJson p = takeExtension p == ".json"
+
