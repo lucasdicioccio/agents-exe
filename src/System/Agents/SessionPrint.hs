@@ -13,11 +13,18 @@ module System.Agents.SessionPrint
     , handleSessionPrint
       -- * Formatting functions
     , formatSessionAsMarkdown
+      -- * Statistics
+    , SessionStatistics (..)
+    , calculateStatistics
     ) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.List (sortOn)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
@@ -44,6 +51,19 @@ data SessionPrintOptions = SessionPrintOptions
       -- | Order preference for displaying session steps
     , orderPreference :: OrderPreference
     }
+
+-- | Statistics about a session.
+data SessionStatistics = SessionStatistics
+    { statTotalTurns :: Int
+    , statUserTurns :: Int
+    , statLlmTurns :: Int
+    , statTotalToolCalls :: Int
+    , statToolCallsByName :: Map Text.Text Int
+    , statInputBytes :: Int
+    , statOutputBytes :: Int
+    , statReasoningBytes :: Int
+    , statTotalBytes :: Int
+    } deriving (Show, Eq)
 
 -- | Handle the session-print command: load a session file and output it as markdown.
 handleSessionPrint :: SessionPrintOptions -> IO ()
@@ -85,17 +105,151 @@ formatSessionAsMarkdown opts session =
             [] -> Nothing
             ((n, _) : _) -> Just n
         
+        -- Calculate statistics for the full session
+        stats = calculateStatistics session
+        
         mdHeader = "# Session Report\n\n"
         sessionInfo = formatSessionInfo session
+        statsSection = formatStatistics stats
         turnsSection = formatTurns opts firstDisplayStepNum orderedTurns
         limitNotice = case opts.nTurns of
             Just n -> "\n\n_(Showing last " <> Text.pack (show n) <> " turns)_\n"
             Nothing -> ""
-    in mdHeader <> sessionInfo <> "\n---\n\n" <> turnsSection <> limitNotice
+    in mdHeader <> sessionInfo <> "\n---\n\n" <> statsSection <> "\n---\n\n" <> turnsSection <> limitNotice
   where
     -- | Take the last n elements from a list
     takeLast :: Int -> [a] -> [a]
     takeLast n xs = drop (max 0 (length xs - n)) xs
+
+-- | Calculate statistics for a session.
+calculateStatistics :: Session.Session -> SessionStatistics
+calculateStatistics session =
+    let turns = session.turns
+        totalTurns = length turns
+        userTurns = length [() | Session.UserTurn _ <- turns]
+        llmTurns = length [() | Session.LlmTurn _ <- turns]
+        
+        -- Collect all LLM turn contents to extract tool calls
+        llmTurnContents = [tc | Session.LlmTurn tc <- turns]
+        allToolCalls = concatMap (.llmToolCalls) llmTurnContents
+        toolCallCount = length allToolCalls
+        toolCallsByName = countToolCallsByName allToolCalls
+        
+        -- Calculate byte counts
+        (inputBytes, outputBytes, reasoningBytes) = calculateByteCounts turns
+        totalBytes = inputBytes + outputBytes + reasoningBytes
+    in SessionStatistics
+        { statTotalTurns = totalTurns
+        , statUserTurns = userTurns
+        , statLlmTurns = llmTurns
+        , statTotalToolCalls = toolCallCount
+        , statToolCallsByName = toolCallsByName
+        , statInputBytes = inputBytes
+        , statOutputBytes = outputBytes
+        , statReasoningBytes = reasoningBytes
+        , statTotalBytes = totalBytes
+        }
+
+-- | Count tool calls by name.
+countToolCallsByName :: [Session.LlmToolCall] -> Map Text.Text Int
+countToolCallsByName toolCalls =
+    let toolNames = map extractToolCallName toolCalls
+    in Map.fromListWith (+) [(name, 1) | name <- toolNames, name /= "(unnamed)"]
+
+-- | Calculate byte counts for input, output, and reasoning.
+calculateByteCounts :: [Session.Turn] -> (Int, Int, Int)
+calculateByteCounts turns =
+    let (inputBytes, outputBytes, reasoningBytes) = foldr countTurn (0, 0, 0) turns
+    in (inputBytes, outputBytes, reasoningBytes)
+  where
+    countTurn :: Session.Turn -> (Int, Int, Int) -> (Int, Int, Int)
+    countTurn (Session.UserTurn utc) (inp, out, reas) =
+        let userBytes = textBytes $ case utc.userPrompt of
+                Session.SystemPrompt sp -> sp
+            queryBytes = maybe 0 (textBytes . unwrapQuery) utc.userQuery
+            toolRespBytes = sum [textBytes $ formatJsonAsText r | (_, Session.UserToolResponse r) <- utc.userToolResponses]
+        in (inp + userBytes + queryBytes + toolRespBytes, out, reas)
+    countTurn (Session.LlmTurn ltc) (inp, out, reas) =
+        let response = ltc.llmResponse
+            outBytes = maybe 0 textBytes response.responseText
+            reasBytes = maybe 0 textBytes response.responseThinking
+        in (inp, out + outBytes, reas + reasBytes)
+    
+    textBytes :: Text.Text -> Int
+    textBytes = Text.length . Text.decodeUtf8 . Text.encodeUtf8
+    
+    unwrapQuery :: Session.UserQuery -> Text.Text
+    unwrapQuery (Session.UserQuery q) = q
+
+-- | Format statistics as markdown.
+formatStatistics :: SessionStatistics -> Text.Text
+formatStatistics stats =
+    "## Statistics\n\n" <>
+    "### Turn Counts\n\n" <>
+    "| Metric | Value |\n" <>
+    "|--------|-------|\n" <>
+    "| Total Turns | " <> Text.pack (show stats.statTotalTurns) <> " |\n" <>
+    "| User Turns | " <> Text.pack (show stats.statUserTurns) <> " |\n" <>
+    "| LLM Turns | " <> Text.pack (show stats.statLlmTurns) <> " |\n" <>
+    "\n### Tool Calls\n\n" <>
+    "**Total Tool Calls:** " <> Text.pack (show stats.statTotalToolCalls) <> "\n\n" <>
+    formatToolCallStats stats.statToolCallsByName <>
+    "\n### Byte Usage\n\n" <>
+    formatByteChart stats
+
+-- | Format tool call statistics with bar chart.
+formatToolCallStats :: Map Text.Text Int -> Text.Text
+formatToolCallStats toolMap
+    | Map.null toolMap = "_No tool calls recorded_\n"
+    | otherwise = 
+        let maxCount = maximum (Map.elems toolMap)
+            sortedTools = sortOn (negate . snd) (Map.toList toolMap)
+        in Text.intercalate "\n" $ map (formatToolBar maxCount) sortedTools <> [""]
+
+-- | Format a single tool bar in the chart.
+formatToolBar :: Int -> (Text.Text, Int) -> Text.Text
+formatToolBar maxCount (name, count) =
+    let barWidth = 60  -- Maximum width of the bar in characters
+        filled = if maxCount == 0 then 0 else (count * barWidth) `div` maxCount
+        bar = Text.replicate filled "█"
+        label = Text.justifyLeft 20 ' ' name
+        valueStr = Text.justifyRight 4 ' ' (Text.pack $ show count)
+    in "`" <> label <> "` " <> valueStr <> " " <> bar
+
+-- | Format byte usage as bar chart.
+formatByteChart :: SessionStatistics -> Text.Text
+formatByteChart stats =
+    let categories = 
+            [ ("Input", stats.statInputBytes)
+            , ("Output", stats.statOutputBytes)
+            , ("Reasoning", stats.statReasoningBytes)
+            ]
+        maxBytes = maximum (map snd categories)
+        total = stats.statTotalBytes
+    in if total == 0 
+       then "_No byte data recorded_\n"
+       else 
+           let chart = Text.intercalate "\n" $ map (formatByteBar maxBytes) categories
+               totalLine = "\n**Total:** " <> formatBytes total <> "\n"
+           in chart <> totalLine
+
+-- | Format a single byte bar in the chart.
+formatByteBar :: Int -> (Text.Text, Int) -> Text.Text
+formatByteBar maxBytes (label, bytes) =
+    let barWidth = 60
+        filled = if maxBytes == 0 then 0 else (bytes * barWidth) `div` maxBytes
+        bar = Text.replicate filled "█"
+        label' = Text.justifyLeft 10 ' ' label
+        valueStr = Text.justifyRight 10 ' ' (formatBytes bytes)
+    in "`" <> label' <> "` " <> valueStr <> " " <> bar
+
+-- | Format bytes in human-readable form.
+formatBytes :: Int -> Text.Text
+formatBytes n
+    | n >= 1024 * 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024 * 1024))) <> " GiB"
+    | n >= 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024))) <> " MiB"
+    | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
+    | otherwise = Text.pack (show n) <> " B"
 
 -- | Format session metadata.
 formatSessionInfo :: Session.Session -> Text.Text
