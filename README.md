@@ -1,17 +1,4 @@
-```
-    λλ
-   λ⊙λ⊙
-  λλλλλλ
- λλλλλλλλ
-    λλ
-    λλ
-    λλ
-    λλ
-    λλ
-    λλ
-    λλ
-    λλ
-```
+![agents-exe logo](docs/logo-01.png)
 
 # an LLM-agent tool
 
