@@ -35,6 +35,7 @@ tracePrintingTextResponses = Tracer f
     f (AgentTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
     f (McpTrace _ _) = pure ()
     f (OpenAPITrace _ _) = pure ()
+    f (PostgRESTTrace _ _) = pure ()
     f (DataLoadingTrace _) = pure ()
     f (ConfigLoadedTrace _) = pure ()
     f (CyclicReferencesWarning _) = pure ()
@@ -68,6 +69,8 @@ traceUsefulPromptHandle h = Tracer f
     f (McpTrace _ tr) =
         Text.hPutStrLn h (Text.pack $ show tr)
     f (OpenAPITrace _ tr) =
+        Text.hPutStrLn h (Text.pack $ show tr)
+    f (PostgRESTTrace _ tr) =
         Text.hPutStrLn h (Text.pack $ show tr)
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
     f (ConfigLoadedTrace x) =
