@@ -1,368 +1,258 @@
-# Internal Tool Mapping Documentation
+# Internal Tool Mapping
+
+This document describes how tool names are mapped between different systems in `agents-exe`.
 
 ## Overview
 
-This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints.
+Tools in `agents-exe` come from various sources and may need their names transformed for different contexts:
 
-## The Problem
+- LLM context - Names visible to the language model
+- MCP context - Names used in Model Context Protocol
+- Bash context - Names used in bash tool invocations
+- User context - Names displayed to users
 
-LLM APIs (like OpenAI) have strict requirements for function names:
-- Must start with a letter (a-z, A-Z)
-- Can only contain alphanumeric characters and underscores: `[a-zA-Z0-9_]`
-- Some providers have additional length constraints
+## Tool Naming Conventions
 
-Note: Dashes (`-`) and colons (`:`) are **not** allowed, even though some documentation may suggest otherwise.
+### LLM Tool Names
 
-However, tool identifiers from external sources may contain invalid characters:
-- OpenAPI operation IDs can contain dots (e.g., `pet.findByStatus`)
-- OpenAPI operation IDs can contain slashes (e.g., `users/pets/get`)
-- URLs may contain dots, colons, slashes, and other special characters (e.g., `localhost:8001`)
-- MCP tool names may contain dashes, colons, or other special characters
+Tools exposed to LLMs follow a prefixed naming convention to avoid collisions:
 
-## Current Naming Schemes
+```
+{prefix}_{original_name}
+```
 
-### 1. IO Tools
+Prefixes:
+- `bash_` - Bash script tools
+- `mcp_{server}_` - MCP tools from a specific server
+- `openapi_` - OpenAPI-derived tools
+- `postgrest_{toolbox}_` - PostgREST-derived tools
+- `io_` - In-process Haskell IO tools
+
+Examples:
+- `bash_hello` - Bash tool named "hello"
+- `mcp_filesystem_readFile` - MCP tool from "filesystem" server
+- `openapi_getPetById` - OpenAPI tool for getPetById operation
+- `postgrest_api_get_users` - PostgREST tool for GET /users
+
+### MCP Tool Names
+
+When exposing tools via MCP, names can be transformed using the `NameMappingStrategy`:
+
+#### KeepPrefixedNames
+
+Preserves the LLM prefixes:
+```
+bash_hello -> bash_hello
+mcp_filesystem_readFile -> mcp_filesystem_readFile
+```
+
+#### StripPrefixes (Default)
+
+Removes LLM-specific prefixes:
+```
+bash_hello -> hello
+mcp_filesystem_readFile -> filesystem_readFile
+openapi_getPetById -> getPetById
+```
+
+#### UseOriginalNames
+
+Uses original names where available:
+```
+bash_hello -> hello
+openapi_getPetById -> getPetById
+```
+
+## Tool Registration
+
+The `System.Agents.ToolRegistration` module handles tool registration with proper name mapping.
+
+### Registration Functions
 
 ```haskell
-io2LLMName :: IOScript a b -> OpenAI.ToolName
-io2LLMName io = OpenAI.ToolName ("io_" <> io.description.ioSlug)
+-- Register a bash tool
+registerBashToolInLLM :: ScriptDescription -> ToolRegistration
+
+-- Register an MCP tool
+registerMcpToolInLLM :: Toolbox -> ToolDescription -> Either String ToolRegistration
+
+-- Register an OpenAPI tool
+registerOpenAPIToolInLLM :: Toolbox -> OpenAPITool -> Either String ToolRegistration
+
+-- Register a PostgREST tool
+registerPostgRESToolInLLM :: Toolbox -> PostgRESTool -> Either String ToolRegistration
 ```
 
-- Prefix: `io_`
-- Source: User-defined slug
-- Constraints: Assumed valid (user-controlled)
-
-### 2. Bash Tools
+### Naming Policy Functions
 
 ```haskell
-bash2LLMName :: ScriptDescription -> OpenAI.ToolName
-bash2LLMName bash = OpenAI.ToolName ("bash_" <> bash.scriptInfo.scriptSlug)
+-- Bash tool naming
+bash2LLMName :: ScriptDescription -> ToolName
+-- Result: bash_{scriptSlug}
+
+-- MCP tool naming
+mcp2LLMName :: Toolbox -> ToolDescription -> ToolName
+-- Result: mcp_{serverName}_{toolName}
+
+-- OpenAPI tool naming
+openapi2LLMName :: Toolbox -> Text -> ToolName
+-- Result: openapi_{normalizedName}
+
+-- PostgREST tool naming
+postgrest2LLMName :: Toolbox -> PostgRESTool -> ToolName
+-- Result: postgrest_{toolbox}_{method}_{table}
 ```
 
-- Prefix: `bash_`
-- Source: User-defined slug
-- Constraints: Assumed valid (user-controlled)
+## Toolbox Nest Command
 
-### 3. MCP Tools
+The `toolbox nest` command creates a single bash-compatible tool from multiple tools. The nested tool:
 
-```haskell
-mcp2LLMName :: Toolbox -> ToolDescription -> OpenAI.ToolName
-mcp2LLMName box mcp = OpenAI.ToolName ("mcp_" <> box.name <> "_" <> mcp.getToolDescription.name)
+1. Preserves original tool configurations in embedded JSON
+2. Dispatches to sub-tools based on the `--tool` argument
+3. Maintains the bash-tool interface (`describe` and `run` commands)
+
+### Nested Tool Dispatch
+
+```bash
+./nested-tool run --tool=<name> --arg='<json>'
 ```
 
-- Prefix: `mcp_<toolboxName>_`
-- Source: MCP tool name from server
-- **Issue**: MCP tool names may contain invalid characters (dashes, colons, etc.)
+The tool name is matched against registered tools and dispatched appropriately:
 
-### 4. OpenAPI Tools
+- `BashToolType` - Execute the bash script directly
+- `McpToolType` - Call via `agents-exe toolbox call-mcp`
+- `IOToolType` - Call via `agents-exe toolbox call-io`
+- `OpenAPIToolType` - Call via `agents-exe toolbox call-openapi`
+- `PostgRESToolType` - Call via `agents-exe toolbox call-postgrest`
 
-```haskell
-openapi2LLMName :: Text -> Text -> OpenAI.ToolName
-openapi2LLMName tboxName operationId =
-    OpenAI.ToolName ("openapi_" <> tboxName <> "_" <> operationId)
-```
+### Nest Configuration Format
 
-- Prefix: `openapi_<toolboxName>_`
-- Source: OpenAPI operationId
-- **Issue**: operationId often contains dots (e.g., `pet.findByStatus`)
-- **Issue**: Toolbox names derived from URLs may contain colons (e.g., `localhost:8001`)
+The embedded configuration in nested tools:
 
-## Error Manifestation
-
-When an invalid tool name is sent to an LLM API, you may see errors like:
-
-```
-"Invalid request: function name is invalid, must start with a letter 
- and can contain only alphanumerics and underscores"
-```
-
-This commonly occurs with:
-- OpenAPI specs that use dot-notation for operation IDs:
-  - `pet.findByStatus` → Invalid (contains dot)
-  - `users/pets/get` → Invalid (contains slash)
-- Toolbox names derived from URLs:
-  - `localhost:8001` → Invalid (contains colon)
-  - `api.example.com` → Invalid (contains dots)
-- MCP tool names with dashes or special characters:
-  - `get-pet` → Invalid (contains dash)
-
-## Proposed Solution: Normalization with Bi-directional Mapping
-
-### Core Principles
-
-1. **Normalization**: Convert all tool names to LLM-valid format (alphanumeric + underscore only)
-2. **Bi-directional Mapping**: Maintain ability to map back to original names
-3. **Consistency**: Same normalization logic for registration and lookup
-4. **Collision Avoidance**: Ensure unique normalized names
-
-### Normalization Function
-
-```haskell
--- | Normalize a tool name to be LLM-compatible.
--- 
--- Rules:
--- 1. Must start with a letter (prefix with 't' if needed)
--- 2. Replace all non-alphanumeric characters with underscores
--- 3. Collapse multiple consecutive underscores
--- 4. Preserve case (some providers are case-sensitive)
---
--- Examples:
--- >>> normalizeToolName "pet.findByStatus"
--- "pet_findByStatus"
--- >>> normalizeToolName "users/pets/get"
--- "users_pets_get"
--- >>> normalizeToolName "2.0_getPet"  -- starts with number
--- "t2_0_getPet"
--- >>> normalizeToolName "localhost:8001"  -- contains colon
--- "localhost_8001"
--- >>> normalizeToolName "get-pet"  -- contains dash
--- "get_pet"
-normalizeToolName :: Text -> Text
-```
-
-### Character Replacement Rules
-
-| Character | Replacement | Example |
-|-----------|-------------|---------|
-| `.` (dot) | `_` (underscore) | `pet.find` → `pet_find` |
-| `/` (slash) | `_` (underscore) | `users/pets` → `users_pets` |
-| `:` (colon) | `_` (underscore) | `localhost:8001` → `localhost_8001` |
-| `-` (dash) | `_` (underscore) | `get-pet` → `get_pet` |
-| Other special chars | `_` (underscore) | `pet@home` → `pet_home` |
-| Leading digit | Prefix with `t` | `2.0_api` → `t2_0_api` |
-
-### Bi-directional Mapping Strategy
-
-For OpenAPI tools, we need to maintain a mapping from normalized LLM names back to original operation IDs:
-
-```haskell
-data ToolNameMapping = ToolNameMapping
-    { originalName :: Text        -- ^ Original operationId
-    , normalizedName :: Text      -- ^ LLM-safe name
-    , fullLLMName :: Text         -- ^ With prefix (e.g., "openapi_pets_pet_findByStatus")
+```json
+{
+  "name": "nested-tool-name",
+  "tools": [
+    {
+      "name": "tool1",
+      "type": "bash",
+      "config": {
+        "path": "/path/to/tool1",
+        "info": { ... }
+      }
+    },
+    {
+      "name": "tool2",
+      "type": {"mcp": "server-name"},
+      "config": {
+        "server": "server-name"
+      }
     }
-
--- Build mapping during tool registration
-buildNameMapping :: Text -> [OpenAPITool] -> Map Text ToolNameMapping
-buildNameMapping toolboxName tools = ...
-
--- Lookup during tool execution
-findToolByLLMName :: Map Text ToolNameMapping -> OpenAI.ToolName -> Maybe OpenAPITool
+  ]
+}
 ```
 
-### Implementation in OpenAPI Toolbox
+## Toolbox MCP Command
 
-The OpenAPI toolbox should:
+The `toolbox mcp` command exposes tools directly via MCP without agent indirection. This provides:
 
-1. **During Initialization**:
-   - Normalize the toolbox name itself (may contain colons from URLs)
-   - Convert all operation IDs to normalized form
-   - Store mapping from normalized → original
-   - Generate LLM tool names with normalized IDs
+1. Direct tool execution without LLM latency
+2. Simplified testing of MCP clients
+3. Composition of tools from multiple sources
 
-2. **During Tool Execution**:
-   - Receive LLM tool call with normalized name
-   - Look up original operation ID from mapping
-   - Execute using original ID
+### Name Mapping in MCP Server
 
-### Updated Naming Flow
+When running `toolbox mcp`, tool names are mapped according to the selected strategy:
 
-```
-OpenAPI Spec
-    │
-    ▼
-Parse Operations
-    │
-    ▼
-Extract operationId (e.g., "pet.findByStatus")
-    │
-    ▼
-Normalize ──────────────────┐
-    │                        │
-    ▼                        │
-"pet_findByStatus"          │
-    │                        │
-    ▼                        ▼
-Add prefix:              Store mapping:
-"openapi_pets_pet_findByStatus"  "pet_findByStatus" → "pet.findByStatus"
-    │
-    ▼
-Register with LLM
-    │
-    ▼
-LLM calls tool with name "openapi_pets_pet_findByStatus"
-    │
-    ▼
-Lookup mapping → "pet.findByStatus"
-    │
-    ▼
-Execute HTTP request
+```bash
+# Strip prefixes (default)
+agents-exe toolbox mcp --agent-file agent.json --strip-prefixes
+
+# Keep prefixes
+agents-exe toolbox mcp --agent-file agent.json --keep-prefixes
+
+# Use original names
+agents-exe toolbox mcp --agent-file agent.json --use-original-names
 ```
 
-## Implementation Plan
+The mapping is applied when:
+1. Tools are listed via `tools/list`
+2. Tools are called via `tools/call`
 
-### Phase 1: Normalization Function
+### Tool Lookup
 
-Add to `System.Agents.Tools.OpenAPI.Converter`:
+When a tool is called, the MCP server:
 
-```haskell
--- | Normalize a tool name for LLM compatibility.
--- Only allows alphanumeric characters and underscores.
-normalizeForLLM :: Text -> Text
-normalizeForLLM = collapseUnderscores . ensureLetterStart . replaceInvalid
-  where
-    replaceInvalid = Text.map replaceChar
-    replaceChar c
-        | isValidChar c = c
-        | otherwise = '_'
-    -- Only alphanumeric and underscore allowed (NO dashes, NO colons)
-    isValidChar c = isLetter c || isDigit c || c == '_'
-    
-    ensureLetterStart t
-        | Text.null t = "tool"
-        | isLetter (Text.head t) = t
-        | otherwise = "t" <> t
-    
-    collapseUnderscores = Text.intercalate "_" . filter (not . Text.null) . Text.splitOn "_"
-```
+1. Receives the MCP tool name
+2. Applies reverse mapping to find the internal tool registration
+3. Executes the tool with the provided arguments
+4. Returns results in MCP format
 
-### Phase 2: Bi-directional Mapping
+## OpenAPI Name Mapping
 
-Add to `System.Agents.Tools.OpenAPI.Converter`:
+OpenAPI operation IDs may contain characters invalid for LLM tool names. The `NameMapping` system maintains bidirectional mapping:
 
 ```haskell
 data NameMapping = NameMapping
-    { nmOriginal :: Text
-    , nmNormalized :: Text
-    }
-
-buildToolNameMapping :: Text -> [OpenAPITool] -> Map Text NameMapping
-buildToolNameMapping toolboxName tools = 
-    Map.fromList [(nmNormalized m, m) | m <- mappings]
-  where
-    mappings = [ NameMapping orig (normalizeForLLM orig)
-               | tool <- tools
-               , let orig = getOperationIdOrFallback tool
-               ]
+  { nmOriginal :: Text    -- Original OpenAPI operationId
+  , nmNormalized :: Text  -- LLM-safe normalized name
+  }
 ```
 
-### Phase 3: Update OpenAPI Toolbox
+Normalization rules:
+1. Replace invalid characters with underscores
+2. Ensure name starts with a letter
+3. Collapse consecutive underscores
 
-Modify `Toolbox` to store name mapping:
-
-```haskell
-data Toolbox = Toolbox
-    { toolboxName :: Text
-    , toolboxBaseUrl :: Text
-    , toolboxTools :: [OpenAPITool]
-    , toolboxNameMapping :: Map Text NameMapping  -- ^ normalized → original
-    , httpRuntime :: HttpClient.Runtime
-    , headerFunc :: Maybe (IO (Map Text Text))
-    , staticHeaders :: Map Text Text
-    }
+Example:
+```
+Original: "pets.getById"
+Normalized: "pets_getById"
+LLM Name: "openapi_pets_getById"
 ```
 
-### Phase 4: Update Registration Functions
+## PostgREST Name Mapping
 
-Update `openapi2LLMName` to use normalized names for both toolbox and operation:
+PostgREST tools use a structured naming scheme:
 
-```haskell
-openapi2LLMName :: Text -> Text -> OpenAI.ToolName
-openapi2LLMName tboxName operationId =
-    let normalizedBox = normalizeForLLM tboxName
-        normalizedOp = normalizeForLLM operationId
-    in OpenAI.ToolName ("openapi_" <> normalizedBox <> "_" <> normalizedOp)
+```
+postgrest_{toolbox}_{method}_{table}
 ```
 
-Note: Both `tboxName` and `operationId` must be normalized because toolbox names may come from URLs containing colons.
-
-## Testing Strategy
-
-1. **Unit Tests**:
-   - Test normalization of various edge cases (dots, slashes, colons, dashes)
-   - Test bi-directional mapping
-   - Test collision handling
-
-2. **Integration Tests**:
-   - Test with real OpenAPI specs containing dots in operationIds
-   - Test with toolbox names from URLs containing colons
-   - Test end-to-end tool registration and execution
-
-3. **Property Tests**:
-   - Round-trip property: normalize → denormalize should preserve original
-   - Validity property: normalized names always match `[a-zA-Z][a-zA-Z0-9_]*`
-
-## Edge Cases
-
-### 1. Name Collisions
-
-When two different operation IDs normalize to the same name:
-
-```haskell
--- Original names
-"pet.find" and "pet_find" both normalize to "pet_find"
-
--- Solution: Append number suffix
-"pet_find" and "pet_find_2"
+Examples:
+```
+postgrest_api_get_users    -> GET /users
+postgrest_api_post_users   -> POST /users
+postgrest_api_patch_users  -> PATCH /users
+postgrest_api_delete_users -> DELETE /users
 ```
 
-### 2. Empty Operation IDs
+The table name is extracted from the path and normalized for LLM compatibility.
 
-When operationId is missing, we fall back to path/method:
+## Best Practices
 
-```haskell
--- From path "/pets/{id}" and method "GET"
--- Generated name: "get_pets__id_"
-```
+### For Tool Authors
 
-### 3. Very Long Names
+1. Use descriptive, unique script/tool names
+2. Avoid special characters that require normalization
+3. Keep names concise but meaningful
 
-Some providers have length limits. Strategy:
+### For Agent Developers
 
-```haskell
--- Truncate with hash suffix to maintain uniqueness
-"openapi_very_long_toolbox_name_very_long_operation_id_..."
-  → "openapi_very_long_toolbox_name_very_long_operat_a1b2c3"
-```
+1. Use `toolbox list` to verify tool names
+2. Use `toolbox nest` to create portable tool packages
+3. Use `toolbox mcp` for testing tool integrations
 
-### 4. Unicode Characters
+### For Client Developers
 
-Non-ASCII characters in operation IDs:
+1. Handle both prefixed and unprefixed names
+2. Use the MCP introspection to discover available tools
+3. Cache tool schemas for better performance
 
-```haskell
--- Replace with underscores
-"获取宠物" → "____"
--- Then ensure letter start: "t____"
-```
+## Related Documentation
 
-### 5. Toolbox Names from URLs
-
-When toolbox names are derived from URLs, they may contain colons and dots:
-
-```haskell
--- Original URL-based name
-"localhost:8001"
--- Normalized
-"localhost_8001"
-
--- Original URL-based name
-"api.example.com:8080"
--- Normalized
-"api_example_com_8080"
-```
-
-## Related Files
-
-- `src/System/Agents/Tools/OpenAPI/Converter.hs` - Tool conversion logic
-- `src/System/Agents/Tools/OpenAPI/Types.hs` - Type definitions
-- `src/System/Agents/Tools/OpenAPIToolbox.hs` - Toolbox implementation
-- `src/System/Agents/ToolRegistration.hs` - LLM registration
-- `src/System/Agents/LLMs/OpenAI.hs` - LLM ToolName type
-
-## Future Considerations
-
-1. **Caching**: Cache normalized names to avoid recomputation
-2. **Configuration**: Allow users to provide custom normalization rules
-3. **Validation**: Pre-validate specs during initialization
-4. **Reporting**: Log warnings when names are normalized
+- `docs/cli-reference.md` - CLI command reference
+- `System.Agents.ToolRegistration` - Tool registration API
+- `System.Agents.Tools.Nest` - Tool nesting implementation
+- `System.Agents.Tools.McpServer` - Direct MCP server implementation
 
