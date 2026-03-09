@@ -48,6 +48,7 @@ import qualified System.Agents.Tools.Bash as ToolsTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as ToolsTrace
 import qualified System.Agents.Tools.List as ToolsList
+import qualified System.Agents.Tools.McpServer as McpToolboxServer
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.Nest as Nest
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
@@ -339,6 +340,7 @@ data Command
     | Export ExportOptions
     | Import ImportOptions
     | ToolboxNest NestOptions
+    | ToolboxMcp McpToolboxOptions
     | ListTools ToolsList.ListToolsOptions
 
 instance Show Command where
@@ -353,6 +355,7 @@ instance Show Command where
     show (Export _) = "Export"
     show (Import _) = "Import"
     show (ToolboxNest _) = "ToolboxNest"
+    show (ToolboxMcp _) = "ToolboxMcp"
     show (ListTools _) = "ListTools"
 
 data PromptScriptDirective
@@ -458,6 +461,16 @@ data NestOptions = NestOptions
     , nestToolName :: Maybe Text
     , nestIncludeTools :: [Text]
     , nestExcludeTools :: [Text]
+    }
+    deriving (Show)
+
+-- | Options for the toolbox mcp command
+data McpToolboxOptions = McpToolboxOptions
+    { mcpToolSources :: [McpToolboxServer.ToolSource]
+    , mcpServerName :: Text
+    , mcpServerVersion :: Text
+    , mcpTransport :: McpToolboxServer.McpTransport
+    , mcpNameMapping :: McpToolboxServer.NameMappingStrategy
     }
     deriving (Show)
 
@@ -891,12 +904,102 @@ parseNestOptions =
                 <> help "Exclude specific tool (can be specified multiple times)"
             ))
 
+-- | Parse the toolbox mcp command
+parseToolboxMcpCommand :: Parser Command
+parseToolboxMcpCommand =
+    ToolboxMcp <$> parseMcpToolboxOptions
+
+parseMcpToolboxOptions :: Parser McpToolboxOptions
+parseMcpToolboxOptions =
+    McpToolboxOptions
+        <$> many parseToolSource
+        <*> strOption
+            ( long "server-name"
+                <> metavar "NAME"
+                <> help "Server name for MCP protocol"
+                <> value "agents-exe-toolbox"
+            )
+        <*> strOption
+            ( long "server-version"
+                <> metavar "VERSION"
+                <> help "Server version for MCP protocol"
+                <> value "0.1.0"
+            )
+        <*> parseMcpTransport
+        <*> parseNameMappingStrategy
+
+parseToolSource :: Parser McpToolboxServer.ToolSource
+parseToolSource =
+    asum
+        [ McpToolboxServer.ToolSourceAgent <$> strOption
+            ( long "agent-file"
+                <> metavar "AGENTFILE"
+                <> help "Load tools from an agent's configuration"
+            )
+        , McpToolboxServer.ToolSourceDirectory <$> strOption
+            ( long "tool-dir"
+                <> metavar "TOOLDIR"
+                <> help "Load bash tools directly from a directory"
+            )
+        , McpToolboxServer.ToolSourceMcpToolbox
+            <$> strOption
+                ( long "mcp-toolbox-name"
+                    <> metavar "NAME"
+                    <> help "Name for MCP toolbox"
+                    <> value "mcp"
+                )
+            <*> strOption
+                ( long "mcp-toolbox-config"
+                    <> metavar "CONFIG"
+                    <> help "Load tools from an MCP server configuration file"
+                )
+        , McpToolboxServer.ToolSourceOpenAPI <$> strOption
+            ( long "openapi-config"
+                <> metavar "CONFIG"
+                <> help "Load tools from an OpenAPI configuration file"
+            )
+        , McpToolboxServer.ToolSourcePostgREST <$> strOption
+            ( long "postgrest-config"
+                <> metavar "CONFIG"
+                <> help "Load tools from a PostgREST configuration file"
+            )
+        ]
+
+parseMcpTransport :: Parser McpToolboxServer.McpTransport
+parseMcpTransport =
+    flag' McpToolboxServer.StdioTransport
+        ( long "stdio"
+            <> help "Use stdio transport (default)"
+        )
+    <|> (McpToolboxServer.HttpTransport <$> option auto
+            ( long "http-port"
+                <> metavar "PORT"
+                <> help "Use HTTP transport on specified port"
+            ))
+    <|> pure McpToolboxServer.StdioTransport
+
+parseNameMappingStrategy :: Parser McpToolboxServer.NameMappingStrategy
+parseNameMappingStrategy =
+    asum
+        [ flag' McpToolboxServer.StripPrefixes
+            ( long "strip-prefixes"
+                <> help "Strip LLM name prefixes (bash_, mcp_, etc.)"
+            )
+        , flag' McpToolboxServer.UseOriginalNames
+            ( long "use-original-names"
+                <> help "Use original tool names where available"
+            )
+        , pure McpToolboxServer.KeepPrefixedNames
+        ]
+
 -- | Parse toolbox subcommands
 parseToolboxCommand :: Parser Command
 parseToolboxCommand =
     hsubparser
         ( command "nest" (info parseToolboxNestCommand
             (progDesc "Nest multiple tools into a single bash-compatible tool"))
+        <> command "mcp" (info parseToolboxMcpCommand
+            (progDesc "Run MCP server directly from toolbox (no agent indirection)"))
         <> command "list" (info parseListToolsCommand
             (progDesc "List available tools"))
         )
@@ -910,12 +1013,12 @@ parseListToolsCommand =
 parseListToolsOptions :: Parser ToolsList.ListToolsOptions
 parseListToolsOptions =
     ToolsList.ListToolsOptions
-        <$> parseToolSource
+        <$> parseToolSourceList
         <*> parseListFormat
 
 -- | Parse the tool source (agent file, directory, or MCP config)
-parseToolSource :: Parser ToolsList.ToolSource
-parseToolSource =
+parseToolSourceList :: Parser ToolsList.ToolSource
+parseToolSourceList =
     asum
         [ ToolsList.ToolSourceAgent <$> strOption
             ( long "agent-file"
@@ -1185,12 +1288,23 @@ main = do
             Export opts -> handleExport opts pargs
             Import opts -> handleImport opts
             ToolboxNest opts -> handleToolboxNest opts
+            ToolboxMcp opts -> handleToolboxMcp opts
             ListTools opts -> ToolsList.runListCommand opts
 
 -------------------------------------------------------------------------------
--- Toolbox List Handler (moved to module)
+-- Toolbox MCP Handler
 -------------------------------------------------------------------------------
--- The list command is now handled in System.Agents.Tools.List
+
+handleToolboxMcp :: McpToolboxOptions -> IO ()
+handleToolboxMcp opts = do
+    let mcpOpts = McpToolboxServer.McpToolboxOptions
+            { McpToolboxServer.mcpToolSources = mcpToolSources opts
+            , McpToolboxServer.mcpServerName = mcpServerName opts
+            , McpToolboxServer.mcpServerVersion = mcpServerVersion opts
+            , McpToolboxServer.mcpTransport = mcpTransport opts
+            , McpToolboxServer.mcpNameMapping = mcpNameMapping opts
+            }
+    McpToolboxServer.runMcpToolboxServer mcpOpts
 
 -------------------------------------------------------------------------------
 -- Toolbox Nest Handler
