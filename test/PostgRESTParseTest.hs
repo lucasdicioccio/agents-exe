@@ -12,6 +12,7 @@ import Test.Tasty.HUnit
 
 import System.Agents.Tools.OpenAPI.Types (OpenAPISpec(..))
 import System.Agents.Tools.PostgREST.Converter (convertPostgRESToTools)
+import System.Agents.Tools.PostgREST.Types (HttpMethod (..), defaultAllowedMethods)
 
 tests :: TestTree
 tests = testGroup "PostgREST Parsing"
@@ -36,7 +37,7 @@ test_convertMonsterGameToTools = testCase "Can convert monstergame spec to tools
     case decode content :: Maybe OpenAPISpec of
         Nothing -> assertFailure "Failed to parse monstergame.json"
         Just spec -> do
-            let tools = convertPostgRESToTools "monstergame" spec
+            let tools = convertPostgRESToTools "monstergame" defaultAllowedMethods spec
             -- Should generate tools for tables
             assertBool "Should generate tools" (not $ null tools)
             -- Print how many tools for debugging

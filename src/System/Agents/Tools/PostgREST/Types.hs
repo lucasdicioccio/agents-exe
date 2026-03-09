@@ -20,6 +20,13 @@
 module System.Agents.Tools.PostgREST.Types (
     -- * Configuration
     Config (..),
+    defaultAllowedMethods,
+
+    -- * HTTP Methods
+    HttpMethod (..),
+    methodToText,
+    textToMethod,
+    isReadOnlyMethod,
 
     -- * Row filtering
     RowFilter (..),
@@ -41,11 +48,85 @@ module System.Agents.Tools.PostgREST.Types (
     ToolResult (..),
 ) where
 
-import Data.Aeson (ToJSON (..), Value (..))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..))
 import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as Text
+
+import System.Agents.Tools.OpenAPI.Types (Schema)
+
+-- -------------------------------------------------------------------------
+-- HTTP Methods
+-- -------------------------------------------------------------------------
+
+-- | HTTP methods supported by PostgREST.
+--
+-- PostgREST supports the full range of HTTP verbs for RESTful operations:
+-- * GET - Query rows
+-- * HEAD - Check existence/count without body
+-- * POST - Create new rows
+-- * PUT - Upsert (update or insert)
+-- * PATCH - Partial update
+-- * DELETE - Remove rows
+-- * OPTIONS - Get metadata about endpoint
+data HttpMethod
+    = GET
+    | HEAD
+    | POST
+    | PUT
+    | PATCH
+    | DELETE
+    | OPTIONS
+    deriving (Show, Eq, Ord, Enum, Bounded)
+
+-- | Convert HttpMethod to Text.
+methodToText :: HttpMethod -> Text
+methodToText GET = "GET"
+methodToText HEAD = "HEAD"
+methodToText POST = "POST"
+methodToText PUT = "PUT"
+methodToText PATCH = "PATCH"
+methodToText DELETE = "DELETE"
+methodToText OPTIONS = "OPTIONS"
+
+-- | Parse HttpMethod from Text (case-insensitive).
+textToMethod :: Text -> Maybe HttpMethod
+textToMethod t = case Text.toUpper t of
+    "GET" -> Just GET
+    "HEAD" -> Just HEAD
+    "POST" -> Just POST
+    "PUT" -> Just PUT
+    "PATCH" -> Just PATCH
+    "DELETE" -> Just DELETE
+    "OPTIONS" -> Just OPTIONS
+    _ -> Nothing
+
+instance ToJSON HttpMethod where
+    toJSON = Aeson.String . methodToText
+
+instance FromJSON HttpMethod where
+    parseJSON = Aeson.withText "HttpMethod" $ \t ->
+        case textToMethod t of
+            Just m -> pure m
+            Nothing -> fail $ "Unknown HTTP method: " ++ Text.unpack t
+
+-- | Check if a method is read-only (safe, no side effects).
+--
+-- Read-only methods: GET, HEAD, OPTIONS
+-- Write methods: POST, PUT, PATCH, DELETE
+isReadOnlyMethod :: HttpMethod -> Bool
+isReadOnlyMethod GET = True
+isReadOnlyMethod HEAD = True
+isReadOnlyMethod OPTIONS = True
+isReadOnlyMethod _ = False
+
+-- | Default allowed methods for PostgREST toolbox.
+--
+-- By default, only read-only methods are exposed for safety.
+defaultAllowedMethods :: [HttpMethod]
+defaultAllowedMethods = [GET, HEAD, OPTIONS]
 
 -- -------------------------------------------------------------------------
 -- Configuration
@@ -64,6 +145,8 @@ data Config = Config
     -- ^ Static headers to include in all requests
     , configToken :: Maybe Text
     -- ^ Optional Bearer token for JWT authentication
+    , configAllowedMethods :: [HttpMethod]
+    -- ^ HTTP methods to expose as tools (default: read-only methods)
     }
     deriving (Show, Eq)
 
@@ -123,15 +206,16 @@ data Trace
 
 -- | Internal representation of a tool derived from a PostgREST table.
 --
--- Each table in the PostgREST API becomes a tool with:
--- * GET support for querying rows
+-- Each table/method combination in the PostgREST API becomes a tool with:
+-- * Support for the specific HTTP method (GET, POST, PUT, etc.)
 -- * Structured parameters for filters, subsetting, and ordering
 -- * Detected row filters from the spec
+-- * Optional request body schema for POST/PUT/PATCH
 data PostgRESTool = PostgRESTool
     { prtPath :: Text
     -- ^ Table path (e.g., "/users", "/public.orders")
-    , prtMethod :: Text
-    -- ^ HTTP method (typically "GET" for initial implementation)
+    , prtMethod :: HttpMethod
+    -- ^ HTTP method (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
     , prtName :: Text
     -- ^ Tool name (e.g., "postgrest_get_users")
     , prtDescription :: Text
@@ -142,6 +226,10 @@ data PostgRESTool = PostgRESTool
     -- ^ Whether pagination parameters (limit/offset) are available
     , prtHasOrdering :: Bool
     -- ^ Whether ordering parameter is available
+    , prtRequestBodySchema :: Maybe Schema
+    -- ^ Schema for request body (for POST/PUT/PATCH methods)
+    , prtIsReadOnly :: Bool
+    -- ^ Whether this is a read-only operation (GET, HEAD, OPTIONS)
     }
     deriving (Show, Eq)
 
@@ -161,6 +249,8 @@ data ToolParameters = ToolParameters
     -- ^ Pagination (limit, offset) and column selection
     , tpRanking :: Maybe RankingSchema
     -- ^ Ordering clause (order parameter)
+    , tpRequestBody :: Maybe Schema
+    -- ^ Schema for request body (for POST/PUT/PATCH)
     }
     deriving (Show, Eq)
 
@@ -239,5 +329,4 @@ instance ToJSON ToolResult where
             , "status" Aeson..= resultStatus tr
             , "payload" Aeson..= resultPayload tr
             ]
-
 

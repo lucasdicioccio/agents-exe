@@ -86,6 +86,7 @@ import System.Agents.Tools.PostgREST.Converter (
     ColumnFilterSchema (..),
     SubsetSchema (..),
     RankingSchema (..),
+    methodToText,
  )
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
@@ -130,7 +131,7 @@ postgrest2LLMName box tool =
         -- Extract table name from path (e.g., "/users" -> "users")
         tableName = Text.dropWhile (== '/') tool.prtPath
         normalizedTable = normalizeForLLM tableName
-        methodPart = Text.toLower tool.prtMethod
+        methodPart = Text.toLower $ methodToText tool.prtMethod
      in OpenAI.ToolName (mconcat ["postgrest_", normalizedToolbox, "_", methodPart, "_", normalizedTable])
 
 -------------------------------------------------------------------------------

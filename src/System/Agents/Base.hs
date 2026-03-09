@@ -13,6 +13,8 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.Tools.PostgREST.Types (HttpMethod (..), defaultAllowedMethods)
+
 type AgentSlug = Text
 type AgentAnnounce = Text
 
@@ -227,6 +229,9 @@ instance FromJSON OpenAPIToolboxDescription where
 -- * An HTTP/HTTPS URL (e.g., "http://localhost:3000/")
 -- * A file URL (e.g., "file:///path/to/postgrest-spec.json")
 --
+-- By default, only read-only methods (GET, HEAD, OPTIONS) are exposed
+-- for safety. Use 'allowedMethods' to enable write operations.
+--
 -- Example configuration:
 --
 -- @
@@ -236,7 +241,8 @@ instance FromJSON OpenAPIToolboxDescription where
 --     "specUrl": "http://localhost:3000/",
 --     "baseUrl": "http://localhost:3000",
 --     "headers": {"Accept-Profile": "myschema"},
---     "token": "${POSTGREST_TOKEN}"
+--     "token": "${POSTGREST_TOKEN}",
+--     "allowedMethods": ["GET", "POST", "PATCH"]
 --   }
 -- }
 -- @
@@ -252,6 +258,10 @@ data PostgRESTServerDescription
     -- (e.g., for schema selection via Accept-Profile)
     , postgrestToken :: Maybe Text
     -- ^ Optional Bearer token for JWT authentication
+    , postgrestAllowedMethods :: Maybe [HttpMethod]
+    -- ^ Optional list of HTTP methods to expose as tools.
+    -- Default: read-only methods [GET, HEAD, OPTIONS] for safety.
+    -- To enable full CRUD: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -295,7 +305,8 @@ instance FromJSON PostgRESTServerDescription where
 --   "specUrl": "http://localhost:3000/",
 --   "baseUrl": "http://localhost:3000",
 --   "headers": {"Accept-Profile": "myschema"},
---   "token": "${POSTGREST_TOKEN}"
+--   "token": "${POSTGREST_TOKEN}",
+--   "allowedMethods": ["GET", "POST", "PATCH"]
 -- }
 -- @
 newtype PostgRESTServerOnDisk = PostgRESTServerOnDisk
@@ -417,6 +428,5 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-
 
 

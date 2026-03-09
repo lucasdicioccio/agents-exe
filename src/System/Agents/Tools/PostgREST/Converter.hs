@@ -7,20 +7,20 @@
 -- tool representations. It handles:
 --
 -- * Parsing PostgREST-specific OpenAPI specs
--- * Converting table endpoints to tools (GET operations)
+-- * Converting table endpoints to tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
 -- * Extracting row filters from rowFilter. parameter references
 -- * Building structured parameter schemas (filters/subset/ranking)
 -- * Name normalization for LLM compatibility
 --
 -- Key differences from generic OpenAPI:
--- * Tools are named postgrest_{toolbox}_{table} instead of openapi_{operationId}
+-- * Tools are named postgrest_{toolbox}_{method}_{table} instead of openapi_{operationId}
 -- * GET parameters are structured into filters/subset/ranking groups
 -- * Row filtering uses column-based parameters from the spec
 -- * The root / path and OpenAPI description endpoints are skipped
 --
 -- Example:
 -- >>> import qualified Data.Map.Strict as Map
--- >>> let tool = convertTable "/users" True True [RowFilter "name" "text" "Filter on name"]
+-- >>> let tool = convertTable "/users" GET True True [] Nothing
 -- >>> prtName tool
 -- "postgrest_get_users"
 module System.Agents.Tools.PostgREST.Converter (
@@ -31,29 +31,35 @@ module System.Agents.Tools.PostgREST.Converter (
     ColumnFilterSchema (..),
     SubsetSchema (..),
     RankingSchema (..),
-    
+    HttpMethod (..),
+    methodToText,
+
     -- * Main conversion functions
     convertPostgRESToTools,
     convertTable,
-    
+
     -- * Row filter extraction
     extractRowFilters,
     parseRowFilterRef,
-    
+
     -- * Parameter building
     buildToolParameters,
     buildFilterSchema,
     buildSubsetSchema,
     buildRankingSchema,
-    
+
     -- * Name generation
     deriveToolName,
     normalizeTableName,
-    
+
     -- * Path filtering
     isTablePath,
     shouldSkipPath,
-    
+
+    -- * Method helpers
+    methodToOperation,
+    isMethodSupported,
+
     -- * Re-export for convenience
     module System.Agents.Tools.PostgREST.Types,
 ) where
@@ -74,6 +80,7 @@ import System.Agents.Tools.OpenAPI.Types (
     ParamLocation (..),
     Parameter (..),
     Path,
+    RequestBody (..),
     Schema (..),
  )
 import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
@@ -87,70 +94,97 @@ import System.Agents.Tools.PostgREST.Types
 --
 -- This function:
 -- 1. Filters out non-table paths (root /, OpenAPI endpoints)
--- 2. Extracts GET operations for each table
+-- 2. Extracts operations for each allowed HTTP method
 -- 3. Detects row filters from parameter references
 -- 4. Builds structured tool parameters
 -- 5. Generates LLM-compatible tool names
 --
--- Only GET operations are supported in the initial implementation.
--- POST/PUT/PATCH/DELETE can be added later.
+-- The 'allowedMethods' parameter controls which HTTP verbs are exposed
+-- as tools. By default, only read-only methods are included for safety.
 --
 -- Example:
 -- >>> let spec = OpenAPISpec (Map.fromList [("/users", Map.fromList [("GET", someOp)])]) Nothing
--- >>> let tools = convertPostgRESToTools "mydb" spec
+-- >>> let tools = convertPostgRESToTools "mydb" [GET] spec
 -- >>> length tools
 -- 1
 convertPostgRESToTools ::
     -- | Toolbox name (used for tool naming)
     Text ->
+    -- | Allowed HTTP methods to expose
+    [HttpMethod] ->
     OpenAPISpec ->
     [PostgRESTool]
-convertPostgRESToTools toolboxName spec = do
+convertPostgRESToTools toolboxName allowedMethods spec = do
     (path, methods) <- Map.toList (specPaths spec)
     -- Skip non-table paths
     guard (isTablePath path)
     guard (not (shouldSkipPath path))
-    -- Only process GET operations for now
-    (method, operation) <- Map.toList methods
-    guard (method == "GET")
-    -- Extract row filters from the operation
-    let rowFilters = extractRowFilters operation spec
-    pure $ convertTable toolboxName path method operation rowFilters
+    -- Process all allowed methods
+    method <- allowedMethods
+    -- Convert OpenAPI Method to HttpMethod for comparison
+    case methodToOperation method methods of
+        Just operation -> do
+            -- Extract row filters from the operation
+            let rowFilters = extractRowFilters operation spec
+            -- Extract request body schema for write operations
+            let requestBodySchema = extractRequestBodySchema operation
+            pure $ convertTable toolboxName path method operation rowFilters requestBodySchema
+        Nothing -> []
   where
     guard :: Bool -> [()]
     guard True = [()]
     guard False = []
 
+-- | Find an operation matching the given HTTP method.
+methodToOperation :: HttpMethod -> Map Method Operation -> Maybe Operation
+methodToOperation method methods = Map.lookup (methodToText method) methods
+
+-- | Check if a method should be supported based on the operation.
+isMethodSupported :: HttpMethod -> Operation -> Bool
+isMethodSupported _ _ = True
+
+-- | Extract request body schema from an operation.
+extractRequestBodySchema :: Operation -> Maybe Schema
+extractRequestBodySchema op = do
+    reqBody <- opRequestBody op
+    -- Get the JSON schema from the request body content
+    Map.lookup "application/json" (reqBodyContent reqBody)
+
 -- | Converts a single PostgREST table endpoint to a tool.
 --
 -- This is the core conversion function that:
--- * Derives a tool name from the table path
+-- * Derives a tool name from the table path and method
 -- * Builds the tool description from summary and description
 -- * Creates structured parameters (filters/subset/ranking)
 -- * Records detected row filters
+-- * Includes request body schema for write operations
 --
--- The tool name format is: postgrest_{toolbox}_{table}
+-- The tool name format is: postgrest_{toolbox}_{method}_{table}
 convertTable ::
     -- | Toolbox name
     Text ->
     -- | Table path (e.g., "/users")
     Path ->
-    -- | HTTP method (e.g., "GET")
-    Method ->
+    -- | HTTP method
+    HttpMethod ->
     -- | OpenAPI operation
     Operation ->
     -- | Detected row filters
     [RowFilter] ->
+    -- | Request body schema (for POST/PUT/PATCH)
+    Maybe Schema ->
     PostgRESTool
-convertTable toolboxName path method op rowFilters =
+convertTable toolboxName path method op rowFilters requestBodySchema =
     PostgRESTool
         { prtPath = path
         , prtMethod = method
         , prtName = deriveToolName toolboxName path method
-        , prtDescription = buildToolDescription op path
+        , prtDescription = buildToolDescription op path method
         , prtRowFilters = rowFilters
         , prtHasPagination = hasPaginationParams op
         , prtHasOrdering = hasOrderingParam op
+        , prtRequestBodySchema = requestBodySchema
+        , prtIsReadOnly = isReadOnlyMethod method
         }
 
 -- -------------------------------------------------------------------------
@@ -296,16 +330,33 @@ resolveFilterRef _spec ref =
 
 -- | Build a tool description from operation and path.
 --
--- Combines operation summary/description with table path information.
-buildToolDescription :: Operation -> Path -> Text
-buildToolDescription op path =
+-- Combines operation summary/description with table path and method information.
+buildToolDescription :: Operation -> Path -> HttpMethod -> Text
+buildToolDescription op path method =
     let baseDesc = case (opSummary op, opDescription op) of
             (Just summary, Just desc) -> summary <> ":\n" <> desc
             (Just summary, Nothing) -> summary
             (Nothing, Just desc) -> desc
-            (Nothing, Nothing) -> "Query " <> tableName <> " table"
+            (Nothing, Nothing) -> defaultAction method <> " " <> tableName
         tableName = Text.dropWhile (== '/') path
-     in baseDesc <> "\nTable: " <> tableName
+        methodDesc = case method of
+            GET -> "Query rows from"
+            HEAD -> "Check existence/count in"
+            POST -> "Create new rows in"
+            PUT -> "Upsert (update or insert) rows in"
+            PATCH -> "Partially update rows in"
+            DELETE -> "Delete rows from"
+            OPTIONS -> "Get metadata about"
+     in baseDesc <> "\nTable: " <> tableName <> "\nMethod: " <> methodToText method
+  where
+    defaultAction :: HttpMethod -> Text
+    defaultAction GET = "Query"
+    defaultAction HEAD = "Check"
+    defaultAction POST = "Create"
+    defaultAction PUT = "Upsert"
+    defaultAction PATCH = "Update"
+    defaultAction DELETE = "Delete"
+    defaultAction OPTIONS = "Get metadata for"
 
 -- -------------------------------------------------------------------------
 -- Parameter Detection
@@ -333,18 +384,18 @@ hasOrderingParam op =
 
 -- | Derives a tool name from a PostgREST table path.
 --
--- Format: postgrest_{toolbox}_{table}
+-- Format: postgrest_{toolbox}_{method}_{table}
 --
 -- Examples:
--- >>> deriveToolName "mydb" "/users" "GET"
+-- >>> deriveToolName "mydb" "/users" GET
 -- "postgrest_mydb_get_users"
--- >>> deriveToolName "mydb" "/public.orders" "GET"
--- "postgrest_mydb_get_public_orders"
-deriveToolName :: Text -> Path -> Method -> Text
+-- >>> deriveToolName "mydb" "/public.orders" POST
+-- "postgrest_mydb_post_public_orders"
+deriveToolName :: Text -> Path -> HttpMethod -> Text
 deriveToolName toolboxName path method =
     let normalizedToolbox = normalizeForLLM toolboxName
         tablePart = normalizeTableName path
-        methodPart = Text.toLower method
+        methodPart = Text.toLower $ methodToText method
      in "postgrest_" <> normalizedToolbox <> "_" <> methodPart <> "_" <> tablePart
 
 -- | Normalize a table path for use in a tool name.
@@ -389,17 +440,26 @@ normalizeTableName path =
 
 -- | Build structured tool parameters from operation.
 --
--- Creates three parameter groups:
--- * filters: Column-based row filters
--- * subset: Pagination (limit/offset) and column selection
--- * ranking: Ordering clause
+-- Creates parameter groups:
+-- * filters: Column-based row filters (for GET, DELETE, PATCH, PUT)
+-- * subset: Pagination (limit/offset) and column selection (for GET)
+-- * ranking: Ordering clause (for GET)
+-- * requestBody: JSON body for write operations (POST, PUT, PATCH)
 buildToolParameters :: PostgRESTool -> ToolParameters
 buildToolParameters tool =
     ToolParameters
         { tpFilters = buildFilterSchema tool
-        , tpSubset = buildSubsetSchema tool
-        , tpRanking = buildRankingSchema tool
+        , tpSubset = if needsSubset then buildSubsetSchema tool else Nothing
+        , tpRanking = if needsRanking then buildRankingSchema tool else Nothing
+        , tpRequestBody = if needsRequestBody then prtRequestBodySchema tool else Nothing
         }
+  where
+    method = prtMethod tool
+    -- Subset and ranking only for GET (and HEAD for counting)
+    needsSubset = method == GET && prtHasPagination tool
+    needsRanking = method == GET && prtHasOrdering tool
+    -- Request body for POST, PUT, PATCH
+    needsRequestBody = method `elem` [POST, PUT, PATCH]
 
 -- | Build filter schema from detected row filters.
 --
