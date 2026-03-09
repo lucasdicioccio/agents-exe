@@ -45,7 +45,7 @@ import Data.ByteString (ByteString)
 import Data.Foldable.WithIndex (ifoldl')
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import qualified Data.Maybe as Maybe
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -86,9 +86,10 @@ import System.Agents.Tools.PostgREST.Converter (
     ColumnFilterSchema (..),
     SubsetSchema (..),
     RankingSchema (..),
+    extractRequestBody,
  )
-import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
+import System.Agents.Tools.OpenAPI.Types (Schema (..), OpenAPISpec (..))
 import System.Agents.ToolSchema
 import System.Agents.Tools.Trace (ToolTrace (..))
 import Prod.Tracer (Tracer, contramap)
@@ -220,7 +221,7 @@ registerMcpToolInLLM box mcp =
         llmName = mcp2LLMName box mcp
 
         llmDescription :: Text
-        llmDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
+        llmDescription = fromMaybe "" mcp.getToolDescription.description
 
         mapToolDescriptionMcp2LLM :: [ParamProperty] -> OpenAI.Tool
         mapToolDescriptionMcp2LLM schema =
@@ -268,13 +269,13 @@ registerMcpToolInLLM box mcp =
 -- @
 registerOpenAPITool ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPI.OpenAPITool ->
+    OpenAPITool ->
     Either String ToolRegistration
 registerOpenAPITool toolbox tool =
     let 
         -- Get the original operation ID
-        originalOpId = Maybe.fromMaybe (OpenAPI.toolName tool) 
-                       (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation tool))
+        originalOpId = fromMaybe (toolName tool) 
+                       (OpenAPIToolbox.getOperationId (toolOperation tool))
         
         -- Get the normalized name from the mapping
         mNameMapping = findNameMapping toolbox originalOpId
@@ -285,7 +286,7 @@ registerOpenAPITool toolbox tool =
             Nothing -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) originalOpId
      in case mNameMapping of
         Nothing -> Left $ "Tool not found in name mapping: " ++ Text.unpack originalOpId
-        Just nameMapping ->
+        Just _nameMapping ->
             let -- Convert to OpenAI Tool format with normalized name
                 openaiTool = (toOpenAITool tool)
                     { OpenAI.toolName = llmName }
@@ -297,7 +298,7 @@ registerOpenAPITool toolbox tool =
                 -- Create the Tool
                 toolDef0 = IOTool $ IOScriptDescription
                     { ioSlug = OpenAI.getToolName llmName
-                    , ioDescription = OpenAPI.toolDescription tool
+                    , ioDescription = toolDescription tool
                     }
 
                 tool' = Tool
@@ -355,7 +356,7 @@ registerOpenAPITools ::
     IO (Either String [ToolRegistration])
 registerOpenAPITools toolbox =
     -- Fail fast - return first error encountered
-    let registerAll :: [OpenAPI.OpenAPITool] -> Either String [ToolRegistration] -> Either String [ToolRegistration]
+    let registerAll :: [OpenAPITool] -> Either String [ToolRegistration] -> Either String [ToolRegistration]
         registerAll [] acc = acc
         registerAll (t:ts) (Right regs) =
             case registerOpenAPITool toolbox t of
@@ -374,7 +375,7 @@ registerOpenAPITools toolbox =
 -- provided for backward compatibility.
 registerOpenAPIToolInLLM ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPI.OpenAPITool ->
+    OpenAPITool ->
     Either String ToolRegistration
 registerOpenAPIToolInLLM = registerOpenAPITool
 
@@ -388,10 +389,11 @@ registerOpenAPIToolInLLM = registerOpenAPITool
 -- parent toolbox. The tool name follows the format:
 -- postgrest_{toolbox}_{method}_{table}
 --
--- The tool parameters are structured into three groups:
--- * filters: Column-based row filters
+-- The tool parameters are structured into groups:
+-- * filters: Column-based row filters (for GET and filtering PATCH/DELETE)
 -- * subset: Pagination (limit/offset) and column selection
 -- * ranking: Ordering clause
+-- * body: Request body for POST/PUT/PATCH operations
 --
 -- All parameter groups and their sub-properties are marked as optional,
 -- allowing the LLM to provide only the parameters it needs.
@@ -411,7 +413,14 @@ registerPostgRESTool ::
     Either String ToolRegistration
 registerPostgRESTool toolbox tool =
     let llmName = postgrest2LLMName toolbox tool
-        params = buildToolParameters tool
+        -- Get spec from toolbox
+        spec = PostgRESToolbox.toolboxSpec toolbox
+        -- Build base parameters from tool structure
+        baseParams = buildToolParameters tool spec
+        -- Extract request body schema for write operations
+        requestBodySchema = extractRequestBodyFromTool tool spec
+        -- Create final parameters with request body
+        params = baseParams { tpRequestBody = requestBodySchema }
         
         -- Build parameter properties from structured parameters
         -- All parameters are marked as optional (propertyRequired = False)
@@ -451,11 +460,32 @@ registerPostgRESTool toolbox tool =
             , findTool = find
             }
 
+-- | Extract request body schema for a PostgREST tool.
+--
+-- For write operations (POST, PUT, PATCH), looks up the request body
+-- schema from the OpenAPI spec.
+extractRequestBodyFromTool :: PostgRESTool -> OpenAPISpec -> Maybe Schema
+extractRequestBodyFromTool tool spec =
+    -- Only extract body for write operations
+    if prtMethod tool `elem` ["POST", "PUT", "PATCH"]
+        then
+            -- Look up the operation in the spec and extract its body
+            case Map.lookup (prtPath tool) (specPaths spec) of
+                Just methods ->
+                    case Map.lookup (prtMethod tool) methods of
+                        Just op -> extractRequestBody op spec
+                        Nothing -> Nothing
+                Nothing -> Nothing
+        else Nothing
+
 -- | Build parameter properties for PostgREST tool from structured parameters.
 --
--- All parameter groups (filters, subset, ranking) and their sub-properties
+-- All parameter groups (filters, subset, ranking, body) and their sub-properties
 -- are marked as optional (propertyRequired = False), allowing the LLM to
 -- provide only the parameters it needs.
+--
+-- For POST/PUT/PATCH operations, includes a 'body' parameter with the
+-- appropriate schema for inserting or updating rows.
 buildPostgRESTParamProperties :: ToolParameters -> [ParamProperty]
 buildPostgRESTParamProperties params =
     let filterProp = case tpFilters params of
@@ -484,7 +514,11 @@ buildPostgRESTParamProperties params =
                 , propertyRequired = False  -- Optional parameter group
                 }
             Nothing -> Nothing
-     in Maybe.catMaybes [filterProp, subsetProp, rankingProp]
+        
+        bodyProp = case tpRequestBody params of
+            Just schema -> Just $ buildBodyProperty schema
+            Nothing -> Nothing
+     in catMaybes [filterProp, subsetProp, rankingProp, bodyProp]
   where
     buildFilterSubProperties :: FilterSchema -> [ParamProperty]
     buildFilterSubProperties fs =
@@ -497,7 +531,7 @@ buildPostgRESTParamProperties params =
     
     buildSubsetSubProperties :: SubsetSchema -> [ParamProperty]
     buildSubsetSubProperties ss =
-        Maybe.catMaybes
+        catMaybes
             [ fmap (\desc -> ParamProperty "offset" (OpaqueParamType "string") desc False) (ssOffset ss)
             , fmap (\desc -> ParamProperty "limit" (OpaqueParamType "string") desc False) (ssLimit ss)
             , fmap (\desc -> ParamProperty "columns" (OpaqueParamType "string") desc False) (ssColumns ss)
@@ -505,9 +539,125 @@ buildPostgRESTParamProperties params =
     
     buildRankingSubProperties :: RankingSchema -> [ParamProperty]
     buildRankingSubProperties rs =
-        Maybe.catMaybes
+        catMaybes
             [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False) (rsOrder rs)
             ]
+
+-- | Build the body property for write operations.
+--
+-- Converts the OpenAPI Schema to a ParamProperty that describes
+-- the request body structure to the LLM.
+buildBodyProperty :: Schema -> ParamProperty
+buildBodyProperty schema =
+    ParamProperty
+        { propertyKey = "body"
+        , propertyType = buildBodyParamType schema
+        , propertyDescription = buildBodyDescription schema
+        , propertyRequired = False  -- Optional to allow database defaults
+        }
+
+-- | Build the ParamType for a request body schema.
+--
+-- Handles:
+-- * Object schemas - converted to ObjectParamType with properties
+-- * Array schemas - for bulk inserts, uses ObjectParamType for items
+-- * Primitive types - mapped directly
+-- * References - treated as opaque object
+buildBodyParamType :: Schema -> ParamType
+buildBodyParamType schema =
+    case schemaType schema of
+        Just "object" ->
+            case schemaProperties schema of
+                Just props -> 
+                    -- Build properties from schema
+                    let paramProps = map schemaPropertyToParamProperty (Map.toList props)
+                     in ObjectParamType paramProps
+                Nothing -> 
+                    -- Object without defined properties - opaque
+                    OpaqueParamType "object"
+        Just "array" ->
+            case schemaItems schema of
+                Just itemSchema ->
+                    -- For arrays, we describe the item type
+                    let itemType = buildBodyParamType itemSchema
+                     in case itemType of
+                            ObjectParamType props -> ObjectParamType props
+                            _ -> OpaqueParamType "array"
+                Nothing ->
+                    OpaqueParamType "array"
+        Just "string" -> StringParamType
+        Just "integer" -> NumberParamType
+        Just "number" -> NumberParamType
+        Just "boolean" -> BoolParamType
+        Just t -> OpaqueParamType t
+        Nothing ->
+            -- No type specified - check for properties or use opaque
+            case schemaProperties schema of
+                Just props -> 
+                    let paramProps = map schemaPropertyToParamProperty (Map.toList props)
+                     in ObjectParamType paramProps
+                Nothing -> OpaqueParamType "object"
+
+-- | Convert a schema property to a ParamProperty.
+schemaPropertyToParamProperty :: (Text, Schema) -> ParamProperty
+schemaPropertyToParamProperty (name, propSchema) =
+    ParamProperty
+        { propertyKey = name
+        , propertyType = schemaToParamType propSchema
+        , propertyDescription = fromMaybe ("Column " <> name) (schemaDescription propSchema)
+        , propertyRequired = False  -- All body properties optional for flexibility
+        }
+
+-- | Convert a Schema to its corresponding ParamType.
+schemaToParamType :: Schema -> ParamType
+schemaToParamType schema =
+    case schemaType schema of
+        Just "string" -> 
+            case schemaEnum schema of
+                Just enumVals -> 
+                    -- Convert enum values to text
+                    let enumTexts = mapMaybe enumValueToText enumVals
+                     in if null enumTexts then StringParamType else EnumParamType enumTexts
+                Nothing -> StringParamType
+        Just "integer" -> NumberParamType
+        Just "number" -> NumberParamType
+        Just "boolean" -> BoolParamType
+        Just "object" ->
+            case schemaProperties schema of
+                Just props -> 
+                    let paramProps = map schemaPropertyToParamProperty (Map.toList props)
+                     in ObjectParamType paramProps
+                Nothing -> OpaqueParamType "object"
+        Just "array" ->
+            case schemaItems schema of
+                Just _ -> OpaqueParamType "array"
+                Nothing -> OpaqueParamType "array"
+        Just t -> OpaqueParamType t
+        Nothing -> 
+            case schemaProperties schema of
+                Just props -> 
+                    let paramProps = map schemaPropertyToParamProperty (Map.toList props)
+                     in ObjectParamType paramProps
+                Nothing -> OpaqueParamType "object"
+
+-- | Convert an enum value to Text.
+enumValueToText :: Aeson.Value -> Maybe Text
+enumValueToText (Aeson.String s) = Just s
+enumValueToText _ = Nothing
+
+-- | Build a description for the body parameter.
+buildBodyDescription :: Schema -> Text
+buildBodyDescription schema =
+    let baseDesc = fromMaybe "Request body" (schemaDescription schema)
+        typeHint = case schemaType schema of
+            Just "object" -> " (object with column values)"
+            Just "array" -> " (array for bulk insert)"
+            Just t -> " (type: " <> t <> ")"
+            Nothing -> ""
+        requiredHint = case schemaRequired schema of
+            Just reqs | not (null reqs) -> ". Required fields: " <> Text.intercalate ", " reqs
+            _ -> ""
+     in baseDesc <> typeHint <> requiredHint
 
 -- | Register all tools from a PostgREST toolbox.
 --

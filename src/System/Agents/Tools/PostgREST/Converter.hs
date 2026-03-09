@@ -7,14 +7,15 @@
 -- tool representations. It handles:
 --
 -- * Parsing PostgREST-specific OpenAPI specs
--- * Converting table endpoints to tools (GET operations)
+-- * Converting table endpoints to tools (GET, POST, PUT, PATCH operations)
 -- * Extracting row filters from rowFilter. parameter references
--- * Building structured parameter schemas (filters/subset/ranking)
+-- * Building structured parameter schemas (filters/subset/ranking/body)
 -- * Name normalization for LLM compatibility
 --
 -- Key differences from generic OpenAPI:
 -- * Tools are named postgrest_{toolbox}_{table} instead of openapi_{operationId}
 -- * GET parameters are structured into filters/subset/ranking groups
+-- * POST/PUT/PATCH operations include request body schema for data insertion/updates
 -- * Row filtering uses column-based parameters from the spec
 -- * The root / path and OpenAPI description endpoints are skipped
 --
@@ -46,6 +47,10 @@ module System.Agents.Tools.PostgREST.Converter (
     buildSubsetSchema,
     buildRankingSchema,
     
+    -- * Request body handling
+    extractRequestBody,
+    resolveSchemaRef,
+    
     -- * Name generation
     deriveToolName,
     normalizeTableName,
@@ -63,7 +68,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (isLetter)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -75,6 +80,8 @@ import System.Agents.Tools.OpenAPI.Types (
     Parameter (..),
     Path,
     Schema (..),
+    Components (..),
+    RequestBody (..),
  )
 import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import System.Agents.Tools.PostgREST.Types
@@ -87,19 +94,12 @@ import System.Agents.Tools.PostgREST.Types
 --
 -- This function:
 -- 1. Filters out non-table paths (root /, OpenAPI endpoints)
--- 2. Extracts GET operations for each table
+-- 2. Extracts GET, POST, PUT, and PATCH operations for each table
 -- 3. Detects row filters from parameter references
--- 4. Builds structured tool parameters
+-- 4. Builds structured tool parameters including request body for write operations
 -- 5. Generates LLM-compatible tool names
 --
--- Only GET operations are supported in the initial implementation.
--- POST/PUT/PATCH/DELETE can be added later.
---
--- Example:
--- >>> let spec = OpenAPISpec (Map.fromList [("/users", Map.fromList [("GET", someOp)])]) Nothing
--- >>> let tools = convertPostgRESToTools "mydb" spec
--- >>> length tools
--- 1
+-- Supports GET for querying and POST/PUT/PATCH for write operations.
 convertPostgRESToTools ::
     -- | Toolbox name (used for tool naming)
     Text ->
@@ -110,44 +110,49 @@ convertPostgRESToTools toolboxName spec = do
     -- Skip non-table paths
     guard (isTablePath path)
     guard (not (shouldSkipPath path))
-    -- Only process GET operations for now
+    -- Process supported operations: GET, POST, PUT, PATCH
     (method, operation) <- Map.toList methods
-    guard (method == "GET")
+    guard (method `elem` supportedMethods)
     -- Extract row filters from the operation
     let rowFilters = extractRowFilters operation spec
-    pure $ convertTable toolboxName path method operation rowFilters
+    pure $ convertTable toolboxName path method operation rowFilters spec
   where
     guard :: Bool -> [()]
     guard True = [()]
     guard False = []
+    
+    supportedMethods :: [Text]
+    supportedMethods = ["GET", "POST", "PUT", "PATCH"]
 
 -- | Converts a single PostgREST table endpoint to a tool.
 --
 -- This is the core conversion function that:
--- * Derives a tool name from the table path
+-- * Derives a tool name from the table path and method
 -- * Builds the tool description from summary and description
--- * Creates structured parameters (filters/subset/ranking)
+-- * Creates structured parameters (filters/subset/ranking/body)
 -- * Records detected row filters
 --
--- The tool name format is: postgrest_{toolbox}_{table}
+-- The tool name format is: postgrest_{toolbox}_{method}_{table}
 convertTable ::
     -- | Toolbox name
     Text ->
     -- | Table path (e.g., "/users")
     Path ->
-    -- | HTTP method (e.g., "GET")
+    -- | HTTP method (e.g., "GET", "POST")
     Method ->
     -- | OpenAPI operation
     Operation ->
     -- | Detected row filters
     [RowFilter] ->
+    -- | OpenAPI spec for resolving schema references
+    OpenAPISpec ->
     PostgRESTool
-convertTable toolboxName path method op rowFilters =
+convertTable toolboxName path method op rowFilters spec =
     PostgRESTool
         { prtPath = path
         , prtMethod = method
         , prtName = deriveToolName toolboxName path method
-        , prtDescription = buildToolDescription op path
+        , prtDescription = buildToolDescription op path method
         , prtRowFilters = rowFilters
         , prtHasPagination = hasPaginationParams op
         , prtHasOrdering = hasOrderingParam op
@@ -296,16 +301,22 @@ resolveFilterRef _spec ref =
 
 -- | Build a tool description from operation and path.
 --
--- Combines operation summary/description with table path information.
-buildToolDescription :: Operation -> Path -> Text
-buildToolDescription op path =
+-- Combines operation summary/description with table path and method information.
+buildToolDescription :: Operation -> Path -> Method -> Text
+buildToolDescription op path method =
     let baseDesc = case (opSummary op, opDescription op) of
             (Just summary, Just desc) -> summary <> ":\n" <> desc
             (Just summary, Nothing) -> summary
             (Nothing, Just desc) -> desc
-            (Nothing, Nothing) -> "Query " <> tableName <> " table"
+            (Nothing, Nothing) -> defaultDescription
         tableName = Text.dropWhile (== '/') path
-     in baseDesc <> "\nTable: " <> tableName
+        defaultDescription = case method of
+            "GET" -> "Query " <> tableName <> " table"
+            "POST" -> "Insert new row into " <> tableName <> " table"
+            "PUT" -> "Update row in " <> tableName <> " table (full replacement)"
+            "PATCH" -> "Update row(s) in " <> tableName <> " table (partial update)"
+            _ -> "Operate on " <> tableName <> " table"
+     in baseDesc <> "\nTable: " <> tableName <> "\nMethod: " <> method
 
 -- -------------------------------------------------------------------------
 -- Parameter Detection
@@ -333,13 +344,13 @@ hasOrderingParam op =
 
 -- | Derives a tool name from a PostgREST table path.
 --
--- Format: postgrest_{toolbox}_{table}
+-- Format: postgrest_{toolbox}_{method}_{table}
 --
 -- Examples:
 -- >>> deriveToolName "mydb" "/users" "GET"
 -- "postgrest_mydb_get_users"
--- >>> deriveToolName "mydb" "/public.orders" "GET"
--- "postgrest_mydb_get_public_orders"
+-- >>> deriveToolName "mydb" "/public.orders" "POST"
+-- "postgrest_mydb_post_public_orders"
 deriveToolName :: Text -> Path -> Method -> Text
 deriveToolName toolboxName path method =
     let normalizedToolbox = normalizeForLLM toolboxName
@@ -387,19 +398,120 @@ normalizeTableName path =
 -- Parameter Schema Building
 -- -------------------------------------------------------------------------
 
--- | Build structured tool parameters from operation.
+-- | Build structured tool parameters from operation and spec.
 --
--- Creates three parameter groups:
--- * filters: Column-based row filters
--- * subset: Pagination (limit/offset) and column selection
--- * ranking: Ordering clause
-buildToolParameters :: PostgRESTool -> ToolParameters
-buildToolParameters tool =
+-- Creates parameter groups based on the HTTP method:
+-- * All methods: filters, subset, ranking (for GET-like filtering)
+-- * POST/PUT/PATCH: body parameter for the request payload
+--
+-- The request body schema is extracted from the operation and resolved
+-- using the spec's components/schemas section.
+buildToolParameters :: PostgRESTool -> OpenAPISpec -> ToolParameters
+buildToolParameters tool spec =
     ToolParameters
         { tpFilters = buildFilterSchema tool
         , tpSubset = buildSubsetSchema tool
         , tpRanking = buildRankingSchema tool
+        , tpRequestBody = Nothing  -- Will be populated by caller using extractRequestBody
         }
+
+-- | Extract request body schema for write operations (POST/PUT/PATCH).
+--
+-- Looks for a request body in the operation and resolves any $ref
+-- references to get the actual schema definition.
+--
+-- For PostgREST Swagger 2.0 specs, request bodies are often defined
+-- via body.* parameters that reference definitions.
+extractRequestBody :: Operation -> OpenAPISpec -> Maybe Schema
+extractRequestBody op spec =
+    -- First try to get from opRequestBody (OpenAPI 3.x style)
+    case opRequestBody op of
+        Just reqBody -> getJsonSchema reqBody spec
+        Nothing -> extractBodyFromParameters op spec
+
+-- | Get JSON schema from request body content.
+getJsonSchema :: RequestBody -> OpenAPISpec -> Maybe Schema
+getJsonSchema reqBody spec =
+    -- Look for application/json content type
+    case Map.lookup "application/json" (reqBodyContent reqBody) of
+        Just schema -> Just (resolveSchemaRef spec schema)
+        Nothing -> 
+            -- Try first available content type as fallback
+            case Map.toList (reqBodyContent reqBody) of
+                ((_, schema):_) -> Just (resolveSchemaRef spec schema)
+                [] -> Nothing
+
+-- | Extract request body schema from body.* parameters (Swagger 2.0 style).
+--
+-- PostgREST Swagger specs define request bodies as parameters like:
+-- {"$ref": "#/parameters/body.items"}
+extractBodyFromParameters :: Operation -> OpenAPISpec -> Maybe Schema
+extractBodyFromParameters op spec =
+    -- Look for body parameter references
+    let bodyParamRefs = extractBodyParamRefs op
+     in case bodyParamRefs of
+            (ref:_) -> resolveBodyParameterRef spec ref
+            [] -> Nothing
+
+-- | Extract body parameter reference strings from operation.
+extractBodyParamRefs :: Operation -> [Text]
+extractBodyParamRefs op =
+    mapMaybe extractBodyRef (opParameters op)
+  where
+    extractBodyRef :: Parameter -> Maybe Text
+    extractBodyRef param =
+        case paramSchema param of
+            Just schema -> 
+                case schemaRef schema of
+                    Just ref | "#/parameters/body." `Text.isPrefixOf` ref -> Just ref
+                    _ -> Nothing
+            Nothing -> Nothing
+
+-- | Resolve a body parameter reference to its schema.
+resolveBodyParameterRef :: OpenAPISpec -> Text -> Maybe Schema
+resolveBodyParameterRef spec ref =
+    -- For body.* parameters, the schema reference points to definitions
+    -- e.g., #/parameters/body.items -> we need to find the schema reference
+    -- within that parameter definition
+    --
+    -- In the spec, the parameter would be defined in the parameters section
+    -- with a schema that references a definition
+    --
+    -- For now, we extract the table name from the ref and look it up
+    -- in the definitions
+    let tableName = Text.drop (Text.length "#/parameters/body.") ref
+        -- Look in components/schemas for a matching definition
+     in lookupDefinition spec tableName
+
+-- | Look up a table definition in the spec's components/schemas.
+lookupDefinition :: OpenAPISpec -> Text -> Maybe Schema
+lookupDefinition spec name =
+    case specComponents spec of
+        Just components ->
+            case componentsSchemas components of
+                Just schemas -> Map.lookup name schemas
+                Nothing -> Nothing
+        Nothing -> Nothing
+
+-- | Resolve schema references to actual schemas.
+--
+-- If the schema has a $ref, look it up in the spec's components/schemas.
+-- Otherwise, return the schema as-is.
+resolveSchemaRef :: OpenAPISpec -> Schema -> Schema
+resolveSchemaRef spec schema =
+    case schemaRef schema of
+        Just ref -> 
+            -- Extract definition name from ref like "#/definitions/items"
+            let defName = Text.dropWhile (== '#') $ Text.dropWhile (/= '/') $ Text.dropWhile (== '/') ref
+                cleanName = Text.dropWhile (== '/') defName
+                -- Handle both "definitions/" and "components/schemas/" prefixes
+                name = if "definitions/" `Text.isPrefixOf` cleanName
+                          then Text.drop (Text.length "definitions/") cleanName
+                          else if "components/schemas/" `Text.isPrefixOf` cleanName
+                               then Text.drop (Text.length "components/schemas/") cleanName
+                               else cleanName
+             in fromMaybe schema (lookupDefinition spec name)
+        Nothing -> schema
 
 -- | Build filter schema from detected row filters.
 --

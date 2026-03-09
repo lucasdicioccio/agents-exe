@@ -47,6 +47,8 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 
+import System.Agents.Tools.OpenAPI.Types (Schema)
+
 -- -------------------------------------------------------------------------
 -- Configuration
 -- -------------------------------------------------------------------------
@@ -125,13 +127,14 @@ data Trace
 --
 -- Each table in the PostgREST API becomes a tool with:
 -- * GET support for querying rows
+-- * POST/PUT/PATCH support for inserting/updating rows (with body parameter)
 -- * Structured parameters for filters, subsetting, and ordering
 -- * Detected row filters from the spec
 data PostgRESTool = PostgRESTool
     { prtPath :: Text
     -- ^ Table path (e.g., "/users", "/public.orders")
     , prtMethod :: Text
-    -- ^ HTTP method (typically "GET" for initial implementation)
+    -- ^ HTTP method ("GET", "POST", "PUT", "PATCH", "DELETE")
     , prtName :: Text
     -- ^ Tool name (e.g., "postgrest_get_users")
     , prtDescription :: Text
@@ -161,6 +164,8 @@ data ToolParameters = ToolParameters
     -- ^ Pagination (limit, offset) and column selection
     , tpRanking :: Maybe RankingSchema
     -- ^ Ordering clause (order parameter)
+    , tpRequestBody :: Maybe Schema
+    -- ^ Request body schema for POST/PUT/PATCH operations
     }
     deriving (Show, Eq)
 
@@ -239,5 +244,4 @@ instance ToJSON ToolResult where
             , "status" Aeson..= resultStatus tr
             , "payload" Aeson..= resultPayload tr
             ]
-
 
