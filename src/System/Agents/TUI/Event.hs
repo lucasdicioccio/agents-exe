@@ -262,6 +262,7 @@ formatSessionMarkdown session =
             , repeatSystemPrompt = False
             , repeatTools = False
             , orderPreference = Chronological
+            , noFunnyStamp = True  -- Skip ASCII art in TUI exports for cleaner output
             }
     in formatSessionAsMarkdown opts session
 

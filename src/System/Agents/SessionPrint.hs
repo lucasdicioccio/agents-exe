@@ -50,6 +50,8 @@ data SessionPrintOptions = SessionPrintOptions
     , repeatTools :: Bool
       -- | Order preference for displaying session steps
     , orderPreference :: OrderPreference
+      -- | Whether to skip the ASCII art logo stamp in the header
+    , noFunnyStamp :: Bool
     }
 
 -- | Statistics about a session.
@@ -64,6 +66,23 @@ data SessionStatistics = SessionStatistics
     , statReasoningBytes :: Int
     , statTotalBytes :: Int
     } deriving (Show, Eq)
+
+-- | Default ASCII art logo for the session report header.
+defaultLogo :: Text.Text
+defaultLogo = Text.intercalate "\n"
+    [ "    λλ"
+    , "   λ⊙λ⊙"
+    , "  λλλλλλ"
+    , " λλλλλλλλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    ]
 
 -- | Handle the session-print command: load a session file and output it as markdown.
 handleSessionPrint :: SessionPrintOptions -> IO ()
@@ -108,7 +127,7 @@ formatSessionAsMarkdown opts session =
         -- Calculate statistics for the full session
         stats = calculateStatistics session
         
-        mdHeader = "# Session Report\n\n"
+        mdHeader = formatHeader opts.noFunnyStamp
         sessionInfo = formatSessionInfo session
         statsSection = formatStatistics stats
         turnsSection = formatTurns opts firstDisplayStepNum orderedTurns
@@ -120,6 +139,24 @@ formatSessionAsMarkdown opts session =
     -- | Take the last n elements from a list
     takeLast :: Int -> [a] -> [a]
     takeLast n xs = drop (max 0 (length xs - n)) xs
+
+-- | Format the header with optional ASCII art logo.
+formatHeader :: Bool -> Text.Text
+formatHeader skipLogo =
+    if skipLogo
+        then "# 📋 Session Report\n\n"
+        else Text.intercalate "\n" (zipWith combineLogoLine logoLines titleLines) <> "\n\n"
+  where
+    logoLines = Text.lines defaultLogo
+    titleLines = "# 📋 Session Report" : repeat ""
+    
+    -- Combine a logo line with a title line, padding the logo to align nicely
+    combineLogoLine :: Text.Text -> Text.Text -> Text.Text
+    combineLogoLine logoLine titleLine =
+        let paddedLogo = Text.justifyLeft 20 ' ' logoLine
+        in if Text.null titleLine
+            then paddedLogo
+            else paddedLogo <> "  " <> titleLine
 
 -- | Calculate statistics for a session.
 calculateStatistics :: Session.Session -> SessionStatistics
@@ -184,17 +221,17 @@ calculateByteCounts turns =
 -- | Format statistics as markdown.
 formatStatistics :: SessionStatistics -> Text.Text
 formatStatistics stats =
-    "## Statistics\n\n" <>
+    "## 📊 Statistics\n\n" <>
     "### Turn Counts\n\n" <>
     "| Metric | Value |\n" <>
     "|--------|-------|\n" <>
     "| Total Turns | " <> Text.pack (show stats.statTotalTurns) <> " |\n" <>
-    "| User Turns | " <> Text.pack (show stats.statUserTurns) <> " |\n" <>
-    "| LLM Turns | " <> Text.pack (show stats.statLlmTurns) <> " |\n" <>
-    "\n### Tool Calls\n\n" <>
+    "| 👤 User Turns | " <> Text.pack (show stats.statUserTurns) <> " |\n" <>
+    "| 🤖 LLM Turns | " <> Text.pack (show stats.statLlmTurns) <> " |\n" <>
+    "\n### 🔧 Tool Calls\n\n" <>
     "**Total Tool Calls:** " <> Text.pack (show stats.statTotalToolCalls) <> "\n\n" <>
     formatToolCallStats stats.statToolCallsByName <>
-    "\n### Byte Usage\n\n" <>
+    "\n### 💾 Byte Usage\n\n" <>
     formatByteChart stats
 
 -- | Format tool call statistics with bar chart.
@@ -254,8 +291,8 @@ formatBytes n
 -- | Format session metadata.
 formatSessionInfo :: Session.Session -> Text.Text
 formatSessionInfo session =
-    "**Session ID:** " <> formatSessionId session.sessionId <> "\n" <>
-    maybe "" (\sid -> "**Forked from:** " <> formatSessionId sid <> "\n") session.forkedFromSessionId
+    "**🔑 Session ID:** " <> formatSessionId session.sessionId <> "\n" <>
+    maybe "" (\sid -> "**🍴 Forked from:** " <> formatSessionId sid <> "\n") session.forkedFromSessionId
 
 -- | Extract UUID text from SessionId.
 formatSessionId :: Session.SessionId -> Text.Text
@@ -274,10 +311,10 @@ formatTurn opts firstDisplayStepNum (stepNum, turn) =
     let isFirstTurn = Just stepNum == firstDisplayStepNum
     in case turn of
         Session.UserTurn content ->
-            "## Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
+            "## 👤 Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
             formatUserTurn opts isFirstTurn content
         Session.LlmTurn content ->
-            "## Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
+            "## 🤖 Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
             formatLlmTurn opts content
 
 -- | Format user turn content.
@@ -288,20 +325,20 @@ formatUserTurn opts isFirstTurn content =
     let -- Show system prompt if repeatSystemPrompt is True, or if it's the first turn
         systemPromptSection = case content.userPrompt of
             Session.SystemPrompt sp | opts.repeatSystemPrompt || isFirstTurn ->
-                "### System Prompt\n\n```\n" <> sp <> "```\n"
+                "### 📝 System Prompt\n\n```\n" <> sp <> "```\n"
             _ -> ""
         querySection = case content.userQuery of
-            Just (Session.UserQuery q) -> "\n### User Query\n\n" <> q <> "\n"
+            Just (Session.UserQuery q) -> "\n### 💬 User Query\n\n" <> q <> "\n"
             Nothing -> ""
         -- Show tools if repeatTools is True, or if it's the first turn (and tools exist)
         toolsSection = if null content.userTools
             then ""
             else if opts.repeatTools || isFirstTurn
-                then "\n### Available Tools\n\n" <> formatAvailableTools content.userTools
+                then "\n### 🛠️ Available Tools\n\n" <> formatAvailableTools content.userTools
                 else ""
         toolResponsesSection = if null content.userToolResponses || not opts.showToolCallResults
             then ""
-            else "\n### Tool Responses\n\n" <> formatToolResponses content.userToolResponses
+            else "\n### 📥 Tool Responses\n\n" <> formatToolResponses content.userToolResponses
     in systemPromptSection <> querySection <> toolsSection <> toolResponsesSection
 
 -- | Format LLM turn content.
@@ -309,18 +346,18 @@ formatLlmTurn :: SessionPrintOptions -> Session.LlmTurnContent -> Text.Text
 formatLlmTurn _opts content =
     let thinkingSection = case content.llmResponse.responseThinking of
             Just thinking ->
-                "### Thinking Process\n\n" <>
+                "### 💭 Thinking Process\n\n" <>
                 "<details>\n" <>
                 "<summary>Click to expand reasoning</summary>\n\n" <>
                 thinking <> "\n" <>
                 "</details>\n\n"
             Nothing -> ""
         responseSection = case content.llmResponse.responseText of
-            Just txt -> "### Response\n\n" <> txt <> "\n"
-            Nothing -> "### Response\n\n_(No text response)_\n"
+            Just txt -> "### 💬 Response\n\n" <> txt <> "\n"
+            Nothing -> "### 💬 Response\n\n_(No text response)_\n"
         toolCallsSection = if null content.llmToolCalls
             then ""
-            else "\n### Tool Calls\n\n" <> formatLlmToolCalls content.llmToolCalls
+            else "\n### 🔧 Tool Calls\n\n" <> formatLlmToolCalls content.llmToolCalls
     in thinkingSection <> responseSection <> toolCallsSection
 
 -- | Format available tools (just names and descriptions).
