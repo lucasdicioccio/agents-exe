@@ -35,6 +35,7 @@ import System.Agents.ToolRegistration
 import System.Agents.Tools
 import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.Session.Step (naiveTilNoToolCallStep)
 
 import qualified Data.Aeson.Key as AesonKey
 import Prod.Tracer (Tracer (..), contramap)

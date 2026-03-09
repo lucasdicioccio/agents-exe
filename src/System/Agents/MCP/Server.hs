@@ -406,7 +406,7 @@ callResultToUserToolResponse _ result =
         McpToolResult _ res ->
             SessionBase.UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
-            SessionBase.UserToolResponse $ TextEncoding.decodeUtf8 v
+            SessionBase.UserToolResponse $ Aeson.String (TextEncoding.decodeUtf8 v)
         OpenAPIToolResult _ toolResult ->
             SessionBase.UserToolResponse $ Aeson.toJSON toolResult
         OpenAPIToolError _ err ->
@@ -508,9 +508,9 @@ callExpertTool mcpName ai =
                     ( Just $
                         Mcp.pairz
                             [ "prompt"
-                                Aeson..= Mcp.object
-                                    [ "type" Aeson..= ("string" :: Text)
-                                    , "description" Aeson..= ("the prompt asked when calling the expert" :: Text)
+                                Mcp..= Mcp.object
+                                    [ "type" Mcp..= ("string" :: Text)
+                                    , "description" Mcp..= ("the prompt asked when calling the expert" :: Text)
                                     ]
                             ]
                     )
