@@ -144,10 +144,10 @@ instance Rpc.FromRequest ClientMsg where
         Just (fmap ListResourcesRequestMsg <$> Aeson.parseJSON)
     parseParams "tools/list" =
         Just (fmap ListToolsRequestMsg <$> Aeson.parseJSON)
-    parseParams "tools/call" =
-        Just (fmap CallToolRequestMsg <$> Aeson.parseJSON)
     parseParams "prompts/list" =
         Just (fmap ListPromptsRequestMsg <$> Aeson.parseJSON)
+    parseParams "tools/call" =
+        Just (fmap CallToolRequestMsg <$> Aeson.parseJSON)
     parseParams other =
         error $ Text.unpack $ "unhandled parseParams: " <> other
 
@@ -406,7 +406,7 @@ callResultToUserToolResponse _ result =
         McpToolResult _ res ->
             SessionBase.UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
-            SessionBase.UserToolResponse $ Aeson.String $ TextEncoding.decodeUtf8 v
+            SessionBase.UserToolResponse $ TextEncoding.decodeUtf8 v
         OpenAPIToolResult _ toolResult ->
             SessionBase.UserToolResponse $ Aeson.toJSON toolResult
         OpenAPIToolError _ err ->
@@ -439,12 +439,14 @@ toolRegistrationToSystemTool reg =
 
 -- | Convert tool parameters to JSON schema.
 -- Based on toolParamsToJson from OneShot.hs.
+--
+-- Only properties with 'propertyRequired = True' are included in the 'required' array.
 toolParamsToJson :: [ParamProperty] -> Aeson.Value
 toolParamsToJson props =
     Aeson.object
         [ "type" Aeson..= ("object" :: Text)
         , "properties" Aeson..= KeyMap.fromList (map paramPropertyToJson props)
-        , "required" Aeson..= map propertyKey props
+        , "required" Aeson..= map propertyKey (filter propertyRequired props)
         , "additionalProperties" Aeson..= False
         ]
   where
@@ -506,9 +508,9 @@ callExpertTool mcpName ai =
                     ( Just $
                         Mcp.pairz
                             [ "prompt"
-                                .= Mcp.object
-                                    [ "type" .= ("string" :: Text)
-                                    , "description" .= ("the prompt asked when calling the expert" :: Text)
+                                Aeson..= Mcp.object
+                                    [ "type" Aeson..= ("string" :: Text)
+                                    , "description" Aeson..= ("the prompt asked when calling the expert" :: Text)
                                     ]
                             ]
                     )

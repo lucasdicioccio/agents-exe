@@ -9,6 +9,8 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BSL
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -114,36 +116,45 @@ mkOpenAICompletion config completion = do
 
         parseParamsObject :: Aeson.Value -> [ParamProperty]
         parseParamsObject (Aeson.Object params) =
-            case KeyMap.lookup "properties" params of
+            let requiredSet = case KeyMap.lookup "required" params of
+                    Just (Aeson.Array arr) -> 
+                        foldr (\v acc -> case v of Aeson.String s -> Set.insert s acc; _ -> acc) Set.empty arr
+                    _ -> Set.empty
+            in case KeyMap.lookup "properties" params of
                 Just (Aeson.Object props) ->
-                    KeyMap.toList props >>= \(key, val) -> parseProperty key val
+                    KeyMap.toList props >>= \(key, val) -> parseProperty requiredSet key val
                 _ -> []
         parseParamsObject _ = []
 
-        parseProperty :: Aeson.Key -> Aeson.Value -> [ParamProperty]
-        parseProperty key (Aeson.Object propObj) =
+        parseProperty :: Set Text -> Key.Key -> Aeson.Value -> [ParamProperty]
+        parseProperty requiredSet key (Aeson.Object propObj) =
             let propType = case KeyMap.lookup "type" propObj of
-                    Just (Aeson.String t) -> parseParamType t propObj
+                    Just (Aeson.String t) -> parseParamType requiredSet t propObj
                     _ -> StringParamType
                 propDesc = case KeyMap.lookup "description" propObj of
                     Just (Aeson.String d) -> d
                     _ -> ""
-             in [ParamProperty (Key.toText key) propType propDesc]
-        parseProperty _ _ = []
+                propRequired = Set.member (Key.toText key) requiredSet
+             in [ParamProperty (Key.toText key) propType propDesc propRequired]
+        parseProperty _ _ _ = []
 
-        parseParamType :: Text -> KeyMap.KeyMap Aeson.Value -> ParamType
-        parseParamType "string" _ = StringParamType
-        parseParamType "integer" _ = NumberParamType
-        parseParamType "number" _ = NumberParamType
-        parseParamType "boolean" _ = BoolParamType
-        parseParamType "null" _ = NullParamType
-        parseParamType "object" obj =
+        parseParamType :: Set Text -> Text -> KeyMap.KeyMap Aeson.Value -> ParamType
+        parseParamType _ "string" _ = StringParamType
+        parseParamType _ "integer" _ = NumberParamType
+        parseParamType _ "number" _ = NumberParamType
+        parseParamType _ "boolean" _ = BoolParamType
+        parseParamType _ "null" _ = NullParamType
+        parseParamType requiredSet "object" obj =
             case KeyMap.lookup "properties" obj of
                 Just (Aeson.Object props) ->
-                    ObjectParamType $ KeyMap.toList props >>= \(k, v) -> parseProperty k v
+                    let nestedRequiredSet = case KeyMap.lookup "required" obj of
+                            Just (Aeson.Array arr) -> 
+                                foldr (\v acc -> case v of Aeson.String s -> Set.insert s acc; _ -> acc) Set.empty arr
+                            _ -> Set.empty
+                    in ObjectParamType $ KeyMap.toList props >>= \(k, v) -> parseProperty nestedRequiredSet k v
                 _ -> ObjectParamType []
-        parseParamType "array" _ = OpaqueParamType "array"
-        parseParamType other _ = OpaqueParamType other
+        parseParamType _ "array" _ = OpaqueParamType "array"
+        parseParamType _ other _ = OpaqueParamType other
     systemToolToOpenAI (SystemTool (V0 other)) =
         -- Handle non-object V0 values by creating a minimal tool
         OpenAI.Tool

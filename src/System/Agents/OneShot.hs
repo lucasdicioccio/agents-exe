@@ -28,7 +28,6 @@ import qualified System.Agents.Runtime as Runtime
 import System.Agents.Base (newConversationId,newStepId,ConversationId, AgentId)
 import System.Agents.Session.Base
 import System.Agents.Session.Loop
-import System.Agents.Session.Step
 import System.Agents.Session.OpenAI
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
@@ -275,12 +274,14 @@ toolRegistrationToSystemTool reg =
      in SystemTool $ V1 toolDefv1
 
 -- | Convert tool parameters to JSON schema.
+-- 
+-- Only properties with 'propertyRequired = True' are included in the 'required' array.
 toolParamsToJson :: [ParamProperty] -> Aeson.Value
 toolParamsToJson props =
     Aeson.object
         [ "type" .= ("object" :: Text)
         , "properties" .= KeyMap.fromList (map paramPropertyToJson props)
-        , "required" .= map propertyKey props
+        , "required" .= map propertyKey (filter propertyRequired props)
         , "additionalProperties" .= False
         ]
   where

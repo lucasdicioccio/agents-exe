@@ -157,6 +157,7 @@ registerBashToolInLLM script =
                 { propertyKey = arg.argName
                 , propertyType = OpaqueParamType arg.argBackingTypeString
                 , propertyDescription = arg.argDescription
+                , propertyRequired = True
                 }
 
         tool :: Tool ()
@@ -267,7 +268,7 @@ registerMcpToolInLLM box mcp =
 -- @
 registerOpenAPITool ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPITool ->
+    OpenAPI.OpenAPITool ->
     Either String ToolRegistration
 registerOpenAPITool toolbox tool =
     let 
@@ -392,6 +393,9 @@ registerOpenAPIToolInLLM = registerOpenAPITool
 -- * subset: Pagination (limit/offset) and column selection
 -- * ranking: Ordering clause
 --
+-- All parameter groups and their sub-properties are marked as optional,
+-- allowing the LLM to provide only the parameters it needs.
+--
 -- Returns 'Left' if the tool cannot be registered.
 --
 -- Example:
@@ -410,6 +414,7 @@ registerPostgRESTool toolbox tool =
         params = buildToolParameters tool
         
         -- Build parameter properties from structured parameters
+        -- All parameters are marked as optional (propertyRequired = False)
         paramProps = buildPostgRESTParamProperties params
         
         -- Create the OpenAI Tool declaration
@@ -447,6 +452,10 @@ registerPostgRESTool toolbox tool =
             }
 
 -- | Build parameter properties for PostgREST tool from structured parameters.
+--
+-- All parameter groups (filters, subset, ranking) and their sub-properties
+-- are marked as optional (propertyRequired = False), allowing the LLM to
+-- provide only the parameters it needs.
 buildPostgRESTParamProperties :: ToolParameters -> [ParamProperty]
 buildPostgRESTParamProperties params =
     let filterProp = case tpFilters params of
@@ -454,6 +463,7 @@ buildPostgRESTParamProperties params =
                 { propertyKey = "filters"
                 , propertyType = ObjectParamType (buildFilterSubProperties fs)
                 , propertyDescription = fsDescription fs
+                , propertyRequired = False  -- Optional parameter group
                 }
             Nothing -> Nothing
         
@@ -462,6 +472,7 @@ buildPostgRESTParamProperties params =
                 { propertyKey = "subset"
                 , propertyType = ObjectParamType (buildSubsetSubProperties ss)
                 , propertyDescription = "Pagination and column selection"
+                , propertyRequired = False  -- Optional parameter group
                 }
             Nothing -> Nothing
         
@@ -470,6 +481,7 @@ buildPostgRESTParamProperties params =
                 { propertyKey = "ranking"
                 , propertyType = ObjectParamType (buildRankingSubProperties rs)
                 , propertyDescription = "Result ordering"
+                , propertyRequired = False  -- Optional parameter group
                 }
             Nothing -> Nothing
      in Maybe.catMaybes [filterProp, subsetProp, rankingProp]
@@ -480,20 +492,21 @@ buildPostgRESTParamProperties params =
             { propertyKey = col
             , propertyType = OpaqueParamType "string"
             , propertyDescription = cfsDescription schema
+            , propertyRequired = False  -- Optional filter property
             }) (Map.toList $ fsProperties fs)
     
     buildSubsetSubProperties :: SubsetSchema -> [ParamProperty]
     buildSubsetSubProperties ss =
         Maybe.catMaybes
-            [ fmap (\desc -> ParamProperty "offset" (OpaqueParamType "string") desc) (ssOffset ss)
-            , fmap (\desc -> ParamProperty "limit" (OpaqueParamType "string") desc) (ssLimit ss)
-            , fmap (\desc -> ParamProperty "columns" (OpaqueParamType "string") desc) (ssColumns ss)
+            [ fmap (\desc -> ParamProperty "offset" (OpaqueParamType "string") desc False) (ssOffset ss)
+            , fmap (\desc -> ParamProperty "limit" (OpaqueParamType "string") desc False) (ssLimit ss)
+            , fmap (\desc -> ParamProperty "columns" (OpaqueParamType "string") desc False) (ssColumns ss)
             ]
     
     buildRankingSubProperties :: RankingSchema -> [ParamProperty]
     buildRankingSubProperties rs =
         Maybe.catMaybes
-            [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc) (rsOrder rs)
+            [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False) (rsOrder rs)
             ]
 
 -- | Register all tools from a PostgREST toolbox.
@@ -636,6 +649,7 @@ adaptProperty k val =
                     (AesonKey.toText k)
                     (OpaqueParamType prop._type)
                     prop._description
+                    True  -- MCP properties are required by default
         Aeson.Error err -> Left err
   where
     propMappingResult :: Aeson.Result PropertyHelper
