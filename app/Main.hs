@@ -573,6 +573,10 @@ parseSessionPrintOptions =
             ( long "antichronological"
                 <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
             )
+        <*> switch
+            ( long "no-funny-stamp"
+                <> help "Skip the ASCII art logo stamp in the header (default: show logo)"
+            )
 
 parseInitializeCommand :: Parser Command
 parseInitializeCommand =
