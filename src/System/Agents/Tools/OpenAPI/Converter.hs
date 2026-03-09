@@ -614,15 +614,20 @@ toOpenAITool apiTool =
     OpenAI.Tool
         { OpenAI.toolName = OpenAI.ToolName (toolName apiTool)
         , OpenAI.toolDescription = toolDescription apiTool
-        , OpenAI.toolParamProperties = map propertyToParamProperty $ Map.toList (paramsProperties (toolParameters apiTool))
+        , OpenAI.toolParamProperties = map (propertyToParamProperty requiredSet) $ Map.toList (paramsProperties (toolParameters apiTool))
         }
   where
-    propertyToParamProperty :: (Text, PropertySchema) -> ParamProperty
-    propertyToParamProperty (name, prop) =
+    -- Build a set of required parameter names for O(1) lookup
+    requiredSet :: Set Text
+    requiredSet = Set.fromList (paramsRequired (toolParameters apiTool))
+    
+    propertyToParamProperty :: Set Text -> (Text, PropertySchema) -> ParamProperty
+    propertyToParamProperty required (name, prop) =
         ParamProperty
             { propertyKey = name
             , propertyType = schemaTypeToParamType prop
             , propertyDescription = propDescription prop
+            , propertyRequired = Set.member name required
             }
 
     schemaTypeToParamType :: PropertySchema -> ParamType

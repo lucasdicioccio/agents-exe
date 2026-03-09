@@ -21,6 +21,8 @@ import Test.Tasty.HUnit
 
 -- Import the comprehensive OpenAPI Toolbox tests
 import qualified OpenAPIToolboxTests
+-- Import PostgREST parsing tests
+import qualified PostgRESTParseTest
 
 main :: IO ()
 main = defaultMain tests
@@ -41,7 +43,8 @@ tests =
         , openAPITypesTests
         , openAPIResolverTests
         , openAPIConverterTests
-        , OpenAPIToolboxTests.tests  -- New comprehensive OpenAPI Toolbox tests
+        , OpenAPIToolboxTests.tests
+        , PostgRESTParseTest.tests
         ]
 
 openAIRateLimitTests :: TestTree

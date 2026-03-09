@@ -11,7 +11,7 @@ import Brick.Widgets.Edit (handleEditorEvent, editContentsL, getEditContents)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listInsert, listSelectedL, listElements)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO)
-import Control.Concurrent.Async (Async, async, cancel, poll)
+import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (use, (%=), (.=), to)
 import Control.Monad (void, when, filterM)

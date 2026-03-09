@@ -196,9 +196,11 @@ instance ToJSON Tool where
         toplevelProperty :: ParamProperty
         toplevelProperty =
             ParamProperty
-                t.toolName.getToolName
-                (ObjectParamType t.toolParamProperties)
-                t.toolDescription
+                { propertyKey = t.toolName.getToolName
+                , propertyType = ObjectParamType t.toolParamProperties
+                , propertyDescription = t.toolDescription
+                , propertyRequired = True
+                }
 
 data ToolResponse
     = ToolNotFound

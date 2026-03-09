@@ -88,6 +88,7 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
             { propertyKey = "what"
             , propertyType = StringParamType
             , propertyDescription = "the prompt to call the specialized-agent with"
+            , propertyRequired = True
             }
         ]
 
@@ -198,12 +199,14 @@ toolRegistrationToSystemTool reg =
      in SystemTool $ V1 toolDefv1
 
 -- | Convert tool parameters to JSON schema.
+--
+-- Only properties with 'propertyRequired = True' are included in the 'required' array.
 toolParamsToJson :: [ParamProperty] -> Aeson.Value
 toolParamsToJson props =
     Aeson.object
         [ "type" .= ("object" :: Text)
         , "properties" .= KeyMap.fromList (map paramPropertyToJson props)
-        , "required" .= map propertyKey props
+        , "required" .= map propertyKey (filter propertyRequired props)
         , "additionalProperties" .= False
         ]
   where
@@ -257,7 +260,6 @@ agentSetQuery :: UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent {usrQuery = pure (Just query)}
 
--------------------------------------------------------------------------------
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =

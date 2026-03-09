@@ -195,7 +195,7 @@ parseOperationSwaggerV2 = withObject "Operation" $ \o -> do
             [] -> Nothing
             (bodyParam : _) -> Just $ swaggerBodyParamToRequestBody bodyParam
 
-    -- Parse other parameters
+    -- Parse other parameters (now handling $ref-only params)
     regularParams <- traverse parseParameterSwaggerV2 otherParams
 
     pure $ Operation operationId summary description regularParams mRequestBody
@@ -236,36 +236,73 @@ swaggerBodyParamToRequestBody sbp =
     let content = Map.singleton "application/json" (sbpSchema sbp)
      in RequestBody (sbpDescription sbp) (sbpRequired sbp) content
 
--- | Parse Swagger 2.0 parameter (supports both direct type and schema).
+-- | Parse Swagger 2.0 parameter (supports both direct type and schema, and $ref-only).
+--
+-- In Swagger 2.0, parameters can be:
+-- 1. Full inline parameters with 'in', 'name', 'type' or 'schema'
+-- 2. Reference-only parameters: {"$ref": "#/parameters/something"}
 parseParameterSwaggerV2 :: Value -> Parser Parameter
-parseParameterSwaggerV2 v = withObject "Parameter" (\o -> do
-    paramInStr <- o .: "in"
-    paramIn <- parseParamLocationSwaggerV2 paramInStr
-    name <- o .: "name"
-    desc <- o .:? "description"
-    required <- fromMaybe False <$> o .:? "required"
+parseParameterSwaggerV2 v = 
+    -- First try to parse as a $ref-only parameter
+    case parseMaybe parseRefOnlyParam v of
+        Just param -> pure param
+        Nothing -> parseFullParameterSwaggerV2 v
+  where
+    parseMaybe :: (Value -> Parser a) -> Value -> Maybe a
+    parseMaybe p val = either (const Nothing) Just (parseEither p val)
 
-    -- Swagger 2.0 can have type directly or in schema
-    mDirectType <- o .:? "type"
-    mSchema <- o .:? "schema"
-
-    -- Build schema from direct type if present
-    let schema = case (mSchema, mDirectType) of
-            (Just s, _) -> Just s
-            (Nothing, Just t) -> Just $ Schema
-                { schemaType = Just t
+    -- Parse a parameter that is just a $ref (no name, in, etc.)
+    parseRefOnlyParam :: Value -> Parser Parameter
+    parseRefOnlyParam = withObject "Parameter ($ref only)" $ \o -> do
+        ref <- o .: "$ref"
+        -- Create a parameter with just the schema ref
+        -- We use "query" as a default location since it's most common for PostgREST
+        pure $ Parameter
+            { paramName = ""  -- Will be resolved later if needed
+            , paramIn = ParamInQuery  -- Default, may be overridden
+            , paramDescription = Nothing
+            , paramRequired = False
+            , paramSchema = Just $ Schema
+                { schemaType = Nothing
                 , schemaDescription = Nothing
                 , schemaEnum = Nothing
                 , schemaProperties = Nothing
                 , schemaItems = Nothing
                 , schemaAnyOf = Nothing
-                , schemaRef = Nothing
+                , schemaRef = Just ref
                 , schemaRequired = Nothing
                 }
-            (Nothing, Nothing) -> Nothing
+            }
 
-    pure $ Parameter name paramIn desc required schema
-    ) v
+    -- Parse a full inline parameter
+    parseFullParameterSwaggerV2 :: Value -> Parser Parameter
+    parseFullParameterSwaggerV2 = withObject "Parameter" $ \o -> do
+        paramInStr <- o .: "in"
+        paramIn <- parseParamLocationSwaggerV2 paramInStr
+        name <- o .: "name"
+        desc <- o .:? "description"
+        required <- fromMaybe False <$> o .:? "required"
+
+        -- Swagger 2.0 can have type directly or in schema
+        mDirectType <- o .:? "type"
+        mSchema <- o .:? "schema"
+
+        -- Build schema from direct type if present
+        let schema = case (mSchema, mDirectType) of
+                (Just s, _) -> Just s
+                (Nothing, Just t) -> Just $ Schema
+                    { schemaType = Just t
+                    , schemaDescription = Nothing
+                    , schemaEnum = Nothing
+                    , schemaProperties = Nothing
+                    , schemaItems = Nothing
+                    , schemaAnyOf = Nothing
+                    , schemaRef = Nothing
+                    , schemaRequired = Nothing
+                    }
+                (Nothing, Nothing) -> Nothing
+
+        pure $ Parameter name paramIn desc required schema
 
 -- | Parse parameter location for Swagger 2.0 (includes formData).
 parseParamLocationSwaggerV2 :: Text -> Parser ParamLocation

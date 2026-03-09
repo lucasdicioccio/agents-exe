@@ -13,6 +13,10 @@ data ParamProperty = ParamProperty
     { propertyKey :: Text
     , propertyType :: ParamType
     , propertyDescription :: Text
+    , propertyRequired :: Bool
+    -- ^ Whether this property is required. When True, the property key
+    -- is included in the 'required' array of the JSON schema.
+    -- This allows the LLM to omit optional parameters.
     }
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON ParamProperty
@@ -52,10 +56,11 @@ jsonSchema p =
         MultipleParamType allowedTypes ->
             ["type" .= allowedTypes, "description" .= p.propertyDescription]
         ObjectParamType propz ->
-            [ "type" .= ("object" :: Text)
-            , "description" .= p.propertyDescription
-            , "properties" .= HashMap.fromList (fmap toJsonSchemaPair propz)
-            , "additionalProperties" .= False
-            , "required" .= fmap propertyKey propz
-            ]
+            let requiredProps = filter propertyRequired propz
+             in [ "type" .= ("object" :: Text)
+                , "description" .= p.propertyDescription
+                , "properties" .= HashMap.fromList (fmap toJsonSchemaPair propz)
+                , "additionalProperties" .= False
+                , "required" .= fmap propertyKey requiredProps
+                ]
 
