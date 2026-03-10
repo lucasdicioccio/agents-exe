@@ -1,0 +1,17 @@
+{
+  "queueDb": "tasks/agq.db",
+  "taskDir": "tasks",
+  "sessionsDir": "tasks-sessions",
+  "baseBranch": "main",
+  "githubUsername": "lucasdicioccio",
+  "pollSeconds": 30,
+  "lockStaleSeconds": 7200,
+  "projects": {
+    "root": ".",
+    "architect": "."
+  },
+  "agents": {
+    "default": "tasks-agents/kimi-agent-oneshot.json",
+    "architect": "tasks-agents/kimi-architect.json"
+  }
+}

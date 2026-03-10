@@ -1,0 +1,475 @@
+module Agq.Commands
+  ( cmdInit
+  , cmdAdd
+  , cmdPull
+  , cmdPromote
+  , cmdStatus
+  , cmdProcess
+  , cmdExec
+  , cmdMergePRs
+  , cmdClean
+  , cmdRecover
+  ) where
+
+import Agq.Config (AgqConfig(..))
+import Agq.DB
+import Agq.Run
+import Agq.Schedule
+
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad (forM_, when, unless, void)
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Map as Map
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Scientific (floatingOrInteger)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.IO as Text
+import Database.SQLite.Simple
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Exit (ExitCode(..))
+import System.FilePath ((</>), takeBaseName)
+import System.IO (hGetContents)
+import System.Process
+
+-- ---------------------------------------------------------------------------
+-- cmdInit
+-- ---------------------------------------------------------------------------
+
+cmdInit :: AgqConfig -> Connection -> IO ()
+cmdInit cfg conn = do
+  createDirectoryIfMissing True (taskDir cfg)
+  createDirectoryIfMissing True (sessionsDir cfg)
+  initDB conn
+  putStrLn $ "Queue initialised at " <> queueDb cfg
+
+-- ---------------------------------------------------------------------------
+-- cmdAdd
+-- ---------------------------------------------------------------------------
+
+cmdAdd :: AgqConfig -> Connection -> Text -> Text -> [Text] -> [Text] -> IO ()
+cmdAdd cfg conn label name deps extraTags = do
+  createDirectoryIfMissing True (taskDir cfg)
+  let fname = taskDir cfg </> Text.unpack name <> ".md"
+  exists <- doesFileExist fname
+  unless exists $ writeFile fname ""
+  content <- readFile fname
+  when (null content) $ do
+    let editor = "vim"
+    callProcess editor [fname]
+  let task = Task
+        { taskId              = 0
+        , taskName            = name
+        , taskLabel           = label
+        , taskSource          = "local"
+        , taskStatus          = Pending
+        , taskInstructionFile = fname
+        , taskBaseBranch      = baseBranch cfg
+        , taskIsFinal         = False
+        }
+  insertTask conn task deps (label : extraTags)
+  putStrLn $ "Added task: " <> Text.unpack name <> " (label=" <> Text.unpack label <> ")"
+
+-- ---------------------------------------------------------------------------
+-- cmdPull
+-- ---------------------------------------------------------------------------
+
+cmdPull :: AgqConfig -> Connection -> IO ()
+cmdPull cfg conn = do
+  createDirectoryIfMissing True (taskDir cfg)
+  (ec, out) <- runGh
+    [ "issue", "list"
+    , "--label", "agents/to-be-taken"
+    , "--author", Text.unpack (githubUsername cfg)
+    , "--json", "number,labels"
+    ]
+  when (ec /= ExitSuccess) $ putStrLn "Warning: gh issue list failed."
+  let issues = case Aeson.decode (lbsFromText out) of
+        Just (Aeson.Array arr) -> reverse (foldr (:) [] arr)
+        _                      -> []
+  when (null issues) $ putStrLn "No tasks found in GitHub."
+  forM_ issues $ \issueVal -> do
+    let num    = extractInt issueVal "number"
+        labels = extractLabels issueVal
+        label  = findProjectLabel (Map.keys (projects cfg)) labels
+    case (num, label) of
+      (Just n, Just lbl) -> importGhIssue cfg conn n lbl
+      (Just n, Nothing)  -> putStrLn $ "Skipping issue #" <> show n <> ": no project label."
+      _                  -> putStrLn "Skipping malformed issue."
+
+importGhIssue :: AgqConfig -> Connection -> Int -> Text -> IO ()
+importGhIssue cfg conn n lbl = do
+  let name  = "gh-" <> Text.pack (show n)
+      fname = taskDir cfg </> Text.unpack name <> ".md"
+  exists <- doesFileExist fname
+  unless exists $ writeFile fname ""
+  content <- readFile fname
+  when (null content) $ do
+    (_, body) <- runGh
+      [ "issue", "view", show n
+      , "--json", "title,body"
+      , "--jq", "\"# \" + .title + \"\\n\\n\" + .body"
+      ]
+    Text.writeFile fname (Text.strip body <> "\n\n---\nCloses #" <> Text.pack (show n) <> "\n")
+  freshContent <- Text.readFile fname
+  let base   = fromMaybe (baseBranch cfg) (parseHeader "Base-branch:" freshContent)
+      isFin  = parseHeader "Final:" freshContent == Just "true"
+      task   = Task
+        { taskId              = 0
+        , taskName            = name
+        , taskLabel           = lbl
+        , taskSource          = "github"
+        , taskStatus          = Pending
+        , taskInstructionFile = fname
+        , taskBaseBranch      = base
+        , taskIsFinal         = isFin
+        }
+      deps = parseDeps freshContent
+  insertTask conn task deps [lbl]
+  void $ runGh ["issue", "edit", show n, "--remove-label", "agents/to-be-taken", "--add-label", "agents/taken"]
+  putStrLn $ "Enqueued GitHub issue #" <> show n <> " as " <> Text.unpack lbl
+
+-- ---------------------------------------------------------------------------
+-- cmdPromote
+-- ---------------------------------------------------------------------------
+
+cmdPromote :: AgqConfig -> IO ()
+cmdPromote cfg = do
+  (ec, out) <- runGh
+    [ "issue", "list"
+    , "--label", "agents/wait"
+    , "--author", Text.unpack (githubUsername cfg)
+    , "--json", "number,title"
+    ]
+  when (ec /= ExitSuccess) $ putStrLn "Warning: gh issue list failed."
+  let issues = case Aeson.decode (lbsFromText out) of
+        Just (Aeson.Array arr) -> foldr (:) [] arr
+        _                      -> []
+  when (null issues) $ putStrLn "No issues in 'agents/wait'."
+  forM_ issues $ \issueVal ->
+    case extractInt issueVal "number" of
+      Nothing -> return ()
+      Just n  -> do
+        (_, body) <- runGh ["issue", "view", show n, "--json", "body", "--jq", ".body"]
+        let deps = parseDeps body
+        allSat <- checkDepsSatisfied deps
+        if allSat
+          then do
+            putStrLn $ "Promoting issue #" <> show n <> " to agents/to-be-taken"
+            void $ runGh ["issue", "edit", show n, "--remove-label", "agents/wait", "--add-label", "agents/to-be-taken"]
+          else
+            putStrLn $ "Issue #" <> show n <> " still waiting on deps."
+
+checkDepsSatisfied :: [Text] -> IO Bool
+checkDepsSatisfied deps = do
+  results <- mapM checkDep deps
+  return (and results)
+  where
+    checkDep dep = do
+      let depStr = Text.unpack dep
+      (_, out) <- runGh ["issue", "view", depStr, "--json", "state", "--jq", ".state"]
+      if Text.strip out == "CLOSED"
+        then return True
+        else do
+          (ec2, out2) <- runGh ["pr", "view", depStr, "--json", "state", "--jq", ".state"]
+          return (ec2 == ExitSuccess && Text.strip out2 `elem` ["MERGED", "CLOSED"])
+
+-- ---------------------------------------------------------------------------
+-- cmdStatus
+-- ---------------------------------------------------------------------------
+
+cmdStatus :: AgqConfig -> Connection -> IO ()
+cmdStatus _cfg conn = do
+  tasks <- listTasks conn
+  putStrLn $ padR 6 "ID" <> padR 30 "NAME" <> padR 12 "LABEL" <> padR 10 "STATUS" <> padR 20 "DEPS" <> "TAGS"
+  putStrLn (replicate 90 '-')
+  forM_ tasks $ \(t, deps, tags) ->
+    putStrLn $
+      padR 6  (show (taskId t)) <>
+      padR 30 (Text.unpack (taskName t)) <>
+      padR 12 (Text.unpack (taskLabel t)) <>
+      padR 10 (Text.unpack (taskStatusText (taskStatus t))) <>
+      padR 20 (Text.unpack (Text.intercalate "," deps)) <>
+      Text.unpack (Text.intercalate "," tags)
+  putStrLn ""
+  locks <- query_ conn "SELECT tag, task_name, acquired_at FROM locks" :: IO [(Text,Text,Int)]
+  if null locks
+    then putStrLn "No active locks."
+    else do
+      putStrLn "Active locks:"
+      forM_ locks $ \(tag, tname, at) ->
+        putStrLn $ "  [" <> Text.unpack tag <> "] held by " <> Text.unpack tname <> " since " <> show at
+  where
+    padR n s = let s' = take n s in s' <> replicate (n - length s') ' '
+
+-- ---------------------------------------------------------------------------
+-- cmdProcess
+-- ---------------------------------------------------------------------------
+
+cmdProcess :: AgqConfig -> Connection -> Bool -> IO ()
+cmdProcess cfg conn parallel = do
+  n <- recoverStaleLocks conn (lockStaleSeconds cfg)
+  when (n > 0) $ putStrLn $ "Recovered " <> show n <> " stale task(s)."
+  loop
+  where
+    loop = do
+      mname <- claimNextTask conn
+      case mname of
+        Nothing -> do
+          cnt <- countPendingRunning conn
+          if cnt == 0
+            then putStrLn "Queue empty. Exiting."
+            else do
+              putStrLn $ "Waiting (" <> show cnt <> " task(s) pending/running)..."
+              threadDelay (pollSeconds cfg * 1000000)
+              loop
+        Just name ->
+          if parallel
+            then do
+              void $ forkIO (cmdExec cfg conn name)
+              loop
+            else do
+              cmdExec cfg conn name
+              loop
+
+-- ---------------------------------------------------------------------------
+-- cmdExec
+-- ---------------------------------------------------------------------------
+
+cmdExec :: AgqConfig -> Connection -> Text -> IO ()
+cmdExec cfg conn name = do
+  mt <- getTaskByName conn name
+  case mt of
+    Nothing -> putStrLn $ "Task not found: " <> Text.unpack name
+    Just t  -> execTask cfg conn t
+
+execTask :: AgqConfig -> Connection -> Task -> IO ()
+execTask cfg conn t = do
+  let nameStr   = Text.unpack (taskName t)
+      base      = Text.unpack (taskBaseBranch t)
+      lbl       = taskLabel t
+      agentCfg  = Text.unpack $ fromMaybe
+                    (fromMaybe "tasks-agents/kimi-agent-oneshot.json" (Map.lookup "default" (agents cfg)))
+                    (Map.lookup lbl (agents cfg))
+      projDir   = Text.unpack $ fromMaybe "." (Map.lookup lbl (projects cfg))
+      sessFile  = sessionsDir cfg </> nameStr <> ".session.json"
+      instrFile = taskInstructionFile t
+      target    = if taskIsFinal t then "main" else base
+
+  createDirectoryIfMissing True (sessionsDir cfg)
+
+  -- 1. Fetch base branch
+  ecFetch <- runGit ["fetch", "origin", base]
+  when (ecFetch /= ExitSuccess) $
+    putStrLn $ "Warning: fetch of " <> base <> " failed."
+
+  -- 2. Set up worktree (remove old one first if present)
+  void $ runGit ["worktree", "remove", "--force", nameStr]
+  void $ runGit ["worktree", "prune"]
+  ecWt <- runGit ["worktree", "add", nameStr, "origin/" <> base]
+  when (ecWt /= ExitSuccess) $ do
+    releaseLock conn (taskName t) Failed (Just "worktree creation failed")
+    fail $ "Failed to create worktree " <> nameStr
+
+  let worktreeProj = nameStr </> projDir
+      hookScript   = worktreeProj </> "git-agent-task.sh"
+
+  -- 3. Optional prepare hook
+  hookExists <- doesFileExist hookScript
+  when hookExists $
+    void $ runCmd hookScript ["prepare", Text.unpack lbl, nameStr, instrFile]
+
+  -- 4. Run agent, capturing commit message
+  (ecAgent, commitMsg) <- runWithCwd worktreeProj "agents-exe"
+    [ "--agent-file", agentCfg
+    , "run"
+    , "--session-file", sessFile
+    , "-f", instrFile
+    ]
+  let commit = if Text.null (Text.strip commitMsg)
+                 then "Update via automation (" <> nameStr <> ")"
+                 else Text.unpack (Text.strip commitMsg)
+
+  -- 5. session-print
+  void $ runCmd "agents-exe" ["session-print", sessFile]
+
+  -- 6. Commit and push
+  void $ runGit ["-C", nameStr, "checkout", "-b", nameStr]
+  (_, statusOut) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
+  unless (Text.null (Text.strip statusOut)) $ do
+    void $ runGit ["-C", nameStr, "add", "-A"]
+    void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
+    void $ runGit ["-C", nameStr, "push", "-u", "origin", nameStr]
+
+    let prTitle = takeWhile (/= '\n') commit
+    void $ runCmd "gh"
+      [ "pr", "create"
+      , "--base", target
+      , "--head", nameStr
+      , "--title", prTitle
+      , "--body", commit
+      , "--label", "agents/agent-pr"
+      ]
+
+    when hookExists $
+      void $ runCmd hookScript ["preview", Text.unpack lbl, nameStr, instrFile]
+
+  if ecAgent == ExitSuccess
+    then releaseLock conn (taskName t) Done Nothing
+    else releaseLock conn (taskName t) Failed (Just "agents-exe returned non-zero")
+
+-- | Run a command inside a given working directory, capturing stdout.
+runWithCwd :: FilePath -> FilePath -> [String] -> IO (ExitCode, Text)
+runWithCwd worktreePath cmd args = do
+  let p = (proc cmd args)
+        { std_in  = NoStream
+        , std_out = CreatePipe
+        , cwd     = Just worktreePath
+        }
+  (_, mout, _, ph) <- createProcess p
+  out <- case mout of
+    Nothing -> return ""
+    Just h  -> fmap Text.pack (hGetContents h)
+  ec <- waitForProcess ph
+  return (ec, out)
+
+-- ---------------------------------------------------------------------------
+-- cmdMergePRs
+-- ---------------------------------------------------------------------------
+
+cmdMergePRs :: AgqConfig -> IO ()
+cmdMergePRs _cfg = do
+  (_, defOut) <- runGh ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
+  let def = Text.strip defOut
+  (_, out) <- runGh ["pr", "list", "--label", "agents/agent-pr", "--json", "number,baseRefName,title"]
+  let prs = case Aeson.decode (lbsFromText out) of
+              Just (Aeson.Array arr) -> foldr (:) [] arr
+              _                      -> []
+  when (null prs) $ putStrLn "No PRs with label agents/agent-pr."
+  forM_ prs $ \prVal ->
+    case (extractInt prVal "number", extractText prVal "baseRefName") of
+      (Just n, Just b) ->
+        if b /= def
+          then do
+            putStrLn $ "Merging PR #" <> show n <> " (base=" <> Text.unpack b <> ")"
+            void $ runCmd "gh" ["pr", "merge", show n, "--merge", "--auto"]
+          else putStrLn $ "Skipping PR #" <> show n <> ": targets default branch."
+      _ -> return ()
+
+-- ---------------------------------------------------------------------------
+-- cmdClean
+-- ---------------------------------------------------------------------------
+
+cmdClean :: AgqConfig -> Bool -> Bool -> IO ()
+cmdClean cfg doIt force = do
+  (_, wtOut)   <- captureCmd "git" ["worktree", "list", "--porcelain"]
+  (_, rootOut) <- captureCmd "git" ["rev-parse", "--show-toplevel"]
+  let root    = Text.strip rootOut
+      wts     = parseWorktrees wtOut
+      nonMain = filter (\p -> Text.strip p /= root) wts
+  toClean <- myFilterM (\wt -> do
+    let nm = takeBaseName (Text.unpack wt)
+        md = sessionsDir cfg </> nm <> ".session.md"
+    doesFileExist md
+    ) nonMain
+  if null toClean
+    then putStrLn "No worktrees with completed sessions."
+    else if not doIt
+      then do
+        putStrLn "=== PREVIEW (use --do-it to execute) ==="
+        mapM_ (putStrLn . ("  " <>) . Text.unpack) toClean
+      else do
+        putStrLn "=== EXECUTING CLEANUP ==="
+        forM_ toClean $ \wt -> do
+          let nm = takeBaseName (Text.unpack wt)
+          putStrLn $ "Removing worktree: " <> nm
+          if force
+            then void $ runGit ["worktree", "remove", "--force", nm]
+            else void $ runGit ["worktree", "remove", nm]
+        void $ runGit ["worktree", "prune"]
+        forM_ toClean $ \wt -> do
+          let nm = takeBaseName (Text.unpack wt)
+          void $ runGit ["branch", "-D", nm]
+
+parseWorktrees :: Text -> [Text]
+parseWorktrees txt =
+  mapMaybe parseLine (Text.lines txt)
+  where
+    parseLine l
+      | "worktree " `Text.isPrefixOf` l = Just (Text.drop (Text.length "worktree ") l)
+      | otherwise = Nothing
+
+myFilterM :: Monad m => (a -> m Bool) -> [a] -> m [a]
+myFilterM _ [] = return []
+myFilterM p (x:xs) = do
+  b    <- p x
+  rest <- myFilterM p xs
+  return (if b then x:rest else rest)
+
+-- ---------------------------------------------------------------------------
+-- cmdRecover
+-- ---------------------------------------------------------------------------
+
+cmdRecover :: AgqConfig -> Connection -> IO ()
+cmdRecover cfg conn = do
+  n <- recoverStaleLocks conn (lockStaleSeconds cfg)
+  putStrLn $ "Recovered " <> show n <> " stale task(s)."
+
+-- ---------------------------------------------------------------------------
+-- Helpers
+-- ---------------------------------------------------------------------------
+
+lbsFromText :: Text -> LBS.ByteString
+lbsFromText = LBS.fromStrict . TE.encodeUtf8
+
+extractInt :: Aeson.Value -> Text -> Maybe Int
+extractInt val key = case val of
+  Aeson.Object obj ->
+    case KeyMap.lookup (Key.fromText key) obj of
+      Just (Aeson.Number n) ->
+        case (floatingOrInteger n :: Either Double Int) of
+          Right i -> Just i
+          Left  d -> Just (round d)
+      _ -> Nothing
+  _ -> Nothing
+
+extractText :: Aeson.Value -> Text -> Maybe Text
+extractText val key = case val of
+  Aeson.Object obj ->
+    case KeyMap.lookup (Key.fromText key) obj of
+      Just (Aeson.String s) -> Just s
+      _                     -> Nothing
+  _ -> Nothing
+
+extractLabels :: Aeson.Value -> [Text]
+extractLabels val = case val of
+  Aeson.Object obj ->
+    case KeyMap.lookup (Key.fromText "labels") obj of
+      Just (Aeson.Array arr) ->
+        mapMaybe (\v -> extractText v "name") (foldr (:) [] arr)
+      _ -> []
+  _ -> []
+
+findProjectLabel :: [Text] -> [Text] -> Maybe Text
+findProjectLabel keys labels =
+  case filter (`elem` labels) keys of
+    (k:_) -> Just k
+    []    -> Nothing
+
+parseHeader :: Text -> Text -> Maybe Text
+parseHeader header content =
+  case filter (Text.isPrefixOf (Text.toLower header) . Text.toLower) (Text.lines content) of
+    []    -> Nothing
+    (l:_) -> Just (Text.strip (Text.drop (Text.length header) l))
+
+parseDeps :: Text -> [Text]
+parseDeps content =
+  case parseHeader "Depends-on:" content of
+    Nothing  -> []
+    Just val ->
+      map (Text.replace "#" "" . Text.strip) $
+      Text.splitOn "," val
