@@ -30,6 +30,7 @@
 --             , configBaseUrl = "https://api.example.com"
 --             , configHeaders = Map.empty
 --             , configToken = Just "my-bearer-token"
+--             , configFilter = Just (PathPrefix "/api/v1")
 --             }
 --     result <- OpenAPI.initializeToolbox tracer config
 --     case result of
@@ -50,6 +51,9 @@ module System.Agents.Tools.OpenAPIToolbox (
 
     -- * Re-export ToolResult from Types
     ToolResult,
+
+    -- * Re-export EndpointPredicate for filter configuration
+    EndpointPredicate,
 
     -- * Initialization
     initializeToolbox,
@@ -98,6 +102,10 @@ import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), runTracer)
+import System.Agents.Tools.EndpointPredicate (
+    EndpointPredicate,
+    matchesOpenAPITool,
+ )
 import System.Agents.Tools.OpenAPI.Converter (
     OpenAPITool (..),
     NameMapping (..),
@@ -144,6 +152,8 @@ data Trace
     -- ^ Successfully loaded spec from file
     | ToolsConvertedTrace !Int
     -- ^ Number of tools converted from spec
+    | ToolsFilteredTrace !Int !Int
+    -- ^ Number of tools before and after filtering
     | CallingEndpointTrace !Text !Text !Text
     -- ^ method, url, path being called
     | EndpointResponseTrace !Int
@@ -182,6 +192,9 @@ data Config = Config
     -- ^ Static headers to include in all requests
     , configToken :: Maybe Text
     -- ^ Optional Bearer token for authentication
+    , configFilter :: Maybe EndpointPredicate
+    -- ^ Optional filter to restrict which endpoints are exposed as tools.
+    -- If not specified, all endpoints are included.
     }
     deriving (Show, Eq)
 
@@ -190,7 +203,7 @@ data Config = Config
 -- The toolbox maintains:
 -- * A name for identification
 -- * The base URL for API calls
--- * A list of available tools
+-- * A list of available tools (filtered by configFilter if provided)
 -- * A name mapping for LLM-safe tool names
 -- * The HTTP runtime for making requests
 -- * An optional header function for dynamic auth headers
@@ -198,7 +211,7 @@ data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxBaseUrl :: Text
     , toolboxTools :: [OpenAPITool]
-    -- ^ Tools converted from the OpenAPI spec
+    -- ^ Tools converted from the OpenAPI spec (filtered if configFilter was provided)
     , toolboxNameMapping :: Map Text NameMapping
     -- ^ Mapping from normalized LLM names to original operation IDs
     , httpRuntime :: HttpClient.Runtime
@@ -207,6 +220,8 @@ data Toolbox = Toolbox
     -- ^ Optional function to get dynamic headers (e.g., for auth)
     , staticHeaders :: Map Text Text
     -- ^ Static headers from config
+    , toolboxFilter :: Maybe EndpointPredicate
+    -- ^ The filter used during initialization (stored for reference)
     }
 
 -- -------------------------------------------------------------------------
@@ -253,7 +268,8 @@ fileUrlToPath url =
 -- 3. Parses the JSON to an OpenAPISpec
 -- 4. Dereferences schema references ($ref)
 -- 5. Converts operations to tools
--- 6. Builds the name mapping for LLM-safe names
+-- 6. Applies the optional filter to subset tools (using 'matchesOpenAPITool')
+-- 7. Builds the name mapping for LLM-safe names
 --
 -- Returns an 'InitializationError' if any step fails.
 initializeToolbox ::
@@ -281,11 +297,19 @@ initializeToolbox tracer config = do
                     let dereferencedSpec = dereferenceSpec spec
 
                     -- Convert to tools
-                    let tools = convertOpenAPIToTools dereferencedSpec
-                    runTracer tracer (ToolsConvertedTrace (length tools))
+                    let allTools = convertOpenAPIToTools dereferencedSpec
+                    runTracer tracer (ToolsConvertedTrace (length allTools))
 
-                    -- Build name mapping for LLM-safe names
-                    let nameMapping = buildToolNameMapping toolboxName tools
+                    -- Apply filter if provided
+                    let filteredTools = case config.configFilter of
+                            Nothing -> allTools
+                            Just predicate -> filter (matchesOpenAPITool predicate) allTools
+                    
+                    -- Trace filtering results
+                    runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
+
+                    -- Build name mapping for LLM-safe names (using filtered tools)
+                    let nameMapping = buildToolNameMapping toolboxName filteredTools
 
                     -- Trace name normalizations (for debugging)
                     mapM_ (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m)))
@@ -295,11 +319,12 @@ initializeToolbox tracer config = do
                     pure $ Right $ Toolbox
                         { toolboxName = toolboxName
                         , toolboxBaseUrl = config.configBaseUrl
-                        , toolboxTools = tools
+                        , toolboxTools = filteredTools
                         , toolboxNameMapping = nameMapping
                         , httpRuntime = runtime
                         , headerFunc = Nothing
                         , staticHeaders = config.configHeaders
+                        , toolboxFilter = config.configFilter
                         }
   where
     toolboxName = extractToolboxName config.configUrl
@@ -692,5 +717,4 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
-
 
