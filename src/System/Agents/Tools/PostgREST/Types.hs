@@ -136,6 +136,10 @@ defaultAllowedMethods = [GET, HEAD, OPTIONS]
 --
 -- This configuration connects to a PostgREST instance and provides
 -- authentication credentials if needed.
+--
+-- Note: The 'configFilter' field for endpoint filtering is stored in
+-- 'System.Agents.Tools.PostgRESToolbox.Config' to avoid circular
+-- dependencies (EndpointPredicate depends on PostgREST types).
 data Config = Config
     { configUrl :: Text
     -- ^ URL to PostgREST OpenAPI spec (e.g., "http://localhost:3000/" or "file:///path/to/spec.json")
@@ -194,6 +198,8 @@ data Trace
     -- ^ Table name that was converted to a tool (e.g., "users")
     | ColumnFiltersDetectedTrace !Text !Int
     -- ^ Table name and count of detected column filters (e.g., "users", 5)
+    | ToolsFilteredTrace !Int !Int
+    -- ^ Number of tools before and after filtering (e.g., 50, 20)
     | ExecutionTrace !Text !Text !Text
     -- ^ method, path, query string being executed
     | ExecutionErrorTrace !Text

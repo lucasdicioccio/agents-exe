@@ -36,6 +36,7 @@
 --             , configHeaders = Map.empty
 --             , configToken = Just "eyJhbG..."
 --             , configAllowedMethods = [GET, POST, PATCH]  -- Enable read and write
+--             , configFilter = Just (PathPrefix "/public")  -- Only public schema tables
 --             }
 --     result <- PostgREST.initializeToolbox tracer config
 --     case result of
@@ -61,6 +62,9 @@ module System.Agents.Tools.PostgRESToolbox (
     PostgRESTool (..),
     RowFilter (..),
     isReadOnlyMethod,
+
+    -- * Re-export EndpointPredicate for filter configuration
+    EndpointPredicate,
 
     -- * Initialization
     initializeToolbox,
@@ -110,6 +114,10 @@ import Prod.Tracer (Tracer (..), runTracer)
 import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.EndpointPredicate (
+    EndpointPredicate,
+    matchesPostgRESTool,
+ )
 import System.Agents.Tools.IO (RunError (..))
 import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import System.Agents.Tools.OpenAPI.Types (OpenAPISpec (..))
@@ -120,7 +128,6 @@ import System.Agents.Tools.PostgREST.Converter (
     methodToText,
  )
 import System.Agents.Tools.PostgREST.Types (
-    Config (..),
     HttpMethod (..),
     RowFilter (..),
     ToolParameters (..),
@@ -132,6 +139,7 @@ import System.Agents.Tools.PostgREST.Types (
     defaultAllowedMethods,
     isReadOnlyMethod,
  )
+import qualified System.Agents.Tools.PostgREST.Types as Types
 import System.Agents.Tools.Trace (ToolTrace (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
@@ -151,12 +159,43 @@ data InitializationError
     -- ^ OpenAPI spec validation error
     deriving (Show, Eq)
 
+-- | Configuration for initializing a PostgREST toolbox.
+--
+-- This configuration type extends the base 'Types.Config' with an optional
+-- 'EndpointPredicate' filter to subset the available tools.
+data Config = Config
+    { configUrl :: Text
+    -- ^ URL to PostgREST OpenAPI spec (e.g., "http://localhost:3000/" or "file:///path/to/spec.json")
+    , configBaseUrl :: Text
+    -- ^ Base URL for API calls (e.g., "http://localhost:3000")
+    , configHeaders :: Map Text Text
+    -- ^ Static headers to include in all requests
+    , configToken :: Maybe Text
+    -- ^ Optional Bearer token for JWT authentication
+    , configAllowedMethods :: [HttpMethod]
+    -- ^ HTTP methods to expose as tools (default: read-only methods)
+    , configFilter :: Maybe EndpointPredicate
+    -- ^ Optional filter to restrict which tables/endpoints are exposed as tools.
+    -- If not specified, all tables are included.
+    }
+    deriving (Show, Eq)
+
+-- | Convert toolbox Config to base Types.Config.
+toBaseConfig :: Config -> Types.Config
+toBaseConfig cfg = Types.Config
+    { Types.configUrl = cfg.configUrl
+    , Types.configBaseUrl = cfg.configBaseUrl
+    , Types.configHeaders = cfg.configHeaders
+    , Types.configToken = cfg.configToken
+    , Types.configAllowedMethods = cfg.configAllowedMethods
+    }
+
 -- | Runtime state for a PostgREST toolbox.
 --
 -- The toolbox maintains:
 -- * A name for identification
 -- * The base URL for API calls
--- * A list of available tools (one per table/method combination)
+-- * A list of available tools (one per table/method combination, filtered by configFilter if provided)
 -- * The HTTP runtime for making requests
 -- * Optional dynamic header function for auth
 -- * The list of allowed HTTP methods
@@ -164,7 +203,7 @@ data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxBaseUrl :: Text
     , toolboxTools :: [PostgRESTool]
-    -- ^ Tools converted from the PostgREST spec
+    -- ^ Tools converted from the PostgREST spec (filtered if configFilter was provided)
     , httpRuntime :: HttpClient.Runtime
     -- ^ HTTP client runtime
     , headerFunc :: Maybe (IO (Map Text Text))
@@ -173,6 +212,8 @@ data Toolbox = Toolbox
     -- ^ Static headers from config
     , toolboxAllowedMethods :: [HttpMethod]
     -- ^ HTTP methods exposed by this toolbox
+    , toolboxFilter :: Maybe EndpointPredicate
+    -- ^ The filter used during initialization (stored for reference)
     }
 
 -- -------------------------------------------------------------------------
@@ -218,7 +259,8 @@ fileUrlToPath url =
 -- 2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
 -- 3. Parses the JSON to an OpenAPISpec
 -- 4. Converts table operations to tools based on allowed methods
--- 5. Detects row filters and builds parameter schemas
+-- 5. Applies the optional filter to subset tools (using 'matchesPostgRESTool')
+-- 6. Detects row filters and builds parameter schemas
 --
 -- Returns an 'InitializationError' if any step fails.
 initializeToolbox ::
@@ -249,23 +291,32 @@ initializeToolbox tracer config = do
 
                     -- Convert to tools
                     let toolboxName = extractToolboxName config.configUrl
-                    let tools = convertPostgRESToTools toolboxName allowedMethods spec
+                    let allTools = convertPostgRESToTools toolboxName allowedMethods spec
+
+                    -- Apply filter if provided
+                    let filteredTools = case config.configFilter of
+                            Nothing -> allTools
+                            Just predicate -> filter (matchesPostgRESTool predicate) allTools
 
                     -- Trace tool conversions
-                    mapM_ (\t -> runTracer tracer (TableConvertedTrace (prtPath t))) tools
+                    mapM_ (\t -> runTracer tracer (TableConvertedTrace (prtPath t))) filteredTools
+
+                    -- Trace filtering results
+                    runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
 
                     -- Trace filter detection
-                    mapM_ (\t -> runTracer tracer (ColumnFiltersDetectedTrace (prtPath t) (length (prtRowFilters t)))) tools
+                    mapM_ (\t -> runTracer tracer (ColumnFiltersDetectedTrace (prtPath t) (length (prtRowFilters t)))) filteredTools
 
                     -- Create toolbox
                     pure $ Right $ Toolbox
                         { toolboxName = toolboxName
                         , toolboxBaseUrl = config.configBaseUrl
-                        , toolboxTools = tools
+                        , toolboxTools = filteredTools
                         , httpRuntime = runtime
                         , headerFunc = Nothing
                         , staticHeaders = config.configHeaders
                         , toolboxAllowedMethods = allowedMethods
+                        , toolboxFilter = config.configFilter
                         }
 
 -- | Extract a toolbox name from the spec URL.

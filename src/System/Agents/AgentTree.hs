@@ -729,9 +729,6 @@ withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTreeRuntime props continue = do
     loadAgentTreeRuntime props >>= continue
 
--------------------------------------------------------------------------------
-type PromptModifier = Text -> Text
-
 -- | Convert OpenAPI toolbox description to toolbox configuration.
 --
 -- Handles both inline configurations and on-disk configurations.
@@ -742,6 +739,7 @@ openApiDescToConfig desc =
         , OpenAPIToolbox.configBaseUrl = openApiBaseUrl desc
         , OpenAPIToolbox.configHeaders = Maybe.fromMaybe Map.empty (openApiHeaders desc)
         , OpenAPIToolbox.configToken = openApiToken desc
+        , OpenAPIToolbox.configFilter = openApiFilter desc
         }
 
 -- | Convert PostgREST toolbox description to toolbox configuration.
@@ -757,6 +755,7 @@ postgrestDescToConfig desc =
         , PostgREST.configHeaders = Maybe.fromMaybe Map.empty (postgrestHeaders desc)
         , PostgREST.configToken = postgrestToken desc
         , PostgREST.configAllowedMethods = Maybe.fromMaybe PostgREST.defaultAllowedMethods (postgrestAllowedMethods desc)
+        , PostgREST.configFilter = postgrestFilter desc
         }
 
 -- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
@@ -878,6 +877,9 @@ initializePostgRESToolboxes tracer baseDir descriptions = do
     concatEithers eithers =
         let (lefts, rights) = Either.partitionEithers eithers
          in if null lefts then Right rights else Left lefts
+
+-- | Type alias for prompt modification functions.
+type PromptModifier = Text -> Text
 
 -- | Initialize a runtime with deferred tool resolution for extra agents.
 --

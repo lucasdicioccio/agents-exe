@@ -82,6 +82,7 @@ library agents-lib
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
+                    , System.Agents.Tools.EndpointPredicate
                     , System.Agents.Tools.IO
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.Tools.OpenAPI.Types
@@ -238,6 +239,7 @@ test-suite agents-tests
                    PostgRESTParseTest
                    SessionEditTests
                    SessionPrintTests
+                   EndpointPredicateTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
