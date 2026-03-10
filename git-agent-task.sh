@@ -41,27 +41,14 @@ instruction_rel="${4:-}"
 
 case "$command" in
   prepare)
+    echo "======================="
+    cat "${instruction_rel}"
+    echo "======================="
+    echo ""
     echo "Nothing to prepare."
     ;;
   preview)
-    set -x
-    echo "Checking configs"
-    mkdir -p checks
-    cabal run -- agents-exe check > "checks/${name}.check.txt" 2>&1
-
-    echo "Running checks"
-    cabal run -- agents-exe --session-json-file-prefix checks/conv. --agent-file demo-agents/ollama-01.json run --prompt "hi, test the notification and the markdown preview tool"
-    
-    latest_check=$(ls -t checks/conv.*.json 2>/dev/null | head -n 1 || true)
-    if [[ -n "$latest_check" ]]; then
-      if command -v markdown-eye >/dev/null 2>&1; then
-        cabal run -- agents-exe session-print "$latest_check" | markdown-eye /dev/stdin "$instruction_rel"
-      else
-        cabal run -- agents-exe session-print "$latest_check"
-      fi
-    else
-      echo "No check files found in checks/"
-    fi
+    echo "Skipping."
     ;;
   *)
     echo "Error: Unknown command '$command'"
