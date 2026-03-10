@@ -1,5 +1,7 @@
 module Agq.Commands
   ( cmdInit
+  , cmdInitQueue
+  , cmdInitGithub
   , cmdAdd
   , cmdPull
   , cmdPromote
@@ -10,10 +12,9 @@ module Agq.Commands
   , cmdClean
   , cmdRecover
   , cmdRetry
-  , cmdInitLabels
   ) where
 
-import Agq.Config (AgqConfig(..), AgqLabels(..))
+import Agq.Config (AgqConfig(..), AgqLabels(..), defaultConfig)
 import Agq.DB
 import Agq.Run
 import Agq.Schedule
@@ -23,6 +24,7 @@ import Control.Monad (forM_, when, unless, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -39,11 +41,29 @@ import System.IO (hGetContents)
 import System.Process
 
 -- ---------------------------------------------------------------------------
--- cmdInit
+-- cmdInit  (bootstrap — no config or DB required)
 -- ---------------------------------------------------------------------------
 
-cmdInit :: AgqConfig -> Connection -> IO ()
-cmdInit cfg conn = do
+-- | Write a template agq.json to the given path using the built-in defaults.
+-- Does nothing if the file already exists.
+cmdInit :: FilePath -> IO ()
+cmdInit cfgPath = do
+  exists <- doesFileExist cfgPath
+  if exists
+    then putStrLn $ cfgPath <> " already exists — not overwriting."
+    else do
+      LBS.writeFile cfgPath (AesonPretty.encodePretty defaultConfig)
+      putStrLn $ "Created " <> cfgPath
+      putStrLn "Edit it to suit your project, then run:"
+      putStrLn "  agq init-queue    # create directories and SQLite DB"
+      putStrLn "  agq init-github   # create GitHub labels"
+
+-- ---------------------------------------------------------------------------
+-- cmdInitQueue
+-- ---------------------------------------------------------------------------
+
+cmdInitQueue :: AgqConfig -> Connection -> IO ()
+cmdInitQueue cfg conn = do
   createDirectoryIfMissing True (taskDir cfg)
   createDirectoryIfMissing True (sessionsDir cfg)
   initDB conn
@@ -60,7 +80,7 @@ ensureGitignore = do
   current <- if exists then Text.readFile path else return ""
   let missing = filter (\p -> not (p `elem` Text.lines current)) required
   unless (null missing) $ do
-    let additions = "\n# agents-exe verbose logs (added by agq init)\n"
+    let additions = "\n# agents-exe verbose logs (added by agq init-queue)\n"
                  <> Text.unlines missing
     Text.appendFile path additions
     putStrLn $ ".gitignore: added " <> show (length missing) <> " missing pattern(s): "
@@ -536,8 +556,8 @@ createLabel name color desc = do
     then putStrLn $ "  ok  " <> Text.unpack name
     else putStrLn $ "  ERR " <> Text.unpack name
 
-cmdInitLabels :: AgqConfig -> IO ()
-cmdInitLabels cfg = do
+cmdInitGithub :: AgqConfig -> IO ()
+cmdInitGithub cfg = do
   putStrLn "Workflow labels:"
   forM_ (workflowLabelDefs (labels cfg)) $ \(name, color, desc) ->
     createLabel name color desc

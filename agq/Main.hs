@@ -15,7 +15,9 @@ import System.IO (hSetBuffering, stdout, stderr, BufferMode(..))
 -- ---------------------------------------------------------------------------
 
 data Command
-  = Init
+  = Init                         -- bootstrap: write agq.json template
+  | InitQueue                    -- create dirs + SQLite DB
+  | InitGithub                   -- create GitHub labels
   | Add Text Text [Text] [Text] Int  -- label name deps tags tries
   | Pull
   | Promote
@@ -26,7 +28,6 @@ data Command
   | Clean Bool Bool              -- do-it force
   | Recover
   | Retry Text Int               -- task name, tries to restore
-  | InitLabels
 
 -- ---------------------------------------------------------------------------
 -- Parser
@@ -45,9 +46,6 @@ parseCfgPath = strOption
 textArg :: String -> String -> Parser Text
 textArg mvar h = fmap Text.pack $ argument str (metavar mvar <> help h)
 
-textOption :: String -> String -> Parser Text
-textOption lng h = fmap Text.pack $ strOption (long lng <> metavar "TEXT" <> help h)
-
 textList :: String -> String -> Parser [Text]
 textList lng h = many $ fmap Text.pack $ strOption (long lng <> metavar "TEXT" <> help h)
 
@@ -55,16 +53,22 @@ parseCommand :: Parser Command
 parseCommand = hsubparser
   ( command "init"
       (info (pure Init)
+        (progDesc "Write a template agq.json (no config needed)"))
+  <> command "init-queue"
+      (info (pure InitQueue)
         (progDesc "Initialise the queue database and directories"))
+  <> command "init-github"
+      (info (pure InitGithub)
+        (progDesc "Create or update GitHub labels defined in the config"))
   <> command "add"
       (info parseAdd
         (progDesc "Add a task to the queue"))
   <> command "pull"
       (info (pure Pull)
-        (progDesc "Pull tasks from GitHub (agents/to-be-taken issues)"))
+        (progDesc "Pull tasks from GitHub (agq/to-be-taken issues)"))
   <> command "promote"
       (info (pure Promote)
-        (progDesc "Promote agents/wait issues whose deps are satisfied"))
+        (progDesc "Promote agq/wait issues whose deps are satisfied"))
   <> command "status"
       (info (pure Status)
         (progDesc "Show queue status"))
@@ -76,7 +80,7 @@ parseCommand = hsubparser
         (progDesc "Execute a specific task by name (internal)"))
   <> command "merge-prs"
       (info (pure MergePRs)
-        (progDesc "Merge PRs with label agents/agent-pr"))
+        (progDesc "Merge PRs with label agq/agent-pr"))
   <> command "clean"
       (info parseClean
         (progDesc "Remove worktrees with completed sessions"))
@@ -86,9 +90,6 @@ parseCommand = hsubparser
   <> command "retry"
       (info parseRetry
         (progDesc "Reset a failed task back to pending"))
-  <> command "init-labels"
-      (info (pure InitLabels)
-        (progDesc "Create or update GitHub labels defined in the config"))
   )
 
 parseAdd :: Parser Command
@@ -130,14 +131,20 @@ main = do
   (cfgPath, cmd) <- execParser $ info
     (liftA2 (,) parseCfgPath parseCommand <**> helper)
     (fullDesc <> progDesc "agq — Agent Queue scheduler")
-  cfg <- loadConfig cfgPath
-  withConnection (queueDb cfg) $ \conn -> do
-    initDB conn
-    dispatch cfg conn cmd
+  -- 'init' needs no config file or DB connection
+  case cmd of
+    Init -> cmdInit cfgPath
+    _    -> do
+      cfg <- loadConfig cfgPath
+      withConnection (queueDb cfg) $ \conn -> do
+        initDB conn
+        dispatch cfg conn cmd
 
 dispatch :: AgqConfig -> Connection -> Command -> IO ()
 dispatch cfg conn cmd = case cmd of
-  Init          -> cmdInit    cfg conn
+  Init          -> return ()  -- handled in main before reaching here
+  InitQueue     -> cmdInitQueue   cfg conn
+  InitGithub    -> cmdInitGithub  cfg
   Add l n d t r -> cmdAdd     cfg conn l n d t (if r <= 0 then defaultTries cfg else r)
   Pull          -> cmdPull    cfg conn
   Promote       -> cmdPromote cfg
@@ -148,4 +155,3 @@ dispatch cfg conn cmd = case cmd of
   Clean d f     -> cmdClean   cfg d f
   Recover       -> cmdRecover cfg conn
   Retry n r     -> cmdRetry   cfg conn n r
-  InitLabels    -> cmdInitLabels cfg
