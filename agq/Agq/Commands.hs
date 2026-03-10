@@ -63,6 +63,7 @@ cmdAdd cfg conn label name deps extraTags tries = do
   when (null content) $ do
     let editor = "vim"
     callProcess editor [fname]
+  base <- detectBaseBranch cfg
   let task = Task
         { taskId              = 0
         , taskName            = name
@@ -70,7 +71,7 @@ cmdAdd cfg conn label name deps extraTags tries = do
         , taskSource          = SourceLocal
         , taskStatus          = Pending
         , taskInstructionFile = fname
-        , taskBaseBranch      = baseBranch cfg
+        , taskBaseBranch      = base
         , taskIsFinal         = False
         , taskTriesRemaining  = tries
         }
@@ -119,7 +120,8 @@ importGhIssue cfg conn n lbl = do
       ]
     Text.writeFile fname (Text.strip body <> "\n\n---\nCloses #" <> Text.pack (show n) <> "\n")
   freshContent <- Text.readFile fname
-  let base   = fromMaybe (baseBranch cfg) (parseHeader "Base-branch:" freshContent)
+  detectedBase <- detectBaseBranch cfg
+  let base   = fromMaybe detectedBase (parseHeader "Base-branch:" freshContent)
       isFin  = parseHeader "Final:" freshContent == Just "true"
       tries  = maybe (defaultTries cfg) (read . Text.unpack) (parseHeader "Tries:" freshContent)
       task   = Task
@@ -565,3 +567,17 @@ parseDeps content =
     Just val ->
       map (Text.replace "#" "" . Text.strip) $
       Text.splitOn "," val
+
+-- | Detect the remote default branch via git, falling back to the configured value.
+-- Runs: git symbolic-ref refs/remotes/origin/HEAD --short
+-- which returns e.g. "origin/main" or "origin/master"; we strip the "origin/" prefix.
+detectBaseBranch :: AgqConfig -> IO Text
+detectBaseBranch cfg = do
+  (ec, out) <- captureCmd "git" ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"]
+  if ec == ExitSuccess
+    then
+      let raw = Text.strip out
+      in return $ if "origin/" `Text.isPrefixOf` raw
+                    then Text.drop (Text.length "origin/") raw
+                    else raw
+    else return (baseBranch cfg)
