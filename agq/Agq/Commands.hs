@@ -114,13 +114,18 @@ cmdPull cfg conn = do
         _                      -> []
   when (null issues) $ putStrLn "No tasks found in GitHub."
   forM_ issues $ \issueVal -> do
-    let num    = extractInt issueVal "number"
+    let num      = extractInt issueVal "number"
         ghLabels = extractLabels issueVal
+        hasTbt   = labelToBeTaken (labels cfg) `elem` ghLabels
         label    = findProjectLabel (Map.keys (projects cfg)) ghLabels
-    case (num, label) of
-      (Just n, Just lbl) -> importGhIssue cfg conn n lbl
-      (Just n, Nothing)  -> putStrLn $ "Skipping issue #" <> show n <> ": no project label."
-      _                  -> putStrLn "Skipping malformed issue."
+    case num of
+      Nothing -> putStrLn "Skipping malformed issue."
+      Just n
+        | not hasTbt ->
+            putStrLn $ "Skipping issue #" <> show n <> ": missing label '" <> Text.unpack (labelToBeTaken (labels cfg)) <> "'."
+        | Just lbl <- label -> importGhIssue cfg conn n lbl
+        | otherwise ->
+            putStrLn $ "Skipping issue #" <> show n <> ": no project label."
 
 importGhIssue :: AgqConfig -> Connection -> Int -> Text -> IO ()
 importGhIssue cfg conn n lbl = do
