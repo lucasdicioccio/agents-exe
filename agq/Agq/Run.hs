@@ -1,6 +1,7 @@
 module Agq.Run
   ( runCmd
   , runWithCwd
+  , runWithCwdBoth
   , captureCmd
   , captureCmdBoth
   , runGit
@@ -9,8 +10,10 @@ module Agq.Run
   ) where
 
 import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.ByteString as BS
+import System.IO (hGetContents)
 import System.Exit (ExitCode(..))
 import System.Process
 
@@ -27,6 +30,21 @@ runWithCwd worktreePath cmd args = do
   let p = (proc cmd args) { std_in = NoStream, cwd = Just worktreePath }
   (_, _, _, ph) <- createProcess p
   waitForProcess ph
+
+-- | Run a command inside a given working directory, capturing stdout and stderr.
+runWithCwdBoth :: FilePath -> FilePath -> [String] -> IO (ExitCode, Text, Text)
+runWithCwdBoth worktreePath cmd args = do
+  let p = (proc cmd args)
+        { std_in  = NoStream
+        , std_out = CreatePipe
+        , std_err = CreatePipe
+        , cwd     = Just worktreePath
+        }
+  (_, mout, merr, ph) <- createProcess p
+  out <- maybe (return "") (fmap Text.pack . hGetContents) mout
+  err <- maybe (return "") (fmap Text.pack . hGetContents) merr
+  ec  <- waitForProcess ph
+  return (ec, out, err)
 
 -- | Run a command capturing stdout as Text. Streams stderr.
 captureCmd :: FilePath -> [String] -> IO (ExitCode, Text)
