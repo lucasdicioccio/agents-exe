@@ -10,6 +10,7 @@ module Agq.Commands
   , cmdClean
   , cmdRecover
   , cmdRetry
+  , cmdInitLabels
   ) where
 
 import Agq.Config (AgqConfig(..), AgqLabels(..))
@@ -451,6 +452,41 @@ cmdRetry cfg conn name tries = do
   if ok
     then putStrLn $ "Task '" <> Text.unpack name <> "' reset to pending (tries_remaining=" <> show t <> ")."
     else putStrLn $ "Task '" <> Text.unpack name <> "' not found or not in a retryable state (must be failed or running)."
+
+-- ---------------------------------------------------------------------------
+-- cmdInitLabels
+-- ---------------------------------------------------------------------------
+
+-- Each label has a fixed colour and description; --force makes gh idempotent
+-- (creates the label if absent, updates it if already present).
+workflowLabelDefs :: AgqLabels -> [(Text, String, String)]
+workflowLabelDefs lbls =
+  [ (labelToBeTaken lbls, "0075ca", "Task is ready to be picked up by an agent")
+  , (labelTaken     lbls, "e4e669", "Task has been claimed and is being worked on")
+  , (labelWait      lbls, "d93f0b", "Task is waiting for its dependencies to complete")
+  , (labelAgentPr   lbls, "6f42c1", "Pull request was created automatically by an agent")
+  ]
+
+createLabel :: Text -> String -> String -> IO ()
+createLabel name color desc = do
+  (ec, _) <- runGh
+    [ "label", "create", Text.unpack name
+    , "--color", color
+    , "--description", desc
+    , "--force"
+    ]
+  if ec == ExitSuccess
+    then putStrLn $ "  ok  " <> Text.unpack name
+    else putStrLn $ "  ERR " <> Text.unpack name
+
+cmdInitLabels :: AgqConfig -> IO ()
+cmdInitLabels cfg = do
+  putStrLn "Workflow labels:"
+  forM_ (workflowLabelDefs (labels cfg)) $ \(name, color, desc) ->
+    createLabel name color desc
+  putStrLn "Project labels:"
+  forM_ (Map.keys (projects cfg)) $ \proj ->
+    createLabel proj "bfd4f2" ("Project: " <> Text.unpack proj)
 
 -- ---------------------------------------------------------------------------
 -- Helpers

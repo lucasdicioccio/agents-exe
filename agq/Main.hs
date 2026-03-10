@@ -26,6 +26,7 @@ data Command
   | Clean Bool Bool              -- do-it force
   | Recover
   | Retry Text Int               -- task name, tries to restore
+  | InitLabels
 
 -- ---------------------------------------------------------------------------
 -- Parser
@@ -85,6 +86,9 @@ parseCommand = hsubparser
   <> command "retry"
       (info parseRetry
         (progDesc "Reset a failed task back to pending"))
+  <> command "init-labels"
+      (info (pure InitLabels)
+        (progDesc "Create or update GitHub labels defined in the config"))
   )
 
 parseAdd :: Parser Command
@@ -143,3 +147,4 @@ dispatch cfg conn cmd = case cmd of
   Clean d f     -> cmdClean   cfg d f
   Recover       -> cmdRecover cfg conn
   Retry n r     -> cmdRetry   cfg conn n r
+  InitLabels    -> cmdInitLabels cfg
