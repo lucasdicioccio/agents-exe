@@ -13,5 +13,11 @@
   "agents": {
     "default": "tasks-agents/kimi-agent-oneshot.json",
     "architect": "tasks-agents/kimi-architect.json"
+  },
+  "labels": {
+    "labelToBeTaken": "agents/to-be-taken",
+    "labelTaken":     "agents/taken",
+    "labelWait":      "agents/wait",
+    "labelAgentPr":   "agents/agent-pr"
   }
 }

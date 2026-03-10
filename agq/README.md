@@ -54,6 +54,12 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
   "agents": {
     "default":   "tasks-agents/kimi-agent-oneshot.json",
     "architect": "tasks-agents/kimi-architect.json"
+  },
+  "labels": {
+    "labelToBeTaken": "agents/to-be-taken",
+    "labelTaken":     "agents/taken",
+    "labelWait":      "agents/wait",
+    "labelAgentPr":   "agents/agent-pr"
   }
 }
 ```
@@ -69,6 +75,10 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
 | `lockStaleSeconds` | Locks older than this (in seconds) are considered stale and released by `recover` |
 | `projects` | Maps a label → relative path inside the worktree |
 | `agents` | Maps a label → agent config file path |
+| `labels.labelToBeTaken` | GitHub label meaning "ready to pick up" |
+| `labels.labelTaken` | GitHub label applied after an issue is claimed |
+| `labels.labelWait` | GitHub label meaning "blocked on dependencies" |
+| `labels.labelAgentPr` | GitHub label applied to PRs created by the agent |
 
 ---
 

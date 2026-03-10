@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Agq.Config
   ( AgqConfig(..)
+  , AgqLabels(..)
   , defaultConfig
   , loadConfig
   ) where
@@ -13,6 +14,24 @@ import qualified Data.Map as Map
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+data AgqLabels = AgqLabels
+  { labelToBeTaken :: Text  -- issue is ready to be picked up
+  , labelTaken     :: Text  -- issue has been claimed
+  , labelWait      :: Text  -- issue is waiting on dependencies
+  , labelAgentPr   :: Text  -- PR was created by an agent
+  } deriving (Generic, Show)
+
+instance FromJSON AgqLabels
+instance ToJSON AgqLabels
+
+defaultLabels :: AgqLabels
+defaultLabels = AgqLabels
+  { labelToBeTaken = "agents/to-be-taken"
+  , labelTaken     = "agents/taken"
+  , labelWait      = "agents/wait"
+  , labelAgentPr   = "agents/agent-pr"
+  }
+
 data AgqConfig = AgqConfig
   { queueDb          :: FilePath
   , taskDir          :: FilePath
@@ -23,6 +42,7 @@ data AgqConfig = AgqConfig
   , lockStaleSeconds :: Int
   , projects         :: Map Text Text
   , agents           :: Map Text Text
+  , labels           :: AgqLabels
   } deriving (Generic, Show)
 
 instance FromJSON AgqConfig
@@ -42,6 +62,7 @@ defaultConfig = AgqConfig
       [ ("default",   "tasks-agents/kimi-agent-oneshot.json")
       , ("architect", "tasks-agents/kimi-architect.json")
       ]
+  , labels           = defaultLabels
   }
 
 loadConfig :: FilePath -> IO AgqConfig

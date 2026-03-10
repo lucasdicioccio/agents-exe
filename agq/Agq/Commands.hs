@@ -11,7 +11,7 @@ module Agq.Commands
   , cmdRecover
   ) where
 
-import Agq.Config (AgqConfig(..))
+import Agq.Config (AgqConfig(..), AgqLabels(..))
 import Agq.DB
 import Agq.Run
 import Agq.Schedule
@@ -83,7 +83,7 @@ cmdPull cfg conn = do
   createDirectoryIfMissing True (taskDir cfg)
   (ec, out) <- runGh
     [ "issue", "list"
-    , "--label", "agents/to-be-taken"
+    , "--label", Text.unpack (labelToBeTaken (labels cfg))
     , "--author", Text.unpack (githubUsername cfg)
     , "--json", "number,labels"
     ]
@@ -94,8 +94,8 @@ cmdPull cfg conn = do
   when (null issues) $ putStrLn "No tasks found in GitHub."
   forM_ issues $ \issueVal -> do
     let num    = extractInt issueVal "number"
-        labels = extractLabels issueVal
-        label  = findProjectLabel (Map.keys (projects cfg)) labels
+        ghLabels = extractLabels issueVal
+        label    = findProjectLabel (Map.keys (projects cfg)) ghLabels
     case (num, label) of
       (Just n, Just lbl) -> importGhIssue cfg conn n lbl
       (Just n, Nothing)  -> putStrLn $ "Skipping issue #" <> show n <> ": no project label."
@@ -130,7 +130,7 @@ importGhIssue cfg conn n lbl = do
         }
       deps = parseDeps freshContent
   insertTask conn task deps [lbl]
-  void $ runGh ["issue", "edit", show n, "--remove-label", "agents/to-be-taken", "--add-label", "agents/taken"]
+  void $ runGh ["issue", "edit", show n, "--remove-label", Text.unpack (labelToBeTaken (labels cfg)), "--add-label", Text.unpack (labelTaken (labels cfg))]
   putStrLn $ "Enqueued GitHub issue #" <> show n <> " as " <> Text.unpack lbl
 
 -- ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ cmdPromote :: AgqConfig -> IO ()
 cmdPromote cfg = do
   (ec, out) <- runGh
     [ "issue", "list"
-    , "--label", "agents/wait"
+    , "--label", Text.unpack (labelWait (labels cfg))
     , "--author", Text.unpack (githubUsername cfg)
     , "--json", "number,title"
     ]
@@ -149,7 +149,7 @@ cmdPromote cfg = do
   let issues = case Aeson.decode (lbsFromText out) of
         Just (Aeson.Array arr) -> foldr (:) [] arr
         _                      -> []
-  when (null issues) $ putStrLn "No issues in 'agents/wait'."
+  when (null issues) $ putStrLn $ "No issues in '" <> Text.unpack (labelWait (labels cfg)) <> "'."
   forM_ issues $ \issueVal ->
     case extractInt issueVal "number" of
       Nothing -> return ()
@@ -159,8 +159,8 @@ cmdPromote cfg = do
         allSat <- checkDepsSatisfied deps
         if allSat
           then do
-            putStrLn $ "Promoting issue #" <> show n <> " to agents/to-be-taken"
-            void $ runGh ["issue", "edit", show n, "--remove-label", "agents/wait", "--add-label", "agents/to-be-taken"]
+            putStrLn $ "Promoting issue #" <> show n <> " to " <> Text.unpack (labelToBeTaken (labels cfg))
+            void $ runGh ["issue", "edit", show n, "--remove-label", Text.unpack (labelWait (labels cfg)), "--add-label", Text.unpack (labelToBeTaken (labels cfg))]
           else
             putStrLn $ "Issue #" <> show n <> " still waiting on deps."
 
@@ -312,7 +312,7 @@ execTask cfg conn t = do
       , "--head", nameStr
       , "--title", prTitle
       , "--body", commit
-      , "--label", "agents/agent-pr"
+      , "--label", Text.unpack (labelAgentPr (labels cfg))
       ]
 
     when hookExists $
@@ -342,14 +342,14 @@ runWithCwd worktreePath cmd args = do
 -- ---------------------------------------------------------------------------
 
 cmdMergePRs :: AgqConfig -> IO ()
-cmdMergePRs _cfg = do
+cmdMergePRs cfg = do
   (_, defOut) <- runGh ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
   let def = Text.strip defOut
-  (_, out) <- runGh ["pr", "list", "--label", "agents/agent-pr", "--json", "number,baseRefName,title"]
+  (_, out) <- runGh ["pr", "list", "--label", Text.unpack (labelAgentPr (labels cfg)), "--json", "number,baseRefName,title"]
   let prs = case Aeson.decode (lbsFromText out) of
               Just (Aeson.Array arr) -> foldr (:) [] arr
               _                      -> []
-  when (null prs) $ putStrLn "No PRs with label agents/agent-pr."
+  when (null prs) $ putStrLn $ "No PRs with label " <> Text.unpack (labelAgentPr (labels cfg)) <> "."
   forM_ prs $ \prVal ->
     case (extractInt prVal "number", extractText prVal "baseRefName") of
       (Just n, Just b) ->
@@ -455,8 +455,8 @@ extractLabels val = case val of
   _ -> []
 
 findProjectLabel :: [Text] -> [Text] -> Maybe Text
-findProjectLabel keys labels =
-  case filter (`elem` labels) keys of
+findProjectLabel keys ghLabels =
+  case filter (`elem` ghLabels) keys of
     (k:_) -> Just k
     []    -> Nothing
 
