@@ -40,7 +40,8 @@ data AgqConfig = AgqConfig
   , githubUsername   :: Text
   , pollSeconds      :: Int
   , lockStaleSeconds :: Int
-  , defaultTries     :: Int            -- default tries_remaining for new tasks
+  , defaultTries     :: Int            -- default tries_remaining for new tasks (clean worktree runs)
+  , agentAttempts    :: Int            -- max agents-exe invocations per try (resuming same session)
   , projects         :: Map Text Text
   , agents           :: Map Text Text
   , hooks            :: Map Text Text  -- label -> hook script path (relative to worktree project dir)
@@ -60,6 +61,7 @@ defaultConfig = AgqConfig
   , pollSeconds      = 30
   , lockStaleSeconds = 7200
   , defaultTries     = 3
+  , agentAttempts    = 1
   , projects         = Map.fromList [("root", "."), ("architect", ".")]
   , agents           = Map.fromList
       [ ("default",   "tasks-agents/kimi-agent-oneshot.json")

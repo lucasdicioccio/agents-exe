@@ -349,21 +349,41 @@ execTask cfg conn t = do
     Nothing -> return ()
     Just h  -> void $ runWithCwd worktreeProj h ["prepare", Text.unpack lbl, nameStr, instrFile]
 
-  -- 4. Run agent, capturing stdout (commit message) and stderr (error log)
+  -- 4. Run agent with inner attempt loop.
+  -- Each attempt calls agents-exe with the same session file so it resumes
+  -- where the previous attempt left off.  The number of attempts is bounded
+  -- by agentAttempts from the config (default 1).
   putStrLn $ "[agq] Running agent for task '" <> nameStr <> "'"
-  putStrLn $ "[agq]   agent  : " <> agentCfg
-  putStrLn $ "[agq]   instr  : " <> instrFile
-  putStrLn $ "[agq]   session: " <> sessFile
-  (ecAgent, commitMsg, agentErr) <- runWithCwdBoth worktreeProj "agents-exe"
-    [ "--agent-file", agentCfg
-    , "run"
-    , "--session-file", sessFile
-    , "-f", instrFile
-    ]
+  putStrLn $ "[agq]   agent    : " <> agentCfg
+  putStrLn $ "[agq]   instr    : " <> instrFile
+  putStrLn $ "[agq]   session  : " <> sessFile
+  putStrLn $ "[agq]   attempts : " <> show (agentAttempts cfg)
+
+  let agentArgs = [ "--agent-file", agentCfg
+                  , "run"
+                  , "--session-file", sessFile
+                  , "-f", instrFile
+                  ]
+      runAttempt attempt = do
+        putStrLn $ "[agq] Attempt " <> show attempt <> "/" <> show (agentAttempts cfg)
+                <> " for task '" <> nameStr <> "'"
+        runWithCwdBoth worktreeProj "agents-exe" agentArgs
+
+      attemptLoop attempt = do
+        (ec, out, err) <- runAttempt attempt
+        if ec == ExitSuccess
+          then return (ec, out, err)
+          else if attempt < agentAttempts cfg
+            then do
+              putStrLn $ "[agq] Attempt " <> show attempt <> " failed, retrying..."
+              attemptLoop (attempt + 1)
+            else return (ec, out, err)
+
+  (ecAgent, commitMsg, agentErr) <- attemptLoop 1
   putStrLn $ "[agq] Agent finished for task '" <> nameStr <> "' — " <>
     if ecAgent == ExitSuccess then "success" else "FAILED"
 
-  -- Bail out immediately on agent failure
+  -- Bail out when all attempts are exhausted
   when (ecAgent /= ExitSuccess) $ do
     -- Write full stderr to disk next to the session files
     let errFile = sessDir </> nameStr <> ".err"
