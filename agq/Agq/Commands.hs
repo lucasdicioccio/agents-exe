@@ -345,6 +345,10 @@ execTask cfg conn t = do
 
   -- Bail out immediately on agent failure
   when (ecAgent /= ExitSuccess) $ do
+    -- Write full stderr to disk next to the session files
+    let errFile = sessDir </> nameStr <> ".err"
+    Text.writeFile errFile agentErr
+    putStrLn $ "[agq] Stderr log written to " <> errFile
     let errSnippet = Text.unlines . reverse . take 100 . reverse . Text.lines $ agentErr
         errMsg     = "agents-exe failed for task `" <> Text.pack nameStr <> "`\n\n```\n" <> errSnippet <> "```"
     -- For GitHub-sourced tasks, post the failure snippet as an issue comment
@@ -365,18 +369,24 @@ execTask cfg conn t = do
     Text.writeFile sessMd sessionMd
 
     -- 6. Commit and push
-    void $ runGit ["-C", nameStr, "checkout", "-b", nameStr]
+    -- Branch name includes a short SHA and the tries_remaining counter so that
+    -- successive retry attempts never collide with each other on the remote.
+    -- e.g. gh-132-c7823.2  (tries_remaining=2 after this attempt was claimed)
+    (_, shaOut) <- captureCmd "git" ["-C", nameStr, "rev-parse", "--short", "HEAD"]
+    let shortSha  = Text.unpack (Text.strip shaOut)
+        branchName = nameStr <> "-" <> shortSha <> "." <> show (taskTriesRemaining t)
+    void $ runGit ["-C", nameStr, "checkout", "-b", branchName]
     (_, statusOut) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
     unless (Text.null (Text.strip statusOut)) $ do
       void $ runGit ["-C", nameStr, "add", "-A"]
       void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
-      void $ runGit ["-C", nameStr, "push", "-u", "origin", nameStr]
+      void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
 
       let prTitle = takeWhile (/= '\n') commit
       void $ runCmd "gh"
         [ "pr", "create"
         , "--base", target
-        , "--head", nameStr
+        , "--head", branchName
         , "--title", prTitle
         , "--body", commit
         , "--label", Text.unpack (labelAgentPr (labels cfg))
