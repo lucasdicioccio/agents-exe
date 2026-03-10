@@ -12,6 +12,8 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Functor.Contravariant.Divisible (choose)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -63,6 +65,64 @@ import qualified System.Process as Process
 
 import Options.Applicative
 import Data.Time (getCurrentTime)
+
+-------------------------------------------------------------------------------
+-- Alias Types and Defaults
+-------------------------------------------------------------------------------
+
+-- | Input mode for aliases - determines how content is read
+data AliasInputMode = AliasStdin | AliasFile
+    deriving (Show, Eq, Generic)
+
+instance Aeson.FromJSON AliasInputMode where
+    parseJSON = Aeson.withText "AliasInputMode" $ \t ->
+        case Text.toLower t of
+            "stdin" -> pure AliasStdin
+            "file" -> pure AliasFile
+            _ -> fail $ "Unknown alias input mode: " <> Text.unpack t
+
+instance Aeson.ToJSON AliasInputMode where
+    toJSON AliasStdin = Aeson.String "stdin"
+    toJSON AliasFile = Aeson.String "file"
+
+-- | Definition of a prompt alias
+data AliasDefinition = AliasDefinition
+    { aliasDescription :: Text
+    , aliasTemplate :: Text
+    , aliasInputMode :: AliasInputMode
+    }
+    deriving (Show, Generic)
+
+instance Aeson.FromJSON AliasDefinition where
+    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 5  -- drop "alias" prefix
+        }
+
+instance Aeson.ToJSON AliasDefinition where
+    toJSON = Aeson.genericToJSON Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 5
+        }
+
+-- | Default aliases provided when no configuration exists
+defaultAliases :: Map Text AliasDefinition
+defaultAliases = Map.fromList
+    [ ("translate", AliasDefinition
+        "Translate text to English"
+        "Please translate the following text to English:\n\n{{content}}"
+        AliasStdin)
+    , ("summarize", AliasDefinition
+        "Summarize text"
+        "Please provide a concise summary of the following:\n\n{{content}}"
+        AliasStdin)
+    , ("code-review", AliasDefinition
+        "Review code for issues"
+        "Please review the following code for potential bugs, security issues, and style improvements:\n\n```{{language}}\n{{content}}\n```"
+        AliasFile)
+    , ("explain", AliasDefinition
+        "Explain code in plain English"
+        "Please explain what the following code does in plain English:\n\n```{{language}}\n{{content}}\n```"
+        AliasFile)
+    ]
 
 -------------------------------------------------------------------------------
 -- Default Configuration and Example Agents
@@ -236,6 +296,7 @@ data ArgParserArgs
     , defaultLogJsonFilepath :: Maybe FilePath
     , defaultLogRawFilepath :: Maybe FilePath
     , defaultLogSesionsJsonPrefix :: Maybe FilePath
+    , defaultAliasesMap :: Map Text AliasDefinition
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -260,10 +321,18 @@ data AgentsExeConfig = AgentsExeConfig
     , agentsDirectories :: [FilePath]
     , agentsFiles :: [FilePath]
     , agentsLogs :: Maybe AgentsExeLogConfig
+    , promptAliases :: Maybe (Map Text AliasDefinition)
     }
     deriving (Show, Generic)
 
-instance Aeson.FromJSON AgentsExeConfig
+instance Aeson.FromJSON AgentsExeConfig where
+    parseJSON = Aeson.withObject "AgentsExeConfig" $ \v ->
+        AgentsExeConfig
+            <$> v Aeson..:? "agentsConfigDir"
+            <*> v Aeson..:? "agentsDirectories" Aeson..!= []
+            <*> v Aeson..:? "agentsFiles" Aeson..!= []
+            <*> v Aeson..:? "agentsLogs"
+            <*> v Aeson..:? "promptAliases"
 
 locateAgentsExeConfig :: IO (Maybe FilePath)
 locateAgentsExeConfig = do
@@ -308,6 +377,7 @@ initArgParserArgs = do
                         (logJsonPath =<< obj.agentsLogs)
                         (logRawPath =<< obj.agentsLogs)
                         (logSessionsJsonPrefix =<< obj.agentsLogs)
+                        (fromMaybe defaultAliases obj.promptAliases)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
@@ -327,6 +397,7 @@ initArgParserArgs = do
                 Nothing
                 Nothing
                 (Just sessionsDir)
+                defaultAliases
 
 data Prog = Prog
     { configDir :: FilePath
@@ -336,6 +407,7 @@ data Prog = Prog
     , logJsonFile :: Maybe FilePath
     , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
+    , availableAliases :: Map Text AliasDefinition
     , mainCommand :: Command
     }
 
@@ -373,6 +445,7 @@ data PromptScriptDirective
     | Separator Int Text.Text
     | ShellOutput String
     | SessionContents FilePath SessionInject.SessionVerbosity
+    | AliasPrompt Text  -- ^ Use a predefined prompt alias
     deriving (Show)
 
 type PromptScript =
@@ -556,21 +629,40 @@ parseOneShotOptions =
                     <> help "extra session-file to resume/store"
                 )
             )
-        <*> ( many
-                ( promptOption
-                    <|> fileOption
-                    <|> shellOption
-                    <|> smallSeparatorFlag
-                    <|> largeSeparatorFlag
-                    <|> sessionXSOption
-                    <|> sessionSOption
-                    <|> sessionMOption
-                    <|> sessionLOption
-                    <|> sessionXLOption
-                )
-            )
+        <*> parsePromptScript
         <*> parseThinkingOption
+
+-- | Parse a prompt script - can include aliases, prompts, files, etc.
+parsePromptScript :: Parser PromptScript
+parsePromptScript =
+    fmap
+        (\directives -> if null directives then [FileContents "/dev/stdin"] else directives)
+        (many parsePromptDirective)
+
+-- | Parse a single prompt directive (alias, prompt, file, etc.)
+parsePromptDirective :: Parser PromptScriptDirective
+parsePromptDirective =
+    aliasOption
+        <|> promptOption
+        <|> fileOption
+        <|> shellOption
+        <|> smallSeparatorFlag
+        <|> largeSeparatorFlag
+        <|> sessionXSOption
+        <|> sessionSOption
+        <|> sessionMOption
+        <|> sessionLOption
+        <|> sessionXLOption
   where
+    aliasOption :: Parser PromptScriptDirective
+    aliasOption =
+        AliasPrompt
+            <$> strOption
+                ( long "alias"
+                    <> metavar "NAME"
+                    <> help "Use a predefined prompt alias (e.g., translate, summarize, code-review, explain)"
+                )
+
     smallSeparatorFlag :: Parser PromptScriptDirective
     smallSeparatorFlag =
         Separator 4
@@ -730,8 +822,7 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*>
-            flag
+        <*> flag
                 SessionPrint.Chronological
                 SessionPrint.Antichronological
                 ( long "antichronological"
@@ -1073,6 +1164,7 @@ parseProgOptions argparserargs =
                     )
                 )
             )
+        <*> pure argparserargs.defaultAliasesMap
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "tui" (info parseTuiChatCommand (idm))
@@ -1169,12 +1261,12 @@ main = do
                 agentPropsList <- traverse oneAgent pargs.agentFiles
                 TUI.runTUI sessionStore agentPropsList
             EchoPrompt opts -> do
-                promptContents <- interpretPromptScript opts.promptScript
+                promptContents <- interpretPromptScript pargs.availableAliases opts.promptScript
                 Text.putStr promptContents
             OneShot opts -> do
                 apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
                 forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
-                    promptContents <- interpretPromptScript opts.promptScript
+                    promptContents <- interpretPromptScript pargs.availableAliases opts.promptScript
                     mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
                     registry <- AgentTree.newRuntimeRegistry
                     let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
@@ -1697,7 +1789,7 @@ loadStandaloneToolsForAgent agentFile agent = do
         }
 
 -------------------------------------------------------------------------------
--- Check Command Helper
+-- Check Command Handler
 -------------------------------------------------------------------------------
 
 printAgentCheck :: AgentTree.AgentTree -> IO ()
@@ -1894,14 +1986,18 @@ makeHttpJsonTrace baseTracer url = do
     rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
     pure $ HttpLogger.httpTracer rt baseTracer
 
-interpretPromptScript :: PromptScript -> IO Text.Text
-interpretPromptScript [] =
-    Text.unlines <$> traverse interpretPromptScriptDirective [FileContents "/dev/stdin"]
-interpretPromptScript directives =
-    Text.unlines <$> traverse interpretPromptScriptDirective directives
+-------------------------------------------------------------------------------
+-- Prompt Script Interpretation with Alias Support
+-------------------------------------------------------------------------------
 
-interpretPromptScriptDirective :: PromptScriptDirective -> IO Text.Text
-interpretPromptScriptDirective x =
+-- | Interpret a prompt script, resolving aliases and reading content
+interpretPromptScript :: Map Text AliasDefinition -> PromptScript -> IO Text.Text
+interpretPromptScript aliases directives =
+    Text.unlines <$> traverse (interpretPromptScriptDirective aliases) directives
+
+-- | Interpret a single prompt directive
+interpretPromptScriptDirective :: Map Text AliasDefinition -> PromptScriptDirective -> IO Text.Text
+interpretPromptScriptDirective aliases x =
     case x of
         Str s -> pure s
         FileContents p -> Text.readFile p
@@ -1915,4 +2011,51 @@ interpretPromptScriptDirective x =
                     pure $ "_(Error loading session: " <> Text.pack err <> " )_\n"
                 Right session ->
                     pure $ SessionInject.formatSessionForPrompt verbosity session
+        AliasPrompt aliasName ->
+            case Map.lookup aliasName aliases of
+                Just def -> resolveAlias def
+                Nothing -> do
+                    Text.hPutStrLn stderr $ "Error: Unknown alias '" <> aliasName <> "'"
+                    Text.hPutStrLn stderr "Available aliases:"
+                    mapM_ (\name -> Text.hPutStrLn stderr $ "  - " <> name) (Map.keys aliases)
+                    exitFailure
+
+-- | Resolve an alias by reading input and substituting template variables
+resolveAlias :: AliasDefinition -> IO Text
+resolveAlias def = do
+    content <- case aliasInputMode def of
+        AliasStdin -> Text.getContents
+        AliasFile -> do
+            -- For file mode without explicit file, read from stdin
+            Text.getContents
+    let language = detectLanguage content
+    pure $ substituteTemplate (aliasTemplate def) content language
+
+-- | Detect language from content (simple heuristic)
+detectLanguage :: Text -> Text
+detectLanguage content =
+    -- Simple heuristic: check for common language indicators
+    if "{-#" `Text.isInfixOf` content || "module " `Text.isInfixOf` content
+        then "haskell"
+    else if "def " `Text.isInfixOf` content || ("import " `Text.isInfixOf` content && ":" `Text.isInfixOf` content)
+        then "python"
+    else if "function " `Text.isInfixOf` content || "const " `Text.isInfixOf` content || "let " `Text.isInfixOf` content
+        then "javascript"
+    else if "fn " `Text.isInfixOf` content || "impl " `Text.isInfixOf` content || "use " `Text.isInfixOf` content
+        then "rust"
+    else if "public class " `Text.isInfixOf` content || "private " `Text.isInfixOf` content
+        then "java"
+    else if "<?php" `Text.isInfixOf` content
+        then "php"
+    else if "package main" `Text.isInfixOf` content || "func " `Text.isInfixOf` content
+        then "go"
+    else
+        ""
+
+-- | Substitute template variables with actual values
+substituteTemplate :: Text -> Text -> Text -> Text
+substituteTemplate template content language =
+    let withContent = Text.replace "{{content}}" content template
+        withLanguage = Text.replace "{{language}}" language withContent
+    in withLanguage
 
