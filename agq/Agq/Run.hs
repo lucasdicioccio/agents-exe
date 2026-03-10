@@ -1,6 +1,7 @@
 module Agq.Run
   ( runCmd
   , captureCmd
+  , captureCmdBoth
   , runGit
   , runGh
   , runAgentsExe
@@ -31,6 +32,20 @@ captureCmd cmd args = do
       return (TextEncoding.decodeUtf8 bs)
   ec <- waitForProcess ph
   return (ec, out)
+
+-- | Run a command capturing both stdout and stderr as Text.
+captureCmdBoth :: FilePath -> [String] -> IO (ExitCode, Text, Text)
+captureCmdBoth cmd args = do
+  let p = (proc cmd args) { std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe }
+  (_, mout, merr, ph) <- createProcess p
+  out <- case mout of
+    Nothing -> return ""
+    Just h  -> fmap TextEncoding.decodeUtf8 (BS.hGetContents h)
+  err <- case merr of
+    Nothing -> return ""
+    Just h  -> fmap TextEncoding.decodeUtf8 (BS.hGetContents h)
+  ec <- waitForProcess ph
+  return (ec, out, err)
 
 -- | Run git with given args, streaming output.
 runGit :: [String] -> IO ExitCode

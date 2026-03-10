@@ -305,12 +305,12 @@ execTask cfg conn t = do
     Nothing -> return ()
     Just h  -> void $ runCmd h ["prepare", Text.unpack lbl, nameStr, instrFile]
 
-  -- 4. Run agent, capturing commit message
+  -- 4. Run agent, capturing stdout (commit message) and stderr (error log)
   putStrLn $ "[agq] Running agent for task '" <> nameStr <> "'"
   putStrLn $ "[agq]   agent  : " <> agentCfg
   putStrLn $ "[agq]   instr  : " <> instrFile
   putStrLn $ "[agq]   session: " <> sessFile
-  (ecAgent, commitMsg) <- runWithCwd worktreeProj "agents-exe"
+  (ecAgent, commitMsg, agentErr) <- runWithCwdBoth worktreeProj "agents-exe"
     [ "--agent-file", agentCfg
     , "run"
     , "--session-file", sessFile
@@ -318,55 +318,75 @@ execTask cfg conn t = do
     ]
   putStrLn $ "[agq] Agent finished for task '" <> nameStr <> "' — " <>
     if ecAgent == ExitSuccess then "success" else "FAILED"
-  let commit = if Text.null (Text.strip commitMsg)
-                 then "Update via automation (" <> nameStr <> ")"
-                 else Text.unpack (Text.strip commitMsg)
 
-  -- 5. session-print → write sibling .md so it gets committed with the work
-  putStrLn $ "[agq] Printing session for task '" <> nameStr <> "' -> " <> sessMd
-  (_, sessionMd) <- captureCmd "agents-exe" ["session-print", sessFile]
-  Text.writeFile sessMd sessionMd
+  -- Bail out immediately on agent failure
+  when (ecAgent /= ExitSuccess) $ do
+    let errSnippet = Text.unlines . take 100 . reverse . Text.lines $ agentErr
+        errMsg     = "agents-exe failed for task `" <> Text.pack nameStr <> "`\n\n```\n" <> errSnippet <> "```"
+    -- For GitHub-sourced tasks, post the failure snippet as an issue comment
+    when (taskSource t == "github") $
+      case issueNumber nameStr of
+        Nothing -> return ()
+        Just n  -> void $ runGh ["issue", "comment", show n, "--body", Text.unpack errMsg]
+    releaseLock conn (taskName t) Failed (Just "agents-exe returned non-zero")
 
-  -- 6. Commit and push
-  void $ runGit ["-C", nameStr, "checkout", "-b", nameStr]
-  (_, statusOut) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
-  unless (Text.null (Text.strip statusOut)) $ do
-    void $ runGit ["-C", nameStr, "add", "-A"]
-    void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
-    void $ runGit ["-C", nameStr, "push", "-u", "origin", nameStr]
+  -- Only continue if agent succeeded
+  when (ecAgent == ExitSuccess) $ do
+    let commit = if Text.null (Text.strip commitMsg)
+                   then "Update via automation (" <> nameStr <> ")"
+                   else Text.unpack (Text.strip commitMsg)
 
-    let prTitle = takeWhile (/= '\n') commit
-    void $ runCmd "gh"
-      [ "pr", "create"
-      , "--base", target
-      , "--head", nameStr
-      , "--title", prTitle
-      , "--body", commit
-      , "--label", Text.unpack (labelAgentPr (labels cfg))
-      ]
+    -- 5. session-print → write sibling .md so it gets committed with the work
+    putStrLn $ "[agq] Printing session for task '" <> nameStr <> "' -> " <> sessMd
+    (_, sessionMd) <- captureCmd "agents-exe" ["session-print", sessFile]
+    Text.writeFile sessMd sessionMd
 
-    case mHookAbs of
-      Nothing -> return ()
-      Just h  -> void $ runCmd h ["preview", Text.unpack lbl, nameStr, instrFile]
+    -- 6. Commit and push
+    void $ runGit ["-C", nameStr, "checkout", "-b", nameStr]
+    (_, statusOut) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
+    unless (Text.null (Text.strip statusOut)) $ do
+      void $ runGit ["-C", nameStr, "add", "-A"]
+      void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
+      void $ runGit ["-C", nameStr, "push", "-u", "origin", nameStr]
 
-  if ecAgent == ExitSuccess
-    then releaseLock conn (taskName t) Done Nothing
-    else releaseLock conn (taskName t) Failed (Just "agents-exe returned non-zero")
+      let prTitle = takeWhile (/= '\n') commit
+      void $ runCmd "gh"
+        [ "pr", "create"
+        , "--base", target
+        , "--head", nameStr
+        , "--title", prTitle
+        , "--body", commit
+        , "--label", Text.unpack (labelAgentPr (labels cfg))
+        ]
 
--- | Run a command inside a given working directory, capturing stdout.
-runWithCwd :: FilePath -> FilePath -> [String] -> IO (ExitCode, Text)
-runWithCwd worktreePath cmd args = do
+      case mHookAbs of
+        Nothing -> return ()
+        Just h  -> void $ runCmd h ["preview", Text.unpack lbl, nameStr, instrFile]
+
+    releaseLock conn (taskName t) Done Nothing
+
+-- | Extract the GitHub issue number from a task name like "gh-42".
+issueNumber :: String -> Maybe Int
+issueNumber s = case break (== '-') s of
+  ("gh", '-':rest) -> case reads rest of
+    [(n, "")] -> Just n
+    _         -> Nothing
+  _ -> Nothing
+
+-- | Run a command inside a given working directory, capturing stdout and stderr.
+runWithCwdBoth :: FilePath -> FilePath -> [String] -> IO (ExitCode, Text, Text)
+runWithCwdBoth worktreePath cmd args = do
   let p = (proc cmd args)
         { std_in  = NoStream
         , std_out = CreatePipe
+        , std_err = CreatePipe
         , cwd     = Just worktreePath
         }
-  (_, mout, _, ph) <- createProcess p
-  out <- case mout of
-    Nothing -> return ""
-    Just h  -> fmap Text.pack (hGetContents h)
-  ec <- waitForProcess ph
-  return (ec, out)
+  (_, mout, merr, ph) <- createProcess p
+  out <- maybe (return "") (fmap Text.pack . hGetContents) mout
+  err <- maybe (return "") (fmap Text.pack . hGetContents) merr
+  ec  <- waitForProcess ph
+  return (ec, out, err)
 
 -- ---------------------------------------------------------------------------
 -- cmdMergePRs
