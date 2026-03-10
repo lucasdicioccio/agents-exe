@@ -376,6 +376,7 @@ data OneShotOptions
     = OneShotOptions
     { sessionFile :: Maybe FilePath
     , promptScript :: PromptScript
+    , thinkingOutput :: OneShot.ThinkingOutput
     }
     deriving (Show)
 
@@ -506,6 +507,28 @@ parseTuiOptions :: Parser TuiOptions
 parseTuiOptions =
     pure TuiOptions
 
+-- | Parse the --thinking option with choices: none, stdout, stderr
+parseThinkingOption :: Parser OneShot.ThinkingOutput
+parseThinkingOption =
+    option (maybeReader parseThinking)
+        ( long "thinking"
+            <> metavar "TARGET"
+            <> help "Where to output thinking content: none, stdout, or stderr (default: none)"
+            <> value OneShot.ThinkingNone
+            <> showDefaultWith showThinking
+        )
+  where
+    parseThinking :: String -> Maybe OneShot.ThinkingOutput
+    parseThinking "none" = Just OneShot.ThinkingNone
+    parseThinking "stdout" = Just OneShot.ThinkingStdout
+    parseThinking "stderr" = Just OneShot.ThinkingStderr
+    parseThinking _ = Nothing
+    
+    showThinking :: OneShot.ThinkingOutput -> String
+    showThinking OneShot.ThinkingNone = "none"
+    showThinking OneShot.ThinkingStdout = "stdout"
+    showThinking OneShot.ThinkingStderr = "stderr"
+
 parseOneShotOptions :: Parser OneShotOptions
 parseOneShotOptions =
     OneShotOptions
@@ -529,6 +552,7 @@ parseOneShotOptions =
                     <|> sessionXLOption
                 )
             )
+        <*> parseThinkingOption
   where
     smallSeparatorFlag :: Parser PromptScriptDirective
     smallSeparatorFlag =
@@ -669,12 +693,13 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*> flag
-            SessionPrint.Chronological
-            SessionPrint.Antichronological
-            ( long "antichronological"
-                <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
-            )
+        <*>
+            flag
+                SessionPrint.Chronological
+                SessionPrint.Antichronological
+                ( long "antichronological"
+                    <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
+                )
         <*> switch
             ( long "no-funny-stamp"
                 <> help "Skip the ASCII art logo stamp in the header (default: show logo)"
@@ -1099,7 +1124,7 @@ main = do
                     promptContents <- interpretPromptScript opts.promptScript
                     mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
                     registry <- AgentTree.newRuntimeRegistry
-                    let oneShot text props = OneShot.mainOneShotText sessionStore opts.sessionFile mSession props text
+                    let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
                     oneShot promptContents $
                         AgentTree.Props
                             { AgentTree.apiKeys = apiKeys
@@ -1707,7 +1732,7 @@ toJsonTrace x = case x of
                         , "cmd" .= cmd
                         , "args" .= targs
                         ]
-            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc input))) ->
+            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStarted desc _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -1715,9 +1740,8 @@ toJsonTrace x = case x of
                         , "flavor" .= ("io" :: Text.Text)
                         , "action" .= ("start" :: Text.Text)
                         , "tool" .= desc.ioSlug
-                        , "input" .= input
                         ]
-            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc input _))) ->
+            (RuntimeTrace.RunToolTrace uuid (ToolsTrace.IOToolsTrace (ToolsTrace.IOScriptStopped desc _ _))) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("tool" :: Text.Text)
@@ -1725,7 +1749,6 @@ toJsonTrace x = case x of
                         , "flavor" .= ("io" :: Text.Text)
                         , "action" .= ("stop" :: Text.Text)
                         , "tool" .= desc.ioSlug
-                        , "input" .= input
                         ]
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub

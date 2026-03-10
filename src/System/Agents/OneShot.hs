@@ -3,11 +3,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module System.Agents.OneShot (
+  -- * Types
+  ThinkingOutput(..),
+  
+  -- * Main functions
   runtimeToAgent,
   agentStoreSession,
   fileStoringCallback,
   mainPrintAgent,
-  mainOneShotText
+  mainOneShotText,
+  mainOneShotTextWithThinking,
 ) where
 
 import Control.Exception (Exception)
@@ -21,6 +26,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import System.IO (stderr)
 
 import System.Agents.AgentTree
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -29,16 +35,23 @@ import System.Agents.Base (newConversationId,newStepId,ConversationId, AgentId)
 import System.Agents.Session.Base
 import System.Agents.Session.Loop
 import System.Agents.Session.OpenAI
+import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
 import System.Agents.Tools
 import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import System.Agents.Session.Step (naiveTilNoToolCallStep)
 
 import qualified Data.Aeson.Key as AesonKey
 import Prod.Tracer (Tracer (..), contramap)
+
+-- | Controls where thinking content should be output.
+data ThinkingOutput
+  = ThinkingNone      -- ^ Suppress thinking output (default)
+  | ThinkingStdout    -- ^ Output thinking to stdout
+  | ThinkingStderr    -- ^ Output thinking to stderr
+  deriving (Show, Eq, Ord)
 
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
@@ -55,6 +68,8 @@ data OneShotConfig = OneShotConfig
     -- ^ Optional initial session to resume from
   , extraSavePath :: Maybe FilePath
     -- ^ Optional final session store path
+  , thinkingOutput :: ThinkingOutput
+    -- ^ Where to output thinking content (defaults to 'ThinkingNone')
   }
 
 -- | Creates a configuration that optionally persists sessions to a file on top of the SessionStore.
@@ -63,15 +78,15 @@ fileStoringConfig store mSession mPath = OneShotConfig
   { onSessionProgress = fileStoringCallback store
   , initialSession = mSession
   , extraSavePath = mPath
+  , thinkingOutput = ThinkingNone
   }
 
 -- | Run a one-shot agent with the given configuration.
 runOneShotWithConfig :: SessionStore -> OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
 runOneShotWithConfig store config convId rt query = do
-    agent0 <- runtimeToAgent store config.extraSavePath convId rt
+    agent0 <- runtimeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId rt
     let agent = agentSetQuery (UserQuery query)
           $ agentWithSessionProgress (config.onSessionProgress convId)
-          $ fmap oneShotStep
           $ agent0
     
     -- Create or use initial session with all required fields including sessionConversationId
@@ -80,32 +95,37 @@ runOneShotWithConfig store config convId rt query = do
       Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
     
     config.onSessionProgress convId (SessionStarted session0)
-    result <- run convId agent session0
+    (llmTurn, _) <- run convId agent session0
     config.onSessionProgress convId (SessionCompleted session0)
-    pure result
+    pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
 
 -- | Legacy function: Run a one-shot agent with optional file-based session storage.
 mainOneShotText :: SessionStore -> Maybe FilePath -> Maybe Session -> Props -> Text -> IO ()
 mainOneShotText store mPath mSession props query = do
+    mainOneShotTextWithThinking store mPath mSession ThinkingNone props query
+
+-- | Run a one-shot agent with configurable thinking output.
+mainOneShotTextWithThinking :: SessionStore -> Maybe FilePath -> Maybe Session -> ThinkingOutput -> Props -> Text -> IO ()
+mainOneShotTextWithThinking store mPath mSession thinkingOut props query = do
     convId <- newConversationId
     withAgentTreeRuntime props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized ai -> do
-                let config = fileStoringConfig store mSession mPath
-                result <- runOneShotWithConfig store config convId ai.agentRuntime query
-                Text.putStrLn (getOneShotResult result)
+                let config = (fileStoringConfig store mSession mPath) { thinkingOutput = thinkingOut }
+                OneShotResult result <- runOneShotWithConfig store config convId ai.agentRuntime query
+                Text.putStrLn result
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
   deriving (Show)
 instance Exception SessionLoadingFailed
 
 -- | Stopping result type that carries the final response text.
-newtype OneShotResult = OneShotResult  { getOneShotResult :: Text }
+newtype OneShotResult = OneShotResult Text
 
--- | Step function that stops when the LLM returns no tool calls.
-oneShotStep :: (LlmTurnContent, Session) -> OneShotResult
-oneShotStep (llmTurn,_) = OneShotResult $ extractResponseText llmTurn.llmResponse
+-- | Extract text content from an LLM response.
+extractResponseText :: LlmResponse -> Text
+extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
 
 -- | Converts a Runtime into an Agent that stops when no tool calls are present.
 --
@@ -113,7 +133,12 @@ oneShotStep (llmTurn,_) = OneShotResult $ extractResponseText llmTurn.llmRespons
 -- These identifiers are used to construct the 'ToolExecutionContext' passed to tools
 -- during execution, allowing tools to access session metadata.
 runtimeToAgent :: SessionStore -> Maybe FilePath -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
-runtimeToAgent store mPath convId rt = do
+runtimeToAgent store mPath convId rt = 
+    runtimeToAgentWithThinking store mPath ThinkingNone convId rt
+
+-- | Converts a Runtime into an Agent with configurable thinking output.
+runtimeToAgentWithThinking :: SessionStore -> Maybe FilePath -> ThinkingOutput -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
+runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
     stepId <- newStepId
@@ -131,7 +156,17 @@ runtimeToAgent store mPath convId rt = do
     pure $ 
       agentStoreSession store mPath convId $
         Agent
-        { step = naiveTilNoToolCallStep
+        { step = \sess -> do
+            action <- naiveTilNoToolCallStep sess
+            -- Output thinking if present and configured
+            case action of
+                Stop (llmTurn, _) -> 
+                    case (thinkingOut, llmTurn.llmResponse.responseThinking) of
+                        (ThinkingStdout, Just t) -> Text.putStrLn t
+                        (ThinkingStderr, Just t) -> Text.hPutStrLn stderr t
+                        _ -> pure ()
+                _ -> pure ()
+            pure action
         , sysPrompt = pure sPrompt
         , sysTools = sTools
         , usrQuery = pure Nothing
@@ -139,10 +174,6 @@ runtimeToAgent store mPath convId rt = do
         , complete = completeF
         , contextConfig = defaultContextConfig
         }
-
--- | Extract text content from an LLM response.
-extractResponseText :: LlmResponse -> Text
-extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
 
 -- | Execute a tool call using the runtime's registered tools.
 --
