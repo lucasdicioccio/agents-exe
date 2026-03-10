@@ -311,6 +311,13 @@ initArgParserArgs = do
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
         jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
+        
+        -- Create sessions directory for storing conversations when outside projects
+        -- This ensures session files are properly persisted instead of being written
+        -- to the current working directory with an empty prefix
+        let sessionsDir = pconfigdir </> "sessions"
+        createDirectoryIfMissing True sessionsDir
+        
         pure $
             ArgParserArgs
                 pconfigdir
@@ -318,7 +325,7 @@ initArgParserArgs = do
                 Nothing
                 Nothing
                 Nothing
-                Nothing
+                (Just sessionsDir)
 
 data Prog = Prog
     { apiKeysFile :: FilePath
