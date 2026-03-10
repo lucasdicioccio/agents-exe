@@ -43,6 +43,7 @@ import qualified System.Agents.Runtime.Trace as RuntimeTrace
 import qualified System.Agents.Session.Edit as SessionEdit
 import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.SessionPrint as SessionPrint
+import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
 import qualified System.Agents.Tools as ToolsTrace
@@ -359,6 +360,7 @@ data PromptScriptDirective
     | FileContents FilePath
     | Separator Int Text.Text
     | ShellOutput String
+    | SessionContents FilePath SessionInject.SessionVerbosity
     deriving (Show)
 
 type PromptScript =
@@ -515,7 +517,17 @@ parseOneShotOptions =
                 )
             )
         <*> ( many
-                (promptOption <|> fileOption <|> shellOption <|> smallSeparatorFlag <|> largeSeparatorFlag)
+                ( promptOption
+                    <|> fileOption
+                    <|> shellOption
+                    <|> smallSeparatorFlag
+                    <|> largeSeparatorFlag
+                    <|> sessionXSOption
+                    <|> sessionSOption
+                    <|> sessionMOption
+                    <|> sessionLOption
+                    <|> sessionXLOption
+                )
             )
   where
     smallSeparatorFlag :: Parser PromptScriptDirective
@@ -566,6 +578,61 @@ parseOneShotOptions =
                     <> metavar "SHELL"
                     <> help "prompt the stdout of a shell command"
                 )
+
+    -- | Parse --session-xs: minimal session info (queries and responses only, skip tool-only turns)
+    sessionXSOption :: Parser PromptScriptDirective
+    sessionXSOption =
+        SessionContents
+            <$> strOption
+                ( long "session-xs"
+                    <> metavar "SESSIONFILE"
+                    <> help "inject session file content at minimal verbosity (queries/responses only, skips tool-only turns)"
+                )
+            <*> pure SessionInject.SessionXS
+
+    -- | Parse --session-s: add thinking and tool names called
+    sessionSOption :: Parser PromptScriptDirective
+    sessionSOption =
+        SessionContents
+            <$> strOption
+                ( long "session-s"
+                    <> metavar "SESSIONFILE"
+                    <> help "inject session file content at low verbosity (+thinking, +tool names)"
+                )
+            <*> pure SessionInject.SessionS
+
+    -- | Parse --session-m: add statistics
+    sessionMOption :: Parser PromptScriptDirective
+    sessionMOption =
+        SessionContents
+            <$> strOption
+                ( long "session-m"
+                    <> metavar "SESSIONFILE"
+                    <> help "inject session file content at medium verbosity (+statistics)"
+                )
+            <*> pure SessionInject.SessionM
+
+    -- | Parse --session-l: add tool call results
+    sessionLOption :: Parser PromptScriptDirective
+    sessionLOption =
+        SessionContents
+            <$> strOption
+                ( long "session-l"
+                    <> metavar "SESSIONFILE"
+                    <> help "inject session file content at high verbosity (+tool call results)"
+                )
+            <*> pure SessionInject.SessionL
+
+    -- | Parse --session-xl: complete session info (same as L)
+    sessionXLOption :: Parser PromptScriptDirective
+    sessionXLOption =
+        SessionContents
+            <$> strOption
+                ( long "session-xl"
+                    <> metavar "SESSIONFILE"
+                    <> help "inject session file content at maximum verbosity (complete)"
+                )
+            <*> pure SessionInject.SessionXL
 
 parseMcpServer :: Parser Command
 parseMcpServer =
@@ -1739,4 +1806,12 @@ interpretPromptScriptDirective x =
         FileContents p -> Text.readFile p
         Separator n s -> pure $ Text.replicate n s
         ShellOutput cmd -> Text.pack <$> Process.readCreateProcess (Process.shell cmd) ("" :: String)
+        SessionContents path verbosity -> do
+            result <- Aeson.eitherDecodeFileStrict' path
+            case result of
+                Left err -> do
+                    Text.hPutStrLn stderr $ "Warning: could not load session file " <> Text.pack path <> ": " <> Text.pack err
+                    pure $ "_(Error loading session: " <> Text.pack err <> " )_\n"
+                Right session ->
+                    pure $ SessionInject.formatSessionForPrompt verbosity session
 
