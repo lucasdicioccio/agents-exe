@@ -345,7 +345,7 @@ execTask cfg conn t = do
 
   -- Bail out immediately on agent failure
   when (ecAgent /= ExitSuccess) $ do
-    let errSnippet = Text.unlines . take 100 . reverse . Text.lines $ agentErr
+    let errSnippet = Text.unlines . reverse . take 100 . reverse . Text.lines $ agentErr
         errMsg     = "agents-exe failed for task `" <> Text.pack nameStr <> "`\n\n```\n" <> errSnippet <> "```"
     -- For GitHub-sourced tasks, post the failure snippet as an issue comment
     case taskSource t of
