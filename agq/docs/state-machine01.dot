@@ -1,0 +1,66 @@
+digraph agq {
+  rankdir=LR
+  fontname="Helvetica"
+  node [fontname="Helvetica" fontsize=12 shape=box style=rounded]
+  edge [fontname="Helvetica" fontsize=10]
+
+  // ── GitHub issue lifecycle ──────────────────────────────────────────────
+  subgraph cluster_github {
+    label="GitHub Issue"
+    style=dashed
+    color="#666666"
+    fontsize=13
+
+    gh_wait       [label="agq/wait"         style="rounded,filled" fillcolor="#fff3cd"]
+    gh_toretaken  [label="agq/to-be-taken"  style="rounded,filled" fillcolor="#cfe2ff"]
+    gh_taken      [label="agq/taken"        style="rounded,filled" fillcolor="#d1e7dd"]
+  }
+
+  // ── Task lifecycle (SQLite) ─────────────────────────────────────────────
+  subgraph cluster_task {
+    label="Task (SQLite queue)"
+    style=dashed
+    color="#666666"
+    fontsize=13
+
+    t_pending  [label="pending"  style="rounded,filled" fillcolor="#fff3cd"]
+    t_running  [label="running"  style="rounded,filled" fillcolor="#cfe2ff"]
+    t_done     [label="done"     style="rounded,filled" fillcolor="#d1e7dd" shape=doublecircle]
+    t_failed   [label="failed"   style="rounded,filled" fillcolor="#f8d7da" shape=doublecircle]
+  }
+
+  // ── Pull Request lifecycle ──────────────────────────────────────────────
+  subgraph cluster_pr {
+    label="Pull Request"
+    style=dashed
+    color="#666666"
+    fontsize=13
+
+    pr_open   [label="open"    style="rounded,filled" fillcolor="#cfe2ff"]
+    pr_merged [label="merged"  style="rounded,filled" fillcolor="#d1e7dd" shape=doublecircle]
+  }
+
+  // ── Entry points ───────────────────────────────────────────────────────
+  add    [label="agq add"  shape=plaintext]
+  issue  [label="GitHub\nissue"  shape=plaintext]
+
+  add   -> t_pending  [label="insert task"]
+  issue -> gh_wait    [label="label: agq/wait\n(has deps)"]
+  issue -> gh_toretaken [label="label: agq/to-be-taken\n(no deps)"]
+
+  // ── GitHub promote → pull flow ─────────────────────────────────────────
+  gh_wait      -> gh_toretaken [label="agq promote\n(no dep is open)"]
+  gh_toretaken -> gh_taken     [label="agq pull"]
+  gh_taken     -> t_pending    [label="task inserted"]
+
+  // ── Task state transitions ─────────────────────────────────────────────
+  t_pending -> t_running [label="claimNextTask\n(deps done, lock free)"]
+  t_running -> t_done    [label="agent success"]
+  t_running -> t_failed  [label="agent failure /\nmax tries reached"]
+  t_running -> t_pending [label="recover\n(stale lock)"]
+  t_failed  -> t_pending [label="agq retry"]
+
+  // ── PR creation and merge ──────────────────────────────────────────────
+  t_running -> pr_open  [label="gh pr create\n(on success)" style=dashed]
+  pr_open   -> pr_merged [label="agq merge-prs"]
+}

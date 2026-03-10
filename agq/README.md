@@ -2,25 +2,11 @@
 
 A standalone Haskell binary that schedules and runs agentic tasks with DAG dependency enforcement, tag-based locking, and GitHub issue integration.
 
-It is the successor to `sqq-agent.sh`, replacing the `sqq`-backed FIFO queue with a richer SQLite schema that understands task dependencies and prevents conflicting parallel runs.
-
----
-
-## Why agq?
-
-`sqq-agent.sh` has three structural problems:
-
-| Problem | Effect |
-|---------|--------|
-| No DAG enforcement | A task with `Depends-on: #N` can start before `#N` finishes |
-| No locking | Two tasks on the same project/branch can run at the same time and conflict |
-| Split sources | Local tasks and GitHub-pulled tasks are managed in two different ways |
-
-`agq` fixes all three:
-
 - Tasks declare dependencies by **name**; `agq` only schedules a task once all its deps are `done`.
 - Tasks carry **tags**; `agq` holds an exclusive lock on each tag while a task runs — other tasks sharing any tag are held back.
 - Both local and GitHub-sourced tasks live in the same SQLite database with the same lifecycle.
+
+![State machine](docs/state-machine01.png)
 
 ---
 
@@ -168,8 +154,9 @@ Tries: 2
 ### `agq promote`
 
 Checks all issues labelled `agq/wait`. For each one, resolves the `Depends-on:`
-refs (via `gh issue view` / `gh pr view`). If all deps are closed or merged,
+refs (via `gh issue view` / `gh pr view`). If no dep is explicitly open,
 the issue is promoted to `agq/to-be-taken` so the next `pull` will import it.
+Deps in unknown state (deleted, transferred, not found) are treated as satisfied.
 
 ```bash
 agq promote
@@ -334,12 +321,3 @@ run multiple `agq process` instances concurrently.
 
 ---
 
-## Migrating from `sqq-agent.sh`
-
-1. `cabal build agq && cabal install agq`
-2. Copy `agq.json` to your repo root; adjust `projects` / `agents` / `hooks` to match your old `PROJECT_MAP` / `AGENT_MAP`.
-3. `agq init-labels` — creates the GitHub labels.
-4. `agq init` — creates `tasks/agq.db` (separate from `tasks/queue.sql`).
-5. `agq pull` — imports any GitHub issues still open.
-6. Switch your cron / tmux session from `bash sqq-agent.sh process` to `agq process --loop`.
-7. Leave `sqq-agent.sh` in place to drain its existing queue.
