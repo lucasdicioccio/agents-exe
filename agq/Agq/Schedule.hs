@@ -4,7 +4,7 @@ module Agq.Schedule
   , recoverStaleLocks
   ) where
 
-import Agq.DB (TaskStatus(..), updateTaskStatus)
+import Agq.DB (TaskStatus(..), updateTaskStatus, decrementTries)
 import Data.Text (Text)
 import Database.SQLite.Simple
 
@@ -19,6 +19,7 @@ claimNextTask conn = withTransaction conn $ do
       execute conn
         "UPDATE tasks SET status='running', started_at=unixepoch() WHERE id=?"
         (Only tid)
+      decrementTries conn tname
       tags <- query conn
         "SELECT tag FROM task_tags WHERE task_id=?"
         (Only tid) :: IO [Only Text]
@@ -30,6 +31,7 @@ claimNextTask conn = withTransaction conn $ do
     readyQuery =
       "SELECT t.id, t.name FROM tasks t\
       \ WHERE t.status = 'pending'\
+      \   AND t.tries_remaining > 0\
       \   AND NOT EXISTS (\
       \     SELECT 1 FROM task_deps d\
       \     LEFT JOIN tasks dep ON dep.name = d.dep_name\

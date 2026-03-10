@@ -9,6 +9,7 @@ module Agq.Commands
   , cmdMergePRs
   , cmdClean
   , cmdRecover
+  , cmdRetry
   ) where
 
 import Agq.Config (AgqConfig(..), AgqLabels(..))
@@ -51,8 +52,8 @@ cmdInit cfg conn = do
 -- cmdAdd
 -- ---------------------------------------------------------------------------
 
-cmdAdd :: AgqConfig -> Connection -> Text -> Text -> [Text] -> [Text] -> IO ()
-cmdAdd cfg conn label name deps extraTags = do
+cmdAdd :: AgqConfig -> Connection -> Text -> Text -> [Text] -> [Text] -> Int -> IO ()
+cmdAdd cfg conn label name deps extraTags tries = do
   createDirectoryIfMissing True (taskDir cfg)
   let fname = taskDir cfg </> Text.unpack name <> ".md"
   exists <- doesFileExist fname
@@ -70,9 +71,10 @@ cmdAdd cfg conn label name deps extraTags = do
         , taskInstructionFile = fname
         , taskBaseBranch      = baseBranch cfg
         , taskIsFinal         = False
+        , taskTriesRemaining  = tries
         }
   insertTask conn task deps (label : extraTags)
-  putStrLn $ "Added task: " <> Text.unpack name <> " (label=" <> Text.unpack label <> ")"
+  putStrLn $ "Added task: " <> Text.unpack name <> " (label=" <> Text.unpack label <> ", tries=" <> show tries <> ")"
 
 -- ---------------------------------------------------------------------------
 -- cmdPull
@@ -118,6 +120,7 @@ importGhIssue cfg conn n lbl = do
   freshContent <- Text.readFile fname
   let base   = fromMaybe (baseBranch cfg) (parseHeader "Base-branch:" freshContent)
       isFin  = parseHeader "Final:" freshContent == Just "true"
+      tries  = maybe (defaultTries cfg) (read . Text.unpack) (parseHeader "Tries:" freshContent)
       task   = Task
         { taskId              = 0
         , taskName            = name
@@ -127,6 +130,7 @@ importGhIssue cfg conn n lbl = do
         , taskInstructionFile = fname
         , taskBaseBranch      = base
         , taskIsFinal         = isFin
+        , taskTriesRemaining  = tries
         }
       deps = parseDeps freshContent
   insertTask conn task deps [lbl]
@@ -185,14 +189,15 @@ checkDepsSatisfied deps = do
 cmdStatus :: AgqConfig -> Connection -> IO ()
 cmdStatus _cfg conn = do
   tasks <- listTasks conn
-  putStrLn $ padR 6 "ID" <> padR 30 "NAME" <> padR 12 "LABEL" <> padR 10 "STATUS" <> padR 20 "DEPS" <> "TAGS"
-  putStrLn (replicate 90 '-')
+  putStrLn $ padR 6 "ID" <> padR 30 "NAME" <> padR 12 "LABEL" <> padR 10 "STATUS" <> padR 6 "TRIES" <> padR 20 "DEPS" <> "TAGS"
+  putStrLn (replicate 96 '-')
   forM_ tasks $ \(t, deps, tags) ->
     putStrLn $
       padR 6  (show (taskId t)) <>
       padR 30 (Text.unpack (taskName t)) <>
       padR 12 (Text.unpack (taskLabel t)) <>
       padR 10 (Text.unpack (taskStatusText (taskStatus t))) <>
+      padR 6  (show (taskTriesRemaining t)) <>
       padR 20 (Text.unpack (Text.intercalate "," deps)) <>
       Text.unpack (Text.intercalate "," tags)
   putStrLn ""
@@ -431,6 +436,21 @@ cmdRecover :: AgqConfig -> Connection -> IO ()
 cmdRecover cfg conn = do
   n <- recoverStaleLocks conn (lockStaleSeconds cfg)
   putStrLn $ "Recovered " <> show n <> " stale task(s)."
+
+-- ---------------------------------------------------------------------------
+-- cmdRetry
+-- ---------------------------------------------------------------------------
+
+-- | Reset a failed (or stuck running) task back to pending so it will be
+-- picked up again by the next 'process' cycle. The attempt counter is NOT
+-- reset — it continues to accumulate across retries.
+cmdRetry :: AgqConfig -> Connection -> Text -> Int -> IO ()
+cmdRetry cfg conn name tries = do
+  let t = if tries <= 0 then defaultTries cfg else tries
+  ok <- retryTask conn name t
+  if ok
+    then putStrLn $ "Task '" <> Text.unpack name <> "' reset to pending (tries_remaining=" <> show t <> ")."
+    else putStrLn $ "Task '" <> Text.unpack name <> "' not found or not in a retryable state (must be failed or running)."
 
 -- ---------------------------------------------------------------------------
 -- Helpers

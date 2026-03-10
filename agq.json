@@ -6,6 +6,7 @@
   "githubUsername": "lucasdicioccio",
   "pollSeconds": 30,
   "lockStaleSeconds": 7200,
+  "defaultTries": 3,
   "projects": {
     "root": ".",
     "architect": "."

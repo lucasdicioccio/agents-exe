@@ -16,7 +16,7 @@ import System.IO (hSetBuffering, stdout, stderr, BufferMode(..))
 
 data Command
   = Init
-  | Add Text Text [Text] [Text]  -- label name deps tags
+  | Add Text Text [Text] [Text] Int  -- label name deps tags tries
   | Pull
   | Promote
   | Status
@@ -25,6 +25,7 @@ data Command
   | MergePRs
   | Clean Bool Bool              -- do-it force
   | Recover
+  | Retry Text Int               -- task name, tries to restore
 
 -- ---------------------------------------------------------------------------
 -- Parser
@@ -81,6 +82,9 @@ parseCommand = hsubparser
   <> command "recover"
       (info (pure Recover)
         (progDesc "Recover stale locks and reset orphaned tasks"))
+  <> command "retry"
+      (info parseRetry
+        (progDesc "Reset a failed task back to pending"))
   )
 
 parseAdd :: Parser Command
@@ -89,6 +93,8 @@ parseAdd = Add
   <*> textArg "NAME"  "Unique task name (used as branch name)"
   <*> textList "dep" "Dependency task name (repeatable)"
   <*> textList "tag" "Extra tag (repeatable)"
+  <*> option auto (long "tries" <> metavar "N" <> value 0
+        <> help "Number of allowed execution attempts (0 = use defaultTries from config)")
 
 parseProcess :: Parser Command
 parseProcess = Process
@@ -96,6 +102,12 @@ parseProcess = Process
 
 parseExec :: Parser Command
 parseExec = Exec <$> textArg "NAME" "Task name to execute"
+
+parseRetry :: Parser Command
+parseRetry = Retry
+  <$> textArg "NAME" "Task name to retry"
+  <*> option auto (long "tries" <> metavar "N" <> value 0
+        <> help "tries_remaining to restore (0 = use defaultTries from config)")
 
 parseClean :: Parser Command
 parseClean = Clean
@@ -121,7 +133,7 @@ main = do
 dispatch :: AgqConfig -> Connection -> Command -> IO ()
 dispatch cfg conn cmd = case cmd of
   Init          -> cmdInit    cfg conn
-  Add l n d t   -> cmdAdd     cfg conn l n d t
+  Add l n d t r -> cmdAdd     cfg conn l n d t (if r <= 0 then defaultTries cfg else r)
   Pull          -> cmdPull    cfg conn
   Promote       -> cmdPromote cfg
   Status        -> cmdStatus  cfg conn
@@ -130,3 +142,4 @@ dispatch cfg conn cmd = case cmd of
   MergePRs      -> cmdMergePRs cfg
   Clean d f     -> cmdClean   cfg d f
   Recover       -> cmdRecover cfg conn
+  Retry n r     -> cmdRetry   cfg conn n r

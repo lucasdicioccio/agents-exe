@@ -8,9 +8,12 @@ module Agq.DB
   , getTaskByName
   , listTasks
   , updateTaskStatus
+  , decrementTries
+  , retryTask
   , countPendingRunning
   ) where
 
+import Control.Exception (SomeException, try)
 import Data.Text (Text)
 import Database.SQLite.Simple
 
@@ -40,6 +43,7 @@ data Task = Task
   , taskInstructionFile :: FilePath
   , taskBaseBranch      :: Text
   , taskIsFinal         :: Bool
+  , taskTriesRemaining  :: Int
   } deriving (Show)
 
 instance FromRow Task where
@@ -52,6 +56,7 @@ instance FromRow Task where
     tfile  <- field
     tbase  <- field
     tfinal <- field
+    ttries <- field
     return Task
       { taskId              = tid
       , taskName            = tname
@@ -61,7 +66,11 @@ instance FromRow Task where
       , taskInstructionFile = tfile
       , taskBaseBranch      = tbase
       , taskIsFinal         = (tfinal :: Int) /= 0
+      , taskTriesRemaining  = ttries
       }
+
+selectCols :: Query
+selectCols = "id,name,label,source,status,instruction_file,base_branch,is_final,tries_remaining"
 
 initDB :: Connection -> IO ()
 initDB conn = do
@@ -75,11 +84,18 @@ initDB conn = do
     \  instruction_file TEXT NOT NULL,\
     \  base_branch      TEXT NOT NULL DEFAULT 'main',\
     \  is_final         INTEGER NOT NULL DEFAULT 0,\
+    \  tries_remaining  INTEGER NOT NULL DEFAULT 1,\
     \  created_at       INTEGER DEFAULT (unixepoch()),\
     \  started_at       INTEGER,\
     \  completed_at     INTEGER,\
     \  error_msg        TEXT\
     \)"
+  -- Migration: add tries_remaining to databases created before this field existed
+  result <- try (execute_ conn "ALTER TABLE tasks ADD COLUMN tries_remaining INTEGER NOT NULL DEFAULT 1")
+             :: IO (Either SomeException ())
+  case result of
+    Left _  -> return ()  -- column already exists
+    Right _ -> return ()
   execute_ conn
     "CREATE TABLE IF NOT EXISTS task_deps (\
     \  task_id  INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,\
@@ -104,8 +120,9 @@ initDB conn = do
 insertTask :: Connection -> Task -> [Text] -> [Text] -> IO ()
 insertTask conn task deps tags = withTransaction conn $ do
   execute conn
-    "INSERT OR IGNORE INTO tasks (name, label, source, status, instruction_file, base_branch, is_final)\
-    \ VALUES (?,?,?,?,?,?,?)"
+    "INSERT OR IGNORE INTO tasks\
+    \ (name, label, source, status, instruction_file, base_branch, is_final, tries_remaining)\
+    \ VALUES (?,?,?,?,?,?,?,?)"
     ( taskName task
     , taskLabel task
     , taskSource task
@@ -113,6 +130,7 @@ insertTask conn task deps tags = withTransaction conn $ do
     , taskInstructionFile task
     , taskBaseBranch task
     , if taskIsFinal task then 1 :: Int else 0
+    , taskTriesRemaining task
     )
   rows <- query conn "SELECT id FROM tasks WHERE name=?" (Only (taskName task)) :: IO [Only Int]
   case rows of
@@ -128,7 +146,7 @@ insertTask conn task deps tags = withTransaction conn $ do
 getTaskByName :: Connection -> Text -> IO (Maybe Task)
 getTaskByName conn name = do
   rows <- query conn
-    "SELECT id,name,label,source,status,instruction_file,base_branch,is_final FROM tasks WHERE name=?"
+    ("SELECT " <> selectCols <> " FROM tasks WHERE name=?")
     (Only name)
   return $ case rows of
     [t] -> Just t
@@ -137,7 +155,7 @@ getTaskByName conn name = do
 listTasks :: Connection -> IO [(Task, [Text], [Text])]
 listTasks conn = do
   tasks <- query_ conn
-    "SELECT id,name,label,source,status,instruction_file,base_branch,is_final FROM tasks ORDER BY id"
+    ("SELECT " <> selectCols <> " FROM tasks ORDER BY id")
   mapM (\t -> do
     deps <- query conn "SELECT dep_name FROM task_deps WHERE task_id=?" (Only (taskId t))
     tags <- query conn "SELECT tag FROM task_tags WHERE task_id=?" (Only (taskId t))
@@ -153,9 +171,31 @@ updateTaskStatus conn name st merr = case merr of
     "UPDATE tasks SET status=?, completed_at=unixepoch(), error_msg=? WHERE name=?"
     (taskStatusText st, err, name)
 
+-- | Decrement tries_remaining when a task is claimed for execution.
+decrementTries :: Connection -> Text -> IO ()
+decrementTries conn name =
+  execute conn
+    "UPDATE tasks SET tries_remaining = tries_remaining - 1 WHERE name=?"
+    (Only name)
+
+-- | Reset a failed (or stuck running) task back to pending and restore its
+-- tries_remaining to the given value. Returns True if the task existed.
+retryTask :: Connection -> Text -> Int -> IO Bool
+retryTask conn name tries = do
+  execute conn
+    "UPDATE tasks\
+    \ SET status='pending', started_at=NULL, completed_at=NULL,\
+    \     error_msg=NULL, tries_remaining=?\
+    \ WHERE name=? AND status IN ('failed','running')"
+    (tries, name)
+  n <- changes conn
+  return (n > 0)
+
 countPendingRunning :: Connection -> IO Int
 countPendingRunning conn = do
-  rows <- query_ conn "SELECT COUNT(*) FROM tasks WHERE status IN ('pending','running')" :: IO [Only Int]
+  rows <- query_ conn
+    "SELECT COUNT(*) FROM tasks WHERE status IN ('pending','running')"
+    :: IO [Only Int]
   return $ case rows of
     [Only n] -> n
     _        -> 0
