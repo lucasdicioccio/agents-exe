@@ -43,6 +43,7 @@ import qualified System.Agents.Runtime.Trace as RuntimeTrace
 import qualified System.Agents.Session.Edit as SessionEdit
 import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.SessionPrint as SessionPrint
+import System.Agents.SessionPrint (PrintVisibility(..), PrintAmount(..))
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
@@ -662,6 +663,28 @@ parseMcpServer :: Parser Command
 parseMcpServer =
     pure McpServer
 
+-- | Parse visibility option (hidden, shown, elided)
+parseVisibilityOption :: String -> String -> Parser PrintVisibility
+parseVisibilityOption optName helpText =
+    option (maybeReader parseVisibility)
+        ( long optName
+            <> metavar "MODE"
+            <> help (helpText <> ": hidden, shown, or elided (default: hidden)")
+            <> value Hidden
+            <> showDefaultWith showVisibility
+        )
+  where
+    parseVisibility :: String -> Maybe PrintVisibility
+    parseVisibility "hidden" = Just Hidden
+    parseVisibility "shown" = Just ShownFull
+    parseVisibility "elided" = Just (Elided (Lines 10) (Lines 10))
+    parseVisibility _ = Nothing
+    
+    showVisibility :: PrintVisibility -> String
+    showVisibility Hidden = "hidden"
+    showVisibility ShownFull = "shown"
+    showVisibility (Elided _ _) = "elided"
+
 parseSessionPrintCommand :: Parser Command
 parseSessionPrintCommand =
     SessionPrint <$> parseSessionPrintOptions
@@ -673,14 +696,8 @@ parseSessionPrintOptions =
             ( metavar "SESSIONFILE"
                 <> help "Path to the session JSON file to print"
             )
-        <*> switch
-            ( long "show-tool-call-results"
-                <> help "Show the results of tool calls in the output"
-            )
-        <*> switch
-            ( long "show-tool-call-arguments"
-                <> help "Show the arguments of tool calls in the output"
-            )
+        <*> parseVisibilityOption "show-tool-call-results" "How to display tool call results"
+        <*> parseVisibilityOption "show-tool-call-arguments" "How to display tool call arguments"
         <*> optional
             ( option auto
                 ( long "n-turns"
