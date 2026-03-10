@@ -27,6 +27,8 @@ import qualified PostgRESTParseTest
 import qualified SessionEditTests
 -- Import SessionPrint tests
 import qualified SessionPrintTests
+-- Import EndpointPredicate tests
+import qualified EndpointPredicateTests
 
 main :: IO ()
 main = defaultMain tests
@@ -51,6 +53,7 @@ tests =
         , PostgRESTParseTest.tests
         , SessionEditTests.tests
         , SessionPrintTests.tests
+        , EndpointPredicateTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

@@ -13,6 +13,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..), defaultAllowedMethods)
 
 type AgentSlug = Text
@@ -109,10 +110,15 @@ instance FromJSON ExtraAgentRef where
 --     "specUrl": "https://api.example.com/openapi.json",
 --     "baseUrl": "https://api.example.com",
 --     "headers": {"X-API-Version": "v1"},
---     "token": "${API_TOKEN}"
+--     "token": "${API_TOKEN}",
+--     "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
 --   }
 -- }
 -- @
+--
+-- The optional 'filter' field allows restricting which endpoints are
+-- exposed as tools. See 'EndpointPredicate' for the available filter
+-- predicates. If no filter is specified, all endpoints are included.
 data OpenAPIServerDescription
     = OpenAPIServerDescription
     { openApiSpecUrl :: Text
@@ -123,6 +129,8 @@ data OpenAPIServerDescription
     -- ^ Optional static headers to include in all requests
     , openApiToken :: Maybe Text
     -- ^ Optional Bearer token for authentication
+    , openApiFilter :: Maybe EndpointPredicate
+    -- ^ Optional filter to restrict which endpoints are exposed as tools
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -167,7 +175,8 @@ instance FromJSON OpenAPIServerDescription where
 --   "specUrl": "https://api.example.com/openapi.json",
 --   "baseUrl": "https://api.example.com",
 --   "headers": {"X-API-Version": "v1"},
---   "token": "${API_TOKEN}"
+--   "token": "${API_TOKEN}",
+--   "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
 -- }
 -- @
 newtype OpenAPIServerOnDisk = OpenAPIServerOnDisk
@@ -242,10 +251,15 @@ instance FromJSON OpenAPIToolboxDescription where
 --     "baseUrl": "http://localhost:3000",
 --     "headers": {"Accept-Profile": "myschema"},
 --     "token": "${POSTGREST_TOKEN}",
---     "allowedMethods": ["GET", "POST", "PATCH"]
+--     "allowedMethods": ["GET", "POST", "PATCH"],
+--     "filter": {"tag": "PathPrefix", "contents": "/public"}
 --   }
 -- }
 -- @
+--
+-- The optional 'filter' field allows restricting which tables are
+-- exposed as tools. See 'EndpointPredicate' for the available filter
+-- predicates. If no filter is specified, all tables are included.
 data PostgRESTServerDescription
     = PostgRESTServerDescription
     { postgrestSpecUrl :: Text
@@ -262,6 +276,8 @@ data PostgRESTServerDescription
     -- ^ Optional list of HTTP methods to expose as tools.
     -- Default: read-only methods [GET, HEAD, OPTIONS] for safety.
     -- To enable full CRUD: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    , postgrestFilter :: Maybe EndpointPredicate
+    -- ^ Optional filter to restrict which tables/endpoints are exposed as tools
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -306,7 +322,8 @@ instance FromJSON PostgRESTServerDescription where
 --   "baseUrl": "http://localhost:3000",
 --   "headers": {"Accept-Profile": "myschema"},
 --   "token": "${POSTGREST_TOKEN}",
---   "allowedMethods": ["GET", "POST", "PATCH"]
+--   "allowedMethods": ["GET", "POST", "PATCH"],
+--   "filter": {"tag": "Not", "contents": {"tag": "PathContains", "contents": "_internal"}}
 -- }
 -- @
 newtype PostgRESTServerOnDisk = PostgRESTServerOnDisk
@@ -428,5 +445,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-
 
