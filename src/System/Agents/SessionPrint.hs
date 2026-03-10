@@ -42,6 +42,8 @@ data SessionPrintOptions = SessionPrintOptions
       sessionPrintFile :: FilePath
       -- | Whether to show tool call results in the output
     , showToolCallResults :: Bool
+      -- | Whether to show tool call arguments in the output
+    , showToolCallArguments :: Bool
       -- | Optional limit on the number of turns to display
     , nTurns :: Maybe Int
       -- | Whether to repeat the system prompt at each turn
@@ -345,7 +347,7 @@ formatUserTurn opts isFirstTurn content =
 
 -- | Format LLM turn content.
 formatLlmTurn :: SessionPrintOptions -> Session.LlmTurnContent -> Text.Text
-formatLlmTurn _opts content =
+formatLlmTurn opts content =
     let thinkingSection = case content.llmResponse.responseThinking of
             Just thinking ->
                 "### 💭 Thinking Process\n\n" <>
@@ -359,7 +361,7 @@ formatLlmTurn _opts content =
             Nothing -> "### 💬 Response\n\n_(No text response)_\n"
         toolCallsSection = if null content.llmToolCalls
             then ""
-            else "\n### 🔧 Tool Calls\n\n" <> formatLlmToolCalls content.llmToolCalls
+            else "\n### 🔧 Tool Calls\n\n" <> formatLlmToolCalls opts.showToolCallArguments content.llmToolCalls
     in thinkingSection <> responseSection <> toolCallsSection
 
 -- | Format available tools (just names and descriptions).
@@ -375,24 +377,36 @@ formatSystemTool (Session.SystemTool toolDef) = case toolDef of
         "- **" <> def.name <> "** (`" <> def.llmName <> "`)\n" <>
         "  - Description: " <> def.description
 
--- | Format LLM tool calls (only names).
-formatLlmToolCalls :: [Session.LlmToolCall] -> Text.Text
-formatLlmToolCalls calls =
-    Text.intercalate "\n" $ map formatLlmToolCall calls
+-- | Format LLM tool calls (names and optionally arguments).
+formatLlmToolCalls :: Bool -> [Session.LlmToolCall] -> Text.Text
+formatLlmToolCalls showArgs calls =
+    Text.intercalate "\n" $ map (formatLlmToolCall showArgs) calls
 
--- | Format a single LLM tool call, extracting the name.
-formatLlmToolCall :: Session.LlmToolCall -> Text.Text
-formatLlmToolCall (Session.LlmToolCall val) =
+-- | Format a single LLM tool call, extracting the name and optionally arguments.
+formatLlmToolCall :: Bool -> Session.LlmToolCall -> Text.Text
+formatLlmToolCall showArgs (Session.LlmToolCall val) =
     case val of
         Aeson.Object obj ->
             -- Try to extract the function name from the tool call structure
             case KeyMap.lookup "function" obj of
                 Just (Aeson.Object funcObj) ->
-                    case KeyMap.lookup "name" funcObj of
-                        Just (Aeson.String toolName) -> "- **" <> toolName <> "**"
-                        _ -> "- (unnamed tool call)"
+                    let toolName = case KeyMap.lookup "name" funcObj of
+                            Just (Aeson.String n) -> n
+                            _ -> "(unnamed)"
+                        args = if showArgs
+                            then case KeyMap.lookup "arguments" funcObj of
+                                Just argsVal -> "\n  ```\n  " <> formatJsonAsText argsVal <> "\n  ```"
+                                Nothing -> ""
+                            else ""
+                    in "- **" <> toolName <> "**" <> args
                 _ -> case KeyMap.lookup "name" obj of
-                    Just (Aeson.String toolName) -> "- **" <> toolName <> "**"
+                    Just (Aeson.String toolName) -> 
+                        let args = if showArgs
+                                then case KeyMap.lookup "arguments" obj of
+                                    Just argsVal -> "\n  ```\n  " <> formatJsonAsText argsVal <> "\n  ```"
+                                    Nothing -> ""
+                                else ""
+                        in "- **" <> toolName <> "**" <> args
                     _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
         _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
 

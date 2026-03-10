@@ -258,6 +258,7 @@ formatSessionMarkdown session =
     let opts = SessionPrintOptions
             { sessionPrintFile = ""  -- Not used for in-memory formatting
             , showToolCallResults = True
+            , showToolCallArguments = True
             , nTurns = Nothing
             , repeatSystemPrompt = False
             , repeatTools = False
