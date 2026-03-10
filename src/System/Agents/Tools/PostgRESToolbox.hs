@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -6,7 +7,7 @@
 --
 -- This module provides a runtime that:
 -- * Fetches PostgREST OpenAPI specifications from URLs
--- * Converts table endpoints to executable tools
+-- * Converts table endpoints to executable tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
 -- * Handles HTTP execution with PostgREST-specific query parameter building
 -- * Integrates with the LLM tool registration system
 --
@@ -14,7 +15,9 @@
 -- and BashToolbox for consistent integration with the agents system.
 --
 -- Key features:
--- * Structured query parameters (filters/subset/ranking)
+-- * Structured query parameters (filters/subset/ranking) for read operations
+-- * Request body support for write operations (POST/PUT/PATCH)
+-- * Configurable HTTP method exposure (read-only by default for safety)
 -- * Column-based row filtering
 -- * Automatic pagination and ordering support
 -- * JWT Bearer token authentication
@@ -32,6 +35,7 @@
 --             , configBaseUrl = "http://localhost:3000"
 --             , configHeaders = Map.empty
 --             , configToken = Just "eyJhbG..."
+--             , configAllowedMethods = [GET, POST, PATCH]  -- Enable read and write
 --             }
 --     result <- PostgREST.initializeToolbox tracer config
 --     case result of
@@ -48,12 +52,15 @@ module System.Agents.Tools.PostgRESToolbox (
     Trace,
     Toolbox (..),
     Config (..),
+    HttpMethod (..),
+    defaultAllowedMethods,
     InitializationError (..),
 
     -- * Re-exports from Types
     ToolResult,
     PostgRESTool (..),
     RowFilter (..),
+    isReadOnlyMethod,
 
     -- * Initialization
     initializeToolbox,
@@ -83,7 +90,7 @@ module System.Agents.Tools.PostgRESToolbox (
 ) where
 
 import Control.Exception (try)
-import Data.Aeson (Value (..), Object)
+import Data.Aeson (Object, Value (..))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
@@ -110,9 +117,11 @@ import System.Agents.Tools.PostgREST.Converter (
     PostgRESTool (..),
     convertPostgRESToTools,
     buildToolParameters,
+    methodToText,
  )
 import System.Agents.Tools.PostgREST.Types (
     Config (..),
+    HttpMethod (..),
     RowFilter (..),
     ToolParameters (..),
     FilterSchema (..),
@@ -120,6 +129,8 @@ import System.Agents.Tools.PostgREST.Types (
     RankingSchema (..),
     ToolResult (..),
     Trace (..),
+    defaultAllowedMethods,
+    isReadOnlyMethod,
  )
 import System.Agents.Tools.Trace (ToolTrace (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -145,9 +156,10 @@ data InitializationError
 -- The toolbox maintains:
 -- * A name for identification
 -- * The base URL for API calls
--- * A list of available tools (one per table)
+-- * A list of available tools (one per table/method combination)
 -- * The HTTP runtime for making requests
 -- * Optional dynamic header function for auth
+-- * The list of allowed HTTP methods
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxBaseUrl :: Text
@@ -159,6 +171,8 @@ data Toolbox = Toolbox
     -- ^ Optional function to get dynamic headers (e.g., for auth)
     , staticHeaders :: Map Text Text
     -- ^ Static headers from config
+    , toolboxAllowedMethods :: [HttpMethod]
+    -- ^ HTTP methods exposed by this toolbox
     }
 
 -- -------------------------------------------------------------------------
@@ -203,7 +217,7 @@ fileUrlToPath url =
 -- 1. Creates an HTTP runtime with authentication
 -- 2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
 -- 3. Parses the JSON to an OpenAPISpec
--- 4. Converts table operations to tools
+-- 4. Converts table operations to tools based on allowed methods
 -- 5. Detects row filters and builds parameter schemas
 --
 -- Returns an 'InitializationError' if any step fails.
@@ -228,9 +242,14 @@ initializeToolbox tracer config = do
             case Aeson.decode body of
                 Nothing -> pure $ Left $ ParseError "Failed to parse PostgREST OpenAPI spec JSON"
                 Just spec -> do
+                    -- Get allowed methods (default to read-only if not specified)
+                    let allowedMethods = case config.configAllowedMethods of
+                            [] -> defaultAllowedMethods
+                            methods -> methods
+
                     -- Convert to tools
                     let toolboxName = extractToolboxName config.configUrl
-                    let tools = convertPostgRESToTools toolboxName spec
+                    let tools = convertPostgRESToTools toolboxName allowedMethods spec
 
                     -- Trace tool conversions
                     mapM_ (\t -> runTracer tracer (TableConvertedTrace (prtPath t))) tools
@@ -246,6 +265,7 @@ initializeToolbox tracer config = do
                         , httpRuntime = runtime
                         , headerFunc = Nothing
                         , staticHeaders = config.configHeaders
+                        , toolboxAllowedMethods = allowedMethods
                         }
 
 -- | Extract a toolbox name from the spec URL.
@@ -353,10 +373,10 @@ createToolHandler toolbox tool _tracer _ctx args = do
 -- | Handle a tool call by executing the HTTP request.
 --
 -- This function:
--- 1. Extracts structured arguments (filters, subset, ranking)
+-- 1. Extracts structured arguments (filters, subset, ranking, body)
 -- 2. Builds the query string from arguments
 -- 3. Builds full URL
--- 4. Makes HTTP GET request
+-- 4. Makes HTTP request with the appropriate method
 -- 5. Returns result
 handleToolCall ::
     Toolbox ->
@@ -366,7 +386,7 @@ handleToolCall ::
 handleToolCall toolbox tool args = do
     case args of
         Object obj -> do
-            -- Build query string from structured arguments
+            -- Build query string from structured arguments (for read operations)
             let queryString = buildQueryStringFromArgs obj (buildToolParameters tool)
 
             -- Build full URL
@@ -378,8 +398,11 @@ handleToolCall toolbox tool args = do
                 Nothing -> pure Map.empty
             let allHeaders = Map.union headers (staticHeaders toolbox)
 
-            -- Make HTTP request
-            result <- executeGetRequest toolbox.httpRuntime fullUrl allHeaders
+            -- Extract request body if present (for POST/PUT/PATCH)
+            let requestBody = extractRequestBody obj (buildToolParameters tool)
+
+            -- Make HTTP request with appropriate method
+            result <- executeRequest toolbox.httpRuntime (prtMethod tool) fullUrl allHeaders requestBody
 
             case result of
                 Left err -> pure $ Left err
@@ -387,34 +410,57 @@ handleToolCall toolbox tool args = do
                     pure $ Right (textResult, toolResult)
         _ -> pure $ Left "Tool arguments must be a JSON object"
 
--- | Execute a GET request.
-executeGetRequest ::
+-- | Extract request body from arguments.
+extractRequestBody :: Object -> ToolParameters -> Maybe Value
+extractRequestBody obj params =
+    case KeyMap.lookup "body" obj of
+        Just val -> Just val
+        Nothing -> Nothing
+
+-- | Execute an HTTP request with the specified method.
+executeRequest ::
     HttpClient.Runtime ->
+    HttpMethod ->
     Text ->
     Map Text Text ->
+    Maybe Value ->
     IO (Either Text (Text, ToolResult))
-executeGetRequest runtime url headers = do
-    -- Build request
-    req <- buildGetRequest url headers
+executeRequest runtime method url headers mbody = do
+    -- Build request based on method
+    req <- buildRequest method url headers mbody
 
     -- Execute the request
     result <- HttpClient.runRequest runtime (Tracer (const (pure ()))) req
 
     case result of
         Left err -> pure $ Left (Text.pack $ show err)
-        Right response -> handleResponse url response
+        Right response -> handleResponse method url response
 
--- | Build a GET request with headers.
-buildGetRequest ::
+-- | Build an HTTP request with the specified method.
+buildRequest ::
+    HttpMethod ->
     Text ->
     Map Text Text ->
+    Maybe Value ->
     IO HttpClient.Request
-buildGetRequest url headers = do
+buildRequest method url headers mbody = do
     req <- HttpClient.parseRequest (Text.unpack url)
+
+    -- Set the HTTP method
+    let methodBytes = Text.encodeUtf8 $ methodToText method
+    let reqWithMethod = req { HttpClient.method = methodBytes }
 
     -- Add custom headers
     let headerList = map (\(k, v) -> (mk (Text.encodeUtf8 k), Text.encodeUtf8 v)) $ Map.toList headers
-    let finalReq = req{HttpClient.requestHeaders = HttpClient.requestHeaders req ++ headerList}
+    let reqWithHeaders = reqWithMethod { HttpClient.requestHeaders = HttpClient.requestHeaders reqWithMethod ++ headerList }
+
+    -- Add request body if present (for POST, PUT, PATCH)
+    let finalReq = case mbody of
+            Just body -> reqWithHeaders
+                { HttpClient.requestBody = HttpClient.RequestBodyLBS (Aeson.encode body)
+                , HttpClient.requestHeaders = (mk "Content-Type", "application/json") : HttpClient.requestHeaders reqWithHeaders
+                }
+            Nothing -> reqWithHeaders
 
     pure finalReq
 
@@ -538,10 +584,11 @@ urlEncode = Text.concatMap encodeChar
 --
 -- Returns both text for the LLM and a structured ToolResult.
 handleResponse ::
+    HttpMethod ->
     Text ->
     HttpClient.Response LByteString.ByteString ->
     IO (Either Text (Text, ToolResult))
-handleResponse url response = do
+handleResponse method url response = do
     let status = HttpTypes.statusCode (HttpClient.responseStatus response)
     let body = HttpClient.responseBody response
 
@@ -551,15 +598,19 @@ handleResponse url response = do
             Nothing -> String (Text.decodeUtf8 $ LByteString.toStrict body)
 
     -- Create text representation for LLM
-    let textResult =
-            "HTTP " <> Text.pack (show status) <> "\n"
-                <> Text.decodeUtf8 (LByteString.toStrict body)
+    -- For HEAD requests, don't include body (there shouldn't be one)
+    let textResult = case method of
+            HEAD ->
+                "HTTP " <> Text.pack (show status) <> " (HEAD request - no body)"
+            _ ->
+                "HTTP " <> Text.pack (show status) <> "\n"
+                    <> Text.decodeUtf8 (LByteString.toStrict body)
 
     pure $ Right
         ( textResult
         , ToolResult
             { resultPath = url
-            , resultMethod = "GET"
+            , resultMethod = methodToText method
             , resultStatus = status
             , resultPayload = payload
             }
@@ -583,5 +634,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
-
 

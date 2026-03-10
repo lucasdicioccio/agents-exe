@@ -747,6 +747,8 @@ openApiDescToConfig desc =
 -- | Convert PostgREST toolbox description to toolbox configuration.
 --
 -- Handles both inline configurations and on-disk configurations.
+-- The 'allowedMethods' field controls which HTTP verbs are exposed as tools.
+-- By default, only read-only methods are enabled for safety.
 postgrestDescToConfig :: PostgRESTServerDescription -> PostgREST.Config
 postgrestDescToConfig desc =
     PostgREST.Config
@@ -754,6 +756,7 @@ postgrestDescToConfig desc =
         , PostgREST.configBaseUrl = postgrestBaseUrl desc
         , PostgREST.configHeaders = Maybe.fromMaybe Map.empty (postgrestHeaders desc)
         , PostgREST.configToken = postgrestToken desc
+        , PostgREST.configAllowedMethods = Maybe.fromMaybe PostgREST.defaultAllowedMethods (postgrestAllowedMethods desc)
         }
 
 -- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
@@ -1035,5 +1038,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
-
 

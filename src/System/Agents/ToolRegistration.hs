@@ -72,6 +72,7 @@ import System.Agents.Tools.OpenAPI.Converter (
     normalizeForLLM,
  )
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
+import System.Agents.Tools.OpenAPI.Types (Schema (..))
 import System.Agents.Tools.OpenAPIToolbox (
     createToolHandler,
     getToolByNormalizedName,
@@ -86,6 +87,7 @@ import System.Agents.Tools.PostgREST.Converter (
     ColumnFilterSchema (..),
     SubsetSchema (..),
     RankingSchema (..),
+    methodToText,
  )
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
@@ -130,7 +132,7 @@ postgrest2LLMName box tool =
         -- Extract table name from path (e.g., "/users" -> "users")
         tableName = Text.dropWhile (== '/') tool.prtPath
         normalizedTable = normalizeForLLM tableName
-        methodPart = Text.toLower tool.prtMethod
+        methodPart = Text.toLower $ methodToText tool.prtMethod
      in OpenAI.ToolName (mconcat ["postgrest_", normalizedToolbox, "_", methodPart, "_", normalizedTable])
 
 -------------------------------------------------------------------------------
@@ -388,10 +390,11 @@ registerOpenAPIToolInLLM = registerOpenAPITool
 -- parent toolbox. The tool name follows the format:
 -- postgrest_{toolbox}_{method}_{table}
 --
--- The tool parameters are structured into three groups:
--- * filters: Column-based row filters
--- * subset: Pagination (limit/offset) and column selection
--- * ranking: Ordering clause
+-- The tool parameters are structured into groups:
+-- * filters: Column-based row filters (for GET, DELETE, PATCH, PUT)
+-- * subset: Pagination (limit/offset) and column selection (for GET)
+-- * ranking: Ordering clause (for GET)
+-- * body: JSON request body (for POST, PUT, PATCH)
 --
 -- All parameter groups and their sub-properties are marked as optional,
 -- allowing the LLM to provide only the parameters it needs.
@@ -453,9 +456,15 @@ registerPostgRESTool toolbox tool =
 
 -- | Build parameter properties for PostgREST tool from structured parameters.
 --
--- All parameter groups (filters, subset, ranking) and their sub-properties
--- are marked as optional (propertyRequired = False), allowing the LLM to
--- provide only the parameters it needs.
+-- Parameter groups:
+-- * filters: Column-based row filters (for GET, DELETE, PATCH, PUT)
+-- * subset: Pagination (limit/offset) and column selection (for GET)
+-- * ranking: Ordering clause (for GET)
+-- * body: JSON request body (for POST, PUT, PATCH)
+--
+-- All parameter groups and their sub-properties are marked as optional
+-- (propertyRequired = False), allowing the LLM to provide only the
+-- parameters it needs.
 buildPostgRESTParamProperties :: ToolParameters -> [ParamProperty]
 buildPostgRESTParamProperties params =
     let filterProp = case tpFilters params of
@@ -484,7 +493,17 @@ buildPostgRESTParamProperties params =
                 , propertyRequired = False  -- Optional parameter group
                 }
             Nothing -> Nothing
-     in Maybe.catMaybes [filterProp, subsetProp, rankingProp]
+        
+        -- NEW: Request body for write operations (POST, PUT, PATCH)
+        bodyProp = case tpRequestBody params of
+            Just schema -> Just $ ParamProperty
+                { propertyKey = "body"
+                , propertyType = buildBodyParamType schema
+                , propertyDescription = buildBodyDescription schema
+                , propertyRequired = False  -- Optional - can insert with defaults
+                }
+            Nothing -> Nothing
+     in Maybe.catMaybes [filterProp, subsetProp, rankingProp, bodyProp]
   where
     buildFilterSubProperties :: FilterSchema -> [ParamProperty]
     buildFilterSubProperties fs =
@@ -508,6 +527,59 @@ buildPostgRESTParamProperties params =
         Maybe.catMaybes
             [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False) (rsOrder rs)
             ]
+    
+    -- NEW: Build the parameter type for the request body
+    buildBodyParamType :: Schema -> ParamType
+    buildBodyParamType schema =
+        case schema.schemaType of
+            Just "array" -> 
+                -- For bulk insert (array of objects)
+                case schema.schemaItems of
+                    Just itemSchema -> ObjectParamType (buildSchemaProperties itemSchema)
+                    Nothing -> OpaqueParamType "object"
+            Just "object" -> 
+                -- For single row insert
+                ObjectParamType (buildSchemaProperties schema)
+            _ -> OpaqueParamType "object"
+    
+    -- NEW: Build description for the request body parameter
+    buildBodyDescription :: Schema -> Text
+    buildBodyDescription schema =
+        let baseDesc = Maybe.fromMaybe "JSON request body for insert/update operations" schema.schemaDescription
+            typeHint = case schema.schemaType of
+                Just "array" -> " (provide an array of objects for bulk insert, or a single object)"
+                Just "object" -> " (provide a JSON object with column values)"
+                _ -> ""
+        in baseDesc <> typeHint
+    
+    -- NEW: Build properties from schema for object validation
+    buildSchemaProperties :: Schema -> [ParamProperty]
+    buildSchemaProperties schema =
+        case schema.schemaProperties of
+            Just props -> map (\(k, v) -> schemaToParamProperty k v) (Map.toList props)
+            Nothing -> []
+    
+    -- NEW: Convert a schema property to ParamProperty
+    schemaToParamProperty :: Text -> Schema -> ParamProperty
+    schemaToParamProperty name schema =
+        ParamProperty
+            { propertyKey = name
+            , propertyType = schemaTypeToParamType schema
+            , propertyDescription = Maybe.fromMaybe (name <> " column value") schema.schemaDescription
+            , propertyRequired = maybe False (name `elem`) schema.schemaRequired
+            }
+    
+    -- NEW: Convert schema type to ParamType
+    schemaTypeToParamType :: Schema -> ParamType
+    schemaTypeToParamType schema =
+        case schema.schemaType of
+            Just "string" -> StringParamType
+            Just "integer" -> NumberParamType
+            Just "number" -> NumberParamType
+            Just "boolean" -> BoolParamType
+            Just "array" -> OpaqueParamType "array"
+            Just "object" -> ObjectParamType (buildSchemaProperties schema)
+            _ -> OpaqueParamType "string"
 
 -- | Register all tools from a PostgREST toolbox.
 --

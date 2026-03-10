@@ -1,0 +1,70 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Test API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/users": {
+      "post": {
+        "summary": "Create a user",
+        "parameters": [
+          {"$ref": "#/parameters/body.users"},
+          {"$ref": "#/parameters/select"}
+        ],
+        "responses": {
+          "201": {"description": "Created"}
+        }
+      },
+      "patch": {
+        "summary": "Update users",
+        "parameters": [
+          {"$ref": "#/parameters/rowFilter.users.id"},
+          {"$ref": "#/parameters/body.users"},
+          {"$ref": "#/parameters/preferReturn"}
+        ],
+        "responses": {
+          "204": {"description": "No Content"}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "users": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {"type": "integer"},
+        "name": {"type": "string"},
+        "email": {"type": "string"}
+      }
+    }
+  },
+  "parameters": {
+    "select": {
+      "name": "select",
+      "in": "query",
+      "type": "string"
+    },
+    "preferReturn": {
+      "name": "Prefer",
+      "in": "header",
+      "type": "string"
+    },
+    "body.users": {
+      "name": "users",
+      "description": "users",
+      "required": false,
+      "in": "body",
+      "schema": {
+        "$ref": "#/definitions/users"
+      }
+    },
+    "rowFilter.users.id": {
+      "name": "id",
+      "in": "query",
+      "type": "string"
+    }
+  }
+}
+

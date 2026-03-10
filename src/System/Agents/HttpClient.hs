@@ -61,7 +61,7 @@ newRuntime token =
         let setts =
                 TlsHttpClient.tlsManagerSettings
                     { HttpClient.managerResponseTimeout =
-                        HttpClient.responseTimeoutMicro 300_000_000
+                        HttpClient.responseTimeoutMicro 600_000_000
                     }
         TlsHttpClient.newTlsManagerWith setts
 
