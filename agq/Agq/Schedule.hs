@@ -64,7 +64,7 @@ recoverStaleLocks conn staleSeconds = withTransaction conn $ do
   -- Reset tasks that are in 'running' state but have stale locks
   resetCount <- fmap sum $ mapM (\tname -> do
     execute conn
-      "UPDATE tasks SET status='pending', started_at=NULL WHERE name=? AND status='running'"
+      "UPDATE tasks SET status='pending', started_at=NULL, tries_remaining=MAX(tries_remaining,1) WHERE name=? AND status='running'"
       (Only tname)
     changes conn
     ) staleNames
