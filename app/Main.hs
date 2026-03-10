@@ -10,6 +10,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -39,6 +40,8 @@ import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.Runtime.Trace as RuntimeTrace
+import qualified System.Agents.Session.Edit as SessionEdit
+import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
@@ -334,6 +337,7 @@ data Command
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
+    | SessionEdit SessionEditOptions
     | Export ExportOptions
     | Import ImportOptions
 
@@ -346,6 +350,7 @@ instance Show Command where
     show Initialize = "Initialize"
     show McpServer = "McpServer"
     show (SessionPrint _) = "SessionPrint"
+    show (SessionEdit _) = "SessionEdit"
     show (Export _) = "Export"
     show (Import _) = "Import"
 
@@ -370,6 +375,19 @@ data OneShotOptions
     { sessionFile :: Maybe FilePath
     , promptScript :: PromptScript
     }
+    deriving (Show)
+
+data SessionEditOptions = SessionEditOptions
+    { sessionEditOperations :: [SessionEditOp]
+    } deriving (Show)
+
+data SessionEditOp
+    = SessionEditTake Int
+    | SessionEditTakeTail Int
+    | SessionEditDrop Int
+    | SessionEditDropTail Int
+    | SessionEditCensorToolCalls
+    | SessionEditCensorThinking
     deriving (Show)
 
 -- | Export options for the export command
@@ -448,6 +466,23 @@ data ImportMode
 -------------------------------------------------------------------------------
 -- Parsers
 -------------------------------------------------------------------------------
+
+parseSessionEditCommand :: Parser Command
+parseSessionEditCommand = SessionEdit <$> parseSessionEditOptions
+
+parseSessionEditOptions :: Parser SessionEditOptions
+parseSessionEditOptions = SessionEditOptions <$> many parseSessionEditOp
+
+parseSessionEditOp :: Parser SessionEditOp
+parseSessionEditOp = asum [parseTake, parseTakeTail, parseDrop, parseDropTail, parseCensorToolCalls, parseCensorThinking]
+  where
+    parseTake = flag' () (long "take" <> help "Take first N turns (use --count N)") *> (SessionEditTake <$> parseCountOption)
+    parseTakeTail = flag' () (long "take-tail" <> help "Take last N turns (use --count N)") *> (SessionEditTakeTail <$> parseCountOption)
+    parseDrop = flag' () (long "drop" <> help "Drop first N turns (use --count N)") *> (SessionEditDrop <$> parseCountOption)
+    parseDropTail = flag' () (long "drop-tail" <> help "Drop last N turns (use --count N)") *> (SessionEditDropTail <$> parseCountOption)
+    parseCensorToolCalls = flag' SessionEditCensorToolCalls (long "censor-tool-calls" <> help "Remove all tool calls from the session")
+    parseCensorThinking = flag' SessionEditCensorThinking (long "censor-thinking" <> help "Remove all thinking content from the session")
+    parseCountOption = option auto (long "count" <> short 'n' <> metavar "N" <> help "Number of turns" <> value 1 <> showDefault)
 
 parseCheckCommand :: Parser Command
 parseCheckCommand =
@@ -904,6 +939,7 @@ parseProgOptions argparserargs =
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
+                <> command "session-edit" (info parseSessionEditCommand (progDesc "Edit a session file (reads JSON from STDIN, writes JSON to STDOUT)"))
                 <> command "export" (info parseExportCommand 
                     (progDesc "Export agent/tool configurations"))
                 <> command "import" (info parseImportCommand
@@ -1072,8 +1108,35 @@ main = do
                             InitProject.initKeyFile pargs.apiKeysFile
             SessionPrint opts -> do
                 SessionPrint.handleSessionPrint opts
+            SessionEdit opts ->
+                handleSessionEdit opts
             Export opts -> handleExport opts pargs
             Import opts -> handleImport opts
+
+-------------------------------------------------------------------------------
+-- Session Edit Handler
+-------------------------------------------------------------------------------
+
+handleSessionEdit :: SessionEditOptions -> IO ()
+handleSessionEdit opts = do
+    input <- LByteString.getContents
+    case Aeson.eitherDecode input of
+        Left err -> do
+            Text.hPutStrLn stderr $ "Error parsing session JSON: " <> Text.pack err
+            exitFailure
+        Right session -> do
+            let transforms = map editOpToTransform opts.sessionEditOperations
+            let editedSession = SessionEdit.applySessionEdits transforms session
+            LByteChar8.putStrLn $ Aeson.encodePretty editedSession
+  where
+    editOpToTransform :: SessionEditOp -> (SessionTypes.Session -> SessionTypes.Session)
+    editOpToTransform op = case op of
+        SessionEditTake n -> SessionEdit.sessionEditTake n
+        SessionEditTakeTail n -> SessionEdit.sessionEditTakeTail n
+        SessionEditDrop n -> SessionEdit.sessionEditDrop n
+        SessionEditDropTail n -> SessionEdit.sessionEditDropTail n
+        SessionEditCensorToolCalls -> SessionEdit.sessionEditCensorToolCalls
+        SessionEditCensorThinking -> SessionEdit.sessionEditCensorThinking
 
 -------------------------------------------------------------------------------
 -- Export Handler

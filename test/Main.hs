@@ -23,6 +23,8 @@ import Test.Tasty.HUnit
 import qualified OpenAPIToolboxTests
 -- Import PostgREST parsing tests
 import qualified PostgRESTParseTest
+-- Import Session Edit tests
+import qualified SessionEditTests
 
 main :: IO ()
 main = defaultMain tests
@@ -45,6 +47,7 @@ tests =
         , openAPIConverterTests
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
+        , SessionEditTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
