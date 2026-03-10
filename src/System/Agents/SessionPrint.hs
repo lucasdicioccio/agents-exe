@@ -16,6 +16,8 @@ module System.Agents.SessionPrint
       -- * Statistics
     , SessionStatistics (..)
     , calculateStatistics
+      -- * Logo
+    , agentsLogo
     ) where
 
 import qualified Data.Aeson as Aeson
@@ -66,6 +68,25 @@ data SessionStatistics = SessionStatistics
     , statReasoningBytes :: Int
     , statTotalBytes :: Int
     } deriving (Show, Eq)
+
+-- | The ASCII art logo for agents-exe.
+--
+-- This is the lambda-character "agents" mascot.
+agentsLogo :: Text.Text
+agentsLogo = Text.intercalate "\n"
+    [ "    λλ"
+    , "   λ⊙λ⊙"
+    , "  λλλλλλ"
+    , " λλλλλλλλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    , "    λλ"
+    ]
 
 -- | Default ASCII art logo for the session report header.
 defaultLogo :: Text.Text
