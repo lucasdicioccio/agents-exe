@@ -240,7 +240,7 @@ formatStatistics stats =
 formatToolCallStats :: Map Text.Text Int -> Text.Text
 formatToolCallStats toolMap
     | Map.null toolMap = "_No tool calls recorded_\n"
-    otherwise = 
+    | otherwise = 
         let maxCount = maximum (Map.elems toolMap)
             sortedTools = sortOn (negate . snd) (Map.toList toolMap)
         in Text.intercalate "\n" $ map (formatToolBar maxCount) sortedTools <> [""]
