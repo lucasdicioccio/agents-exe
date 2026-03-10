@@ -16,7 +16,7 @@
     "architect": "tasks-agents/kimi-architect.json"
   },
   "hooks": {
-    "default": "git-agent-task.sh"
+    "default": "./git-agent-task.sh"
   },
   "labels": {
     "labelToBeTaken": "agq/to-be-taken",

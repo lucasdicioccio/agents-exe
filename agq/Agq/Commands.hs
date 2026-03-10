@@ -302,7 +302,7 @@ execTask cfg conn t = do
       base      = Text.unpack (taskBaseBranch t)
       lbl       = taskLabel t
       agentCfg  = Text.unpack $ fromMaybe
-                    (fromMaybe "tasks-agents/kimi-agent-oneshot.json" (Map.lookup "default" (agents cfg)))
+                    (fromMaybe "task-agent.json" (Map.lookup "default" (agents cfg)))
                     (Map.lookup lbl (agents cfg))
       projDir   = Text.unpack $ fromMaybe "." (Map.lookup lbl (projects cfg))
       mHook     = Text.unpack <$> (case Map.lookup lbl (hooks cfg) of
