@@ -677,6 +677,10 @@ parseSessionPrintOptions =
             ( long "show-tool-call-results"
                 <> help "Show the results of tool calls in the output"
             )
+        <*> switch
+            ( long "show-tool-call-arguments"
+                <> help "Show the arguments of tool calls in the output"
+            )
         <*> optional
             ( option auto
                 ( long "n-turns"
