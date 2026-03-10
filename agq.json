@@ -14,6 +14,9 @@
     "default": "tasks-agents/kimi-agent-oneshot.json",
     "architect": "tasks-agents/kimi-architect.json"
   },
+  "hooks": {
+    "default": "git-agent-task.sh"
+  },
   "labels": {
     "labelToBeTaken": "agents/to-be-taken",
     "labelTaken":     "agents/taken",

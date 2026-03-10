@@ -256,6 +256,9 @@ execTask cfg conn t = do
                     (fromMaybe "tasks-agents/kimi-agent-oneshot.json" (Map.lookup "default" (agents cfg)))
                     (Map.lookup lbl (agents cfg))
       projDir   = Text.unpack $ fromMaybe "." (Map.lookup lbl (projects cfg))
+      mHook     = Text.unpack <$> (case Map.lookup lbl (hooks cfg) of
+                    Just h  -> Just h
+                    Nothing -> Map.lookup "default" (hooks cfg))
       sessFile  = sessionsDir cfg </> nameStr <> ".session.json"
       instrFile = taskInstructionFile t
       target    = if taskIsFinal t then "main" else base
@@ -276,12 +279,17 @@ execTask cfg conn t = do
     fail $ "Failed to create worktree " <> nameStr
 
   let worktreeProj = nameStr </> projDir
-      hookScript   = worktreeProj </> "git-agent-task.sh"
 
   -- 3. Optional prepare hook
-  hookExists <- doesFileExist hookScript
-  when hookExists $
-    void $ runCmd hookScript ["prepare", Text.unpack lbl, nameStr, instrFile]
+  mHookAbs <- case mHook of
+    Nothing -> return Nothing
+    Just h  -> do
+      let absH = worktreeProj </> h
+      exists <- doesFileExist absH
+      return (if exists then Just absH else Nothing)
+  case mHookAbs of
+    Nothing -> return ()
+    Just h  -> void $ runCmd h ["prepare", Text.unpack lbl, nameStr, instrFile]
 
   -- 4. Run agent, capturing commit message
   (ecAgent, commitMsg) <- runWithCwd worktreeProj "agents-exe"
@@ -315,8 +323,9 @@ execTask cfg conn t = do
       , "--label", Text.unpack (labelAgentPr (labels cfg))
       ]
 
-    when hookExists $
-      void $ runCmd hookScript ["preview", Text.unpack lbl, nameStr, instrFile]
+    case mHookAbs of
+      Nothing -> return ()
+      Just h  -> void $ runCmd h ["preview", Text.unpack lbl, nameStr, instrFile]
 
   if ecAgent == ExitSuccess
     then releaseLock conn (taskName t) Done Nothing

@@ -42,6 +42,7 @@ data AgqConfig = AgqConfig
   , lockStaleSeconds :: Int
   , projects         :: Map Text Text
   , agents           :: Map Text Text
+  , hooks            :: Map Text Text  -- label -> hook script path (relative to worktree project dir)
   , labels           :: AgqLabels
   } deriving (Generic, Show)
 
@@ -62,6 +63,8 @@ defaultConfig = AgqConfig
       [ ("default",   "tasks-agents/kimi-agent-oneshot.json")
       , ("architect", "tasks-agents/kimi-architect.json")
       ]
+  , hooks            = Map.fromList
+      [ ("default", "git-agent-task.sh") ]
   , labels           = defaultLabels
   }
 
