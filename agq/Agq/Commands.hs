@@ -159,7 +159,7 @@ importGhIssue cfg conn n lbl = do
       , "--json", "title,body"
       , "--jq", "\"# \" + .title + \"\\n\\n\" + .body"
       ]
-    Text.writeFile fname (Text.strip body <> "\n\n---\nCloses #" <> Text.pack (show n) <> "\n")
+    Text.writeFile fname (Text.strip body <> "\n\n---\nFrom #" <> Text.pack (show n) <> "\n")
   freshContent <- Text.readFile fname
   detectedBase <- detectBaseBranch cfg
   let base   = fromMaybe detectedBase (parseHeader "Base-branch:" freshContent)
