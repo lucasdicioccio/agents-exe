@@ -67,7 +67,7 @@ cmdAdd cfg conn label name deps extraTags tries = do
         { taskId              = 0
         , taskName            = name
         , taskLabel           = label
-        , taskSource          = "local"
+        , taskSource          = SourceLocal
         , taskStatus          = Pending
         , taskInstructionFile = fname
         , taskBaseBranch      = baseBranch cfg
@@ -126,7 +126,7 @@ importGhIssue cfg conn n lbl = do
         { taskId              = 0
         , taskName            = name
         , taskLabel           = lbl
-        , taskSource          = "github"
+        , taskSource          = SourceGithub n
         , taskStatus          = Pending
         , taskInstructionFile = fname
         , taskBaseBranch      = base
@@ -324,10 +324,9 @@ execTask cfg conn t = do
     let errSnippet = Text.unlines . take 100 . reverse . Text.lines $ agentErr
         errMsg     = "agents-exe failed for task `" <> Text.pack nameStr <> "`\n\n```\n" <> errSnippet <> "```"
     -- For GitHub-sourced tasks, post the failure snippet as an issue comment
-    when (taskSource t == "github") $
-      case issueNumber nameStr of
-        Nothing -> return ()
-        Just n  -> void $ runGh ["issue", "comment", show n, "--body", Text.unpack errMsg]
+    case taskSource t of
+      SourceGithub n -> void $ runGh ["issue", "comment", show n, "--body", Text.unpack errMsg]
+      SourceLocal    -> return ()
     releaseLock conn (taskName t) Failed (Just "agents-exe returned non-zero")
 
   -- Only continue if agent succeeded
@@ -364,14 +363,6 @@ execTask cfg conn t = do
         Just h  -> void $ runCmd h ["preview", Text.unpack lbl, nameStr, instrFile]
 
     releaseLock conn (taskName t) Done Nothing
-
--- | Extract the GitHub issue number from a task name like "gh-42".
-issueNumber :: String -> Maybe Int
-issueNumber s = case break (== '-') s of
-  ("gh", '-':rest) -> case reads rest of
-    [(n, "")] -> Just n
-    _         -> Nothing
-  _ -> Nothing
 
 -- | Run a command inside a given working directory, capturing stdout and stderr.
 runWithCwdBoth :: FilePath -> FilePath -> [String] -> IO (ExitCode, Text, Text)

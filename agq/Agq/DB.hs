@@ -1,8 +1,11 @@
 module Agq.DB
   ( TaskStatus(..)
+  , TaskSource(..)
   , Task(..)
   , taskStatusText
   , parseTaskStatus
+  , taskSourceText
+  , parseTaskSource
   , initDB
   , insertTask
   , getTaskByName
@@ -15,6 +18,7 @@ module Agq.DB
 
 import Control.Exception (SomeException, try)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Database.SQLite.Simple
 
 -- | Task execution status
@@ -34,11 +38,32 @@ parseTaskStatus "done"    = Done
 parseTaskStatus "failed"  = Failed
 parseTaskStatus _         = Pending
 
+-- | Where a task originated.  New trackers (Jira, Linear, …) add constructors.
+data TaskSource
+  = SourceLocal               -- ^ Added manually via 'agq add'
+  | SourceGithub Int          -- ^ Imported from a GitHub issue; carries the issue number
+  deriving (Show, Eq)
+
+taskSourceText :: TaskSource -> Text
+taskSourceText SourceLocal       = "local"
+taskSourceText (SourceGithub n)  = "github:" <> Text.pack (show n)
+
+parseTaskSource :: Text -> TaskSource
+parseTaskSource t
+  | t == "local"                      = SourceLocal
+  | "github:" `Text.isPrefixOf` t     =
+      case reads (Text.unpack (Text.drop 7 t)) of
+        [(n, "")] -> SourceGithub n
+        _         -> SourceLocal   -- malformed → fall back
+  -- legacy value stored before the ADT existed
+  | t == "github"                     = SourceLocal
+  | otherwise                         = SourceLocal
+
 data Task = Task
   { taskId              :: Int
   , taskName            :: Text
   , taskLabel           :: Text
-  , taskSource          :: Text
+  , taskSource          :: TaskSource
   , taskStatus          :: TaskStatus
   , taskInstructionFile :: FilePath
   , taskBaseBranch      :: Text
@@ -61,7 +86,7 @@ instance FromRow Task where
       { taskId              = tid
       , taskName            = tname
       , taskLabel           = tlabel
-      , taskSource          = tsrc
+      , taskSource          = parseTaskSource (tsrc :: Text)
       , taskStatus          = parseTaskStatus (tst :: Text)
       , taskInstructionFile = tfile
       , taskBaseBranch      = tbase
@@ -125,7 +150,7 @@ insertTask conn task deps tags = withTransaction conn $ do
     \ VALUES (?,?,?,?,?,?,?,?)"
     ( taskName task
     , taskLabel task
-    , taskSource task
+    , taskSourceText (taskSource task)
     , taskStatusText (taskStatus task)
     , taskInstructionFile task
     , taskBaseBranch task
