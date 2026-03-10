@@ -203,6 +203,33 @@ executable agents-exe
     -- Base language which the package written in.
     default-language: Haskell2010
 
+executable agq
+    import:           warnings
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    other-modules:    Agq.Config
+                    , Agq.DB
+                    , Agq.Schedule
+                    , Agq.Run
+                    , Agq.Commands
+    build-depends:    base >=4.18.3.0,
+                      aeson,
+                      aeson-pretty,
+                      bytestring,
+                      containers,
+                      directory,
+                      filepath,
+                      optparse-applicative,
+                      process,
+                      scientific,
+                      sqlite-simple,
+                      text,
+                      time,
+                      unix
+    hs-source-dirs:   agq
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+
 test-suite agents-tests
     type: exitcode-stdio-1.0
     hs-source-dirs: test

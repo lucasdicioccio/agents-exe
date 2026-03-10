@@ -1,0 +1,28 @@
+{
+  "queueDb": "tasks/agq.db",
+  "taskDir": "tasks",
+  "sessionsDir": "tasks-sessions",
+  "baseBranch": "main",
+  "githubUsername": "lucasdicioccio",
+  "pollSeconds": 30,
+  "lockStaleSeconds": 7200,
+  "defaultTries": 2,
+  "agentAttempts": 3,
+  "projects": {
+    "root": ".",
+    "architect": "."
+  },
+  "agents": {
+    "default": "tasks-agents/kimi-agent-oneshot.json",
+    "architect": "tasks-agents/kimi-architect.json"
+  },
+  "hooks": {
+    "default": "./git-agent-task.sh"
+  },
+  "labels": {
+    "labelToBeTaken": "agq/to-be-taken",
+    "labelTaken":     "agq/taken",
+    "labelWait":      "agq/wait",
+    "labelAgentPr":   "agq/agent-pr"
+  }
+}
