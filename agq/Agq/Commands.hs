@@ -30,7 +30,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as Text
 import Database.SQLite.Simple
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>), takeBaseName)
 import System.IO (hGetContents)
@@ -259,11 +259,15 @@ execTask cfg conn t = do
       mHook     = Text.unpack <$> (case Map.lookup lbl (hooks cfg) of
                     Just h  -> Just h
                     Nothing -> Map.lookup "default" (hooks cfg))
-      sessFile  = sessionsDir cfg </> nameStr <> ".session.json"
-      instrFile = taskInstructionFile t
       target    = if taskIsFinal t then "main" else base
 
-  createDirectoryIfMissing True (sessionsDir cfg)
+  -- Resolve paths as absolute so they remain valid when commands run inside the
+  -- worktree subdirectory (same pattern as sqq-agent.sh's instruction_abs).
+  repoRoot <- getCurrentDirectory
+  let instrFile = repoRoot </> taskInstructionFile t
+      sessFile  = repoRoot </> sessionsDir cfg </> nameStr <> ".session.json"
+
+  createDirectoryIfMissing True (repoRoot </> sessionsDir cfg)
 
   -- 1. Fetch base branch
   ecFetch <- runGit ["fetch", "origin", base]
