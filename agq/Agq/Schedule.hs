@@ -36,7 +36,7 @@ claimNextTask conn = withTransaction conn $ do
       \     SELECT 1 FROM task_deps d\
       \     LEFT JOIN tasks dep ON dep.name = d.dep_name\
       \     WHERE d.task_id = t.id\
-      \       AND (dep.id IS NULL OR dep.status != 'done')\
+      \       AND dep.id IS NOT NULL AND dep.status != 'done'\
       \   )\
       \   AND NOT EXISTS (\
       \     SELECT 1 FROM task_tags tt\

@@ -217,14 +217,16 @@ checkDepsSatisfied deps = do
   results <- mapM checkDep deps
   return (and results)
   where
+    -- Block promotion only when a dep is explicitly OPEN.
+    -- Unknown state (not found, error, deleted, transferred) is treated as done.
     checkDep dep = do
       let depStr = Text.unpack dep
-      (_, out) <- runGh ["issue", "view", depStr, "--json", "state", "--jq", ".state"]
-      if Text.strip out == "CLOSED"
-        then return True
+      (ec1, out1) <- runGh ["issue", "view", depStr, "--json", "state", "--jq", ".state"]
+      if ec1 == ExitSuccess && Text.strip out1 == "OPEN"
+        then return False
         else do
           (ec2, out2) <- runGh ["pr", "view", depStr, "--json", "state", "--jq", ".state"]
-          return (ec2 == ExitSuccess && Text.strip out2 `elem` ["MERGED", "CLOSED"])
+          return (not (ec2 == ExitSuccess && Text.strip out2 == "OPEN"))
 
 -- ---------------------------------------------------------------------------
 -- cmdStatus
@@ -315,10 +317,14 @@ execTask cfg conn t = do
   repoRoot <- getCurrentDirectory
   let instrFile = repoRoot </> taskInstructionFile t
 
-  -- 1. Fetch base branch
+  -- 1. Fetch base branch, creating it on origin from the default branch if absent
   ecFetch <- runGit ["fetch", "origin", base]
-  when (ecFetch /= ExitSuccess) $
-    putStrLn $ "Warning: fetch of " <> base <> " failed."
+  when (ecFetch /= ExitSuccess) $ do
+    putStrLn $ "Base branch '" <> base <> "' not found on origin, creating it..."
+    defaultBranch <- detectBaseBranch cfg
+    void $ runGit ["fetch", "origin", Text.unpack defaultBranch]
+    void $ runGit ["push", "origin", "refs/remotes/origin/" <> Text.unpack defaultBranch <> ":refs/heads/" <> base]
+    void $ runGit ["fetch", "origin", base]
 
   -- 2. Set up worktree (remove old one first if present)
   void $ runGit ["worktree", "remove", "--force", nameStr]
