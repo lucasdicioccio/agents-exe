@@ -70,9 +70,9 @@ EOD
     # If dependencies is empty or whitespace-only -> to-be-taken (ready to work)
     # If dependencies has content -> wait (must wait for dependencies)
     if [[ -z "${dependencies}" ]] || [[ "${dependencies}" =~ ^[[:space:]]*$ ]]; then
-      agent_label="agents/to-be-taken"
+      agent_label="agq/to-be-taken"
     else
-      agent_label="agents/wait"
+      agent_label="agq/wait"
     fi
 
     labels="${agent_label},${scope}"
