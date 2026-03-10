@@ -24,6 +24,7 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (Agent (..), AgentDescription (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..), ExtraAgentRef (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
+import qualified System.Agents.CLI.Paths as PathsCmd
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.ExportImport.Archive as ExportImport
 import qualified System.Agents.ExportImport.Git as ExportImport
@@ -321,7 +322,8 @@ initArgParserArgs = do
                 Nothing
 
 data Prog = Prog
-    { apiKeysFile :: FilePath
+    { configDir :: FilePath
+    , apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
     , logJsonFile :: Maybe FilePath
@@ -342,6 +344,7 @@ data Command
     | SessionEdit SessionEditOptions
     | Export ExportOptions
     | Import ImportOptions
+    | Paths PathsOptions
 
 instance Show Command where
     show Check = "Check"
@@ -355,6 +358,7 @@ instance Show Command where
     show (SessionEdit _) = "SessionEdit"
     show (Export _) = "Export"
     show (Import _) = "Import"
+    show (Paths _) = "Paths"
 
 data PromptScriptDirective
     = Str Text.Text
@@ -393,6 +397,11 @@ data SessionEditOp
     | SessionEditCensorToolCalls
     | SessionEditCensorThinking
     deriving (Show)
+
+-- | Options for the paths command
+data PathsOptions = PathsOptions
+    { pathsOutputJson :: Bool
+    } deriving (Show)
 
 -- | Export options for the export command
 data ExportOptions = ExportOptions
@@ -734,6 +743,19 @@ parseSelfDescribeCommand :: Parser Command
 parseSelfDescribeCommand =
     pure SelfDescribe
 
+-- | Parse the paths command
+parsePathsCommand :: Parser Command
+parsePathsCommand =
+    Paths <$> parsePathsOptions
+
+parsePathsOptions :: Parser PathsOptions
+parsePathsOptions =
+    PathsOptions
+        <$> switch
+            ( long "json"
+                <> help "Output in JSON format"
+            )
+
 -- | Parse the export command
 parseExportCommand :: Parser Command
 parseExportCommand =
@@ -993,7 +1015,8 @@ parseListTools =
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
-        <$> strOption
+        <$> pure argparserargs.configdir
+        <*> strOption
             ( long "api-keys"
                 <> metavar "AGENTS-KEY"
                 <> help "path to json-file containing API keys"
@@ -1057,6 +1080,8 @@ parseProgOptions argparserargs =
                     (progDesc "Export agent/tool configurations"))
                 <> command "import" (info parseImportCommand
                     (progDesc "Import agent/tool configurations"))
+                <> command "paths" (info parsePathsCommand
+                    (progDesc "Show important configuration paths"))
             )
 
 -------------------------------------------------------------------------------
@@ -1225,6 +1250,31 @@ main = do
                 handleSessionEdit opts
             Export opts -> handleExport opts pargs
             Import opts -> handleImport opts
+            Paths opts -> handlePaths opts pargs
+
+-------------------------------------------------------------------------------
+-- Paths Command Handler
+-------------------------------------------------------------------------------
+
+handlePaths :: PathsOptions -> Prog -> IO ()
+handlePaths opts progArgs = do
+    homedir <- getHomeDirectory
+    let defaultCfgDir = homedir </> ".config/agents-exe"
+    
+    -- Collect path information
+    pathsInfo <- PathsCmd.collectPathsInfo
+        progArgs.configDir
+        defaultCfgDir
+        progArgs.agentFiles
+        progArgs.apiKeysFile
+        progArgs.sessionsJsonPrefix
+    
+    -- Output based on format option
+    if pathsOutputJson opts
+        then LByteChar8.putStrLn $ PathsCmd.formatPathsJson pathsInfo
+        else Text.putStrLn $ PathsCmd.formatPathsHuman pathsInfo
+    
+    exitSuccess
 
 -------------------------------------------------------------------------------
 -- Session Edit Handler
