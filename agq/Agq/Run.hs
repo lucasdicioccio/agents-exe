@@ -1,5 +1,6 @@
 module Agq.Run
   ( runCmd
+  , runWithCwd
   , captureCmd
   , captureCmdBoth
   , runGit
@@ -17,6 +18,13 @@ import System.Process
 runCmd :: FilePath -> [String] -> IO ExitCode
 runCmd cmd args = do
   let p = (proc cmd args) { std_in = NoStream }
+  (_, _, _, ph) <- createProcess p
+  waitForProcess ph
+
+-- | Run a command in a specific working directory, streaming stdout/stderr. Returns ExitCode.
+runWithCwd :: FilePath -> FilePath -> [String] -> IO ExitCode
+runWithCwd worktreePath cmd args = do
+  let p = (proc cmd args) { std_in = NoStream, cwd = Just worktreePath }
   (_, _, _, ph) <- createProcess p
   waitForProcess ph
 

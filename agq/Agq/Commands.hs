@@ -344,10 +344,11 @@ execTask cfg conn t = do
     Just h  -> do
       let absH = worktreeProj </> h
       exists <- doesFileExist absH
-      return (if exists then Just absH else Nothing)
+      -- return the relative hook location as it will run in the worktreeProj
+      return (if exists then Just h else Nothing)
   case mHookAbs of
     Nothing -> return ()
-    Just h  -> void $ runCmd h ["prepare", Text.unpack lbl, nameStr, instrFile]
+    Just h  -> void $ runWithCwd worktreeProj h ["prepare", Text.unpack lbl, nameStr, instrFile]
 
   -- 4. Run agent, capturing stdout (commit message) and stderr (error log)
   putStrLn $ "[agq] Running agent for task '" <> nameStr <> "'"
@@ -414,7 +415,7 @@ execTask cfg conn t = do
 
       case mHookAbs of
         Nothing -> return ()
-        Just h  -> void $ runCmd h ["preview", Text.unpack lbl, nameStr, instrFile]
+        Just h  -> void $ runWithCwd worktreeProj h ["preview", Text.unpack lbl, nameStr, instrFile]
 
     releaseLock conn (taskName t) Done Nothing
 
