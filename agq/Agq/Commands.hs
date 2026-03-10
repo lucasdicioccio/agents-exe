@@ -302,17 +302,24 @@ execTask cfg conn t = do
     Just h  -> void $ runCmd h ["prepare", Text.unpack lbl, nameStr, instrFile]
 
   -- 4. Run agent, capturing commit message
+  putStrLn $ "[agq] Running agent for task '" <> nameStr <> "'"
+  putStrLn $ "[agq]   agent  : " <> agentCfg
+  putStrLn $ "[agq]   instr  : " <> instrFile
+  putStrLn $ "[agq]   session: " <> sessFile
   (ecAgent, commitMsg) <- runWithCwd worktreeProj "agents-exe"
     [ "--agent-file", agentCfg
     , "run"
     , "--session-file", sessFile
     , "-f", instrFile
     ]
+  putStrLn $ "[agq] Agent finished for task '" <> nameStr <> "' — " <>
+    if ecAgent == ExitSuccess then "success" else "FAILED"
   let commit = if Text.null (Text.strip commitMsg)
                  then "Update via automation (" <> nameStr <> ")"
                  else Text.unpack (Text.strip commitMsg)
 
   -- 5. session-print
+  putStrLn $ "[agq] Printing session for task '" <> nameStr <> "'"
   void $ runCmd "agents-exe" ["session-print", sessFile]
 
   -- 6. Commit and push
