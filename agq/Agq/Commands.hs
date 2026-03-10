@@ -267,13 +267,10 @@ execTask cfg conn t = do
                     Nothing -> Map.lookup "default" (hooks cfg))
       target    = if taskIsFinal t then "main" else base
 
-  -- Resolve paths as absolute so they remain valid when commands run inside the
-  -- worktree subdirectory (same pattern as sqq-agent.sh's instruction_abs).
+  -- instrFile must be absolute: it is stored relative to the repo root but
+  -- agents-exe runs from inside the worktree subdirectory.
   repoRoot <- getCurrentDirectory
   let instrFile = repoRoot </> taskInstructionFile t
-      sessFile  = repoRoot </> sessionsDir cfg </> nameStr <> ".session.json"
-
-  createDirectoryIfMissing True (repoRoot </> sessionsDir cfg)
 
   -- 1. Fetch base branch
   ecFetch <- runGit ["fetch", "origin", base]
@@ -289,6 +286,13 @@ execTask cfg conn t = do
     fail $ "Failed to create worktree " <> nameStr
 
   let worktreeProj = nameStr </> projDir
+      -- Session files live inside the worktree so that git add -A commits them
+      -- as part of the work item, mirroring sqq-agent.sh's behaviour.
+      sessDir  = repoRoot </> worktreeProj </> sessionsDir cfg
+      sessFile = sessDir </> nameStr <> ".session.json"
+      sessMd   = sessDir </> nameStr <> ".session.md"
+
+  createDirectoryIfMissing True sessDir
 
   -- 3. Optional prepare hook
   mHookAbs <- case mHook of
@@ -318,9 +322,10 @@ execTask cfg conn t = do
                  then "Update via automation (" <> nameStr <> ")"
                  else Text.unpack (Text.strip commitMsg)
 
-  -- 5. session-print
-  putStrLn $ "[agq] Printing session for task '" <> nameStr <> "'"
-  void $ runCmd "agents-exe" ["session-print", sessFile]
+  -- 5. session-print → write sibling .md so it gets committed with the work
+  putStrLn $ "[agq] Printing session for task '" <> nameStr <> "' -> " <> sessMd
+  (_, sessionMd) <- captureCmd "agents-exe" ["session-print", sessFile]
+  Text.writeFile sessMd sessionMd
 
   -- 6. Commit and push
   void $ runGit ["-C", nameStr, "checkout", "-b", nameStr]
