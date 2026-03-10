@@ -37,7 +37,7 @@ import System.Agents.OneShot (runtimeToAgent)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
 import qualified System.Agents.Session.Loop as Loop
-import System.Agents.SessionPrint (SessionPrintOptions(..), OrderPreference(..), formatSessionAsMarkdown)
+import System.Agents.SessionPrint (SessionPrintOptions(..), OrderPreference(..), PrintVisibility(..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
 
@@ -257,8 +257,8 @@ formatSessionMarkdown :: Session -> Text.Text
 formatSessionMarkdown session =
     let opts = SessionPrintOptions
             { sessionPrintFile = ""  -- Not used for in-memory formatting
-            , showToolCallResults = True
-            , showToolCallArguments = True
+            , showToolCallResults = ShownFull
+            , showToolCallArguments = ShownFull
             , nTurns = Nothing
             , repeatSystemPrompt = False
             , repeatTools = False

@@ -9,6 +9,8 @@ module System.Agents.SessionPrint
     ( -- * Options
       SessionPrintOptions (..)
     , OrderPreference (..)
+    , PrintVisibility (..)
+    , PrintAmount (..)
       -- * Main handler
     , handleSessionPrint
       -- * Formatting functions
@@ -16,16 +18,22 @@ module System.Agents.SessionPrint
       -- * Statistics
     , SessionStatistics (..)
     , calculateStatistics
+      -- * Elision
+    , elideDocument
     ) where
 
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString as BS
 import Data.List (sortOn)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import qualified Data.Text.Lazy as TextLazy
+import qualified Data.Text.Lazy.Encoding as TextLazyEncoding
 import System.IO (stderr)
 
 import qualified System.Agents.Session.Base as Session
@@ -36,14 +44,31 @@ data OrderPreference
     | Antichronological   -- ^ Newest first (recent steps shown first)
     deriving (Show, Eq)
 
+-- | Amount of content to print (either in lines or characters).
+data PrintAmount
+    = Lines Int  -- ^ Number of lines to keep
+    | Chars Int  -- ^ Number of characters to keep
+    deriving (Show, Eq)
+
+-- | Visibility preference for displaying content.
+--
+-- - 'Hidden': Don't show the content at all
+-- - 'Elided leading trailing': Show leading and trailing portions, eliding the middle
+-- - 'ShownFull': Show the complete content
+data PrintVisibility
+    = Hidden
+    | Elided PrintAmount PrintAmount  -- ^ Keep leading amount and trailing amount
+    | ShownFull
+    deriving (Show, Eq)
+
 -- | Options for controlling the session print output.
 data SessionPrintOptions = SessionPrintOptions
     { -- | Path to the session JSON file to print
       sessionPrintFile :: FilePath
-      -- | Whether to show tool call results in the output
-    , showToolCallResults :: Bool
-      -- | Whether to show tool call arguments in the output
-    , showToolCallArguments :: Bool
+      -- | How to display tool call results in the output
+    , showToolCallResults :: PrintVisibility
+      -- | How to display tool call arguments in the output
+    , showToolCallArguments :: PrintVisibility
       -- | Optional limit on the number of turns to display
     , nTurns :: Maybe Int
       -- | Whether to repeat the system prompt at each turn
@@ -98,6 +123,87 @@ handleSessionPrint opts = do
         Right session -> do
             let markdown = formatSessionAsMarkdown opts session
             Text.putStr markdown
+
+-- | Elide a document by keeping leading and trailing portions.
+--
+-- This function intelligently handles overlapping regions. For example, if a
+-- document is 7 lines long and we request @Elided (Lines 5) (Lines 5)@, all
+-- 7 lines will be displayed (not duplicated).
+--
+-- >>> elideDocument (Lines 3) (Lines 3) "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+-- "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+--
+-- >>> elideDocument (Lines 2) (Lines 2) "line1\nline2\nline3\nline4\nline5"
+-- "line1\nline2\n... (1 line elided) ...\nline4\nline5"
+--
+-- >>> elideDocument (Chars 10) (Chars 5) "Hello, world! This is a test."
+-- "Hello, wor... (elided 14 chars) ...test."
+--
+-- >>> elideDocument (Lines 100) (Lines 100) "short text"
+-- "short text"
+elideDocument :: PrintAmount -> PrintAmount -> Text.Text -> Text.Text
+elideDocument _ _ "" = ""
+elideDocument leading trailing content =
+    case (leading, trailing) of
+        (Lines n, Lines m) -> elideLines n m content
+        (Chars n, Chars m) -> elideChars n m content
+        (Lines n, Chars m) ->
+            -- Convert leading lines to chars for consistent handling
+            let lines' = Text.lines content
+                leadingLines = take n lines'
+                leadingChars = sum (map Text.length leadingLines) + length leadingLines
+            in elideChars leadingChars m content
+        (Chars n, Lines m) ->
+            -- Convert trailing lines to chars for consistent handling
+            let lines' = Text.lines content
+                trailingLines = take m (reverse lines')
+                trailingChars = sum (map Text.length trailingLines) + length trailingLines
+            in elideChars n trailingChars content
+
+-- | Elide by lines, handling overlaps intelligently.
+elideLines :: Int -> Int -> Text.Text -> Text.Text
+elideLines leadingCount trailingCount content =
+    let lines' = Text.lines content
+        totalLines = length lines'
+        -- If the total would exceed document length, show everything
+        actualLeading = min leadingCount totalLines
+        actualTrailing = min trailingCount totalLines
+        -- Check for overlap
+        overlap = actualLeading + actualTrailing - totalLines
+    in if overlap >= 0
+        then Text.intercalate "\n" lines'  -- No elision needed
+        else
+            let leading = take actualLeading lines'
+                trailing = drop (totalLines - actualTrailing) lines'
+                elidedCount = totalLines - actualLeading - actualTrailing
+            in Text.intercalate "\n" leading
+                <> "\n... ("
+                <> Text.pack (show elidedCount)
+                <> " line" <> (if elidedCount == 1 then "" else "s")
+                <> " elided) ...\n"
+                <> Text.intercalate "\n" trailing
+
+-- | Elide by characters, handling overlaps intelligently.
+elideChars :: Int -> Int -> Text.Text -> Text.Text
+elideChars leadingCount trailingCount content =
+    let totalChars = Text.length content
+        -- If the total would exceed document length, show everything
+        actualLeading = min leadingCount totalChars
+        actualTrailing = min trailingCount totalChars
+        -- Check for overlap
+        overlap = actualLeading + actualTrailing - totalChars
+    in if overlap >= 0
+        then content  -- No elision needed
+        else
+            let leading = Text.take actualLeading content
+                trailing = Text.drop (totalChars - actualTrailing) content
+                elidedCount = totalChars - actualLeading - actualTrailing
+            in leading
+                <> "... (elided "
+                <> Text.pack (show elidedCount)
+                <> " char" <> (if elidedCount == 1 then "" else "s")
+                <> ") ..."
+                <> trailing
 
 -- | Format a Session as markdown text.
 --
@@ -217,7 +323,7 @@ calculateByteCounts turns =
         in (inp, out + outBytes, reas + reasBytes)
     
     textBytes :: Text.Text -> Int
-    textBytes = Text.length . Text.decodeUtf8 . Text.encodeUtf8
+    textBytes = BS.length . Text.encodeUtf8
     
     unwrapQuery :: Session.UserQuery -> Text.Text
     unwrapQuery (Session.UserQuery q) = q
@@ -340,9 +446,10 @@ formatUserTurn opts isFirstTurn content =
             else if opts.repeatTools || isFirstTurn
                 then "\n### 🛠️ Available Tools\n\n" <> formatAvailableTools content.userTools
                 else ""
-        toolResponsesSection = if null content.userToolResponses || not opts.showToolCallResults
-            then ""
-            else "\n### 📥 Tool Responses\n\n" <> formatToolResponses content.userToolResponses
+        toolResponsesSection = case opts.showToolCallResults of
+            Hidden -> ""
+            _ | null content.userToolResponses -> ""
+            _ -> "\n### 📥 Tool Responses\n\n" <> formatToolResponses opts.showToolCallResults content.userToolResponses
     in systemPromptSection <> querySection <> toolsSection <> toolResponsesSection
 
 -- | Format LLM turn content.
@@ -378,13 +485,13 @@ formatSystemTool (Session.SystemTool toolDef) = case toolDef of
         "  - Description: " <> def.description
 
 -- | Format LLM tool calls (names and optionally arguments).
-formatLlmToolCalls :: Bool -> [Session.LlmToolCall] -> Text.Text
-formatLlmToolCalls showArgs calls =
-    Text.intercalate "\n" $ map (formatLlmToolCall showArgs) calls
+formatLlmToolCalls :: PrintVisibility -> [Session.LlmToolCall] -> Text.Text
+formatLlmToolCalls visibility calls =
+    Text.intercalate "\n" $ map (formatLlmToolCall visibility) calls
 
 -- | Format a single LLM tool call, extracting the name and optionally arguments.
-formatLlmToolCall :: Bool -> Session.LlmToolCall -> Text.Text
-formatLlmToolCall showArgs (Session.LlmToolCall val) =
+formatLlmToolCall :: PrintVisibility -> Session.LlmToolCall -> Text.Text
+formatLlmToolCall visibility (Session.LlmToolCall val) =
     case val of
         Aeson.Object obj ->
             -- Try to extract the function name from the tool call structure
@@ -393,33 +500,72 @@ formatLlmToolCall showArgs (Session.LlmToolCall val) =
                     let toolName = case KeyMap.lookup "name" funcObj of
                             Just (Aeson.String n) -> n
                             _ -> "(unnamed)"
-                        args = if showArgs
-                            then case KeyMap.lookup "arguments" funcObj of
-                                Just argsVal -> "\n  ```\n  " <> formatJsonAsText argsVal <> "\n  ```"
-                                Nothing -> ""
-                            else ""
+                        args = formatToolArguments visibility funcObj
                     in "- **" <> toolName <> "**" <> args
                 _ -> case KeyMap.lookup "name" obj of
                     Just (Aeson.String toolName) -> 
-                        let args = if showArgs
-                                then case KeyMap.lookup "arguments" obj of
-                                    Just argsVal -> "\n  ```\n  " <> formatJsonAsText argsVal <> "\n  ```"
-                                    Nothing -> ""
-                                else ""
+                        let args = formatToolArgumentsDirect visibility obj
                         in "- **" <> toolName <> "**" <> args
                     _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
         _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
 
+-- | Format tool arguments from the function object.
+formatToolArguments :: PrintVisibility -> KeyMap.KeyMap Aeson.Value -> Text.Text
+formatToolArguments Hidden _ = ""
+formatToolArguments visibility funcObj =
+    case KeyMap.lookup "arguments" funcObj of
+        Just argsVal -> 
+            let formatted = formatJsonValuePretty argsVal
+                elided = case visibility of
+                    Hidden -> ""
+                    Elided leading trailing -> elideDocument leading trailing formatted
+                    ShownFull -> formatted
+                byteCount = BS.length $ Text.encodeUtf8 formatted
+            in if Text.null elided
+                then ""
+                else "\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+        Nothing -> ""
+
+-- | Format tool arguments directly from the tool call object.
+formatToolArgumentsDirect :: PrintVisibility -> KeyMap.KeyMap Aeson.Value -> Text.Text
+formatToolArgumentsDirect Hidden _ = ""
+formatToolArgumentsDirect visibility obj =
+    case KeyMap.lookup "arguments" obj of
+        Just argsVal -> 
+            let formatted = formatJsonValuePretty argsVal
+                elided = case visibility of
+                    Hidden -> ""
+                    Elided leading trailing -> elideDocument leading trailing formatted
+                    ShownFull -> formatted
+                byteCount = BS.length $ Text.encodeUtf8 formatted
+            in if Text.null elided
+                then ""
+                else "\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+        Nothing -> ""
+
+-- | Format a JSON value as pretty-printed text.
+formatJsonValuePretty :: Aeson.Value -> Text.Text
+formatJsonValuePretty val =
+    TextLazy.toStrict $ TextLazyEncoding.decodeUtf8 $ AesonPretty.encodePretty val
+
 -- | Format tool responses.
-formatToolResponses :: [(Session.LlmToolCall, Session.UserToolResponse)] -> Text.Text
-formatToolResponses responses =
-    Text.intercalate "\n\n" $ map formatToolResponse responses
+formatToolResponses :: PrintVisibility -> [(Session.LlmToolCall, Session.UserToolResponse)] -> Text.Text
+formatToolResponses visibility responses =
+    Text.intercalate "\n\n" $ map (formatToolResponse visibility) responses
 
 -- | Format a single tool response.
-formatToolResponse :: (Session.LlmToolCall, Session.UserToolResponse) -> Text.Text
-formatToolResponse (call, Session.UserToolResponse response) =
+formatToolResponse :: PrintVisibility -> (Session.LlmToolCall, Session.UserToolResponse) -> Text.Text
+formatToolResponse visibility (call, Session.UserToolResponse response) =
     let callName = extractToolCallName call
-    in "**" <> callName <> "** response:\n```\n" <> formatJsonAsText response <> "\n```"
+        formatted = formatJsonValuePretty response
+        elided = case visibility of
+            Hidden -> ""
+            Elided leading trailing -> elideDocument leading trailing formatted
+            ShownFull -> formatted
+        byteCount = BS.length $ Text.encodeUtf8 formatted
+    in if Text.null elided
+        then ""
+        else "**" <> callName <> "** response:\n```json\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
 
 -- | Extract tool name from a tool call.
 extractToolCallName :: Session.LlmToolCall -> Text.Text

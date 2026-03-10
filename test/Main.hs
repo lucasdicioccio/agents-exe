@@ -25,6 +25,8 @@ import qualified OpenAPIToolboxTests
 import qualified PostgRESTParseTest
 -- Import Session Edit tests
 import qualified SessionEditTests
+-- Import SessionPrint tests
+import qualified SessionPrintTests
 
 main :: IO ()
 main = defaultMain tests
@@ -48,6 +50,7 @@ tests =
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests
+        , SessionPrintTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
