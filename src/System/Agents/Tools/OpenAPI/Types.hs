@@ -68,6 +68,8 @@ object = Aeson.object . catMaybes
 data OpenAPISpec = OpenAPISpec
     { specPaths :: Map Path (Map Method Operation)
     , specComponents :: Maybe Components
+    , specParameters :: Maybe (Map Text Parameter)
+    -- ^ Swagger 2.0 parameters section, stored for reference resolution
     }
     deriving (Show, Eq)
 
@@ -88,7 +90,7 @@ parseOpenAPIV3 o = do
     pathsObj <- o .: "paths"
     paths <- parsePaths pathsObj
     components <- o .:? "components"
-    pure $ OpenAPISpec paths components
+    pure $ OpenAPISpec paths components Nothing
 
 -- | Parse Swagger 2.0 format and convert to OpenAPI 3.x structure.
 parseSwaggerV2 :: KeyMap.KeyMap Value -> Parser OpenAPISpec
@@ -99,7 +101,10 @@ parseSwaggerV2 o = do
     -- Convert definitions to components/schemas
     definitions <- o .:? "definitions"
     let components = fmap definitionsToComponents definitions
-    pure $ OpenAPISpec paths components
+    -- Parse and store the parameters section for reference resolution
+    parameters <- o .:? "parameters"
+    let paramsMap = fmap parametersToMap parameters
+    pure $ OpenAPISpec paths components paramsMap
 
 -- | Convert Swagger 2.0 definitions to Components.
 definitionsToComponents :: KeyMap.KeyMap Value -> Components
@@ -112,6 +117,19 @@ definitionsToComponents defs =
     parseDefinition (k, v) =
         case Aeson.fromJSON v of
             Aeson.Success schema -> Just (toText k, schema)
+            Aeson.Error _ -> Nothing
+
+-- | Convert Swagger 2.0 parameters to a Map.
+parametersToMap :: KeyMap.KeyMap Value -> Map Text Parameter
+parametersToMap params =
+    let pairs = KeyMap.toList params
+        paramPairs = mapMaybe parseParamPair pairs
+    in Map.fromList paramPairs
+  where
+    parseParamPair :: (Key, Value) -> Maybe (Text, Parameter)
+    parseParamPair (k, v) =
+        case Aeson.fromJSON v of
+            Aeson.Success param -> Just (toText k, param)
             Aeson.Error _ -> Nothing
 
 -- | Parse the paths object where each path maps to a methods object.
@@ -310,6 +328,7 @@ parseParamLocationSwaggerV2 "path" = pure ParamInPath
 parseParamLocationSwaggerV2 "query" = pure ParamInQuery
 parseParamLocationSwaggerV2 "header" = pure ParamInHeader
 parseParamLocationSwaggerV2 "formData" = pure ParamInFormData
+parseParamLocationSwaggerV2 "body" = pure ParamInBody
 parseParamLocationSwaggerV2 other = fail $ "Unknown parameter location: " ++ Text.unpack other
 
 instance ToJSON OpenAPISpec where
@@ -317,6 +336,7 @@ instance ToJSON OpenAPISpec where
         object
             [ "paths" .= specPaths spec
             , "components" .=? specComponents spec
+            , "parameters" .=? specParameters spec
             ]
 
 -- -------------------------------------------------------------------------
@@ -398,12 +418,13 @@ instance ToJSON Parameter where
             , "schema" .=? param.paramSchema
             ]
 
--- | Parameter location: path, query, header, or formData.
+-- | Parameter location: path, query, header, formData, or body.
 data ParamLocation
     = ParamInPath
     | ParamInQuery
     | ParamInHeader
     | ParamInFormData
+    | ParamInBody
     deriving (Show, Eq)
 
 -- | Parse a parameter location from text.
@@ -411,6 +432,8 @@ parseParamLocation :: Text -> Parser ParamLocation
 parseParamLocation "path" = pure ParamInPath
 parseParamLocation "query" = pure ParamInQuery
 parseParamLocation "header" = pure ParamInHeader
+parseParamLocation "formData" = pure ParamInFormData
+parseParamLocation "body" = pure ParamInBody
 parseParamLocation other = fail $ "Unknown parameter location: " ++ Text.unpack other
 
 -- | Convert a parameter location to text.
@@ -419,6 +442,7 @@ paramLocationToText ParamInPath = "path"
 paramLocationToText ParamInQuery = "query"
 paramLocationToText ParamInHeader = "header"
 paramLocationToText ParamInFormData = "formData"
+paramLocationToText ParamInBody = "body"
 
 -- -------------------------------------------------------------------------
 -- Request body

@@ -408,7 +408,7 @@ test_dereferenceSpec = testCase "Dereferences all schemas in spec" $ do
     let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
     let param = Parameter "petId" ParamInPath Nothing True (Just refSchema)
     let operation = Operation (Just "getPet") Nothing Nothing [param] Nothing
-    let spec = OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) (Just components)
+    let spec = OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) (Just components) Nothing
 
     let dereferenced = dereferenceSpec spec
     case Map.lookup "/pets/{petId}" (specPaths dereferenced) of
@@ -598,7 +598,7 @@ test_convertOpenAPIToTools = testCase "Converts entire spec to tools" $ do
                 [ ("/pets", Map.fromList [("GET", getOp), ("POST", postOp)])
                 , ("/pets/{id}", Map.singleton "GET" getOp)
                 ]
-    let spec = OpenAPISpec paths Nothing
+    let spec = OpenAPISpec paths Nothing Nothing
 
     let tools = convertOpenAPIToTools spec
     length tools @?= 3

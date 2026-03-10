@@ -365,6 +365,7 @@ openAPITypesTests =
             let spec = OpenAPI.OpenAPISpec
                     { OpenAPI.specPaths = Map.singleton "/test" (Map.singleton "GET" testOperation)
                     , OpenAPI.specComponents = Nothing
+                    , OpenAPI.specParameters = Nothing
                     }
             let json = encode spec
             let mSpec = decode json :: Maybe OpenAPI.OpenAPISpec
@@ -516,7 +517,7 @@ openAPIResolverTests =
             let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
             let param = OpenAPI.Parameter "petId" OpenAPI.ParamInPath Nothing True (Just refSchema)
             let operation = OpenAPI.Operation (Just "getPet") Nothing Nothing [param] Nothing
-            let spec = OpenAPI.OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) (Just components)
+            let spec = OpenAPI.OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) (Just components) Nothing
             let dereferenced = Resolver.dereferenceSpec spec
             case Map.lookup "/pets/{petId}" (OpenAPI.specPaths dereferenced) of
                 Nothing -> assertFailure "Path not found"
@@ -533,7 +534,7 @@ openAPIResolverTests =
             let refSchema = mkSchema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
             let param = OpenAPI.Parameter "petId" OpenAPI.ParamInPath Nothing True (Just refSchema)
             let operation = OpenAPI.Operation (Just "getPet") Nothing Nothing [param] Nothing
-            let spec = OpenAPI.OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) Nothing
+            let spec = OpenAPI.OpenAPISpec (Map.singleton "/pets/{petId}" (Map.singleton "GET" operation)) Nothing Nothing
             let dereferenced = Resolver.dereferenceSpec spec
             -- Should not crash, schema remains unresolved
             case Map.lookup "/pets/{petId}" (OpenAPI.specPaths dereferenced) of
@@ -660,7 +661,7 @@ openAPIConverterTests =
                     [ ("/pets", Map.fromList [("GET", getOp), ("POST", postOp)])
                     , ("/pets/{id}", Map.singleton "GET" getOp)
                     ]
-            let spec = OpenAPI.OpenAPISpec paths Nothing
+            let spec = OpenAPI.OpenAPISpec paths Nothing Nothing
             let tools = Converter.convertOpenAPIToTools spec
             length tools @?= 3
         , testCase "toOpenAITool converts tool correctly" $ do

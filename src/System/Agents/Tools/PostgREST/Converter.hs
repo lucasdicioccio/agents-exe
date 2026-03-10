@@ -60,6 +60,11 @@ module System.Agents.Tools.PostgREST.Converter (
     methodToOperation,
     isMethodSupported,
 
+    -- * Body parameter resolution (for PostgREST pattern)
+    extractRequestBodySchema,
+    resolveBodyParameterRef,
+    isBodyParamRef,
+
     -- * Re-export for convenience
     module System.Agents.Tools.PostgREST.Types,
 ) where
@@ -67,9 +72,10 @@ module System.Agents.Tools.PostgREST.Converter (
 import Data.Aeson (Value (..))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (isLetter)
+import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -103,7 +109,7 @@ import System.Agents.Tools.PostgREST.Types
 -- as tools. By default, only read-only methods are included for safety.
 --
 -- Example:
--- >>> let spec = OpenAPISpec (Map.fromList [("/users", Map.fromList [("GET", someOp)])]) Nothing
+-- >>> let spec = OpenAPISpec (Map.fromList [("/users", Map.fromList [("GET", someOp)])]) Nothing Nothing
 -- >>> let tools = convertPostgRESToTools "mydb" [GET] spec
 -- >>> length tools
 -- 1
@@ -126,8 +132,8 @@ convertPostgRESToTools toolboxName allowedMethods spec = do
         Just operation -> do
             -- Extract row filters from the operation
             let rowFilters = extractRowFilters operation spec
-            -- Extract request body schema for write operations
-            let requestBodySchema = extractRequestBodySchema operation
+            -- Extract request body schema for write operations (with PostgREST resolution)
+            let requestBodySchema = extractRequestBodySchemaWithSpec spec operation
             pure $ convertTable toolboxName path method operation rowFilters requestBodySchema
         Nothing -> []
   where
@@ -144,11 +150,76 @@ isMethodSupported :: HttpMethod -> Operation -> Bool
 isMethodSupported _ _ = True
 
 -- | Extract request body schema from an operation.
+-- This is the standard extraction that doesn't use the spec.
 extractRequestBodySchema :: Operation -> Maybe Schema
 extractRequestBodySchema op = do
     reqBody <- opRequestBody op
     -- Get the JSON schema from the request body content
     Map.lookup "application/json" (reqBodyContent reqBody)
+
+-- | Extract request body schema with PostgREST-specific resolution.
+--
+-- PostgREST uses a two-level reference pattern:
+-- 1. Operation references: {"$ref": "#/parameters/body.tablename"}
+-- 2. Parameter def has: {"in": "body", "schema": {"$ref": "#/definitions/..."}}
+--
+-- This function first tries standard extraction, then falls back to
+-- resolving the PostgREST body parameter pattern.
+extractRequestBodySchemaWithSpec :: OpenAPISpec -> Operation -> Maybe Schema
+extractRequestBodySchemaWithSpec spec op =
+    -- First try standard extraction
+    case extractRequestBodySchema op of
+        Just schema -> Just schema
+        Nothing -> resolvePostgRESTBodyRef spec op
+
+-- | Resolve PostgREST body parameter reference.
+--
+-- Looks for parameters with $ref to #/parameters/body.* and resolves
+-- them against the spec's parameters section.
+resolvePostgRESTBodyRef :: OpenAPISpec -> Operation -> Maybe Schema
+resolvePostgRESTBodyRef spec op = do
+    -- Find a parameter that is a body parameter reference
+    bodyParamRef <- find isBodyParamRef (opParameters op)
+    -- Get the reference string (e.g., "#/parameters/body.trainers")
+    ref <- getParamRef bodyParamRef
+    -- Resolve the reference against the spec's parameters
+    resolveBodyParameterRef spec ref
+
+-- | Check if a parameter is a body parameter reference.
+-- Pattern: $ref = "#/parameters/body.something"
+isBodyParamRef :: Parameter -> Bool
+isBodyParamRef param =
+    case paramSchema param >>= schemaRef of
+        Just ref -> "#/parameters/body." `Text.isPrefixOf` ref
+        Nothing -> False
+
+-- | Get the $ref value from a parameter.
+getParamRef :: Parameter -> Maybe Text
+getParamRef param = paramSchema param >>= schemaRef
+
+-- | Resolve a body parameter reference to get the actual schema.
+--
+-- Given a reference like "#/parameters/body.trainers", this function:
+-- 1. Looks up the parameter definition in specParameters
+-- 2. Verifies it's a body parameter
+-- 3. Returns the schema from that parameter definition
+resolveBodyParameterRef :: OpenAPISpec -> Text -> Maybe Schema
+resolveBodyParameterRef spec ref = do
+    -- Extract the parameter name from the reference
+    -- Format: #/parameters/body.tablename
+    paramName <- Text.stripPrefix "#/parameters/" ref
+    -- Get the parameters section
+    params <- specParameters spec
+    -- Look up the parameter definition
+    paramDef <- Map.lookup paramName params
+    -- Verify it's a body parameter
+    guard (paramIn paramDef == ParamInBody)
+    -- Return the schema from the parameter definition
+    paramSchema paramDef
+  where
+    guard :: Bool -> Maybe ()
+    guard True = Just ()
+    guard False = Nothing
 
 -- | Converts a single PostgREST table endpoint to a tool.
 --
@@ -256,7 +327,7 @@ isOpenApiEndpoint path =
 --
 -- Examples:
 -- >>> let param = Parameter "id" ParamInQuery (Just "Filter on id") False (Just (Schema (Just "integer") Nothing Nothing Nothing Nothing Nothing Nothing Nothing))
--- >>> extractRowFilters (Operation Nothing Nothing Nothing [param] Nothing) (OpenAPISpec Map.empty Nothing)
+-- >>> extractRowFilters (Operation Nothing Nothing Nothing [param] Nothing) (OpenAPISpec Map.empty Nothing Nothing)
 -- []
 extractRowFilters :: Operation -> OpenAPISpec -> [RowFilter]
 extractRowFilters op spec =
