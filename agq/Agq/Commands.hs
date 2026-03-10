@@ -422,13 +422,17 @@ execTask cfg conn t = do
       void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
       void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
 
-      let prTitle = takeWhile (/= '\n') commit
+      let prTitle  = takeWhile (/= '\n') commit
+          closesLine = case taskSource t of
+            SourceGithub n -> "\n\nCloses #" <> show n <> "."
+            SourceLocal    -> ""
+          prBody   = commit <> closesLine
       void $ runCmd "gh"
         [ "pr", "create"
         , "--base", target
         , "--head", branchName
         , "--title", prTitle
-        , "--body", commit
+        , "--body", prBody
         , "--label", Text.unpack (labelAgentPr (labels cfg))
         ]
 
