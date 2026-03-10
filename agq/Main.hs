@@ -20,7 +20,7 @@ data Command
   | Pull
   | Promote
   | Status
-  | Process Bool                 -- parallel?
+  | Process Bool Bool            -- parallel? loop?
   | Exec Text                    -- task name
   | MergePRs
   | Clean Bool Bool              -- do-it force
@@ -103,6 +103,7 @@ parseAdd = Add
 parseProcess :: Parser Command
 parseProcess = Process
   <$> switch (long "parallel" <> help "Fork tasks in parallel")
+  <*> switch (long "loop"     <> help "Run forever, polling for new tasks when the queue is empty")
 
 parseExec :: Parser Command
 parseExec = Exec <$> textArg "NAME" "Task name to execute"
@@ -141,7 +142,7 @@ dispatch cfg conn cmd = case cmd of
   Pull          -> cmdPull    cfg conn
   Promote       -> cmdPromote cfg
   Status        -> cmdStatus  cfg conn
-  Process p     -> cmdProcess cfg conn p
+  Process p l   -> cmdProcess cfg conn p l
   Exec n        -> cmdExec    cfg conn n
   MergePRs      -> cmdMergePRs cfg
   Clean d f     -> cmdClean   cfg d f

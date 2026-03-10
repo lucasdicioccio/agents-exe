@@ -216,31 +216,31 @@ cmdStatus _cfg conn = do
 -- cmdProcess
 -- ---------------------------------------------------------------------------
 
-cmdProcess :: AgqConfig -> Connection -> Bool -> IO ()
-cmdProcess cfg conn parallel = do
+cmdProcess :: AgqConfig -> Connection -> Bool -> Bool -> IO ()
+cmdProcess cfg conn parallel loop = do
   n <- recoverStaleLocks conn (lockStaleSeconds cfg)
   when (n > 0) $ putStrLn $ "Recovered " <> show n <> " stale task(s)."
-  loop
+  go
   where
-    loop = do
+    go = do
       mname <- claimNextTask conn
       case mname of
         Nothing -> do
           cnt <- countPendingRunning conn
-          if cnt == 0
+          if cnt == 0 && not loop
             then putStrLn "Queue empty. Exiting."
             else do
               putStrLn $ "Waiting (" <> show cnt <> " task(s) pending/running)..."
               threadDelay (pollSeconds cfg * 1000000)
-              loop
+              go
         Just name ->
           if parallel
             then do
               void $ forkIO (cmdExec cfg conn name)
-              loop
+              go
             else do
               cmdExec cfg conn name
-              loop
+              go
 
 -- ---------------------------------------------------------------------------
 -- cmdExec
