@@ -70,7 +70,8 @@ data SessionStatistics = SessionStatistics
 -- | Default ASCII art logo for the session report header.
 defaultLogo :: Text.Text
 defaultLogo = Text.intercalate "\n"
-    [ "    λλ"
+    [ "```"
+    , "    λλ"
     , "   λ⊙λ⊙"
     , "  λλλλλλ"
     , " λλλλλλλλ"
@@ -82,6 +83,7 @@ defaultLogo = Text.intercalate "\n"
     , "    λλ"
     , "    λλ"
     , "    λλ"
+    , "```"
     ]
 
 -- | Handle the session-print command: load a session file and output it as markdown.
@@ -238,7 +240,7 @@ formatStatistics stats =
 formatToolCallStats :: Map Text.Text Int -> Text.Text
 formatToolCallStats toolMap
     | Map.null toolMap = "_No tool calls recorded_\n"
-    | otherwise = 
+    otherwise = 
         let maxCount = maximum (Map.elems toolMap)
             sortedTools = sortOn (negate . snd) (Map.toList toolMap)
         in Text.intercalate "\n" $ map (formatToolBar maxCount) sortedTools <> [""]
