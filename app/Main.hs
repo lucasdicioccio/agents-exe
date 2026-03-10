@@ -12,6 +12,7 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Functor.Contravariant.Divisible (choose)
+import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -336,6 +337,7 @@ data Prog = Prog
     , logJsonFile :: Maybe FilePath
     , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
+    , selectedAgentSlug :: Maybe Text  -- NEW: selected agent by slug
     , mainCommand :: Command
     }
 
@@ -1073,6 +1075,14 @@ parseProgOptions argparserargs =
                     )
                 )
             )
+        <*> optional
+            ( strOption
+                ( long "agent"
+                    <> short 'a'
+                    <> metavar "SLUG"
+                    <> help "Select agent by slug instead of file path"
+                )
+            )
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "tui" (info parseTuiChatCommand (idm))
@@ -1133,138 +1143,182 @@ main = do
         -- Initialize SessionStore from the session prefix argument
         let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
 
-        case pargs.mainCommand of
-            Check -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                forM_ pargs.agentFiles $ \agentFile -> do
-                    -- Create a new runtime registry for this agent tree
+        -- Resolve agent files based on selected slug
+        resolvedAgentFiles <- resolveAgentFiles pargs.agentFiles pargs.selectedAgentSlug
+
+        case resolvedAgentFiles of
+            Left err -> do
+                Text.hPutStrLn stderr err
+                exitFailure
+            Right agentFiles' ->
+                runCommand pargs baseTracer sessionStore agentFiles'
+
+-- | Resolve agent files based on optional slug selection.
+-- If a slug is provided, finds the agent file with matching slug.
+-- If no slug is provided, returns all agent files unchanged.
+resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
+resolveAgentFiles files Nothing = pure $ Right files
+resolveAgentFiles files (Just slug) = do
+    -- Load all agents to find matching slug
+    agentsWithFiles <- mapM loadAgentWithFile files
+    case find (\(_, agent) -> slug == agent.slug) agentsWithFiles of
+        Just (file, _) -> pure $ Right [file]
+        Nothing -> do
+            -- Build error message with available slugs
+            let availableSlugs = map (\(f, a) -> (a.slug, f)) agentsWithFiles
+            pure $ Left $ formatSlugNotFoundError slug availableSlugs
+  where
+    loadAgentWithFile :: FilePath -> IO (FilePath, Agent)
+    loadAgentWithFile file = do
+        result <- Aeson.eitherDecodeFileStrict' file
+        case result of
+            Left err -> error $ "Failed to parse agent file " ++ file ++ ": " ++ err
+            Right (AgentDescription agent) -> pure (file, agent)
+
+    formatSlugNotFoundError :: Text -> [(Text, FilePath)] -> Text
+    formatSlugNotFoundError targetSlug available =
+        Text.unlines $
+            [ "Error: Agent '" <> targetSlug <> "' not found."
+            , ""
+            , "Available agents:"
+            ]
+            ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
+
+-- | Run the selected command with resolved agent files
+runCommand :: Prog -> Prod.Tracer IO AgentTree.Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
+runCommand pargs baseTracer sessionStore agentFiles =
+    case pargs.mainCommand of
+        Check -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            forM_ agentFiles $ \agentFile -> do
+                -- Create a new runtime registry for this agent tree
+                registry <- AgentTree.newRuntimeRegistry
+                -- Use silent tracer to suppress diagnostic output during agent loading
+                AgentTree.withAgentTreeRuntime
+                    AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer = Prod.silent
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+                    $ \result -> case result of
+                        AgentTree.Errors errs -> mapM_ print errs
+                        AgentTree.Initialized tree -> printAgentCheck tree
+        TerminalUI _ -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            let oneAgent agentFile = do
                     registry <- AgentTree.newRuntimeRegistry
-                    -- Use silent tracer to suppress diagnostic output during agent loading
-                    AgentTree.withAgentTreeRuntime
-                        AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer = Prod.silent
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-                        $ \result -> case result of
-                            AgentTree.Errors errs -> mapM_ print errs
-                            AgentTree.Initialized tree -> printAgentCheck tree
-            TerminalUI _ -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let oneAgent agentFile = do
-                        registry <- AgentTree.newRuntimeRegistry
-                        pure $ AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                Prod.traceBoth
-                                    baseTracer
-                                    (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-                -- Use traverse to sequence the IO actions for creating Props
-                agentPropsList <- traverse oneAgent pargs.agentFiles
-                TUI.runTUI sessionStore agentPropsList
-            EchoPrompt opts -> do
+                    pure $ AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer =
+                            Prod.traceBoth
+                                baseTracer
+                                (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+            -- Use traverse to sequence the IO actions for creating Props
+            agentPropsList <- traverse oneAgent agentFiles
+            TUI.runTUI sessionStore agentPropsList
+        EchoPrompt opts -> do
+            promptContents <- interpretPromptScript opts.promptScript
+            Text.putStr promptContents
+        OneShot opts -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            forM_ (take 1 agentFiles) $ \agentFile -> do
                 promptContents <- interpretPromptScript opts.promptScript
-                Text.putStr promptContents
-            OneShot opts -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
-                    promptContents <- interpretPromptScript opts.promptScript
-                    mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
+                mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
+                registry <- AgentTree.newRuntimeRegistry
+                let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+                oneShot promptContents $
+                    AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer = baseTracer
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+        SelfDescribe -> do
+            -- verify the api-key file exists at least
+            _ <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            Aeson.encodeFile "/dev/stdout" $
+                Bash.ScriptInfo
+                    [ Bash.ScriptArg
+                        "prompt"
+                        "the prompt to call the agent with"
+                        "string"
+                        "string"
+                        Bash.Single
+                        Bash.DashDashSpace
+                    ]
+                    "self_call"
+                    "calls oneself with a prompt"
+                    (Just $ Bash.AddMessage "--no output--")
+        McpServer -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            let oneAgent agentFile = do
                     registry <- AgentTree.newRuntimeRegistry
-                    let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
-                    oneShot promptContents $
-                        AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer = baseTracer
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-            SelfDescribe -> do
-                -- verify the api-key file exists at least
-                _ <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                Aeson.encodeFile "/dev/stdout" $
-                    Bash.ScriptInfo
-                        [ Bash.ScriptArg
-                            "prompt"
-                            "the prompt to call the agent with"
-                            "string"
-                            "string"
-                            Bash.Single
-                            Bash.DashDashSpace
-                        ]
-                        "self_call"
-                        "calls oneself with a prompt"
-                        (Just $ Bash.AddMessage "--no output--")
-            McpServer -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let oneAgent agentFile = do
-                        registry <- AgentTree.newRuntimeRegistry
-                        pure $ AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                Prod.traceBoth
-                                    baseTracer
-                                    ( Prod.traceBoth
-                                        traceUsefulPromptStderr
-                                        (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
-                                    )
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-                -- Use traverse to sequence the IO actions for creating Props
-                agentPropsList <- traverse oneAgent pargs.agentFiles
-                McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
-            Initialize ->
-                let o =
-                        Agent
-                            { slug = "main-agent"
-                            , apiKeyId = "main-key"
-                            , flavor = "OpenAIv1"
-                            , modelUrl = "https://api.openai.com/v1"
-                            , modelName = "gpt-4-turbo"
-                            , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
-                            , toolDirectory = "tools"
-                            , systemPrompt =
-                                [ "You are a helpful software agent trying to solve user requests"
-                                , "Your preferred action mode is to act as a puppet master capable of driving other agents."
-                                , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
-                                , "You efficiently single-shot prompt other agents to efficiently use your token buget."
-                                , "You only provide prompt examples when you think other agents may benefit."
-                                , "You notify users as you progress"
-                                , "If an agent fails, do not retry and abdicate"
-                                ]
-                            , mcpServers = Just []
-                            , openApiToolboxes = Nothing
-                            , postgrestToolboxes = Nothing
-                            , extraAgents = Nothing
-                            }
-                 in do
-                        forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
-                            InitProject.initAgentFile o agentFile
-                            InitProject.initAgentTooldir o agentFile
-                            InitProject.initKeyFile pargs.apiKeysFile
-            SessionPrint opts -> do
-                SessionPrint.handleSessionPrint opts
-            SessionEdit opts ->
-                handleSessionEdit opts
-            Export opts -> handleExport opts pargs
-            Import opts -> handleImport opts
-            Paths opts -> handlePaths opts pargs
+                    pure $ AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer =
+                            Prod.traceBoth
+                                baseTracer
+                                ( Prod.traceBoth
+                                    traceUsefulPromptStderr
+                                    (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                )
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+            -- Use traverse to sequence the IO actions for creating Props
+            agentPropsList <- traverse oneAgent agentFiles
+            McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
+        Initialize ->
+            let o =
+                    Agent
+                        { slug = "main-agent"
+                        , apiKeyId = "main-key"
+                        , flavor = "OpenAIv1"
+                        , modelUrl = "https://api.openai.com/v1"
+                        , modelName = "gpt-4-turbo"
+                        , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
+                        , toolDirectory = "tools"
+                        , systemPrompt =
+                            [ "You are a helpful software agent trying to solve user requests"
+                            , "Your preferred action mode is to act as a puppet master capable of driving other agents."
+                            , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
+                            , "You efficiently single-shot prompt other agents to efficiently use your token buget."
+                            , "You only provide prompt examples when you think other agents may benefit."
+                            , "You notify users as you progress"
+                            , "If an agent fails, do not retry and abdicate"
+                            ]
+                        , mcpServers = Just []
+                        , openApiToolboxes = Nothing
+                        , postgrestToolboxes = Nothing
+                        , extraAgents = Nothing
+                        }
+             in do
+                    forM_ (take 1 agentFiles) $ \agentFile -> do
+                        InitProject.initAgentFile o agentFile
+                        InitProject.initAgentTooldir o agentFile
+                        InitProject.initKeyFile pargs.apiKeysFile
+        SessionPrint opts -> do
+            SessionPrint.handleSessionPrint opts
+        SessionEdit opts ->
+            handleSessionEdit opts
+        Export opts -> handleExport opts pargs agentFiles
+        Import opts -> handleImport opts
+        Paths opts -> handlePaths opts pargs agentFiles
 
 -------------------------------------------------------------------------------
 -- Paths Command Handler
 -------------------------------------------------------------------------------
 
-handlePaths :: PathsOptions -> Prog -> IO ()
-handlePaths opts progArgs = do
+handlePaths :: PathsOptions -> Prog -> [FilePath] -> IO ()
+handlePaths opts progArgs agentFiles = do
     homedir <- getHomeDirectory
     let defaultCfgDir = homedir </> ".config/agents-exe"
     
@@ -1272,7 +1326,7 @@ handlePaths opts progArgs = do
     pathsInfo <- PathsCmd.collectPathsInfo
         progArgs.configDir
         defaultCfgDir
-        progArgs.agentFiles
+        agentFiles
         progArgs.apiKeysFile
         progArgs.sessionsJsonPrefix
     
@@ -1312,8 +1366,8 @@ handleSessionEdit opts = do
 -- Export Handler
 -------------------------------------------------------------------------------
 
-handleExport :: ExportOptions -> Prog -> IO ()
-handleExport opts pargs = do
+handleExport :: ExportOptions -> Prog -> [FilePath] -> IO ()
+handleExport opts pargs agentFiles = do
     -- Determine archive format
     let archiveFormat = case (opts.exportDestination, opts.exportFormat) of
             (ExportToFile path, Nothing) -> fromMaybe ExportImport.TarGzFormat (ExportImport.detectArchiveFormat path)
@@ -1321,7 +1375,7 @@ handleExport opts pargs = do
             (_, Nothing) -> ExportImport.TarGzFormat
     
     -- Build export package
-    ePackage <- buildExportPackage opts pargs
+    ePackage <- buildExportPackage opts pargs agentFiles
     
     case ePackage of
         Left err -> do
@@ -1370,8 +1424,8 @@ parseNamespaceToMaybeNs (Just txt) =
         Left _ -> Nothing
         Right ns -> Just ns
 
-buildExportPackage :: ExportOptions -> Prog -> IO (Either Text ExportImport.ExportPackage)
-buildExportPackage opts pargs = do
+buildExportPackage :: ExportOptions -> Prog -> [FilePath] -> IO (Either Text ExportImport.ExportPackage)
+buildExportPackage opts pargs agentFiles = do
     now <- getCurrentTime
     let metadata = ExportImport.PackageMetadata
             { ExportImport.packageVersion = ExportImport.exportSchemaVersion
@@ -1382,7 +1436,7 @@ buildExportPackage opts pargs = do
     
     case opts.exportSource of
         ExportCurrentAgent -> do
-            case pargs.agentFiles of
+            case agentFiles of
                 [] -> pure $ Left "No agent file specified"
                 (agentFile:_) -> do
                     -- Load agent
@@ -1424,7 +1478,7 @@ buildExportPackage opts pargs = do
                             { ExportImport.agentConfig = agent
                             , ExportImport.agentNamespace = opts.exportNamespace
                             , ExportImport.agentTools = tools
-                            }) pargs.agentFiles
+                            }) agentFiles
             
             pure $ Right $ ExportImport.ExportPackage
                 { ExportImport.packageMetadata = metadata
@@ -1435,13 +1489,13 @@ buildExportPackage opts pargs = do
         
         ExportAgentBySlug targetSlug -> do
             -- Find agent with matching slug
-            agents <- mapM loadAgentFromFile pargs.agentFiles
+            agents <- mapM loadAgentFromFile agentFiles
             case [a | Right a <- agents, targetSlug == slug a] of
                 [] -> pure $ Left $ "Agent with slug '" <> targetSlug <> "' not found"
                 (agent:_) -> do
-                    let agentFile = case [f | (f, Right a) <- zip pargs.agentFiles agents, slug a == targetSlug] of
+                    let agentFile = case [f | (f, Right a) <- zip agentFiles agents, slug a == targetSlug] of
                             (f:_) -> f
-                            [] -> case pargs.agentFiles of
+                            [] -> case agentFiles of
                                 (first:_) -> first
                                 [] -> error "No agent files available"
                     tools <- if opts.exportIncludeTools
@@ -1465,7 +1519,7 @@ buildExportPackage opts pargs = do
         
         ExportCurrentTools -> do
             -- Export tools from current agent
-            case pargs.agentFiles of
+            case agentFiles of
                 [] -> pure $ Left "No agent file specified"
                 (agentFile:_) -> do
                     eAgent <- loadAgentFromFile agentFile
@@ -1482,7 +1536,7 @@ buildExportPackage opts pargs = do
         
         ExportToolByName toolName -> do
             -- Find and export specific tool
-            case pargs.agentFiles of
+            case agentFiles of
                 [] -> pure $ Left "No agent file specified"
                 (agentFile:_) -> do
                     eAgent <- loadAgentFromFile agentFile
