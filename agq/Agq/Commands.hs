@@ -47,7 +47,24 @@ cmdInit cfg conn = do
   createDirectoryIfMissing True (taskDir cfg)
   createDirectoryIfMissing True (sessionsDir cfg)
   initDB conn
+  ensureGitignore
   putStrLn $ "Queue initialised at " <> queueDb cfg
+
+-- | Ensure .gitignore contains the noisy agent log patterns so that
+-- 'git add -A' inside a worktree never commits them.
+ensureGitignore :: IO ()
+ensureGitignore = do
+  let path     = ".gitignore"
+      required = ["agents-logfile", "logs.json", "conv.*.json"]
+  exists  <- doesFileExist path
+  current <- if exists then Text.readFile path else return ""
+  let missing = filter (\p -> not (p `elem` Text.lines current)) required
+  unless (null missing) $ do
+    let additions = "\n# agents-exe verbose logs (added by agq init)\n"
+                 <> Text.unlines missing
+    Text.appendFile path additions
+    putStrLn $ ".gitignore: added " <> show (length missing) <> " missing pattern(s): "
+            <> Text.unpack (Text.intercalate ", " missing)
 
 -- ---------------------------------------------------------------------------
 -- cmdAdd
