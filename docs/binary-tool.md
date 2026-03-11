@@ -289,3 +289,36 @@ echo $?  # Should be 0 on success, non-zero on error
 
 Use `agents-exe check` to validate all tools in your agent configuration.
 
+## Inspecting Tool Schemas
+
+The `check` command supports an optional `--tools` flag that allows you to inspect how tools are serialized for LLM calls. This is useful for debugging tool definition issues:
+
+```bash
+# Default behavior - just validate and show tool counts
+agents-exe check
+
+# List tools with their names and descriptions
+agents-exe check --tools=list
+
+# Show the internal agents-exe tool representation as JSON (wrapped in markdown details tags)
+agents-exe check --tools=agents-exe
+
+# Show the OpenAI LLM tool representation as JSON (wrapped in markdown details tags)
+agents-exe check --tools=openai
+```
+
+The `--tools` option accepts the following modes:
+
+| Mode | Description |
+|------|-------------|
+| `none` | Default. Only show agent names and tool counts. |
+| `list` | Print a markdown list of tool names and descriptions. |
+| `agents-exe` | Output the internal tool representation as JSON within `<details>` tags. |
+| `openai` | Output the OpenAI LLM tool schema (as sent to the API) within `<details>` tags. |
+
+This feature is particularly useful when:
+- Debugging why a tool isn't being called by the LLM
+- Verifying that tool schemas are correctly formed
+- Documenting available tools for users
+- Comparing internal vs. LLM-facing representations
+
