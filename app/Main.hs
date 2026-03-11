@@ -12,6 +12,9 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Functor.Contravariant.Divisible (choose)
+import Data.List (find)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -24,6 +27,7 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (Agent (..), AgentDescription (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..), ExtraAgentRef (..))
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.InitProject as InitProject
+import qualified System.Agents.CLI.Paths as PathsCmd
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.ExportImport.Archive as ExportImport
 import qualified System.Agents.ExportImport.Git as ExportImport
@@ -56,12 +60,145 @@ import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (ExitCode(..), exitFailure, exitSuccess)
-import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.FilePath (takeDirectory, takeFileName, takeExtension, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import qualified System.Process as Process
 
 import Options.Applicative
 import Data.Time (getCurrentTime)
+
+-------------------------------------------------------------------------------
+-- Alias Types and Configuration
+-------------------------------------------------------------------------------
+
+-- | Input mode for aliases: read from stdin or from a file
+data AliasInputMode = AliasStdin | AliasFile
+    deriving (Show, Eq, Generic)
+
+instance Aeson.FromJSON AliasInputMode where
+    parseJSON = Aeson.withText "AliasInputMode" $ \t -> case Text.toLower t of
+        "stdin" -> pure AliasStdin
+        "file" -> pure AliasFile
+        _ -> fail $ "Unknown input mode: " ++ Text.unpack t
+
+-- | Definition of a prompt alias with template and metadata
+data AliasDefinition = AliasDefinition
+    { aliasDescription :: Text
+    , aliasTemplate :: Text
+    , aliasInputMode :: AliasInputMode
+    }
+    deriving (Show, Generic)
+
+instance Aeson.FromJSON AliasDefinition where
+    parseJSON = Aeson.withObject "AliasDefinition" $ \v -> AliasDefinition
+        <$> v Aeson..: "description"
+        <*> v Aeson..: "template"
+        <*> v Aeson..: "inputMode"
+
+-- | Default aliases available even without configuration
+defaultAliases :: Map Text AliasDefinition
+defaultAliases = Map.fromList
+    [ ("translate", AliasDefinition
+        "Translate to English"
+        "Please translate the following text to English:\n\n{{content}}"
+        AliasStdin)
+    , ("summarize", AliasDefinition
+        "Summarize text"
+        "Please provide a concise summary of the following:\n\n{{content}}"
+        AliasStdin)
+    , ("code-review", AliasDefinition
+        "Review code for issues"
+        "Please review the following code for potential bugs, security issues, and style improvements:\n\n```{{language}}\n{{content}}\n```"
+        AliasFile)
+    , ("explain", AliasDefinition
+        "Explain code in plain English"
+        "Please explain what the following code does in plain English:\n\n```{{language}}\n{{content}}\n```"
+        AliasFile)
+    ]
+
+-- | Resolve aliases from config, falling back to defaults
+resolveAliases :: Maybe (Map Text AliasDefinition) -> Map Text AliasDefinition
+resolveAliases Nothing = defaultAliases
+resolveAliases (Just cfgAliases) = Map.union cfgAliases defaultAliases
+
+-- | Get alias definition or return error message
+lookupAlias :: Map Text AliasDefinition -> Text -> Either Text AliasDefinition
+lookupAlias aliases name = case Map.lookup name aliases of
+    Just def -> Right def
+    Nothing -> Left $ formatAliasNotFoundError name aliases
+
+-- | Format error message for unknown alias with available aliases list
+formatAliasNotFoundError :: Text -> Map Text AliasDefinition -> Text
+formatAliasNotFoundError name aliases =
+    Text.unlines $
+        [ "Error: Unknown alias '" <> name <> "'"
+        , ""
+        , "Available aliases:"
+        ]
+        ++ map formatAlias (Map.toList aliases)
+  where
+    formatAlias (aliasName, def) = "  - " <> aliasName <> ": " <> aliasDescription def
+
+-- | Substitute template variables in an alias template
+-- Supported variables:
+--   {{content}}  - The actual content from stdin or file
+--   {{language}} - Auto-detected or specified language
+--   {{filename}} - Name of the input file
+substituteTemplate :: Text -> Text -> Maybe FilePath -> Text
+substituteTemplate template content mFilePath =
+    let withContent = Text.replace "{{content}}" content template
+        withFilename = case mFilePath of
+            Just fp -> Text.replace "{{filename}}" (Text.pack $ takeFileName fp) withContent
+            Nothing -> Text.replace "{{filename}}" "" withContent
+        language = detectLanguage mFilePath
+    in Text.replace "{{language}}" language withFilename
+
+-- | Detect programming language from file extension
+detectLanguage :: Maybe FilePath -> Text
+detectLanguage Nothing = ""
+detectLanguage (Just fp) = case takeExtension fp of
+    ".hs" -> "haskell"
+    ".py" -> "python"
+    ".js" -> "javascript"
+    ".ts" -> "typescript"
+    ".java" -> "java"
+    ".c" -> "c"
+    ".cpp" -> "cpp"
+    ".cc" -> "cpp"
+    ".h" -> "c"
+    ".hpp" -> "cpp"
+    ".rs" -> "rust"
+    ".go" -> "go"
+    ".rb" -> "ruby"
+    ".php" -> "php"
+    ".sh" -> "bash"
+    ".bash" -> "bash"
+    ".zsh" -> "zsh"
+    ".pl" -> "perl"
+    ".r" -> "r"
+    ".swift" -> "swift"
+    ".kt" -> "kotlin"
+    ".scala" -> "scala"
+    ".clj" -> "clojure"
+    ".ex" -> "elixir"
+    ".exs" -> "elixir"
+    ".erl" -> "erlang"
+    ".ml" -> "ocaml"
+    ".fs" -> "fsharp"
+    ".cs" -> "csharp"
+    ".lua" -> "lua"
+    ".vim" -> "vim"
+    ".md" -> "markdown"
+    ".json" -> "json"
+    ".yaml" -> "yaml"
+    ".yml" -> "yaml"
+    ".xml" -> "xml"
+    ".html" -> "html"
+    ".css" -> "css"
+    ".scss" -> "scss"
+    ".sass" -> "sass"
+    ".sql" -> "sql"
+    _ -> ""
 
 -------------------------------------------------------------------------------
 -- Default Configuration and Example Agents
@@ -235,6 +372,7 @@ data ArgParserArgs
     , defaultLogJsonFilepath :: Maybe FilePath
     , defaultLogRawFilepath :: Maybe FilePath
     , defaultLogSesionsJsonPrefix :: Maybe FilePath
+    , argPromptAliases :: Map Text AliasDefinition
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -259,10 +397,17 @@ data AgentsExeConfig = AgentsExeConfig
     , agentsDirectories :: [FilePath]
     , agentsFiles :: [FilePath]
     , agentsLogs :: Maybe AgentsExeLogConfig
+    , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
     }
     deriving (Show, Generic)
 
-instance Aeson.FromJSON AgentsExeConfig
+instance Aeson.FromJSON AgentsExeConfig where
+    parseJSON = Aeson.withObject "AgentsExeConfig" $ \v -> AgentsExeConfig
+        <$> v Aeson..:? "agentsConfigDir"
+        <*> v Aeson..:? "agentsDirectories" Aeson..!= []
+        <*> v Aeson..:? "agentsFiles" Aeson..!= []
+        <*> v Aeson..:? "agentsLogs"
+        <*> v Aeson..:? "promptAliases"
 
 locateAgentsExeConfig :: IO (Maybe FilePath)
 locateAgentsExeConfig = do
@@ -307,10 +452,18 @@ initArgParserArgs = do
                         (logJsonPath =<< obj.agentsLogs)
                         (logRawPath =<< obj.agentsLogs)
                         (logSessionsJsonPrefix =<< obj.agentsLogs)
+                        (resolveAliases obj.cfgPromptAliases)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
         jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
+        
+        -- Create sessions directory for storing conversations when outside projects
+        -- This ensures session files are properly persisted instead of being written
+        -- to the current working directory with an empty prefix
+        let sessionsDir = pconfigdir </> "sessions"
+        createDirectoryIfMissing True sessionsDir
+        
         pure $
             ArgParserArgs
                 pconfigdir
@@ -318,15 +471,19 @@ initArgParserArgs = do
                 Nothing
                 Nothing
                 Nothing
-                Nothing
+                (Just sessionsDir)
+                defaultAliases
 
 data Prog = Prog
-    { apiKeysFile :: FilePath
+    { configDir :: FilePath
+    , apiKeysFile :: FilePath
     , logFile :: FilePath
     , logHttp :: Maybe String
     , logJsonFile :: Maybe FilePath
     , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
+    , selectedAgentSlug :: Maybe Text
+    , progPromptAliases :: Map Text AliasDefinition
     , mainCommand :: Command
     }
 
@@ -342,6 +499,7 @@ data Command
     | SessionEdit SessionEditOptions
     | Export ExportOptions
     | Import ImportOptions
+    | Paths PathsOptions
 
 instance Show Command where
     show Check = "Check"
@@ -355,6 +513,7 @@ instance Show Command where
     show (SessionEdit _) = "SessionEdit"
     show (Export _) = "Export"
     show (Import _) = "Import"
+    show (Paths _) = "Paths"
 
 data PromptScriptDirective
     = Str Text.Text
@@ -362,6 +521,7 @@ data PromptScriptDirective
     | Separator Int Text.Text
     | ShellOutput String
     | SessionContents FilePath SessionInject.SessionVerbosity
+    | AliasPrompt Text
     deriving (Show)
 
 type PromptScript =
@@ -394,6 +554,11 @@ data SessionEditOp
     | SessionEditCensorThinking
     deriving (Show)
 
+-- | Options for the paths command
+data PathsOptions = PathsOptions
+    { pathsOutputJson :: Bool
+    } deriving (Show)
+
 -- | Export options for the export command
 data ExportOptions = ExportOptions
     { exportSource :: ExportSource
@@ -410,8 +575,8 @@ data ExportSource
     = ExportCurrentAgent
     | ExportAllAgents
     | ExportAgentBySlug Text
-    | ExportCurrentTools         -- Tools only
-    | ExportToolByName Text      -- Specific tool
+    | ExportCurrentTools
+    | ExportToolByName Text
     deriving (Show)
 
 data ExportDestination
@@ -540,124 +705,143 @@ parseOneShotOptions =
                     <> help "extra session-file to resume/store"
                 )
             )
-        <*> ( many
-                ( promptOption
-                    <|> fileOption
-                    <|> shellOption
-                    <|> smallSeparatorFlag
-                    <|> largeSeparatorFlag
-                    <|> sessionXSOption
-                    <|> sessionSOption
-                    <|> sessionMOption
-                    <|> sessionLOption
-                    <|> sessionXLOption
-                )
-            )
+        <*> parsePromptScriptInput
         <*> parseThinkingOption
+
+-- | Parse prompt script input, which can be either aliases, regular directives, or default to stdin
+parsePromptScriptInput :: Parser PromptScript
+parsePromptScriptInput =
+    fmap concat $ many $ asum
+        [ pure <$> parseAliasPrompt
+        , parseRegularDirectives
+        ]
   where
-    smallSeparatorFlag :: Parser PromptScriptDirective
-    smallSeparatorFlag =
-        Separator 4
-            <$> strOption
-                ( long "sep4"
-                    <> short 's'
-                    <> metavar "SEPARATOR"
-                    <> help "a short separator"
-                )
+    parseRegularDirectives :: Parser PromptScript
+    parseRegularDirectives = many $ asum
+        [ promptOption
+        , fileOption
+        , shellOption
+        , smallSeparatorFlag
+        , largeSeparatorFlag
+        , sessionXSOption
+        , sessionSOption
+        , sessionMOption
+        , sessionLOption
+        , sessionXLOption
+        ]
 
-    largeSeparatorFlag :: Parser PromptScriptDirective
-    largeSeparatorFlag =
-        Separator 40
-            <$> strOption
-                ( long "sep40"
-                    <> short 'S'
-                    <> metavar "SEPARATOR"
-                    <> help "a long separator"
-                )
+parseAliasPrompt :: Parser PromptScriptDirective
+parseAliasPrompt =
+    AliasPrompt
+        <$> strOption
+            ( long "alias"
+                <> metavar "NAME"
+                <> help "Use a predefined prompt alias (e.g., translate, summarize, code-review, explain)"
+            )
 
-    promptOption :: Parser PromptScriptDirective
-    promptOption =
-        Str
-            <$> strOption
-                ( long "prompt"
-                    <> short 'p'
-                    <> metavar "PROMPT"
-                    <> help "prompt text paragraph"
-                )
+promptOption :: Parser PromptScriptDirective
+promptOption =
+    Str
+        <$> strOption
+            ( long "prompt"
+                <> short 'p'
+                <> metavar "PROMPT"
+                <> help "prompt text paragraph"
+            )
 
-    fileOption :: Parser PromptScriptDirective
-    fileOption =
-        FileContents
-            <$> strOption
-                ( long "file"
-                    <> short 'f'
-                    <> metavar "FILE"
-                    <> help "prompt text file"
-                )
+fileOption :: Parser PromptScriptDirective
+fileOption =
+    FileContents
+        <$> strOption
+            ( long "file"
+                <> short 'f'
+                <> metavar "FILE"
+                <> help "prompt text file"
+            )
 
-    shellOption :: Parser PromptScriptDirective
-    shellOption =
-        ShellOutput
-            <$> strOption
-                ( long "shell"
-                    <> metavar "SHELL"
-                    <> help "prompt the stdout of a shell command"
-                )
+shellOption :: Parser PromptScriptDirective
+shellOption =
+    ShellOutput
+        <$> strOption
+            ( long "shell"
+                <> metavar "SHELL"
+                <> help "prompt the stdout of a shell command"
+            )
 
-    -- | Parse --session-xs: minimal session info (queries and responses only, skip tool-only turns)
-    sessionXSOption :: Parser PromptScriptDirective
-    sessionXSOption =
-        SessionContents
-            <$> strOption
-                ( long "session-xs"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at minimal verbosity (queries/responses only, skips tool-only turns)"
-                )
-            <*> pure SessionInject.SessionXS
+smallSeparatorFlag :: Parser PromptScriptDirective
+smallSeparatorFlag =
+    Separator 4
+        <$> strOption
+            ( long "sep4"
+                <> short 's'
+                <> metavar "SEPARATOR"
+                <> help "a short separator"
+            )
 
-    -- | Parse --session-s: add thinking and tool names called
-    sessionSOption :: Parser PromptScriptDirective
-    sessionSOption =
-        SessionContents
-            <$> strOption
-                ( long "session-s"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at low verbosity (+thinking, +tool names)"
-                )
-            <*> pure SessionInject.SessionS
+largeSeparatorFlag :: Parser PromptScriptDirective
+largeSeparatorFlag =
+    Separator 40
+        <$> strOption
+            ( long "sep40"
+                <> short 'S'
+                <> metavar "SEPARATOR"
+                <> help "a long separator"
+            )
 
-    -- | Parse --session-m: add statistics
-    sessionMOption :: Parser PromptScriptDirective
-    sessionMOption =
-        SessionContents
-            <$> strOption
-                ( long "session-m"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at medium verbosity (+statistics)"
-                )
-            <*> pure SessionInject.SessionM
+-- | Parse --session-xs: minimal session info (queries and responses only, skip tool-only turns)
+sessionXSOption :: Parser PromptScriptDirective
+sessionXSOption =
+    SessionContents
+        <$> strOption
+            ( long "session-xs"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at minimal verbosity (queries/responses only, skips tool-only turns)"
+            )
+        <*> pure SessionInject.SessionXS
 
-    -- | Parse --session-l: add tool call results
-    sessionLOption :: Parser PromptScriptDirective
-    sessionLOption =
-        SessionContents
-            <$> strOption
-                ( long "session-l"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at high verbosity (+tool call results)"
-                )
-            <*> pure SessionInject.SessionL
+-- | Parse --session-s: add thinking and tool names called
+sessionSOption :: Parser PromptScriptDirective
+sessionSOption =
+    SessionContents
+        <$> strOption
+            ( long "session-s"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at low verbosity (+thinking, +tool names)"
+            )
+        <*> pure SessionInject.SessionS
 
-    -- | Parse --session-xl: complete session info (same as L)
-    sessionXLOption :: Parser PromptScriptDirective
-    sessionXLOption =
-        SessionContents
-            <$> strOption
-                ( long "session-xl"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at maximum verbosity (complete)"
-                )
-            <*> pure SessionInject.SessionXL
+-- | Parse --session-m: add statistics
+sessionMOption :: Parser PromptScriptDirective
+sessionMOption =
+    SessionContents
+        <$> strOption
+            ( long "session-m"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at medium verbosity (+statistics)"
+            )
+        <*> pure SessionInject.SessionM
+
+-- | Parse --session-l: add tool call results
+sessionLOption :: Parser PromptScriptDirective
+sessionLOption =
+    SessionContents
+        <$> strOption
+            ( long "session-l"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at high verbosity (+tool call results)"
+            )
+        <*> pure SessionInject.SessionL
+
+-- | Parse --session-xl: complete session info (same as L)
+sessionXLOption :: Parser PromptScriptDirective
+sessionXLOption =
+    SessionContents
+        <$> strOption
+            ( long "session-xl"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at maximum verbosity (complete)"
+            )
+        <*> pure SessionInject.SessionXL
 
 parseMcpServer :: Parser Command
 parseMcpServer =
@@ -733,6 +917,19 @@ parseInitializeCommand =
 parseSelfDescribeCommand :: Parser Command
 parseSelfDescribeCommand =
     pure SelfDescribe
+
+-- | Parse the paths command
+parsePathsCommand :: Parser Command
+parsePathsCommand =
+    Paths <$> parsePathsOptions
+
+parsePathsOptions :: Parser PathsOptions
+parsePathsOptions =
+    PathsOptions
+        <$> switch
+            ( long "json"
+                <> help "Output in JSON format"
+            )
 
 -- | Parse the export command
 parseExportCommand :: Parser Command
@@ -993,7 +1190,8 @@ parseListTools =
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
-        <$> strOption
+        <$> pure argparserargs.configdir
+        <*> strOption
             ( long "api-keys"
                 <> metavar "AGENTS-KEY"
                 <> help "path to json-file containing API keys"
@@ -1043,6 +1241,15 @@ parseProgOptions argparserargs =
                     )
                 )
             )
+        <*> optional
+            ( strOption
+                ( long "agent"
+                    <> short 'a'
+                    <> metavar "SLUG"
+                    <> help "Select agent by slug instead of file path"
+                )
+            )
+        <*> pure argparserargs.argPromptAliases
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "tui" (info parseTuiChatCommand (idm))
@@ -1057,6 +1264,8 @@ parseProgOptions argparserargs =
                     (progDesc "Export agent/tool configurations"))
                 <> command "import" (info parseImportCommand
                     (progDesc "Import agent/tool configurations"))
+                <> command "paths" (info parsePathsCommand
+                    (progDesc "Show important configuration paths"))
             )
 
 -------------------------------------------------------------------------------
@@ -1101,130 +1310,199 @@ main = do
         -- Initialize SessionStore from the session prefix argument
         let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
 
-        case pargs.mainCommand of
-            Check -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                forM_ pargs.agentFiles $ \agentFile -> do
-                    -- Create a new runtime registry for this agent tree
+        -- Resolve agent files based on selected slug
+        resolvedAgentFiles <- resolveAgentFiles pargs.agentFiles pargs.selectedAgentSlug
+
+        case resolvedAgentFiles of
+            Left err -> do
+                Text.hPutStrLn stderr err
+                exitFailure
+            Right agentFiles' ->
+                runCommand pargs baseTracer sessionStore agentFiles'
+
+-- | Resolve agent files based on optional slug selection.
+-- If a slug is provided, finds the agent file with matching slug.
+-- If no slug is provided, returns all agent files unchanged.
+resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
+resolveAgentFiles files Nothing = pure $ Right files
+resolveAgentFiles files (Just slug) = do
+    -- Load all agents to find matching slug
+    agentsWithFiles <- mapM loadAgentWithFile files
+    case find (\(_, agent) -> slug == agent.slug) agentsWithFiles of
+        Just (file, _) -> pure $ Right [file]
+        Nothing -> do
+            -- Build error message with available slugs
+            let availableSlugs = map (\(f, a) -> (a.slug, f)) agentsWithFiles
+            pure $ Left $ formatSlugNotFoundError slug availableSlugs
+  where
+    loadAgentWithFile :: FilePath -> IO (FilePath, Agent)
+    loadAgentWithFile file = do
+        result <- Aeson.eitherDecodeFileStrict' file
+        case result of
+            Left err -> error $ "Failed to parse agent file " ++ file ++ ": " ++ err
+            Right (AgentDescription agent) -> pure (file, agent)
+
+    formatSlugNotFoundError :: Text -> [(Text, FilePath)] -> Text
+    formatSlugNotFoundError targetSlug available =
+        Text.unlines $
+            [ "Error: Agent '" <> targetSlug <> "' not found."
+            , ""
+            , "Available agents:"
+            ]
+            ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
+
+-- | Run the selected command with resolved agent files
+runCommand :: Prog -> Prod.Tracer IO AgentTree.Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
+runCommand pargs baseTracer sessionStore agentFiles =
+    case pargs.mainCommand of
+        Check -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            forM_ agentFiles $ \agentFile -> do
+                -- Create a new runtime registry for this agent tree
+                registry <- AgentTree.newRuntimeRegistry
+                -- Use silent tracer to suppress diagnostic output during agent loading
+                AgentTree.withAgentTreeRuntime
+                    AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer = Prod.silent
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+                    $ \result -> case result of
+                        AgentTree.Errors errs -> mapM_ print errs
+                        AgentTree.Initialized tree -> printAgentCheck tree
+        TerminalUI _ -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            let oneAgent agentFile = do
                     registry <- AgentTree.newRuntimeRegistry
-                    -- Use silent tracer to suppress diagnostic output during agent loading
-                    AgentTree.withAgentTreeRuntime
-                        AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer = Prod.silent
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-                        $ \result -> case result of
-                            AgentTree.Errors errs -> mapM_ print errs
-                            AgentTree.Initialized tree -> printAgentCheck tree
-            TerminalUI _ -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let oneAgent agentFile = do
-                        registry <- AgentTree.newRuntimeRegistry
-                        pure $ AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                Prod.traceBoth
-                                    baseTracer
-                                    (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-                -- Use traverse to sequence the IO actions for creating Props
-                agentPropsList <- traverse oneAgent pargs.agentFiles
-                TUI.runTUI sessionStore agentPropsList
-            EchoPrompt opts -> do
-                promptContents <- interpretPromptScript opts.promptScript
-                Text.putStr promptContents
-            OneShot opts -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
-                    promptContents <- interpretPromptScript opts.promptScript
-                    mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
+                    pure $ AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer =
+                            Prod.traceBoth
+                                baseTracer
+                                (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+            -- Use traverse to sequence the IO actions for creating Props
+            agentPropsList <- traverse oneAgent agentFiles
+            TUI.runTUI sessionStore agentPropsList
+        EchoPrompt opts -> do
+            promptContents <- interpretPromptScript pargs.progPromptAliases opts.promptScript opts.sessionFile
+            Text.putStr promptContents
+        OneShot opts -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            forM_ (take 1 agentFiles) $ \agentFile -> do
+                promptContents <- interpretPromptScript pargs.progPromptAliases opts.promptScript opts.sessionFile
+                mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
+                registry <- AgentTree.newRuntimeRegistry
+                let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+                oneShot promptContents $
+                    AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer = baseTracer
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+        SelfDescribe -> do
+            -- verify the api-key file exists at least
+            _ <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            Aeson.encodeFile "/dev/stdout" $
+                Bash.ScriptInfo
+                    [ Bash.ScriptArg
+                        "prompt"
+                        "the prompt to call the agent with"
+                        "string"
+                        "string"
+                        Bash.Single
+                        Bash.DashDashSpace
+                    ]
+                    "self_call"
+                    "calls oneself with a prompt"
+                    (Just $ Bash.AddMessage "--no output--")
+        McpServer -> do
+            apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
+            let oneAgent agentFile = do
                     registry <- AgentTree.newRuntimeRegistry
-                    let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
-                    oneShot promptContents $
-                        AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer = baseTracer
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-            SelfDescribe -> do
-                -- verify the api-key file exists at least
-                _ <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                Aeson.encodeFile "/dev/stdout" $
-                    Bash.ScriptInfo
-                        [ Bash.ScriptArg
-                            "prompt"
-                            "the prompt to call the agent with"
-                            "string"
-                            "string"
-                            Bash.Single
-                            Bash.DashDashSpace
-                        ]
-                        "self_call"
-                        "calls oneself with a prompt"
-                        (Just $ Bash.AddMessage "--no output--")
-            McpServer -> do
-                apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
-                let oneAgent agentFile = do
-                        registry <- AgentTree.newRuntimeRegistry
-                        pure $ AgentTree.Props
-                            { AgentTree.apiKeys = apiKeys
-                            , AgentTree.rootAgentFile = agentFile
-                            , AgentTree.interactiveTracer =
-                                Prod.traceBoth
-                                    baseTracer
-                                    ( Prod.traceBoth
-                                        traceUsefulPromptStderr
-                                        (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
-                                    )
-                            , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                            , AgentTree.runtimeRegistry = registry
-                            }
-                -- Use traverse to sequence the IO actions for creating Props
-                agentPropsList <- traverse oneAgent pargs.agentFiles
-                McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
-            Initialize ->
-                let o =
-                        Agent
-                            { slug = "main-agent"
-                            , apiKeyId = "main-key"
-                            , flavor = "OpenAIv1"
-                            , modelUrl = "https://api.openai.com/v1"
-                            , modelName = "gpt-4-turbo"
-                            , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
-                            , toolDirectory = "tools"
-                            , systemPrompt =
-                                [ "You are a helpful software agent trying to solve user requests"
-                                , "Your preferred action mode is to act as a puppet master capable of driving other agents."
-                                , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
-                                , "You efficiently single-shot prompt other agents to efficiently use your token buget."
-                                , "You only provide prompt examples when you think other agents may benefit."
-                                , "You notify users as you progress"
-                                , "If an agent fails, do not retry and abdicate"
-                                ]
-                            , mcpServers = Just []
-                            , openApiToolboxes = Nothing
-                            , postgrestToolboxes = Nothing
-                            , extraAgents = Nothing
-                            }
-                 in do
-                        forM_ (take 1 pargs.agentFiles) $ \agentFile -> do
-                            InitProject.initAgentFile o agentFile
-                            InitProject.initAgentTooldir o agentFile
-                            InitProject.initKeyFile pargs.apiKeysFile
-            SessionPrint opts -> do
-                SessionPrint.handleSessionPrint opts
-            SessionEdit opts ->
-                handleSessionEdit opts
-            Export opts -> handleExport opts pargs
-            Import opts -> handleImport opts
+                    pure $ AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.rootAgentFile = agentFile
+                        , AgentTree.interactiveTracer =
+                            Prod.traceBoth
+                                baseTracer
+                                ( Prod.traceBoth
+                                    traceUsefulPromptStderr
+                                    (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                                )
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                        , AgentTree.runtimeRegistry = registry
+                        }
+            -- Use traverse to sequence the IO actions for creating Props
+            agentPropsList <- traverse oneAgent agentFiles
+            McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
+        Initialize ->
+            let o =
+                    Agent
+                        { slug = "main-agent"
+                        , apiKeyId = "main-key"
+                        , flavor = "OpenAIv1"
+                        , modelUrl = "https://api.openai.com/v1"
+                        , modelName = "gpt-4-turbo"
+                        , announce = "a helpful pupper-master capable of orchestrating other agents ensuring"
+                        , toolDirectory = "tools"
+                        , systemPrompt =
+                            [ "You are a helpful software agent trying to solve user requests"
+                            , "Your preferred action mode is to act as a puppet master capable of driving other agents."
+                            , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
+                            , "You efficiently single-shot prompt other agents to efficiently use your token buget."
+                            , "You only provide prompt examples when you think other agents may benefit."
+                            , "You notify users as you progress"
+                            , "If an agent fails, do not retry and abdicate"
+                            ]
+                        , mcpServers = Just []
+                        , openApiToolboxes = Nothing
+                        , postgrestToolboxes = Nothing
+                        , extraAgents = Nothing
+                        }
+             in do
+                    forM_ (take 1 agentFiles) $ \agentFile -> do
+                        InitProject.initAgentFile o agentFile
+                        InitProject.initAgentTooldir o agentFile
+                        InitProject.initKeyFile pargs.apiKeysFile
+        SessionPrint opts -> do
+            SessionPrint.handleSessionPrint opts
+        SessionEdit opts ->
+            handleSessionEdit opts
+        Export opts -> handleExport opts pargs agentFiles
+        Import opts -> handleImport opts
+        Paths opts -> handlePaths opts pargs agentFiles
+
+-------------------------------------------------------------------------------
+-- Paths Command Handler
+-------------------------------------------------------------------------------
+
+handlePaths :: PathsOptions -> Prog -> [FilePath] -> IO ()
+handlePaths opts progArgs agentFiles = do
+    homedir <- getHomeDirectory
+    let defaultCfgDir = homedir </> ".config/agents-exe"
+    
+    -- Collect path information
+    pathsInfo <- PathsCmd.collectPathsInfo
+        progArgs.configDir
+        defaultCfgDir
+        agentFiles
+        progArgs.apiKeysFile
+        progArgs.sessionsJsonPrefix
+    
+    -- Output based on format option
+    if pathsOutputJson opts
+        then LByteChar8.putStrLn $ PathsCmd.formatPathsJson pathsInfo
+        else Text.putStrLn $ PathsCmd.formatPathsHuman pathsInfo
+    
+    exitSuccess
 
 -------------------------------------------------------------------------------
 -- Session Edit Handler
@@ -1255,8 +1533,8 @@ handleSessionEdit opts = do
 -- Export Handler
 -------------------------------------------------------------------------------
 
-handleExport :: ExportOptions -> Prog -> IO ()
-handleExport opts pargs = do
+handleExport :: ExportOptions -> Prog -> [FilePath] -> IO ()
+handleExport opts pargs agentFiles = do
     -- Determine archive format
     let archiveFormat = case (opts.exportDestination, opts.exportFormat) of
             (ExportToFile path, Nothing) -> fromMaybe ExportImport.TarGzFormat (ExportImport.detectArchiveFormat path)
@@ -1264,7 +1542,7 @@ handleExport opts pargs = do
             (_, Nothing) -> ExportImport.TarGzFormat
     
     -- Build export package
-    ePackage <- buildExportPackage opts pargs
+    ePackage <- buildExportPackage opts pargs agentFiles
     
     case ePackage of
         Left err -> do
@@ -1313,8 +1591,8 @@ parseNamespaceToMaybeNs (Just txt) =
         Left _ -> Nothing
         Right ns -> Just ns
 
-buildExportPackage :: ExportOptions -> Prog -> IO (Either Text ExportImport.ExportPackage)
-buildExportPackage opts pargs = do
+buildExportPackage :: ExportOptions -> Prog -> [FilePath] -> IO (Either Text ExportImport.ExportPackage)
+buildExportPackage opts pargs agentFiles = do
     now <- getCurrentTime
     let metadata = ExportImport.PackageMetadata
             { ExportImport.packageVersion = ExportImport.exportSchemaVersion
@@ -1325,7 +1603,7 @@ buildExportPackage opts pargs = do
     
     case opts.exportSource of
         ExportCurrentAgent -> do
-            case pargs.agentFiles of
+            case agentFiles of
                 [] -> pure $ Left "No agent file specified"
                 (agentFile:_) -> do
                     -- Load agent
@@ -1367,7 +1645,7 @@ buildExportPackage opts pargs = do
                             { ExportImport.agentConfig = agent
                             , ExportImport.agentNamespace = opts.exportNamespace
                             , ExportImport.agentTools = tools
-                            }) pargs.agentFiles
+                            }) agentFiles
             
             pure $ Right $ ExportImport.ExportPackage
                 { ExportImport.packageMetadata = metadata
@@ -1378,13 +1656,13 @@ buildExportPackage opts pargs = do
         
         ExportAgentBySlug targetSlug -> do
             -- Find agent with matching slug
-            agents <- mapM loadAgentFromFile pargs.agentFiles
+            agents <- mapM loadAgentFromFile agentFiles
             case [a | Right a <- agents, targetSlug == slug a] of
                 [] -> pure $ Left $ "Agent with slug '" <> targetSlug <> "' not found"
                 (agent:_) -> do
-                    let agentFile = case [f | (f, Right a) <- zip pargs.agentFiles agents, slug a == targetSlug] of
+                    let agentFile = case [f | (f, Right a) <- zip agentFiles agents, slug a == targetSlug] of
                             (f:_) -> f
-                            [] -> case pargs.agentFiles of
+                            [] -> case agentFiles of
                                 (first:_) -> first
                                 [] -> error "No agent files available"
                     tools <- if opts.exportIncludeTools
@@ -1408,7 +1686,7 @@ buildExportPackage opts pargs = do
         
         ExportCurrentTools -> do
             -- Export tools from current agent
-            case pargs.agentFiles of
+            case agentFiles of
                 [] -> pure $ Left "No agent file specified"
                 (agentFile:_) -> do
                     eAgent <- loadAgentFromFile agentFile
@@ -1425,7 +1703,7 @@ buildExportPackage opts pargs = do
         
         ExportToolByName toolName -> do
             -- Find and export specific tool
-            case pargs.agentFiles of
+            case agentFiles of
                 [] -> pure $ Left "No agent file specified"
                 (agentFile:_) -> do
                     eAgent <- loadAgentFromFile agentFile
@@ -1837,15 +2115,20 @@ makeHttpJsonTrace baseTracer url = do
     rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
     pure $ HttpLogger.httpTracer rt baseTracer
 
-interpretPromptScript :: PromptScript -> IO Text.Text
-interpretPromptScript [] =
-    Text.unlines <$> traverse interpretPromptScriptDirective [FileContents "/dev/stdin"]
-interpretPromptScript directives =
-    Text.unlines <$> traverse interpretPromptScriptDirective directives
+-- | Interpret prompt script with alias resolution
+interpretPromptScript :: Map Text AliasDefinition -> PromptScript -> Maybe FilePath -> IO Text.Text
+interpretPromptScript aliases directives mSessionFile
+    | null directives = do
+        content <- Text.getContents
+        pure content
+    | otherwise = do
+        results <- mapM (interpretPromptScriptDirective aliases mSessionFile) directives
+        pure $ Text.unlines results
 
-interpretPromptScriptDirective :: PromptScriptDirective -> IO Text.Text
-interpretPromptScriptDirective x =
-    case x of
+-- | Interpret a single prompt script directive
+interpretPromptScriptDirective :: Map Text AliasDefinition -> Maybe FilePath -> PromptScriptDirective -> IO Text.Text
+interpretPromptScriptDirective aliases mSessionFile directive =
+    case directive of
         Str s -> pure s
         FileContents p -> Text.readFile p
         Separator n s -> pure $ Text.replicate n s
@@ -1858,4 +2141,26 @@ interpretPromptScriptDirective x =
                     pure $ "_(Error loading session: " <> Text.pack err <> " )_\n"
                 Right session ->
                     pure $ SessionInject.formatSessionForPrompt verbosity session
+        AliasPrompt aliasName -> do
+            case lookupAlias aliases aliasName of
+                Left err -> do
+                    Text.hPutStrLn stderr err
+                    exitFailure
+                Right def -> resolveAlias def mSessionFile
+
+-- | Resolve an alias definition to its final prompt text
+resolveAlias :: AliasDefinition -> Maybe FilePath -> IO Text
+resolveAlias def mSessionFile = do
+    (content, mActualFile) <- case aliasInputMode def of
+        AliasStdin -> do
+            c <- Text.getContents
+            pure (c, Nothing)
+        AliasFile -> case mSessionFile of
+            Just sf -> do
+                c <- Text.readFile sf
+                pure (c, Just sf)
+            Nothing -> do
+                c <- Text.getContents
+                pure (c, Nothing)
+    pure $ substituteTemplate (aliasTemplate def) content mActualFile
 
