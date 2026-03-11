@@ -488,7 +488,7 @@ formatSystemTool (Session.SystemTool toolDef) = case toolDef of
 -- | Format LLM tool calls (names and optionally arguments).
 formatLlmToolCalls :: PrintVisibility -> [Session.LlmToolCall] -> Text.Text
 formatLlmToolCalls visibility calls =
-    Text.intercalate "\n" $ map (formatLlmToolCall visibility) calls
+    Text.intercalate "\n\n" $ map (formatLlmToolCall visibility) calls
 
 -- | Format a single LLM tool call, extracting the name and optionally arguments.
 --
@@ -538,7 +538,7 @@ formatToolArguments visibility funcObj =
                 byteCount = BS.length $ Text.encodeUtf8 formatted
             in if Text.null elided
                 then ""
-                else "\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+                else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
         Nothing -> ""
 
 -- | Format tool arguments directly from the tool call object.
@@ -557,7 +557,7 @@ formatToolArgumentsDirect visibility obj =
                 byteCount = BS.length $ Text.encodeUtf8 formatted
             in if Text.null elided
                 then ""
-                else "\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+                else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
         Nothing -> ""
 
 -- | Apply visibility settings to format content.
