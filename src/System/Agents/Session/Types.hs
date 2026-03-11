@@ -22,6 +22,11 @@ module System.Agents.Session.Types (
     UserTurnContent(..),
     LlmTurnContent(..),
     
+    -- * Byte usage tracking
+    StepByteUsage(..),
+    calculateStepByteUsage,
+    sessionTotalBytes,
+    
     -- * Content types
     SystemPrompt(..),
     LlmResponse(..),
@@ -61,6 +66,60 @@ newtype TurnId = TurnId UUID
 newTurnId :: IO TurnId
 newTurnId =
     TurnId <$> UUID.nextRandom
+
+-------------------------------------------------------------------------------
+-- Byte Usage Tracking
+-------------------------------------------------------------------------------
+
+-- | Byte usage breakdown for a single step.
+--
+-- Tracks the amount of data exchanged during a single turn of conversation,
+-- broken down by category for cost transparency and debugging.
+data StepByteUsage = StepByteUsage
+    { stepTotalBytes :: Int
+      -- ^ Total bytes for this step
+    , stepInputBytes :: Int
+      -- ^ Bytes in the input (prompt + context + query)
+    , stepOutputBytes :: Int
+      -- ^ Bytes in the LLM output response
+    , stepReasoningBytes :: Int
+      -- ^ Bytes in reasoning/thinking content (if model supports it)
+    , stepToolBytes :: Int
+      -- ^ Bytes in tool call responses
+    } deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON StepByteUsage
+instance ToJSON StepByteUsage
+
+-- | Helper to calculate total bytes from components.
+-- Use this when you have individual components but want to ensure
+-- consistency between total and sum of parts.
+calculateStepByteUsage :: Int -> Int -> Int -> Int -> StepByteUsage
+calculateStepByteUsage input output reasoning tool =
+    StepByteUsage
+        { stepTotalBytes = input + output + reasoning + tool
+        , stepInputBytes = input
+        , stepOutputBytes = output
+        , stepReasoningBytes = reasoning
+        , stepToolBytes = tool
+        }
+
+-- | Calculate total bytes for an entire session.
+-- Returns the sum of all step totals across all turns.
+sessionTotalBytes :: Session -> Int
+sessionTotalBytes session =
+    sum [ stepTotalBytes usage
+        | turn <- session.turns
+        , usage <- maybeToList (turnByteUsage turn)
+        ]
+  where
+    maybeToList :: Maybe a -> [a]
+    maybeToList Nothing = []
+    maybeToList (Just x) = [x]
+
+    turnByteUsage :: Turn -> Maybe StepByteUsage
+    turnByteUsage (UserTurn _ usage) = usage
+    turnByteUsage (LlmTurn _ usage) = usage
 
 -------------------------------------------------------------------------------
 -- Core content types
@@ -144,9 +203,13 @@ instance FromJSON LlmTurnContent
 instance ToJSON LlmTurnContent
   
 -- | Unification.
+-- 
+-- Each turn now optionally includes 'StepByteUsage' for tracking
+-- data exchange sizes. The 'Maybe' allows backward compatibility
+-- with sessions that were created before byte tracking was added.
 data Turn
-  = UserTurn UserTurnContent
-  | LlmTurn LlmTurnContent
+  = UserTurn UserTurnContent (Maybe StepByteUsage)
+  | LlmTurn LlmTurnContent (Maybe StepByteUsage)
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Turn
 instance ToJSON Turn
@@ -161,4 +224,5 @@ data Session
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Session
 instance ToJSON Session
+
 

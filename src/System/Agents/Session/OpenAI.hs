@@ -183,11 +183,11 @@ mkOpenAICompletion config completion = do
     historyToMessages ts = concatMap turnToMessages (reverse ts)
 
     turnToMessages :: Turn -> [Aeson.Value]
-    turnToMessages (LlmTurn turn) =
+    turnToMessages (LlmTurn turn _mUsage) =
         case Aeson.parse OpenAI.parseLLMResponse turn.llmResponse.rawResponse of
           Aeson.Error _ -> []
           Aeson.Success rsp -> [Aeson.Object rsp.chosenMessage]
-    turnToMessages (UserTurn turn) =
+    turnToMessages (UserTurn turn _mUsage) =
         let 
             mQuery = turn.userQuery
             userMsg = userQueryToMessages mQuery
@@ -266,4 +266,5 @@ newConfig tracer =
         <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
         <*> pure "gpt-4.1-mini"
         <*> pure OpenAI.OpenAIv1
+
 

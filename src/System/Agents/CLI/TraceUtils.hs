@@ -41,16 +41,18 @@ tracePrintingTextResponses = Tracer f
     f (CyclicReferencesWarning _) = pure ()
     f (ReferenceValidationTrace _) = pure ()
 
-    g pfx (Runtime.LLMTrace _ (OpenAI.GotChatCompletion x)) =
+    g pfx (Runtime.LLMTrace _ (OpenAI.GotChatCompletion x bytes)) =
         case Aeson.parseEither OpenAI.parseLLMResponse x of
             Left _ -> pure ()
             Right rsp ->
-                Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent]
+                let byteInfo = " [" <> formatBytes bytes <> "]"
+                in Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent] <> byteInfo
     g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_Conversation childSlug _ _ sub)) =
         g (childSlug : pfx) sub
     g _ (Runtime.ChildrenTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
-    g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _)) = pure ()
+    g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) = 
+        Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
     g _ (Runtime.NewConversation) = pure ()
     g _ (Runtime.WaitingForPrompt) = pure ()
     g _ (Runtime.RunToolTrace _ _) = pure ()
@@ -87,6 +89,14 @@ traceUsefulPromptHandle h = Tracer f
     f (ReferenceValidationTrace refs) =
         Text.hPutStrLn h $ "Reference validation trace: " <> Text.pack (show refs)
 
+-- | Format bytes in human-readable form.
+formatBytes :: Int -> Text
+formatBytes n
+    | n >= 1024 * 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024 * 1024))) <> " GiB"
+    | n >= 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024))) <> " MiB"
+    | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
+    | otherwise = Text.pack (show n) <> " B"
+
 renderAgentTrace :: Runtime.Trace -> Text
 renderAgentTrace (Runtime.AgentTrace_Loading slug _ tr) =
     Text.unlines
@@ -120,13 +130,14 @@ renderConversationAgentTrace tr = case tr of
     Runtime.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "stop"]
     Runtime.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
-    Runtime.LLMTrace _ (OpenAI.CallChatCompletion _) ->
-        Text.unwords ["to: llm"]
-    Runtime.LLMTrace _ (OpenAI.GotChatCompletion x) ->
-        Text.unwords ["from: llm", jsonTxt x]
+    Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes) ->
+        Text.unwords ["to: llm", "[" <> formatBytes bytes <> "]"]
+    Runtime.LLMTrace _ (OpenAI.GotChatCompletion x bytes) ->
+        Text.unwords ["from: llm", "[" <> formatBytes bytes <> "]", jsonTxt x]
     Runtime.ChildrenTrace sub ->
         Text.unwords ["(", Runtime.traceAgentSlug sub, ")", renderAgentTrace sub]
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+
 

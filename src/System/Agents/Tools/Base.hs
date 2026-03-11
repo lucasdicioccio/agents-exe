@@ -3,9 +3,13 @@
 module System.Agents.Tools.Base where
 
 -------------------------------------------------------------------------------
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Prod.Tracer (Tracer)
 
 import qualified System.Agents.MCP.Base as Mcp
@@ -104,4 +108,49 @@ extractCall (OpenAPIToolResult c _) = c
 extractCall (OpenAPIToolError c _) = c
 extractCall (PostgRESToolResult c _) = c
 extractCall (PostgRESToolError c _) = c
+
+-------------------------------------------------------------------------------
+-- Byte Counting Helpers
+-------------------------------------------------------------------------------
+
+-- | Calculate the byte size of a tool response for tracking purposes.
+--
+-- This function converts various tool result types to their JSON representation
+-- and returns the size in bytes. Used for byte usage tracking in sessions.
+--
+-- Note: For BlobToolSuccess, we count the raw ByteString length directly.
+-- For other result types, we encode to JSON and count the bytes.
+callResultByteSize :: CallResult call -> Int
+callResultByteSize (BlobToolSuccess _ bs) =
+    -- Raw bytes - count the ByteString length directly
+    BS.length bs
+callResultByteSize (ToolNotFound _) =
+    -- Fixed small size for not-found errors
+    20
+callResultByteSize (BashToolError _ _) =
+    -- Encode error details as JSON and count
+    -- The actual error will be serialized when stored
+    100  -- Approximate, actual size depends on error details
+callResultByteSize (IOToolError _ _) =
+    100  -- Approximate
+callResultByteSize (McpToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (McpToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack err))))
+callResultByteSize (OpenAPIToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (OpenAPIToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack err))))
+callResultByteSize (PostgRESToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (PostgRESToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack err))))
+
+-- | Calculate total bytes for a list of tool responses.
+--
+-- Helper function for calculating tool byte usage when processing
+-- multiple tool results in a single step.
+sumToolResponseBytes :: [CallResult call] -> Int
+sumToolResponseBytes = sum . map callResultByteSize
+
 

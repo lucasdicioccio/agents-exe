@@ -9,6 +9,7 @@ module System.Agents.LLMs.OpenAI (
  , SystemPrompt(..)
  , Response(..)
  , callLLMPayload
+ , calculatePayloadBytes
  , parseLLMResponse
  , waitRateLimit
  , parseRateLimitDelay
@@ -38,11 +39,28 @@ import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
+-- Trace with byte counts
+-------------------------------------------------------------------------------
+
+-- | Trace events for LLM calls, now including byte counts for tracking.
+--
+-- The constructors include byte counts for request/response payloads
+-- to support cost transparency and debugging.
 data Trace
-    = CallChatCompletion !Aeson.Value
-    | GotChatCompletion !Aeson.Value
+    = CallChatCompletion !Aeson.Value !Int
+      -- ^ Payload being sent to the LLM + byte count
+    | GotChatCompletion !Aeson.Value !Int
+      -- ^ Response received from the LLM + byte count
     | HttpClientTrace !HttpClient.Trace
+      -- ^ Trace from the underlying HTTP client
     deriving (Show)
+
+-- | Calculate byte size of a JSON Value for tracking purposes.
+--
+-- This encodes the value to JSON and returns the length of the
+-- resulting ByteString. Useful for tracking payload sizes.
+calculatePayloadBytes :: Aeson.Value -> Int
+calculatePayloadBytes = fromIntegral . LByteString.length . Aeson.encode
 
 -------------------------------------------------------------------------------
 newtype ApiBaseUrl
@@ -249,7 +267,8 @@ callLLMPayload ::
     IO (Either String Value)
 callLLMPayload tracer rt (ApiBaseUrl baseUrl) payload = do
     let payloadVal = Aeson.toJSON payload
-    runTracer tracer (CallChatCompletion payloadVal)
+    let requestBytes = calculatePayloadBytes payloadVal
+    runTracer tracer (CallChatCompletion payloadVal requestBytes)
     httpRsp <- rt.post (contramap HttpClientTrace tracer) (baseUrl <> "/chat/completions") (Just payloadVal)
     case httpRsp of
         Left (HttpClient.SomeError err) -> do
@@ -258,7 +277,8 @@ callLLMPayload tracer rt (ApiBaseUrl baseUrl) payload = do
             case HttpClient.decodeBody (HttpClient.J rsp) of
                 Nothing -> pure $ Left "json decode body error"
                 Just body -> do
-                    runTracer tracer (GotChatCompletion body)
+                    let responseBytes = calculatePayloadBytes body
+                    runTracer tracer (GotChatCompletion body responseBytes)
                     pure $ Right body
 
 data ToolCallFunction

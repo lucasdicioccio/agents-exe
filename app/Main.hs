@@ -1207,7 +1207,7 @@ toJsonTrace x = case x of
                 Nothing
             (RuntimeTrace.LLMTrace _ (LLMTrace.HttpClientTrace _)) ->
                 Nothing
-            (RuntimeTrace.LLMTrace uuid (LLMTrace.CallChatCompletion val)) ->
+            (RuntimeTrace.LLMTrace uuid (LLMTrace.CallChatCompletion val _bytes)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text)
@@ -1215,7 +1215,7 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
-            (RuntimeTrace.LLMTrace uuid (LLMTrace.GotChatCompletion val)) ->
+            (RuntimeTrace.LLMTrace uuid (LLMTrace.GotChatCompletion val _bytes)) ->
                 Just $
                     Aeson.object
                         [ "x" .= ("llm" :: Text)
@@ -1322,4 +1322,5 @@ toJsonTrace x = case x of
                         [ "x" .= ("tool-call-end" :: Text)
                         , "name" .= n
                         ]
+
 

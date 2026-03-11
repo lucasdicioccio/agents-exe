@@ -101,10 +101,10 @@ sessionEditCensorToolCalls session =
     session { Session.turns = map censorTurn session.turns }
   where
     censorTurn :: Session.Turn -> Session.Turn
-    censorTurn (Session.UserTurn utc) =
-        Session.UserTurn $ utc { Session.userToolResponses = [] }
-    censorTurn (Session.LlmTurn ltc) =
-        Session.LlmTurn $ ltc { Session.llmToolCalls = [] }
+    censorTurn (Session.UserTurn utc mUsage) =
+        Session.UserTurn (utc { Session.userToolResponses = [] }) mUsage
+    censorTurn (Session.LlmTurn ltc mUsage) =
+        Session.LlmTurn (ltc { Session.llmToolCalls = [] }) mUsage
 
 -- | Censor (remove) all thinking content from a session.
 --
@@ -122,9 +122,9 @@ sessionEditCensorThinking session =
     session { Session.turns = map censorTurn session.turns }
   where
     censorTurn :: Session.Turn -> Session.Turn
-    censorTurn (Session.UserTurn utc) = Session.UserTurn utc
-    censorTurn (Session.LlmTurn ltc) =
-        Session.LlmTurn $ ltc { Session.llmResponse = censorResponse ltc.llmResponse }
+    censorTurn (Session.UserTurn utc mUsage) = Session.UserTurn utc mUsage
+    censorTurn (Session.LlmTurn ltc mUsage) =
+        Session.LlmTurn (ltc { Session.llmResponse = censorResponse ltc.llmResponse }) mUsage
 
     censorResponse :: Session.LlmResponse -> Session.LlmResponse
     censorResponse resp = resp { Session.responseThinking = Nothing }
@@ -139,4 +139,5 @@ sessionEditCensorThinking session =
 --
 applySessionEdits :: [Session.Session -> Session.Session] -> Session.Session -> Session.Session
 applySessionEdits edits session = foldl (\s f -> f s) session edits
+
 
