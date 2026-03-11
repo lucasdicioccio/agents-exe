@@ -23,6 +23,7 @@
     "labelToBeTaken": "agq/to-be-taken",
     "labelTaken":     "agq/taken",
     "labelWait":      "agq/wait",
-    "labelAgentPr":   "agq/agent-pr"
+    "labelAgentPr":   "agq/agent-pr",
+    "labelDoneInBranch":   "agq/done-in-branch"
   }
 }
