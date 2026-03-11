@@ -536,8 +536,8 @@ data TuiOptions
 data OneShotOptions
     = OneShotOptions
     { sessionFile :: Maybe FilePath
-    , promptScript :: PromptScript
     , thinkingOutput :: OneShot.ThinkingOutput
+    , promptScript :: PromptScript
     }
     deriving (Show)
 
@@ -705,19 +705,17 @@ parseOneShotOptions =
                     <> help "extra session-file to resume/store"
                 )
             )
-        <*> parsePromptScriptInput
         <*> parseThinkingOption
+        <*> parsePromptScriptInput
 
 -- | Parse prompt script input, which can be either aliases, regular directives, or default to stdin
 parsePromptScriptInput :: Parser PromptScript
 parsePromptScriptInput =
-    fmap concat $ many $ asum
-        [ pure <$> parseAliasPrompt
-        , parseRegularDirectives
-        ]
+    let pair = (,) <$> parseAliasPrompt <*> many parseRegularDirectives
+    in fmap (\(d0,ds) -> d0:ds) pair
   where
-    parseRegularDirectives :: Parser PromptScript
-    parseRegularDirectives = many $ asum
+    parseRegularDirectives :: Parser PromptScriptDirective
+    parseRegularDirectives = asum
         [ promptOption
         , fileOption
         , shellOption
