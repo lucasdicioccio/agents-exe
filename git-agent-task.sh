@@ -47,6 +47,18 @@ case "$command" in
     echo ""
     echo "Nothing to prepare."
     ;;
+  check)
+    echo "Building."
+    ./qa-agent/tools/cabal-build run
+    echo "Testing."
+    ./qa-agent/tools/cabal-test run
+    echo "Verifying some commands."
+    ./qa-agent/tools/run-agents-exe run --args "paths"
+    ./qa-agent/tools/run-agents-exe run --args "check --tools openai"
+    ./qa-agent/tools/run-agents-exe run --args "describe"
+    ./qa-agent/tools/run-agents-exe run --args "cowsay 'we want types and we want it now'"
+    ./qa-agent/tools/run-agents-exe run --args "echo-prompt -S '#' -p 'types types types'"
+    ;;
   preview)
     echo "Skipping."
     ;;

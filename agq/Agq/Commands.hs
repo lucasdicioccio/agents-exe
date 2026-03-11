@@ -453,7 +453,7 @@ execTask cfg conn t = do
 
       case mHookAbs of
         Nothing -> return ()
-        Just h  -> void $ runWithCwd worktreeProj h ["preview", Text.unpack lbl, nameStr, instrFile]
+        Just h  -> void $ runWithCwd worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
 
     releaseLock conn (taskName t) Done Nothing
 
