@@ -26,6 +26,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import Data.List (sortOn)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -487,9 +488,21 @@ formatSystemTool (Session.SystemTool toolDef) = case toolDef of
 -- | Format LLM tool calls (names and optionally arguments).
 formatLlmToolCalls :: PrintVisibility -> [Session.LlmToolCall] -> Text.Text
 formatLlmToolCalls visibility calls =
-    Text.intercalate "\n" $ map (formatLlmToolCall visibility) calls
+    Text.intercalate "\n\n" $ map (formatLlmToolCall visibility) calls
 
 -- | Format a single LLM tool call, extracting the name and optionally arguments.
+--
+-- Tool calls from OpenAI have the structure:
+-- @
+-- {
+--   "id": "call_xxx",
+--   "type": "function",
+--   "function": {
+--     "name": "tool_name",
+--     "arguments": "{\"key\": \"value\"}"  -- Note: this is a STRING, not an object
+--   }
+-- }
+-- @
 formatLlmToolCall :: PrintVisibility -> Session.LlmToolCall -> Text.Text
 formatLlmToolCall visibility (Session.LlmToolCall val) =
     case val of
@@ -510,38 +523,61 @@ formatLlmToolCall visibility (Session.LlmToolCall val) =
         _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
 
 -- | Format tool arguments from the function object.
+--
+-- The 'arguments' field is stored as a JSON string (because that's how the OpenAI API
+-- returns it), so we need to parse it first before pretty-printing.
 formatToolArguments :: PrintVisibility -> KeyMap.KeyMap Aeson.Value -> Text.Text
 formatToolArguments Hidden _ = ""
 formatToolArguments visibility funcObj =
     case KeyMap.lookup "arguments" funcObj of
         Just argsVal -> 
-            let formatted = formatJsonValuePretty argsVal
-                elided = case visibility of
-                    Hidden -> ""
-                    Elided leading trailing -> elideDocument leading trailing formatted
-                    ShownFull -> formatted
+            let -- Parse arguments: if it's a string, try to parse as JSON; otherwise use as-is
+                parsedVal = parseArgumentsValue argsVal
+                formatted = formatJsonValuePretty parsedVal
+                elided = applyVisibility visibility formatted
                 byteCount = BS.length $ Text.encodeUtf8 formatted
             in if Text.null elided
                 then ""
-                else "\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+                else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
         Nothing -> ""
 
 -- | Format tool arguments directly from the tool call object.
+--
+-- Similar to 'formatToolArguments', handles the case where arguments are stored
+-- as a JSON string rather than a JSON object.
 formatToolArgumentsDirect :: PrintVisibility -> KeyMap.KeyMap Aeson.Value -> Text.Text
 formatToolArgumentsDirect Hidden _ = ""
 formatToolArgumentsDirect visibility obj =
     case KeyMap.lookup "arguments" obj of
         Just argsVal -> 
-            let formatted = formatJsonValuePretty argsVal
-                elided = case visibility of
-                    Hidden -> ""
-                    Elided leading trailing -> elideDocument leading trailing formatted
-                    ShownFull -> formatted
+            let -- Parse arguments: if it's a string, try to parse as JSON; otherwise use as-is
+                parsedVal = parseArgumentsValue argsVal
+                formatted = formatJsonValuePretty parsedVal
+                elided = applyVisibility visibility formatted
                 byteCount = BS.length $ Text.encodeUtf8 formatted
             in if Text.null elided
                 then ""
-                else "\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+                else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
         Nothing -> ""
+
+-- | Apply visibility settings to format content.
+applyVisibility :: PrintVisibility -> Text.Text -> Text.Text
+applyVisibility ShownFull content = content
+applyVisibility (Elided leading trailing) content = elideDocument leading trailing content
+applyVisibility Hidden _ = ""
+
+-- | Parse an arguments value.
+--
+-- The OpenAI API returns tool call arguments as a JSON string (e.g., "{\"key\": \"value\"}").
+-- This function attempts to parse such strings into proper JSON values for pretty-printing.
+-- If parsing fails or the value is not a string, it returns the original value.
+parseArgumentsValue :: Aeson.Value -> Aeson.Value
+parseArgumentsValue (Aeson.String txt) =
+    -- Try to parse the string as JSON
+    case Aeson.decode (BSL.fromStrict $ Text.encodeUtf8 txt) of
+        Just val -> val
+        Nothing -> Aeson.String txt  -- Keep as string if parsing fails
+parseArgumentsValue other = other
 
 -- | Format a JSON value as pretty-printed text.
 formatJsonValuePretty :: Aeson.Value -> Text.Text
@@ -558,10 +594,7 @@ formatToolResponse :: PrintVisibility -> (Session.LlmToolCall, Session.UserToolR
 formatToolResponse visibility (call, Session.UserToolResponse response) =
     let callName = extractToolCallName call
         formatted = formatJsonValuePretty response
-        elided = case visibility of
-            Hidden -> ""
-            Elided leading trailing -> elideDocument leading trailing formatted
-            ShownFull -> formatted
+        elided = applyVisibility visibility formatted
         byteCount = BS.length $ Text.encodeUtf8 formatted
     in if Text.null elided
         then ""
