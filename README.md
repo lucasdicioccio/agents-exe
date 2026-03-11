@@ -315,6 +315,42 @@ Coding style guidelines:
 - No monad-tower, run in IO (library users can add their own)
 - Use contravariant tracer to surface logs, be generous with traces
 
+# agq — Automating GitHub Issue Queues
+
+`agq` is a companion tool (see [`agq/README.md`](agq/README.md)) that turns
+GitHub issues into an agent-driven task queue with DAG dependency enforcement.
+
+## Typical Automation Loop
+
+A cron job or CI step running every few minutes is enough to drive the full
+cycle:
+
+```console
+# 1. Promote blocked issues whose dependencies are now satisfied
+agq promote
+
+# 2. Import ready issues into the local task queue
+agq pull
+
+# 3. Run pending tasks (each spins up agents-exe in a git worktree)
+agq process
+
+# 4. Merge agent PRs that target feature branches;
+#    labels closed issues with agq/done-in-branch so promote() unblocks dependents
+agq merge-prs
+```
+
+Steps 1–4 are intentionally idempotent — re-running them is always safe.
+
+## Feature-branch Chains
+
+When issues A → B → C are all destined for a shared feature branch, GitHub
+will not auto-close A when the PR for A merges into that branch (only merges
+into the default branch trigger auto-close). `agq merge-prs` bridges this gap:
+after merging a feature-branch PR it parses its `Closes #N` lines and labels
+those issues `agq/done-in-branch`. `agq promote` treats that label as
+equivalent to a closed issue, so B is unblocked automatically.
+
 # Build and Run
 
 ## Directly from Source

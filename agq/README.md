@@ -46,10 +46,11 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
     "default": "git-agent-task.sh"
   },
   "labels": {
-    "labelToBeTaken": "agq/to-be-taken",
-    "labelTaken":     "agq/taken",
-    "labelWait":      "agq/wait",
-    "labelAgentPr":   "agq/agent-pr"
+    "labelToBeTaken":    "agq/to-be-taken",
+    "labelTaken":        "agq/taken",
+    "labelWait":         "agq/wait",
+    "labelAgentPr":      "agq/agent-pr",
+    "labelDoneInBranch": "agq/done-in-branch"
   }
 }
 ```
@@ -71,6 +72,7 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
 | `labels.labelTaken` | GitHub label applied after an issue is imported |
 | `labels.labelWait` | GitHub label meaning "blocked on dependencies" |
 | `labels.labelAgentPr` | GitHub label applied to PRs created by the agent |
+| `labels.labelDoneInBranch` | GitHub label added to issues closed by a PR merged into a feature branch (see [Feature-branch DAG](#feature-branch-dag)) |
 
 ---
 
@@ -93,9 +95,10 @@ agq init
 
 ### `agq init-labels`
 
-Creates (or updates) all GitHub labels defined in the config: the four workflow
-labels (`agq/to-be-taken`, `agq/taken`, `agq/wait`, `agq/agent-pr`) and one
-label per project key. Uses `gh label create --force` so it is idempotent.
+Creates (or updates) all GitHub labels defined in the config: the five workflow
+labels (`agq/to-be-taken`, `agq/taken`, `agq/wait`, `agq/agent-pr`,
+`agq/done-in-branch`) and one label per project key. Uses
+`gh label create --force` so it is idempotent.
 
 ```bash
 agq init-labels
@@ -154,9 +157,14 @@ Tries: 2
 ### `agq promote`
 
 Checks all issues labelled `agq/wait`. For each one, resolves the `Depends-on:`
-refs (via `gh issue view` / `gh pr view`). If no dep is explicitly open,
-the issue is promoted to `agq/to-be-taken` so the next `pull` will import it.
-Deps in unknown state (deleted, transferred, not found) are treated as satisfied.
+refs (via `gh issue view` / `gh pr view`). A dependency is considered satisfied
+when it is:
+- **closed** on GitHub, or
+- **not found** (deleted, transferred) — treated as done, or
+- labelled **`agq/done-in-branch`** — closed by a PR merged into a feature branch.
+
+If all deps are satisfied, the issue is promoted to `agq/to-be-taken` so the
+next `pull` will import it.
 
 ```bash
 agq promote
@@ -242,6 +250,14 @@ Merges all open PRs labelled `agq/agent-pr` whose base branch is **not** the
 repo's default branch (i.e. intermediate feature-branch PRs). Uses
 `gh pr merge --merge --auto`.
 
+After triggering the merge, `agq` parses `Closes / Fixes / Resolves #N` lines
+from the PR body and adds the `agq/done-in-branch` label to every referenced
+issue. This signals to `agq promote` that those issues are satisfied even though
+GitHub will not auto-close them (the PR targets a feature branch, not `main`).
+
+PRs that already target the default branch are skipped — GitHub handles closure
+for those automatically.
+
 ```bash
 agq merge-prs
 ```
@@ -272,6 +288,23 @@ resets those tasks to `pending`. Useful after a crash or `kill`.
 ```bash
 agq recover
 ```
+
+---
+
+## Feature-branch DAG
+
+When a chain of issues (A → B → C) all target the same feature branch (not
+`main`), GitHub will not auto-close issue A when the PR for A merges into that
+branch. The standard `agq` loop handles this transparently:
+
+1. `agq merge-prs` auto-merges the PR for A into the feature branch and parses
+   its `Closes #A` line → adds `agq/done-in-branch` to issue A.
+2. `agq promote` sees issue A is labelled `agq/done-in-branch` → promotes issue
+   B from `agq/wait` to `agq/to-be-taken`.
+3. `agq pull` imports issue B and the agent works on it.
+
+The label is intentionally left on issue A; it has no effect once B and C have
+progressed, and it provides a clear audit trail.
 
 ---
 
