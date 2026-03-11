@@ -13,6 +13,8 @@ import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.List (find)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -58,12 +60,145 @@ import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (ExitCode(..), exitFailure, exitSuccess)
-import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.FilePath (takeDirectory, takeFileName, takeExtension, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import qualified System.Process as Process
 
 import Options.Applicative
 import Data.Time (getCurrentTime)
+
+-------------------------------------------------------------------------------
+-- Alias Types and Configuration
+-------------------------------------------------------------------------------
+
+-- | Input mode for aliases: read from stdin or from a file
+data AliasInputMode = AliasStdin | AliasFile
+    deriving (Show, Eq, Generic)
+
+instance Aeson.FromJSON AliasInputMode where
+    parseJSON = Aeson.withText "AliasInputMode" $ \t -> case Text.toLower t of
+        "stdin" -> pure AliasStdin
+        "file" -> pure AliasFile
+        _ -> fail $ "Unknown input mode: " ++ Text.unpack t
+
+-- | Definition of a prompt alias with template and metadata
+data AliasDefinition = AliasDefinition
+    { aliasDescription :: Text
+    , aliasTemplate :: Text
+    , aliasInputMode :: AliasInputMode
+    }
+    deriving (Show, Generic)
+
+instance Aeson.FromJSON AliasDefinition where
+    parseJSON = Aeson.withObject "AliasDefinition" $ \v -> AliasDefinition
+        <$> v Aeson..: "description"
+        <*> v Aeson..: "template"
+        <*> v Aeson..: "inputMode"
+
+-- | Default aliases available even without configuration
+defaultAliases :: Map Text AliasDefinition
+defaultAliases = Map.fromList
+    [ ("translate", AliasDefinition
+        "Translate to English"
+        "Please translate the following text to English:\n\n{{content}}"
+        AliasStdin)
+    , ("summarize", AliasDefinition
+        "Summarize text"
+        "Please provide a concise summary of the following:\n\n{{content}}"
+        AliasStdin)
+    , ("code-review", AliasDefinition
+        "Review code for issues"
+        "Please review the following code for potential bugs, security issues, and style improvements:\n\n```{{language}}\n{{content}}\n```"
+        AliasFile)
+    , ("explain", AliasDefinition
+        "Explain code in plain English"
+        "Please explain what the following code does in plain English:\n\n```{{language}}\n{{content}}\n```"
+        AliasFile)
+    ]
+
+-- | Resolve aliases from config, falling back to defaults
+resolveAliases :: Maybe (Map Text AliasDefinition) -> Map Text AliasDefinition
+resolveAliases Nothing = defaultAliases
+resolveAliases (Just cfgAliases) = Map.union cfgAliases defaultAliases
+
+-- | Get alias definition or return error message
+lookupAlias :: Map Text AliasDefinition -> Text -> Either Text AliasDefinition
+lookupAlias aliases name = case Map.lookup name aliases of
+    Just def -> Right def
+    Nothing -> Left $ formatAliasNotFoundError name aliases
+
+-- | Format error message for unknown alias with available aliases list
+formatAliasNotFoundError :: Text -> Map Text AliasDefinition -> Text
+formatAliasNotFoundError name aliases =
+    Text.unlines $
+        [ "Error: Unknown alias '" <> name <> "'"
+        , ""
+        , "Available aliases:"
+        ]
+        ++ map formatAlias (Map.toList aliases)
+  where
+    formatAlias (aliasName, def) = "  - " <> aliasName <> ": " <> aliasDescription def
+
+-- | Substitute template variables in an alias template
+-- Supported variables:
+--   {{content}}  - The actual content from stdin or file
+--   {{language}} - Auto-detected or specified language
+--   {{filename}} - Name of the input file
+substituteTemplate :: Text -> Text -> Maybe FilePath -> Text
+substituteTemplate template content mFilePath =
+    let withContent = Text.replace "{{content}}" content template
+        withFilename = case mFilePath of
+            Just fp -> Text.replace "{{filename}}" (Text.pack $ takeFileName fp) withContent
+            Nothing -> Text.replace "{{filename}}" "" withContent
+        language = detectLanguage mFilePath
+    in Text.replace "{{language}}" language withFilename
+
+-- | Detect programming language from file extension
+detectLanguage :: Maybe FilePath -> Text
+detectLanguage Nothing = ""
+detectLanguage (Just fp) = case takeExtension fp of
+    ".hs" -> "haskell"
+    ".py" -> "python"
+    ".js" -> "javascript"
+    ".ts" -> "typescript"
+    ".java" -> "java"
+    ".c" -> "c"
+    ".cpp" -> "cpp"
+    ".cc" -> "cpp"
+    ".h" -> "c"
+    ".hpp" -> "cpp"
+    ".rs" -> "rust"
+    ".go" -> "go"
+    ".rb" -> "ruby"
+    ".php" -> "php"
+    ".sh" -> "bash"
+    ".bash" -> "bash"
+    ".zsh" -> "zsh"
+    ".pl" -> "perl"
+    ".r" -> "r"
+    ".swift" -> "swift"
+    ".kt" -> "kotlin"
+    ".scala" -> "scala"
+    ".clj" -> "clojure"
+    ".ex" -> "elixir"
+    ".exs" -> "elixir"
+    ".erl" -> "erlang"
+    ".ml" -> "ocaml"
+    ".fs" -> "fsharp"
+    ".cs" -> "csharp"
+    ".lua" -> "lua"
+    ".vim" -> "vim"
+    ".md" -> "markdown"
+    ".json" -> "json"
+    ".yaml" -> "yaml"
+    ".yml" -> "yaml"
+    ".xml" -> "xml"
+    ".html" -> "html"
+    ".css" -> "css"
+    ".scss" -> "scss"
+    ".sass" -> "sass"
+    ".sql" -> "sql"
+    _ -> ""
 
 -------------------------------------------------------------------------------
 -- Default Configuration and Example Agents
@@ -237,6 +372,7 @@ data ArgParserArgs
     , defaultLogJsonFilepath :: Maybe FilePath
     , defaultLogRawFilepath :: Maybe FilePath
     , defaultLogSesionsJsonPrefix :: Maybe FilePath
+    , argPromptAliases :: Map Text AliasDefinition
     }
 
 secretsKeyFile :: ArgParserArgs -> FilePath
@@ -261,10 +397,17 @@ data AgentsExeConfig = AgentsExeConfig
     , agentsDirectories :: [FilePath]
     , agentsFiles :: [FilePath]
     , agentsLogs :: Maybe AgentsExeLogConfig
+    , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
     }
     deriving (Show, Generic)
 
-instance Aeson.FromJSON AgentsExeConfig
+instance Aeson.FromJSON AgentsExeConfig where
+    parseJSON = Aeson.withObject "AgentsExeConfig" $ \v -> AgentsExeConfig
+        <$> v Aeson..:? "agentsConfigDir"
+        <*> v Aeson..:? "agentsDirectories" Aeson..!= []
+        <*> v Aeson..:? "agentsFiles" Aeson..!= []
+        <*> v Aeson..:? "agentsLogs"
+        <*> v Aeson..:? "promptAliases"
 
 locateAgentsExeConfig :: IO (Maybe FilePath)
 locateAgentsExeConfig = do
@@ -309,6 +452,7 @@ initArgParserArgs = do
                         (logJsonPath =<< obj.agentsLogs)
                         (logRawPath =<< obj.agentsLogs)
                         (logSessionsJsonPrefix =<< obj.agentsLogs)
+                        (resolveAliases obj.cfgPromptAliases)
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
@@ -328,6 +472,7 @@ initArgParserArgs = do
                 Nothing
                 Nothing
                 (Just sessionsDir)
+                defaultAliases
 
 data Prog = Prog
     { configDir :: FilePath
@@ -337,7 +482,8 @@ data Prog = Prog
     , logJsonFile :: Maybe FilePath
     , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
-    , selectedAgentSlug :: Maybe Text  -- NEW: selected agent by slug
+    , selectedAgentSlug :: Maybe Text
+    , progPromptAliases :: Map Text AliasDefinition
     , mainCommand :: Command
     }
 
@@ -375,6 +521,7 @@ data PromptScriptDirective
     | Separator Int Text.Text
     | ShellOutput String
     | SessionContents FilePath SessionInject.SessionVerbosity
+    | AliasPrompt Text
     deriving (Show)
 
 type PromptScript =
@@ -428,8 +575,8 @@ data ExportSource
     = ExportCurrentAgent
     | ExportAllAgents
     | ExportAgentBySlug Text
-    | ExportCurrentTools         -- Tools only
-    | ExportToolByName Text      -- Specific tool
+    | ExportCurrentTools
+    | ExportToolByName Text
     deriving (Show)
 
 data ExportDestination
@@ -558,124 +705,143 @@ parseOneShotOptions =
                     <> help "extra session-file to resume/store"
                 )
             )
-        <*> ( many
-                ( promptOption
-                    <|> fileOption
-                    <|> shellOption
-                    <|> smallSeparatorFlag
-                    <|> largeSeparatorFlag
-                    <|> sessionXSOption
-                    <|> sessionSOption
-                    <|> sessionMOption
-                    <|> sessionLOption
-                    <|> sessionXLOption
-                )
-            )
+        <*> parsePromptScriptInput
         <*> parseThinkingOption
+
+-- | Parse prompt script input, which can be either aliases, regular directives, or default to stdin
+parsePromptScriptInput :: Parser PromptScript
+parsePromptScriptInput =
+    fmap concat $ many $ asum
+        [ pure <$> parseAliasPrompt
+        , parseRegularDirectives
+        ]
   where
-    smallSeparatorFlag :: Parser PromptScriptDirective
-    smallSeparatorFlag =
-        Separator 4
-            <$> strOption
-                ( long "sep4"
-                    <> short 's'
-                    <> metavar "SEPARATOR"
-                    <> help "a short separator"
-                )
+    parseRegularDirectives :: Parser PromptScript
+    parseRegularDirectives = many $ asum
+        [ promptOption
+        , fileOption
+        , shellOption
+        , smallSeparatorFlag
+        , largeSeparatorFlag
+        , sessionXSOption
+        , sessionSOption
+        , sessionMOption
+        , sessionLOption
+        , sessionXLOption
+        ]
 
-    largeSeparatorFlag :: Parser PromptScriptDirective
-    largeSeparatorFlag =
-        Separator 40
-            <$> strOption
-                ( long "sep40"
-                    <> short 'S'
-                    <> metavar "SEPARATOR"
-                    <> help "a long separator"
-                )
+parseAliasPrompt :: Parser PromptScriptDirective
+parseAliasPrompt =
+    AliasPrompt
+        <$> strOption
+            ( long "alias"
+                <> metavar "NAME"
+                <> help "Use a predefined prompt alias (e.g., translate, summarize, code-review, explain)"
+            )
 
-    promptOption :: Parser PromptScriptDirective
-    promptOption =
-        Str
-            <$> strOption
-                ( long "prompt"
-                    <> short 'p'
-                    <> metavar "PROMPT"
-                    <> help "prompt text paragraph"
-                )
+promptOption :: Parser PromptScriptDirective
+promptOption =
+    Str
+        <$> strOption
+            ( long "prompt"
+                <> short 'p'
+                <> metavar "PROMPT"
+                <> help "prompt text paragraph"
+            )
 
-    fileOption :: Parser PromptScriptDirective
-    fileOption =
-        FileContents
-            <$> strOption
-                ( long "file"
-                    <> short 'f'
-                    <> metavar "FILE"
-                    <> help "prompt text file"
-                )
+fileOption :: Parser PromptScriptDirective
+fileOption =
+    FileContents
+        <$> strOption
+            ( long "file"
+                <> short 'f'
+                <> metavar "FILE"
+                <> help "prompt text file"
+            )
 
-    shellOption :: Parser PromptScriptDirective
-    shellOption =
-        ShellOutput
-            <$> strOption
-                ( long "shell"
-                    <> metavar "SHELL"
-                    <> help "prompt the stdout of a shell command"
-                )
+shellOption :: Parser PromptScriptDirective
+shellOption =
+    ShellOutput
+        <$> strOption
+            ( long "shell"
+                <> metavar "SHELL"
+                <> help "prompt the stdout of a shell command"
+            )
 
-    -- | Parse --session-xs: minimal session info (queries and responses only, skip tool-only turns)
-    sessionXSOption :: Parser PromptScriptDirective
-    sessionXSOption =
-        SessionContents
-            <$> strOption
-                ( long "session-xs"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at minimal verbosity (queries/responses only, skips tool-only turns)"
-                )
-            <*> pure SessionInject.SessionXS
+smallSeparatorFlag :: Parser PromptScriptDirective
+smallSeparatorFlag =
+    Separator 4
+        <$> strOption
+            ( long "sep4"
+                <> short 's'
+                <> metavar "SEPARATOR"
+                <> help "a short separator"
+            )
 
-    -- | Parse --session-s: add thinking and tool names called
-    sessionSOption :: Parser PromptScriptDirective
-    sessionSOption =
-        SessionContents
-            <$> strOption
-                ( long "session-s"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at low verbosity (+thinking, +tool names)"
-                )
-            <*> pure SessionInject.SessionS
+largeSeparatorFlag :: Parser PromptScriptDirective
+largeSeparatorFlag =
+    Separator 40
+        <$> strOption
+            ( long "sep40"
+                <> short 'S'
+                <> metavar "SEPARATOR"
+                <> help "a long separator"
+            )
 
-    -- | Parse --session-m: add statistics
-    sessionMOption :: Parser PromptScriptDirective
-    sessionMOption =
-        SessionContents
-            <$> strOption
-                ( long "session-m"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at medium verbosity (+statistics)"
-                )
-            <*> pure SessionInject.SessionM
+-- | Parse --session-xs: minimal session info (queries and responses only, skip tool-only turns)
+sessionXSOption :: Parser PromptScriptDirective
+sessionXSOption =
+    SessionContents
+        <$> strOption
+            ( long "session-xs"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at minimal verbosity (queries/responses only, skips tool-only turns)"
+            )
+        <*> pure SessionInject.SessionXS
 
-    -- | Parse --session-l: add tool call results
-    sessionLOption :: Parser PromptScriptDirective
-    sessionLOption =
-        SessionContents
-            <$> strOption
-                ( long "session-l"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at high verbosity (+tool call results)"
-                )
-            <*> pure SessionInject.SessionL
+-- | Parse --session-s: add thinking and tool names called
+sessionSOption :: Parser PromptScriptDirective
+sessionSOption =
+    SessionContents
+        <$> strOption
+            ( long "session-s"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at low verbosity (+thinking, +tool names)"
+            )
+        <*> pure SessionInject.SessionS
 
-    -- | Parse --session-xl: complete session info (same as L)
-    sessionXLOption :: Parser PromptScriptDirective
-    sessionXLOption =
-        SessionContents
-            <$> strOption
-                ( long "session-xl"
-                    <> metavar "SESSIONFILE"
-                    <> help "inject session file content at maximum verbosity (complete)"
-                )
-            <*> pure SessionInject.SessionXL
+-- | Parse --session-m: add statistics
+sessionMOption :: Parser PromptScriptDirective
+sessionMOption =
+    SessionContents
+        <$> strOption
+            ( long "session-m"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at medium verbosity (+statistics)"
+            )
+        <*> pure SessionInject.SessionM
+
+-- | Parse --session-l: add tool call results
+sessionLOption :: Parser PromptScriptDirective
+sessionLOption =
+    SessionContents
+        <$> strOption
+            ( long "session-l"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at high verbosity (+tool call results)"
+            )
+        <*> pure SessionInject.SessionL
+
+-- | Parse --session-xl: complete session info (same as L)
+sessionXLOption :: Parser PromptScriptDirective
+sessionXLOption =
+    SessionContents
+        <$> strOption
+            ( long "session-xl"
+                <> metavar "SESSIONFILE"
+                <> help "inject session file content at maximum verbosity (complete)"
+            )
+        <*> pure SessionInject.SessionXL
 
 parseMcpServer :: Parser Command
 parseMcpServer =
@@ -1083,6 +1249,7 @@ parseProgOptions argparserargs =
                     <> help "Select agent by slug instead of file path"
                 )
             )
+        <*> pure argparserargs.argPromptAliases
         <*> hsubparser
             ( command "check" (info parseCheckCommand (idm))
                 <> command "tui" (info parseTuiChatCommand (idm))
@@ -1223,12 +1390,12 @@ runCommand pargs baseTracer sessionStore agentFiles =
             agentPropsList <- traverse oneAgent agentFiles
             TUI.runTUI sessionStore agentPropsList
         EchoPrompt opts -> do
-            promptContents <- interpretPromptScript opts.promptScript
+            promptContents <- interpretPromptScript pargs.progPromptAliases opts.promptScript opts.sessionFile
             Text.putStr promptContents
         OneShot opts -> do
             apiKeys <- AgentTree.readOpenApiKeysFile pargs.apiKeysFile
             forM_ (take 1 agentFiles) $ \agentFile -> do
-                promptContents <- interpretPromptScript opts.promptScript
+                promptContents <- interpretPromptScript pargs.progPromptAliases opts.promptScript opts.sessionFile
                 mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
                 registry <- AgentTree.newRuntimeRegistry
                 let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
@@ -1948,15 +2115,20 @@ makeHttpJsonTrace baseTracer url = do
     rt <- HttpLogger.Runtime <$> HttpClient.newRuntime HttpClient.NoToken <*> pure url
     pure $ HttpLogger.httpTracer rt baseTracer
 
-interpretPromptScript :: PromptScript -> IO Text.Text
-interpretPromptScript [] =
-    Text.unlines <$> traverse interpretPromptScriptDirective [FileContents "/dev/stdin"]
-interpretPromptScript directives =
-    Text.unlines <$> traverse interpretPromptScriptDirective directives
+-- | Interpret prompt script with alias resolution
+interpretPromptScript :: Map Text AliasDefinition -> PromptScript -> Maybe FilePath -> IO Text.Text
+interpretPromptScript aliases directives mSessionFile
+    | null directives = do
+        content <- Text.getContents
+        pure content
+    | otherwise = do
+        results <- mapM (interpretPromptScriptDirective aliases mSessionFile) directives
+        pure $ Text.unlines results
 
-interpretPromptScriptDirective :: PromptScriptDirective -> IO Text.Text
-interpretPromptScriptDirective x =
-    case x of
+-- | Interpret a single prompt script directive
+interpretPromptScriptDirective :: Map Text AliasDefinition -> Maybe FilePath -> PromptScriptDirective -> IO Text.Text
+interpretPromptScriptDirective aliases mSessionFile directive =
+    case directive of
         Str s -> pure s
         FileContents p -> Text.readFile p
         Separator n s -> pure $ Text.replicate n s
@@ -1969,4 +2141,26 @@ interpretPromptScriptDirective x =
                     pure $ "_(Error loading session: " <> Text.pack err <> " )_\n"
                 Right session ->
                     pure $ SessionInject.formatSessionForPrompt verbosity session
+        AliasPrompt aliasName -> do
+            case lookupAlias aliases aliasName of
+                Left err -> do
+                    Text.hPutStrLn stderr err
+                    exitFailure
+                Right def -> resolveAlias def mSessionFile
+
+-- | Resolve an alias definition to its final prompt text
+resolveAlias :: AliasDefinition -> Maybe FilePath -> IO Text
+resolveAlias def mSessionFile = do
+    (content, mActualFile) <- case aliasInputMode def of
+        AliasStdin -> do
+            c <- Text.getContents
+            pure (c, Nothing)
+        AliasFile -> case mSessionFile of
+            Just sf -> do
+                c <- Text.readFile sf
+                pure (c, Just sf)
+            Nothing -> do
+                c <- Text.getContents
+                pure (c, Nothing)
+    pure $ substituteTemplate (aliasTemplate def) content mActualFile
 
