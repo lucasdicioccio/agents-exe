@@ -32,7 +32,7 @@ version:            0.1.0.0
 license:            Apache-2.0
 
 -- The file containing the license text.
-license-file:       LICENSE
+license-file:      LICENSE
 
 -- The package author(s).
 author:             Lucas DiCioccio
@@ -64,10 +64,22 @@ library agents-lib
                     , System.Agents.AgentTree.OneShotTool
                     , System.Agents.ApiKeys
                     , System.Agents.Base
-                    , System.Agents.CLI.TraceUtils
+                    , System.Agents.CLI.Aliases
                     , System.Agents.CLI.Base
+                    , System.Agents.CLI.Check
+                    , System.Agents.CLI.EchoPrompt
+                    , System.Agents.CLI.Export
+                    , System.Agents.CLI.Import
+                    , System.Agents.CLI.Initialize
                     , System.Agents.CLI.InitProject
+                    , System.Agents.CLI.McpServer
+                    , System.Agents.CLI.OneShot
                     , System.Agents.CLI.Paths
+                    , System.Agents.CLI.PromptScript
+                    , System.Agents.CLI.SelfDescribe
+                    , System.Agents.CLI.SessionEdit
+                    , System.Agents.CLI.TraceUtils
+                    , System.Agents.CLI.TUI
                     , System.Agents.ExportImport.Types
                     , System.Agents.ExportImport.Namespace
                     , System.Agents.ExportImport.Archive
