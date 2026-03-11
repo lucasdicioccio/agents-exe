@@ -16,6 +16,9 @@ module System.Agents.CLI.Paths (
     -- * Formatting output
     formatPathsHuman,
     formatPathsJson,
+
+    -- * Handler
+    handlePaths,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -23,8 +26,10 @@ import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
-import System.Directory (doesFileExist, getCurrentDirectory)
+import System.Directory (doesFileExist, getCurrentDirectory, getHomeDirectory)
+import System.Exit (exitSuccess)
 import System.FilePath (takeDirectory, (</>))
 
 -------------------------------------------------------------------------------
@@ -44,7 +49,7 @@ data PathsInfo = PathsInfo
     , -- | Location of the API keys file
       apiKeysPath :: FilePath
     , -- | Session file prefix/directory (if configured)
-      sessionPrefix :: Maybe FilePath
+      sessionStoragePrefix :: Maybe FilePath
     }
     deriving (Show, Eq, Generic)
 
@@ -72,7 +77,7 @@ instance Aeson.ToJSON PathsInfo where
                     ]
             , "agents" Aeson..= agentFilesPaths info
             , "apiKeys" Aeson..= apiKeysPath info
-            , "sessionStorage" Aeson..= sessionPrefix info
+            , "sessionStorage" Aeson..= sessionStoragePrefix info
             ]
 
 instance Aeson.FromJSON PathsInfo
@@ -107,7 +112,7 @@ collectPathsInfo activeCfgDir defaultCfgDir agents keys session = do
             , defaultCfgDirectory = defaultCfgDir
             , agentFilesPaths = agents
             , apiKeysPath = keys
-            , sessionPrefix = session
+            , sessionStoragePrefix = session
             }
 
 -- | Find the agents-exe.cfg.json file by traversing up the directory tree.
@@ -147,7 +152,7 @@ formatPathsHuman info =
                , "  " <> Text.pack (apiKeysPath info)
                , ""
                , "Session Storage:"
-               , formatSessionPrefix (sessionPrefix info)
+               , formatSessionPrefix (sessionStoragePrefix info)
                ]
 
 -- | Format the config file line based on whether it was found.
@@ -170,4 +175,40 @@ formatSessionPrefix (Just path) = "  Prefix: " <> Text.pack path
 -- | Format path information as JSON.
 formatPathsJson :: PathsInfo -> LByteChar8.ByteString
 formatPathsJson = Aeson.encodePretty
+
+-------------------------------------------------------------------------------
+-- Handler
+-------------------------------------------------------------------------------
+
+-- | Handle the paths command
+handlePaths ::
+    -- | Paths options
+    PathsOptions ->
+    -- | Config directory
+    FilePath ->
+    -- | Agent files
+    [FilePath] ->
+    -- | API keys file
+    FilePath ->
+    -- | Session prefix
+    Maybe FilePath ->
+    IO ()
+handlePaths opts configDir agentFiles apiKeysFile sessionPrefix = do
+    homedir <- getHomeDirectory
+    let defaultCfgDir = homedir </> ".config/agents-exe"
+    
+    -- Collect path information
+    pathsInfo <- collectPathsInfo
+        configDir
+        defaultCfgDir
+        agentFiles
+        apiKeysFile
+        sessionPrefix
+    
+    -- Output based on format option
+    case outputFormat opts of
+        PathsOutputJson -> LByteChar8.putStrLn $ formatPathsJson pathsInfo
+        PathsOutputHuman -> Text.putStrLn $ formatPathsHuman pathsInfo
+    
+    exitSuccess
 
