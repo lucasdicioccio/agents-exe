@@ -38,6 +38,7 @@ import System.Agents.CLI.Aliases
     )
 import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
+import qualified System.Agents.CLI.Cowsay as CowsayCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
 import qualified System.Agents.CLI.Export as ExportCmd
 import qualified System.Agents.CLI.Import as ImportCmd
@@ -387,6 +388,7 @@ data Command
     | Export ExportCmd.ExportOptions
     | Import ImportCmd.ImportOptions
     | Paths PathsCmd.PathsOptions
+    | Cowsay CowsayCmd.CowsayOptions
 
 instance Show Command where
     show Check = "Check"
@@ -401,6 +403,7 @@ instance Show Command where
     show (Export _) = "Export"
     show (Import _) = "Import"
     show (Paths _) = "Paths"
+    show (Cowsay _) = "Cowsay"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -938,6 +941,25 @@ parseListTools =
                 <> help "List available tools in git repo"
         )
 
+parseCowsayCommand :: Parser Command
+parseCowsayCommand = Cowsay <$> parseCowsayOptions
+
+parseCowsayOptions :: Parser CowsayCmd.CowsayOptions
+parseCowsayOptions =
+    CowsayCmd.CowsayOptions
+        <$> optional (strArgument 
+            ( metavar "MESSAGE"
+                <> help "Message to display (reads from stdin if not provided)"
+            ))
+        <*> option auto
+            ( long "width"
+                <> short 'W'
+                <> metavar "WIDTH"
+                <> help "Maximum width of the speech bubble"
+                <> value 40
+                <> showDefault
+            )
+
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
@@ -1017,6 +1039,8 @@ parseProgOptions argparserargs =
                     (progDesc "Import agent/tool configurations"))
                 <> command "paths" (info parsePathsCommand
                     (progDesc "Show important configuration paths"))
+                <> command "cowsay" (info parseCowsayCommand
+                    (progDesc "Display a message with the agents-exe mascot"))
             )
 
 -------------------------------------------------------------------------------
@@ -1139,6 +1163,9 @@ runCommand pargs baseTracer sessionStore agentFiles =
         
         Paths opts ->
             PathsCmd.handlePaths opts pargs.configDir agentFiles pargs.apiKeysFile pargs.sessionsJsonPrefix
+        
+        Cowsay opts ->
+            CowsayCmd.handleCowsay opts
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

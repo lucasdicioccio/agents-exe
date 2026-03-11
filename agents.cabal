@@ -67,6 +67,7 @@ library agents-lib
                     , System.Agents.CLI.Aliases
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
+                    , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.EchoPrompt
                     , System.Agents.CLI.Export
                     , System.Agents.CLI.Import
