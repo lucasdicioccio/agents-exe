@@ -351,7 +351,7 @@ formatToolCallStats toolMap
     | otherwise = 
         let maxCount = maximum (Map.elems toolMap)
             sortedTools = sortOn (negate . snd) (Map.toList toolMap)
-        in Text.intercalate "\n" $ map (formatToolBar maxCount) sortedTools <> [""]
+        in Text.intercalate "\n\n" $ map (formatToolBar maxCount) sortedTools <> [""]
 
 -- | Format a single tool bar in the chart.
 formatToolBar :: Int -> (Text.Text, Int) -> Text.Text
@@ -376,7 +376,7 @@ formatByteChart stats =
     in if total == 0 
        then "_No byte data recorded_\n"
        else 
-           let chart = Text.intercalate "\n" $ map (formatByteBar maxBytes) categories
+           let chart = Text.intercalate "\n\n" $ map (formatByteBar maxBytes) categories
                totalLine = "\n**Total:** " <> formatBytes total <> "\n"
            in chart <> totalLine
 
