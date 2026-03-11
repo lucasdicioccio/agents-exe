@@ -218,7 +218,7 @@ formatSessionAsMarkdown opts session =
     let -- Session turns are stored newest-first (last turn is first in the list)
         -- Step 1: Number the steps with their original position
         -- We reverse first to get chronological order for numbering, then zip
-        numberedChronological = zip [1 :: Int ..] (reverse session.turns)
+        numberedChronological = zip [(1 :: Int)..] (reverse session.turns)
         
         -- Step 2: Apply n-turns limit (takes the last N steps in chronological order = most recent)
         limitedTurns = case opts.nTurns of
@@ -274,12 +274,12 @@ calculateStatistics :: Session.Session -> SessionStatistics
 calculateStatistics session =
     let turns = session.turns
         totalTurns = length turns
-        userTurns = length [() | Session.UserTurn _ <- turns]
-        llmTurns = length [() | Session.LlmTurn _ <- turns]
+        userTurns = length [() | Session.UserTurn _ _ <- turns]
+        llmTurns = length [() | Session.LlmTurn _ _ <- turns]
         
         -- Collect all LLM turn contents to extract tool calls
-        llmTurnContents = [tc | Session.LlmTurn tc <- turns]
-        allToolCalls = concatMap (.llmToolCalls) llmTurnContents
+        llmTurnContents = [tc | Session.LlmTurn tc _ <- turns]
+        allToolCalls = concatMap Session.llmToolCalls llmTurnContents
         toolCallCount = length allToolCalls
         toolCallsByName = countToolCallsByName allToolCalls
         
@@ -311,13 +311,13 @@ calculateByteCounts turns =
     in (inputBytes, outputBytes, reasoningBytes)
   where
     countTurn :: Session.Turn -> (Int, Int, Int) -> (Int, Int, Int)
-    countTurn (Session.UserTurn utc) (inp, out, reas) =
+    countTurn (Session.UserTurn utc _mUsage) (inp, out, reas) =
         let userBytes = textBytes $ case utc.userPrompt of
                 Session.SystemPrompt sp -> sp
             queryBytes = maybe 0 (textBytes . unwrapQuery) utc.userQuery
             toolRespBytes = sum [textBytes $ formatJsonAsText r | (_, Session.UserToolResponse r) <- utc.userToolResponses]
         in (inp + userBytes + queryBytes + toolRespBytes, out, reas)
-    countTurn (Session.LlmTurn ltc) (inp, out, reas) =
+    countTurn (Session.LlmTurn ltc _mUsage) (inp, out, reas) =
         let response = ltc.llmResponse
             outBytes = maybe 0 textBytes response.responseText
             reasBytes = maybe 0 textBytes response.responseThinking
@@ -336,11 +336,11 @@ formatStatistics stats =
     "### Turn Counts\n\n" <>
     "| Metric | Value |\n" <>
     "|--------|-------|\n" <>
-    "| Total Turns | " <> Text.pack (show stats.statTotalTurns) <> " |\n" <>
-    "| 👤 User Turns | " <> Text.pack (show stats.statUserTurns) <> " |\n" <>
-    "| 🤖 LLM Turns | " <> Text.pack (show stats.statLlmTurns) <> " |\n" <>
+    "| Total Turns | " <> Text.pack (show (statTotalTurns stats :: Int)) <> " |\n" <>
+    "| 👤 User Turns | " <> Text.pack (show (statUserTurns stats :: Int)) <> " |\n" <>
+    "| 🤖 LLM Turns | " <> Text.pack (show (statLlmTurns stats :: Int)) <> " |\n" <>
     "\n### 🔧 Tool Calls\n\n" <>
-    "**Total Tool Calls:** " <> Text.pack (show stats.statTotalToolCalls) <> "\n\n" <>
+    "**Total Tool Calls:** " <> Text.pack (show (statTotalToolCalls stats :: Int)) <> "\n\n" <>
     formatToolCallStats stats.statToolCallsByName <>
     "\n### 💾 Byte Usage\n\n" <>
     formatByteChart stats
@@ -368,12 +368,12 @@ formatToolBar maxCount (name, count) =
 formatByteChart :: SessionStatistics -> Text.Text
 formatByteChart stats =
     let categories = 
-            [ ("Input", stats.statInputBytes)
-            , ("Output", stats.statOutputBytes)
-            , ("Reasoning", stats.statReasoningBytes)
+            [ ("Input", statInputBytes stats)
+            , ("Output", statOutputBytes stats)
+            , ("Reasoning", statReasoningBytes stats)
             ]
         maxBytes = maximum (map snd categories)
-        total = stats.statTotalBytes
+        total = statTotalBytes stats
     in if total == 0 
        then "_No byte data recorded_\n"
        else 
@@ -421,11 +421,11 @@ formatTurn :: SessionPrintOptions -> Maybe Int -> (Int, Session.Turn) -> Text.Te
 formatTurn opts firstDisplayStepNum (stepNum, turn) = 
     let isFirstTurn = Just stepNum == firstDisplayStepNum
     in case turn of
-        Session.UserTurn content ->
-            "## 👤 Step " <> Text.pack (show stepNum) <> ": User Turn\n\n" <>
+        Session.UserTurn content _mUsage ->
+            "## 👤 Step " <> Text.pack (show (stepNum :: Int)) <> ": User Turn\n\n" <>
             formatUserTurn opts isFirstTurn content
-        Session.LlmTurn content ->
-            "## 🤖 Step " <> Text.pack (show stepNum) <> ": LLM Turn\n\n" <>
+        Session.LlmTurn content _mUsage ->
+            "## 🤖 Step " <> Text.pack (show (stepNum :: Int)) <> ": LLM Turn\n\n" <>
             formatLlmTurn opts content
 
 -- | Format user turn content.
@@ -618,4 +618,5 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
+
 

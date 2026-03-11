@@ -54,17 +54,17 @@ filterTurns _ = id
 
 -- | Check if a turn is "tool-only" (no user query, no response text, just tool calls).
 isToolOnlyTurn :: Session.Turn -> Bool
-isToolOnlyTurn (Session.UserTurn utc) =
+isToolOnlyTurn (Session.UserTurn utc _mUsage) =
     isNothing utc.userQuery && null utc.userToolResponses
-isToolOnlyTurn (Session.LlmTurn ltc) =
+isToolOnlyTurn (Session.LlmTurn ltc _mUsage) =
     isNothing ltc.llmResponse.responseText && not (null ltc.llmToolCalls)
 
 -- | Format a single turn at the given verbosity level.
 formatTurn :: SessionVerbosity -> Int -> Session.Turn -> Text
 formatTurn verbosity idx turn =
     case turn of
-        Session.UserTurn content -> formatUserTurn verbosity idx content
-        Session.LlmTurn content -> formatLlmTurn verbosity idx content
+        Session.UserTurn content _mUsage -> formatUserTurn verbosity idx content
+        Session.LlmTurn content _mUsage -> formatLlmTurn verbosity idx content
 
 -- | Format a user turn.
 formatUserTurn :: SessionVerbosity -> Int -> Session.UserTurnContent -> Text
@@ -135,12 +135,13 @@ formatJsonAsText = Text.pack . show . Aeson.encode
 formatStatisticsSection :: Session.Session -> Text
 formatStatisticsSection session =
     let totalTurns = length session.turns
-        userTurns = length [() | Session.UserTurn _ <- session.turns]
-        llmTurns = length [() | Session.LlmTurn _ <- session.turns]
-        toolCalls = sum [length ltc.llmToolCalls | Session.LlmTurn ltc <- session.turns]
+        userTurns = length [() | Session.UserTurn _ _ <- session.turns]
+        llmTurns = length [() | Session.LlmTurn _ _ <- session.turns]
+        toolCalls = sum [length ltc.llmToolCalls | Session.LlmTurn ltc _ <- session.turns]
     in "**Statistics:**\n" <>
-       "- Total turns: " <> Text.pack (show totalTurns) <> "\n" <>
-       "- User turns: " <> Text.pack (show userTurns) <> "\n" <>
-       "- Assistant turns: " <> Text.pack (show llmTurns) <> "\n" <>
-       "- Total tool calls: " <> Text.pack (show toolCalls) <> "\n\n"
+       "- Total turns: " <> Text.pack (show (totalTurns :: Int)) <> "\n" <>
+       "- User turns: " <> Text.pack (show (userTurns :: Int)) <> "\n" <>
+       "- Assistant turns: " <> Text.pack (show (llmTurns :: Int)) <> "\n" <>
+       "- Total tool calls: " <> Text.pack (show (toolCalls :: Int)) <> "\n\n"
+
 
