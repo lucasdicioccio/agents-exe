@@ -15,10 +15,11 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 data AgqLabels = AgqLabels
-  { labelToBeTaken :: Text  -- issue is ready to be picked up
-  , labelTaken     :: Text  -- issue has been claimed
-  , labelWait      :: Text  -- issue is waiting on dependencies
-  , labelAgentPr   :: Text  -- PR was created by an agent
+  { labelToBeTaken    :: Text  -- issue is ready to be picked up
+  , labelTaken        :: Text  -- issue has been claimed
+  , labelWait         :: Text  -- issue is waiting on dependencies
+  , labelAgentPr      :: Text  -- PR was created by an agent
+  , labelDoneInBranch :: Text  -- issue was closed by a PR merged into a feature branch
   } deriving (Generic, Show)
 
 instance FromJSON AgqLabels
@@ -26,10 +27,11 @@ instance ToJSON AgqLabels
 
 defaultLabels :: AgqLabels
 defaultLabels = AgqLabels
-  { labelToBeTaken = "agents/to-be-taken"
-  , labelTaken     = "agents/taken"
-  , labelWait      = "agents/wait"
-  , labelAgentPr   = "agents/agent-pr"
+  { labelToBeTaken    = "agq/to-be-taken"
+  , labelTaken        = "agq/taken"
+  , labelWait         = "agq/wait"
+  , labelAgentPr      = "agq/agent-pr"
+  , labelDoneInBranch = "agq/done-in-branch"
   }
 
 data AgqConfig = AgqConfig

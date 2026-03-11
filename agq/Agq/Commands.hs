@@ -20,7 +20,8 @@ import Agq.Run
 import Agq.Schedule
 
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (forM_, when, unless, void)
+import Control.Monad (forM_, when, unless, void, guard)
+import Data.Char (isDigit)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -204,7 +205,7 @@ cmdPromote cfg = do
       Just n  -> do
         (_, body) <- runGh ["issue", "view", show n, "--json", "body", "--jq", ".body"]
         let deps = parseDeps body
-        allSat <- checkDepsSatisfied deps
+        allSat <- checkDepsSatisfied cfg deps
         if allSat
           then do
             putStrLn $ "Promoting issue #" <> show n <> " to " <> Text.unpack (labelToBeTaken (labels cfg))
@@ -212,21 +213,29 @@ cmdPromote cfg = do
           else
             putStrLn $ "Issue #" <> show n <> " still waiting on deps."
 
-checkDepsSatisfied :: [Text] -> IO Bool
-checkDepsSatisfied deps = do
+checkDepsSatisfied :: AgqConfig -> [Text] -> IO Bool
+checkDepsSatisfied cfg deps = do
   results <- mapM checkDep deps
   return (and results)
   where
-    -- Block promotion only when a dep is explicitly OPEN.
+    -- Block promotion only when a dep is explicitly OPEN and not labelled done-in-branch.
     -- Unknown state (not found, error, deleted, transferred) is treated as done.
     checkDep dep = do
       let depStr = Text.unpack dep
-      (ec1, out1) <- runGh ["issue", "view", depStr, "--json", "state", "--jq", ".state"]
-      if ec1 == ExitSuccess && Text.strip out1 == "OPEN"
-        then return False
+      (ec1, out1) <- runGh ["issue", "view", depStr, "--json", "state,labels"]
+      if ec1 /= ExitSuccess
+        then return True  -- not found / error: treat as done
         else do
-          (ec2, out2) <- runGh ["pr", "view", depStr, "--json", "state", "--jq", ".state"]
-          return (not (ec2 == ExitSuccess && Text.strip out2 == "OPEN"))
+          let issueVal = fromMaybe Aeson.Null (Aeson.decode (lbsFromText out1))
+              state    = maybe "" Text.strip (extractText issueVal "state")
+              lbls     = extractLabels issueVal
+          if state /= "OPEN"
+            then return True  -- closed
+            else if labelDoneInBranch (labels cfg) `elem` lbls
+              then return True  -- done in a feature branch
+              else do
+                (ec2, out2) <- runGh ["pr", "view", depStr, "--json", "state", "--jq", ".state"]
+                return (not (ec2 == ExitSuccess && Text.strip out2 == "OPEN"))
 
 -- ---------------------------------------------------------------------------
 -- cmdStatus
@@ -468,8 +477,37 @@ cmdMergePRs cfg = do
           then do
             putStrLn $ "Merging PR #" <> show n <> " (base=" <> Text.unpack b <> ")"
             void $ runCmd "gh" ["pr", "merge", show n, "--merge", "--auto"]
+            labelClosedIssues cfg n
           else putStrLn $ "Skipping PR #" <> show n <> ": targets default branch."
       _ -> return ()
+
+-- | Fetch the PR body, parse "Closes/Fixes/Resolves #N" references, and add
+-- labelDoneInBranch to each referenced issue so that promote() treats them as
+-- satisfied even though GitHub won't auto-close them (PR targets a non-default branch).
+labelClosedIssues :: AgqConfig -> Int -> IO ()
+labelClosedIssues cfg prNum = do
+  (ec, body) <- runGh ["pr", "view", show prNum, "--json", "body", "--jq", ".body"]
+  when (ec == ExitSuccess) $ do
+    let closed = parseClosesRefs body
+    forM_ closed $ \issueNum -> do
+      putStrLn $ "  Labelling issue #" <> show issueNum <> " as " <> Text.unpack (labelDoneInBranch (labels cfg))
+      void $ runGh ["issue", "edit", show issueNum, "--add-label", Text.unpack (labelDoneInBranch (labels cfg))]
+
+-- | Extract issue numbers from GitHub closing keywords: Closes/Fixes/Resolves #N
+parseClosesRefs :: Text -> [Int]
+parseClosesRefs body = mapMaybe extractNum candidates
+  where
+    candidates = do
+      line <- Text.lines body
+      let low = Text.toLower line
+      guard $ any (`Text.isInfixOf` low) ["closes", "fixes", "resolves"]
+      word <- Text.words line
+      guard $ "#" `Text.isPrefixOf` word
+      return word
+    extractNum w =
+      let digits = Text.takeWhile isDigit (Text.drop 1 w)
+      in if Text.null digits then Nothing
+         else Just (read (Text.unpack digits))
 
 -- ---------------------------------------------------------------------------
 -- cmdClean
@@ -553,10 +591,11 @@ cmdRetry cfg conn name tries = do
 -- (creates the label if absent, updates it if already present).
 workflowLabelDefs :: AgqLabels -> [(Text, String, String)]
 workflowLabelDefs lbls =
-  [ (labelToBeTaken lbls, "0075ca", "Task is ready to be picked up by an agent")
-  , (labelTaken     lbls, "e4e669", "Task has been claimed and is being worked on")
-  , (labelWait      lbls, "d93f0b", "Task is waiting for its dependencies to complete")
-  , (labelAgentPr   lbls, "6f42c1", "Pull request was created automatically by an agent")
+  [ (labelToBeTaken    lbls, "0075ca", "Task is ready to be picked up by an agent")
+  , (labelTaken        lbls, "e4e669", "Task has been claimed and is being worked on")
+  , (labelWait         lbls, "d93f0b", "Task is waiting for its dependencies to complete")
+  , (labelAgentPr      lbls, "6f42c1", "Pull request was created automatically by an agent")
+  , (labelDoneInBranch lbls, "1d76db", "Issue was addressed by a PR merged into a feature branch")
   ]
 
 createLabel :: Text -> String -> String -> IO ()

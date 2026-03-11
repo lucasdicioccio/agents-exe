@@ -11,9 +11,10 @@ digraph agq {
     color="#666666"
     fontsize=13
 
-    gh_wait       [label="agq/wait"         style="rounded,filled" fillcolor="#fff3cd"]
-    gh_toretaken  [label="agq/to-be-taken"  style="rounded,filled" fillcolor="#cfe2ff"]
-    gh_taken      [label="agq/taken"        style="rounded,filled" fillcolor="#d1e7dd"]
+    gh_wait          [label="agq/wait"            style="rounded,filled" fillcolor="#fff3cd"]
+    gh_toretaken     [label="agq/to-be-taken"     style="rounded,filled" fillcolor="#cfe2ff"]
+    gh_taken         [label="agq/taken"           style="rounded,filled" fillcolor="#d1e7dd"]
+    gh_doneinbranch  [label="agq/done-in-branch"  style="rounded,filled" fillcolor="#e2d9f3"]
   }
 
   // ── Task lifecycle (SQLite) ─────────────────────────────────────────────
@@ -49,7 +50,7 @@ digraph agq {
   issue -> gh_toretaken [label="label: agq/to-be-taken\n(no deps)"]
 
   // ── GitHub promote → pull flow ─────────────────────────────────────────
-  gh_wait      -> gh_toretaken [label="agq promote\n(no dep is open)"]
+  gh_wait      -> gh_toretaken [label="agq promote\n(dep closed or\nagq/done-in-branch)"]
   gh_toretaken -> gh_taken     [label="agq pull"]
   gh_taken     -> t_pending    [label="task inserted"]
 
@@ -61,6 +62,9 @@ digraph agq {
   t_failed  -> t_pending [label="agq retry"]
 
   // ── PR creation and merge ──────────────────────────────────────────────
-  t_running -> pr_open  [label="gh pr create\n(on success)" style=dashed]
-  pr_open   -> pr_merged [label="agq merge-prs"]
+  t_running -> pr_open   [label="gh pr create\n(on success)" style=dashed]
+  pr_open   -> pr_merged [label="agq merge-prs\n(feature branch)"]
+
+  // ── Feature-branch: label closed issues ───────────────────────────────
+  pr_merged -> gh_doneinbranch [label="parse Closes #N\n→ add label" style=dashed color="#6f42c1" fontcolor="#6f42c1"]
 }
