@@ -187,6 +187,7 @@ executable agents-exe
                       aeson,
                       aeson-pretty,
                       bytestring,
+                      containers,
                       contravariant,
                       directory,
                       filepath,
