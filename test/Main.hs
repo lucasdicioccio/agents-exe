@@ -1,6 +1,6 @@
 module Main where
 
-import System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.LLMs.OpenAI as OpenAI hiding (SystemPrompt)
 import System.Agents.Base as Base
 import System.Agents.Tools.Context as Context
 import qualified System.Agents.Session.Types as SessionTypes
