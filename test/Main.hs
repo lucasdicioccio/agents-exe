@@ -3,7 +3,7 @@ module Main where
 import System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Base as Base
 import System.Agents.Tools.Context as Context
-import System.Agents.Session.Types (SessionId(..), TurnId(..))
+import System.Agents.Session.Types (Session(..), Turn(..))
 import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Tools.OpenAPI.Types as OpenAPI
@@ -54,6 +54,7 @@ tests =
         , SessionEditTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
+        , turnRetroCompatibilityTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -210,6 +211,30 @@ agentSerializationTests =
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- Turn Retro-compatibility Tests
+-------------------------------------------------------------------------------
+
+turnRetroCompatibilityTests :: TestTree
+turnRetroCompatibilityTests =
+    testGroup
+        "Turn Retro-compatibility"
+        [ testCase "parse old session format (turn-v0.001.json) without byteUsage" $ do
+            jsonContent <- LBS.readFile "test/data/turn-v0.001.json"
+            let mSession = decode jsonContent :: Maybe Session
+            case mSession of
+                Nothing -> assertFailure "Failed to parse turn-v0.001.json - retro-compatibility broken"
+                Just session -> do
+                    -- Check that the session has 2 turns
+                    length (turns session) @?= 2
+                    -- Both turns should have Nothing for byteUsage (old format)
+                    mapM_ (\turn -> turnByteUsage turn @?= Nothing) (turns session)
+        ]
+  where
+    turnByteUsage :: Turn -> Maybe ()
+    turnByteUsage (UserTurn _ usage) = fmap (const ()) usage
+    turnByteUsage (LlmTurn _ usage) = fmap (const ()) usage
 
 -------------------------------------------------------------------------------
 -- OpenAPI Types Tests
@@ -1243,4 +1268,5 @@ cycleDetectionTests =
         , Base.postgrestToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
+
 

@@ -40,7 +40,8 @@ module System.Agents.Session.Types (
     SystemToolDefinitionV1(..),
 ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Control.Applicative ((<|>))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.:?))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -211,8 +212,43 @@ data Turn
   = UserTurn UserTurnContent (Maybe StepByteUsage)
   | LlmTurn LlmTurnContent (Maybe StepByteUsage)
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON Turn
+
 instance ToJSON Turn
+
+-- | Legacy Turn structure without byte usage tracking.
+-- Used for backward compatibility when parsing old sessions.
+data Turn_v0
+  = UserTurn_v0 UserTurnContent
+  | LlmTurn_v0 LlmTurnContent
+    deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON Turn_v0
+
+-- | Custom FromJSON instance for Turn that handles retro-compatibility.
+-- First tries to parse as the new format (with Maybe StepByteUsage),
+-- then falls back to the old Turn_v0 format (without byte usage).
+instance FromJSON Turn where
+    parseJSON v = parseNew v <|> parseOld v
+      where
+        parseNew = Aeson.withObject "Turn" $ \obj -> do
+            tag <- obj .: "tag"
+            case tag :: Text of
+                "UserTurn" -> do
+                    contents <- obj .: "contents"
+                    byteUsage <- obj .:? "byteUsage"
+                    pure $ UserTurn contents byteUsage
+                "LlmTurn" -> do
+                    contents <- obj .: "contents"
+                    byteUsage <- obj .:? "byteUsage"
+                    pure $ LlmTurn contents byteUsage
+                _ -> fail $ "Unknown Turn tag: " ++ show tag
+        
+        parseOld = Aeson.withObject "Turn" $ \obj -> do
+            -- Try parsing as old format (v0)
+            turnV0 <- Aeson.parseJSON (Aeson.Object obj)
+            case turnV0 of
+                UserTurn_v0 content -> pure $ UserTurn content Nothing
+                LlmTurn_v0 content  -> pure $ LlmTurn content Nothing
 
 data Session
     = Session
