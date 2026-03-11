@@ -3,17 +3,18 @@ module Main where
 import System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Base as Base
 import System.Agents.Tools.Context as Context
+import qualified System.Agents.Session.Types as SessionTypes
 import System.Agents.Session.Types (Session(..), Turn(..), UserTurnContent(..), LlmTurnContent(..),
                                     SystemPrompt(..), UserQuery(..), LlmResponse(..),
                                     StepByteUsage(..), SystemTool(..), SystemToolDefinition(..),
                                     LlmToolCall(..), UserToolResponse(..))
 import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Tools.OpenAPI.Types as OpenAPI
+import System.Agents.Tools.OpenAPI.Types as OpenAPI hiding (object, (.=))
 import System.Agents.Tools.OpenAPI.Resolver as Resolver
 import System.Agents.Tools.OpenAPI.Converter as Converter
 
-import Data.Aeson (decode, encode, Value(..), object, (.=), toJSON)
+import Data.Aeson (decode, encode, Value(..), object, (.=))
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
@@ -273,13 +274,13 @@ turnRoundTripTests =
             let mDecoded = decode json :: Maybe Turn
             mDecoded @?= Just turn
         , testCase "LlmTurn round-trip without byteUsage" $ do
-            let llmResponse = LlmResponse
-                    { responseText = Just "Hello!"
-                    , responseThinking = Just "Thinking..."
-                    , rawResponse = object ["model" .= ("gpt-4" :: Text)]
+            let llmResp = SessionTypes.LlmResponse
+                    { SessionTypes.responseText = Just "Hello!"
+                    , SessionTypes.responseThinking = Just "Thinking..."
+                    , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
                     }
             let llmContent = LlmTurnContent
-                    { llmResponse = llmResponse
+                    { llmResponse = llmResp
                     , llmToolCalls = []
                     }
             let turn = LlmTurn llmContent Nothing
@@ -287,13 +288,13 @@ turnRoundTripTests =
             let mDecoded = decode json :: Maybe Turn
             mDecoded @?= Just turn
         , testCase "LlmTurn round-trip with byteUsage" $ do
-            let llmResponse = LlmResponse
-                    { responseText = Just "Hello!"
-                    , responseThinking = Just "Thinking..."
-                    , rawResponse = object ["model" .= ("gpt-4" :: Text)]
+            let llmResp = SessionTypes.LlmResponse
+                    { SessionTypes.responseText = Just "Hello!"
+                    , SessionTypes.responseThinking = Just "Thinking..."
+                    , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
                     }
             let llmContent = LlmTurnContent
-                    { llmResponse = llmResponse
+                    { llmResponse = llmResp
                     , llmToolCalls = []
                     }
             let byteUsage = StepByteUsage 2000 800 700 300 200
@@ -315,15 +316,15 @@ turnRoundTripTests =
             let mDecoded = decode json :: Maybe Turn
             mDecoded @?= Just turn
         , testCase "LlmTurn with tool calls round-trip" $ do
-            let llmResponse = LlmResponse
-                    { responseText = Just "I'll help you"
-                    , responseThinking = Nothing
-                    , rawResponse = object ["choices" .= ([] :: [Value])]
+            let llmResp = SessionTypes.LlmResponse
+                    { SessionTypes.responseText = Just "I'll help you"
+                    , SessionTypes.responseThinking = Nothing
+                    , SessionTypes.rawResponse = object ["choices" .= ([] :: [Value])]
                     }
             let toolCall1 = LlmToolCall (object ["id" .= ("call-1" :: Text)])
             let toolCall2 = LlmToolCall (object ["id" .= ("call-2" :: Text)])
             let llmContent = LlmTurnContent
-                    { llmResponse = llmResponse
+                    { llmResponse = llmResp
                     , llmToolCalls = [toolCall1, toolCall2]
                     }
             let turn = LlmTurn llmContent Nothing
@@ -332,7 +333,7 @@ turnRoundTripTests =
             mDecoded @?= Just turn
         , testCase "Session round-trip with mixed turns" $ do
             sessionId <- SessionBase.newSessionId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             
             let userTurn1 = UserTurn
                     (UserTurnContent
@@ -345,10 +346,10 @@ turnRoundTripTests =
             
             let llmTurn = LlmTurn
                     (LlmTurnContent
-                        { llmResponse = LlmResponse
-                            { responseText = Just "Response"
-                            , responseThinking = Nothing
-                            , rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                        { llmResponse = SessionTypes.LlmResponse
+                            { SessionTypes.responseText = Just "Response"
+                            , SessionTypes.responseThinking = Nothing
+                            , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
                             }
                         , llmToolCalls = []
                         })
@@ -367,7 +368,7 @@ turnRoundTripTests =
                     { turns = [userTurn1, llmTurn, userTurn2]
                     , sessionId = sessionId
                     , forkedFromSessionId = Nothing
-                    , turnId = turnId
+                    , turnId = turnId'
                     }
             
             let json = encode session
@@ -376,13 +377,13 @@ turnRoundTripTests =
         , testCase "Session round-trip with fork info" $ do
             origSessionId <- SessionBase.newSessionId
             forkedFromId <- SessionBase.newSessionId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             
             let session = Session
                     { turns = []
                     , sessionId = origSessionId
                     , forkedFromSessionId = Just forkedFromId
-                    , turnId = turnId
+                    , turnId = turnId'
                     }
             
             let json = encode session
@@ -413,7 +414,7 @@ turnRoundTripTests =
             let turn = UserTurn userContent Nothing
             let json = encode turn
             let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
-            -- Check that byteUsage is NOT present when Nothing
+            -- Check that the JSON has the expected structure
             assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
             assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
             -- The encoded JSON should not contain byteUsage when it's Nothing
@@ -956,44 +957,44 @@ toolExecutionContextTests =
         [ testCase "mkMinimalContext creates context with empty call stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.ctxCallStack ctx @?= []
             Context.ctxMaxDepth ctx @?= Nothing
             Context.ctxSessionId ctx @?= sessionId
             Context.ctxConversationId ctx @?= convId
-            Context.ctxTurnId ctx @?= turnId
+            Context.ctxTurnId ctx @?= turnId'
             Context.ctxAgentId ctx @?= Nothing
             Context.ctxFullSession ctx @?= Nothing
         , testCase "mkRootContext creates context with root entry in call stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkRootContext sessionId convId turnId Nothing Nothing (Just 5)
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkRootContext sessionId convId turnId' Nothing Nothing (Just 5)
             Context.ctxCallStack ctx @?= [Context.CallStackEntry "root" convId 0]
             Context.ctxMaxDepth ctx @?= Just 5
         , testCase "mkToolExecutionContext with full parameters" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             agentId <- Base.newAgentId
             convId2 <- Base.newConversationId
             let callStack = [Context.CallStackEntry "agent-1" convId 0, Context.CallStackEntry "agent-2" convId2 1]
-            let ctx = Context.mkToolExecutionContext sessionId convId turnId (Just agentId) Nothing callStack (Just 10)
+            let ctx = Context.mkToolExecutionContext sessionId convId turnId' (Just agentId) Nothing callStack (Just 10)
             Context.ctxCallStack ctx @?= callStack
             Context.ctxMaxDepth ctx @?= Just 10
             Context.ctxAgentId ctx @?= Just agentId
         , testCase "JSON round-trip with call stack and max depth" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             agentId <- Base.newAgentId
             convId2 <- Base.newConversationId
             let callStack =
                     [ Context.CallStackEntry "agent-1" convId 0
                     , Context.CallStackEntry "agent-2" convId2 1
                     ]
-            let ctx = Context.mkToolExecutionContext sessionId convId turnId (Just agentId) Nothing callStack (Just 5)
+            let ctx = Context.mkToolExecutionContext sessionId convId turnId' (Just agentId) Nothing callStack (Just 5)
             let json = encode ctx
             let mCtx = decode json :: Maybe Context.ToolExecutionContext
             case mCtx of
@@ -1006,14 +1007,14 @@ toolExecutionContextTests =
         , testCase "hasFullSession returns False when session is Nothing" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.hasFullSession ctx @?= False
         , testCase "hasAgentId returns False when agentId is Nothing" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.hasAgentId ctx @?= False
         ]
 
@@ -1028,21 +1029,21 @@ recursionTrackingTests =
         [ testCase "currentRecursionDepth returns 0 for empty call stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.currentRecursionDepth ctx @?= 0
         , testCase "currentRecursionDepth returns 1 for root context" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             Context.currentRecursionDepth ctx @?= 1
         , testCase "pushAgentContext increments depth" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "sub-agent" newConvId rootCtx of
                 Left err -> assertFailure $ "Should not have failed: " ++ show err
                 Right newCtx -> do
@@ -1058,9 +1059,9 @@ recursionTrackingTests =
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             -- Create root context with max depth of 1
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing (Just 1)
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing (Just 1)
             -- First push should fail because root is already at depth 1 (max)
             case Context.pushAgentContext "sub-agent" newConvId rootCtx of
                 Left (Context.MaxRecursionDepthExceeded stack) -> do
@@ -1069,8 +1070,8 @@ recursionTrackingTests =
         , testCase "isAtDepth correctly checks depth threshold" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             Context.isAtDepth 1 rootCtx @?= True
             Context.isAtDepth 2 rootCtx @?= False
         , testCase "callChain returns entries in root-first order" $ do
@@ -1078,8 +1079,8 @@ recursionTrackingTests =
             convId <- Base.newConversationId
             newConvId1 <- Base.newConversationId
             newConvId2 <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "agent-1" newConvId1 rootCtx of
                 Left err -> assertFailure $ "First push should not fail: " ++ show err
                 Right ctx1 -> case Context.pushAgentContext "agent-2" newConvId2 ctx1 of
@@ -1096,16 +1097,16 @@ recursionTrackingTests =
         , testCase "isAgentInCallStack detects agent in stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             Context.isAgentInCallStack "root" rootCtx @?= True
             Context.isAgentInCallStack "nonexistent" rootCtx @?= False
         , testCase "isAgentInCallStack detects agent after push" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "helper-agent" newConvId rootCtx of
                 Left err -> assertFailure $ "Push should not fail: " ++ show err
                 Right newCtx -> do
@@ -1116,15 +1117,15 @@ recursionTrackingTests =
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "sub-agent" newConvId rootCtx of
                 Left err -> assertFailure $ "Push should not fail: " ++ show err
                 Right newCtx -> do
                     Context.ctxConversationId newCtx @?= newConvId
                     -- Session ID and Turn ID should be preserved
                     Context.ctxSessionId newCtx @?= sessionId
-                    Context.ctxTurnId newCtx @?= turnId
+                    Context.ctxTurnId newCtx @?= turnId'
         ]
 
 -------------------------------------------------------------------------------
