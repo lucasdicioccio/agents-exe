@@ -711,8 +711,8 @@ parseOneShotOptions =
 -- | Parse prompt script input, which can be either aliases, regular directives, or default to stdin
 parsePromptScriptInput :: Parser PromptScript
 parsePromptScriptInput =
-    let pair = (,) <$> parseAliasPrompt <*> many parseRegularDirectives
-    in fmap (\(d0,ds) -> d0:ds) pair
+    let pair = (,) <$> optional parseAliasPrompt <*> many parseRegularDirectives
+    in fmap (\(md0,ds) -> maybe ds (:ds) md0) pair
   where
     parseRegularDirectives :: Parser PromptScriptDirective
     parseRegularDirectives = asum
