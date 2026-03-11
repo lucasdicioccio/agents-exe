@@ -375,7 +375,7 @@ data Prog = Prog
 
 -- | Available commands
 data Command
-    = Check
+    = Check CheckCmd.CheckOptions
     | TerminalUI TUICmd.TuiOptions
     | OneShot OneShotCmd.OneShotOptions
     | EchoPrompt EchoPromptCmd.EchoPromptOptions
@@ -389,7 +389,7 @@ data Command
     | Paths PathsCmd.PathsOptions
 
 instance Show Command where
-    show Check = "Check"
+    show (Check _) = "Check"
     show (TerminalUI _) = "TerminalUI"
     show (OneShot _) = "OneShot"
     show (EchoPrompt _) = "EchoPrompt"
@@ -406,8 +406,37 @@ instance Show Command where
 -- Parsers
 -------------------------------------------------------------------------------
 
+-- | Parse the --tools option for the check command
+parseToolsOption :: Parser CheckCmd.ToolsOutputMode
+parseToolsOption =
+    option (maybeReader parseMode)
+        ( long "tools"
+            <> metavar "MODE"
+            <> help "Tool display mode: none, list, agents-exe, openai (default: none)"
+            <> value CheckCmd.ToolsNone
+            <> showDefaultWith showMode
+        )
+  where
+    parseMode :: String -> Maybe CheckCmd.ToolsOutputMode
+    parseMode "none" = Just CheckCmd.ToolsNone
+    parseMode "list" = Just CheckCmd.ToolsList
+    parseMode "agents-exe" = Just CheckCmd.ToolsAgentsExe
+    parseMode "openai" = Just CheckCmd.ToolsOpenAI
+    parseMode _ = Nothing
+    
+    showMode :: CheckCmd.ToolsOutputMode -> String
+    showMode CheckCmd.ToolsNone = "none"
+    showMode CheckCmd.ToolsList = "list"
+    showMode CheckCmd.ToolsAgentsExe = "agents-exe"
+    showMode CheckCmd.ToolsOpenAI = "openai"
+
 parseCheckCommand :: Parser Command
-parseCheckCommand = pure Check
+parseCheckCommand = Check <$> parseCheckOptions
+
+parseCheckOptions :: Parser CheckCmd.CheckOptions
+parseCheckOptions =
+    CheckCmd.CheckOptions
+        <$> parseToolsOption
 
 parseTuiChatCommand :: Parser Command
 parseTuiChatCommand = TerminalUI <$> parseTuiOptions
@@ -1002,7 +1031,7 @@ parseProgOptions argparserargs =
             )
         <*> pure argparserargs.argPromptAliases
         <*> hsubparser
-            ( command "check" (info parseCheckCommand (idm))
+            ( command "check" (info parseCheckCommand (progDesc "Validate agent configurations and optionally dump tool schemas"))
                 <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
@@ -1104,8 +1133,8 @@ resolveAgentFiles files (Just slug) = do
 runCommand :: Prog -> Prod.Tracer IO AgentTree.Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
 runCommand pargs baseTracer sessionStore agentFiles =
     case pargs.mainCommand of
-        Check ->
-            CheckCmd.handleCheck pargs.apiKeysFile agentFiles
+        Check checkOpts ->
+            CheckCmd.handleCheck checkOpts pargs.apiKeysFile agentFiles
         
         TerminalUI _ ->
             TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile agentFiles
