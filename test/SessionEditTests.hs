@@ -36,20 +36,20 @@ tests = testGroup "Session Edit"
 mkTestSession :: Int -> Session.Session
 mkTestSession n = Session.Session
     { Session.turns = take n $ cycle
-        [ Session.UserTurn $ Session.UserTurnContent
+        [ Session.UserTurn (Session.UserTurnContent
             { Session.userPrompt = Session.SystemPrompt "System prompt"
             , Session.userTools = []
             , Session.userQuery = Just $ Session.UserQuery "User query"
             , Session.userToolResponses = []
-            }
-        , Session.LlmTurn $ Session.LlmTurnContent
+            }) Nothing
+        , Session.LlmTurn (Session.LlmTurnContent
             { Session.llmResponse = Session.LlmResponse
                 { Session.responseText = Just "LLM response"
                 , Session.responseThinking = Just "Thinking content..."
                 , Session.rawResponse = Aeson.object []
                 }
             , Session.llmToolCalls = []
-            }
+            }) Nothing
         ]
     , Session.sessionId = Session.SessionId undefined  -- Use undefined for tests
     , Session.forkedFromSessionId = Nothing
@@ -60,13 +60,13 @@ mkTestSession n = Session.Session
 mkSessionWithToolCalls :: Session.Session
 mkSessionWithToolCalls = Session.Session
     { Session.turns =
-        [ Session.UserTurn $ Session.UserTurnContent
+        [ Session.UserTurn (Session.UserTurnContent
             { Session.userPrompt = Session.SystemPrompt "System"
             , Session.userTools = []
             , Session.userQuery = Just $ Session.UserQuery "Hello"
             , Session.userToolResponses = []
-            }
-        , Session.LlmTurn $ Session.LlmTurnContent
+            }) Nothing
+        , Session.LlmTurn (Session.LlmTurnContent
             { Session.llmResponse = Session.LlmResponse
                 { Session.responseText = Just "I'll help"
                 , Session.responseThinking = Just "Let me think..."
@@ -78,8 +78,8 @@ mkSessionWithToolCalls = Session.Session
                     , "arguments" .= Aeson.object []
                     ]
                 ]
-            }
-        , Session.UserTurn $ Session.UserTurnContent
+            }) Nothing
+        , Session.UserTurn (Session.UserTurnContent
             { Session.userPrompt = Session.SystemPrompt "System"
             , Session.userTools = []
             , Session.userQuery = Nothing
@@ -88,7 +88,7 @@ mkSessionWithToolCalls = Session.Session
                   , Session.UserToolResponse $ Aeson.object ["result" .= ("done" :: Text)]
                   )
                 ]
-            }
+            }) Nothing
         ]
     , Session.sessionId = Session.SessionId undefined
     , Session.forkedFromSessionId = Nothing
@@ -154,7 +154,7 @@ takeTailTests = testGroup "sessionEditTakeTail"
         length result.turns @?= 2
         -- The last two turns should be UserTurn (index 2) and LlmTurn (index 3)
         case result.turns of
-            [Session.UserTurn _, Session.LlmTurn _] -> pure ()
+            [Session.UserTurn _ _, Session.LlmTurn _ _] -> pure ()
             _ -> assertFailure "Expected [UserTurn, LlmTurn]"
 
     , testCase "takeTail negative returns empty session" $ do
@@ -200,7 +200,7 @@ dropTests = testGroup "sessionEditDrop"
         length result.turns @?= 2
         -- After dropping 2, we have: User (index 2), LLM (index 3)
         case result.turns of
-            [Session.UserTurn _, Session.LlmTurn _] -> pure ()
+            [Session.UserTurn _ _, Session.LlmTurn _ _] -> pure ()
             _ -> assertFailure "Expected [UserTurn, LlmTurn]"
     ]
 
@@ -241,7 +241,7 @@ dropTailTests = testGroup "sessionEditDropTail"
         length result.turns @?= 2
         -- After dropping last 2, we have: User (index 0), LLM (index 1)
         case result.turns of
-            [Session.UserTurn _, Session.LlmTurn _] -> pure ()
+            [Session.UserTurn _ _, Session.LlmTurn _ _] -> pure ()
             _ -> assertFailure "Expected [UserTurn, LlmTurn]"
     ]
 
@@ -255,7 +255,7 @@ censorToolCallsTests = testGroup "sessionEditCensorToolCalls"
         let session = mkSessionWithToolCalls
         let result = SessionEdit.sessionEditCensorToolCalls session
         case result.turns of
-            (_ : Session.LlmTurn ltc : _) ->
+            (_ : Session.LlmTurn ltc _ : _) ->
                 length ltc.llmToolCalls @?= 0
             _ -> assertFailure "Expected LlmTurn with empty llmToolCalls"
 
@@ -263,7 +263,7 @@ censorToolCallsTests = testGroup "sessionEditCensorToolCalls"
         let session = mkSessionWithToolCalls
         let result = SessionEdit.sessionEditCensorToolCalls session
         case result.turns of
-            [_ , _, Session.UserTurn utc] ->
+            [_ , _, Session.UserTurn utc _] ->
                 length utc.userToolResponses @?= 0
             _ -> assertFailure "Expected UserTurn with empty userToolResponses"
 
@@ -272,7 +272,7 @@ censorToolCallsTests = testGroup "sessionEditCensorToolCalls"
         let result = SessionEdit.sessionEditCensorToolCalls session
         -- Check first UserTurn still has query
         case result.turns of
-            (Session.UserTurn utc : _) -> do
+            (Session.UserTurn utc _ : _) -> do
                 Session.userQuery utc @?= Just (Session.UserQuery "Hello")
             _ -> assertFailure "Expected UserTurn with preserved query"
 
@@ -292,7 +292,7 @@ censorThinkingTests = testGroup "sessionEditCensorThinking"
         let session = mkSessionWithToolCalls
         let result = SessionEdit.sessionEditCensorThinking session
         case result.turns of
-            (_ : Session.LlmTurn ltc : _) ->
+            (_ : Session.LlmTurn ltc _ : _) ->
                 Session.responseThinking (Session.llmResponse ltc) @?= Nothing
             _ -> assertFailure "Expected LlmTurn with no thinking"
 
@@ -300,7 +300,7 @@ censorThinkingTests = testGroup "sessionEditCensorThinking"
         let session = mkSessionWithToolCalls
         let result = SessionEdit.sessionEditCensorThinking session
         case result.turns of
-            (_ : Session.LlmTurn ltc : _) ->
+            (_ : Session.LlmTurn ltc _ : _) ->
                 Session.responseText (Session.llmResponse ltc) @?= Just "I'll help"
             _ -> assertFailure "Expected preserved response text"
 
@@ -308,7 +308,7 @@ censorThinkingTests = testGroup "sessionEditCensorThinking"
         let session = mkSessionWithToolCalls
         let result = SessionEdit.sessionEditCensorThinking session
         case result.turns of
-            (Session.UserTurn utc : _) ->
+            (Session.UserTurn utc _ : _) ->
                 Session.userQuery utc @?= Just (Session.UserQuery "Hello")
             _ -> assertFailure "Expected preserved UserTurn"
 
@@ -371,7 +371,7 @@ compositionTests = testGroup "applySessionEdits and composition"
         length result.turns @?= 2
         -- Verify tool calls censored
         case result.turns of
-            (_ : Session.LlmTurn ltc : _) ->
+            (_ : Session.LlmTurn ltc _ : _) ->
                 length ltc.llmToolCalls @?= 0
             _ -> pure ()  -- First turn is UserTurn
     ]
@@ -412,4 +412,5 @@ edgeCaseTests = testGroup "edge cases"
                 ] session
         length result.turns @?= 5
     ]
+
 

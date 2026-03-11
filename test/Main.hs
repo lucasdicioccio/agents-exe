@@ -1,18 +1,23 @@
 module Main where
 
-import System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.LLMs.OpenAI as OpenAI hiding (SystemPrompt)
 import System.Agents.Base as Base
 import System.Agents.Tools.Context as Context
-import System.Agents.Session.Types (SessionId(..), TurnId(..))
+import qualified System.Agents.Session.Types as SessionTypes
+import System.Agents.Session.Types (Session(..), Turn(..), UserTurnContent(..), LlmTurnContent(..),
+                                    SystemPrompt(..), UserQuery(..), LlmResponse(..),
+                                    StepByteUsage(..), SystemTool(..), SystemToolDefinition(..),
+                                    LlmToolCall(..), UserToolResponse(..))
 import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Tools.OpenAPI.Types as OpenAPI
+import System.Agents.Tools.OpenAPI.Types as OpenAPI hiding (object, (.=))
 import System.Agents.Tools.OpenAPI.Resolver as Resolver
 import System.Agents.Tools.OpenAPI.Converter as Converter
 
-import Data.Aeson (decode, encode, Value(..))
+import Data.Aeson (decode, encode, Value(..), object, (.=))
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -54,6 +59,8 @@ tests =
         , SessionEditTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
+        , turnRetroCompatibilityTests
+        , turnRoundTripTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -210,6 +217,232 @@ agentSerializationTests =
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- Turn Retro-compatibility Tests
+-------------------------------------------------------------------------------
+
+turnRetroCompatibilityTests :: TestTree
+turnRetroCompatibilityTests =
+    testGroup
+        "Turn Retro-compatibility"
+        [ testCase "parse old session format (turn-v0.001.json) without byteUsage" $ do
+            jsonContent <- LBS.readFile "test/data/turn-v0.001.json"
+            let mSession = decode jsonContent :: Maybe Session
+            case mSession of
+                Nothing -> assertFailure "Failed to parse turn-v0.001.json - retro-compatibility broken"
+                Just session -> do
+                    -- Check that the session has 2 turns
+                    length (turns session) @?= 2
+                    -- Both turns should have Nothing for byteUsage (old format)
+                    mapM_ (\turn -> turnByteUsage turn @?= Nothing) (turns session)
+        ]
+  where
+    turnByteUsage :: Turn -> Maybe ()
+    turnByteUsage (UserTurn _ usage) = fmap (const ()) usage
+    turnByteUsage (LlmTurn _ usage) = fmap (const ()) usage
+
+-------------------------------------------------------------------------------
+-- Turn Round-trip Tests
+-------------------------------------------------------------------------------
+
+turnRoundTripTests :: TestTree
+turnRoundTripTests =
+    testGroup
+        "Turn Round-trip Tests"
+        [ testCase "UserTurn round-trip without byteUsage" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "You are helpful"
+                    , userTools = []
+                    , userQuery = Just (UserQuery "Hello")
+                    , userToolResponses = []
+                    }
+            let turn = UserTurn userContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "UserTurn round-trip with byteUsage" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "You are helpful"
+                    , userTools = []
+                    , userQuery = Just (UserQuery "Hello")
+                    , userToolResponses = []
+                    }
+            let byteUsage = StepByteUsage 1000 500 300 100 100
+            let turn = UserTurn userContent (Just byteUsage)
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "LlmTurn round-trip without byteUsage" $ do
+            let llmResp = SessionTypes.LlmResponse
+                    { SessionTypes.responseText = Just "Hello!"
+                    , SessionTypes.responseThinking = Just "Thinking..."
+                    , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                    }
+            let llmContent = LlmTurnContent
+                    { llmResponse = llmResp
+                    , llmToolCalls = []
+                    }
+            let turn = LlmTurn llmContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "LlmTurn round-trip with byteUsage" $ do
+            let llmResp = SessionTypes.LlmResponse
+                    { SessionTypes.responseText = Just "Hello!"
+                    , SessionTypes.responseThinking = Just "Thinking..."
+                    , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                    }
+            let llmContent = LlmTurnContent
+                    { llmResponse = llmResp
+                    , llmToolCalls = []
+                    }
+            let byteUsage = StepByteUsage 2000 800 700 300 200
+            let turn = LlmTurn llmContent (Just byteUsage)
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "UserTurn with tool responses round-trip" $ do
+            let toolCall = LlmToolCall (object ["id" .= ("call-1" :: Text)])
+            let toolResponse = UserToolResponse (object ["result" .= ("success" :: Text)])
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "You are helpful"
+                    , userTools = []
+                    , userQuery = Nothing
+                    , userToolResponses = [(toolCall, toolResponse)]
+                    }
+            let turn = UserTurn userContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "LlmTurn with tool calls round-trip" $ do
+            let llmResp = SessionTypes.LlmResponse
+                    { SessionTypes.responseText = Just "I'll help you"
+                    , SessionTypes.responseThinking = Nothing
+                    , SessionTypes.rawResponse = object ["choices" .= ([] :: [Value])]
+                    }
+            let toolCall1 = LlmToolCall (object ["id" .= ("call-1" :: Text)])
+            let toolCall2 = LlmToolCall (object ["id" .= ("call-2" :: Text)])
+            let llmContent = LlmTurnContent
+                    { llmResponse = llmResp
+                    , llmToolCalls = [toolCall1, toolCall2]
+                    }
+            let turn = LlmTurn llmContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "Session round-trip with mixed turns" $ do
+            sessionId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            
+            let userTurn1 = UserTurn
+                    (UserTurnContent
+                        { userPrompt = SystemPrompt "You are helpful"
+                        , userTools = []
+                        , userQuery = Just (UserQuery "First query")
+                        , userToolResponses = []
+                        })
+                    Nothing
+            
+            let llmTurn = LlmTurn
+                    (LlmTurnContent
+                        { llmResponse = SessionTypes.LlmResponse
+                            { SessionTypes.responseText = Just "Response"
+                            , SessionTypes.responseThinking = Nothing
+                            , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                            }
+                        , llmToolCalls = []
+                        })
+                    (Just (StepByteUsage 1000 400 400 100 100))
+            
+            let userTurn2 = UserTurn
+                    (UserTurnContent
+                        { userPrompt = SystemPrompt "You are helpful"
+                        , userTools = []
+                        , userQuery = Just (UserQuery "Second query")
+                        , userToolResponses = []
+                        })
+                    Nothing
+            
+            let session = Session
+                    { turns = [userTurn1, llmTurn, userTurn2]
+                    , sessionId = sessionId
+                    , forkedFromSessionId = Nothing
+                    , turnId = turnId'
+                    }
+            
+            let json = encode session
+            let mDecoded = decode json :: Maybe Session
+            mDecoded @?= Just session
+        , testCase "Session round-trip with fork info" $ do
+            origSessionId <- SessionBase.newSessionId
+            forkedFromId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            
+            let session = Session
+                    { turns = []
+                    , sessionId = origSessionId
+                    , forkedFromSessionId = Just forkedFromId
+                    , turnId = turnId'
+                    }
+            
+            let json = encode session
+            let mDecoded = decode json :: Maybe Session
+            mDecoded @?= Just session
+        , testCase "encoded Turn has correct structure" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "Test"
+                    , userTools = []
+                    , userQuery = Nothing
+                    , userToolResponses = []
+                    }
+            let turn = UserTurn userContent (Just (StepByteUsage 100 50 30 10 10))
+            let json = encode turn
+            let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
+            -- Check that the JSON has the expected structure
+            assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain byteUsage field" ("\"byteUsage\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain UserTurn tag" ("\"UserTurn\"" `Text.isInfixOf` Text.pack jsonStr)
+        , testCase "UserTurn without byteUsage omits byteUsage field" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "Test"
+                    , userTools = []
+                    , userQuery = Nothing
+                    , userToolResponses = []
+                    }
+            let turn = UserTurn userContent Nothing
+            let json = encode turn
+            let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
+            -- Check that the JSON has the expected structure
+            assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
+            -- The encoded JSON should not contain byteUsage when it's Nothing
+            -- Note: aeson may still include it as null, so we check the structure is valid
+            let mDecoded = decode json :: Maybe Turn
+            assertBool "Should decode successfully" (isJust mDecoded)
+        , testCase "decode from new format produces correct Turn" $ do
+            let json = "{\"tag\":\"UserTurn\",\"contents\":{\"userPrompt\":\"Test\",\"userTools\":[],\"userQuery\":null,\"userToolResponses\":[]}}"
+            let mTurn = decode (LBS.fromStrict $ Text.encodeUtf8 json) :: Maybe Turn
+            case mTurn of
+                Nothing -> assertFailure "Failed to decode UserTurn from new format"
+                Just (UserTurn content Nothing) -> do
+                    let SystemPrompt prompt = userPrompt content
+                    prompt @?= "Test"
+                Just _ -> assertFailure "Expected UserTurn with Nothing byteUsage"
+        , testCase "decode from new format with byteUsage" $ do
+            let json = "{\"tag\":\"LlmTurn\",\"contents\":{\"llmResponse\":{\"responseText\":\"Hi\",\"responseThinking\":null,\"rawResponse\":{}},\"llmToolCalls\":[]},\"byteUsage\":{\"stepTotalBytes\":100,\"stepInputBytes\":50,\"stepOutputBytes\":30,\"stepReasoningBytes\":10,\"stepToolBytes\":10}}"
+            let mTurn = decode (LBS.fromStrict $ Text.encodeUtf8 json) :: Maybe Turn
+            case mTurn of
+                Nothing -> assertFailure "Failed to decode LlmTurn with byteUsage"
+                Just (LlmTurn _ (Just usage)) -> do
+                    stepTotalBytes usage @?= 100
+                    stepInputBytes usage @?= 50
+                    stepOutputBytes usage @?= 30
+                    stepReasoningBytes usage @?= 10
+                    stepToolBytes usage @?= 10
+                Just _ -> assertFailure "Expected LlmTurn with Just byteUsage"
+        ]
 
 -------------------------------------------------------------------------------
 -- OpenAPI Types Tests
@@ -724,44 +957,44 @@ toolExecutionContextTests =
         [ testCase "mkMinimalContext creates context with empty call stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.ctxCallStack ctx @?= []
             Context.ctxMaxDepth ctx @?= Nothing
             Context.ctxSessionId ctx @?= sessionId
             Context.ctxConversationId ctx @?= convId
-            Context.ctxTurnId ctx @?= turnId
+            Context.ctxTurnId ctx @?= turnId'
             Context.ctxAgentId ctx @?= Nothing
             Context.ctxFullSession ctx @?= Nothing
         , testCase "mkRootContext creates context with root entry in call stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkRootContext sessionId convId turnId Nothing Nothing (Just 5)
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkRootContext sessionId convId turnId' Nothing Nothing (Just 5)
             Context.ctxCallStack ctx @?= [Context.CallStackEntry "root" convId 0]
             Context.ctxMaxDepth ctx @?= Just 5
         , testCase "mkToolExecutionContext with full parameters" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             agentId <- Base.newAgentId
             convId2 <- Base.newConversationId
             let callStack = [Context.CallStackEntry "agent-1" convId 0, Context.CallStackEntry "agent-2" convId2 1]
-            let ctx = Context.mkToolExecutionContext sessionId convId turnId (Just agentId) Nothing callStack (Just 10)
+            let ctx = Context.mkToolExecutionContext sessionId convId turnId' (Just agentId) Nothing callStack (Just 10)
             Context.ctxCallStack ctx @?= callStack
             Context.ctxMaxDepth ctx @?= Just 10
             Context.ctxAgentId ctx @?= Just agentId
         , testCase "JSON round-trip with call stack and max depth" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             agentId <- Base.newAgentId
             convId2 <- Base.newConversationId
             let callStack =
                     [ Context.CallStackEntry "agent-1" convId 0
                     , Context.CallStackEntry "agent-2" convId2 1
                     ]
-            let ctx = Context.mkToolExecutionContext sessionId convId turnId (Just agentId) Nothing callStack (Just 5)
+            let ctx = Context.mkToolExecutionContext sessionId convId turnId' (Just agentId) Nothing callStack (Just 5)
             let json = encode ctx
             let mCtx = decode json :: Maybe Context.ToolExecutionContext
             case mCtx of
@@ -774,14 +1007,14 @@ toolExecutionContextTests =
         , testCase "hasFullSession returns False when session is Nothing" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.hasFullSession ctx @?= False
         , testCase "hasAgentId returns False when agentId is Nothing" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.hasAgentId ctx @?= False
         ]
 
@@ -796,21 +1029,21 @@ recursionTrackingTests =
         [ testCase "currentRecursionDepth returns 0 for empty call stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkMinimalContext sessionId convId turnId
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkMinimalContext sessionId convId turnId'
             Context.currentRecursionDepth ctx @?= 0
         , testCase "currentRecursionDepth returns 1 for root context" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let ctx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let ctx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             Context.currentRecursionDepth ctx @?= 1
         , testCase "pushAgentContext increments depth" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "sub-agent" newConvId rootCtx of
                 Left err -> assertFailure $ "Should not have failed: " ++ show err
                 Right newCtx -> do
@@ -826,9 +1059,9 @@ recursionTrackingTests =
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
+            turnId' <- SessionBase.newTurnId
             -- Create root context with max depth of 1
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing (Just 1)
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing (Just 1)
             -- First push should fail because root is already at depth 1 (max)
             case Context.pushAgentContext "sub-agent" newConvId rootCtx of
                 Left (Context.MaxRecursionDepthExceeded stack) -> do
@@ -837,8 +1070,8 @@ recursionTrackingTests =
         , testCase "isAtDepth correctly checks depth threshold" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             Context.isAtDepth 1 rootCtx @?= True
             Context.isAtDepth 2 rootCtx @?= False
         , testCase "callChain returns entries in root-first order" $ do
@@ -846,8 +1079,8 @@ recursionTrackingTests =
             convId <- Base.newConversationId
             newConvId1 <- Base.newConversationId
             newConvId2 <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "agent-1" newConvId1 rootCtx of
                 Left err -> assertFailure $ "First push should not fail: " ++ show err
                 Right ctx1 -> case Context.pushAgentContext "agent-2" newConvId2 ctx1 of
@@ -864,16 +1097,16 @@ recursionTrackingTests =
         , testCase "isAgentInCallStack detects agent in stack" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             Context.isAgentInCallStack "root" rootCtx @?= True
             Context.isAgentInCallStack "nonexistent" rootCtx @?= False
         , testCase "isAgentInCallStack detects agent after push" $ do
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "helper-agent" newConvId rootCtx of
                 Left err -> assertFailure $ "Push should not fail: " ++ show err
                 Right newCtx -> do
@@ -884,15 +1117,15 @@ recursionTrackingTests =
             sessionId <- SessionBase.newSessionId
             convId <- Base.newConversationId
             newConvId <- Base.newConversationId
-            turnId <- SessionBase.newTurnId
-            let rootCtx = Context.mkRootContext sessionId convId turnId Nothing Nothing Nothing
+            turnId' <- SessionBase.newTurnId
+            let rootCtx = Context.mkRootContext sessionId convId turnId' Nothing Nothing Nothing
             case Context.pushAgentContext "sub-agent" newConvId rootCtx of
                 Left err -> assertFailure $ "Push should not fail: " ++ show err
                 Right newCtx -> do
                     Context.ctxConversationId newCtx @?= newConvId
                     -- Session ID and Turn ID should be preserved
                     Context.ctxSessionId newCtx @?= sessionId
-                    Context.ctxTurnId newCtx @?= turnId
+                    Context.ctxTurnId newCtx @?= turnId'
         ]
 
 -------------------------------------------------------------------------------

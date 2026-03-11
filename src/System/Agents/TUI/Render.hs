@@ -22,6 +22,7 @@ import System.Agents.AgentTree (AgentTree(..))
 import System.Agents.Base (ConversationId)
 import System.Agents.Runtime (Runtime(..))
 import System.Agents.Session.Base
+import System.Agents.Session.Types (StepByteUsage(..), sessionTotalBytes)
 import System.Agents.ToolRegistration (declareTool)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
@@ -56,6 +57,10 @@ statusWarningAttr = attrName "statusWarning"
 -- | Attribute for error status messages.
 statusErrorAttr :: AttrName
 statusErrorAttr = attrName "statusError"
+
+-- | Attribute for byte usage text (dimmed/smaller).
+byteUsageAttr :: AttrName
+byteUsageAttr = attrName "byteUsage"
 
 -------------------------------------------------------------------------------
 -- Main Draw Function
@@ -317,23 +322,46 @@ render_session :: Maybe Session -> Set ConversationId -> Widget N
 render_session Nothing _ =
     vBox $ [ txt "session not started yet" ]
 render_session (Just session) _ongoingConvs =
-    vBox $ map render_turn (Prelude.reverse (zip [0..] $ Prelude.reverse session.turns))
+    vBox $ 
+        [ render_session_total_bytes session ] ++
+        map render_turn (Prelude.reverse (zip [(0 :: Int)..] $ Prelude.reverse session.turns))
 
--- | Render a single turn.
+-- | Render total session bytes.
+render_session_total_bytes :: Session -> Widget N
+render_session_total_bytes session =
+    let totalBytes = sessionTotalBytes session
+    in if totalBytes == 0
+        then emptyWidget
+        else withAttr byteUsageAttr $
+            txt $ "Session total: " <> formatBytes totalBytes <> "  "
+
+-- | Format bytes in human-readable form.
+formatBytes :: Int -> Text
+formatBytes n
+    | n >= 1024 * 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024 * 1024))) <> " GiB"
+    | n >= 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024))) <> " MiB"
+    | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
+    | otherwise = Text.pack (show n) <> " B"
+
+-- | Render a single turn with byte usage.
 render_turn :: (Int, Turn) -> Widget N
 render_turn (k, turn) =
     case turn of
-        UserTurn userTurn ->
+        UserTurn userTurn mUsage ->
             withAttr userMessageAttr $
                 vBox
-                    [ if k == 0
-                        then txt $ "> " <> getSystemPromptText (userPrompt userTurn)
-                        else emptyWidget
+                    [ hBox
+                        [ if k == 0
+                            then txt $ "> " <> getSystemPromptText (userPrompt userTurn)
+                            else emptyWidget
+                        , fill ' '
+                        , render_byte_usage mUsage
+                        ]
                     , case userQuery userTurn of
-                        Just (UserQuery q) -> txt $ "< " <> q
+                        Just (UserQuery q) -> hBox [txt $ "< " <> q, fill ' ', render_byte_usage mUsage]
                         Nothing -> emptyWidget
                     ]
-        LlmTurn llmTurn ->
+        LlmTurn llmTurn mUsage ->
             withAttr llmMessageAttr $
                 vBox $
                     -- Show thinking content if present
@@ -348,13 +376,41 @@ render_turn (k, turn) =
                             ]
                         Nothing -> []
                     ) ++
-                    [ case llmTurn.llmResponse.responseText of
-                        Just txt0 -> txt $ "< " <> txt0
-                        Nothing -> txt "< (no response)"
+                    [ hBox
+                        [ case llmTurn.llmResponse.responseText of
+                            Just txt0 -> txt $ "< " <> txt0
+                            Nothing -> txt "< (no response)"
+                        , fill ' '
+                        , render_byte_usage mUsage
+                        ]
                     , if null llmTurn.llmToolCalls
                         then emptyWidget
-                        else txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
+                        else hBox 
+                            [ txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
+                            , fill ' '
+                            , render_byte_usage mUsage
+                            ]
                     ]
+
+-- | Render byte usage for a turn.
+render_byte_usage :: Maybe StepByteUsage -> Widget N
+render_byte_usage Nothing = emptyWidget
+render_byte_usage (Just usage) =
+    withAttr byteUsageAttr $ 
+        txt $ "[" <> formatByteBreakdown usage <> "]"
+
+-- | Format byte usage breakdown for display.
+formatByteBreakdown :: StepByteUsage -> Text
+formatByteBreakdown usage =
+    let parts = concat
+            [ if stepInputBytes usage > 0 then ["in: " <> formatBytes (stepInputBytes usage)] else []
+            , if stepOutputBytes usage > 0 then ["out: " <> formatBytes (stepOutputBytes usage)] else []
+            , if stepReasoningBytes usage > 0 then ["reason: " <> formatBytes (stepReasoningBytes usage)] else []
+            , if stepToolBytes usage > 0 then ["tool: " <> formatBytes (stepToolBytes usage)] else []
+            ]
+    in if null parts 
+        then "total: " <> formatBytes (stepTotalBytes usage)
+        else Text.intercalate ", " parts
 
 -- | Helper to extract text from SystemPrompt.
 getSystemPromptText :: SystemPrompt -> Text
@@ -387,9 +443,11 @@ tui_appAttrMap _ =
         , (userMessageAttr, BrickUtil.fg Vty.green)
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
         , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
+        , (byteUsageAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         ]
+
 

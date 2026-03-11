@@ -22,6 +22,11 @@ module System.Agents.Session.Types (
     UserTurnContent(..),
     LlmTurnContent(..),
     
+    -- * Byte usage tracking
+    StepByteUsage(..),
+    calculateStepByteUsage,
+    sessionTotalBytes,
+    
     -- * Content types
     SystemPrompt(..),
     LlmResponse(..),
@@ -35,7 +40,8 @@ module System.Agents.Session.Types (
     SystemToolDefinitionV1(..),
 ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Control.Applicative ((<|>))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -61,6 +67,60 @@ newtype TurnId = TurnId UUID
 newTurnId :: IO TurnId
 newTurnId =
     TurnId <$> UUID.nextRandom
+
+-------------------------------------------------------------------------------
+-- Byte Usage Tracking
+-------------------------------------------------------------------------------
+
+-- | Byte usage breakdown for a single step.
+--
+-- Tracks the amount of data exchanged during a single turn of conversation,
+-- broken down by category for cost transparency and debugging.
+data StepByteUsage = StepByteUsage
+    { stepTotalBytes :: Int
+      -- ^ Total bytes for this step
+    , stepInputBytes :: Int
+      -- ^ Bytes in the input (prompt + context + query)
+    , stepOutputBytes :: Int
+      -- ^ Bytes in the LLM output response
+    , stepReasoningBytes :: Int
+      -- ^ Bytes in reasoning/thinking content (if model supports it)
+    , stepToolBytes :: Int
+      -- ^ Bytes in tool call responses
+    } deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON StepByteUsage
+instance ToJSON StepByteUsage
+
+-- | Helper to calculate total bytes from components.
+-- Use this when you have individual components but want to ensure
+-- consistency between total and sum of parts.
+calculateStepByteUsage :: Int -> Int -> Int -> Int -> StepByteUsage
+calculateStepByteUsage input output reasoning tool =
+    StepByteUsage
+        { stepTotalBytes = input + output + reasoning + tool
+        , stepInputBytes = input
+        , stepOutputBytes = output
+        , stepReasoningBytes = reasoning
+        , stepToolBytes = tool
+        }
+
+-- | Calculate total bytes for an entire session.
+-- Returns the sum of all step totals across all turns.
+sessionTotalBytes :: Session -> Int
+sessionTotalBytes session =
+    sum [ stepTotalBytes usage
+        | turn <- session.turns
+        , usage <- maybeToList (turnByteUsage turn)
+        ]
+  where
+    maybeToList :: Maybe a -> [a]
+    maybeToList Nothing = []
+    maybeToList (Just x) = [x]
+
+    turnByteUsage :: Turn -> Maybe StepByteUsage
+    turnByteUsage (UserTurn _ usage) = usage
+    turnByteUsage (LlmTurn _ usage) = usage
 
 -------------------------------------------------------------------------------
 -- Core content types
@@ -144,12 +204,59 @@ instance FromJSON LlmTurnContent
 instance ToJSON LlmTurnContent
   
 -- | Unification.
+-- 
+-- Each turn now optionally includes 'StepByteUsage' for tracking
+-- data exchange sizes. The 'Maybe' allows backward compatibility
+-- with sessions that were created before byte tracking was added.
 data Turn
-  = UserTurn UserTurnContent
-  | LlmTurn LlmTurnContent
+  = UserTurn UserTurnContent (Maybe StepByteUsage)
+  | LlmTurn LlmTurnContent (Maybe StepByteUsage)
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON Turn
-instance ToJSON Turn
+
+-- | Custom ToJSON instance that matches the FromJSON format.
+-- Produces objects with "tag", "contents", and optional "byteUsage" fields.
+instance ToJSON Turn where
+    toJSON (UserTurn contents byteUsage) =
+        Aeson.object $ ["tag" .= ("UserTurn" :: Text), "contents" .= contents] ++
+                       ["byteUsage" .= usage | Just usage <- [byteUsage]]
+    toJSON (LlmTurn contents byteUsage) =
+        Aeson.object $ ["tag" .= ("LlmTurn" :: Text), "contents" .= contents] ++
+                       ["byteUsage" .= usage | Just usage <- [byteUsage]]
+
+-- | Legacy Turn structure without byte usage tracking.
+-- Used for backward compatibility when parsing old sessions.
+data Turn_v0
+  = UserTurn_v0 UserTurnContent
+  | LlmTurn_v0 LlmTurnContent
+    deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON Turn_v0
+
+-- | Custom FromJSON instance for Turn that handles retro-compatibility.
+-- First tries to parse as the new format (with Maybe StepByteUsage),
+-- then falls back to the old Turn_v0 format (without byte usage).
+instance FromJSON Turn where
+    parseJSON v = parseNew v <|> parseOld v
+      where
+        parseNew = Aeson.withObject "Turn" $ \obj -> do
+            tag <- obj .: "tag"
+            case tag :: Text of
+                "UserTurn" -> do
+                    contents <- obj .: "contents"
+                    byteUsage <- obj .:? "byteUsage"
+                    pure $ UserTurn contents byteUsage
+                "LlmTurn" -> do
+                    contents <- obj .: "contents"
+                    byteUsage <- obj .:? "byteUsage"
+                    pure $ LlmTurn contents byteUsage
+                _ -> fail $ "Unknown Turn tag: " ++ show tag
+        
+        parseOld = Aeson.withObject "Turn" $ \obj -> do
+            -- Try parsing as old format (v0)
+            turnV0 <- Aeson.parseJSON (Aeson.Object obj)
+            case turnV0 of
+                UserTurn_v0 content -> pure $ UserTurn content Nothing
+                LlmTurn_v0 content  -> pure $ LlmTurn content Nothing
 
 data Session
     = Session

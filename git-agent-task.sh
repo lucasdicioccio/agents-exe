@@ -58,6 +58,7 @@ case "$command" in
     ./qa-agent/tools/run-agents-exe run --args "describe"
     ./qa-agent/tools/run-agents-exe run --args "cowsay 'we want types and we want it now'"
     ./qa-agent/tools/run-agents-exe run --args "echo-prompt -S '#' -p 'types types types'"
+    ./qa-agent/tools/run-agents-exe run --args "session-print ./test/data/turn-v0.001.json"
     ;;
   preview)
     echo "Skipping."
