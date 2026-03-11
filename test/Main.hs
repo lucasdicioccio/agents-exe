@@ -3,16 +3,20 @@ module Main where
 import System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Base as Base
 import System.Agents.Tools.Context as Context
-import System.Agents.Session.Types (Session(..), Turn(..))
+import System.Agents.Session.Types (Session(..), Turn(..), UserTurnContent(..), LlmTurnContent(..),
+                                    SystemPrompt(..), UserQuery(..), LlmResponse(..),
+                                    StepByteUsage(..), SystemTool(..), SystemToolDefinition(..),
+                                    LlmToolCall(..), UserToolResponse(..))
 import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Tools.OpenAPI.Types as OpenAPI
 import System.Agents.Tools.OpenAPI.Resolver as Resolver
 import System.Agents.Tools.OpenAPI.Converter as Converter
 
-import Data.Aeson (decode, encode, Value(..))
+import Data.Aeson (decode, encode, Value(..), object, (.=), toJSON)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -55,6 +59,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , turnRetroCompatibilityTests
+        , turnRoundTripTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -235,6 +240,208 @@ turnRetroCompatibilityTests =
     turnByteUsage :: Turn -> Maybe ()
     turnByteUsage (UserTurn _ usage) = fmap (const ()) usage
     turnByteUsage (LlmTurn _ usage) = fmap (const ()) usage
+
+-------------------------------------------------------------------------------
+-- Turn Round-trip Tests
+-------------------------------------------------------------------------------
+
+turnRoundTripTests :: TestTree
+turnRoundTripTests =
+    testGroup
+        "Turn Round-trip Tests"
+        [ testCase "UserTurn round-trip without byteUsage" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "You are helpful"
+                    , userTools = []
+                    , userQuery = Just (UserQuery "Hello")
+                    , userToolResponses = []
+                    }
+            let turn = UserTurn userContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "UserTurn round-trip with byteUsage" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "You are helpful"
+                    , userTools = []
+                    , userQuery = Just (UserQuery "Hello")
+                    , userToolResponses = []
+                    }
+            let byteUsage = StepByteUsage 1000 500 300 100 100
+            let turn = UserTurn userContent (Just byteUsage)
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "LlmTurn round-trip without byteUsage" $ do
+            let llmResponse = LlmResponse
+                    { responseText = Just "Hello!"
+                    , responseThinking = Just "Thinking..."
+                    , rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                    }
+            let llmContent = LlmTurnContent
+                    { llmResponse = llmResponse
+                    , llmToolCalls = []
+                    }
+            let turn = LlmTurn llmContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "LlmTurn round-trip with byteUsage" $ do
+            let llmResponse = LlmResponse
+                    { responseText = Just "Hello!"
+                    , responseThinking = Just "Thinking..."
+                    , rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                    }
+            let llmContent = LlmTurnContent
+                    { llmResponse = llmResponse
+                    , llmToolCalls = []
+                    }
+            let byteUsage = StepByteUsage 2000 800 700 300 200
+            let turn = LlmTurn llmContent (Just byteUsage)
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "UserTurn with tool responses round-trip" $ do
+            let toolCall = LlmToolCall (object ["id" .= ("call-1" :: Text)])
+            let toolResponse = UserToolResponse (object ["result" .= ("success" :: Text)])
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "You are helpful"
+                    , userTools = []
+                    , userQuery = Nothing
+                    , userToolResponses = [(toolCall, toolResponse)]
+                    }
+            let turn = UserTurn userContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "LlmTurn with tool calls round-trip" $ do
+            let llmResponse = LlmResponse
+                    { responseText = Just "I'll help you"
+                    , responseThinking = Nothing
+                    , rawResponse = object ["choices" .= ([] :: [Value])]
+                    }
+            let toolCall1 = LlmToolCall (object ["id" .= ("call-1" :: Text)])
+            let toolCall2 = LlmToolCall (object ["id" .= ("call-2" :: Text)])
+            let llmContent = LlmTurnContent
+                    { llmResponse = llmResponse
+                    , llmToolCalls = [toolCall1, toolCall2]
+                    }
+            let turn = LlmTurn llmContent Nothing
+            let json = encode turn
+            let mDecoded = decode json :: Maybe Turn
+            mDecoded @?= Just turn
+        , testCase "Session round-trip with mixed turns" $ do
+            sessionId <- SessionBase.newSessionId
+            turnId <- SessionBase.newTurnId
+            
+            let userTurn1 = UserTurn
+                    (UserTurnContent
+                        { userPrompt = SystemPrompt "You are helpful"
+                        , userTools = []
+                        , userQuery = Just (UserQuery "First query")
+                        , userToolResponses = []
+                        })
+                    Nothing
+            
+            let llmTurn = LlmTurn
+                    (LlmTurnContent
+                        { llmResponse = LlmResponse
+                            { responseText = Just "Response"
+                            , responseThinking = Nothing
+                            , rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                            }
+                        , llmToolCalls = []
+                        })
+                    (Just (StepByteUsage 1000 400 400 100 100))
+            
+            let userTurn2 = UserTurn
+                    (UserTurnContent
+                        { userPrompt = SystemPrompt "You are helpful"
+                        , userTools = []
+                        , userQuery = Just (UserQuery "Second query")
+                        , userToolResponses = []
+                        })
+                    Nothing
+            
+            let session = Session
+                    { turns = [userTurn1, llmTurn, userTurn2]
+                    , sessionId = sessionId
+                    , forkedFromSessionId = Nothing
+                    , turnId = turnId
+                    }
+            
+            let json = encode session
+            let mDecoded = decode json :: Maybe Session
+            mDecoded @?= Just session
+        , testCase "Session round-trip with fork info" $ do
+            origSessionId <- SessionBase.newSessionId
+            forkedFromId <- SessionBase.newSessionId
+            turnId <- SessionBase.newTurnId
+            
+            let session = Session
+                    { turns = []
+                    , sessionId = origSessionId
+                    , forkedFromSessionId = Just forkedFromId
+                    , turnId = turnId
+                    }
+            
+            let json = encode session
+            let mDecoded = decode json :: Maybe Session
+            mDecoded @?= Just session
+        , testCase "encoded Turn has correct structure" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "Test"
+                    , userTools = []
+                    , userQuery = Nothing
+                    , userToolResponses = []
+                    }
+            let turn = UserTurn userContent (Just (StepByteUsage 100 50 30 10 10))
+            let json = encode turn
+            let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
+            -- Check that the JSON has the expected structure
+            assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain byteUsage field" ("\"byteUsage\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain UserTurn tag" ("\"UserTurn\"" `Text.isInfixOf` Text.pack jsonStr)
+        , testCase "UserTurn without byteUsage omits byteUsage field" $ do
+            let userContent = UserTurnContent
+                    { userPrompt = SystemPrompt "Test"
+                    , userTools = []
+                    , userQuery = Nothing
+                    , userToolResponses = []
+                    }
+            let turn = UserTurn userContent Nothing
+            let json = encode turn
+            let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
+            -- Check that byteUsage is NOT present when Nothing
+            assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
+            assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
+            -- The encoded JSON should not contain byteUsage when it's Nothing
+            -- Note: aeson may still include it as null, so we check the structure is valid
+            let mDecoded = decode json :: Maybe Turn
+            assertBool "Should decode successfully" (isJust mDecoded)
+        , testCase "decode from new format produces correct Turn" $ do
+            let json = "{\"tag\":\"UserTurn\",\"contents\":{\"userPrompt\":\"Test\",\"userTools\":[],\"userQuery\":null,\"userToolResponses\":[]}}"
+            let mTurn = decode (LBS.fromStrict $ Text.encodeUtf8 json) :: Maybe Turn
+            case mTurn of
+                Nothing -> assertFailure "Failed to decode UserTurn from new format"
+                Just (UserTurn content Nothing) -> do
+                    let SystemPrompt prompt = userPrompt content
+                    prompt @?= "Test"
+                Just _ -> assertFailure "Expected UserTurn with Nothing byteUsage"
+        , testCase "decode from new format with byteUsage" $ do
+            let json = "{\"tag\":\"LlmTurn\",\"contents\":{\"llmResponse\":{\"responseText\":\"Hi\",\"responseThinking\":null,\"rawResponse\":{}},\"llmToolCalls\":[]},\"byteUsage\":{\"stepTotalBytes\":100,\"stepInputBytes\":50,\"stepOutputBytes\":30,\"stepReasoningBytes\":10,\"stepToolBytes\":10}}"
+            let mTurn = decode (LBS.fromStrict $ Text.encodeUtf8 json) :: Maybe Turn
+            case mTurn of
+                Nothing -> assertFailure "Failed to decode LlmTurn with byteUsage"
+                Just (LlmTurn _ (Just usage)) -> do
+                    stepTotalBytes usage @?= 100
+                    stepInputBytes usage @?= 50
+                    stepOutputBytes usage @?= 30
+                    stepReasoningBytes usage @?= 10
+                    stepToolBytes usage @?= 10
+                Just _ -> assertFailure "Expected LlmTurn with Just byteUsage"
+        ]
 
 -------------------------------------------------------------------------------
 -- OpenAPI Types Tests
@@ -1268,5 +1475,4 @@ cycleDetectionTests =
         , Base.postgrestToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
-
 

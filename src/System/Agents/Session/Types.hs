@@ -41,7 +41,7 @@ module System.Agents.Session.Types (
 ) where
 
 import Control.Applicative ((<|>))
-import Data.Aeson (FromJSON, ToJSON, (.:), (.:?))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -213,7 +213,15 @@ data Turn
   | LlmTurn LlmTurnContent (Maybe StepByteUsage)
     deriving (Show, Ord, Eq, Generic)
 
-instance ToJSON Turn
+-- | Custom ToJSON instance that matches the FromJSON format.
+-- Produces objects with "tag", "contents", and optional "byteUsage" fields.
+instance ToJSON Turn where
+    toJSON (UserTurn contents byteUsage) =
+        Aeson.object $ ["tag" .= ("UserTurn" :: Text), "contents" .= contents] ++
+                       ["byteUsage" .= usage | Just usage <- [byteUsage]]
+    toJSON (LlmTurn contents byteUsage) =
+        Aeson.object $ ["tag" .= ("LlmTurn" :: Text), "contents" .= contents] ++
+                       ["byteUsage" .= usage | Just usage <- [byteUsage]]
 
 -- | Legacy Turn structure without byte usage tracking.
 -- Used for backward compatibility when parsing old sessions.
@@ -260,5 +268,4 @@ data Session
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Session
 instance ToJSON Session
-
 
