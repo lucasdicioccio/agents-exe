@@ -253,7 +253,7 @@ data ArgParserArgs = ArgParserArgs
     , defaultLogRawFilepath :: Maybe FilePath
     , defaultLogSesionsJsonPrefix :: Maybe FilePath
     , argPromptAliases :: Map Text AliasDefinition
-    , defaultSelfDescribeAnnounce :: Maybe String
+    , defaultSelfDescribeSlug :: Maybe String
     , defaultSelfDescribeDescription :: Maybe String
     }
 
@@ -284,7 +284,7 @@ data AgentsExeConfig = AgentsExeConfig
     , agentsFiles :: [FilePath]
     , agentsLogs :: Maybe AgentsExeLogConfig
     , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
-    , cfgSelfDescribeAnnounce :: Maybe String
+    , cfgSelfDescribeSlug :: Maybe String
     , cfgSelfDescribeDescription :: Maybe String
     }
     deriving (Show, Generic)
@@ -296,7 +296,7 @@ instance Aeson.FromJSON AgentsExeConfig where
         <*> v Aeson..:? "agentsFiles" Aeson..!= []
         <*> v Aeson..:? "agentsLogs"
         <*> v Aeson..:? "promptAliases"
-        <*> v Aeson..:? "selfDescribeAnnounce"
+        <*> v Aeson..:? "selfDescribeSlug"
         <*> v Aeson..:? "selfDescribeDescription"
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
@@ -345,7 +345,7 @@ initArgParserArgs = do
                         (logRawPath =<< obj.agentsLogs)
                         (logSessionsJsonPrefix =<< obj.agentsLogs)
                         (resolveAliases obj.cfgPromptAliases)
-                        obj.cfgSelfDescribeAnnounce
+                        obj.cfgSelfDescribeSlug
                         obj.cfgSelfDescribeDescription
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
@@ -713,15 +713,15 @@ parseSelfDescribeOptions :: ArgParserArgs -> Parser SelfDescribeCmd.SelfDescribe
 parseSelfDescribeOptions argArgs =
     SelfDescribeCmd.SelfDescribeOptions
         <$> optional (strOption
-            ( long "self-describe-announce"
+            ( long "self-describe-slug"
                 <> metavar "NAME"
-                <> help "The name/announce field for self-describe output"
-                <> maybe mempty value argArgs.defaultSelfDescribeAnnounce
+                <> help "The name/slug field for self-describe output"
+                <> maybe mempty value argArgs.defaultSelfDescribeSlug
             ))
         <*> optional (strOption
             ( long "self-describe-description"
                 <> metavar "DESC"
-                <> help "The description for self-describe output"
+                <> help "The description/announce for self-describe output"
                 <> maybe mempty value argArgs.defaultSelfDescribeDescription
             ))
 

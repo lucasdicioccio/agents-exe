@@ -20,10 +20,10 @@ import System.Agents.Tools.Bash (ScriptEmptyResultBehavior (..), ScriptArg (..),
 
 -- | Options for the self-describe command
 data SelfDescribeOptions = SelfDescribeOptions
-    { selfDescribeAnnounce :: Maybe String
-    -- ^ The name/announce field for self-describe output (default: "self_call")
+    { selfDescribeSlug :: Maybe String
+    -- ^ The name/slug field for self-describe output (default: "self_call")
     , selfDescribeDescription :: Maybe String
-    -- ^ The description for self-describe output (default: "calls oneself with a prompt")
+    -- ^ The description/announce for self-describe output (default: "calls oneself with a prompt")
     }
 
 -- | Handle the self-describe command: output agent metadata as JSON
@@ -36,8 +36,8 @@ handleSelfDescribe ::
 handleSelfDescribe opts _apiKeysFile = do
     -- verify the api-key file exists at least
     -- (verification happens before this function is called)
-    let announce :: Text
-        announce = Text.pack $ fromMaybe "self_call" opts.selfDescribeAnnounce
+    let slug :: Text
+        slug = Text.pack $ fromMaybe "self_call" opts.selfDescribeSlug
     let description :: Text
         description = Text.pack $ fromMaybe "calls oneself with a prompt" opts.selfDescribeDescription
     LByteString.writeFile "/dev/stdout" $
@@ -51,7 +51,7 @@ handleSelfDescribe opts _apiKeysFile = do
                     Single
                     DashDashSpace
                 ]
-                announce
+                slug
                 description
                 (Just $ AddMessage "--no output--")
 
