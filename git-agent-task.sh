@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
+set -x
 
 # -----------------------------
 # Help
@@ -50,15 +51,26 @@ case "$command" in
   check)
     echo "Building."
     ./qa-agent/tools/cabal-build run
+
     echo "Testing."
     ./qa-agent/tools/cabal-test run
-    echo "Verifying some commands."
-    ./qa-agent/tools/run-agents-exe run --args "paths"
+
+    echo "General verifications."
     ./qa-agent/tools/run-agents-exe run --args "check --tools openai"
     ./qa-agent/tools/run-agents-exe run --args "describe"
     ./qa-agent/tools/run-agents-exe run --args "cowsay 'we want types and we want it now'"
     ./qa-agent/tools/run-agents-exe run --args "echo-prompt -S '#' -p 'types types types'"
     ./qa-agent/tools/run-agents-exe run --args "session-print ./test/data/turn-v0.001.json"
+
+    echo "Verifying check agents behavior."
+    paths_json=$(agents-exe paths --json)
+    while read -r agent_path; do
+      if [[ -n "$agent_path" ]]; then
+        echo "Running checks for agent: $agent_path"
+        ./qa-agent/tools/run-agents-exe run --args "--agent-file $agent_path run -p 'run checks'"
+      fi
+    done < <(echo "$paths_json" | jq -r '.agents[] | select(test("\\./qa-agents?/check-.*\\.json"))' || true)
+
     ;;
   preview)
     echo "Skipping."
