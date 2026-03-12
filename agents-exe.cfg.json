@@ -3,4 +3,6 @@
 , "agentsLogs": {
     "logJsonPath": "logs.json"
   }
+, "selfDescribeSlug": "root-project-agent"
+, "selfDescribeDescription": "the root project agent"
 }
