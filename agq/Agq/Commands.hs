@@ -442,7 +442,7 @@ execTask cfg conn t = do
             SourceGithub n -> "\n\nCloses #" <> show n <> "."
             SourceLocal    -> ""
           prBody   = commit <> closesLine
-      void $ runCmd "gh"
+      (_, prUrl, _) <- captureCmdBoth "gh"
         [ "pr", "create"
         , "--base", target
         , "--head", branchName
@@ -453,7 +453,12 @@ execTask cfg conn t = do
 
       case mHookAbs of
         Nothing -> return ()
-        Just h  -> void $ runWithCwd worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
+        Just h  -> do
+          (_, checkOut, checkErr) <- runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
+          let checkOutput = Text.strip (checkOut <> checkErr)
+              prUrlStr    = Text.unpack (Text.strip prUrl)
+          unless (Text.null checkOutput || null prUrlStr) $
+            void $ runCmd "gh" ["pr", "comment", prUrlStr, "--body", Text.unpack checkOutput]
 
     releaseLock conn (taskName t) Done Nothing
 
