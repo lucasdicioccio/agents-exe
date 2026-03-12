@@ -8,11 +8,20 @@ This module implements the SQLite toolbox functionality, including:
 
 * Database connection management
 * Query execution with access control (read-only vs read-write)
+* Concurrent access protection (within-agent serialization, cross-agent busy handling)
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
 
 The toolbox can be configured to run in either read-only or read-write mode,
 providing safety when the agent should only query data.
+
+Concurrent Access:
+
+* Within a single agent: Tool calls are serialized via an MVar lock, ensuring
+  only one query executes at a time per toolbox.
+* Across multiple agents: Each agent has its own connection. SQLite's WAL mode
+  allows concurrent readers, but writers are serialized. A busy timeout of
+  5 seconds prevents immediate failures when another agent is writing.
 
 Example usage:
 
@@ -66,20 +75,20 @@ module System.Agents.Tools.SqliteToolbox (
     formatResults,
 ) where
 
-import Control.Exception (SomeException, bracket, try)
-import Control.Monad (when)
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
+import Control.Exception (SomeException, try)
 import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
-import Data.List (intersperse)
+import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
-import Database.SQLite.Simple (Connection, FromRow, Query (..), ToRow)
+import Database.SQLite.Simple (Connection)
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite3 as Direct
 import Prod.Tracer (Tracer (..), runTracer)
@@ -97,6 +106,7 @@ These events allow tracking of:
 * Access violations
 * Database errors
 * Connection lifecycle
+* Concurrent access contention
 -}
 data Trace
     = -- | Database connection opened
@@ -111,6 +121,8 @@ data Trace
       AccessViolationTrace !Text !SqlOperation !AccessMode
     | -- | Query execution error
       QueryErrorTrace !Text !Text
+    | -- | Database busy, waiting for lock
+      WaitingForLockTrace !Text
     deriving (Show)
 
 {- | Runtime state for a SQLite toolbox.
@@ -118,12 +130,20 @@ data Trace
 The toolbox maintains:
 * A database connection (from sqlite-simple)
 * A direct database handle for metadata access
+* An MVar lock for serializing access within this toolbox instance
 * The configured access mode (read-only or read-write)
 * Toolbox metadata (name, description)
+
+The MVar ensures that even if multiple tool calls are made concurrently
+from the same agent, they execute sequentially. Combined with SQLite's
+built-in locking and busy timeout, this provides robust concurrent access
+control.
 -}
 data Toolbox = Toolbox
     { toolboxConnection :: Connection
     , toolboxDirectDb :: Direct.Database
+    , toolboxLock :: MVar ()
+    -- ^ Lock for serializing access within this toolbox instance
     , toolboxName :: Text
     , toolboxDescription :: Text
     , toolboxPath :: FilePath
@@ -181,6 +201,8 @@ data QueryError
       AccessDeniedError !Text
     | -- | Connection error
       ConnectionError !Text
+    | -- | Database is locked/busy (timeout exceeded waiting for lock)
+      DatabaseLockedError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -312,17 +334,31 @@ validateAccess mode query =
 -- Initialization
 -------------------------------------------------------------------------------
 
+-- | Default busy timeout in milliseconds (5 seconds)
+defaultBusyTimeoutMs :: Int
+defaultBusyTimeoutMs = 5000
+
 {- | Initialize a SQLite toolbox from a description.
 
 This function:
 1. Opens a connection to the SQLite database using both sqlite-simple and direct-sqlite
-2. Configures the database for efficient writes (WAL mode, foreign keys)
+2. Configures the database for efficient writes (WAL mode, foreign keys, busy timeout)
 3. Sets up the connection based on the access mode
-4. Returns a 'Toolbox' ready for query execution
+4. Creates an MVar lock for serializing access within this toolbox
+5. Returns a 'Toolbox' ready for query execution
 
 The access mode determines:
 * Whether the database is opened in read-only mode
 * What SQL operations will be allowed
+
+Concurrent Access Protection:
+
+* The toolbox includes an MVar lock that serializes all queries within this
+  toolbox instance. This ensures that even if multiple tool calls are triggered
+  concurrently, they execute sequentially.
+* A busy timeout of 5 seconds is set on the SQLite connection. If another
+  agent (with a different connection) is writing to the same database, this
+  agent will wait up to 5 seconds for the lock instead of failing immediately.
 
 Returns an error if the database cannot be opened.
 -}
@@ -356,19 +392,27 @@ initializeToolbox tracer desc = do
         -- This ensures data is safe while still being efficient
         _ <- SQLite.execute_ conn "PRAGMA synchronous = NORMAL"
 
-        pure (conn, directDb)
+        -- Set busy timeout to prevent SQLITE_BUSY errors when another connection is writing
+        -- This connection will wait up to 5 seconds for the lock before failing
+        _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
+
+        -- Create the lock for serializing access within this toolbox
+        lock <- newMVar ()
+
+        pure (conn, directDb, lock)
 
     case result of
         Left (e :: SomeException) -> do
             let errMsg = "Failed to open database: " <> show e
             runTracer tracer (QueryErrorTrace "initialization" (Text.pack errMsg))
             pure $ Left errMsg
-        Right (conn, directDb) -> do
+        Right (conn, directDb, lock) -> do
             pure $
                 Right
                     Toolbox
                         { toolboxConnection = conn
                         , toolboxDirectDb = directDb
+                        , toolboxLock = lock
                         , toolboxName = desc.sqliteToolboxName
                         , toolboxDescription = desc.sqliteToolboxDescription
                         , toolboxPath = dbPath
@@ -396,9 +440,13 @@ This is the general-purpose query execution function that respects
 the toolbox's configured access mode. Use 'executeReadOnlyQuery'
 or 'executeWriteQuery' for more explicit control.
 
+This function acquires the toolbox lock before executing the query,
+ensuring that only one query runs at a time within this toolbox instance.
+
 Returns:
 * 'Right QueryResult' on successful execution
 * 'Left QueryError' on access violation or database error
+* 'Left DatabaseLockedError' if the database is busy and timeout is exceeded
 -}
 executeQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeQuery toolbox query = do
@@ -408,13 +456,18 @@ executeQuery toolbox query = do
             runTracer (Tracer (const (pure ()))) (AccessViolationTrace query (classifyQuery query) (toolboxAccessMode toolbox))
             pure $ Left err
         Right () -> do
-            executeQueryInternal toolbox query
+            -- Acquire lock to serialize access within this toolbox instance
+            withMVar (toolboxLock toolbox) $ \() -> do
+                executeQueryInternal toolbox query
 
 {- | Execute a read-only (SELECT) query.
 
 This function ensures that only SELECT queries are executed,
 regardless of the toolbox's configured access mode. Use this
 for additional safety when you only need to read data.
+
+Like 'executeQuery', this function acquires the toolbox lock before
+executing the query.
 
 Returns:
 * 'Right QueryResult' on successful execution
@@ -423,7 +476,10 @@ Returns:
 executeReadOnlyQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeReadOnlyQuery toolbox query =
     case classifyQuery query of
-        Select -> executeQueryInternal toolbox query
+        Select -> 
+            -- Acquire lock to serialize access within this toolbox instance
+            withMVar (toolboxLock toolbox) $ \() -> do
+                executeQueryInternal toolbox query
         other -> do
             let err = AccessDeniedError $ "Expected SELECT query, got: " <> Text.pack (show other)
             pure $ Left err
@@ -432,6 +488,9 @@ executeReadOnlyQuery toolbox query =
 
 This function ensures that the toolbox is in read-write mode
 before executing the query. Use this for explicit write operations.
+
+Like 'executeQuery', this function acquires the toolbox lock before
+executing the query.
 
 Returns:
 * 'Right QueryResult' on successful execution
@@ -443,9 +502,13 @@ executeWriteQuery toolbox query =
         ReadOnly -> do
             let err = AccessDeniedError "Write operations not allowed in read-only mode"
             pure $ Left err
-        ReadWrite -> executeQueryInternal toolbox query
+        ReadWrite -> 
+            -- Acquire lock to serialize access within this toolbox instance
+            withMVar (toolboxLock toolbox) $ \() -> do
+                executeQueryInternal toolbox query
 
 -- | Internal function to execute a query and extract results with column names.
+-- This function does NOT acquire the lock - callers must hold the lock.
 executeQueryInternal :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeQueryInternal toolbox query = do
     startTime <- getCurrentTime
@@ -488,7 +551,14 @@ executeQueryInternal toolbox query = do
     case result of
         Left (e :: SomeException) -> do
             let errMsg = Text.pack $ show e
-            pure $ Left $ SqlError errMsg
+            let errStr = show e
+            -- Check if this is a busy/locked error by examining the error message
+            let lowerErr = Text.toLower errMsg
+            if "busy" `Text.isInfixOf` lowerErr || 
+               "locked" `Text.isInfixOf` lowerErr ||
+               "SQLITE_BUSY" `isInfixOf` errStr
+                then pure $ Left $ DatabaseLockedError $ "Database is locked by another process. Try again later. Original error: " <> errMsg
+                else pure $ Left $ SqlError errMsg
         Right qr -> pure $ Right qr
   where
     collectRows :: Direct.Statement -> Direct.ColumnCount -> IO [[Value]]
@@ -604,3 +674,4 @@ formatResultsAsObjects result =
 rowToObject :: [Text] -> [Value] -> Value
 rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
+
