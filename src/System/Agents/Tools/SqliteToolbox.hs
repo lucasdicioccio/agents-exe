@@ -43,6 +43,7 @@ module System.Agents.Tools.SqliteToolbox (
     -- * Core types
     Trace (..),
     Toolbox (..),
+    ToolDescription (..),
     QueryError (..),
     QueryResult (..),
 
@@ -67,7 +68,7 @@ module System.Agents.Tools.SqliteToolbox (
 
 import Control.Exception (SomeException, try, bracket)
 import Control.Monad (when)
-import Data.Aeson (Value (..))
+import Data.Aeson (Value (..), ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -127,6 +128,22 @@ data Toolbox = Toolbox
     , toolboxAccessMode :: AccessMode
     }
 
+-- | Description of a SQLite tool.
+--
+-- Contains metadata about a specific SQLite query tool, including
+-- its name, description, and associated database information.
+data ToolDescription = ToolDescription
+    { toolDescriptionName :: Text
+    -- ^ Name of the tool (e.g., "query_users")
+    , toolDescriptionDescription :: Text
+    -- ^ Human-readable description of what the tool does
+    , toolDescriptionToolboxName :: Text
+    -- ^ Name of the toolbox this tool belongs to
+    , toolDescriptionDatabasePath :: FilePath
+    -- ^ Path to the SQLite database file
+    }
+    deriving (Show)
+
 -- | Result of a SQL query execution.
 --
 -- Contains:
@@ -141,6 +158,16 @@ data QueryResult = QueryResult
     , resultExecutionTime :: NominalDiffTime
     }
     deriving (Show)
+
+-- | JSON serialization for QueryResult.
+instance ToJSON QueryResult where
+    toJSON result =
+        Aeson.object
+            [ "columns" .= resultColumns result
+            , "rows" .= resultRows result
+            , "rowCount" .= resultRowCount result
+            , "executionTime" .= formatExecutionTime (resultExecutionTime result)
+            ]
 
 -- | Errors that can occur during query execution.
 data QueryError
