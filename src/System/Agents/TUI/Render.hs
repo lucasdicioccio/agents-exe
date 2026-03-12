@@ -148,7 +148,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+p: export md | Ctrl+t: view md"
+            [ txt "Ctrl+p: export md | Ctrl+[r|t]: view md"
             ]
 
 -- | Conversation area with message input and conversation history.
@@ -455,3 +455,4 @@ tui_appAttrMap _ =
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         ]
+

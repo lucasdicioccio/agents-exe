@@ -84,7 +84,9 @@ tui_appHandleEvent ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) ->
             handleDumpSessionToMarkdown
         VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
-            handleViewSessionWithExternalViewer
+            handleViewSessionWithExternalViewer Chronological
+        VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) ->
+            handleViewSessionWithExternalViewer Antichronological
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
             currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
@@ -233,9 +235,9 @@ getFocusedConversationId = do
     mConv <- use (tuiUI . conversationList . to listSelectedElement)
     pure $ fmap (conversationId . snd) mConv
 
--- | Format a session as markdown with default options.
-formatSessionMarkdown :: Session -> Text.Text
-formatSessionMarkdown session =
+-- | Format a session as markdown with the specified order preference.
+formatSessionMarkdown :: OrderPreference -> Session -> Text.Text
+formatSessionMarkdown orderPref session =
     let opts =
             SessionPrintOptions
                 { sessionPrintFile = "" -- Not used for in-memory formatting
@@ -244,7 +246,7 @@ formatSessionMarkdown session =
                 , nTurns = Nothing
                 , repeatSystemPrompt = False
                 , repeatTools = False
-                , orderPreference = Chronological
+                , orderPreference = orderPref
                 , noFunnyStamp = True -- Skip ASCII art in TUI exports for cleaner output
                 }
      in formatSessionAsMarkdown opts session
@@ -258,24 +260,27 @@ handleDumpSessionToMarkdown = do
     mConvId <- getFocusedConversationId
     case (mSession, mConvId) of
         (Just session, Just (ConversationId cid)) -> do
-            let markdown = formatSessionMarkdown session
+            let markdown = formatSessionMarkdown Chronological session
                 fileName = "conv." <> show cid <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
             showStatus StatusInfo $ "Exported to " <> Text.pack fileName
         (Just session, Nothing) -> do
-            let markdown = formatSessionMarkdown session
+            let markdown = formatSessionMarkdown Chronological session
                 fileName = "sess." <> show session.sessionId <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
             showStatus StatusInfo $ "Exported to " <> Text.pack fileName
         _ -> do
             showStatus StatusWarning "No session or conversation selected"
 
-{- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
+{- | Handle Ctrl+t or Ctrl+r: Display the currently focused session with an external viewer.
 Uses the AGENT_MD_VIEWER environment variable if set.
 The viewer is executed asynchronously and tracked as an auxiliary task.
+
+Ctrl+t uses Chronological order (oldest first).
+Ctrl+r uses Antichronological order (newest first).
 -}
-handleViewSessionWithExternalViewer :: EventM N TuiState ()
-handleViewSessionWithExternalViewer = do
+handleViewSessionWithExternalViewer :: OrderPreference -> EventM N TuiState ()
+handleViewSessionWithExternalViewer orderPref = do
     mViewer <- liftIO $ lookupEnv "AGENT_MD_VIEWER"
     case mViewer of
         Just viewerCmd -> do
@@ -283,7 +288,7 @@ handleViewSessionWithExternalViewer = do
             mConvId <- getFocusedConversationId
             case (mSession, mConvId) of
                 (Just session, Just convId) -> do
-                    let markdown = formatSessionMarkdown session
+                    let markdown = formatSessionMarkdown orderPref session
                     -- Create a temporary file with the markdown content
                     tempFile <- liftIO $ writeSystemTempFile "session-view-" (Text.unpack markdown)
                     -- Spawn the viewer process asynchronously
@@ -592,3 +597,4 @@ handleSendMessage = do
                     -- Clear editor
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
