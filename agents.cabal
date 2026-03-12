@@ -106,6 +106,7 @@ library agents-lib
                     , System.Agents.Tools.PostgREST.Types
                     , System.Agents.Tools.PostgREST.Converter
                     , System.Agents.Tools.PostgRESToolbox
+                    , System.Agents.Tools.SqliteToolbox
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime
@@ -146,6 +147,7 @@ library agents-lib
                       containers,
                       contravariant,
                       data-clist,
+                      direct-sqlite,
                       directory,
                       extra,
                       filepath,
@@ -164,6 +166,7 @@ library agents-lib
                       process-extras,
                       prodapi,
                       fsnotify,
+                      sqlite-simple,
                       stm,
                       stm-chans,
                       stm-conduit,
