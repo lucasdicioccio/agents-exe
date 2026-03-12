@@ -253,6 +253,8 @@ data ArgParserArgs = ArgParserArgs
     , defaultLogRawFilepath :: Maybe FilePath
     , defaultLogSesionsJsonPrefix :: Maybe FilePath
     , argPromptAliases :: Map Text AliasDefinition
+    , defaultSelfDescribeAnnounce :: Maybe String
+    , defaultSelfDescribeDescription :: Maybe String
     }
 
 -- | Get the path to the secrets key file
@@ -282,6 +284,8 @@ data AgentsExeConfig = AgentsExeConfig
     , agentsFiles :: [FilePath]
     , agentsLogs :: Maybe AgentsExeLogConfig
     , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
+    , cfgSelfDescribeAnnounce :: Maybe String
+    , cfgSelfDescribeDescription :: Maybe String
     }
     deriving (Show, Generic)
 
@@ -292,6 +296,8 @@ instance Aeson.FromJSON AgentsExeConfig where
         <*> v Aeson..:? "agentsFiles" Aeson..!= []
         <*> v Aeson..:? "agentsLogs"
         <*> v Aeson..:? "promptAliases"
+        <*> v Aeson..:? "selfDescribeAnnounce"
+        <*> v Aeson..:? "selfDescribeDescription"
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
 locateAgentsExeConfig :: IO (Maybe FilePath)
@@ -339,6 +345,8 @@ initArgParserArgs = do
                         (logRawPath =<< obj.agentsLogs)
                         (logSessionsJsonPrefix =<< obj.agentsLogs)
                         (resolveAliases obj.cfgPromptAliases)
+                        obj.cfgSelfDescribeAnnounce
+                        obj.cfgSelfDescribeDescription
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
@@ -359,6 +367,8 @@ initArgParserArgs = do
                 Nothing
                 (Just sessionsDir)
                 defaultAliases
+                Nothing
+                Nothing
 
 -- | Main program configuration
 data Prog = Prog
@@ -380,7 +390,7 @@ data Command
     | TerminalUI TUICmd.TuiOptions
     | OneShot OneShotCmd.OneShotOptions
     | EchoPrompt EchoPromptCmd.EchoPromptOptions
-    | SelfDescribe
+    | SelfDescribe SelfDescribeCmd.SelfDescribeOptions
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
@@ -395,7 +405,7 @@ instance Show Command where
     show (TerminalUI _) = "TerminalUI"
     show (OneShot _) = "OneShot"
     show (EchoPrompt _) = "EchoPrompt"
-    show SelfDescribe = "SelfDescribe"
+    show (SelfDescribe _) = "SelfDescribe"
     show Initialize = "Initialize"
     show McpServer = "McpServer"
     show (SessionPrint _) = "SessionPrint"
@@ -696,8 +706,24 @@ parseSessionPrintOptions =
 parseInitializeCommand :: Parser Command
 parseInitializeCommand = pure Initialize
 
-parseSelfDescribeCommand :: Parser Command
-parseSelfDescribeCommand = pure SelfDescribe
+parseSelfDescribeCommand :: ArgParserArgs -> Parser Command
+parseSelfDescribeCommand argArgs = SelfDescribe <$> parseSelfDescribeOptions argArgs
+
+parseSelfDescribeOptions :: ArgParserArgs -> Parser SelfDescribeCmd.SelfDescribeOptions
+parseSelfDescribeOptions argArgs =
+    SelfDescribeCmd.SelfDescribeOptions
+        <$> optional (strOption
+            ( long "self-describe-announce"
+                <> metavar "NAME"
+                <> help "The name/announce field for self-describe output"
+                <> maybe mempty value argArgs.defaultSelfDescribeAnnounce
+            ))
+        <*> optional (strOption
+            ( long "self-describe-description"
+                <> metavar "DESC"
+                <> help "The description for self-describe output"
+                <> maybe mempty value argArgs.defaultSelfDescribeDescription
+            ))
 
 parsePathsCommand :: Parser Command
 parsePathsCommand = Paths <$> parsePathsOptions
@@ -1057,7 +1083,7 @@ parseProgOptions argparserargs =
                 <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
-                <> command "describe" (info parseSelfDescribeCommand (idm))
+                <> command "describe" (info (parseSelfDescribeCommand argparserargs) (idm))
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
@@ -1169,8 +1195,8 @@ runCommand pargs baseTracer sessionStore agentFiles =
         OneShot opts ->
             OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile agentFiles pargs.progPromptAliases opts
         
-        SelfDescribe ->
-            SelfDescribeCmd.handleSelfDescribe pargs.apiKeysFile
+        SelfDescribe opts ->
+            SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile agentFiles
@@ -1378,5 +1404,4 @@ toJsonTrace x = case x of
                         [ "x" .= ("tool-call-end" :: Text)
                         , "name" .= n
                         ]
-
 
