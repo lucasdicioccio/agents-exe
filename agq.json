@@ -10,12 +10,12 @@
   "agentAttempts": 3,
   "projects": {
     "root": ".",
-    "architect": "."
+    "architect": ".",
     "documenter": "."
   },
   "agents": {
     "default": "tasks-agents/kimi-agent-oneshot.json",
-    "architect": "tasks-agents/kimi-architect.json"
+    "architect": "tasks-agents/kimi-architect.json",
     "documenter": "tasks-agents/kimi-documenter.json"
   },
   "hooks": {
