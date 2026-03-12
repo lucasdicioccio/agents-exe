@@ -11,6 +11,7 @@
 -- * MCP tools - Tools exposed via Model Context Protocol
 -- * OpenAPI tools - Tools generated from OpenAPI specifications
 -- * PostgREST tools - Tools generated from PostgREST database APIs
+-- * SQLite tools - Tools for executing SQL queries against SQLite databases
 --
 -- For OpenAPI tools, special handling is done for name normalization:
 -- OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
@@ -19,7 +20,7 @@
 module System.Agents.ToolRegistration (
     -- * Core types
     ToolRegistration (..),
-    
+
     -- * Registration functions
     registerBashToolInLLM,
     registerIOScriptInLLM,
@@ -30,17 +31,21 @@ module System.Agents.ToolRegistration (
     registerPostgRESToolInLLM,
     registerPostgRESTools,
     registerPostgRESTool,
-    
+    registerSqliteTool,
+    registerSqliteTools,
+
     -- * Naming policies
     io2LLMName,
     bash2LLMName,
     mcp2LLMName,
     openapi2LLMName,
     postgrest2LLMName,
+    sqlite2LLMName,
 ) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
 import Data.Foldable.WithIndex (ifoldl')
 import Data.Map.Strict (Map)
@@ -91,6 +96,7 @@ import System.Agents.Tools.PostgREST.Converter (
  )
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
+import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import System.Agents.ToolSchema
 import System.Agents.Tools.Trace (ToolTrace (..))
 import Prod.Tracer (Tracer, contramap)
@@ -134,6 +140,13 @@ postgrest2LLMName box tool =
         normalizedTable = normalizeForLLM tableName
         methodPart = Text.toLower $ methodToText tool.prtMethod
      in OpenAI.ToolName (mconcat ["postgrest_", normalizedToolbox, "_", methodPart, "_", normalizedTable])
+
+-- | Naming policy for SQLite tools.
+--
+-- Generates an LLM-safe tool name in the format: @sqlite_{toolboxName}_{toolName}@
+sqlite2LLMName :: SqliteTools.Toolbox -> Text -> OpenAI.ToolName
+sqlite2LLMName box toolName =
+    OpenAI.ToolName (mconcat ["sqlite_", box.toolboxName, "_", toolName])
 
 -------------------------------------------------------------------------------
 
@@ -286,7 +299,7 @@ registerOpenAPITool toolbox tool =
             Just nm -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) (nmNormalized nm)
             Nothing -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) originalOpId
      in case mNameMapping of
-        Nothing -> Left $ "Tool not found in name mapping: " ++ Text.unpack originalOpId
+        Nothing -> Left $ "Tool not found in name mapping: " <> Text.unpack originalOpId
         Just nameMapping ->
             let -- Convert to OpenAI Tool format with normalized name
                 openaiTool = (toOpenAITool tool)
@@ -633,6 +646,64 @@ registerPostgRESToolInLLM ::
 registerPostgRESToolInLLM = registerPostgRESTool
 
 -------------------------------------------------------------------------------
+-- SQLite Tool Registration
+-------------------------------------------------------------------------------
+
+-- | Register a single SQLite tool with the LLM system.
+--
+-- SQLite tools expose a single 'query' function that accepts SQL.
+-- The function name includes the toolbox name for uniqueness.
+registerSqliteTool ::
+    SqliteTools.Toolbox ->
+    Either String ToolRegistration
+registerSqliteTool box =
+    let -- Tool name is "query" since SQLite toolboxes expose a single query tool
+        toolName = "query"
+        llmName = sqlite2LLMName box toolName
+        
+        -- Single parameter: the SQL query
+        paramProps = 
+            [ ParamProperty
+                { propertyKey = "sql"
+                , propertyType = StringParamType
+                , propertyDescription = "SQL query to execute (SELECT for read-only, any valid SQL for read-write)"
+                , propertyRequired = True
+                }
+            ]
+        
+        openaiTool = OpenAI.Tool
+            { OpenAI.toolName = llmName
+            , OpenAI.toolDescription = box.toolboxDescription
+            , OpenAI.toolParamProperties = paramProps
+            }
+
+        -- Create the tool
+        tool' = sqliteTool box
+
+        -- Find function - matches on the LLM name
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find call =
+            if call.toolCallFunction.toolCallFunctionName == llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+     in Right $ ToolRegistration
+            { innerTool = mapToolResult (const ()) tool'
+            , declareTool = openaiTool
+            , findTool = find
+            }
+
+-- | Register all tools from a SQLite toolbox.
+--
+-- Currently SQLite toolboxes expose a single query tool.
+registerSqliteTools ::
+    SqliteTools.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerSqliteTools box =
+    pure $ case registerSqliteTool box of
+        Left err -> Left err
+        Right reg -> Right [reg]
+
+-------------------------------------------------------------------------------
 -- Internal tool builders (copied from Tools to avoid import cycle)
 -------------------------------------------------------------------------------
 
@@ -694,6 +765,37 @@ ioTool script =
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
+
+-- | Builder for a tool based on a SQLite toolbox.
+sqliteTool ::
+    SqliteTools.Toolbox ->
+    Tool ()
+sqliteTool box =
+    Tool
+        { toolDef = SqliteTool toolDesc
+        , toolRun = run
+        }
+  where
+    call = ()
+    
+    -- Build tool description from toolbox
+    toolDesc = SqliteTools.ToolDescription
+        { SqliteTools.toolDescriptionName = "query"
+        , SqliteTools.toolDescriptionDescription = box.toolboxDescription
+        , SqliteTools.toolDescriptionToolboxName = box.toolboxName
+        , SqliteTools.toolDescriptionDatabasePath = box.toolboxPath
+        }
+    
+    run _tracer _ctx (Aeson.Object v) = do
+        case KeyMap.lookup (AesonKey.fromText "sql") v of
+            Just (Aeson.String query) -> do
+                result <- SqliteTools.executeQuery box query
+                case result of
+                    Left err -> pure $ SqliteToolError call err
+                    Right rsp -> pure $ SqliteToolResult call rsp
+            _ -> pure $ SqliteToolError call (SqliteTools.SqlError "Missing 'sql' parameter or invalid type")
+    run _tracer _ctx _ = do
+        pure $ SqliteToolError call (SqliteTools.SqlError "Arguments must be a JSON object")
 
 -------------------------------------------------------------------------------
 -- Schema adaptation helpers
