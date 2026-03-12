@@ -17,7 +17,8 @@ import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.McpToolbox as McpTools
-import qualified System.Agents.Tools.PostgREST.Types as PostgRESTTypes
+import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
+import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.Trace (ToolTrace)
 
@@ -41,6 +42,7 @@ data ToolDef
     | IOTool !IOTools.IOScriptDescription
     | OpenAPITool !Text !Text  -- ^ Toolbox name and operation ID
     | PostgRESTool !Text !Text  -- ^ Toolbox name and table path
+    | SqliteTool !SqliteTools.ToolDescription  -- ^ SQLite tool description
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -66,10 +68,14 @@ data CallResult call
     -- ^ OpenAPI tool executed successfully with structured result
     | OpenAPIToolError call String
     -- ^ OpenAPI tool execution failed
-    | PostgRESToolResult call PostgRESTTypes.ToolResult
+    | PostgRESToolResult call PostgRESTypes.ToolResult
     -- ^ PostgREST tool executed successfully with structured result
     | PostgRESToolError call String
     -- ^ PostgREST tool execution failed
+    | SqliteToolResult call SqliteTools.QueryResult
+    -- ^ SQLite tool executed successfully with query results
+    | SqliteToolError call SqliteTools.QueryError
+    -- ^ SQLite tool execution failed
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -87,6 +93,8 @@ mapCallResult f c =
         (OpenAPIToolError v e) -> OpenAPIToolError (f v) e
         (PostgRESToolResult v r) -> PostgRESToolResult (f v) r
         (PostgRESToolError v e) -> PostgRESToolError (f v) e
+        (SqliteToolResult c r) -> SqliteToolResult (f c) r
+        (SqliteToolError c e) -> SqliteToolError (f c) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -108,6 +116,8 @@ extractCall (OpenAPIToolResult c _) = c
 extractCall (OpenAPIToolError c _) = c
 extractCall (PostgRESToolResult c _) = c
 extractCall (PostgRESToolError c _) = c
+extractCall (SqliteToolResult c _) = c
+extractCall (SqliteToolError c _) = c
 
 -------------------------------------------------------------------------------
 -- Byte Counting Helpers
@@ -145,6 +155,10 @@ callResultByteSize (PostgRESToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (PostgRESToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack err))))
+callResultByteSize (SqliteToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (SqliteToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 
 -- | Calculate total bytes for a list of tool responses.
 --
@@ -152,5 +166,4 @@ callResultByteSize (PostgRESToolError _ err) =
 -- multiple tool results in a single step.
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
-
 
