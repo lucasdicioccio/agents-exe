@@ -10,7 +10,17 @@
     "announce": "The main agent, capable of reasoning.",
     "systemPrompt": [
       "You are a helpful software agent trying to solve user requests"
+    ],
+    "builtinToolboxes": [
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "Name": "knowledge",
+          "Description": "A knowledge base of facts and information",
+          "Path": ".knowledge.db",
+          "Access": "read-write"
+        }
+      }
     ]
   }
 }
-

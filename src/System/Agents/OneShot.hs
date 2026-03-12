@@ -299,6 +299,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         PostgRESToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "PostgREST tool error: " <> err
+        SqliteToolResult _ toolResult ->
+            UserToolResponse $ Aeson.toJSON toolResult
+        SqliteToolError _ err ->
+            UserToolResponse $ Aeson.String $ Text.pack $ "SQLite tool error: " <> show err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
