@@ -233,9 +233,7 @@ checkDepsSatisfied cfg deps = do
             then return True  -- closed
             else if labelDoneInBranch (labels cfg) `elem` lbls
               then return True  -- done in a feature branch
-              else do
-                (ec2, out2) <- runGh ["pr", "view", depStr, "--json", "state", "--jq", ".state"]
-                return (not (ec2 == ExitSuccess && Text.strip out2 == "OPEN"))
+              else return False  -- still open, blocks promotion
 
 -- ---------------------------------------------------------------------------
 -- cmdStatus
