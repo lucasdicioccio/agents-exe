@@ -43,7 +43,7 @@ handleInitialize apiKeysFile agentFiles = do
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
-            , builtinToolboxes = Nothing
+            , builtinToolboxes = Just []
             , extraAgents = Nothing
             }
 
