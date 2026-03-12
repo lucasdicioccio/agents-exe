@@ -76,7 +76,7 @@ import qualified System.FilePath as FilePath
 import System.Process (proc)
 
 import System.Agents.Base (
-    Agent, AgentDescription (..), AgentId, AgentSlug, ExtraAgentRef (..),
+    Agent, AgentDescription (..), AgentId, AgentSlug, BuiltinToolboxDescription (..), ExtraAgentRef (..),
     McpServerDescription (..), McpSimpleBinaryConfiguration (..),
     OpenAPIToolboxDescription (..), OpenAPIServerDescription (..), OpenAPIServerOnDisk (..),
     PostgRESTToolboxDescription (..), PostgRESTServerDescription (..), PostgRESTServerOnDisk (..)
@@ -913,6 +913,9 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                 (Left err, _) -> pure $ Left (show err)
                 (_, Left err) -> pure $ Left (show err)
                 (Right openApiToolRegs, Right postgrestToolRegs) -> do
+                    -- Get builtin toolbox descriptions from agent config
+                    let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
+
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
                     -- extra agents (resolved via registry at call time)
@@ -934,6 +937,7 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                         [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
+                        builtinDescriptions
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
@@ -969,6 +973,9 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                 (Left err, _) -> pure $ Left (show err)
                 (_, Left err) -> pure $ Left (show err)
                 (Right openApiToolRegs, Right postgrestToolRegs) -> do
+                    -- Get builtin toolbox descriptions from agent config
+                    let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
+
                     Runtime.newRuntime
                         desc.slug
                         desc.announce
@@ -987,6 +994,7 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                         [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
+                        builtinDescriptions
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =

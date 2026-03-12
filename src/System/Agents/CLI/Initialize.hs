@@ -43,9 +43,10 @@ handleInitialize apiKeysFile agentFiles = do
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
+            , builtinToolboxes = Just []
             , extraAgents = Nothing
             }
-    
+
     forM_ (take 1 agentFiles) $ \agentFile -> do
         catch (InitProject.initAgentFile defaultAgent agentFile >> pure ()) handleInitError
         catch (InitProject.initAgentTooldir defaultAgent agentFile >> pure ()) handleInitError
