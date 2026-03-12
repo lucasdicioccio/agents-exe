@@ -11,10 +11,12 @@
   "projects": {
     "root": ".",
     "architect": "."
+    "documenter": "."
   },
   "agents": {
     "default": "tasks-agents/kimi-agent-oneshot.json",
     "architect": "tasks-agents/kimi-architect.json"
+    "documenter": "tasks-agents/kimi-documenter.json"
   },
   "hooks": {
     "default": "./git-agent-task.sh"
