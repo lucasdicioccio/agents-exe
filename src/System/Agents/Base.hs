@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module System.Agents.Base where
@@ -9,12 +10,13 @@ import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
-import System.Agents.Tools.PostgREST.Types (HttpMethod (..), defaultAllowedMethods)
+import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 
 type AgentSlug = Text
 type AgentAnnounce = Text
@@ -368,6 +370,121 @@ instance FromJSON PostgRESTToolboxDescription where
             _ -> fail "expecting 'PostgRESTServer' or 'PostgRESTServerOnDisk' tag"
 
 -------------------------------------------------------------------------------
+-- Builtin Toolbox Configuration
+-------------------------------------------------------------------------------
+
+-- | Access mode for SQLite databases.
+--
+-- Controls whether the database is opened in read-only or read-write mode.
+-- This affects both file permissions and SQLite's internal locking behavior.
+data SqliteAccessMode
+    = SqliteReadOnly
+    -- ^ Open database in read-only mode. No modifications allowed.
+    | SqliteReadWrite
+    -- ^ Open database in read-write mode. Both reads and writes allowed.
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Serialize SqliteAccessMode as kebab-case strings.
+instance ToJSON SqliteAccessMode where
+    toJSON SqliteReadOnly = Aeson.String "read-only"
+    toJSON SqliteReadWrite = Aeson.String "read-write"
+
+-- | Parse SqliteAccessMode from kebab-case strings.
+instance FromJSON SqliteAccessMode where
+    parseJSON = Aeson.withText "SqliteAccessMode" $ \txt ->
+        case txt of
+            "read-only" -> return SqliteReadOnly
+            "read-write" -> return SqliteReadWrite
+            other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only' or 'read-write'."
+
+-- | Configuration for a SQLite builtin toolbox.
+--
+-- This describes a SQLite database to load as a builtin toolbox.
+-- The toolbox provides tools for querying and optionally modifying
+-- the SQLite database.
+--
+-- Example configuration:
+--
+-- @
+-- {
+--   "name": "memory",
+--   "description": "a set of memories",
+--   "path": "/path/to/memories.sqlite",
+--   "access": "read-write"
+-- }
+-- @
+--
+-- The 'access' field controls whether the database is opened in
+-- read-only or read-write mode. Use 'read-only' for safety when
+-- the agent should only query data, and 'read-write' when the agent
+-- needs to modify the database.
+data SqliteToolboxDescription
+    = SqliteToolboxDescription
+    { sqliteToolboxName :: Text
+    -- ^ Unique name for this toolbox instance (used as tool prefix)
+    , sqliteToolboxDescription :: Text
+    -- ^ Human-readable description of the database contents/purpose
+    , sqliteToolboxPath :: FilePath
+    -- ^ Path to the SQLite database file
+    , sqliteToolboxAccess :: SqliteAccessMode
+    -- ^ Access mode: read-only or read-write
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for SqliteToolboxDescription to use camelCase field names
+sqliteToolboxOptions :: Aeson.Options
+sqliteToolboxOptions = Aeson.defaultOptions
+    { Aeson.fieldLabelModifier = dropPrefix "sqliteToolbox"
+    , Aeson.omitNothingFields = True
+    }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON SqliteToolboxDescription where
+    toJSON = Aeson.genericToJSON sqliteToolboxOptions
+    toEncoding = Aeson.genericToEncoding sqliteToolboxOptions
+
+instance FromJSON SqliteToolboxDescription where
+    parseJSON = Aeson.genericParseJSON sqliteToolboxOptions
+
+-- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
+--
+-- This is a tagged union type that allows extensible builtin toolbox types.
+-- New builtin toolbox types can be added in the future without breaking
+-- existing configurations.
+--
+-- Example configuration:
+--
+-- @
+-- {
+--   "builtinToolboxes": [
+--     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
+--     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}}
+--   ]
+-- }
+-- @
+data BuiltinToolboxDescription
+    = SqliteToolbox SqliteToolboxDescription
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON BuiltinToolboxDescription where
+    toJSON (SqliteToolbox val) =
+        Aeson.object
+            [ "tag" .= ("SqliteToolbox" :: Text)
+            , "contents" .= val
+            ]
+
+instance FromJSON BuiltinToolboxDescription where
+    parseJSON = Aeson.withObject "BuiltinToolboxDescription" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "SqliteToolbox" ->
+                SqliteToolbox <$> v .: "contents"
+            _ -> fail "expecting 'SqliteToolbox' tag"
+
+-------------------------------------------------------------------------------
 data Agent
     = Agent
     { slug :: Text
@@ -381,6 +498,7 @@ data Agent
     , mcpServers :: Maybe [McpServerDescription]
     , openApiToolboxes :: Maybe [OpenAPIToolboxDescription]
     , postgrestToolboxes :: Maybe [PostgRESTToolboxDescription]
+    , builtinToolboxes :: Maybe [BuiltinToolboxDescription]
     , extraAgents :: Maybe [ExtraAgentRef]
     }
     deriving (Show, Ord, Eq, Generic)

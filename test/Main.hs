@@ -129,6 +129,7 @@ agentSerializationTests =
                 Just agent -> do
                     Base.slug agent @?= "test-agent"
                     Base.extraAgents agent @?= Nothing
+                    Base.builtinToolboxes agent @?= Nothing
         , testCase "agent with extra-agents" $ do
             let json = Text.unlines
                     [ "{"
@@ -168,6 +169,7 @@ agentSerializationTests =
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
@@ -188,6 +190,7 @@ agentSerializationTests =
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -206,6 +209,7 @@ agentSerializationTests =
                     , Base.mcpServers = Just []
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
@@ -214,6 +218,76 @@ agentSerializationTests =
             let json = encode desc
             let mDesc = decode json :: Maybe Base.AgentDescription
             mDesc @?= Just desc
+        , testCase "round-trip with builtin toolboxes" $ do
+            let sqliteDesc = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "memory"
+                    , Base.sqliteToolboxDescription = "a set of memories"
+                    , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    }
+            let builtinToolbox = Base.SqliteToolbox sqliteDesc
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = "tools"
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Just [builtinToolbox]
+                    , Base.extraAgents = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            mAgent @?= Just agent
+        , testCase "round-trip with multiple builtin toolboxes" $ do
+            let sqliteDesc1 = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "memory"
+                    , Base.sqliteToolboxDescription = "a set of memories"
+                    , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    }
+            let sqliteDesc2 = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "guidelines"
+                    , Base.sqliteToolboxDescription = "a set of guidelines"
+                    , Base.sqliteToolboxPath = "/path/to/guidelines.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteReadOnly
+                    }
+            let builtinToolboxes = [Base.SqliteToolbox sqliteDesc1, Base.SqliteToolbox sqliteDesc2]
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = "tools"
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Just builtinToolboxes
+                    , Base.extraAgents = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            mAgent @?= Just agent
+        , testCase "SqliteAccessMode round-trip" $ do
+            -- Test read-only mode round-trip
+            let readOnly = Base.SqliteReadOnly
+            let jsonRO = encode readOnly
+            let mReadOnly = decode jsonRO :: Maybe Base.SqliteAccessMode
+            mReadOnly @?= Just Base.SqliteReadOnly
+            
+            -- Test read-write mode round-trip
+            let readWrite = Base.SqliteReadWrite
+            let jsonRW = encode readWrite
+            let mReadWrite = decode jsonRW :: Maybe Base.SqliteAccessMode
+            mReadWrite @?= Just Base.SqliteReadWrite
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
@@ -1224,6 +1298,7 @@ agentConfigGraphTests =
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing
+        , Base.builtinToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
 
@@ -1239,6 +1314,7 @@ agentConfigGraphTests =
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing
+        , Base.builtinToolboxes = Nothing
         , Base.extraAgents = Just [Base.ExtraAgentRef e (Text.unpack e <> ".json") | e <- extras]
         }
 
@@ -1296,6 +1372,7 @@ referenceValidationTests =
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
                 , Base.postgrestToolboxes = Nothing
+                , Base.builtinToolboxes = Nothing
                 , Base.extraAgents = Nothing
                 }
             agent2 = Base.Agent
@@ -1310,6 +1387,7 @@ referenceValidationTests =
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
                 , Base.postgrestToolboxes = Nothing
+                , Base.builtinToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "agent-1" "/agent-1.json"]
                 }
 
@@ -1343,6 +1421,7 @@ referenceValidationTests =
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
                 , Base.postgrestToolboxes = Nothing
+                , Base.builtinToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "nonexistent" "/nonexistent.json"]
                 }
 
@@ -1474,6 +1553,7 @@ cycleDetectionTests =
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing
+        , Base.builtinToolboxes = Nothing
         , Base.extraAgents = Nothing
         }
 
