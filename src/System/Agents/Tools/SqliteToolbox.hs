@@ -316,8 +316,9 @@ validateAccess mode query =
 
 This function:
 1. Opens a connection to the SQLite database using both sqlite-simple and direct-sqlite
-2. Sets up the connection based on the access mode
-3. Returns a 'Toolbox' ready for query execution
+2. Configures the database for efficient writes (WAL mode, foreign keys)
+3. Sets up the connection based on the access mode
+4. Returns a 'Toolbox' ready for query execution
 
 The access mode determines:
 * Whether the database is opened in read-only mode
@@ -343,8 +344,17 @@ initializeToolbox tracer desc = do
         -- Open direct connection for metadata access
         directDb <- Direct.open (Text.pack dbPath)
 
-        -- Set foreign keys on for better data integrity
+        -- Configure database for efficient writes and data integrity
+        -- Enable foreign keys for better data integrity
         _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
+
+        -- Enable Write-Ahead Logging (WAL) mode for better write performance
+        -- WAL mode reduces file churn and allows concurrent readers during writes
+        _ <- SQLite.execute_ conn "PRAGMA journal_mode = WAL"
+
+        -- Set synchronous to NORMAL for a good balance between durability and performance
+        -- This ensures data is safe while still being efficient
+        _ <- SQLite.execute_ conn "PRAGMA synchronous = NORMAL"
 
         pure (conn, directDb)
 
