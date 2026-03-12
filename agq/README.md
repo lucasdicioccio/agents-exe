@@ -67,7 +67,7 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
 | `defaultTries` | Default `tries_remaining` for tasks imported via `pull` |
 | `projects` | Maps a label → relative path inside the worktree |
 | `agents` | Maps a label → agent config file path |
-| `hooks` | Maps a label → hook script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to run no hook |
+| `hooks` | Maps a label → hook script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to run no hook. The same script is invoked at three points with different first arguments: `prepare`, `static-check`, and `check` — see [Hook lifecycle](#hook-lifecycle) |
 | `labels.labelToBeTaken` | GitHub label meaning "ready to pick up" |
 | `labels.labelTaken` | GitHub label applied after an issue is imported |
 | `labels.labelWait` | GitHub label meaning "blocked on dependencies" |
@@ -218,10 +218,11 @@ Executes a single named task directly (also used internally by `process`):
 5. **On agent failure**: writes the full stderr to `<sessionsDir>/<name>.err` inside the worktree, posts the last 100 lines as a comment on the originating GitHub issue (for `gh`-sourced tasks), marks the task `failed`, and stops.
 6. Runs `agents-exe session-print <session.json>` and writes the output to `<sessionsDir>/<name>.session.md` inside the worktree.
 7. `git checkout -b <name> && git add -A && git commit --no-verify -m <commit-msg>`
-8. `git push -u origin <name>`
-9. `gh pr create --base <target> --head <name> --label agq/agent-pr`
-10. Runs `<hook> preview <label> <name> <instruction-file>` if the hook exists.
-11. Marks the task `done` and releases locks.
+8. Runs the **static-checks hook** (if configured): `<static-checks-script> <label> <name> <instruction-file>`. If the script modifies any files a second commit is created (`Run static-checks for <name>`); a noop leaves the branch at one commit. stdout+stderr are appended to the PR body.
+9. `git push -u origin <name>`
+10. `gh pr create --base <target> --head <name> --label agq/agent-pr` (PR body includes static-checks output when non-empty)
+11. Runs `<hook> check <label> <name> <instruction-file>` if the hook exists, posting its output as a PR comment.
+12. Marks the task `done` and releases locks.
 
 Session and error files live **inside the worktree** so they are committed with the work.
 
@@ -287,6 +288,50 @@ resets those tasks to `pending`. Useful after a crash or `kill`.
 
 ```bash
 agq recover
+```
+
+---
+
+## Hook lifecycle
+
+A single hook script (configured via `hooks`) is called at three points during task execution, distinguished by the first positional argument:
+
+| Invocation | When | Arguments |
+|------------|------|-----------|
+| `prepare` | Before the agent runs | `prepare <label> <name> <instruction-file>` |
+| `static-check` | After agent commit, before push | `static-check <label> <name> <instruction-file>` |
+| `check` | After PR is created | `check <label> <name> <instruction-file>` |
+
+The script runs with its working directory set to the project directory inside the worktree.
+
+### `static-check` — commit behaviour
+
+| Outcome | Result |
+|---------|--------|
+| Script exits; no file changes | Branch has **one commit** (the agent's work) |
+| Script exits; files changed | Branch has **two commits**: agent work + `Run static-checks for <name>` |
+
+The combined stdout+stderr is appended to the PR body under a `## Static checks` heading (fenced code block). Empty output is omitted.
+
+### Example hook script skeleton
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+phase="$1"; label="$2"; name="$3"; instr="$4"
+
+case "$phase" in
+  prepare)
+    # e.g. install dependencies
+    ;;
+  static-check)
+    # e.g. run linter/formatter — any file changes will be committed automatically
+    ./scripts/lint.sh
+    ;;
+  check)
+    # e.g. post extra diagnostics as a PR comment (stdout is used as body)
+    ;;
+esac
 ```
 
 ---

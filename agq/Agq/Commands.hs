@@ -433,13 +433,32 @@ execTask cfg conn t = do
     unless (Text.null (Text.strip statusOut)) $ do
       void $ runGit ["-C", nameStr, "add", "-A"]
       void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
+
+      -- static-checks hook: runs after agent commit, before push
+      staticCheckOutput <- case mHookAbs of
+        Nothing -> return ""
+        Just h  -> do
+          putStrLn $ "[agq] Running static-checks for task '" <> nameStr <> "'"
+          (_, scOut, scErr) <- runWithCwdBoth worktreeProj h ["static-check", Text.unpack lbl, nameStr, instrFile]
+          (_, scStatus) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
+          unless (Text.null (Text.strip scStatus)) $ do
+            putStrLn $ "[agq] static-checks modified files, committing..."
+            void $ runGit ["-C", nameStr, "add", "-A"]
+            void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", "Run static-checks for " <> nameStr]
+          return (scOut <> scErr)
+
       void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
 
       let prTitle  = takeWhile (/= '\n') commit
           closesLine = case taskSource t of
             SourceGithub n -> "\n\nCloses #" <> show n <> "."
             SourceLocal    -> ""
-          prBody   = commit <> closesLine
+          staticChecksSection =
+            let trimmed = Text.strip staticCheckOutput
+            in if Text.null trimmed
+                 then ""
+                 else "\n\n## Static checks\n\n```\n" <> Text.unpack trimmed <> "\n```"
+          prBody   = commit <> closesLine <> staticChecksSection
       (_, prUrl, _) <- captureCmdBoth "gh"
         [ "pr", "create"
         , "--base", target
