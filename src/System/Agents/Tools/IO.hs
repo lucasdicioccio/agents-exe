@@ -27,25 +27,26 @@ data IOScriptDescription
     }
     deriving (Show)
 
--- | An IO script that executes a Haskell IO action with access to session context.
---
--- Unlike bash tools that receive context via environment variables, IO tools
--- receive the 'ToolExecutionContext' directly as a function argument. This provides
--- type-safe access to session metadata (session ID, conversation ID, turn ID, etc.)
--- without exposing these details to the LLM.
---
--- Example:
---
--- @
--- myTool :: IOScript MyArg ByteString
--- myTool = IOScript
---     { description = IOScriptDescription "my-tool" "Does something"
---     , ioRun = \ctx arg -> do
---         let sessionId = ctxSessionId ctx
---         -- Access complete session context
---         pure $ result arg
---     }
--- @
+{- | An IO script that executes a Haskell IO action with access to session context.
+
+Unlike bash tools that receive context via environment variables, IO tools
+receive the 'ToolExecutionContext' directly as a function argument. This provides
+type-safe access to session metadata (session ID, conversation ID, turn ID, etc.)
+without exposing these details to the LLM.
+
+Example:
+
+@
+myTool :: IOScript MyArg ByteString
+myTool = IOScript
+    { description = IOScriptDescription "my-tool" "Does something"
+    , ioRun = \ctx arg -> do
+        let sessionId = ctxSessionId ctx
+        -- Access complete session context
+        pure $ result arg
+    }
+@
+-}
 data IOScript llmArg b
     = IOScript
     { description :: IOScriptDescription
@@ -57,10 +58,11 @@ data RunError
     | ScriptExecutionError String
     deriving (Show)
 
--- | Run an IO script with the given execution context and JSON argument.
---
--- The 'ToolExecutionContext' provides the script with access to session metadata
--- without exposing these details to the LLM.
+{- | Run an IO script with the given execution context and JSON argument.
+
+The 'ToolExecutionContext' provides the script with access to session metadata
+without exposing these details to the LLM.
+-}
 runValue ::
     (FromJSON llmArg) =>
     Tracer IO (Trace llmArg b) ->
@@ -77,4 +79,3 @@ runValue tracer script ctx val = do
             out <- script.ioRun ctx argz
             runTracer tracer (IOScriptStopped script.description argz out)
             pure $ Right out
-

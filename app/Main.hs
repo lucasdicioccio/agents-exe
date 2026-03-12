@@ -2,14 +2,15 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Main entry point for the agents-exe executable.
---
--- This module handles command-line argument parsing and dispatches to
--- the appropriate command handlers. The actual command logic is implemented
--- in separate modules under 'System.Agents.CLI'.
+{- | Main entry point for the agents-exe executable.
+
+This module handles command-line argument parsing and dispatches to
+the appropriate command handlers. The actual command logic is implemented
+in separate modules under 'System.Agents.CLI'.
+-}
 module Main where
 
-import Control.Monad (when, unless)
+import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
@@ -26,12 +27,12 @@ import qualified Prod.Tracer as Prod
 
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
-import System.Agents.CLI.Aliases
-    ( AliasDefinition
-    , defaultAliases
-    , resolveAliases
-    )
-import System.Agents.CLI.Base (makeShowLogFileTracer, makeFileJsonTracer)
+import System.Agents.CLI.Aliases (
+    AliasDefinition,
+    defaultAliases,
+    resolveAliases,
+ )
+import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
 import qualified System.Agents.CLI.Cowsay as CowsayCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
@@ -41,12 +42,12 @@ import qualified System.Agents.CLI.Initialize as InitializeCmd
 import qualified System.Agents.CLI.McpServer as McpServerCmd
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
-import System.Agents.CLI.PromptScript (PromptScriptDirective (..), PromptScript)
+import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.TUI as TUICmd
-import System.Agents.ExportImport.Types (ArchiveFormat (..), GitExportOptions (..))
 import qualified System.Agents.ExportImport.ToolInstall as ExportInstall
+import System.Agents.ExportImport.Types (ArchiveFormat (..), GitExportOptions (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -55,15 +56,15 @@ import qualified System.Agents.MCP.Client as McpClient (LoopTrace (..))
 import qualified System.Agents.MCP.Client.Runtime as McpClientRuntime
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as RuntimeTrace
+import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
-import System.Agents.SessionPrint (PrintVisibility (..), PrintAmount (..))
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.Tools.Bash as Bash
-import qualified System.Agents.Tools.IO as IOTools
-import qualified System.Agents.Tools.Trace as ToolTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
+import qualified System.Agents.Tools.Trace as ToolTrace
 import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (exitFailure)
 import System.FilePath (takeDirectory, (</>))
@@ -77,118 +78,125 @@ import Options.Applicative
 
 -- | Default API keys configuration template
 defaultApiKeysContent :: LByteString.ByteString
-defaultApiKeysContent = Aeson.encodePretty $ Aeson.object
-    [ "keys" .=
-        [ Aeson.object
-            [ "id" .= ("main-key" :: Text)
-            , "value" .= ("<insert-your-openai-api-key-here>" :: Text)
+defaultApiKeysContent =
+    Aeson.encodePretty $
+        Aeson.object
+            [ "keys"
+                .= [ Aeson.object
+                        [ "id" .= ("main-key" :: Text)
+                        , "value" .= ("<insert-your-openai-api-key-here>" :: Text)
+                        ]
+                   , Aeson.object
+                        [ "id" .= ("mistral-key" :: Text)
+                        , "value" .= ("<insert-your-mistral-api-key-here>" :: Text)
+                        ]
+                   , Aeson.object
+                        [ "id" .= ("ollama-key" :: Text)
+                        , "value" .= ("ollama" :: Text)
+                        ]
+                   ]
             ]
-        , Aeson.object
-            [ "id" .= ("mistral-key" :: Text)
-            , "value" .= ("<insert-your-mistral-api-key-here>" :: Text)
-            ]
-        , Aeson.object
-            [ "id" .= ("ollama-key" :: Text)
-            , "value" .= ("ollama" :: Text)
-            ]
-        ]
-    ]
 
 -- | Default OpenAI agent configuration
 defaultOpenAIAgent :: Agent
-defaultOpenAIAgent = Agent
-    { slug = "openai-assistant"
-    , apiKeyId = "main-key"
-    , flavor = "OpenAIv1"
-    , modelUrl = "https://api.openai.com/v1"
-    , modelName = "gpt-4-turbo-preview"
-    , announce = "a helpful assistant powered by OpenAI GPT-4"
-    , systemPrompt =
-        [ "You are a helpful assistant."
-        , "You provide clear, accurate, and concise responses."
-        , "When using tools, you explain your actions to the user."
-        ]
-    , toolDirectory = "tools"
-    , mcpServers = Just []
-    , openApiToolboxes = Nothing
-    , postgrestToolboxes = Nothing
-    , builtinToolboxes = Just []
-    , extraAgents = Nothing
-    }
+defaultOpenAIAgent =
+    Agent
+        { slug = "openai-assistant"
+        , apiKeyId = "main-key"
+        , flavor = "OpenAIv1"
+        , modelUrl = "https://api.openai.com/v1"
+        , modelName = "gpt-4-turbo-preview"
+        , announce = "a helpful assistant powered by OpenAI GPT-4"
+        , systemPrompt =
+            [ "You are a helpful assistant."
+            , "You provide clear, accurate, and concise responses."
+            , "When using tools, you explain your actions to the user."
+            ]
+        , toolDirectory = "tools"
+        , mcpServers = Just []
+        , openApiToolboxes = Nothing
+        , postgrestToolboxes = Nothing
+        , builtinToolboxes = Just []
+        , extraAgents = Nothing
+        }
 
 -- | Mistral AI agent configuration
 mistralAgent :: Agent
-mistralAgent = Agent
-    { slug = "mistral-assistant"
-    , apiKeyId = "mistral-key"
-    , flavor = "OpenAIv1"
-    , modelUrl = "https://api.mistral.ai/v1"
-    , modelName = "mistral-large-latest"
-    , announce = "a helpful assistant powered by Mistral AI"
-    , systemPrompt =
-        [ "You are a helpful assistant powered by Mistral AI."
-        , "You provide clear, accurate, and concise responses."
-        , "You excel at reasoning and following instructions precisely."
-        ]
-    , toolDirectory = "tools"
-    , mcpServers = Just []
-    , openApiToolboxes = Nothing
-    , postgrestToolboxes = Nothing
-    , builtinToolboxes = Just []
-    , extraAgents = Nothing
-    }
+mistralAgent =
+    Agent
+        { slug = "mistral-assistant"
+        , apiKeyId = "mistral-key"
+        , flavor = "OpenAIv1"
+        , modelUrl = "https://api.mistral.ai/v1"
+        , modelName = "mistral-large-latest"
+        , announce = "a helpful assistant powered by Mistral AI"
+        , systemPrompt =
+            [ "You are a helpful assistant powered by Mistral AI."
+            , "You provide clear, accurate, and concise responses."
+            , "You excel at reasoning and following instructions precisely."
+            ]
+        , toolDirectory = "tools"
+        , mcpServers = Just []
+        , openApiToolboxes = Nothing
+        , postgrestToolboxes = Nothing
+        , builtinToolboxes = Just []
+        , extraAgents = Nothing
+        }
 
 -- | Ollama local LLM agent configuration
 ollamaAgent :: Agent
-ollamaAgent = Agent
-    { slug = "ollama-assistant"
-    , apiKeyId = "ollama-key"
-    , flavor = "OpenAIv1"
-    , modelUrl = "http://localhost:11434/v1"
-    , modelName = "llama3.2"
-    , announce = "a helpful assistant running locally via Ollama"
-    , systemPrompt =
-        [ "You are a helpful assistant running locally on the user's machine."
-        , "You provide clear and accurate responses while respecting privacy."
-        , "Note: You are running on local hardware, which may limit capabilities."
-        ]
-    , toolDirectory = "tools"
-    , mcpServers = Just []
-    , openApiToolboxes = Nothing
-    , postgrestToolboxes = Nothing
-    , builtinToolboxes = Just []
-    , extraAgents = Nothing
-    }
+ollamaAgent =
+    Agent
+        { slug = "ollama-assistant"
+        , apiKeyId = "ollama-key"
+        , flavor = "OpenAIv1"
+        , modelUrl = "http://localhost:11434/v1"
+        , modelName = "llama3.2"
+        , announce = "a helpful assistant running locally via Ollama"
+        , systemPrompt =
+            [ "You are a helpful assistant running locally on the user's machine."
+            , "You provide clear and accurate responses while respecting privacy."
+            , "Note: You are running on local hardware, which may limit capabilities."
+            ]
+        , toolDirectory = "tools"
+        , mcpServers = Just []
+        , openApiToolboxes = Nothing
+        , postgrestToolboxes = Nothing
+        , builtinToolboxes = Just []
+        , extraAgents = Nothing
+        }
 
 -- | Orchestrator agent that can delegate to other agents
 orchestratorAgent :: Agent
-orchestratorAgent = Agent
-    { slug = "orchestrator"
-    , apiKeyId = "main-key"
-    , flavor = "OpenAIv1"
-    , modelUrl = "https://api.openai.com/v1"
-    , modelName = "gpt-4-turbo-preview"
-    , announce = "a puppet-master capable of orchestrating other agents"
-    , systemPrompt =
-        [ "You are a helpful software agent trying to solve user requests."
-        , "Your preferred action mode is to act as a puppet master capable of driving other agents."
-        , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
-        , "You efficiently single-shot prompt other agents to efficiently use your token budget."
-        , "You only provide prompt examples when you think other agents may benefit."
-        , "You notify users as you progress."
-        , "If an agent fails, do not retry and abdicate."
-        ]
-    , toolDirectory = "tools"
-    , mcpServers = Just []
-    , openApiToolboxes = Nothing
-    , postgrestToolboxes = Nothing
-    , builtinToolboxes = Just []
-    , extraAgents = Just
-        [ ExtraAgentRef "openai-assistant" "openai-assistant.json"
-        , ExtraAgentRef "mistral-assistant" "mistral-assistant.json"
-        , ExtraAgentRef "ollama-assistant" "ollama-assistant.json"
-        ]
-    }
+orchestratorAgent =
+    Agent
+        { slug = "orchestrator"
+        , apiKeyId = "main-key"
+        , flavor = "OpenAIv1"
+        , modelUrl = "https://api.openai.com/v1"
+        , modelName = "gpt-4-turbo-preview"
+        , announce = "a puppet-master capable of orchestrating other agents"
+        , systemPrompt =
+            [ "You are a helpful software agent trying to solve user requests."
+            , "Your preferred action mode is to act as a puppet master capable of driving other agents."
+            , "You can prompt other agents via tools by passing them a prompt using a JSON payload."
+            , "You efficiently single-shot prompt other agents to efficiently use your token budget."
+            , "You only provide prompt examples when you think other agents may benefit."
+            , "You notify users as you progress."
+            , "If an agent fails, do not retry and abdicate."
+            ]
+        , toolDirectory = "tools"
+        , mcpServers = Just []
+        , openApiToolboxes = Nothing
+        , postgrestToolboxes = Nothing
+        , builtinToolboxes = Just []
+        , extraAgents =
+            Just
+                [ ExtraAgentRef "openai-assistant" "openai-assistant.json"
+                , ExtraAgentRef "mistral-assistant" "mistral-assistant.json"
+                , ExtraAgentRef "ollama-assistant" "ollama-assistant.json"
+                ]
+        }
 
 -- | Ensure the config directory structure exists with default files
 ensureConfigStructure :: FilePath -> FilePath -> IO ()
@@ -285,14 +293,15 @@ data AgentsExeConfig = AgentsExeConfig
     deriving (Show, Generic)
 
 instance Aeson.FromJSON AgentsExeConfig where
-    parseJSON = Aeson.withObject "AgentsExeConfig" $ \v -> AgentsExeConfig
-        <$> v Aeson..:? "agentsConfigDir"
-        <*> v Aeson..:? "agentsDirectories" Aeson..!= []
-        <*> v Aeson..:? "agentsFiles" Aeson..!= []
-        <*> v Aeson..:? "agentsLogs"
-        <*> v Aeson..:? "promptAliases"
-        <*> v Aeson..:? "selfDescribeSlug"
-        <*> v Aeson..:? "selfDescribeDescription"
+    parseJSON = Aeson.withObject "AgentsExeConfig" $ \v ->
+        AgentsExeConfig
+            <$> v Aeson..:? "agentsConfigDir"
+            <*> v Aeson..:? "agentsDirectories" Aeson..!= []
+            <*> v Aeson..:? "agentsFiles" Aeson..!= []
+            <*> v Aeson..:? "agentsLogs"
+            <*> v Aeson..:? "promptAliases"
+            <*> v Aeson..:? "selfDescribeSlug"
+            <*> v Aeson..:? "selfDescribeDescription"
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
 locateAgentsExeConfig :: IO (Maybe FilePath)
@@ -346,13 +355,13 @@ initArgParserArgs = do
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
         jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
-        
+
         -- Create sessions directory for storing conversations when outside projects
         -- This ensures session files are properly persisted instead of being written
         -- to the current working directory with an empty prefix
         let sessionsDir = pconfigdir </> "sessions"
         createDirectoryIfMissing True sessionsDir
-        
+
         pure $
             ArgParserArgs
                 pconfigdir
@@ -417,7 +426,8 @@ instance Show Command where
 -- | Parse the --tools option for the check command
 parseToolsOption :: Parser CheckCmd.ToolsOutputMode
 parseToolsOption =
-    option (maybeReader parseMode)
+    option
+        (maybeReader parseMode)
         ( long "tools"
             <> metavar "MODE"
             <> help "Tool display mode: none, list, agents-exe, openai (default: none)"
@@ -431,7 +441,7 @@ parseToolsOption =
     parseMode "agents-exe" = Just CheckCmd.ToolsAgentsExe
     parseMode "openai" = Just CheckCmd.ToolsOpenAI
     parseMode _ = Nothing
-    
+
     showMode :: CheckCmd.ToolsOutputMode -> String
     showMode CheckCmd.ToolsNone = "none"
     showMode CheckCmd.ToolsList = "list"
@@ -461,7 +471,8 @@ parseTuiOptions = pure TUICmd.TuiOptions
 -- | Parse the --thinking option with choices: none, stdout, stderr
 parseThinkingOption :: Parser OneShot.ThinkingOutput
 parseThinkingOption =
-    option (maybeReader parseThinking)
+    option
+        (maybeReader parseThinking)
         ( long "thinking"
             <> metavar "TARGET"
             <> help "Where to output thinking content: none, stdout, or stderr (default: none)"
@@ -474,7 +485,7 @@ parseThinkingOption =
     parseThinking "stdout" = Just OneShot.ThinkingStdout
     parseThinking "stderr" = Just OneShot.ThinkingStderr
     parseThinking _ = Nothing
-    
+
     showThinking :: OneShot.ThinkingOutput -> String
     showThinking OneShot.ThinkingNone = "none"
     showThinking OneShot.ThinkingStdout = "stdout"
@@ -509,21 +520,22 @@ parseEchoPromptOptions =
 parsePromptScriptInput :: Parser PromptScript
 parsePromptScriptInput =
     let pair = (,) <$> optional parseAliasPrompt <*> many parseRegularDirectives
-    in fmap (\(md0,ds) -> maybe ds (:ds) md0) pair
+     in fmap (\(md0, ds) -> maybe ds (: ds) md0) pair
   where
     parseRegularDirectives :: Parser PromptScriptDirective
-    parseRegularDirectives = asum
-        [ promptOption
-        , fileOption
-        , shellOption
-        , smallSeparatorFlag
-        , largeSeparatorFlag
-        , sessionXSOption
-        , sessionSOption
-        , sessionMOption
-        , sessionLOption
-        , sessionXLOption
-        ]
+    parseRegularDirectives =
+        asum
+            [ promptOption
+            , fileOption
+            , shellOption
+            , smallSeparatorFlag
+            , largeSeparatorFlag
+            , sessionXSOption
+            , sessionSOption
+            , sessionMOption
+            , sessionLOption
+            , sessionXLOption
+            ]
 
 parseAliasPrompt :: Parser PromptScriptDirective
 parseAliasPrompt =
@@ -638,7 +650,8 @@ parseMcpServer = pure McpServer
 
 parseVisibilityOption :: String -> String -> Parser PrintVisibility
 parseVisibilityOption optName helpText =
-    option (maybeReader parseVisibility)
+    option
+        (maybeReader parseVisibility)
         ( long optName
             <> metavar "MODE"
             <> help (helpText <> ": hidden, shown, or elided (default: hidden)")
@@ -651,7 +664,7 @@ parseVisibilityOption optName helpText =
     parseVisibility "shown" = Just ShownFull
     parseVisibility "elided" = Just (Elided (Lines 10) (Lines 10))
     parseVisibility _ = Nothing
-    
+
     showVisibility :: PrintVisibility -> String
     showVisibility Hidden = "hidden"
     showVisibility ShownFull = "shown"
@@ -671,7 +684,8 @@ parseSessionPrintOptions =
         <*> parseVisibilityOption "show-tool-call-results" "How to display tool call results"
         <*> parseVisibilityOption "show-tool-call-arguments" "How to display tool call arguments"
         <*> optional
-            ( option auto
+            ( option
+                auto
                 ( long "n-turns"
                     <> metavar "N"
                     <> help "Limit output to the first N turns (no limit if not specified)"
@@ -686,13 +700,12 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*>
-            flag
-                SessionPrint.Chronological
-                SessionPrint.Antichronological
-                ( long "antichronological"
-                    <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
-                )
+        <*> flag
+            SessionPrint.Chronological
+            SessionPrint.Antichronological
+            ( long "antichronological"
+                <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
+            )
         <*> switch
             ( long "no-funny-stamp"
                 <> help "Skip the ASCII art logo stamp in the header (default: show logo)"
@@ -707,18 +720,22 @@ parseSelfDescribeCommand argArgs = SelfDescribe <$> parseSelfDescribeOptions arg
 parseSelfDescribeOptions :: ArgParserArgs -> Parser SelfDescribeCmd.SelfDescribeOptions
 parseSelfDescribeOptions argArgs =
     SelfDescribeCmd.SelfDescribeOptions
-        <$> optional (strOption
-            ( long "self-describe-slug"
-                <> metavar "NAME"
-                <> help "The name/slug field for self-describe output"
-                <> maybe mempty value argArgs.defaultSelfDescribeSlug
-            ))
-        <*> optional (strOption
-            ( long "self-describe-description"
-                <> metavar "DESC"
-                <> help "The description/announce for self-describe output"
-                <> maybe mempty value argArgs.defaultSelfDescribeDescription
-            ))
+        <$> optional
+            ( strOption
+                ( long "self-describe-slug"
+                    <> metavar "NAME"
+                    <> help "The name/slug field for self-describe output"
+                    <> maybe mempty value argArgs.defaultSelfDescribeSlug
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "self-describe-description"
+                    <> metavar "DESC"
+                    <> help "The description/announce for self-describe output"
+                    <> maybe mempty value argArgs.defaultSelfDescribeDescription
+                )
+            )
 
 parsePathsCommand :: Parser Command
 parsePathsCommand = Paths <$> parsePathsOptions
@@ -726,7 +743,9 @@ parsePathsCommand = Paths <$> parsePathsOptions
 parsePathsOptions :: Parser PathsCmd.PathsOptions
 parsePathsOptions =
     PathsCmd.PathsOptions
-        <$> ( flag PathsCmd.PathsOutputHuman PathsCmd.PathsOutputJson
+        <$> ( flag
+                PathsCmd.PathsOutputHuman
+                PathsCmd.PathsOutputJson
                 ( long "json"
                     <> help "Output in JSON format"
                 )
@@ -766,24 +785,28 @@ parseExportOptions =
 parseExportSource :: Parser ExportCmd.ExportSource
 parseExportSource =
     asum
-        [ flag' ExportCmd.ExportCurrentTools
+        [ flag'
+            ExportCmd.ExportCurrentTools
             ( long "tools-only"
                 <> help "Export only tools, not the agent configuration"
             )
-        , ExportCmd.ExportToolByName <$> strOption
-            ( long "tool"
-                <> metavar "TOOLNAME"
-                <> help "Export a specific tool by name"
-            )
-        , flag' ExportCmd.ExportAllAgents
+        , ExportCmd.ExportToolByName
+            <$> strOption
+                ( long "tool"
+                    <> metavar "TOOLNAME"
+                    <> help "Export a specific tool by name"
+                )
+        , flag'
+            ExportCmd.ExportAllAgents
             ( long "all"
                 <> help "Export all loaded agents"
             )
-        , ExportCmd.ExportAgentBySlug <$> strOption
-            ( long "agent-slug"
-                <> metavar "SLUG"
-                <> help "Export agent by slug"
-            )
+        , ExportCmd.ExportAgentBySlug
+            <$> strOption
+                ( long "agent-slug"
+                    <> metavar "SLUG"
+                    <> help "Export agent by slug"
+                )
         , pure ExportCmd.ExportCurrentAgent
         ]
 
@@ -791,12 +814,13 @@ parseExportDestination :: Parser ExportCmd.ExportDestination
 parseExportDestination =
     asum
         [ ExportCmd.ExportToGit <$> parseGitExportDest
-        , ExportCmd.ExportToFile <$> strOption
-            ( long "output"
-                <> short 'o'
-                <> metavar "OUTPUT"
-                <> help "Output file path"
-            )
+        , ExportCmd.ExportToFile
+            <$> strOption
+                ( long "output"
+                    <> short 'o'
+                    <> metavar "OUTPUT"
+                    <> help "Output file path"
+                )
         ]
 
 parseGitExportDest :: Parser ExportCmd.GitExportDest
@@ -807,40 +831,52 @@ parseGitExportDest =
                 <> metavar "URL"
                 <> help "Git remote URL"
             )
-        <*> optional (strOption
-            ( long "git-branch"
-                <> metavar "BRANCH"
-                <> help "Git branch"
-            ))
-        <*> optional (strOption
-            ( long "git-message"
-                <> metavar "MESSAGE"
-                <> help "Git commit message"
-            ))
+        <*> optional
+            ( strOption
+                ( long "git-branch"
+                    <> metavar "BRANCH"
+                    <> help "Git branch"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "git-message"
+                    <> metavar "MESSAGE"
+                    <> help "Git commit message"
+                )
+            )
         <*> switch
             ( long "git-push"
                 <> help "Push to remote after commit"
             )
-        <*> optional (strOption
-            ( long "git-tag"
-                <> metavar "TAG"
-                <> help "Git tag to create"
-            ))
+        <*> optional
+            ( strOption
+                ( long "git-tag"
+                    <> metavar "TAG"
+                    <> help "Git tag to create"
+                )
+            )
 
 parseGitExportOptions :: Parser GitExportOptions
 parseGitExportOptions =
     GitExportOptions
-        <$> (fromMaybe "Update agent configurations" <$> optional (strOption
-            ( long "git-message"
-                <> metavar "MESSAGE"
-                <> help "Git commit message"
-                <> value "Update agent configurations"
-            )))
-        <*> optional (strOption
-            ( long "git-tag"
-                <> metavar "TAG"
-                <> help "Git tag to create"
-            ))
+        <$> ( fromMaybe "Update agent configurations"
+                <$> optional
+                    ( strOption
+                        ( long "git-message"
+                            <> metavar "MESSAGE"
+                            <> help "Git commit message"
+                            <> value "Update agent configurations"
+                        )
+                    )
+            )
+        <*> optional
+            ( strOption
+                ( long "git-tag"
+                    <> metavar "TAG"
+                    <> help "Git tag to create"
+                )
+            )
         <*> switch
             ( long "git-push"
                 <> help "Push to remote after commit"
@@ -848,7 +884,8 @@ parseGitExportOptions =
 
 parseArchiveFormat :: Parser ArchiveFormat
 parseArchiveFormat =
-    option (maybeReader parseFormat)
+    option
+        (maybeReader parseFormat)
         ( long "format"
             <> metavar "FORMAT"
             <> help "Archive format: tar, tar.gz, zip (auto-detected from output if not specified)"
@@ -870,17 +907,19 @@ parseNamespace =
 
 parseIncludeTools :: Parser Bool
 parseIncludeTools =
-    not <$> switch
-        ( long "no-tools"
-            <> help "Exclude tools from export"
-        )
+    not
+        <$> switch
+            ( long "no-tools"
+                <> help "Exclude tools from export"
+            )
 
 parseIncludeMcp :: Parser Bool
 parseIncludeMcp =
-    not <$> switch
-        ( long "no-mcp"
-            <> help "Exclude MCP servers from export"
-        )
+    not
+        <$> switch
+            ( long "no-mcp"
+                <> help "Exclude MCP servers from export"
+            )
 
 parseImportCommand :: Parser Command
 parseImportCommand = Import <$> parseImportOptions
@@ -900,12 +939,13 @@ parseImportSource :: Parser ImportCmd.ImportSource
 parseImportSource =
     asum
         [ ImportCmd.ImportFromGit <$> parseGitImportSource
-        , ImportCmd.ImportFromFile <$> strOption
-            ( long "from-file"
-                <> short 'f'
-                <> metavar "FILE"
-                <> help "Import from archive file"
-            )
+        , ImportCmd.ImportFromFile
+            <$> strOption
+                ( long "from-file"
+                    <> short 'f'
+                    <> metavar "FILE"
+                    <> help "Import from archive file"
+                )
         ]
 
 parseGitImportSource :: Parser ImportCmd.GitImportSource
@@ -916,54 +956,65 @@ parseGitImportSource =
                 <> metavar "URL"
                 <> help "Git remote URL"
             )
-        <*> optional (strOption
-            ( long "git-ref"
-                <> metavar "REF"
-                <> help "Git ref (branch, tag, or commit)"
-            ))
-        <*> optional (strOption
-            ( long "namespace"
-                <> metavar "NAMESPACE"
-                <> help "Namespace to import from"
-            ))
+        <*> optional
+            ( strOption
+                ( long "git-ref"
+                    <> metavar "REF"
+                    <> help "Git ref (branch, tag, or commit)"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "namespace"
+                    <> metavar "NAMESPACE"
+                    <> help "Namespace to import from"
+                )
+            )
 
 parseImportDestination :: Parser ExportInstall.ImportDestination
 parseImportDestination =
     asum
-        [ flag' ExportInstall.ImportToCurrentDir
+        [ flag'
+            ExportInstall.ImportToCurrentDir
             ( long "to-current"
                 <> help "Import to current directory"
             )
-        , ExportInstall.ImportToPath <$> strOption
-            ( long "to"
-                <> metavar "PATH"
-                <> help "Import to specific path"
-            )
-        , flag' ExportInstall.ImportToConfigDir
+        , ExportInstall.ImportToPath
+            <$> strOption
+                ( long "to"
+                    <> metavar "PATH"
+                    <> help "Import to specific path"
+                )
+        , flag'
+            ExportInstall.ImportToConfigDir
             ( long "to-config-dir"
                 <> help "Import to config directory"
             )
-        , ExportInstall.ImportToAgent <$> strOption
-            ( long "install-to-agent"
-                <> metavar "AGENTFILE"
-                <> help "Install tools to agent's tool directory"
-            )
-        , ExportInstall.ImportToToolDir <$> strOption
-            ( long "install-to-tooldir"
-                <> metavar "TOOLDIR"
-                <> help "Install tools to specific tool directory"
-            )
+        , ExportInstall.ImportToAgent
+            <$> strOption
+                ( long "install-to-agent"
+                    <> metavar "AGENTFILE"
+                    <> help "Install tools to agent's tool directory"
+                )
+        , ExportInstall.ImportToToolDir
+            <$> strOption
+                ( long "install-to-tooldir"
+                    <> metavar "TOOLDIR"
+                    <> help "Install tools to specific tool directory"
+                )
         , pure ExportInstall.ImportToCurrentDir
         ]
 
 parseImportMode :: Parser ImportCmd.ImportMode
 parseImportMode =
     asum
-        [ flag' ImportCmd.ImportOverwrite
+        [ flag'
+            ImportCmd.ImportOverwrite
             ( long "overwrite"
                 <> help "Overwrite existing files on conflict"
             )
-        , flag' ImportCmd.ImportMerge
+        , flag'
+            ImportCmd.ImportMerge
             ( long "merge"
                 <> help "Merge with existing files"
             )
@@ -981,14 +1032,14 @@ parseListNamespaces :: Parser Bool
 parseListNamespaces =
     switch
         ( long "list-namespaces"
-                <> help "List available namespaces in git repo"
+            <> help "List available namespaces in git repo"
         )
 
 parseListTools :: Parser Bool
 parseListTools =
     switch
         ( long "list-tools"
-                <> help "List available tools in git repo"
+            <> help "List available tools in git repo"
         )
 
 parseCowsayCommand :: Parser Command
@@ -997,11 +1048,14 @@ parseCowsayCommand = Cowsay <$> parseCowsayOptions
 parseCowsayOptions :: Parser CowsayCmd.CowsayOptions
 parseCowsayOptions =
     CowsayCmd.CowsayOptions
-        <$> optional (strArgument 
-            ( metavar "MESSAGE"
-                <> help "Message to display (reads from stdin if not provided)"
-            ))
-        <*> option auto
+        <$> optional
+            ( strArgument
+                ( metavar "MESSAGE"
+                    <> help "Message to display (reads from stdin if not provided)"
+                )
+            )
+        <*> option
+            auto
             ( long "width"
                 <> short 'W'
                 <> metavar "WIDTH"
@@ -1083,14 +1137,30 @@ parseProgOptions argparserargs =
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
                 <> command "session-edit" (info parseSessionEditCommand (progDesc "Edit a session file (reads JSON from STDIN, writes JSON to STDOUT)"))
-                <> command "export" (info parseExportCommand 
-                    (progDesc "Export agent/tool configurations"))
-                <> command "import" (info parseImportCommand
-                    (progDesc "Import agent/tool configurations"))
-                <> command "paths" (info parsePathsCommand
-                    (progDesc "Show important configuration paths"))
-                <> command "cowsay" (info parseCowsayCommand
-                    (progDesc "Display a message with the agents-exe mascot"))
+                <> command
+                    "export"
+                    ( info
+                        parseExportCommand
+                        (progDesc "Export agent/tool configurations")
+                    )
+                <> command
+                    "import"
+                    ( info
+                        parseImportCommand
+                        (progDesc "Import agent/tool configurations")
+                    )
+                <> command
+                    "paths"
+                    ( info
+                        parsePathsCommand
+                        (progDesc "Show important configuration paths")
+                    )
+                <> command
+                    "cowsay"
+                    ( info
+                        parseCowsayCommand
+                        (progDesc "Display a message with the agents-exe mascot")
+                    )
             )
 
 -------------------------------------------------------------------------------
@@ -1172,7 +1242,7 @@ resolveAgentFiles files (Just agentSlug) = do
             , ""
             , "Available agents:"
             ]
-            ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
+                ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
 
 -- | Run the selected command
 runCommand :: Prog -> Prod.Tracer IO AgentTree.Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
@@ -1180,40 +1250,28 @@ runCommand pargs baseTracer sessionStore agentFiles =
     case pargs.mainCommand of
         Check checkOpts ->
             CheckCmd.handleCheck checkOpts pargs.apiKeysFile agentFiles
-        
         TerminalUI _ ->
             TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile agentFiles
-        
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
-        
         OneShot opts ->
             OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile agentFiles pargs.progPromptAliases opts
-        
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
-        
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile agentFiles
-        
         McpServer ->
             McpServerCmd.handleMcpServer baseTracer sessionStore pargs.apiKeysFile agentFiles
-        
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
-        
         SessionEdit opts ->
             SessionEditCmd.handleSessionEdit opts
-        
         Export opts ->
             ExportCmd.handleExport opts agentFiles pargs.configDir
-        
         Import opts ->
             ImportCmd.handleImport opts
-        
         Paths opts ->
             PathsCmd.handlePaths opts pargs.configDir agentFiles pargs.apiKeysFile pargs.sessionsJsonPrefix
-        
         Cowsay opts ->
             CowsayCmd.handleCowsay opts
 
@@ -1374,41 +1432,40 @@ toJsonTrace x = case x of
             Nothing
     encodeBaseMcpTrace
         (McpToolbox.McpClientRunTrace (McpClientRuntime.RunCommandStart _)) =
-                Just $
-                    Aeson.object
-                        [ "x" .= ("program-start" :: Text)
-                        ]
+            Just $
+                Aeson.object
+                    [ "x" .= ("program-start" :: Text)
+                    ]
     encodeBaseMcpTrace
         (McpToolbox.McpClientRunTrace (McpClientRuntime.RunCommandStopped _ code)) =
-                Just $
-                    Aeson.object
-                        [ "x" .= ("program-end" :: Text)
-                        , "code-str" .= show code
-                        ]
+            Just $
+                Aeson.object
+                    [ "x" .= ("program-end" :: Text)
+                    , "code-str" .= show code
+                    ]
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace McpClient.ExitingToolCallLoop) =
-                Just $
-                    Aeson.object
-                        [ "x" .= ("loop-end" :: Text)
-                        ]
+            Just $
+                Aeson.object
+                    [ "x" .= ("loop-end" :: Text)
+                    ]
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.ToolsRefreshed _)) =
-                Just $
-                    Aeson.object
-                        [ "x" .= ("tools-reloaded" :: Text)
-                        ]
+            Just $
+                Aeson.object
+                    [ "x" .= ("tools-reloaded" :: Text)
+                    ]
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.StartToolCall n _)) =
-                    Just $
-                        Aeson.object
-                                [ "x" .= ("tool-call-start" :: Text)
-                                , "name" .= n
-                                ]
+            Just $
+                Aeson.object
+                    [ "x" .= ("tool-call-start" :: Text)
+                    , "name" .= n
+                    ]
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
-                Just $
-                    Aeson.object
-                        [ "x" .= ("tool-call-end" :: Text)
-                        , "name" .= n
-                        ]
-
+            Just $
+                Aeson.object
+                    [ "x" .= ("tool-call-end" :: Text)
+                    , "name" .= n
+                    ]

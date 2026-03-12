@@ -25,7 +25,7 @@ main = do
             , configHeaders = mempty
             , configToken = Nothing
             }
-    
+
     result <- OpenAPI.initializeToolbox tracer config
     case result of
         Left err -> print err
@@ -42,19 +42,18 @@ main = do
 module System.Agents (
     -- * OpenAPI Toolbox (main addition for this release)
     module System.Agents.Tools.OpenAPIToolbox,
-    
+
     -- * Tool registration
     module System.Agents.ToolRegistration,
-    
+
     -- * Core tools
     module System.Agents.Tools,
-    
+
     -- * Tool schema
     module System.Agents.ToolSchema,
 ) where
 
 import System.Agents.ToolRegistration
+import System.Agents.ToolSchema
 import System.Agents.Tools
 import System.Agents.Tools.OpenAPIToolbox
-import System.Agents.ToolSchema
-

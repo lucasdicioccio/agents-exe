@@ -17,15 +17,15 @@ import Data.Maybe (listToMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Vector as Vector
 import Data.Time (UTCTime)
+import qualified Data.Vector as Vector
 
 import System.Agents.AgentTree (AgentTree)
-import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Base (AgentId, ConversationId (..))
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
+import System.Agents.ToolRegistration (ToolRegistration)
 
 -------------------------------------------------------------------------------
 -- Widget Names
@@ -95,10 +95,10 @@ data TuiAgent = TuiAgent
 
 -- | Status of a conversation regarding its execution state.
 data ConversationStatus
-    = ConversationStatus_Active
-    -- ^ Conversation is currently running (agent is processing)
-    | ConversationStatus_WaitingForInput
-    -- ^ Conversation is waiting for user input
+    = -- | Conversation is currently running (agent is processing)
+      ConversationStatus_Active
+    | -- | Conversation is waiting for user input
+      ConversationStatus_WaitingForInput
     deriving (Show, Eq)
 
 -- | A conversation with an agent.
@@ -120,14 +120,15 @@ data Conversation = Conversation
 -- Auxiliary Task Types
 -------------------------------------------------------------------------------
 
--- | An auxiliary task running asynchronously in the background.
--- These tasks don't block the TUI but are tracked for cleanup.
+{- | An auxiliary task running asynchronously in the background.
+These tasks don't block the TUI but are tracked for cleanup.
+-}
 data AuxiliaryTask
-    = Viewer (Async ()) ConversationId SessionId
-    -- ^ An external viewer process viewing a specific conversation/session
+    = -- | An external viewer process viewing a specific conversation/session
+      Viewer (Async ()) ConversationId SessionId
 
 instance Show AuxiliaryTask where
-    show (Viewer _ convId sessId) = 
+    show (Viewer _ convId sessId) =
         "Viewer <async> " ++ show convId ++ " " ++ show sessId
 
 -------------------------------------------------------------------------------
@@ -169,7 +170,7 @@ data UIState = UIState
     -- ^ Conversations currently being processed by an agent
     , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background async tasks (e.g., external viewers)
-    , _coreAgentTools :: [(AgentId,[ToolRegistration])]
+    , _coreAgentTools :: [(AgentId, [ToolRegistration])]
     , _statusMessage :: Maybe StatusMessage
     -- ^ Current status message to display (if any)
     }
@@ -200,14 +201,14 @@ initUIState agents loadedSessions =
     UIState
         { _uiFocusRing =
             focusRing
-              [ AgentListWidget
-              , ConversationListWidget
-              , SessionsListWidget
-              , MessageEditorWidget
-              , SessionViewWidget
-              , AgentInfoWidget
-              , AgentToolsWidget
-              ]
+                [ AgentListWidget
+                , ConversationListWidget
+                , SessionsListWidget
+                , MessageEditorWidget
+                , SessionViewWidget
+                , AgentInfoWidget
+                , AgentToolsWidget
+                ]
         , _zoomed = False
         , _agentList = list AgentListWidget (Vector.fromList agents) 1
         , _conversationList = list ConversationListWidget Vector.empty 1
@@ -234,4 +235,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-

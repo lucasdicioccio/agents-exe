@@ -1,21 +1,24 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for prompt script functionality.
---
--- Prompt scripts allow composing prompts from multiple sources: strings,
--- files, shell commands, and session contents. This module handles parsing
--- and interpreting prompt script directives.
-module System.Agents.CLI.PromptScript
-    ( -- * Types
-      PromptScriptDirective (..)
-    , PromptScript
-      -- * Interpretation
-    , interpretPromptScript
-    , interpretPromptScriptDirective
-      -- * Alias resolution
-    , resolveAlias
-    ) where
+{- | Module for prompt script functionality.
+
+Prompt scripts allow composing prompts from multiple sources: strings,
+files, shell commands, and session contents. This module handles parsing
+and interpreting prompt script directives.
+-}
+module System.Agents.CLI.PromptScript (
+    -- * Types
+    PromptScriptDirective (..),
+    PromptScript,
+
+    -- * Interpretation
+    interpretPromptScript,
+    interpretPromptScriptDirective,
+
+    -- * Alias resolution
+    resolveAlias,
+) where
 
 import qualified Data.Aeson as Aeson
 import Data.Map (Map)
@@ -26,12 +29,12 @@ import System.Exit (exitFailure)
 import System.IO (stderr)
 import qualified System.Process as Process
 
-import System.Agents.CLI.Aliases
-    ( AliasDefinition (..)
-    , AliasInputMode (..)
-    , lookupAlias
-    , substituteTemplate
-    )
+import System.Agents.CLI.Aliases (
+    AliasDefinition (..),
+    AliasInputMode (..),
+    lookupAlias,
+    substituteTemplate,
+ )
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 
 -------------------------------------------------------------------------------
@@ -103,4 +106,3 @@ resolveAlias def mSessionFile = do
                 c <- Text.getContents
                 pure (c, Nothing)
     pure $ substituteTemplate (aliasTemplate def) content mActualFile
-

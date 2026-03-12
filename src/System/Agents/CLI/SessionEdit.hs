@@ -1,20 +1,23 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'session-edit' command handler.
---
--- The session-edit command reads session JSON from stdin, applies
--- transformations, and outputs the result to stdout. This allows
--- composable editing of session files similar to Unix text utilities.
-module System.Agents.CLI.SessionEdit
-    ( -- * Types
-      SessionEditOptions (..)
-    , SessionEditOp (..)
-      -- * Handler
-    , handleSessionEdit
-      -- * Transform conversion
-    , editOpToTransform
-    ) where
+{- | Module for the 'session-edit' command handler.
+
+The session-edit command reads session JSON from stdin, applies
+transformations, and outputs the result to stdout. This allows
+composable editing of session files similar to Unix text utilities.
+-}
+module System.Agents.CLI.SessionEdit (
+    -- * Types
+    SessionEditOptions (..),
+    SessionEditOp (..),
+
+    -- * Handler
+    handleSessionEdit,
+
+    -- * Transform conversion
+    editOpToTransform,
+) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
@@ -31,7 +34,8 @@ import qualified System.Agents.Session.Types as SessionTypes
 -- | Options for the session-edit command
 data SessionEditOptions = SessionEditOptions
     { sessionEditOperations :: [SessionEditOp]
-    } deriving (Show)
+    }
+    deriving (Show)
 
 -- | Session edit operations
 data SessionEditOp
@@ -65,4 +69,3 @@ editOpToTransform op = case op of
     SessionEditDropTail n -> SessionEdit.sessionEditDropTail n
     SessionEditCensorToolCalls -> SessionEdit.sessionEditCensorToolCalls
     SessionEditCensorThinking -> SessionEdit.sessionEditCensorThinking
-

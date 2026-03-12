@@ -2,42 +2,42 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
--- | Core session types shared across the agent system.
---
--- This module contains the fundamental session types that need to be
--- accessible from multiple parts of the codebase, including tool execution
--- contexts. Keeping these types in a separate module helps avoid circular
--- dependencies between System.Agents.Session.Base and System.Agents.Tools.Context.
---
+{- | Core session types shared across the agent system.
+
+This module contains the fundamental session types that need to be
+accessible from multiple parts of the codebase, including tool execution
+contexts. Keeping these types in a separate module helps avoid circular
+dependencies between System.Agents.Session.Base and System.Agents.Tools.Context.
+-}
 module System.Agents.Session.Types (
     -- * Identifiers
-    SessionId(..),
-    TurnId(..),
+    SessionId (..),
+    TurnId (..),
     newSessionId,
     newTurnId,
-    
+
     -- * Core types
-    Session(..),
-    Turn(..),
-    UserTurnContent(..),
-    LlmTurnContent(..),
-    
+    Session (..),
+    Turn (..),
+    UserTurnContent (..),
+    LlmTurnContent (..),
+
     -- * Byte usage tracking
-    StepByteUsage(..),
+    StepByteUsage (..),
     calculateStepByteUsage,
     sessionTotalBytes,
-    
+
     -- * Content types
-    SystemPrompt(..),
-    LlmResponse(..),
-    LlmToolCall(..),
-    UserQuery(..),
-    UserToolResponse(..),
-    
+    SystemPrompt (..),
+    LlmResponse (..),
+    LlmToolCall (..),
+    UserQuery (..),
+    UserToolResponse (..),
+
     -- * Tool definitions
-    SystemTool(..),
-    SystemToolDefinition(..),
-    SystemToolDefinitionV1(..),
+    SystemTool (..),
+    SystemToolDefinition (..),
+    SystemToolDefinitionV1 (..),
 ) where
 
 import Control.Applicative ((<|>))
@@ -72,29 +72,32 @@ newTurnId =
 -- Byte Usage Tracking
 -------------------------------------------------------------------------------
 
--- | Byte usage breakdown for a single step.
---
--- Tracks the amount of data exchanged during a single turn of conversation,
--- broken down by category for cost transparency and debugging.
+{- | Byte usage breakdown for a single step.
+
+Tracks the amount of data exchanged during a single turn of conversation,
+broken down by category for cost transparency and debugging.
+-}
 data StepByteUsage = StepByteUsage
     { stepTotalBytes :: Int
-      -- ^ Total bytes for this step
+    -- ^ Total bytes for this step
     , stepInputBytes :: Int
-      -- ^ Bytes in the input (prompt + context + query)
+    -- ^ Bytes in the input (prompt + context + query)
     , stepOutputBytes :: Int
-      -- ^ Bytes in the LLM output response
+    -- ^ Bytes in the LLM output response
     , stepReasoningBytes :: Int
-      -- ^ Bytes in reasoning/thinking content (if model supports it)
+    -- ^ Bytes in reasoning/thinking content (if model supports it)
     , stepToolBytes :: Int
-      -- ^ Bytes in tool call responses
-    } deriving (Show, Ord, Eq, Generic)
+    -- ^ Bytes in tool call responses
+    }
+    deriving (Show, Ord, Eq, Generic)
 
 instance FromJSON StepByteUsage
 instance ToJSON StepByteUsage
 
--- | Helper to calculate total bytes from components.
--- Use this when you have individual components but want to ensure
--- consistency between total and sum of parts.
+{- | Helper to calculate total bytes from components.
+Use this when you have individual components but want to ensure
+consistency between total and sum of parts.
+-}
 calculateStepByteUsage :: Int -> Int -> Int -> Int -> StepByteUsage
 calculateStepByteUsage input output reasoning tool =
     StepByteUsage
@@ -105,11 +108,13 @@ calculateStepByteUsage input output reasoning tool =
         , stepToolBytes = tool
         }
 
--- | Calculate total bytes for an entire session.
--- Returns the sum of all step totals across all turns.
+{- | Calculate total bytes for an entire session.
+Returns the sum of all step totals across all turns.
+-}
 sessionTotalBytes :: Session -> Int
 sessionTotalBytes session =
-    sum [ stepTotalBytes usage
+    sum
+        [ stepTotalBytes usage
         | turn <- session.turns
         , usage <- maybeToList (turnByteUsage turn)
         ]
@@ -131,12 +136,14 @@ newtype SystemPrompt = SystemPrompt Text
     deriving (Show, Ord, Eq, FromJSON, ToJSON)
 
 -- | LLM response.
-data LlmResponse = LlmResponse 
+data LlmResponse = LlmResponse
     { responseText :: Maybe Text
-    , responseThinking :: Maybe Text  -- ^ Separate thinking/reasoning content from models like o1/o3 and Claude
+    , responseThinking :: Maybe Text
+    -- ^ Separate thinking/reasoning content from models like o1/o3 and Claude
     , rawResponse :: Aeson.Value
     }
     deriving (Show, Ord, Eq, Generic)
+
 instance FromJSON LlmResponse
 instance ToJSON LlmResponse
 
@@ -146,20 +153,20 @@ newtype LlmToolCall = LlmToolCall Aeson.Value
 
 -- Minimal tool structure loosely inspired by json-schema.
 -- Caveat here is that we want at a same time to have a tool has a bag of function and as some json-serializable object.
-data SystemToolDefinitionV1 = SystemToolDefinitionV1 {
-    name :: Text
-  , llmName :: Text
-  , description :: Text
-  , properties :: [ParamProperty]
-  , raw :: Aeson.Value
-  }
+data SystemToolDefinitionV1 = SystemToolDefinitionV1
+    { name :: Text
+    , llmName :: Text
+    , description :: Text
+    , properties :: [ParamProperty]
+    , raw :: Aeson.Value
+    }
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON SystemToolDefinitionV1
 instance ToJSON SystemToolDefinitionV1
 
 data SystemToolDefinition
-  = V0 Aeson.Value
-  | V1 SystemToolDefinitionV1
+    = V0 Aeson.Value
+    | V1 SystemToolDefinitionV1
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON SystemToolDefinition
 instance ToJSON SystemToolDefinition
@@ -183,58 +190,64 @@ newtype UserToolResponse = UserToolResponse Aeson.Value
 -- Bundle user-turn content.
 -- todo: medias
 data UserTurnContent
-  = UserTurnContent
-  { userPrompt :: SystemPrompt
-  , userTools :: [SystemTool]
-  , userQuery :: Maybe UserQuery
-  , userToolResponses :: [(LlmToolCall, UserToolResponse)]
-  }
+    = UserTurnContent
+    { userPrompt :: SystemPrompt
+    , userTools :: [SystemTool]
+    , userQuery :: Maybe UserQuery
+    , userToolResponses :: [(LlmToolCall, UserToolResponse)]
+    }
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON UserTurnContent
 instance ToJSON UserTurnContent
 
 -- Bundle llm-turn content.
 data LlmTurnContent
-  = LlmTurnContent
-  { llmResponse :: LlmResponse
-  , llmToolCalls :: [LlmToolCall]
-  }
+    = LlmTurnContent
+    { llmResponse :: LlmResponse
+    , llmToolCalls :: [LlmToolCall]
+    }
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON LlmTurnContent
 instance ToJSON LlmTurnContent
-  
--- | Unification.
--- 
--- Each turn now optionally includes 'StepByteUsage' for tracking
--- data exchange sizes. The 'Maybe' allows backward compatibility
--- with sessions that were created before byte tracking was added.
+
+{- | Unification.
+
+Each turn now optionally includes 'StepByteUsage' for tracking
+data exchange sizes. The 'Maybe' allows backward compatibility
+with sessions that were created before byte tracking was added.
+-}
 data Turn
-  = UserTurn UserTurnContent (Maybe StepByteUsage)
-  | LlmTurn LlmTurnContent (Maybe StepByteUsage)
+    = UserTurn UserTurnContent (Maybe StepByteUsage)
+    | LlmTurn LlmTurnContent (Maybe StepByteUsage)
     deriving (Show, Ord, Eq, Generic)
 
--- | Custom ToJSON instance that matches the FromJSON format.
--- Produces objects with "tag", "contents", and optional "byteUsage" fields.
+{- | Custom ToJSON instance that matches the FromJSON format.
+Produces objects with "tag", "contents", and optional "byteUsage" fields.
+-}
 instance ToJSON Turn where
     toJSON (UserTurn contents byteUsage) =
-        Aeson.object $ ["tag" .= ("UserTurn" :: Text), "contents" .= contents] ++
-                       ["byteUsage" .= usage | Just usage <- [byteUsage]]
+        Aeson.object $
+            ["tag" .= ("UserTurn" :: Text), "contents" .= contents]
+                ++ ["byteUsage" .= usage | Just usage <- [byteUsage]]
     toJSON (LlmTurn contents byteUsage) =
-        Aeson.object $ ["tag" .= ("LlmTurn" :: Text), "contents" .= contents] ++
-                       ["byteUsage" .= usage | Just usage <- [byteUsage]]
+        Aeson.object $
+            ["tag" .= ("LlmTurn" :: Text), "contents" .= contents]
+                ++ ["byteUsage" .= usage | Just usage <- [byteUsage]]
 
--- | Legacy Turn structure without byte usage tracking.
--- Used for backward compatibility when parsing old sessions.
+{- | Legacy Turn structure without byte usage tracking.
+Used for backward compatibility when parsing old sessions.
+-}
 data Turn_v0
-  = UserTurn_v0 UserTurnContent
-  | LlmTurn_v0 LlmTurnContent
+    = UserTurn_v0 UserTurnContent
+    | LlmTurn_v0 LlmTurnContent
     deriving (Show, Ord, Eq, Generic)
 
 instance FromJSON Turn_v0
 
--- | Custom FromJSON instance for Turn that handles retro-compatibility.
--- First tries to parse as the new format (with Maybe StepByteUsage),
--- then falls back to the old Turn_v0 format (without byte usage).
+{- | Custom FromJSON instance for Turn that handles retro-compatibility.
+First tries to parse as the new format (with Maybe StepByteUsage),
+then falls back to the old Turn_v0 format (without byte usage).
+-}
 instance FromJSON Turn where
     parseJSON v = parseNew v <|> parseOld v
       where
@@ -250,13 +263,13 @@ instance FromJSON Turn where
                     byteUsage <- obj .:? "byteUsage"
                     pure $ LlmTurn contents byteUsage
                 _ -> fail $ "Unknown Turn tag: " ++ show tag
-        
+
         parseOld = Aeson.withObject "Turn" $ \obj -> do
             -- Try parsing as old format (v0)
             turnV0 <- Aeson.parseJSON (Aeson.Object obj)
             case turnV0 of
                 UserTurn_v0 content -> pure $ UserTurn content Nothing
-                LlmTurn_v0 content  -> pure $ LlmTurn content Nothing
+                LlmTurn_v0 content -> pure $ LlmTurn content Nothing
 
 data Session
     = Session
@@ -268,4 +281,3 @@ data Session
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Session
 instance ToJSON Session
-

@@ -56,17 +56,17 @@ module System.Agents.AgentTree (
     loadPostgRESTToolboxDescription,
 ) where
 
-import Control.Monad (void, unless)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Control.Monad (unless, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Either as Either
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import qualified Data.List as List
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
-import qualified Data.Set as Set
 import Data.Semigroup (sconcat)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
@@ -75,12 +75,23 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
 
+import System.Agents.ApiKeys
 import System.Agents.Base (
-    Agent, AgentDescription (..), AgentId, AgentSlug, BuiltinToolboxDescription (..), ExtraAgentRef (..),
-    McpServerDescription (..), McpSimpleBinaryConfiguration (..),
-    OpenAPIToolboxDescription (..), OpenAPIServerDescription (..), OpenAPIServerOnDisk (..),
-    PostgRESTToolboxDescription (..), PostgRESTServerDescription (..), PostgRESTServerOnDisk (..)
-    )
+    Agent,
+    AgentDescription (..),
+    AgentId,
+    AgentSlug,
+    BuiltinToolboxDescription (..),
+    ExtraAgentRef (..),
+    McpServerDescription (..),
+    McpSimpleBinaryConfiguration (..),
+    OpenAPIServerDescription (..),
+    OpenAPIServerOnDisk (..),
+    OpenAPIToolboxDescription (..),
+    PostgRESTServerDescription (..),
+    PostgRESTServerOnDisk (..),
+    PostgRESTToolboxDescription (..),
+ )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.FileNotification as Notify
@@ -91,7 +102,6 @@ import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
-import System.Agents.ApiKeys
 
 -------------------------------------------------------------------------------
 data Trace
@@ -116,11 +126,12 @@ data ReferenceValidationTrace
 -------------------------------------------------------------------------------
 type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
 
--- | Registry for looking up runtimes by slug during and after initialization
---
--- The registry enables two-phase initialization of agent trees, allowing agents
--- to reference each other recursively. Phase 1 creates runtime shells and
--- registers them; Phase 2 wires up references via registry lookup.
+{- | Registry for looking up runtimes by slug during and after initialization
+
+The registry enables two-phase initialization of agent trees, allowing agents
+to reference each other recursively. Phase 1 creates runtime shells and
+registers them; Phase 2 wires up references via registry lookup.
+-}
 type RuntimeRegistry = IORef (Map.Map AgentSlug Runtime)
 
 -- | Create a new empty registry
@@ -143,7 +154,8 @@ data Props
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO Trace
     , agentToTool :: Runtime -> AgentSlug -> AgentId -> ToolRegistration
-    , runtimeRegistry :: RuntimeRegistry  -- ^ Shared registry for deferred resolution
+    , runtimeRegistry :: RuntimeRegistry
+    -- ^ Shared registry for deferred resolution
     }
 
 data AgentTree = AgentTree
@@ -151,7 +163,8 @@ data AgentTree = AgentTree
     , agentBase :: Agent
     , agentRuntime :: Runtime.Runtime
     , agentChildren :: [AgentTree]
-    , agentExtraRefs :: [AgentSlug]  -- ^ Extra agents this agent references (for deferred wiring)
+    , agentExtraRefs :: [AgentSlug]
+    -- ^ Extra agents this agent references (for deferred wiring)
     }
 
 data AgentConfigTree = AgentConfigTree
@@ -165,6 +178,7 @@ agentRootDir :: AgentConfigTree -> FilePath
 agentRootDir agent = FilePath.takeDirectory agent.agentConfigFile
 
 -------------------------------------------------------------------------------
+
 -- | Result of the discovery phase - represents the agent reference graph
 data AgentConfigGraph = AgentConfigGraph
     { graphNodes :: Map.Map AgentSlug AgentConfigNode
@@ -187,19 +201,23 @@ data AgentConfigNode = AgentConfigNode
 
 -- | Validation error types
 data ReferenceError
-    = MissingAgentReference AgentSlug FilePath AgentSlug
-    -- ^ Agent in file references missing slug
-    --   (referrer slug, referrer file, missing slug)
-    | DuplicateAgentSlug AgentSlug [FilePath]
-    -- ^ Same slug defined in multiple files
+    = {- | Agent in file references missing slug
+      (referrer slug, referrer file, missing slug)
+      -}
+      MissingAgentReference AgentSlug FilePath AgentSlug
+    | -- | Same slug defined in multiple files
+      DuplicateAgentSlug AgentSlug [FilePath]
     deriving (Show)
 
 data LoadingError
     = AgentLoadingError FileLoader.InvalidAgentError
     | ReferenceError ReferenceError
-    | OpenAPIInitError Text String  -- ^ Description and error message
-    | PostgRESTInitError Text String  -- ^ Description and error message
-    | ConfigFileError FilePath String  -- ^ Path and error message
+    | -- | Description and error message
+      OpenAPIInitError Text String
+    | -- | Description and error message
+      PostgRESTInitError Text String
+    | -- | Path and error message
+      ConfigFileError FilePath String
     | OtherError String
     deriving (Show)
 
@@ -211,12 +229,13 @@ data LoadAgentResult
 -- Phase 0: Configuration Discovery
 -------------------------------------------------------------------------------
 
--- | Discover all agents starting from root using BFS traversal.
---
--- This function collects all agent configurations without creating any runtimes.
--- It follows both toolDirectory (children) and extra-agents references.
---
--- Returns a graph of all discovered agents, or errors if loading fails.
+{- | Discover all agents starting from root using BFS traversal.
+
+This function collects all agent configurations without creating any runtimes.
+It follows both toolDirectory (children) and extra-agents references.
+
+Returns a graph of all discovered agents, or errors if loading fails.
+-}
 discoverAgentConfigs ::
     Props ->
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigGraph)
@@ -232,15 +251,17 @@ discoverAgentConfigs props = do
             let edges = Map.map (\n -> n.nodeChildren ++ n.nodeExtraRefs) nodes
             pure $ Right $ AgentConfigGraph nodes edges
 
--- | BFS discovery state
--- FilePath: path to agent config
--- Maybe AgentSlug: optional parent slug (for cycle detection context)
+{- | BFS discovery state
+FilePath: path to agent config
+Maybe AgentSlug: optional parent slug (for cycle detection context)
+-}
 type DiscoveryQueue = [(FilePath, Maybe AgentSlug)]
 
--- | BFS traversal to discover all agents.
---
--- We track visited files to avoid reloading the same config.
--- We track loaded slugs to detect duplicates.
+{- | BFS traversal to discover all agents.
+
+We track visited files to avoid reloading the same config.
+We track loaded slugs to detect duplicates.
+-}
 bfsDiscovery ::
     Props ->
     DiscoveryQueue ->
@@ -315,24 +336,26 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
   where
     tracer = props.interactiveTracer
 
--- | Find a node by its file path using normalized comparison.
--- Both the search path and stored paths are normalized before comparison.
+{- | Find a node by its file path using normalized comparison.
+Both the search path and stored paths are normalized before comparison.
+-}
 findNodeByFile :: FilePath -> Map.Map AgentSlug AgentConfigNode -> Maybe (AgentSlug, AgentConfigNode)
 findNodeByFile file nodes =
     let normalizedSearchPath = FilePath.normalise file
-    in List.find (\(_, n) -> FilePath.normalise n.nodeFile == normalizedSearchPath) (Map.toList nodes)
+     in List.find (\(_, n) -> FilePath.normalise n.nodeFile == normalizedSearchPath) (Map.toList nodes)
 
 -------------------------------------------------------------------------------
 -- Phase 1: Reference Validation
 -------------------------------------------------------------------------------
 
--- | Validate the configuration graph.
---
--- Checks that:
--- 1. All edges point to existing nodes (no missing references)
--- 2. No duplicate slugs exist
---
--- Note: Cycles are allowed but detected and logged separately via 'detectCycles'.
+{- | Validate the configuration graph.
+
+Checks that:
+1. All edges point to existing nodes (no missing references)
+2. No duplicate slugs exist
+
+Note: Cycles are allowed but detected and logged separately via 'detectCycles'.
+-}
 validateReferences ::
     AgentConfigGraph ->
     Either (NonEmpty.NonEmpty LoadingError) ()
@@ -360,7 +383,7 @@ checkMissingReferences graph fromSlug refs =
         Just node ->
             catMaybes $
                 map
-                    (\ref ->
+                    ( \ref ->
                         if Map.member ref graph.graphNodes
                             then Nothing
                             else
@@ -376,15 +399,16 @@ checkMissingReferences graph fromSlug refs =
 -- Phase 2: Runtime Shell Creation
 -------------------------------------------------------------------------------
 
--- | Create runtime shells for all agents.
---
--- For each agent in the graph:
--- 1. Create runtime with empty/mutable tool list
--- 2. Register in RuntimeRegistry
--- 3. Store in result map
---
--- Note: Helper agents (from toolDirectory) are resolved immediately.
--- Extra agents will be wired up in phase 3.
+{- | Create runtime shells for all agents.
+
+For each agent in the graph:
+1. Create runtime with empty/mutable tool list
+2. Register in RuntimeRegistry
+3. Store in result map
+
+Note: Helper agents (from toolDirectory) are resolved immediately.
+Extra agents will be wired up in phase 3.
+-}
 createRuntimeShells ::
     Props ->
     AgentConfigGraph ->
@@ -439,18 +463,19 @@ createSingleRuntime props _graph (_slug, node) = do
 -- Phase 3: Tool Wiring
 -------------------------------------------------------------------------------
 
--- | Wire up tool references for all runtimes.
---
--- For each agent:
--- 1. Get its runtime from the map
--- 2. Collect all referenced agent runtimes (children + extra-agents)
--- 3. Use registry to look up each referenced runtime
--- 4. Create tool registrations via agentToTool
--- 5. Update runtime's agentTools IO action
---
--- Note: This function modifies the existing runtimes in place by updating
--- their tool resolution mechanisms. In a pure implementation, we would
--- create new runtimes, but here we work with IO actions.
+{- | Wire up tool references for all runtimes.
+
+For each agent:
+1. Get its runtime from the map
+2. Collect all referenced agent runtimes (children + extra-agents)
+3. Use registry to look up each referenced runtime
+4. Create tool registrations via agentToTool
+5. Update runtime's agentTools IO action
+
+Note: This function modifies the existing runtimes in place by updating
+their tool resolution mechanisms. In a pure implementation, we would
+create new runtimes, but here we work with IO actions.
+-}
 wireToolReferences ::
     Props ->
     AgentConfigGraph ->
@@ -494,10 +519,11 @@ wireAgentTools props _graph runtimes (slug, node) = do
 -- Phase 4: Build AgentTree
 -------------------------------------------------------------------------------
 
--- | Build the tree from the graph and initialized runtimes.
---
--- Finds the root agent and recursively builds the tree structure using graphEdges.
--- Attaches runtimes from the map.
+{- | Build the tree from the graph and initialized runtimes.
+
+Finds the root agent and recursively builds the tree structure using graphEdges.
+Attaches runtimes from the map.
+-}
 buildAgentTree ::
     AgentConfigGraph ->
     Map.Map AgentSlug Runtime ->
@@ -551,10 +577,11 @@ buildChild graph runtimes childSlug =
 -- Cycle Detection
 -------------------------------------------------------------------------------
 
--- | Detect cycles for warning purposes (doesn't prevent loading).
---
--- Uses DFS with three-color marking to detect all cycles in the graph.
--- Returns a list of all cycles found (each cycle is a list of slugs).
+{- | Detect cycles for warning purposes (doesn't prevent loading).
+
+Uses DFS with three-color marking to detect all cycles in the graph.
+Returns a list of all cycles found (each cycle is a list of slugs).
+-}
 detectCycles :: AgentConfigGraph -> [[AgentSlug]]
 detectCycles graph =
     let allSlugs = Map.keys graph.graphNodes
@@ -651,13 +678,14 @@ loadAgentTree props tree = do
 
             -- Phase 1.5: Create this agent's runtime shell
             -- (tools will be wired up later, but we register the slug now)
-            rt <- initAgentTreeAgentDeferred
+            rt <-
+                initAgentTreeAgentDeferred
                     tracer
                     props.apiKeys
                     (augmentMainAgentPromptWithSubAgents okRuntimes)
                     props.agentToTool
                     okRuntimes
-                    extraSlugs  -- NEW: pass extra refs for later resolution
+                    extraSlugs -- NEW: pass extra refs for later resolution
                     (agentRootDir tree)
                     (AgentDescription tree.agentConfig)
 
@@ -682,13 +710,14 @@ loadAgentTree props tree = do
 -- New Two-Phase Entry Point
 -------------------------------------------------------------------------------
 
--- | Load agent tree using the new two-phase algorithm.
---
--- Phase 0: Discover all configs via BFS traversal
--- Phase 1: Validate all references
--- Phase 2: Create runtime shells
--- Phase 3: Wire tool references
--- Phase 4: Build final tree
+{- | Load agent tree using the new two-phase algorithm.
+
+Phase 0: Discover all configs via BFS traversal
+Phase 1: Validate all references
+Phase 2: Create runtime shells
+Phase 3: Wire tool references
+Phase 4: Build final tree
+-}
 loadAgentTreeRuntime :: Props -> IO LoadAgentResult
 loadAgentTreeRuntime props = do
     -- Phase 0: Discover all configs
@@ -729,9 +758,10 @@ withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTreeRuntime props continue = do
     loadAgentTreeRuntime props >>= continue
 
--- | Convert OpenAPI toolbox description to toolbox configuration.
---
--- Handles both inline configurations and on-disk configurations.
+{- | Convert OpenAPI toolbox description to toolbox configuration.
+
+Handles both inline configurations and on-disk configurations.
+-}
 openApiDescToConfig :: OpenAPIServerDescription -> OpenAPIToolbox.Config
 openApiDescToConfig desc =
     OpenAPIToolbox.Config
@@ -742,11 +772,12 @@ openApiDescToConfig desc =
         , OpenAPIToolbox.configFilter = openApiFilter desc
         }
 
--- | Convert PostgREST toolbox description to toolbox configuration.
---
--- Handles both inline configurations and on-disk configurations.
--- The 'allowedMethods' field controls which HTTP verbs are exposed as tools.
--- By default, only read-only methods are enabled for safety.
+{- | Convert PostgREST toolbox description to toolbox configuration.
+
+Handles both inline configurations and on-disk configurations.
+The 'allowedMethods' field controls which HTTP verbs are exposed as tools.
+By default, only read-only methods are enabled for safety.
+-}
 postgrestDescToConfig :: PostgRESTServerDescription -> PostgREST.Config
 postgrestDescToConfig desc =
     PostgREST.Config
@@ -758,14 +789,16 @@ postgrestDescToConfig desc =
         , PostgREST.configFilter = postgrestFilter desc
         }
 
--- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
---
--- For 'OpenAPIServer' descriptions, returns the configuration directly.
--- For 'OpenAPIServerOnDisk' descriptions, loads the configuration from the specified file.
+{- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
+
+For 'OpenAPIServer' descriptions, returns the configuration directly.
+For 'OpenAPIServerOnDisk' descriptions, loads the configuration from the specified file.
+-}
 loadOpenAPIToolboxDescription ::
-    FilePath  -- ^ Base directory for resolving relative paths
-    -> OpenAPIToolboxDescription
-    -> IO (Either LoadingError OpenAPIServerDescription)
+    -- | Base directory for resolving relative paths
+    FilePath ->
+    OpenAPIToolboxDescription ->
+    IO (Either LoadingError OpenAPIServerDescription)
 loadOpenAPIToolboxDescription _baseDir (OpenAPIServer desc) =
     pure $ Right desc
 loadOpenAPIToolboxDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
@@ -775,14 +808,16 @@ loadOpenAPIToolboxDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPISe
         Left err -> pure $ Left $ ConfigFileError fullPath err
         Right desc -> pure $ Right desc
 
--- | Load a PostgREST toolbox description, resolving on-disk references if needed.
---
--- For 'PostgRESTServer' descriptions, returns the configuration directly.
--- For 'PostgRESTServerOnDisk' descriptions, loads the configuration from the specified file.
+{- | Load a PostgREST toolbox description, resolving on-disk references if needed.
+
+For 'PostgRESTServer' descriptions, returns the configuration directly.
+For 'PostgRESTServerOnDisk' descriptions, loads the configuration from the specified file.
+-}
 loadPostgRESTToolboxDescription ::
-    FilePath  -- ^ Base directory for resolving relative paths
-    -> PostgRESTToolboxDescription
-    -> IO (Either LoadingError PostgRESTServerDescription)
+    -- | Base directory for resolving relative paths
+    FilePath ->
+    PostgRESTToolboxDescription ->
+    IO (Either LoadingError PostgRESTServerDescription)
 loadPostgRESTToolboxDescription _baseDir (PostgRESTServer desc) =
     pure $ Right desc
 loadPostgRESTToolboxDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
@@ -792,22 +827,24 @@ loadPostgRESTToolboxDescription baseDir (PostgRESTServerOnDiskDescription (Postg
         Left err -> pure $ Left $ ConfigFileError fullPath err
         Right desc -> pure $ Right desc
 
--- | Initialize OpenAPI toolboxes and return their tool registrations.
---
--- This function takes OpenAPI toolbox descriptions, initializes each toolbox,
--- and registers all tools. If any toolbox fails to initialize, an error is returned.
---
--- Supports both inline configurations and on-disk configurations.
+{- | Initialize OpenAPI toolboxes and return their tool registrations.
+
+This function takes OpenAPI toolbox descriptions, initializes each toolbox,
+and registers all tools. If any toolbox fails to initialize, an error is returned.
+
+Supports both inline configurations and on-disk configurations.
+-}
 initializeOpenAPIToolboxes ::
     Tracer IO Trace ->
-    FilePath  -- ^ Base directory for resolving relative config paths
-    -> [OpenAPIToolboxDescription] ->
+    -- | Base directory for resolving relative config paths
+    FilePath ->
+    [OpenAPIToolboxDescription] ->
     IO (Either LoadingError [ToolRegistration])
 initializeOpenAPIToolboxes tracer baseDir descriptions = do
     results <- mapM initializeOne descriptions
     case concatEithers results of
         Left [] -> pure $ Left $ OtherError "Unknown OpenAPI initialization error"
-        Left (err : _) -> pure $ Left err  -- Return first error
+        Left (err : _) -> pure $ Left err -- Return first error
         Right allTools -> pure $ Right $ concat allTools
   where
     initializeOne :: OpenAPIToolboxDescription -> IO (Either LoadingError [ToolRegistration])
@@ -835,22 +872,24 @@ initializeOpenAPIToolboxes tracer baseDir descriptions = do
         let (lefts, rights) = Either.partitionEithers eithers
          in if null lefts then Right rights else Left lefts
 
--- | Initialize PostgREST toolboxes and return their tool registrations.
---
--- This function takes PostgREST toolbox descriptions, initializes each toolbox,
--- and registers all tools. If any toolbox fails to initialize, an error is returned.
---
--- Supports both inline configurations and on-disk configurations.
+{- | Initialize PostgREST toolboxes and return their tool registrations.
+
+This function takes PostgREST toolbox descriptions, initializes each toolbox,
+and registers all tools. If any toolbox fails to initialize, an error is returned.
+
+Supports both inline configurations and on-disk configurations.
+-}
 initializePostgRESToolboxes ::
     Tracer IO Trace ->
-    FilePath  -- ^ Base directory for resolving relative config paths
-    -> [PostgRESTToolboxDescription] ->
+    -- | Base directory for resolving relative config paths
+    FilePath ->
+    [PostgRESTToolboxDescription] ->
     IO (Either LoadingError [ToolRegistration])
 initializePostgRESToolboxes tracer baseDir descriptions = do
     results <- mapM initializeOne descriptions
     case concatEithers results of
         Left [] -> pure $ Left $ OtherError "Unknown PostgREST initialization error"
-        Left (err : _) -> pure $ Left err  -- Return first error
+        Left (err : _) -> pure $ Left err -- Return first error
         Right allTools -> pure $ Right $ concat allTools
   where
     initializeOne :: PostgRESTToolboxDescription -> IO (Either LoadingError [ToolRegistration])
@@ -881,19 +920,21 @@ initializePostgRESToolboxes tracer baseDir descriptions = do
 -- | Type alias for prompt modification functions.
 type PromptModifier = Text -> Text
 
--- | Initialize a runtime with deferred tool resolution for extra agents.
---
--- This function creates a runtime where the tool list is built dynamically.
--- Helper agents (from toolDirectory hierarchy) are resolved immediately,
--- while extra agents (from extra-agents config) are resolved lazily via
--- the registry lookup.
+{- | Initialize a runtime with deferred tool resolution for extra agents.
+
+This function creates a runtime where the tool list is built dynamically.
+Helper agents (from toolDirectory hierarchy) are resolved immediately,
+while extra agents (from extra-agents config) are resolved lazily via
+the registry lookup.
+-}
 initAgentTreeAgentDeferred ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
     PromptModifier ->
     (Runtime -> AgentSlug -> AgentId -> ToolRegistration) ->
     [Runtime.Runtime] ->
-    [AgentSlug] ->  -- ^ Extra agent slugs to resolve later via registry
+    -- | Extra agent slugs to resolve later via registry
+    [AgentSlug] ->
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
@@ -946,8 +987,9 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
             cfg.name
             (proc cfg.executable (map Text.unpack cfg.args))
 
--- | Original initialization function - kept for backward compatibility.
--- This function initializes a runtime without deferred resolution.
+{- | Original initialization function - kept for backward compatibility.
+This function initializes a runtime without deferred resolution.
+-}
 initAgentTreeAgent ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
@@ -1048,4 +1090,3 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
-

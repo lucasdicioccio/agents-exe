@@ -1,16 +1,17 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'check' command handler.
---
--- The check command validates agent configuration files and displays
--- information about loaded agents including their tools.
-module System.Agents.CLI.Check
-    ( handleCheck
-    , printAgentCheck
-    , ToolsOutputMode (..)
-    , CheckOptions (..)
-    ) where
+{- | Module for the 'check' command handler.
+
+The check command validates agent configuration files and displays
+information about loaded agents including their tools.
+-}
+module System.Agents.CLI.Check (
+    handleCheck,
+    printAgentCheck,
+    ToolsOutputMode (..),
+    CheckOptions (..),
+) where
 
 import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
@@ -30,14 +31,14 @@ import System.Agents.ToolRegistration (ToolRegistration (..))
 
 -- | How to display tool information in the check output
 data ToolsOutputMode
-    = ToolsNone
-    -- ^ No tool information (default)
-    | ToolsList
-    -- ^ List tool names in textual form
-    | ToolsAgentsExe
-    -- ^ Show the JSON description of the internal representation
-    | ToolsOpenAI
-    -- ^ Show the OpenAI.LLM JSON representation sent to LLM completion calls
+    = -- | No tool information (default)
+      ToolsNone
+    | -- | List tool names in textual form
+      ToolsList
+    | -- | Show the JSON description of the internal representation
+      ToolsAgentsExe
+    | -- | Show the OpenAI.LLM JSON representation sent to LLM completion calls
+      ToolsOpenAI
     deriving (Show, Eq)
 
 -- | Options for the check command
@@ -146,4 +147,3 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
-

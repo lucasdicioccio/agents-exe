@@ -4,11 +4,11 @@ module System.Agents.CLI.Base where
 
 import Control.Concurrent.QSem
 import Control.Exception (bracket_)
-import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Lazy as LByteString
-import qualified Data.ByteString.Char8 as C8
-import Prod.Tracer (Tracer (..), contramap)
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Char8 as C8
+import qualified Data.ByteString.Lazy as LByteString
+import Prod.Tracer (Tracer (..), contramap)
 
 makeShowLogFileTracer :: forall t. (Show t) => FilePath -> IO (Tracer IO t)
 makeShowLogFileTracer path = do
@@ -33,4 +33,3 @@ makeFileJsonTracer path = do
             ByteString.appendFile path (LByteString.toStrict bs)
             ByteString.appendFile path (C8.pack "\n")
     pure tracer
-

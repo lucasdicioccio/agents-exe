@@ -4,7 +4,7 @@
 
 module System.Agents.ExportImport.ToolInstall where
 
-import Control.Exception (try, IOException)
+import Control.Exception (IOException, try)
 import Control.Monad (forM_, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
@@ -14,43 +14,47 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (getCurrentTime)
-import System.Directory
-    ( createDirectoryIfMissing
-    , doesDirectoryExist
-    , doesFileExist
-    , getCurrentDirectory
-    , getHomeDirectory
-    , listDirectory
-    , renameFile
-    )
-import System.Exit (ExitCode(..))
-import System.FilePath ((</>), takeDirectory)
-import System.Posix.Files (unionFileModes, ownerExecuteMode, setFileMode, fileMode, getFileStatus)
+import System.Directory (
+    createDirectoryIfMissing,
+    doesDirectoryExist,
+    doesFileExist,
+    getCurrentDirectory,
+    getHomeDirectory,
+    listDirectory,
+    renameFile,
+ )
+import System.Exit (ExitCode (..))
+import System.FilePath (takeDirectory, (</>))
+import System.Posix.Files (fileMode, getFileStatus, ownerExecuteMode, setFileMode, unionFileModes)
 import System.Posix.Types (FileMode)
 import System.Process (readProcessWithExitCode)
 
-import System.Agents.Base (Agent(..), AgentDescription(..))
+import System.Agents.Base (Agent (..), AgentDescription (..))
 import System.Agents.ExportImport.Types
-import System.Agents.Tools.Bash (ScriptInfo(..))
+import System.Agents.Tools.Bash (ScriptInfo (..))
 
 -------------------------------------------------------------------------------
 -- Install Options
 -------------------------------------------------------------------------------
 
 data InstallOptions = InstallOptions
-    { installForce :: Bool          -- ^ Overwrite existing tools
-    , installLink :: Bool           -- ^ Create symlinks instead of copying
-    , installPrefix :: Maybe Text   -- ^ Prefix to add to tool names
+    { installForce :: Bool
+    -- ^ Overwrite existing tools
+    , installLink :: Bool
+    -- ^ Create symlinks instead of copying
+    , installPrefix :: Maybe Text
+    -- ^ Prefix to add to tool names
     }
     deriving (Show, Eq)
 
 -- | Default install options
 defaultInstallOptions :: InstallOptions
-defaultInstallOptions = InstallOptions
-    { installForce = False
-    , installLink = False
-    , installPrefix = Nothing
-    }
+defaultInstallOptions =
+    InstallOptions
+        { installForce = False
+        , installLink = False
+        , installPrefix = Nothing
+        }
 
 -------------------------------------------------------------------------------
 -- Tool Installation
@@ -67,7 +71,7 @@ installTools :: [StandaloneToolExport] -> FilePath -> InstallOptions -> IO (Eith
 installTools tools targetDir opts = do
     -- Ensure target directory exists
     createDirectoryIfMissing True targetDir
-    
+
     -- Check if target is valid
     isValid <- isValidToolDirectory targetDir
     if not isValid
@@ -78,7 +82,7 @@ installTools tools targetDir opts = do
             let (errors, _) = partitionEithers results
             case errors of
                 [] -> pure $ Right ()
-                (firstErr:_) -> pure $ Left firstErr
+                (firstErr : _) -> pure $ Left firstErr
 
 -- | Install tools globally (to a shared tools directory)
 installToolsGlobally :: [StandaloneToolExport] -> FilePath -> InstallOptions -> IO (Either InstallError ())
@@ -96,7 +100,7 @@ copyToolsBetweenAgents fromAgent toAgent opts = do
         toolExports <- mapM (loadToolFromPath (toolDirectory fromAgent)) toolFiles
         let validExports = [e | Right e <- toolExports]
         installToolsToAgent validExports toAgent opts
-    
+
     case result of
         Left (e :: IOException) -> pure $ Left $ InstallIOError e
         Right r -> pure r
@@ -110,9 +114,9 @@ installTool targetDir opts tool = do
     let toolName0 = case installPrefix opts of
             Just prefix -> Text.unpack prefix ++ Text.unpack (scriptSlug $ standaloneToolInfo tool)
             Nothing -> Text.unpack (scriptSlug $ standaloneToolInfo tool)
-    
+
     let targetPath = targetDir </> toolName0
-    
+
     -- Check if tool already exists
     exists <- doesFileExist targetPath
     if exists && not (installForce opts)
@@ -122,7 +126,7 @@ installTool targetDir opts tool = do
             when (exists && installForce opts) $ do
                 backupPath <- getBackupPath targetPath
                 renameFile targetPath backupPath
-            
+
             -- Install the tool
             if installLink opts
                 then installToolSymlink targetDir opts tool
@@ -133,20 +137,20 @@ installToolCopy targetDir opts tool = do
     let toolName0 = case installPrefix opts of
             Just prefix -> Text.unpack prefix ++ Text.unpack (scriptSlug $ standaloneToolInfo tool)
             Nothing -> Text.unpack (scriptSlug $ standaloneToolInfo tool)
-    
+
     let targetPath = targetDir </> toolName0
-    
+
     result <- try $ do
         -- Write the script
         ByteString.writeFile targetPath (standaloneToolScript tool)
         setFileMode targetPath (standaloneToolPermissions tool)
-        
+
         -- Write aux files if any
         forM_ (standaloneToolAuxFiles tool) $ \(auxPath, auxContent) -> do
             let fullAuxPath = targetDir </> auxPath
             createDirectoryIfMissing True (takeDirectory fullAuxPath)
             ByteString.writeFile fullAuxPath auxContent
-    
+
     case result of
         Left (e :: IOException) -> pure $ Left $ InstallIOError e
         Right () -> pure $ Right ()
@@ -175,7 +179,7 @@ validateTool toolPath = do
                 case Aeson.eitherDecode (LByteString.fromStrict $ Text.encodeUtf8 $ Text.pack out) of
                     Left jsonErr -> pure $ Left $ InvalidScriptInfo jsonErr
                     Right (_ :: ScriptInfo) -> pure $ Right ()
-    
+
     case result of
         Left (e :: IOException) -> pure $ Left $ DescribeFailed (show e)
         Right r -> pure r
@@ -183,9 +187,12 @@ validateTool toolPath = do
 -- | Validate multiple tools
 validateTools :: [FilePath] -> IO [(FilePath, Either ToolValidationError ())]
 validateTools paths = do
-    mapM (\p -> do
-        result <- validateTool p
-        pure (p, result)) paths
+    mapM
+        ( \p -> do
+            result <- validateTool p
+            pure (p, result)
+        )
+        paths
 
 -------------------------------------------------------------------------------
 -- Tool Discovery and Loading
@@ -195,7 +202,7 @@ validateTools paths = do
 loadToolFromPath :: FilePath -> FilePath -> IO (Either InstallError StandaloneToolExport)
 loadToolFromPath baseDir toolName0 = do
     let toolPath = baseDir </> toolName0
-    
+
     result <- try $ do
         isFile <- doesFileExist toolPath
         if not isFile
@@ -212,13 +219,15 @@ loadToolFromPath baseDir toolName0 = do
                                 -- Read the script content
                                 content <- ByteString.readFile toolPath
                                 perms <- getFileMode' toolPath
-                                pure $ Right $ StandaloneToolExport
-                                    { standaloneToolInfo = info
-                                    , standaloneToolScript = content
-                                    , standaloneToolPermissions = perms
-                                    , standaloneToolAuxFiles = []
-                                    }
-    
+                                pure $
+                                    Right $
+                                        StandaloneToolExport
+                                            { standaloneToolInfo = info
+                                            , standaloneToolScript = content
+                                            , standaloneToolPermissions = perms
+                                            , standaloneToolAuxFiles = []
+                                            }
+
     case result of
         Left (e :: IOException) -> pure $ Left $ InstallIOError e
         Right r -> pure r
@@ -256,9 +265,9 @@ data ImportMode
 -- | Convert import mode to install options
 importModeToOptions :: ImportMode -> InstallOptions -> InstallOptions
 importModeToOptions mode opts = case mode of
-    ImportFailOnConflict -> opts { installForce = False }
-    ImportOverwrite -> opts { installForce = True }
-    ImportMerge -> opts { installForce = True }  -- Merge is essentially overwrite with intelligence
+    ImportFailOnConflict -> opts{installForce = False}
+    ImportOverwrite -> opts{installForce = True}
+    ImportMerge -> opts{installForce = True} -- Merge is essentially overwrite with intelligence
 
 -------------------------------------------------------------------------------
 -- Import Integration
@@ -269,8 +278,10 @@ data ImportDestination
     = ImportToCurrentDir
     | ImportToPath FilePath
     | ImportToConfigDir
-    | ImportToAgent FilePath     -- ^ Install to agent's tool dir
-    | ImportToToolDir FilePath   -- ^ Install to specific tool dir
+    | -- | Install to agent's tool dir
+      ImportToAgent FilePath
+    | -- | Install to specific tool dir
+      ImportToToolDir FilePath
     deriving (Show, Eq)
 
 -- | Resolve import destination to a path
@@ -288,7 +299,7 @@ resolveImportDestination dest = case dest of
             content <- LByteString.readFile agentFile
             case Aeson.eitherDecode content of
                 Left err -> pure $ Left $ ValidationFailed $ "Failed to parse agent file: " ++ err
-                Right (AgentDescription agent) -> 
+                Right (AgentDescription agent) ->
                     pure $ Right $ toolDirectory agent
         case result of
             Left (e :: IOException) -> pure $ Left $ InstallIOError e
@@ -320,13 +331,13 @@ isValidToolDirectory path = do
 getBackupPath :: FilePath -> IO FilePath
 getBackupPath path = do
     now <- getCurrentTime
-    let timestamp = take 19 $ show now  -- Simple timestamp
+    let timestamp = take 19 $ show now -- Simple timestamp
     pure $ path ++ ".backup." ++ timestamp
 
-filterM :: Monad m => (a -> m Bool) -> [a] -> m [a]
-filterM p = foldr (\x -> liftM2 (\b -> if b then (x:) else id) (p x)) (return [])
+filterM :: (Monad m) => (a -> m Bool) -> [a] -> m [a]
+filterM p = foldr (\x -> liftM2 (\b -> if b then (x :) else id) (p x)) (return [])
 
-liftM2 :: Monad m => (a1 -> a2 -> r) -> m a1 -> m a2 -> m r
+liftM2 :: (Monad m) => (a1 -> a2 -> r) -> m a1 -> m a2 -> m r
 liftM2 f m1 m2 = do
     x1 <- m1
     x2 <- m2
@@ -336,4 +347,3 @@ getFileMode' :: FilePath -> IO FileMode
 getFileMode' path = do
     status <- getFileStatus path
     pure $ fileMode status
-

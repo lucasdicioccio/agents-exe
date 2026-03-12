@@ -1,19 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | OpenAPI 3.x and Swagger 2.0 specification types and JSON parsers.
---
--- This module provides a subset of OpenAPI 3.0/3.1 and Swagger 2.0 types needed for
--- LLM tool generation. It focuses on parsing paths, operations,
--- parameters, request bodies, and schemas.
---
--- Note: This is not a full OpenAPI implementation - only the subset
--- needed for tool generation is supported.
---
--- The module automatically converts Swagger 2.0 specs to OpenAPI 3.0 structure:
--- * 'definitions' -> 'components/schemas'
--- * 'in: body' parameters -> 'requestBody'
--- * parameter-level 'type' -> nested 'schema.type'
+{- | OpenAPI 3.x and Swagger 2.0 specification types and JSON parsers.
+
+This module provides a subset of OpenAPI 3.0/3.1 and Swagger 2.0 types needed for
+LLM tool generation. It focuses on parsing paths, operations,
+parameters, request bodies, and schemas.
+
+Note: This is not a full OpenAPI implementation - only the subset
+needed for tool generation is supported.
+
+The module automatically converts Swagger 2.0 specs to OpenAPI 3.0 structure:
+* 'definitions' -> 'components/schemas'
+* 'in: body' parameters -> 'requestBody'
+* parameter-level 'type' -> nested 'schema.type'
+-}
 module System.Agents.Tools.OpenAPI.Types (
     -- * OpenAPI spec types
     OpenAPISpec (..),
@@ -42,7 +43,7 @@ module System.Agents.Tools.OpenAPI.Types (
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), decode, withObject, (.:), (.:?))
 import qualified Data.Aeson as Aeson
-import Data.Aeson.Key (fromText, toText, Key)
+import Data.Aeson.Key (Key, fromText, toText)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (Parser, parseEither)
 import qualified Data.HashMap.Strict as HashMap
@@ -63,8 +64,9 @@ object = Aeson.object . catMaybes
 -- Top-level OpenAPI spec
 -- -------------------------------------------------------------------------
 
--- | Top-level OpenAPI specification document.
--- Supports both OpenAPI 3.x and Swagger 2.0 formats.
+{- | Top-level OpenAPI specification document.
+Supports both OpenAPI 3.x and Swagger 2.0 formats.
+-}
 data OpenAPISpec = OpenAPISpec
     { specPaths :: Map Path (Map Method Operation)
     , specComponents :: Maybe Components
@@ -82,7 +84,7 @@ instance FromJSON OpenAPISpec where
         case (mSwagger :: Maybe Text, mOpenapi :: Maybe Text) of
             (Just "2.0", _) -> parseSwaggerV2 o
             (_, Just _) -> parseOpenAPIV3 o
-            (_, _) -> parseOpenAPIV3 o  -- Default to OpenAPI 3.x parsing
+            (_, _) -> parseOpenAPIV3 o -- Default to OpenAPI 3.x parsing
 
 -- | Parse OpenAPI 3.x format.
 parseOpenAPIV3 :: KeyMap.KeyMap Value -> Parser OpenAPISpec
@@ -111,7 +113,7 @@ definitionsToComponents :: KeyMap.KeyMap Value -> Components
 definitionsToComponents defs =
     let schemas = KeyMap.toList defs
         schemaMap = Map.fromList $ mapMaybe parseDefinition schemas
-    in Components (if Map.null schemaMap then Nothing else Just schemaMap)
+     in Components (if Map.null schemaMap then Nothing else Just schemaMap)
   where
     parseDefinition :: (Key, Value) -> Maybe (Text, Schema)
     parseDefinition (k, v) =
@@ -124,7 +126,7 @@ parametersToMap :: KeyMap.KeyMap Value -> Map Text Parameter
 parametersToMap params =
     let pairs = KeyMap.toList params
         paramPairs = mapMaybe parseParamPair pairs
-    in Map.fromList paramPairs
+     in Map.fromList paramPairs
   where
     parseParamPair :: (Key, Value) -> Maybe (Text, Parameter)
     parseParamPair (k, v) =
@@ -146,8 +148,9 @@ parsePathItem o key = do
     operations <- parseOperations val
     pure (pathText, operations)
 
--- | Parse an operations object (the value of a path).
--- This contains the HTTP methods like "get", "post", etc.
+{- | Parse an operations object (the value of a path).
+This contains the HTTP methods like "get", "post", etc.
+-}
 parseOperations :: Value -> Parser (Map Method Operation)
 parseOperations = withObject "pathItem" $ \o -> do
     let methodKeys = filter (not . isExtensionKey) (KeyMap.keys o)
@@ -254,13 +257,14 @@ swaggerBodyParamToRequestBody sbp =
     let content = Map.singleton "application/json" (sbpSchema sbp)
      in RequestBody (sbpDescription sbp) (sbpRequired sbp) content
 
--- | Parse Swagger 2.0 parameter (supports both direct type and schema, and $ref-only).
---
--- In Swagger 2.0, parameters can be:
--- 1. Full inline parameters with 'in', 'name', 'type' or 'schema'
--- 2. Reference-only parameters: {"$ref": "#/parameters/something"}
+{- | Parse Swagger 2.0 parameter (supports both direct type and schema, and $ref-only).
+
+In Swagger 2.0, parameters can be:
+1. Full inline parameters with 'in', 'name', 'type' or 'schema'
+2. Reference-only parameters: {"$ref": "#/parameters/something"}
+-}
 parseParameterSwaggerV2 :: Value -> Parser Parameter
-parseParameterSwaggerV2 v = 
+parseParameterSwaggerV2 v =
     -- First try to parse as a $ref-only parameter
     case parseMaybe parseRefOnlyParam v of
         Just param -> pure param
@@ -275,22 +279,25 @@ parseParameterSwaggerV2 v =
         ref <- o .: "$ref"
         -- Create a parameter with just the schema ref
         -- We use "query" as a default location since it's most common for PostgREST
-        pure $ Parameter
-            { paramName = ""  -- Will be resolved later if needed
-            , paramIn = ParamInQuery  -- Default, may be overridden
-            , paramDescription = Nothing
-            , paramRequired = False
-            , paramSchema = Just $ Schema
-                { schemaType = Nothing
-                , schemaDescription = Nothing
-                , schemaEnum = Nothing
-                , schemaProperties = Nothing
-                , schemaItems = Nothing
-                , schemaAnyOf = Nothing
-                , schemaRef = Just ref
-                , schemaRequired = Nothing
+        pure $
+            Parameter
+                { paramName = "" -- Will be resolved later if needed
+                , paramIn = ParamInQuery -- Default, may be overridden
+                , paramDescription = Nothing
+                , paramRequired = False
+                , paramSchema =
+                    Just $
+                        Schema
+                            { schemaType = Nothing
+                            , schemaDescription = Nothing
+                            , schemaEnum = Nothing
+                            , schemaProperties = Nothing
+                            , schemaItems = Nothing
+                            , schemaAnyOf = Nothing
+                            , schemaRef = Just ref
+                            , schemaRequired = Nothing
+                            }
                 }
-            }
 
     -- Parse a full inline parameter
     parseFullParameterSwaggerV2 :: Value -> Parser Parameter
@@ -308,16 +315,18 @@ parseParameterSwaggerV2 v =
         -- Build schema from direct type if present
         let schema = case (mSchema, mDirectType) of
                 (Just s, _) -> Just s
-                (Nothing, Just t) -> Just $ Schema
-                    { schemaType = Just t
-                    , schemaDescription = Nothing
-                    , schemaEnum = Nothing
-                    , schemaProperties = Nothing
-                    , schemaItems = Nothing
-                    , schemaAnyOf = Nothing
-                    , schemaRef = Nothing
-                    , schemaRequired = Nothing
-                    }
+                (Nothing, Just t) ->
+                    Just $
+                        Schema
+                            { schemaType = Just t
+                            , schemaDescription = Nothing
+                            , schemaEnum = Nothing
+                            , schemaProperties = Nothing
+                            , schemaItems = Nothing
+                            , schemaAnyOf = Nothing
+                            , schemaRef = Nothing
+                            , schemaRequired = Nothing
+                            }
                 (Nothing, Nothing) -> Nothing
 
         pure $ Parameter name paramIn desc required schema
@@ -353,8 +362,9 @@ type Method = Text
 -- Operation (an endpoint)
 -- -------------------------------------------------------------------------
 
--- | Represents an API operation (endpoint).
--- Corresponds to an Operation Object in OpenAPI.
+{- | Represents an API operation (endpoint).
+Corresponds to an Operation Object in OpenAPI.
+-}
 data Operation = Operation
     { opOperationId :: Maybe Text
     , opSummary :: Maybe Text
@@ -499,8 +509,9 @@ type MediaType = Text
 -- JSON Schema (subset needed for OpenAPI)
 -- -------------------------------------------------------------------------
 
--- | JSON Schema subset used in OpenAPI.
--- Supports common schema types needed for tool generation.
+{- | JSON Schema subset used in OpenAPI.
+Supports common schema types needed for tool generation.
+-}
 data Schema = Schema
     { schemaType :: Maybe Text
     , schemaDescription :: Maybe Text
@@ -540,8 +551,9 @@ parseInlineSchema = withObject "Schema" $ \o -> do
     mType <- o .:? "type"
     mProps <- o .:? "properties"
     -- Convert properties from HashMap to Map if present
-    let props = fmap HashMap.toList mProps >>= \pairs ->
-            if null pairs then Nothing else Just $ Map.fromList $ map (\(k, v) -> (toText k, v)) pairs
+    let props =
+            fmap HashMap.toList mProps >>= \pairs ->
+                if null pairs then Nothing else Just $ Map.fromList $ map (\(k, v) -> (toText k, v)) pairs
     Schema
         <$> pure mType
         <*> o .:? "description"
@@ -585,9 +597,10 @@ instance FromJSON Components where
     parseJSON = withObject "Components" $ \o -> do
         mSchemas <- o .:? "schemas"
         -- Convert from HashMap to Map
-        let schemas = mSchemas >>= \hm ->
-                let pairs = HashMap.toList hm
-                 in if null pairs then Nothing else Just $ Map.fromList $ map (\(k, v) -> (toText k, v)) pairs
+        let schemas =
+                mSchemas >>= \hm ->
+                    let pairs = HashMap.toList hm
+                     in if null pairs then Nothing else Just $ Map.fromList $ map (\(k, v) -> (toText k, v)) pairs
         pure $ Components schemas
 
 instance ToJSON Components where
@@ -605,10 +618,11 @@ schemaDefinitionToPair (key, val) = (fromText key, toJSON val)
 -- Tool execution result
 -- -------------------------------------------------------------------------
 
--- | Result of executing an OpenAPI tool.
---
--- This type captures the structured result from executing an OpenAPI-based
--- tool call, including the HTTP response details.
+{- | Result of executing an OpenAPI tool.
+
+This type captures the structured result from executing an OpenAPI-based
+tool call, including the HTTP response details.
+-}
 data ToolResult = ToolResult
     { resultPath :: Text
     -- ^ Path that was called
@@ -645,4 +659,3 @@ infixr 8 .=?
 (.=) k v = Just ((Aeson..=) k v)
 
 infixr 8 .=
-

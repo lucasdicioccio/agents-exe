@@ -1,22 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | JSON Schema reference resolution ($ref dereferencing) for OpenAPI specs.
---
--- This module provides functions to recursively resolve '$ref' pointers in
--- OpenAPI and Swagger 2.0 specs. This is essential because OpenAPI specs use
--- references to avoid duplication and improve maintainability.
---
--- Supports both OpenAPI 3.x refs (@#/components/schemas/Name@) and
--- Swagger 2.0 refs (@#/definitions/Name@).
---
--- Example:
--- >>> import qualified Data.Map.Strict as Map
--- >>> let petSchema = Schema (Just "object") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
--- >>> let components = Components (Just (Map.fromList [("Pet", petSchema)]))
--- >>> let refSchema = Schema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
--- >>> resolveSchema refSchema components
--- Schema {schemaType = Just "object", ...}
+{- | JSON Schema reference resolution ($ref dereferencing) for OpenAPI specs.
+
+This module provides functions to recursively resolve '$ref' pointers in
+OpenAPI and Swagger 2.0 specs. This is essential because OpenAPI specs use
+references to avoid duplication and improve maintainability.
+
+Supports both OpenAPI 3.x refs (@#/components/schemas/Name@) and
+Swagger 2.0 refs (@#/definitions/Name@).
+
+Example:
+>>> import qualified Data.Map.Strict as Map
+>>> let petSchema = Schema (Just "object") Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+>>> let components = Components (Just (Map.fromList [("Pet", petSchema)]))
+>>> let refSchema = Schema Nothing Nothing Nothing Nothing Nothing Nothing (Just "#/components/schemas/Pet") Nothing
+>>> resolveSchema refSchema components
+Schema {schemaType = Just "object", ...}
+-}
 module System.Agents.Tools.OpenAPI.Resolver (
     -- * Core resolution functions
     resolveSchema,
@@ -56,23 +57,24 @@ import System.Agents.Tools.OpenAPI.Types (
 -- Reference path representation
 -- -------------------------------------------------------------------------
 
--- | Represents a parsed JSON reference path.
---
--- A reference like @#/components/schemas/Pet@ is parsed into:
--- @
--- RefPath { refComponents = "components"
---         , refSection = "schemas"
---         , refName = "Pet"
---         }
--- @
---
--- For Swagger 2.0 refs like @#/definitions/Pet@:
--- @
--- RefPath { refComponents = "definitions"
---         , refSection = ""
---         , refName = "Pet"
---         }
--- @
+{- | Represents a parsed JSON reference path.
+
+A reference like @#/components/schemas/Pet@ is parsed into:
+@
+RefPath { refComponents = "components"
+        , refSection = "schemas"
+        , refName = "Pet"
+        }
+@
+
+For Swagger 2.0 refs like @#/definitions/Pet@:
+@
+RefPath { refComponents = "definitions"
+        , refSection = ""
+        , refName = "Pet"
+        }
+@
+-}
 data RefPath = RefPath
     { refComponents :: Text
     -- ^ The first path segment (usually "components" or "definitions")
@@ -83,23 +85,24 @@ data RefPath = RefPath
     }
     deriving (Show, Eq)
 
--- | Parse a reference string into a 'RefPath'.
---
--- Supports internal references of the form:
--- * @#/components/schemas/Name@ (OpenAPI 3.x)
--- * @#/definitions/Name@ (Swagger 2.0)
---
--- External references (URLs) are not supported and will return 'Nothing'.
---
--- Examples:
--- >>> parseRef "#/components/schemas/Pet"
--- Just (RefPath {refComponents = "components", refSection = "schemas", refName = "Pet"})
---
--- >>> parseRef "#/definitions/Pet"
--- Just (RefPath {refComponents = "definitions", refSection = "", refName = "Pet"})
---
--- >>> parseRef "http://example.com/schema.json"
--- Nothing
+{- | Parse a reference string into a 'RefPath'.
+
+Supports internal references of the form:
+* @#/components/schemas/Name@ (OpenAPI 3.x)
+* @#/definitions/Name@ (Swagger 2.0)
+
+External references (URLs) are not supported and will return 'Nothing'.
+
+Examples:
+>>> parseRef "#/components/schemas/Pet"
+Just (RefPath {refComponents = "components", refSection = "schemas", refName = "Pet"})
+
+>>> parseRef "#/definitions/Pet"
+Just (RefPath {refComponents = "definitions", refSection = "", refName = "Pet"})
+
+>>> parseRef "http://example.com/schema.json"
+Nothing
+-}
 parseRef :: Text -> Maybe RefPath
 parseRef ref
     -- External refs (http/https) are not supported
@@ -116,8 +119,9 @@ parseRef ref
                 ("definitions" : name : _) ->
                     Just $ RefPath "definitions" "" name
                 -- Generic format: try to extract name from the last segment
-                parts' | not (null parts') ->
-                    Just $ RefPath (head parts') (if length parts' > 2 then parts' !! 1 else "") (last parts')
+                parts'
+                    | not (null parts') ->
+                        Just $ RefPath (head parts') (if length parts' > 2 then parts' !! 1 else "") (last parts')
                 _ -> Nothing
     -- Relative refs not starting with #/ are not supported
     | otherwise = Nothing
@@ -146,12 +150,13 @@ data ResolutionError
 defaultMaxDepth :: Int
 defaultMaxDepth = 100
 
--- | Recursively resolves all '$ref' pointers in a schema.
---
--- This function will follow references transitively until no more
--- references remain, or an error condition is encountered.
---
--- For simple resolution without error handling, use 'resolveSchema'.
+{- | Recursively resolves all '$ref' pointers in a schema.
+
+This function will follow references transitively until no more
+references remain, or an error condition is encountered.
+
+For simple resolution without error handling, use 'resolveSchema'.
+-}
 resolveSchemaWithDepth ::
     -- | Schema to resolve
     Schema ->
@@ -210,11 +215,12 @@ resolveSchemaWithDepth schema components depth visited = do
     resolveAnyOf (Just schemas) =
         Just <$> traverse (\s -> resolveSchemaWithDepth s components depth visited) schemas
 
--- | Resolve a reference path to a schema from components.
---
--- Looks up the schema in the components/schemas section.
--- Supports both OpenAPI 3.x refs (#/components/schemas/Name) and
--- Swagger 2.0 refs (#/definitions/Name).
+{- | Resolve a reference path to a schema from components.
+
+Looks up the schema in the components/schemas section.
+Supports both OpenAPI 3.x refs (#/components/schemas/Name) and
+Swagger 2.0 refs (#/definitions/Name).
+-}
 resolveRef :: Text -> Components -> Either ResolutionError Schema
 resolveRef ref components = do
     refPath <- maybe (Left $ InvalidRefPath ref) Right (parseRef ref)
@@ -227,22 +233,23 @@ resolveRef ref components = do
 
     pure schema
 
--- | Recursively resolves all '$ref' pointers in a schema.
---
--- This is the main entry point for schema resolution. It handles:
---
--- * Simple references like @#/components/schemas/Pet@ or @#/definitions/Pet@
--- * Nested references (schema A refs B refs C)
--- * Arrays with item references
--- * Object properties with references
--- * anyOf schemas with references
---
--- For circular references, the original $ref is returned to prevent infinite loops.
---
--- Example:
--- >>> let components = Components (Just (Map.fromList [("Pet", petSchema)]))
--- >>> resolveSchema refSchema components
--- Schema {schemaType = Just "object", ...}
+{- | Recursively resolves all '$ref' pointers in a schema.
+
+This is the main entry point for schema resolution. It handles:
+
+* Simple references like @#/components/schemas/Pet@ or @#/definitions/Pet@
+* Nested references (schema A refs B refs C)
+* Arrays with item references
+* Object properties with references
+* anyOf schemas with references
+
+For circular references, the original $ref is returned to prevent infinite loops.
+
+Example:
+>>> let components = Components (Just (Map.fromList [("Pet", petSchema)]))
+>>> resolveSchema refSchema components
+Schema {schemaType = Just "object", ...}
+-}
 resolveSchema :: Schema -> Components -> Schema
 resolveSchema schema components =
     case resolveSchemaWithDepth schema components 0 Set.empty of
@@ -255,17 +262,18 @@ resolveSchema schema components =
                 }
         Right resolved -> resolved
 
--- | Resolves all schemas within an OpenAPI spec.
---
--- This function walks through the entire spec and resolves all
--- schema references in:
---
--- * Path parameters
--- * Operation parameters
--- * Request bodies
--- * Response schemas (when implemented)
---
--- The returned spec has all $ref pointers fully resolved.
+{- | Resolves all schemas within an OpenAPI spec.
+
+This function walks through the entire spec and resolves all
+schema references in:
+
+* Path parameters
+* Operation parameters
+* Request bodies
+* Response schemas (when implemented)
+
+The returned spec has all $ref pointers fully resolved.
+-}
 dereferenceSpec :: OpenAPISpec -> OpenAPISpec
 dereferenceSpec spec =
     let comps = fromMaybe emptyComponents spec.specComponents
@@ -289,4 +297,3 @@ dereferenceSpec spec =
     resolveRequestBody :: Components -> RequestBody -> RequestBody
     resolveRequestBody comps body =
         body{reqBodyContent = Map.map (\s -> resolveSchema s comps) body.reqBodyContent}
-

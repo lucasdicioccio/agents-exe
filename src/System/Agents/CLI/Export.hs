@@ -1,24 +1,27 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'export' command handler.
---
--- The export command packages agent configurations and tools into
--- archive files or git repositories for sharing and deployment.
-module System.Agents.CLI.Export
-    ( -- * Types
-      ExportOptions (..)
-    , ExportSource (..)
-    , ExportDestination (..)
-    , GitExportDest (..)
-      -- * Handler
-    , handleExport
-      -- * Helpers
-    , buildExportPackage
-    , loadAgentFromFile
-    , loadToolsForAgent
-    , loadStandaloneToolsForAgent
-    ) where
+{- | Module for the 'export' command handler.
+
+The export command packages agent configurations and tools into
+archive files or git repositories for sharing and deployment.
+-}
+module System.Agents.CLI.Export (
+    -- * Types
+    ExportOptions (..),
+    ExportSource (..),
+    ExportDestination (..),
+    GitExportDest (..),
+
+    -- * Handler
+    handleExport,
+
+    -- * Helpers
+    buildExportPackage,
+    loadAgentFromFile,
+    loadToolsForAgent,
+    loadStandaloneToolsForAgent,
+) where
 
 import Control.Monad (when)
 import Data.Maybe (fromMaybe)
@@ -31,18 +34,18 @@ import System.IO (stderr)
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
-import System.Directory (doesDirectoryExist)
-import System.FilePath (takeDirectory, takeFileName, (</>))
-import qualified System.Process as Process
-import System.Exit (ExitCode(..))
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Text.Encoding as TextEncoding
+import System.Directory (doesDirectoryExist)
+import System.Exit (ExitCode (..))
+import System.FilePath (takeDirectory, takeFileName, (</>))
+import qualified System.Process as Process
 
 import System.Agents.Base (Agent (..), AgentDescription (..))
-import System.Agents.ExportImport.Types
 import qualified System.Agents.ExportImport.Archive as Archive
 import qualified System.Agents.ExportImport.Git as Git
 import qualified System.Agents.ExportImport.ToolInstall as ExportInstall
+import System.Agents.ExportImport.Types
 import System.Agents.Tools.Bash (ScriptInfo (..))
 
 -------------------------------------------------------------------------------
@@ -98,10 +101,10 @@ handleExport opts agentFiles _configDir = do
             (ExportToFile path, Nothing) -> fromMaybe TarGzFormat (detectArchiveFormat path)
             (_, Just fmt) -> fmt
             (_, Nothing) -> TarGzFormat
-    
+
     -- Build export package
     ePackage <- buildExportPackage opts agentFiles
-    
+
     case ePackage of
         Left err -> do
             Text.hPutStrLn stderr $ "Export error: " <> err
@@ -117,20 +120,21 @@ handleExport opts agentFiles _configDir = do
                         Right () -> do
                             Text.putStrLn $ "Exported to " <> Text.pack path
                             exitSuccess
-                
                 ExportToGit gitDest -> do
                     -- Convert to GitUrl and GitExportOptions
-                    let gitUrl0 = GitUrl
-                            { gitRemote = destGitUrl gitDest
-                            , gitBranch = destGitBranch gitDest
-                            , gitPath = parseNamespaceToMaybeNs opts.exportNamespace
-                            }
-                    let gitOpts = GitExportOptions
-                            { gitCommitMessage = fromMaybe "Update agent configurations" (destGitCommitMessage gitDest)
-                            , gitTag = destGitTag gitDest
-                            , gitPush = destGitPush gitDest
-                            }
-                    
+                    let gitUrl0 =
+                            GitUrl
+                                { gitRemote = destGitUrl gitDest
+                                , gitBranch = destGitBranch gitDest
+                                , gitPath = parseNamespaceToMaybeNs opts.exportNamespace
+                                }
+                    let gitOpts =
+                            GitExportOptions
+                                { gitCommitMessage = fromMaybe "Update agent configurations" (destGitCommitMessage gitDest)
+                                , gitTag = destGitTag gitDest
+                                , gitPush = destGitPush gitDest
+                                }
+
                     result <- Git.exportToGit pkg gitUrl0 gitOpts
                     case result of
                         Left err -> do
@@ -149,118 +153,135 @@ handleExport opts agentFiles _configDir = do
 buildExportPackage :: ExportOptions -> [FilePath] -> IO (Either Text ExportPackage)
 buildExportPackage opts agentFiles = do
     now <- getCurrentTime
-    let metadata = PackageMetadata
-            { packageVersion = exportSchemaVersion
-            , packageCreatedAt = now
-            , packageDescription = Nothing
-            , packageSource = Nothing
-            }
-    
+    let metadata =
+            PackageMetadata
+                { packageVersion = exportSchemaVersion
+                , packageCreatedAt = now
+                , packageDescription = Nothing
+                , packageSource = Nothing
+                }
+
     case opts.exportSource of
         ExportCurrentAgent -> do
             case agentFiles of
                 [] -> pure $ Left "No agent file specified"
-                (agentFile:_) -> do
+                (agentFile : _) -> do
                     -- Load agent
                     eAgent <- loadAgentFromFile agentFile
                     case eAgent of
                         Left err -> pure $ Left err
                         Right agent -> do
                             -- Load agent tools
-                            tools <- if opts.exportIncludeTools
-                                then loadToolsForAgent agentFile agent
-                                else pure []
-                            
-                            let agentExport = AgentExport
-                                    { agentConfig = agent
-                                    , agentNamespace = opts.exportNamespace
-                                    , agentTools = tools
-                                    }
-                            
-                            pure $ Right $ ExportPackage
-                                { packageMetadata = metadata
-                                , packageAgents = [agentExport]
-                                , packageTools = []
-                                , packageMcpServers = if opts.exportIncludeMcp
-                                    then maybe [] (map (\m -> McpServerExport m opts.exportNamespace)) (mcpServers agent)
-                                    else []
-                                }
-        
+                            tools <-
+                                if opts.exportIncludeTools
+                                    then loadToolsForAgent agentFile agent
+                                    else pure []
+
+                            let agentExport =
+                                    AgentExport
+                                        { agentConfig = agent
+                                        , agentNamespace = opts.exportNamespace
+                                        , agentTools = tools
+                                        }
+
+                            pure $
+                                Right $
+                                    ExportPackage
+                                        { packageMetadata = metadata
+                                        , packageAgents = [agentExport]
+                                        , packageTools = []
+                                        , packageMcpServers =
+                                            if opts.exportIncludeMcp
+                                                then maybe [] (map (\m -> McpServerExport m opts.exportNamespace)) (mcpServers agent)
+                                                else []
+                                        }
         ExportAllAgents -> do
             -- Export all loaded agents
-            agentExports <- mapM (\agentFile -> do
-                eAgent <- loadAgentFromFile agentFile
-                case eAgent of
-                    Left _ -> pure Nothing
-                    Right agent -> do
-                        tools <- if opts.exportIncludeTools
-                            then loadToolsForAgent agentFile agent
-                            else pure []
-                        pure $ Just $ AgentExport
-                            { agentConfig = agent
-                            , agentNamespace = opts.exportNamespace
-                            , agentTools = tools
-                            }) agentFiles
-            
-            pure $ Right $ ExportPackage
-                { packageMetadata = metadata
-                , packageAgents = [a | Just a <- agentExports]
-                , packageTools = []
-                , packageMcpServers = []
-                }
-        
+            agentExports <-
+                mapM
+                    ( \agentFile -> do
+                        eAgent <- loadAgentFromFile agentFile
+                        case eAgent of
+                            Left _ -> pure Nothing
+                            Right agent -> do
+                                tools <-
+                                    if opts.exportIncludeTools
+                                        then loadToolsForAgent agentFile agent
+                                        else pure []
+                                pure $
+                                    Just $
+                                        AgentExport
+                                            { agentConfig = agent
+                                            , agentNamespace = opts.exportNamespace
+                                            , agentTools = tools
+                                            }
+                    )
+                    agentFiles
+
+            pure $
+                Right $
+                    ExportPackage
+                        { packageMetadata = metadata
+                        , packageAgents = [a | Just a <- agentExports]
+                        , packageTools = []
+                        , packageMcpServers = []
+                        }
         ExportAgentBySlug targetSlug -> do
             -- Find agent with matching slug
             agents <- mapM loadAgentFromFile agentFiles
             case [a | Right a <- agents, targetSlug == slug a] of
                 [] -> pure $ Left $ "Agent with slug '" <> targetSlug <> "' not found"
-                (agent:_) -> do
+                (agent : _) -> do
                     let agentFile = case [f | (f, Right a) <- zip agentFiles agents, slug a == targetSlug] of
-                            (f:_) -> f
+                            (f : _) -> f
                             [] -> case agentFiles of
-                                (first:_) -> first
+                                (first : _) -> first
                                 [] -> error "No agent files available"
-                    tools <- if opts.exportIncludeTools
-                        then loadToolsForAgent agentFile agent
-                        else pure []
-                    
-                    pure $ Right $ ExportPackage
-                        { packageMetadata = metadata
-                        , packageAgents = 
-                            [ AgentExport
-                                { agentConfig = agent
-                                , agentNamespace = opts.exportNamespace
-                                , agentTools = tools
+                    tools <-
+                        if opts.exportIncludeTools
+                            then loadToolsForAgent agentFile agent
+                            else pure []
+
+                    pure $
+                        Right $
+                            ExportPackage
+                                { packageMetadata = metadata
+                                , packageAgents =
+                                    [ AgentExport
+                                        { agentConfig = agent
+                                        , agentNamespace = opts.exportNamespace
+                                        , agentTools = tools
+                                        }
+                                    ]
+                                , packageTools = []
+                                , packageMcpServers =
+                                    if opts.exportIncludeMcp
+                                        then maybe [] (map (\m -> McpServerExport m opts.exportNamespace)) (mcpServers agent)
+                                        else []
                                 }
-                            ]
-                        , packageTools = []
-                        , packageMcpServers = if opts.exportIncludeMcp
-                            then maybe [] (map (\m -> McpServerExport m opts.exportNamespace)) (mcpServers agent)
-                            else []
-                        }
-        
         ExportCurrentTools -> do
             -- Export tools from current agent
             case agentFiles of
                 [] -> pure $ Left "No agent file specified"
-                (agentFile:_) -> do
+                (agentFile : _) -> do
                     eAgent <- loadAgentFromFile agentFile
                     case eAgent of
                         Left err -> pure $ Left err
                         Right agent -> do
                             standaloneTools <- loadStandaloneToolsForAgent agentFile agent
-                            pure $ Right $ ExportPackage
-                                { packageMetadata = metadata
-                                , packageAgents = []
-                                , packageTools = standaloneTools
-                                , packageMcpServers = []
-                                }
-        
+                            pure $
+                                Right $
+                                    ExportPackage
+                                        { packageMetadata = metadata
+                                        , packageAgents = []
+                                        , packageTools = standaloneTools
+                                        , packageMcpServers = []
+                                        }
         ExportToolByName targetToolName -> do
             -- Find and export specific tool
             case agentFiles of
                 [] -> pure $ Left "No agent file specified"
-                (agentFile:_) -> do
+                (agentFile : _) -> do
                     eAgent <- loadAgentFromFile agentFile
                     case eAgent of
                         Left err -> pure $ Left err
@@ -268,12 +289,15 @@ buildExportPackage opts agentFiles = do
                             standaloneTools <- loadStandaloneToolsForAgent agentFile agent
                             case [t | t <- standaloneTools, scriptSlug (standaloneToolInfo t) == targetToolName] of
                                 [] -> pure $ Left $ "Tool '" <> targetToolName <> "' not found"
-                                (tool:_) -> pure $ Right $ ExportPackage
-                                    { packageMetadata = metadata
-                                    , packageAgents = []
-                                    , packageTools = [tool]
-                                    , packageMcpServers = []
-                                    }
+                                (tool : _) ->
+                                    pure $
+                                        Right $
+                                            ExportPackage
+                                                { packageMetadata = metadata
+                                                , packageAgents = []
+                                                , packageTools = [tool]
+                                                , packageMcpServers = []
+                                                }
 
 -------------------------------------------------------------------------------
 -- Helper Functions
@@ -282,7 +306,7 @@ buildExportPackage opts agentFiles = do
 -- | Helper to parse namespace text to Maybe Namespace
 parseNamespaceToMaybeNs :: Maybe Text -> Maybe Namespace
 parseNamespaceToMaybeNs Nothing = Nothing
-parseNamespaceToMaybeNs (Just txt) = 
+parseNamespaceToMaybeNs (Just txt) =
     case parseNamespace txt of
         Left _ -> Nothing
         Right ns -> Just ns
@@ -313,13 +337,14 @@ loadToolsForAgent agentFile agent = do
         let tName = Text.pack $ takeFileName toolPath
         -- Run describe to get metadata
         _ <- ExportInstall.validateTool toolPath
-        pure $ ToolExport
-            { toolName = tName
-            , toolContent = content
-            , toolPermissions = perms
-            , toolMetadata = Nothing  -- Could be populated by running describe
-            , toolNamespace = Nothing
-            }
+        pure $
+            ToolExport
+                { toolName = tName
+                , toolContent = content
+                , toolPermissions = perms
+                , toolMetadata = Nothing -- Could be populated by running describe
+                , toolNamespace = Nothing
+                }
 
 -- | Load standalone tools for an agent
 loadStandaloneToolsForAgent :: FilePath -> Agent -> IO [StandaloneToolExport]
@@ -344,18 +369,19 @@ loadStandaloneToolsForAgent agentFile agent = do
                         Left _ -> defaultMetadata toolPath
                         Right info0 -> info0
                 _ -> defaultMetadata toolPath
-        pure $ StandaloneToolExport
-            { standaloneToolInfo = metadata
-            , standaloneToolScript = content
-            , standaloneToolPermissions = perms
-            , standaloneToolAuxFiles = []
-            }
-    
-    defaultMetadata :: FilePath -> ScriptInfo
-    defaultMetadata path = ScriptInfo
-        { scriptArgs = []
-        , scriptSlug = Text.pack $ takeFileName path
-        , scriptDescription = "Imported tool"
-        , scriptEmptyResultBehavior = Nothing
-        }
+        pure $
+            StandaloneToolExport
+                { standaloneToolInfo = metadata
+                , standaloneToolScript = content
+                , standaloneToolPermissions = perms
+                , standaloneToolAuxFiles = []
+                }
 
+    defaultMetadata :: FilePath -> ScriptInfo
+    defaultMetadata path =
+        ScriptInfo
+            { scriptArgs = []
+            , scriptSlug = Text.pack $ takeFileName path
+            , scriptDescription = "Imported tool"
+            , scriptEmptyResultBehavior = Nothing
+            }

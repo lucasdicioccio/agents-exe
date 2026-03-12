@@ -1,20 +1,26 @@
-{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module System.Agents.LLMs.OpenAI (
-  Tool(..),Trace(..),ToolCall(..),ToolCallFunction(..),ToolName(..), Model(..), ModelFlavor(..)
- , ApiKey(..)
- , parseFlavor
- , ApiBaseUrl(..)
- , SystemPrompt(..)
- , Response(..)
- , callLLMPayload
- , calculatePayloadBytes
- , parseLLMResponse
- , waitRateLimit
- , parseRateLimitDelay
- , ApiLimits(..)
- , WaitAction(..)
+    Tool (..),
+    Trace (..),
+    ToolCall (..),
+    ToolCallFunction (..),
+    ToolName (..),
+    Model (..),
+    ModelFlavor (..),
+    ApiKey (..),
+    parseFlavor,
+    ApiBaseUrl (..),
+    SystemPrompt (..),
+    Response (..),
+    callLLMPayload,
+    calculatePayloadBytes,
+    parseLLMResponse,
+    waitRateLimit,
+    parseRateLimitDelay,
+    ApiLimits (..),
+    WaitAction (..),
 ) where
 
 import Control.Concurrent (threadDelay)
@@ -42,23 +48,25 @@ import System.Agents.ToolSchema
 -- Trace with byte counts
 -------------------------------------------------------------------------------
 
--- | Trace events for LLM calls, now including byte counts for tracking.
---
--- The constructors include byte counts for request/response payloads
--- to support cost transparency and debugging.
+{- | Trace events for LLM calls, now including byte counts for tracking.
+
+The constructors include byte counts for request/response payloads
+to support cost transparency and debugging.
+-}
 data Trace
-    = CallChatCompletion !Aeson.Value !Int
-      -- ^ Payload being sent to the LLM + byte count
-    | GotChatCompletion !Aeson.Value !Int
-      -- ^ Response received from the LLM + byte count
-    | HttpClientTrace !HttpClient.Trace
-      -- ^ Trace from the underlying HTTP client
+    = -- | Payload being sent to the LLM + byte count
+      CallChatCompletion !Aeson.Value !Int
+    | -- | Response received from the LLM + byte count
+      GotChatCompletion !Aeson.Value !Int
+    | -- | Trace from the underlying HTTP client
+      HttpClientTrace !HttpClient.Trace
     deriving (Show)
 
--- | Calculate byte size of a JSON Value for tracking purposes.
---
--- This encodes the value to JSON and returns the length of the
--- resulting ByteString. Useful for tracking payload sizes.
+{- | Calculate byte size of a JSON Value for tracking purposes.
+
+This encodes the value to JSON and returns the length of the
+resulting ByteString. Useful for tracking payload sizes.
+-}
 calculatePayloadBytes :: Aeson.Value -> Int
 calculatePayloadBytes = fromIntegral . LByteString.length . Aeson.encode
 
@@ -257,7 +265,6 @@ parseFlavor "claude-v1" = Just ClaudeV1
 parseFlavor "ClaudeV1" = Just ClaudeV1
 parseFlavor _ = Nothing
 
-
 callLLMPayload ::
     (ToJSON payload) =>
     Tracer IO Trace ->
@@ -343,4 +350,3 @@ instance FromJSON Response where
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
-

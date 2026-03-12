@@ -1,22 +1,23 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'mcp-server' command handler.
---
--- The mcp-server command starts a Model Context Protocol server that
--- exposes agents as MCP tools for integration with MCP clients.
-module System.Agents.CLI.McpServer
-    ( handleMcpServer
-    ) where
+{- | Module for the 'mcp-server' command handler.
+
+The mcp-server command starts a Model Context Protocol server that
+exposes agents as MCP tools for integration with MCP clients.
+-}
+module System.Agents.CLI.McpServer (
+    handleMcpServer,
+) where
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 
 -- | Handle the MCP server command: start MCP server for agents
 handleMcpServer ::
@@ -33,20 +34,20 @@ handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let oneAgent agentFile = do
             registry <- AgentTree.newRuntimeRegistry
-            pure $ AgentTree.Props
-                { AgentTree.apiKeys = apiKeys
-                , AgentTree.rootAgentFile = agentFile
-                , AgentTree.interactiveTracer =
-                    Prod.traceBoth
-                        baseTracer
-                        ( Prod.traceBoth
-                            traceUsefulPromptStderr
-                            (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
-                        )
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                , AgentTree.runtimeRegistry = registry
-                }
+            pure $
+                AgentTree.Props
+                    { AgentTree.apiKeys = apiKeys
+                    , AgentTree.rootAgentFile = agentFile
+                    , AgentTree.interactiveTracer =
+                        Prod.traceBoth
+                            baseTracer
+                            ( Prod.traceBoth
+                                traceUsefulPromptStderr
+                                (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
+                            )
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                    , AgentTree.runtimeRegistry = registry
+                    }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
-

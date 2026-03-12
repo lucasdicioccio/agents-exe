@@ -2,8 +2,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for collecting and displaying important configuration paths.
--- Used by the 'paths' command to help users debug configuration issues.
+{- | Module for collecting and displaying important configuration paths.
+Used by the 'paths' command to help users debug configuration issues.
+-}
 module System.Agents.CLI.Paths (
     -- * Data types
     PathsInfo (..),
@@ -38,18 +39,18 @@ import System.FilePath (takeDirectory, (</>))
 
 -- | Information about all important configuration paths.
 data PathsInfo = PathsInfo
-    { -- | Path to the config file if found via directory traversal
-      cfgFilePath :: Maybe FilePath
-    , -- | The active configuration directory being used
-      cfgDirectory :: FilePath
-    , -- | The default config directory (~/.config/agents-exe)
-      defaultCfgDirectory :: FilePath
-    , -- | All agent JSON files that were loaded
-      agentFilesPaths :: [FilePath]
-    , -- | Location of the API keys file
-      apiKeysPath :: FilePath
-    , -- | Session file prefix/directory (if configured)
-      sessionStoragePrefix :: Maybe FilePath
+    { cfgFilePath :: Maybe FilePath
+    -- ^ Path to the config file if found via directory traversal
+    , cfgDirectory :: FilePath
+    -- ^ The active configuration directory being used
+    , defaultCfgDirectory :: FilePath
+    -- ^ The default config directory (~/.config/agents-exe)
+    , agentFilesPaths :: [FilePath]
+    -- ^ All agent JSON files that were loaded
+    , apiKeysPath :: FilePath
+    -- ^ Location of the API keys file
+    , sessionStoragePrefix :: Maybe FilePath
+    -- ^ Session file prefix/directory (if configured)
     }
     deriving (Show, Eq, Generic)
 
@@ -86,9 +87,10 @@ instance Aeson.FromJSON PathsInfo
 -- Collecting Paths
 -------------------------------------------------------------------------------
 
--- | Collect all relevant path information.
--- This function mirrors the logic in Main.initArgParserArgs to ensure
--- consistency with how the application actually loads configuration.
+{- | Collect all relevant path information.
+This function mirrors the logic in Main.initArgParserArgs to ensure
+consistency with how the application actually loads configuration.
+-}
 collectPathsInfo ::
     -- | The active config directory (from ArgParserArgs)
     FilePath ->
@@ -115,8 +117,9 @@ collectPathsInfo activeCfgDir defaultCfgDir agents keys session = do
             , sessionStoragePrefix = session
             }
 
--- | Find the agents-exe.cfg.json file by traversing up the directory tree.
--- This is a copy of the function in Main.hs to avoid circular dependencies.
+{- | Find the agents-exe.cfg.json file by traversing up the directory tree.
+This is a copy of the function in Main.hs to avoid circular dependencies.
+-}
 locateAgentsExeConfig :: IO (Maybe FilePath)
 locateAgentsExeConfig = do
     go =<< getCurrentDirectory
@@ -196,19 +199,19 @@ handlePaths ::
 handlePaths opts configDir agentFiles apiKeysFile sessionPrefix = do
     homedir <- getHomeDirectory
     let defaultCfgDir = homedir </> ".config/agents-exe"
-    
+
     -- Collect path information
-    pathsInfo <- collectPathsInfo
-        configDir
-        defaultCfgDir
-        agentFiles
-        apiKeysFile
-        sessionPrefix
-    
+    pathsInfo <-
+        collectPathsInfo
+            configDir
+            defaultCfgDir
+            agentFiles
+            apiKeysFile
+            sessionPrefix
+
     -- Output based on format option
     case outputFormat opts of
         PathsOutputJson -> LByteChar8.putStrLn $ formatPathsJson pathsInfo
         PathsOutputHuman -> Text.putStrLn $ formatPathsHuman pathsInfo
-    
-    exitSuccess
 
+    exitSuccess

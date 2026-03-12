@@ -1,24 +1,26 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'tui' command handler.
---
--- The tui command launches an interactive terminal user interface for
--- chatting with agents.
-module System.Agents.CLI.TUI
-    ( -- * Types
-      TuiOptions (..)
-      -- * Handler
-    , handleTUI
-    ) where
+{- | Module for the 'tui' command handler.
+
+The tui command launches an interactive terminal user interface for
+chatting with agents.
+-}
+module System.Agents.CLI.TUI (
+    -- * Types
+    TuiOptions (..),
+
+    -- * Handler
+    handleTUI,
+) where
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
-import qualified System.Agents.TUI.Core as TUI
 import qualified System.Agents.SessionStore as SessionStore
+import qualified System.Agents.TUI.Core as TUI
+import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 
 -- | Options for the TUI command
 data TuiOptions = TuiOptions
@@ -41,17 +43,17 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let oneAgent agentFile = do
             registry <- AgentTree.newRuntimeRegistry
-            pure $ AgentTree.Props
-                { AgentTree.apiKeys = apiKeys
-                , AgentTree.rootAgentFile = agentFile
-                , AgentTree.interactiveTracer =
-                    Prod.traceBoth
-                        baseTracer
-                        (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                , AgentTree.runtimeRegistry = registry
-                }
+            pure $
+                AgentTree.Props
+                    { AgentTree.apiKeys = apiKeys
+                    , AgentTree.rootAgentFile = agentFile
+                    , AgentTree.interactiveTracer =
+                        Prod.traceBoth
+                            baseTracer
+                            (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                    , AgentTree.runtimeRegistry = registry
+                    }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUI sessionStore agentPropsList
-

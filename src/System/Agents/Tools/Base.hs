@@ -5,8 +5,8 @@ module System.Agents.Tools.Base where
 -------------------------------------------------------------------------------
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
-import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString as BS
+import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -14,71 +14,80 @@ import Prod.Tracer (Tracer)
 
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Tools.Bash as BashTools
+import System.Agents.Tools.Context (ToolExecutionContext)
 import qualified System.Agents.Tools.IO as IOTools
-import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
-import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.Trace (ToolTrace)
 
 -------------------------------------------------------------------------------
--- | Definition of a tool, parameterized by the call type.
---
--- The 'toolRun' function receives a 'ToolExecutionContext' instead of a generic
--- runtime value. This provides tools with access to session metadata (session ID,
--- conversation ID, turn ID, etc.) without exposing these details to the LLM.
+
+{- | Definition of a tool, parameterized by the call type.
+
+The 'toolRun' function receives a 'ToolExecutionContext' instead of a generic
+runtime value. This provides tools with access to session metadata (session ID,
+conversation ID, turn ID, etc.) without exposing these details to the LLM.
+-}
 data Tool call
     = Tool
     { toolDef :: ToolDef
     , toolRun :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult call)
     }
 
--- | Tool definition without the execution function.
--- Used for identifying and describing the tool.
+{- | Tool definition without the execution function.
+Used for identifying and describing the tool.
+-}
 data ToolDef
     = BashTool !BashTools.ScriptDescription
     | MCPTool !McpTools.ToolDescription
     | IOTool !IOTools.IOScriptDescription
-    | OpenAPITool !Text !Text  -- ^ Toolbox name and operation ID
-    | PostgRESTool !Text !Text  -- ^ Toolbox name and table path
-    | SqliteTool !SqliteTools.ToolDescription  -- ^ SQLite tool description
+    | -- | Toolbox name and operation ID
+      OpenAPITool !Text !Text
+    | -- | Toolbox name and table path
+      PostgRESTool !Text !Text
+    | -- | SQLite tool description
+      SqliteTool !SqliteTools.ToolDescription
     deriving (Show)
 
 -------------------------------------------------------------------------------
--- | Result of a tool call.
---
--- This type represents the various outcomes that can occur when executing
--- a tool through the agent system. Each constructor pairs the call context
--- with the specific result or error type.
+
+{- | Result of a tool call.
+
+This type represents the various outcomes that can occur when executing
+a tool through the agent system. Each constructor pairs the call context
+with the specific result or error type.
+-}
 data CallResult call
-    = BlobToolSuccess call ByteString
-    -- ^ Successful execution returning raw bytes (e.g., bash/IO tool output)
-    | ToolNotFound call
-    -- ^ Tool was not found in the registered tools
-    | BashToolError call BashTools.RunScriptError
-    -- ^ Bash script execution failed
-    | IOToolError call IOTools.RunError
-    -- ^ IO tool execution failed
-    | McpToolResult call Mcp.CallToolResult
-    -- ^ MCP tool executed successfully with structured result
-    | McpToolError call String
-    -- ^ MCP tool execution failed
-    | OpenAPIToolResult call ToolResult
-    -- ^ OpenAPI tool executed successfully with structured result
-    | OpenAPIToolError call String
-    -- ^ OpenAPI tool execution failed
-    | PostgRESToolResult call PostgRESTypes.ToolResult
-    -- ^ PostgREST tool executed successfully with structured result
-    | PostgRESToolError call String
-    -- ^ PostgREST tool execution failed
-    | SqliteToolResult call SqliteTools.QueryResult
-    -- ^ SQLite tool executed successfully with query results
-    | SqliteToolError call SqliteTools.QueryError
-    -- ^ SQLite tool execution failed
+    = -- | Successful execution returning raw bytes (e.g., bash/IO tool output)
+      BlobToolSuccess call ByteString
+    | -- | Tool was not found in the registered tools
+      ToolNotFound call
+    | -- | Bash script execution failed
+      BashToolError call BashTools.RunScriptError
+    | -- | IO tool execution failed
+      IOToolError call IOTools.RunError
+    | -- | MCP tool executed successfully with structured result
+      McpToolResult call Mcp.CallToolResult
+    | -- | MCP tool execution failed
+      McpToolError call String
+    | -- | OpenAPI tool executed successfully with structured result
+      OpenAPIToolResult call ToolResult
+    | -- | OpenAPI tool execution failed
+      OpenAPIToolError call String
+    | -- | PostgREST tool executed successfully with structured result
+      PostgRESToolResult call PostgRESTypes.ToolResult
+    | -- | PostgREST tool execution failed
+      PostgRESToolError call String
+    | -- | SQLite tool executed successfully with query results
+      SqliteToolResult call SqliteTools.QueryResult
+    | -- | SQLite tool execution failed
+      SqliteToolError call SqliteTools.QueryError
     deriving (Show)
 
 -------------------------------------------------------------------------------
+
 -- | Explicit helper to map on the result of a CallResult.
 mapCallResult :: (a -> b) -> CallResult a -> CallResult b
 mapCallResult f c =
@@ -102,6 +111,7 @@ mapToolResult f (Tool d run) =
     Tool d (\tracer ctx v -> fmap (mapCallResult f) (run tracer ctx v))
 
 -------------------------------------------------------------------------------
+
 {- | Extracts the call definition out of a CallResut.
 Note that a result is always bound to a CallResut, thus this function is total.
 -}
@@ -123,13 +133,14 @@ extractCall (SqliteToolError c _) = c
 -- Byte Counting Helpers
 -------------------------------------------------------------------------------
 
--- | Calculate the byte size of a tool response for tracking purposes.
---
--- This function converts various tool result types to their JSON representation
--- and returns the size in bytes. Used for byte usage tracking in sessions.
---
--- Note: For BlobToolSuccess, we count the raw ByteString length directly.
--- For other result types, we encode to JSON and count the bytes.
+{- | Calculate the byte size of a tool response for tracking purposes.
+
+This function converts various tool result types to their JSON representation
+and returns the size in bytes. Used for byte usage tracking in sessions.
+
+Note: For BlobToolSuccess, we count the raw ByteString length directly.
+For other result types, we encode to JSON and count the bytes.
+-}
 callResultByteSize :: CallResult call -> Int
 callResultByteSize (BlobToolSuccess _ bs) =
     -- Raw bytes - count the ByteString length directly
@@ -140,9 +151,9 @@ callResultByteSize (ToolNotFound _) =
 callResultByteSize (BashToolError _ _) =
     -- Encode error details as JSON and count
     -- The actual error will be serialized when stored
-    100  -- Approximate, actual size depends on error details
+    100 -- Approximate, actual size depends on error details
 callResultByteSize (IOToolError _ _) =
-    100  -- Approximate
+    100 -- Approximate
 callResultByteSize (McpToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (McpToolError _ err) =
@@ -160,10 +171,10 @@ callResultByteSize (SqliteToolResult _ result) =
 callResultByteSize (SqliteToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 
--- | Calculate total bytes for a list of tool responses.
---
--- Helper function for calculating tool byte usage when processing
--- multiple tool results in a single step.
+{- | Calculate total bytes for a list of tool responses.
+
+Helper function for calculating tool byte usage when processing
+multiple tool results in a single step.
+-}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
-

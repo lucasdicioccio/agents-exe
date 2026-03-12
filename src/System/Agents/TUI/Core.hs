@@ -3,26 +3,27 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 
--- | Main entry point for the TUI application.
--- This module re-exports functionality from the submodules and provides
--- the main initialization and application runner.
+{- | Main entry point for the TUI application.
+This module re-exports functionality from the submodules and provides
+the main initialization and application runner.
+-}
 module System.Agents.TUI.Core (
     -- * Re-exports from Types
-    WidgetName(..),
+    WidgetName (..),
     N,
-    AppEvent(..),
-    TuiAgent(..),
-    Conversation(..),
-    ConversationStatus(..),
-    AuxiliaryTask(..),
-    Core(..),
-    UIState(..),
-    TuiState(..),
-    SessionConfig(..),
+    AppEvent (..),
+    TuiAgent (..),
+    Conversation (..),
+    ConversationStatus (..),
+    AuxiliaryTask (..),
+    Core (..),
+    UIState (..),
+    TuiState (..),
+    SessionConfig (..),
     initUIState,
     updateConversationSession,
     updateConversation,
-    
+
     -- * Lens accessors
     uiFocusRing,
     zoomed,
@@ -36,20 +37,20 @@ module System.Agents.TUI.Core (
     tuiCore,
     tuiUI,
     eventChan,
-    
+
     -- * Re-exports from Render
     tui_appDraw,
     tui_appAttrMap,
     focusedAttr,
     userMessageAttr,
     llmMessageAttr,
-    
+
     -- * Re-exports from Event
     tui_appHandleEvent,
-    
+
     -- * Session loading
     loadSessionFiles,
-    
+
     -- * Main entry point
     runTUI,
     runTUIWithConfig,
@@ -62,19 +63,20 @@ import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
-import Control.Monad (void, forever)
+import Control.Monad (forever, void)
 
-import System.Agents.AgentTree (AgentTree(..), LoadAgentResult(..), Props, loadAgentTreeRuntime, agentRuntime)
+import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props, agentRuntime, loadAgentTreeRuntime)
 import System.Agents.Base (newConversationId)
 import System.Agents.OneShot (runtimeToAgent)
-import System.Agents.Session.Base (Session(..))
+import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 
 -- Import from submodules
-import System.Agents.TUI.Types
-import System.Agents.TUI.Render
+
 import System.Agents.TUI.Event
+import System.Agents.TUI.Render
+import System.Agents.TUI.Types
 
 -------------------------------------------------------------------------------
 -- Cursor and Start Event
@@ -95,10 +97,11 @@ tui_appStartEvent = pure ()
 -- Session File Loading
 -------------------------------------------------------------------------------
 
--- | Load all sessions from files matching the prefix pattern.
--- Returns a list of (FilePath, Maybe Session) pairs.
---
--- This function uses 'SessionStore' internally to discover and load sessions.
+{- | Load all sessions from files matching the prefix pattern.
+Returns a list of (FilePath, Maybe Session) pairs.
+
+This function uses 'SessionStore' internally to discover and load sessions.
+-}
 loadSessionFiles :: SessionStore -> IO [(FilePath, Maybe Session)]
 loadSessionFiles store = do
     sessions <- SessionStore.listSessions store
@@ -111,21 +114,23 @@ loadSessionFiles store = do
 
 -- | Create a session configuration with file-based persistence.
 fileSessionConfig :: SessionStore -> SessionConfig
-fileSessionConfig store = SessionConfig
-    { sessionStore = store
-    }
+fileSessionConfig store =
+    SessionConfig
+        { sessionStore = store
+        }
 
 -------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
--- | Initialize the TUI with props and optional conversation prefix (legacy API).
--- 
--- For more control, use 'runTUIWithConfig' instead.
+{- | Initialize the TUI with props and optional conversation prefix (legacy API).
+
+For more control, use 'runTUIWithConfig' instead.
+-}
 runTUI :: SessionStore -> [Props] -> IO ()
-runTUI store props = 
+runTUI store props =
     let config = fileSessionConfig store
-    in runTUIWithConfig config props
+     in runTUIWithConfig config props
 
 -- | Initialize the TUI with a custom session configuration.
 runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
@@ -139,7 +144,7 @@ runTUIWithConfig config props = do
 
     -- Load existing session files (only if file prefix is provided)
     loadedSessions <- loadSessionFiles config.sessionStore
-    
+
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
 
@@ -147,7 +152,7 @@ runTUIWithConfig config props = do
     core0 <- newTVarIO (Core tuiAgents mempty)
 
     -- Create UI state
-    let ui0 = initUIState tuiAgents [s | (_,Just s) <- loadedSessions]
+    let ui0 = initUIState tuiAgents [s | (_, Just s) <- loadedSessions]
 
     -- Create TUI state with session configuration
     let st = TuiState core0 ui0 evChan config
@@ -163,12 +168,11 @@ runTUIWithConfig config props = do
                 }
 
     void $ forkIO $ forever $ do
-      writeBChan evChan AppEvent_Heartbeat
-      threadDelay 1000000
+        writeBChan evChan AppEvent_Heartbeat
+        threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
   where
     -- Create an agent for a given tree with a fresh conversation ID
     createAgentForTree itree = do
         convId <- newConversationId
         runtimeToAgent config.sessionStore Nothing convId (agentRuntime itree)
-

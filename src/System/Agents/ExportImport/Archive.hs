@@ -2,15 +2,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module System.Agents.ExportImport.Archive
-    ( exportToArchive
-    , exportToolsToArchive
-    , importFromArchive
-    , importToolsFromArchive
-    , getFileMode
-    ) where
+module System.Agents.ExportImport.Archive (
+    exportToArchive,
+    exportToolsToArchive,
+    importFromArchive,
+    importToolsFromArchive,
+    getFileMode,
+) where
 
-import Control.Exception (try, IOException)
+import Control.Exception (IOException, try)
 import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
@@ -21,31 +21,31 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (getCurrentTime)
-import System.Directory
-    ( createDirectoryIfMissing
-    , doesDirectoryExist
-    , doesFileExist
-    , listDirectory
-    )
-import System.FilePath
-    ( (</>)
-    , (<.>)
-    , joinPath
-    , normalise
-    , splitDirectories
-    , takeDirectory
-    , takeFileName
-    )
+import System.Directory (
+    createDirectoryIfMissing,
+    doesDirectoryExist,
+    doesFileExist,
+    listDirectory,
+ )
+import System.FilePath (
+    joinPath,
+    normalise,
+    splitDirectories,
+    takeDirectory,
+    takeFileName,
+    (<.>),
+    (</>),
+ )
 import System.IO.Temp (withSystemTempDirectory)
-import System.Posix.Files (unionFileModes, ownerExecuteMode, setFileMode, fileMode, getFileStatus)
+import System.Posix.Files (fileMode, getFileStatus, ownerExecuteMode, setFileMode, unionFileModes)
 import System.Posix.Types (FileMode)
 
 import qualified Codec.Archive.Tar as Tar
 import qualified Codec.Compression.GZip as GZip
 
-import System.Agents.Base (Agent(..), McpServerDescription(..), McpSimpleBinaryConfiguration(..))
+import System.Agents.Base (Agent (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.ExportImport.Types
-import System.Agents.Tools.Bash (ScriptInfo(..))
+import System.Agents.Tools.Bash (ScriptInfo (..))
 
 -------------------------------------------------------------------------------
 -- Archive Structure Constants
@@ -74,18 +74,18 @@ exportToArchive pkg fmt path = do
         -- Write package contents to temp directory
         let exportDir = tmpDir </> "agents-export"
         createDirectoryIfMissing True exportDir
-        
+
         -- Write manifest
         LByteString.writeFile (exportDir </> manifestFileName) $
             AesonPretty.encodePretty pkg.packageMetadata
-        
+
         -- Write agents
         createDirectoryIfMissing True (exportDir </> agentsDirName)
         forM_ pkg.packageAgents $ \agent -> do
             let agentFile = exportDir </> agentsDirName </> agentFileName agent
             createDirectoryIfMissing True (takeDirectory agentFile)
             LByteString.writeFile agentFile $ AesonPretty.encodePretty agent.agentConfig
-            
+
             -- Write agent tools
             forM_ agent.agentTools $ \tool -> do
                 let toolDirName = fromMaybe (slug agent.agentConfig) tool.toolNamespace
@@ -98,7 +98,7 @@ exportToArchive pkg fmt path = do
                 case tool.toolMetadata of
                     Just meta -> LByteString.writeFile (toolDir </> "metadata.json") (AesonPretty.encodePretty meta)
                     Nothing -> pure ()
-        
+
         -- Write standalone tools
         createDirectoryIfMissing True (exportDir </> toolsDirName)
         forM_ pkg.packageTools $ \tool -> do
@@ -113,7 +113,7 @@ exportToArchive pkg fmt path = do
                 let fullAuxPath = toolDir </> auxPath
                 createDirectoryIfMissing True (takeDirectory fullAuxPath)
                 ByteString.writeFile fullAuxPath auxContent
-        
+
         -- Write MCP servers
         createDirectoryIfMissing True (exportDir </> mcpServersDirName)
         forM_ pkg.packageMcpServers $ \mcp -> do
@@ -121,15 +121,14 @@ exportToArchive pkg fmt path = do
                     McpSimpleBinary cfg -> Text.unpack cfg.name
             let mcpFile = exportDir </> mcpServersDirName </> mcpName <.> "json"
             LByteString.writeFile mcpFile $ AesonPretty.encodePretty mcp.mcpConfig
-        
+
         -- Create archive from export directory
         case fmt of
             TarFormat -> createTarArchive exportDir path
             TarGzFormat -> createTarGzArchive exportDir path
-            ZipFormat -> createTarGzArchive exportDir (path ++ ".tar.gz")  -- Fall back to tar.gz
-        
+            ZipFormat -> createTarGzArchive exportDir (path ++ ".tar.gz") -- Fall back to tar.gz
         pure $ Right ()
-    
+
     case result of
         Left e -> pure $ Left $ FileIOError path e
         Right r -> pure r
@@ -138,18 +137,20 @@ exportToArchive pkg fmt path = do
 exportToolsToArchive :: [StandaloneToolExport] -> ArchiveFormat -> FilePath -> IO (Either ImportError ())
 exportToolsToArchive tools fmt path = do
     now <- getCurrentTime
-    let metadata = PackageMetadata
-            { packageVersion = exportSchemaVersion
-            , packageCreatedAt = now
-            , packageDescription = Just "Tool package"
-            , packageSource = Nothing
-            }
-    let pkg = ExportPackage
-            { packageMetadata = metadata
-            , packageAgents = []
-            , packageTools = tools
-            , packageMcpServers = []
-            }
+    let metadata =
+            PackageMetadata
+                { packageVersion = exportSchemaVersion
+                , packageCreatedAt = now
+                , packageDescription = Just "Tool package"
+                , packageSource = Nothing
+                }
+    let pkg =
+            ExportPackage
+                { packageMetadata = metadata
+                , packageAgents = []
+                , packageTools = tools
+                , packageMcpServers = []
+                }
     exportToArchive pkg fmt path
 
 -------------------------------------------------------------------------------
@@ -166,15 +167,15 @@ importFromArchive path = do
                 -- Extract archive to temp directory
                 let extractDir = tmpDir </> "extracted"
                 createDirectoryIfMissing True extractDir
-                
+
                 case fmt of
                     TarFormat -> extractTarArchive path extractDir
                     TarGzFormat -> extractTarGzArchive path extractDir
-                    ZipFormat -> extractTarGzArchive path extractDir  -- Try tar.gz
-                
+                    ZipFormat -> extractTarGzArchive path extractDir -- Try tar.gz
+
                 -- Find the export root directory (may be nested)
                 exportRoot <- findExportRoot extractDir
-                
+
                 -- Parse manifest
                 manifestPath <- findManifest exportRoot
                 manifestBytes <- LByteString.readFile manifestPath
@@ -183,20 +184,22 @@ importFromArchive path = do
                     Right metadata -> do
                         -- Load agents
                         agentExports <- loadAgentsFromDir (exportRoot </> agentsDirName)
-                        
+
                         -- Load standalone tools
                         standaloneTools <- loadToolsFromDir (exportRoot </> toolsDirName)
-                        
+
                         -- Load MCP servers
                         mcpServers0 <- loadMcpServersFromDir (exportRoot </> mcpServersDirName)
-                        
-                        pure $ Right $ ExportPackage
-                            { packageMetadata = metadata
-                            , packageAgents = agentExports
-                            , packageTools = standaloneTools
-                            , packageMcpServers = mcpServers0
-                            }
-            
+
+                        pure $
+                            Right $
+                                ExportPackage
+                                    { packageMetadata = metadata
+                                    , packageAgents = agentExports
+                                    , packageTools = standaloneTools
+                                    , packageMcpServers = mcpServers0
+                                    }
+
             case result of
                 Left (e :: IOException) -> pure $ Left $ FileIOError path e
                 Right r -> pure r
@@ -208,10 +211,12 @@ importToolsFromArchive path = do
     case ePkg of
         Left err -> pure $ Left err
         Right pkg ->
-            pure $ Right $ ToolPackage
-                { toolPackageMetadata = pkg.packageMetadata
-                , toolPackageTools = pkg.packageTools
-                }
+            pure $
+                Right $
+                    ToolPackage
+                        { toolPackageMetadata = pkg.packageMetadata
+                        , toolPackageTools = pkg.packageTools
+                        }
 
 -------------------------------------------------------------------------------
 -- Internal Helper Functions
@@ -287,24 +292,27 @@ loadAgentsFromDir agentsDir = do
                 let ns = extractNamespaceFromPath agentsDir path
                 -- Load tools for this agent
                 tools <- loadAgentTools (takeDirectory path) agent
-                pure [AgentExport
-                    { agentConfig = agent
-                    , agentNamespace = ns
-                    , agentTools = tools
-                    }]
-    
+                pure
+                    [ AgentExport
+                        { agentConfig = agent
+                        , agentNamespace = ns
+                        , agentTools = tools
+                        }
+                    ]
+
     extractNamespaceFromPath :: FilePath -> FilePath -> Maybe Text
     extractNamespaceFromPath basePath filePath =
         let relativePath = makeRelative basePath filePath
             dirParts = filter (not . null) $ splitDirectories (takeDirectory relativePath)
             fileName = takeFileName filePath
-            baseName = if ".json" `isSuffixOf` fileName
-                        then take (length fileName - 5) fileName
-                        else fileName
+            baseName =
+                if ".json" `isSuffixOf` fileName
+                    then take (length fileName - 5) fileName
+                    else fileName
             allParts = dirParts ++ [baseName]
-        in if null allParts
-            then Nothing
-            else Just $ Text.intercalate "." $ map Text.pack allParts
+         in if null allParts
+                then Nothing
+                else Just $ Text.intercalate "." $ map Text.pack allParts
 
 loadAgentTools :: FilePath -> Agent -> IO [ToolExport]
 loadAgentTools agentDir _agent = do
@@ -329,15 +337,17 @@ loadAgentTools agentDir _agent = do
                     then do
                         content <- ByteString.readFile fullPath
                         perms <- getFileMode fullPath
-                        pure [ToolExport
-                            { toolName = Text.pack entryName
-                            , toolContent = content
-                            , toolPermissions = perms
-                            , toolMetadata = Nothing
-                            , toolNamespace = Nothing
-                            }]
+                        pure
+                            [ ToolExport
+                                { toolName = Text.pack entryName
+                                , toolContent = content
+                                , toolPermissions = perms
+                                , toolMetadata = Nothing
+                                , toolNamespace = Nothing
+                                }
+                            ]
                     else pure []
-    
+
     loadToolFromDir :: FilePath -> FilePath -> IO [ToolExport]
     loadToolFromDir dir name0 = do
         let scriptPath = dir </> "script"
@@ -349,35 +359,40 @@ loadAgentTools agentDir _agent = do
                 -- Try to load metadata
                 let metaPath = dir </> "metadata.json"
                 metaExists <- doesFileExist metaPath
-                metadata <- if metaExists
-                    then do
-                        metaBytes <- LByteString.readFile metaPath
-                        case Aeson.eitherDecode metaBytes of
-                            Left _ -> pure Nothing
-                            Right info -> pure (Just info)
-                    else pure Nothing
-                pure [ToolExport
-                    { toolName = Text.pack name0
-                    , toolContent = content
-                    , toolPermissions = perms
-                    , toolMetadata = metadata
-                    , toolNamespace = Nothing
-                    }]
+                metadata <-
+                    if metaExists
+                        then do
+                            metaBytes <- LByteString.readFile metaPath
+                            case Aeson.eitherDecode metaBytes of
+                                Left _ -> pure Nothing
+                                Right info -> pure (Just info)
+                        else pure Nothing
+                pure
+                    [ ToolExport
+                        { toolName = Text.pack name0
+                        , toolContent = content
+                        , toolPermissions = perms
+                        , toolMetadata = metadata
+                        , toolNamespace = Nothing
+                        }
+                    ]
             else do
                 -- Try to find an executable in the directory
                 entries <- listDirectory dir
                 execs <- filterM (isExecutable . (dir </>)) entries
                 case execs of
-                    (firstExec:_) -> do
+                    (firstExec : _) -> do
                         content <- ByteString.readFile (dir </> firstExec)
                         perms <- getFileMode (dir </> firstExec)
-                        pure [ToolExport
-                            { toolName = Text.pack name0
-                            , toolContent = content
-                            , toolPermissions = perms
-                            , toolMetadata = Nothing
-                            , toolNamespace = Nothing
-                            }]
+                        pure
+                            [ ToolExport
+                                { toolName = Text.pack name0
+                                , toolContent = content
+                                , toolPermissions = perms
+                                , toolMetadata = Nothing
+                                , toolNamespace = Nothing
+                                }
+                            ]
                     _ -> pure []
 
 loadToolsFromDir :: FilePath -> IO [StandaloneToolExport]
@@ -413,13 +428,15 @@ loadToolsFromDir toolsDir = do
                             Right info -> do
                                 -- Load aux files
                                 auxFiles <- loadAuxFiles toolDir
-                                pure [StandaloneToolExport
-                                    { standaloneToolInfo = info
-                                    , standaloneToolScript = script
-                                    , standaloneToolPermissions = perms
-                                    , standaloneToolAuxFiles = auxFiles
-                                    }]
-    
+                                pure
+                                    [ StandaloneToolExport
+                                        { standaloneToolInfo = info
+                                        , standaloneToolScript = script
+                                        , standaloneToolPermissions = perms
+                                        , standaloneToolAuxFiles = auxFiles
+                                        }
+                                    ]
+
     loadAuxFiles :: FilePath -> IO [(FilePath, ByteString.ByteString)]
     loadAuxFiles toolDir = do
         let auxDir = toolDir </> "aux"
@@ -428,14 +445,18 @@ loadToolsFromDir toolsDir = do
             then pure []
             else do
                 files <- listDirectoryRecursive auxDir
-                fmap concat $ traverse (\f -> do
-                    let fullPath = auxDir </> f
-                    isFile <- doesFileExist fullPath
-                    if isFile
-                        then do
-                            content <- ByteString.readFile fullPath
-                            pure [(f, content)]
-                        else pure []) files
+                fmap concat $
+                    traverse
+                        ( \f -> do
+                            let fullPath = auxDir </> f
+                            isFile <- doesFileExist fullPath
+                            if isFile
+                                then do
+                                    content <- ByteString.readFile fullPath
+                                    pure [(f, content)]
+                                else pure []
+                        )
+                        files
 
 loadMcpServersFromDir :: FilePath -> IO [McpServerExport]
 loadMcpServersFromDir mcpDir = do
@@ -454,10 +475,13 @@ loadMcpServersFromDir mcpDir = do
             Left err -> do
                 putStrLn $ "Warning: Failed to parse MCP server file " ++ path ++ ": " ++ err
                 pure []
-            Right mcp -> pure [McpServerExport
-                { mcpConfig = mcp
-                , mcpNamespace = Nothing
-                }]
+            Right mcp ->
+                pure
+                    [ McpServerExport
+                        { mcpConfig = mcp
+                        , mcpNamespace = Nothing
+                        }
+                    ]
 
 -------------------------------------------------------------------------------
 -- Utility Functions
@@ -466,14 +490,18 @@ loadMcpServersFromDir mcpDir = do
 listDirectoryRecursive :: FilePath -> IO [FilePath]
 listDirectoryRecursive dir = do
     entries <- listDirectory dir
-    fmap concat $ traverse (\entry -> do
-        let fullPath = dir </> entry
-        isDir <- doesDirectoryExist fullPath
-        if isDir
-            then do
-                subEntries <- listDirectoryRecursive fullPath
-                pure $ map (entry </>) subEntries
-            else pure [entry]) entries
+    fmap concat $
+        traverse
+            ( \entry -> do
+                let fullPath = dir </> entry
+                isDir <- doesDirectoryExist fullPath
+                if isDir
+                    then do
+                        subEntries <- listDirectoryRecursive fullPath
+                        pure $ map (entry </>) subEntries
+                    else pure [entry]
+            )
+            entries
 
 isExecutable :: FilePath -> IO Bool
 isExecutable path = do
@@ -496,17 +524,16 @@ makeRelative base path =
         pathParts = splitDirectories (normalise path)
         go [] ys = joinPath ys
         go xs [] = joinPath xs
-        go (x:xs) (y:ys)
+        go (x : xs) (y : ys)
             | x == y = go xs ys
-            | otherwise = joinPath (x:xs ++ y:ys)
-    in go baseParts pathParts
+            | otherwise = joinPath (x : xs ++ y : ys)
+     in go baseParts pathParts
 
-filterM :: Monad m => (a -> m Bool) -> [a] -> m [a]
-filterM p = foldr (\x -> liftM2 (\b -> if b then (x:) else id) (p x)) (return [])
+filterM :: (Monad m) => (a -> m Bool) -> [a] -> m [a]
+filterM p = foldr (\x -> liftM2 (\b -> if b then (x :) else id) (p x)) (return [])
 
-liftM2 :: Monad m => (a1 -> a2 -> r) -> m a1 -> m a2 -> m r
+liftM2 :: (Monad m) => (a1 -> a2 -> r) -> m a1 -> m a2 -> m r
 liftM2 f m1 m2 = do
     x1 <- m1
     x2 <- m2
     return (f x1 x2)
-

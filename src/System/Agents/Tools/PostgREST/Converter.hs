@@ -1,28 +1,29 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | PostgREST to Tool conversion logic.
---
--- This module converts PostgREST OpenAPI specifications into executable
--- tool representations. It handles:
---
--- * Parsing PostgREST-specific OpenAPI specs
--- * Converting table endpoints to tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
--- * Extracting row filters from rowFilter. parameter references
--- * Building structured parameter schemas (filters/subset/ranking)
--- * Name normalization for LLM compatibility
---
--- Key differences from generic OpenAPI:
--- * Tools are named postgrest_{toolbox}_{method}_{table} instead of openapi_{operationId}
--- * GET parameters are structured into filters/subset/ranking groups
--- * Row filtering uses column-based parameters from the spec
--- * The root / path and OpenAPI description endpoints are skipped
---
--- Example:
--- >>> import qualified Data.Map.Strict as Map
--- >>> let tool = convertTable "/users" GET True True [] Nothing
--- >>> prtName tool
--- "postgrest_get_users"
+{- | PostgREST to Tool conversion logic.
+
+This module converts PostgREST OpenAPI specifications into executable
+tool representations. It handles:
+
+* Parsing PostgREST-specific OpenAPI specs
+* Converting table endpoints to tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
+* Extracting row filters from rowFilter. parameter references
+* Building structured parameter schemas (filters/subset/ranking)
+* Name normalization for LLM compatibility
+
+Key differences from generic OpenAPI:
+* Tools are named postgrest_{toolbox}_{method}_{table} instead of openapi_{operationId}
+* GET parameters are structured into filters/subset/ranking groups
+* Row filtering uses column-based parameters from the spec
+* The root / path and OpenAPI description endpoints are skipped
+
+Example:
+>>> import qualified Data.Map.Strict as Map
+>>> let tool = convertTable "/users" GET True True [] Nothing
+>>> prtName tool
+"postgrest_get_users"
+-}
 module System.Agents.Tools.PostgREST.Converter (
     -- * Core types
     PostgRESTool (..),
@@ -75,10 +76,11 @@ import Data.Char (isLetter)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, mapMaybe, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
+import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),
@@ -89,30 +91,30 @@ import System.Agents.Tools.OpenAPI.Types (
     RequestBody (..),
     Schema (..),
  )
-import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import System.Agents.Tools.PostgREST.Types
 
 -- -------------------------------------------------------------------------
 -- Main Conversion Functions
 -- -------------------------------------------------------------------------
 
--- | Converts a PostgREST OpenAPI spec into a list of tools.
---
--- This function:
--- 1. Filters out non-table paths (root /, OpenAPI endpoints)
--- 2. Extracts operations for each allowed HTTP method
--- 3. Detects row filters from parameter references
--- 4. Builds structured tool parameters
--- 5. Generates LLM-compatible tool names
---
--- The 'allowedMethods' parameter controls which HTTP verbs are exposed
--- as tools. By default, only read-only methods are included for safety.
---
--- Example:
--- >>> let spec = OpenAPISpec (Map.fromList [("/users", Map.fromList [("GET", someOp)])]) Nothing Nothing
--- >>> let tools = convertPostgRESToTools "mydb" [GET] spec
--- >>> length tools
--- 1
+{- | Converts a PostgREST OpenAPI spec into a list of tools.
+
+This function:
+1. Filters out non-table paths (root /, OpenAPI endpoints)
+2. Extracts operations for each allowed HTTP method
+3. Detects row filters from parameter references
+4. Builds structured tool parameters
+5. Generates LLM-compatible tool names
+
+The 'allowedMethods' parameter controls which HTTP verbs are exposed
+as tools. By default, only read-only methods are included for safety.
+
+Example:
+>>> let spec = OpenAPISpec (Map.fromList [("/users", Map.fromList [("GET", someOp)])]) Nothing Nothing
+>>> let tools = convertPostgRESToTools "mydb" [GET] spec
+>>> length tools
+1
+-}
 convertPostgRESToTools ::
     -- | Toolbox name (used for tool naming)
     Text ->
@@ -149,22 +151,24 @@ methodToOperation method methods = Map.lookup (methodToText method) methods
 isMethodSupported :: HttpMethod -> Operation -> Bool
 isMethodSupported _ _ = True
 
--- | Extract request body schema from an operation.
--- This is the standard extraction that doesn't use the spec.
+{- | Extract request body schema from an operation.
+This is the standard extraction that doesn't use the spec.
+-}
 extractRequestBodySchema :: Operation -> Maybe Schema
 extractRequestBodySchema op = do
     reqBody <- opRequestBody op
     -- Get the JSON schema from the request body content
     Map.lookup "application/json" (reqBodyContent reqBody)
 
--- | Extract request body schema with PostgREST-specific resolution.
---
--- PostgREST uses a two-level reference pattern:
--- 1. Operation references: {"$ref": "#/parameters/body.tablename"}
--- 2. Parameter def has: {"in": "body", "schema": {"$ref": "#/definitions/..."}}
---
--- This function first tries standard extraction, then falls back to
--- resolving the PostgREST body parameter pattern.
+{- | Extract request body schema with PostgREST-specific resolution.
+
+PostgREST uses a two-level reference pattern:
+1. Operation references: {"$ref": "#/parameters/body.tablename"}
+2. Parameter def has: {"in": "body", "schema": {"$ref": "#/definitions/..."}}
+
+This function first tries standard extraction, then falls back to
+resolving the PostgREST body parameter pattern.
+-}
 extractRequestBodySchemaWithSpec :: OpenAPISpec -> Operation -> Maybe Schema
 extractRequestBodySchemaWithSpec spec op =
     -- First try standard extraction
@@ -172,10 +176,11 @@ extractRequestBodySchemaWithSpec spec op =
         Just schema -> Just schema
         Nothing -> resolvePostgRESTBodyRef spec op
 
--- | Resolve PostgREST body parameter reference.
---
--- Looks for parameters with $ref to #/parameters/body.* and resolves
--- them against the spec's parameters section.
+{- | Resolve PostgREST body parameter reference.
+
+Looks for parameters with $ref to #/parameters/body.* and resolves
+them against the spec's parameters section.
+-}
 resolvePostgRESTBodyRef :: OpenAPISpec -> Operation -> Maybe Schema
 resolvePostgRESTBodyRef spec op = do
     -- Find a parameter that is a body parameter reference
@@ -185,8 +190,9 @@ resolvePostgRESTBodyRef spec op = do
     -- Resolve the reference against the spec's parameters
     resolveBodyParameterRef spec ref
 
--- | Check if a parameter is a body parameter reference.
--- Pattern: $ref = "#/parameters/body.something"
+{- | Check if a parameter is a body parameter reference.
+Pattern: $ref = "#/parameters/body.something"
+-}
 isBodyParamRef :: Parameter -> Bool
 isBodyParamRef param =
     case paramSchema param >>= schemaRef of
@@ -197,12 +203,13 @@ isBodyParamRef param =
 getParamRef :: Parameter -> Maybe Text
 getParamRef param = paramSchema param >>= schemaRef
 
--- | Resolve a body parameter reference to get the actual schema.
---
--- Given a reference like "#/parameters/body.trainers", this function:
--- 1. Looks up the parameter definition in specParameters
--- 2. Verifies it's a body parameter
--- 3. Returns the schema from that parameter definition
+{- | Resolve a body parameter reference to get the actual schema.
+
+Given a reference like "#/parameters/body.trainers", this function:
+1. Looks up the parameter definition in specParameters
+2. Verifies it's a body parameter
+3. Returns the schema from that parameter definition
+-}
 resolveBodyParameterRef :: OpenAPISpec -> Text -> Maybe Schema
 resolveBodyParameterRef spec ref = do
     -- Extract the parameter name from the reference
@@ -221,16 +228,17 @@ resolveBodyParameterRef spec ref = do
     guard True = Just ()
     guard False = Nothing
 
--- | Converts a single PostgREST table endpoint to a tool.
---
--- This is the core conversion function that:
--- * Derives a tool name from the table path and method
--- * Builds the tool description from summary and description
--- * Creates structured parameters (filters/subset/ranking)
--- * Records detected row filters
--- * Includes request body schema for write operations
---
--- The tool name format is: postgrest_{toolbox}_{method}_{table}
+{- | Converts a single PostgREST table endpoint to a tool.
+
+This is the core conversion function that:
+* Derives a tool name from the table path and method
+* Builds the tool description from summary and description
+* Creates structured parameters (filters/subset/ranking)
+* Records detected row filters
+* Includes request body schema for write operations
+
+The tool name format is: postgrest_{toolbox}_{method}_{table}
+-}
 convertTable ::
     -- | Toolbox name
     Text ->
@@ -262,52 +270,55 @@ convertTable toolboxName path method op rowFilters requestBodySchema =
 -- Path Filtering
 -- -------------------------------------------------------------------------
 
--- | Check if a path represents a table endpoint.
---
--- Table paths in PostgREST:
--- * Start with / (all paths do)
--- * Don't contain {parameters} in the main table path
--- * Are not the root path /
---
--- Examples:
--- >>> isTablePath "/users"
--- True
--- >>> isTablePath "/"
--- False
--- >>> isTablePath "/users/{id}"
--- True  -- We still consider this a table path (single row access)
--- >>> isTablePath "/rpc/some_function"
--- True  -- RPC endpoints are also valid
+{- | Check if a path represents a table endpoint.
+
+Table paths in PostgREST:
+* Start with / (all paths do)
+* Don't contain {parameters} in the main table path
+* Are not the root path /
+
+Examples:
+>>> isTablePath "/users"
+True
+>>> isTablePath "/"
+False
+>>> isTablePath "/users/{id}"
+True  -- We still consider this a table path (single row access)
+>>> isTablePath "/rpc/some_function"
+True  -- RPC endpoints are also valid
+-}
 isTablePath :: Path -> Bool
 isTablePath path =
     path /= "/" && not (isOpenApiEndpoint path)
 
--- | Check if a path should be skipped.
---
--- Skip paths that are:
--- * The root OpenAPI spec endpoint
--- * Swagger UI endpoints
--- * Internal PostgREST endpoints
---
--- Examples:
--- >>> shouldSkipPath "/"
--- False  -- Root is handled separately
--- >>> shouldSkipPath "/api/swagger.json"
--- True
+{- | Check if a path should be skipped.
+
+Skip paths that are:
+* The root OpenAPI spec endpoint
+* Swagger UI endpoints
+* Internal PostgREST endpoints
+
+Examples:
+>>> shouldSkipPath "/"
+False  -- Root is handled separately
+>>> shouldSkipPath "/api/swagger.json"
+True
+-}
 shouldSkipPath :: Path -> Bool
 shouldSkipPath path =
-    path `elem`
-        [ "/api/swagger.json"
-        , "/swagger.json"
-        , "/api/swagger-ui"
-        , "/swagger-ui"
-        , "/api/swagger-ui.html"
-        ]
+    path
+        `elem` [ "/api/swagger.json"
+               , "/swagger.json"
+               , "/api/swagger-ui"
+               , "/swagger-ui"
+               , "/api/swagger-ui.html"
+               ]
 
--- | Check if path is the OpenAPI description endpoint.
---
--- PostgREST serves the OpenAPI spec at the root / endpoint.
--- This should not be exposed as a tool.
+{- | Check if path is the OpenAPI description endpoint.
+
+PostgREST serves the OpenAPI spec at the root / endpoint.
+This should not be exposed as a tool.
+-}
 isOpenApiEndpoint :: Path -> Bool
 isOpenApiEndpoint path =
     -- The root path serves the OpenAPI spec in PostgREST
@@ -317,27 +328,29 @@ isOpenApiEndpoint path =
 -- Row Filter Extraction
 -- -------------------------------------------------------------------------
 
--- | Extract row filters from an operation's parameters.
---
--- PostgREST exposes column filters via parameter references like:
--- * #/parameters/rowFilter.users.id
--- * #/parameters/rowFilter.public.orders.name
---
--- This function parses these references and extracts column information.
---
--- Examples:
--- >>> let param = Parameter "id" ParamInQuery (Just "Filter on id") False (Just (Schema (Just "integer") Nothing Nothing Nothing Nothing Nothing Nothing Nothing))
--- >>> extractRowFilters (Operation Nothing Nothing Nothing [param] Nothing) (OpenAPISpec Map.empty Nothing Nothing)
--- []
+{- | Extract row filters from an operation's parameters.
+
+PostgREST exposes column filters via parameter references like:
+* #/parameters/rowFilter.users.id
+* #/parameters/rowFilter.public.orders.name
+
+This function parses these references and extracts column information.
+
+Examples:
+>>> let param = Parameter "id" ParamInQuery (Just "Filter on id") False (Just (Schema (Just "integer") Nothing Nothing Nothing Nothing Nothing Nothing Nothing))
+>>> extractRowFilters (Operation Nothing Nothing Nothing [param] Nothing) (OpenAPISpec Map.empty Nothing Nothing)
+[]
+-}
 extractRowFilters :: Operation -> OpenAPISpec -> [RowFilter]
 extractRowFilters op spec =
     -- Look for parameters with rowFilter references
     let filterRefs = extractFilterRefs op
      in mapMaybe (resolveFilterRef spec) filterRefs
 
--- | Extract filter reference strings from operation parameters.
---
--- Scans parameter schemas for $ref entries pointing to rowFilter definitions.
+{- | Extract filter reference strings from operation parameters.
+
+Scans parameter schemas for $ref entries pointing to rowFilter definitions.
+-}
 extractFilterRefs :: Operation -> [Text]
 extractFilterRefs op =
     catMaybes $ map extractRefFromParam (opParameters op)
@@ -350,21 +363,22 @@ extractFilterRefs op =
 
     catMaybes = mapMaybe id
 
--- | Parse a rowFilter reference string.
---
--- PostgREST rowFilter references look like:
--- * #/parameters/rowFilter.users.id
--- * #/parameters/rowFilter.public.orders.name
---
--- Returns (table, column) tuple if parsing succeeds.
---
--- Examples:
--- >>> parseRowFilterRef "#/parameters/rowFilter.users.id"
--- Just ("users", "id")
--- >>> parseRowFilterRef "#/parameters/rowFilter.public.orders.name"
--- Just ("public.orders", "name")
--- >>> parseRowFilterRef "#/parameters/something.else"
--- Nothing
+{- | Parse a rowFilter reference string.
+
+PostgREST rowFilter references look like:
+* #/parameters/rowFilter.users.id
+* #/parameters/rowFilter.public.orders.name
+
+Returns (table, column) tuple if parsing succeeds.
+
+Examples:
+>>> parseRowFilterRef "#/parameters/rowFilter.users.id"
+Just ("users", "id")
+>>> parseRowFilterRef "#/parameters/rowFilter.public.orders.name"
+Just ("public.orders", "name")
+>>> parseRowFilterRef "#/parameters/something.else"
+Nothing
+-}
 parseRowFilterRef :: Text -> Maybe (Text, Text)
 parseRowFilterRef ref =
     -- Format: #/parameters/rowFilter.{table}.{column}
@@ -377,9 +391,10 @@ parseRowFilterRef ref =
                 Just (schema <> "." <> table, column)
             _ -> Nothing
 
--- | Resolve a filter reference to a RowFilter.
---
--- Looks up the parameter definition in the spec to get type information.
+{- | Resolve a filter reference to a RowFilter.
+
+Looks up the parameter definition in the spec to get type information.
+-}
 resolveFilterRef :: OpenAPISpec -> Text -> Maybe RowFilter
 resolveFilterRef _spec ref =
     -- For now, parse the reference and create a basic RowFilter
@@ -399,9 +414,10 @@ resolveFilterRef _spec ref =
 -- Tool Description Building
 -- -------------------------------------------------------------------------
 
--- | Build a tool description from operation and path.
---
--- Combines operation summary/description with table path and method information.
+{- | Build a tool description from operation and path.
+
+Combines operation summary/description with table path and method information.
+-}
 buildToolDescription :: Operation -> Path -> HttpMethod -> Text
 buildToolDescription op path method =
     let baseDesc = case (opSummary op, opDescription op) of
@@ -433,17 +449,19 @@ buildToolDescription op path method =
 -- Parameter Detection
 -- -------------------------------------------------------------------------
 
--- | Check if operation has pagination parameters.
---
--- Looks for limit and offset parameters.
+{- | Check if operation has pagination parameters.
+
+Looks for limit and offset parameters.
+-}
 hasPaginationParams :: Operation -> Bool
 hasPaginationParams op =
     let paramNames = map paramName (opParameters op)
      in "limit" `elem` paramNames && "offset" `elem` paramNames
 
--- | Check if operation has ordering parameter.
---
--- Looks for order parameter.
+{- | Check if operation has ordering parameter.
+
+Looks for order parameter.
+-}
 hasOrderingParam :: Operation -> Bool
 hasOrderingParam op =
     let paramNames = map paramName (opParameters op)
@@ -453,15 +471,16 @@ hasOrderingParam op =
 -- Tool Name Derivation
 -- -------------------------------------------------------------------------
 
--- | Derives a tool name from a PostgREST table path.
---
--- Format: postgrest_{toolbox}_{method}_{table}
---
--- Examples:
--- >>> deriveToolName "mydb" "/users" GET
--- "postgrest_mydb_get_users"
--- >>> deriveToolName "mydb" "/public.orders" POST
--- "postgrest_mydb_post_public_orders"
+{- | Derives a tool name from a PostgREST table path.
+
+Format: postgrest_{toolbox}_{method}_{table}
+
+Examples:
+>>> deriveToolName "mydb" "/users" GET
+"postgrest_mydb_get_users"
+>>> deriveToolName "mydb" "/public.orders" POST
+"postgrest_mydb_post_public_orders"
+-}
 deriveToolName :: Text -> Path -> HttpMethod -> Text
 deriveToolName toolboxName path method =
     let normalizedToolbox = normalizeForLLM toolboxName
@@ -469,23 +488,25 @@ deriveToolName toolboxName path method =
         methodPart = Text.toLower $ methodToText method
      in "postgrest_" <> normalizedToolbox <> "_" <> methodPart <> "_" <> tablePart
 
--- | Normalize a table path for use in a tool name.
---
--- Converts paths like:
--- * /users -> users
--- * /public.users -> public_users
--- * /rpc/my_function -> rpc_my_function
---
--- Examples:
--- >>> normalizeTableName "/users"
--- "users"
--- >>> normalizeTableName "/public.users"
--- "public_users"
--- >>> normalizeTableName "/rpc/my_function"
--- "rpc_my_function"
+{- | Normalize a table path for use in a tool name.
+
+Converts paths like:
+* /users -> users
+* /public.users -> public_users
+* /rpc/my_function -> rpc_my_function
+
+Examples:
+>>> normalizeTableName "/users"
+"users"
+>>> normalizeTableName "/public.users"
+"public_users"
+>>> normalizeTableName "/rpc/my_function"
+"rpc_my_function"
+-}
 normalizeTableName :: Path -> Text
 normalizeTableName path =
-    let -- Remove leading slash
+    let
+        -- Remove leading slash
         withoutLeading = Text.dropWhile (== '/') path
         -- Replace dots and slashes with underscores
         normalized =
@@ -494,7 +515,8 @@ normalizeTableName path =
                 $ withoutLeading
         -- Clean up multiple consecutive underscores
         collapsed = collapseUnderscores normalized
-     in ensureValidStart collapsed
+     in
+        ensureValidStart collapsed
   where
     collapseUnderscores :: Text -> Text
     collapseUnderscores = Text.intercalate "_" . filter (not . Text.null) . Text.splitOn "_"
@@ -509,13 +531,14 @@ normalizeTableName path =
 -- Parameter Schema Building
 -- -------------------------------------------------------------------------
 
--- | Build structured tool parameters from operation.
---
--- Creates parameter groups:
--- * filters: Column-based row filters (for GET, DELETE, PATCH, PUT)
--- * subset: Pagination (limit/offset) and column selection (for GET)
--- * ranking: Ordering clause (for GET)
--- * requestBody: JSON body for write operations (POST, PUT, PATCH)
+{- | Build structured tool parameters from operation.
+
+Creates parameter groups:
+* filters: Column-based row filters (for GET, DELETE, PATCH, PUT)
+* subset: Pagination (limit/offset) and column selection (for GET)
+* ranking: Ordering clause (for GET)
+* requestBody: JSON body for write operations (POST, PUT, PATCH)
+-}
 buildToolParameters :: PostgRESTool -> ToolParameters
 buildToolParameters tool =
     ToolParameters
@@ -532,9 +555,10 @@ buildToolParameters tool =
     -- Request body for POST, PUT, PATCH
     needsRequestBody = method `elem` [POST, PUT, PATCH]
 
--- | Build filter schema from detected row filters.
---
--- Each row filter becomes a property in the filters object.
+{- | Build filter schema from detected row filters.
+
+Each row filter becomes a property in the filters object.
+-}
 buildFilterSchema :: PostgRESTool -> Maybe FilterSchema
 buildFilterSchema tool =
     if null (prtRowFilters tool)
@@ -555,12 +579,13 @@ buildFilterSchema tool =
             }
         )
 
--- | Build subset schema for pagination and column selection.
---
--- Includes:
--- * offset: Number of rows to skip
--- * limit: Maximum rows to return
--- * columns: Comma-separated column names (select parameter)
+{- | Build subset schema for pagination and column selection.
+
+Includes:
+* offset: Number of rows to skip
+* limit: Maximum rows to return
+* columns: Comma-separated column names (select parameter)
+-}
 buildSubsetSchema :: PostgRESTool -> Maybe SubsetSchema
 buildSubsetSchema tool =
     if prtHasPagination tool
@@ -573,9 +598,10 @@ buildSubsetSchema tool =
                     }
         else Nothing
 
--- | Build ranking schema for ordering.
---
--- Includes the order parameter for sorting results.
+{- | Build ranking schema for ordering.
+
+Includes the order parameter for sorting results.
+-}
 buildRankingSchema :: PostgRESTool -> Maybe RankingSchema
 buildRankingSchema tool =
     if prtHasOrdering tool
@@ -585,4 +611,3 @@ buildRankingSchema tool =
                     { rsOrder = Just "Ordering clause (e.g., 'created_at.desc,name.asc')"
                     }
         else Nothing
-

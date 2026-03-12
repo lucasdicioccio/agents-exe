@@ -1,16 +1,18 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'run' command handler (one-shot mode).
---
--- The run command executes a single prompt against an agent and outputs
--- the response. This is the non-interactive mode for agents-exe.
-module System.Agents.CLI.OneShot
-    ( -- * Types
-      OneShotOptions (..)
-      -- * Handler
-    , handleOneShot
-    ) where
+{- | Module for the 'run' command handler (one-shot mode).
+
+The run command executes a single prompt against an agent and outputs
+the response. This is the non-interactive mode for agents-exe.
+-}
+module System.Agents.CLI.OneShot (
+    -- * Types
+    OneShotOptions (..),
+
+    -- * Handler
+    handleOneShot,
+) where
 
 import Control.Monad (forM_)
 import Data.Map (Map)
@@ -63,4 +65,3 @@ handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
                 , AgentTree.runtimeRegistry = registry
                 }
-

@@ -3,51 +3,52 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | PostgREST Toolbox runtime for executing database API tools.
---
--- This module provides a runtime that:
--- * Fetches PostgREST OpenAPI specifications from URLs
--- * Converts table endpoints to executable tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
--- * Handles HTTP execution with PostgREST-specific query parameter building
--- * Integrates with the LLM tool registration system
---
--- The toolbox follows patterns similar to OpenAPIToolbox, McpToolbox,
--- and BashToolbox for consistent integration with the agents system.
---
--- Key features:
--- * Structured query parameters (filters/subset/ranking) for read operations
--- * Request body support for write operations (POST/PUT/PATCH)
--- * Configurable HTTP method exposure (read-only by default for safety)
--- * Column-based row filtering
--- * Automatic pagination and ordering support
--- * JWT Bearer token authentication
---
--- Example usage:
---
--- @
--- import System.Agents
--- import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
---
--- main :: IO ()
--- main = do
---     let config = PostgREST.Config
---             { configUrl = "http://localhost:3000/"
---             , configBaseUrl = "http://localhost:3000"
---             , configHeaders = Map.empty
---             , configToken = Just "eyJhbG..."
---             , configAllowedMethods = [GET, POST, PATCH]  -- Enable read and write
---             , configFilter = Just (PathPrefix "/public")  -- Only public schema tables
---             }
---     result <- PostgREST.initializeToolbox tracer config
---     case result of
---         Right toolbox -> do
---             -- Register tools with LLM
---             regResult <- registerPostgRESTools toolbox
---             case regResult of
---                 Right registrations -> useWithAgent registrations
---                 Left err -> handleError err
---         Left err -> handleError err
--- @
+{- | PostgREST Toolbox runtime for executing database API tools.
+
+This module provides a runtime that:
+* Fetches PostgREST OpenAPI specifications from URLs
+* Converts table endpoints to executable tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
+* Handles HTTP execution with PostgREST-specific query parameter building
+* Integrates with the LLM tool registration system
+
+The toolbox follows patterns similar to OpenAPIToolbox, McpToolbox,
+and BashToolbox for consistent integration with the agents system.
+
+Key features:
+* Structured query parameters (filters/subset/ranking) for read operations
+* Request body support for write operations (POST/PUT/PATCH)
+* Configurable HTTP method exposure (read-only by default for safety)
+* Column-based row filtering
+* Automatic pagination and ordering support
+* JWT Bearer token authentication
+
+Example usage:
+
+@
+import System.Agents
+import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
+
+main :: IO ()
+main = do
+    let config = PostgREST.Config
+            { configUrl = "http://localhost:3000/"
+            , configBaseUrl = "http://localhost:3000"
+            , configHeaders = Map.empty
+            , configToken = Just "eyJhbG..."
+            , configAllowedMethods = [GET, POST, PATCH]  -- Enable read and write
+            , configFilter = Just (PathPrefix "/public")  -- Only public schema tables
+            }
+    result <- PostgREST.initializeToolbox tracer config
+    case result of
+        Right toolbox -> do
+            -- Register tools with LLM
+            regResult <- registerPostgRESTools toolbox
+            case regResult of
+                Right registrations -> useWithAgent registrations
+                Left err -> handleError err
+        Left err -> handleError err
+@
+-}
 module System.Agents.Tools.PostgRESToolbox (
     -- * Core types
     Trace,
@@ -112,6 +113,7 @@ import Numeric (showHex)
 import Prod.Tracer (Tracer (..), runTracer)
 
 import qualified System.Agents.HttpClient as HttpClient
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.EndpointPredicate (
@@ -123,17 +125,17 @@ import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import System.Agents.Tools.OpenAPI.Types (OpenAPISpec (..))
 import System.Agents.Tools.PostgREST.Converter (
     PostgRESTool (..),
-    convertPostgRESToTools,
     buildToolParameters,
+    convertPostgRESToTools,
     methodToText,
  )
 import System.Agents.Tools.PostgREST.Types (
-    HttpMethod (..),
-    RowFilter (..),
-    ToolParameters (..),
     FilterSchema (..),
-    SubsetSchema (..),
+    HttpMethod (..),
     RankingSchema (..),
+    RowFilter (..),
+    SubsetSchema (..),
+    ToolParameters (..),
     ToolResult (..),
     Trace (..),
     defaultAllowedMethods,
@@ -141,7 +143,6 @@ import System.Agents.Tools.PostgREST.Types (
  )
 import qualified System.Agents.Tools.PostgREST.Types as Types
 import System.Agents.Tools.Trace (ToolTrace (..))
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -- -------------------------------------------------------------------------
 -- Core types
@@ -149,20 +150,21 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -- | Errors that can occur during toolbox initialization.
 data InitializationError
-    = NetworkError !Text
-    -- ^ Network error fetching spec
-    | FileError !Text
-    -- ^ File error loading spec from disk
-    | ParseError !Text
-    -- ^ JSON parse error
-    | SpecError !Text
-    -- ^ OpenAPI spec validation error
+    = -- | Network error fetching spec
+      NetworkError !Text
+    | -- | File error loading spec from disk
+      FileError !Text
+    | -- | JSON parse error
+      ParseError !Text
+    | -- | OpenAPI spec validation error
+      SpecError !Text
     deriving (Show, Eq)
 
--- | Configuration for initializing a PostgREST toolbox.
---
--- This configuration type extends the base 'Types.Config' with an optional
--- 'EndpointPredicate' filter to subset the available tools.
+{- | Configuration for initializing a PostgREST toolbox.
+
+This configuration type extends the base 'Types.Config' with an optional
+'EndpointPredicate' filter to subset the available tools.
+-}
 data Config = Config
     { configUrl :: Text
     -- ^ URL to PostgREST OpenAPI spec (e.g., "http://localhost:3000/" or "file:///path/to/spec.json")
@@ -175,30 +177,33 @@ data Config = Config
     , configAllowedMethods :: [HttpMethod]
     -- ^ HTTP methods to expose as tools (default: read-only methods)
     , configFilter :: Maybe EndpointPredicate
-    -- ^ Optional filter to restrict which tables/endpoints are exposed as tools.
-    -- If not specified, all tables are included.
+    {- ^ Optional filter to restrict which tables/endpoints are exposed as tools.
+    If not specified, all tables are included.
+    -}
     }
     deriving (Show, Eq)
 
 -- | Convert toolbox Config to base Types.Config.
 toBaseConfig :: Config -> Types.Config
-toBaseConfig cfg = Types.Config
-    { Types.configUrl = cfg.configUrl
-    , Types.configBaseUrl = cfg.configBaseUrl
-    , Types.configHeaders = cfg.configHeaders
-    , Types.configToken = cfg.configToken
-    , Types.configAllowedMethods = cfg.configAllowedMethods
-    }
+toBaseConfig cfg =
+    Types.Config
+        { Types.configUrl = cfg.configUrl
+        , Types.configBaseUrl = cfg.configBaseUrl
+        , Types.configHeaders = cfg.configHeaders
+        , Types.configToken = cfg.configToken
+        , Types.configAllowedMethods = cfg.configAllowedMethods
+        }
 
--- | Runtime state for a PostgREST toolbox.
---
--- The toolbox maintains:
--- * A name for identification
--- * The base URL for API calls
--- * A list of available tools (one per table/method combination, filtered by configFilter if provided)
--- * The HTTP runtime for making requests
--- * Optional dynamic header function for auth
--- * The list of allowed HTTP methods
+{- | Runtime state for a PostgREST toolbox.
+
+The toolbox maintains:
+* A name for identification
+* The base URL for API calls
+* A list of available tools (one per table/method combination, filtered by configFilter if provided)
+* The HTTP runtime for making requests
+* Optional dynamic header function for auth
+* The list of allowed HTTP methods
+-}
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxBaseUrl :: Text
@@ -220,49 +225,52 @@ data Toolbox = Toolbox
 -- URL Helpers
 -- -------------------------------------------------------------------------
 
--- | Check if a URL is a file:// URL.
---
--- Example:
---
--- >>> isFileUrl "file:///path/to/spec.json"
--- True
---
--- >>> isFileUrl "http://localhost:3000/"
--- False
+{- | Check if a URL is a file:// URL.
+
+Example:
+
+>>> isFileUrl "file:///path/to/spec.json"
+True
+
+>>> isFileUrl "http://localhost:3000/"
+False
+-}
 isFileUrl :: Text -> Bool
 isFileUrl url = Text.isPrefixOf "file://" url
 
--- | Convert a file:// URL to a file path.
---
--- Handles both "file:///absolute/path" and "file://relative/path" formats.
---
--- Example:
---
--- >>> fileUrlToPath "file:///home/user/spec.json"
--- "/home/user/spec.json"
---
--- >>> fileUrlToPath "file://spec.json"
--- "spec.json"
+{- | Convert a file:// URL to a file path.
+
+Handles both "file:///absolute/path" and "file://relative/path" formats.
+
+Example:
+
+>>> fileUrlToPath "file:///home/user/spec.json"
+"/home/user/spec.json"
+
+>>> fileUrlToPath "file://spec.json"
+"spec.json"
+-}
 fileUrlToPath :: Text -> FilePath
 fileUrlToPath url =
-    let withoutPrefix = Text.drop 7 url  -- Drop "file://"
-    in Text.unpack withoutPrefix
+    let withoutPrefix = Text.drop 7 url -- Drop "file://"
+     in Text.unpack withoutPrefix
 
 -- -------------------------------------------------------------------------
 -- Initialization
 -- -------------------------------------------------------------------------
 
--- | Initialize a PostgREST toolbox from a configuration.
---
--- This function:
--- 1. Creates an HTTP runtime with authentication
--- 2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
--- 3. Parses the JSON to an OpenAPISpec
--- 4. Converts table operations to tools based on allowed methods
--- 5. Applies the optional filter to subset tools (using 'matchesPostgRESTool')
--- 6. Detects row filters and builds parameter schemas
---
--- Returns an 'InitializationError' if any step fails.
+{- | Initialize a PostgREST toolbox from a configuration.
+
+This function:
+1. Creates an HTTP runtime with authentication
+2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
+3. Parses the JSON to an OpenAPISpec
+4. Converts table operations to tools based on allowed methods
+5. Applies the optional filter to subset tools (using 'matchesPostgRESTool')
+6. Detects row filters and builds parameter schemas
+
+Returns an 'InitializationError' if any step fails.
+-}
 initializeToolbox ::
     Tracer IO Trace ->
     Config ->
@@ -308,20 +316,23 @@ initializeToolbox tracer config = do
                     mapM_ (\t -> runTracer tracer (ColumnFiltersDetectedTrace (prtPath t) (length (prtRowFilters t)))) filteredTools
 
                     -- Create toolbox
-                    pure $ Right $ Toolbox
-                        { toolboxName = toolboxName
-                        , toolboxBaseUrl = config.configBaseUrl
-                        , toolboxTools = filteredTools
-                        , httpRuntime = runtime
-                        , headerFunc = Nothing
-                        , staticHeaders = config.configHeaders
-                        , toolboxAllowedMethods = allowedMethods
-                        , toolboxFilter = config.configFilter
-                        }
+                    pure $
+                        Right $
+                            Toolbox
+                                { toolboxName = toolboxName
+                                , toolboxBaseUrl = config.configBaseUrl
+                                , toolboxTools = filteredTools
+                                , httpRuntime = runtime
+                                , headerFunc = Nothing
+                                , staticHeaders = config.configHeaders
+                                , toolboxAllowedMethods = allowedMethods
+                                , toolboxFilter = config.configFilter
+                                }
 
--- | Extract a toolbox name from the spec URL.
---
--- Uses the hostname as the toolbox name.
+{- | Extract a toolbox name from the spec URL.
+
+Uses the hostname as the toolbox name.
+-}
 extractToolboxName :: Text -> Text
 extractToolboxName url =
     let withoutProtocol = Text.dropWhile (/= '/') $ Text.drop 8 url
@@ -330,10 +341,11 @@ extractToolboxName url =
             then "postgrest"
             else normalizeForLLM hostPart
 
--- | Fetch the OpenAPI spec from a URL or file.
---
--- Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
--- the spec is read directly from the filesystem.
+{- | Fetch the OpenAPI spec from a URL or file.
+
+Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
+the spec is read directly from the filesystem.
+-}
 fetchSpec ::
     Tracer IO Trace ->
     HttpClient.Runtime ->
@@ -376,19 +388,20 @@ fetchSpecFromUrl tracer runtime url = do
             let status = HttpTypes.statusCode (HttpClient.responseStatus response)
                 body = HttpClient.responseBody response
              in do
-                runTracer tracer (SpecFetchedTrace status)
-                pure $ Right body
+                    runTracer tracer (SpecFetchedTrace status)
+                    pure $ Right body
 
 -- -------------------------------------------------------------------------
 -- Tool Lookup
 -- -------------------------------------------------------------------------
 
--- | Get a tool by its name.
---
--- This is used during tool execution to find the tool
--- when the LLM calls it by name.
---
--- Returns 'Nothing' if no tool with that name exists.
+{- | Get a tool by its name.
+
+This is used during tool execution to find the tool
+when the LLM calls it by name.
+
+Returns 'Nothing' if no tool with that name exists.
+-}
 getToolByName ::
     Toolbox ->
     Text ->
@@ -402,10 +415,11 @@ getToolByName toolbox name =
 -- Tool Handler Creation
 -- -------------------------------------------------------------------------
 
--- | Creates a handler function for a PostgREST tool.
---
--- This handler integrates with the ToolExecutionContext system and
--- returns results in the standard CallResult format.
+{- | Creates a handler function for a PostgREST tool.
+
+This handler integrates with the ToolExecutionContext system and
+returns results in the standard CallResult format.
+-}
 createToolHandler ::
     Toolbox ->
     PostgRESTool ->
@@ -421,14 +435,15 @@ createToolHandler toolbox tool _tracer _ctx args = do
         Right (textResult, _toolResult) -> do
             pure $ BlobToolSuccess () (Text.encodeUtf8 textResult)
 
--- | Handle a tool call by executing the HTTP request.
---
--- This function:
--- 1. Extracts structured arguments (filters, subset, ranking, body)
--- 2. Builds the query string from arguments
--- 3. Builds full URL
--- 4. Makes HTTP request with the appropriate method
--- 5. Returns result
+{- | Handle a tool call by executing the HTTP request.
+
+This function:
+1. Extracts structured arguments (filters, subset, ranking, body)
+2. Builds the query string from arguments
+3. Builds full URL
+4. Makes HTTP request with the appropriate method
+5. Returns result
+-}
 handleToolCall ::
     Toolbox ->
     PostgRESTool ->
@@ -499,18 +514,19 @@ buildRequest method url headers mbody = do
 
     -- Set the HTTP method
     let methodBytes = Text.encodeUtf8 $ methodToText method
-    let reqWithMethod = req { HttpClient.method = methodBytes }
+    let reqWithMethod = req{HttpClient.method = methodBytes}
 
     -- Add custom headers
     let headerList = map (\(k, v) -> (mk (Text.encodeUtf8 k), Text.encodeUtf8 v)) $ Map.toList headers
-    let reqWithHeaders = reqWithMethod { HttpClient.requestHeaders = HttpClient.requestHeaders reqWithMethod ++ headerList }
+    let reqWithHeaders = reqWithMethod{HttpClient.requestHeaders = HttpClient.requestHeaders reqWithMethod ++ headerList}
 
     -- Add request body if present (for POST, PUT, PATCH)
     let finalReq = case mbody of
-            Just body -> reqWithHeaders
-                { HttpClient.requestBody = HttpClient.RequestBodyLBS (Aeson.encode body)
-                , HttpClient.requestHeaders = (mk "Content-Type", "application/json") : HttpClient.requestHeaders reqWithHeaders
-                }
+            Just body ->
+                reqWithHeaders
+                    { HttpClient.requestBody = HttpClient.RequestBodyLBS (Aeson.encode body)
+                    , HttpClient.requestHeaders = (mk "Content-Type", "application/json") : HttpClient.requestHeaders reqWithHeaders
+                    }
             Nothing -> reqWithHeaders
 
     pure finalReq
@@ -519,10 +535,11 @@ buildRequest method url headers mbody = do
 -- Query String Building
 -- -------------------------------------------------------------------------
 
--- | Build query string from tool arguments.
---
--- Extracts filters, subset, and ranking from the arguments object
--- and converts them to PostgREST query parameters.
+{- | Build query string from tool arguments.
+
+Extracts filters, subset, and ranking from the arguments object
+and converts them to PostgREST query parameters.
+-}
 buildQueryStringFromArgs :: Object -> ToolParameters -> Text
 buildQueryStringFromArgs obj params =
     let objMap = KeyMap.toMapText obj
@@ -550,16 +567,17 @@ buildQueryStringFromArgs obj params =
   where
     encodeParam (k, v) = urlEncode k <> "=" <> urlEncode v
 
--- | Build filter parameters from filters object.
---
--- Converts filter values directly to query parameters.
--- PostgREST infers the eq operator when no operator is specified.
---
--- Examples:
--- >>> buildFilterParams (KeyMap.fromList [("name", String "John")])
--- fromList [("name","John")]
--- >>> buildFilterParams (KeyMap.fromList [("age", String "gt.18")])
--- fromList [("age","gt.18")]
+{- | Build filter parameters from filters object.
+
+Converts filter values directly to query parameters.
+PostgREST infers the eq operator when no operator is specified.
+
+Examples:
+>>> buildFilterParams (KeyMap.fromList [("name", String "John")])
+fromList [("name","John")]
+>>> buildFilterParams (KeyMap.fromList [("age", String "gt.18")])
+fromList [("age","gt.18")]
+-}
 buildFilterParams :: Object -> Map Text Text
 buildFilterParams filterObj =
     let objMap = KeyMap.toMapText filterObj
@@ -571,26 +589,29 @@ buildFilterParams filterObj =
     extractValue (Bool b) = Just (if b then "true" else "false")
     extractValue _ = Nothing
 
--- | Build subset parameters from subset object.
---
--- Extracts limit, offset, and columns (mapped to select).
+{- | Build subset parameters from subset object.
+
+Extracts limit, offset, and columns (mapped to select).
+-}
 buildSubsetParams :: Object -> Map Text Text
 buildSubsetParams subsetObj =
     let objMap = KeyMap.toMapText subsetObj
         extract key = case Map.lookup key objMap of
             Just (String s) | not (Text.null s) -> Just s
             _ -> Nothing
-     in Map.fromList $ catMaybes
-            [ fmap (\v -> ("limit", v)) (extract "limit")
-            , fmap (\v -> ("offset", v)) (extract "offset")
-            , fmap (\v -> ("select", v)) (extract "columns")
-            ]
+     in Map.fromList $
+            catMaybes
+                [ fmap (\v -> ("limit", v)) (extract "limit")
+                , fmap (\v -> ("offset", v)) (extract "offset")
+                , fmap (\v -> ("select", v)) (extract "columns")
+                ]
   where
     catMaybes = mapMaybe id
 
--- | Build ranking parameters from ranking object.
---
--- Extracts the order parameter.
+{- | Build ranking parameters from ranking object.
+
+Extracts the order parameter.
+-}
 buildRankingParams :: Object -> Map Text Text
 buildRankingParams rankingObj =
     let objMap = KeyMap.toMapText rankingObj
@@ -598,9 +619,10 @@ buildRankingParams rankingObj =
             Just (String s) | not (Text.null s) -> Map.singleton "order" s
             _ -> Map.empty
 
--- | Build query string from parameters map.
---
--- This is a lower-level function for building query strings directly.
+{- | Build query string from parameters map.
+
+This is a lower-level function for building query strings directly.
+-}
 buildQueryString :: Map Text Text -> Text
 buildQueryString params
     | Map.null params = ""
@@ -609,9 +631,10 @@ buildQueryString params
   where
     encodeParam (k, v) = urlEncode k <> "=" <> urlEncode v
 
--- | URL-encode a query parameter.
---
--- Basic URL encoding for query string parameters.
+{- | URL-encode a query parameter.
+
+Basic URL encoding for query string parameters.
+-}
 urlEncode :: Text -> Text
 urlEncode = Text.concatMap encodeChar
   where
@@ -631,9 +654,10 @@ urlEncode = Text.concatMap encodeChar
 -- Response Handling
 -- -------------------------------------------------------------------------
 
--- | Handle an HTTP response, converting to ToolResult.
---
--- Returns both text for the LLM and a structured ToolResult.
+{- | Handle an HTTP response, converting to ToolResult.
+
+Returns both text for the LLM and a structured ToolResult.
+-}
 handleResponse ::
     HttpMethod ->
     Text ->
@@ -654,35 +678,38 @@ handleResponse method url response = do
             HEAD ->
                 "HTTP " <> Text.pack (show status) <> " (HEAD request - no body)"
             _ ->
-                "HTTP " <> Text.pack (show status) <> "\n"
+                "HTTP "
+                    <> Text.pack (show status)
+                    <> "\n"
                     <> Text.decodeUtf8 (LByteString.toStrict body)
 
-    pure $ Right
-        ( textResult
-        , ToolResult
-            { resultPath = url
-            , resultMethod = methodToText method
-            , resultStatus = status
-            , resultPayload = payload
-            }
-        )
+    pure $
+        Right
+            ( textResult
+            , ToolResult
+                { resultPath = url
+                , resultMethod = methodToText method
+                , resultStatus = status
+                , resultPayload = payload
+                }
+            )
 
 -- -------------------------------------------------------------------------
 -- Naming helpers
 -- -------------------------------------------------------------------------
 
--- | Convert a PostgREST tool name to an LLM tool name.
---
--- Names are prefixed with @postgrest_@ and include the normalized toolbox name
--- and tool name to avoid conflicts and ensure LLM compatibility.
---
--- Example:
---
--- >>> postgrest2LLMName "mydb" "get_users"
--- ToolName {getToolName = "postgrest_mydb_get_users"}
+{- | Convert a PostgREST tool name to an LLM tool name.
+
+Names are prefixed with @postgrest_@ and include the normalized toolbox name
+and tool name to avoid conflicts and ensure LLM compatibility.
+
+Example:
+
+>>> postgrest2LLMName "mydb" "get_users"
+ToolName {getToolName = "postgrest_mydb_get_users"}
+-}
 postgrest2LLMName :: Text -> Text -> OpenAI.ToolName
 postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
-

@@ -22,10 +22,10 @@ module System.Agents.Tools (
     mapToolResult,
     mapCallResult,
     extractCall,
-    
+
     -- * Re-exports from Trace
     module System.Agents.Tools.Trace,
-    
+
     -- * Tool builders
     ioTool,
     bashTool,
@@ -55,19 +55,20 @@ import System.Agents.Tools.Trace
 
 -------------------------------------------------------------------------------
 
--- | Builder for a tool based on a Bash script-description.
---
--- When executed, the script will have access to session context via environment
--- variables (see 'System.Agents.Tools.Bash.runValue' for details):
---
--- * @AGENT_SESSION_ID@ - The current session UUID
--- * @AGENT_CONVERSATION_ID@ - The conversation UUID
--- * @AGENT_TURN_ID@ - The current turn UUID
--- * @AGENT_AGENT_ID@ - The agent UUID (if available)
--- * @AGENT_SESSION_JSON@ - Full session as JSON (if available)
---
--- Scripts can use these variables for logging, audit trails, or context-aware
--- processing without requiring explicit parameters from the LLM.
+{- | Builder for a tool based on a Bash script-description.
+
+When executed, the script will have access to session context via environment
+variables (see 'System.Agents.Tools.Bash.runValue' for details):
+
+* @AGENT_SESSION_ID@ - The current session UUID
+* @AGENT_CONVERSATION_ID@ - The conversation UUID
+* @AGENT_TURN_ID@ - The current turn UUID
+* @AGENT_AGENT_ID@ - The agent UUID (if available)
+* @AGENT_SESSION_JSON@ - Full session as JSON (if available)
+
+Scripts can use these variables for logging, audit trails, or context-aware
+processing without requiring explicit parameters from the LLM.
+-}
 bashTool ::
     BashTools.ScriptDescription ->
     Tool ()
@@ -86,10 +87,11 @@ bashTool script =
 
 -------------------------------------------------------------------------------
 
--- | Builder for a tool based on an MCP toolbox tool.
---
--- MCP tools are exposed via the Model Context Protocol and provide
--- standardized tool definitions with structured schemas.
+{- | Builder for a tool based on an MCP toolbox tool.
+
+MCP tools are exposed via the Model Context Protocol and provide
+standardized tool definitions with structured schemas.
+-}
 mcpTool ::
     McpTools.Toolbox ->
     McpTools.ToolDescription ->
@@ -114,28 +116,29 @@ mcpTool toolbox desc =
 
 -------------------------------------------------------------------------------
 
--- | Builder for an OpenAPI-based tool.
---
--- This creates a tool from an OpenAPI operation that can be executed
--- against an API endpoint. The tool handles:
---
--- * Path parameter substitution (parameters prefixed with 'p_')
--- * Query parameter construction (parameters prefixed with 'p_')
--- * Request body serialization (parameter 'b')
--- * HTTP method execution
--- * Response parsing
---
--- Example usage:
---
--- @
--- let toolbox = ... -- initialized OpenAPI toolbox
--- let apiTool = head (OpenAPIToolbox.toolboxTools toolbox)
--- let tool = openapiTool toolbox apiTool
--- -- Use tool with agent runtime...
--- @
---
--- The tool name and description are derived from the OpenAPI operation,
--- and the execution uses the HTTP runtime from the toolbox.
+{- | Builder for an OpenAPI-based tool.
+
+This creates a tool from an OpenAPI operation that can be executed
+against an API endpoint. The tool handles:
+
+* Path parameter substitution (parameters prefixed with 'p_')
+* Query parameter construction (parameters prefixed with 'p_')
+* Request body serialization (parameter 'b')
+* HTTP method execution
+* Response parsing
+
+Example usage:
+
+@
+let toolbox = ... -- initialized OpenAPI toolbox
+let apiTool = head (OpenAPIToolbox.toolboxTools toolbox)
+let tool = openapiTool toolbox apiTool
+-- Use tool with agent runtime...
+@
+
+The tool name and description are derived from the OpenAPI operation,
+and the execution uses the HTTP runtime from the toolbox.
+-}
 openapiTool ::
     OpenAPIToolbox.Toolbox ->
     OpenAPI.OpenAPITool ->
@@ -158,27 +161,28 @@ openapiTool toolbox apiTool =
 
 -------------------------------------------------------------------------------
 
--- | Builder for a PostgREST-based tool.
---
--- This creates a tool from a PostgREST table endpoint that can be executed
--- against a PostgREST API. The tool handles:
---
--- * Structured query parameters (filters, subset, ranking)
--- * Column-based row filtering
--- * Pagination (limit/offset)
--- * Column selection (select parameter)
--- * Ordering (order parameter)
---
--- Example usage:
---
--- @
--- let toolbox = ... -- initialized PostgREST toolbox
--- let prTool = head (PostgRESToolbox.toolboxTools toolbox)
--- let tool = postgrestTool toolbox prTool
--- -- Use tool with agent runtime...
--- @
---
--- The tool name format is: postgrest_{toolbox}_{table}
+{- | Builder for a PostgREST-based tool.
+
+This creates a tool from a PostgREST table endpoint that can be executed
+against a PostgREST API. The tool handles:
+
+* Structured query parameters (filters, subset, ranking)
+* Column-based row filtering
+* Pagination (limit/offset)
+* Column selection (select parameter)
+* Ordering (order parameter)
+
+Example usage:
+
+@
+let toolbox = ... -- initialized PostgREST toolbox
+let prTool = head (PostgRESToolbox.toolboxTools toolbox)
+let tool = postgrestTool toolbox prTool
+-- Use tool with agent runtime...
+@
+
+The tool name format is: postgrest_{toolbox}_{table}
+-}
 postgrestTool ::
     PostgRESToolbox.Toolbox ->
     PostgREST.PostgRESTool ->
@@ -200,43 +204,44 @@ postgrestTool toolbox prTool =
 
 -------------------------------------------------------------------------------
 
--- | Builder for a tool based on an IO-tool script-description.
---
--- The IO action receives the full 'ToolExecutionContext', giving it direct access
--- to session metadata including:
---
--- * 'ctxSessionId' - The current session identifier
--- * 'ctxConversationId' - The conversation identifier
--- * 'ctxTurnId' - The current turn identifier
--- * 'ctxAgentId' - Optional agent identifier
--- * 'ctxFullSession' - Optional complete session data
---
--- This is a breaking change from the previous API where IO scripts received a
--- 'ConversationId'. To migrate existing tools:
---
--- @
--- -- Before:
--- ioRun :: ConversationId -> MyArg -> IO ByteString
--- ioRun _convId arg = ...
---
--- -- After:
--- ioRun :: ToolExecutionContext -> MyArg -> IO ByteString
--- ioRun ctx arg = ...
--- -- Use ctx when needed, or ignore with _ctx if not needed
--- @
---
--- Example tool using context:
---
--- @
--- logTool :: IOScript LogArg ByteString
--- logTool = IOScript
---     { description = IOScriptDescription "log-tool" "Logs with session context"
---     , ioRun = \ctx arg -> do
---         let sessionId = ctxSessionId ctx
---         logWithSession sessionId arg.message
---         pure "logged"
---     }
--- @
+{- | Builder for a tool based on an IO-tool script-description.
+
+The IO action receives the full 'ToolExecutionContext', giving it direct access
+to session metadata including:
+
+* 'ctxSessionId' - The current session identifier
+* 'ctxConversationId' - The conversation identifier
+* 'ctxTurnId' - The current turn identifier
+* 'ctxAgentId' - Optional agent identifier
+* 'ctxFullSession' - Optional complete session data
+
+This is a breaking change from the previous API where IO scripts received a
+'ConversationId'. To migrate existing tools:
+
+@
+-- Before:
+ioRun :: ConversationId -> MyArg -> IO ByteString
+ioRun _convId arg = ...
+
+-- After:
+ioRun :: ToolExecutionContext -> MyArg -> IO ByteString
+ioRun ctx arg = ...
+-- Use ctx when needed, or ignore with _ctx if not needed
+@
+
+Example tool using context:
+
+@
+logTool :: IOScript LogArg ByteString
+logTool = IOScript
+    { description = IOScriptDescription "log-tool" "Logs with session context"
+    , ioRun = \ctx arg -> do
+        let sessionId = ctxSessionId ctx
+        logWithSession sessionId arg.message
+        pure "logged"
+    }
+@
+-}
 ioTool ::
     (Aeson.FromJSON llmArg) =>
     IOTools.IOScript llmArg ByteString ->
@@ -255,4 +260,3 @@ ioTool script =
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
-

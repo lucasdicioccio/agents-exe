@@ -5,39 +5,39 @@
 module System.Agents.TUI.Event where
 
 import Brick
-import Brick.BChan (newBChan, readBChan, writeBChan, BChan)
-import Brick.Focus (focusGetCurrent, focusSetCurrent, focusNext, focusPrev, focusRingModify)
-import Brick.Widgets.Edit (handleEditorEvent, editContentsL, getEditContents)
-import Brick.Widgets.List (handleListEvent, listSelectedElement, listInsert, listSelectedL, listElements)
+import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRingModify, focusSetCurrent)
+import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
+import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
-import Control.Lens (use, (%=), (.=), to)
-import Control.Monad (void, when, filterM)
+import Control.Lens (to, use, (%=), (.=))
+import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
+import Data.Time (diffUTCTime, getCurrentTime)
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
-import Data.Time (getCurrentTime, diffUTCTime)
 import System.Environment (lookupEnv)
-import System.Exit (ExitCode(..))
+import System.Exit (ExitCode (..))
 import System.FilePath ((<.>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
 
-import System.Agents.AgentTree (AgentTree(..))
+import System.Agents.AgentTree (AgentTree (..))
 import System.Agents.Base (ConversationId (..), newConversationId)
 import System.Agents.OneShot (runtimeToAgent)
 import qualified System.Agents.Runtime as Runtime
-import System.Agents.Session.Base (Session (..), UserQuery (..), newSessionId, newTurnId, Agent (..), Action (..), MissingUserPrompt (..), SessionProgress(..), OnSessionProgress)
+import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
-import System.Agents.SessionPrint (SessionPrintOptions(..), OrderPreference(..), PrintVisibility(..), formatSessionAsMarkdown)
+import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
 
@@ -62,7 +62,6 @@ tui_appHandleEvent ev = do
             handleShowStatus severity text
         AppEvent AppEvent_ClearStatus ->
             handleClearStatus
-
         -- VTY events
         VtyEvent (Vty.EvKey Vty.KEsc _) ->
             halt
@@ -86,7 +85,6 @@ tui_appHandleEvent ev = do
             handleDumpSessionToMarkdown
         VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
             handleViewSessionWithExternalViewer
-
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
             currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
@@ -109,7 +107,6 @@ tui_appHandleEvent ev = do
                     handleAgentToolsEvent vtyEv
                 _ ->
                     pure ()
-
         _ -> pure ()
 
 -------------------------------------------------------------------------------
@@ -255,20 +252,22 @@ getFocusedConversationId = do
 -- | Format a session as markdown with default options.
 formatSessionMarkdown :: Session -> Text.Text
 formatSessionMarkdown session =
-    let opts = SessionPrintOptions
-            { sessionPrintFile = ""  -- Not used for in-memory formatting
-            , showToolCallResults = ShownFull
-            , showToolCallArguments = ShownFull
-            , nTurns = Nothing
-            , repeatSystemPrompt = False
-            , repeatTools = False
-            , orderPreference = Chronological
-            , noFunnyStamp = True  -- Skip ASCII art in TUI exports for cleaner output
-            }
-    in formatSessionAsMarkdown opts session
+    let opts =
+            SessionPrintOptions
+                { sessionPrintFile = "" -- Not used for in-memory formatting
+                , showToolCallResults = ShownFull
+                , showToolCallArguments = ShownFull
+                , nTurns = Nothing
+                , repeatSystemPrompt = False
+                , repeatTools = False
+                , orderPreference = Chronological
+                , noFunnyStamp = True -- Skip ASCII art in TUI exports for cleaner output
+                }
+     in formatSessionAsMarkdown opts session
 
--- | Handle Ctrl+m: Dump the currently focused session to a markdown file.
--- The file is named `<conversation-id>.md`.
+{- | Handle Ctrl+m: Dump the currently focused session to a markdown file.
+The file is named `<conversation-id>.md`.
+-}
 handleDumpSessionToMarkdown :: EventM N TuiState ()
 handleDumpSessionToMarkdown = do
     mSession <- getFocusedSession
@@ -279,7 +278,7 @@ handleDumpSessionToMarkdown = do
                 fileName = "conv." <> show cid <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
             showStatus StatusInfo $ "Exported to " <> Text.pack fileName
-        (Just session, Nothing ) -> do
+        (Just session, Nothing) -> do
             let markdown = formatSessionMarkdown session
                 fileName = "sess." <> show session.sessionId <.> "md"
             liftIO $ TextIO.writeFile fileName markdown
@@ -287,9 +286,10 @@ handleDumpSessionToMarkdown = do
         _ -> do
             showStatus StatusWarning "No session or conversation selected"
 
--- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
--- Uses the AGENT_MD_VIEWER environment variable if set.
--- The viewer is executed asynchronously and tracked as an auxiliary task.
+{- | Handle Ctrl+Shift+m: Display the currently focused session with an external viewer.
+Uses the AGENT_MD_VIEWER environment variable if set.
+The viewer is executed asynchronously and tracked as an auxiliary task.
+-}
 handleViewSessionWithExternalViewer :: EventM N TuiState ()
 handleViewSessionWithExternalViewer = do
     mViewer <- liftIO $ lookupEnv "AGENT_MD_VIEWER"
@@ -344,8 +344,9 @@ toggleZoom = tuiUI . zoomed %= not
 -- Application Event Handlers
 -------------------------------------------------------------------------------
 
--- | Handle heartbeat - refresh UI state and auto-clear expired status messages.
--- Preserves the currently selected conversation when refreshing the list.
+{- | Handle heartbeat - refresh UI state and auto-clear expired status messages.
+Preserves the currently selected conversation when refreshing the list.
+-}
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
     -- Save the currently selected conversation ID before refreshing
@@ -363,13 +364,13 @@ handleHeartbeat = do
             let newConvs = Vector.fromList convs
             case Vector.findIndex (\c -> conversationId c == selectedConvId) newConvs of
                 Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
-                Nothing -> pure ()  -- Conversation was removed, keep no selection
+                Nothing -> pure () -- Conversation was removed, keep no selection
         Nothing -> pure ()
 
     -- Refresh tools.
     let itrees = fmap agentTree coreState.coreAgents
     agentTools <- liftIO $ traverse (\itree -> itree.agentRuntime.agentTools) itrees
-    let toolz = zipWith (,) [ itree.agentRuntime.agentId | itree <- itrees] agentTools
+    let toolz = zipWith (,) [itree.agentRuntime.agentId | itree <- itrees] agentTools
     tuiUI . coreAgentTools .= toolz
 
     -- Auto-clear status messages after 5 seconds
@@ -396,8 +397,8 @@ cleanupAuxiliaryTasks = do
     isTaskActive (Viewer asyncHandle _ _) = do
         mResult <- poll asyncHandle
         pure $ case mResult of
-            Nothing -> True   -- Still running
-            Just _  -> False  -- Completed (success or failure)
+            Nothing -> True -- Still running
+            Just _ -> False -- Completed (success or failure)
 
 -- | Handle show status event.
 handleShowStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
@@ -425,7 +426,7 @@ handleNewConversation convId = do
 handleConversationNeedsInput :: ConversationId -> EventM N TuiState ()
 handleConversationNeedsInput convId = do
     tuiUI . ongoingConversations %= Set.delete convId
-    
+
     -- Also update the conversation status in core
     updateConversationStatus convId ConversationStatus_WaitingForInput
 
@@ -434,10 +435,16 @@ updateConversationStatus :: ConversationId -> ConversationStatus -> EventM N Tui
 updateConversationStatus convId newStatus = do
     coreRef <- use tuiCore
     liftIO $ atomically $ modifyTVar coreRef $ \c ->
-        c{coreConversations = map (\conv -> 
-            if conversationId conv == convId 
-            then conv{conversationStatus = newStatus}
-            else conv) (coreConversations c)}
+        c
+            { coreConversations =
+                map
+                    ( \conv ->
+                        if conversationId conv == convId
+                            then conv{conversationStatus = newStatus}
+                            else conv
+                    )
+                    (coreConversations c)
+            }
 
 -- | Handle conversation update event.
 handleConversationUpdated :: ConversationId -> Session -> EventM N TuiState ()
@@ -457,8 +464,9 @@ handleConversationUpdated convId sess = do
     -- Refresh from core
     handleHeartbeat
 
--- | Handle agent trace events.
--- TODO: remove
+{- | Handle agent trace events.
+TODO: remove
+-}
 handleAgentTrace :: Runtime.Trace -> EventM N TuiState ()
 handleAgentTrace _trace = do
     -- Currently a no-op, to be implemented
@@ -483,25 +491,27 @@ handleNewConversationFromEditor = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-           session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
-           runConversation baseTuiAgent session
+            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
+            runConversation baseTuiAgent session
         _ ->
-           pure ()
+            pure ()
 
--- | Continue a session restored from storage.
--- This starts the agent loop with the restored session.
+{- | Continue a session restored from storage.
+This starts the agent loop with the restored session.
+-}
 handleRestoredConversation :: EventM N TuiState ()
 handleRestoredConversation = do
     mSession <- use (tuiUI . sessionList . to listSelectedElement)
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
     case (,) <$> mSession <*> mAgent of
-        Just ((_, session), (_,baseTuiAgent)) -> do
+        Just ((_, session), (_, baseTuiAgent)) -> do
             runConversation baseTuiAgent session
         _ ->
-           pure ()
+            pure ()
 
--- | Build the progress callback for a conversation.
--- Combines the global session config with TUI-specific notification needs.
+{- | Build the progress callback for a conversation.
+Combines the global session config with TUI-specific notification needs.
+-}
 buildOnProgress :: ConversationId -> BChan AppEvent -> OnSessionProgress
 buildOnProgress convId outChan progress = do
     -- Notify TUI of progress updates
@@ -519,32 +529,34 @@ runConversation :: TuiAgent -> Session -> EventM N TuiState ()
 runConversation baseTuiAgent session = do
     -- Get session configuration
     config <- use sessionConfig
-    
+
     -- Generate conversation ID
     convId <- liftIO $ newConversationId
-    
+
     outChan <- use eventChan
     inChan <- liftIO $ newBChan 100
-    
+
     -- Build the progress callback
     let notifyProgress = buildOnProgress convId outChan
-    
+
     -- Create the agent with the progress callback
     -- Note: runtimeToAgent now requires convId as a parameter
     agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.agentTree.agentRuntime)
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-    let a = agent0 {
-        step = \sess -> do
-           notifyProgress (SessionUpdated sess)
-           ret <- agent0.step sess
-           case ret of
-              Stop _r -> -- smoll hack to reuse the naive step from runtimeToAgent
-                pure $ AskUserPrompt (MissingUserPrompt True [])
-              _ -> pure ret
-      , usrQuery = notifyNeedInput >> readBChan inChan
-      }
+    let a =
+            agent0
+                { step = \sess -> do
+                    notifyProgress (SessionUpdated sess)
+                    ret <- agent0.step sess
+                    case ret of
+                        Stop _r ->
+                            -- smoll hack to reuse the naive step from runtimeToAgent
+                            pure $ AskUserPrompt (MissingUserPrompt True [])
+                        _ -> pure ret
+                , usrQuery = notifyNeedInput >> readBChan inChan
+                }
 
-    -- * wrap in Conversation
+    -- \* wrap in Conversation
     let tuiAgent = TuiAgent a baseTuiAgent.agentTree
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
@@ -562,7 +574,6 @@ runConversation baseTuiAgent session = do
                 , conversationStatus = ConversationStatus_WaitingForInput
                 , conversationOnProgress = notifyProgress
                 }
-
 
     -- Add to core
     coreRef <- use tuiCore
@@ -596,6 +607,4 @@ handleSendMessage = do
                     tuiUI . ongoingConversations %= Set.insert (conversationId conv)
                     -- Clear editor
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
-
             Nothing -> pure ()
-

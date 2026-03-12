@@ -109,8 +109,9 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
         let reg tb tds = rights [registerMcpToolInLLM tb td | td <- tds]
         pure $ mconcat $ zipWith reg mcpToolboxes lists
 
--- | Initialize all builtin toolboxes from their descriptions.
--- Currently only supports SQLite toolboxes.
+{- | Initialize all builtin toolboxes from their descriptions.
+Currently only supports SQLite toolboxes.
+-}
 initializeBuiltinToolboxes ::
     Tracer IO Trace ->
     [BuiltinToolboxDescription] ->
@@ -122,8 +123,9 @@ initializeBuiltinToolboxes tracer descriptions = do
     mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "builtin" err)) errors
     pure $ concat toolboxes
 
--- | Initialize a single builtin toolbox.
--- Returns either an error message or a list of toolboxes (for SQLite, always a single toolbox).
+{- | Initialize a single builtin toolbox.
+Returns either an error message or a list of toolboxes (for SQLite, always a single toolbox).
+-}
 initializeBuiltinToolbox ::
     Tracer IO Trace ->
     BuiltinToolboxDescription ->
@@ -159,4 +161,3 @@ registerSqliteToolsWithTracing tracer toolbox = do
             runTracer tracer (BuiltinToolboxInitError (SqliteToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
-

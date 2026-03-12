@@ -1,77 +1,78 @@
-module Agq.Run
-  ( runCmd
-  , runWithCwd
-  , runWithCwdBoth
-  , captureCmd
-  , captureCmdBoth
-  , runGit
-  , runGh
-  , runAgentsExe
-  ) where
+module Agq.Run (
+    runCmd,
+    runWithCwd,
+    runWithCwdBoth,
+    captureCmd,
+    captureCmdBoth,
+    runGit,
+    runGh,
+    runAgentsExe,
+) where
 
+import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
-import qualified Data.ByteString as BS
+import System.Exit (ExitCode (..))
 import System.IO (hGetContents)
-import System.Exit (ExitCode(..))
 import System.Process
 
 -- | Run a command, streaming output to stdout/stderr. Returns ExitCode.
 runCmd :: FilePath -> [String] -> IO ExitCode
 runCmd cmd args = do
-  let p = (proc cmd args) { std_in = NoStream }
-  (_, _, _, ph) <- createProcess p
-  waitForProcess ph
+    let p = (proc cmd args){std_in = NoStream}
+    (_, _, _, ph) <- createProcess p
+    waitForProcess ph
 
 -- | Run a command in a specific working directory, streaming stdout/stderr. Returns ExitCode.
 runWithCwd :: FilePath -> FilePath -> [String] -> IO ExitCode
 runWithCwd worktreePath cmd args = do
-  let p = (proc cmd args) { std_in = NoStream, cwd = Just worktreePath }
-  (_, _, _, ph) <- createProcess p
-  waitForProcess ph
+    let p = (proc cmd args){std_in = NoStream, cwd = Just worktreePath}
+    (_, _, _, ph) <- createProcess p
+    waitForProcess ph
 
 -- | Run a command inside a given working directory, capturing stdout and stderr.
 runWithCwdBoth :: FilePath -> FilePath -> [String] -> IO (ExitCode, Text, Text)
 runWithCwdBoth worktreePath cmd args = do
-  let p = (proc cmd args)
-        { std_in  = NoStream
-        , std_out = CreatePipe
-        , std_err = CreatePipe
-        , cwd     = Just worktreePath
-        }
-  (_, mout, merr, ph) <- createProcess p
-  out <- maybe (return "") (fmap Text.pack . hGetContents) mout
-  err <- maybe (return "") (fmap Text.pack . hGetContents) merr
-  ec  <- waitForProcess ph
-  return (ec, out, err)
+    let p =
+            (proc cmd args)
+                { std_in = NoStream
+                , std_out = CreatePipe
+                , std_err = CreatePipe
+                , cwd = Just worktreePath
+                }
+    (_, mout, merr, ph) <- createProcess p
+    out <- maybe (return "") (fmap Text.pack . hGetContents) mout
+    err <- maybe (return "") (fmap Text.pack . hGetContents) merr
+    ec <- waitForProcess ph
+    return (ec, out, err)
 
 -- | Run a command capturing stdout as Text. Streams stderr.
 captureCmd :: FilePath -> [String] -> IO (ExitCode, Text)
 captureCmd cmd args = do
-  let p = (proc cmd args) { std_in = NoStream, std_out = CreatePipe }
-  (_, mout, _, ph) <- createProcess p
-  out <- case mout of
-    Nothing -> return ""
-    Just h  -> do
-      bs <- BS.hGetContents h
-      return (TextEncoding.decodeUtf8 bs)
-  ec <- waitForProcess ph
-  return (ec, out)
+    let p = (proc cmd args){std_in = NoStream, std_out = CreatePipe}
+    (_, mout, _, ph) <- createProcess p
+    out <- case mout of
+        Nothing -> return ""
+        Just h -> do
+            bs <- BS.hGetContents h
+            return (TextEncoding.decodeUtf8 bs)
+    ec <- waitForProcess ph
+    return (ec, out)
 
 -- | Run a command capturing both stdout and stderr as Text.
 captureCmdBoth :: FilePath -> [String] -> IO (ExitCode, Text, Text)
 captureCmdBoth cmd args = do
-  let p = (proc cmd args) { std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe }
-  (_, mout, merr, ph) <- createProcess p
-  out <- case mout of
-    Nothing -> return ""
-    Just h  -> fmap TextEncoding.decodeUtf8 (BS.hGetContents h)
-  err <- case merr of
-    Nothing -> return ""
-    Just h  -> fmap TextEncoding.decodeUtf8 (BS.hGetContents h)
-  ec <- waitForProcess ph
-  return (ec, out, err)
+    let p = (proc cmd args){std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe}
+    (_, mout, merr, ph) <- createProcess p
+    out <- case mout of
+        Nothing -> return ""
+        Just h -> fmap TextEncoding.decodeUtf8 (BS.hGetContents h)
+    err <- case merr of
+        Nothing -> return ""
+        Just h -> fmap TextEncoding.decodeUtf8 (BS.hGetContents h)
+    ec <- waitForProcess ph
+    return (ec, out, err)
 
 -- | Run git with given args, streaming output.
 runGit :: [String] -> IO ExitCode

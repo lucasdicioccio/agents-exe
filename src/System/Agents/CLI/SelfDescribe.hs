@@ -1,22 +1,23 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for the 'describe' command handler.
---
--- The describe command outputs JSON metadata describing the agent's
--- interface. This is used for self-introspection and tool registration.
-module System.Agents.CLI.SelfDescribe
-    ( handleSelfDescribe
-    , SelfDescribeOptions (..)
-    ) where
+{- | Module for the 'describe' command handler.
 
+The describe command outputs JSON metadata describing the agent's
+interface. This is used for self-introspection and tool registration.
+-}
+module System.Agents.CLI.SelfDescribe (
+    handleSelfDescribe,
+    SelfDescribeOptions (..),
+) where
+
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy as LByteString
 
-import System.Agents.Tools.Bash (ScriptEmptyResultBehavior (..), ScriptArg (..), ScriptArgArity (..), ScriptArgCallingMode (..), ScriptInfo (..))
+import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptArgCallingMode (..), ScriptEmptyResultBehavior (..), ScriptInfo (..))
 
 -- | Options for the self-describe command
 data SelfDescribeOptions = SelfDescribeOptions
@@ -54,4 +55,3 @@ handleSelfDescribe opts _apiKeysFile = do
                 slug
                 description
                 (Just $ AddMessage "--no output--")
-

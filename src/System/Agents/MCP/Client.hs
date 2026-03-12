@@ -47,8 +47,7 @@ runClient ::
     IO ()
 runClient ctracer rt act = do
     runLoggingT
-        ( runReaderT (runMcpStack scheduleMcp) rt
-        )
+        (runReaderT (runMcpStack scheduleMcp) rt)
         logInTracer
   where
     logInTracer loc src lvl str =

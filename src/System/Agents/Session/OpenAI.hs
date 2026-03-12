@@ -20,8 +20,8 @@ import Prod.Tracer (Tracer)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
-import System.Agents.ToolSchema
 import System.Agents.Session.Base
+import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
 
@@ -54,10 +54,11 @@ mkOpenAICompletion config completion = do
     -- Build the OpenAI-compatible payload from LlmCompletion
     buildPayload :: LlmCompletion -> Aeson.Value
     buildPayload comp =
-        let 
+        let
             tools = map systemToolToOpenAI comp.completeTools
             messages = buildMessages comp
-         in Aeson.object $
+         in
+            Aeson.object $
                 [ "model" .= config.cfgModelName
                 , "messages" .= messages
                 ]
@@ -117,13 +118,13 @@ mkOpenAICompletion config completion = do
         parseParamsObject :: Aeson.Value -> [ParamProperty]
         parseParamsObject (Aeson.Object params) =
             let requiredSet = case KeyMap.lookup "required" params of
-                    Just (Aeson.Array arr) -> 
+                    Just (Aeson.Array arr) ->
                         foldr (\v acc -> case v of Aeson.String s -> Set.insert s acc; _ -> acc) Set.empty arr
                     _ -> Set.empty
-            in case KeyMap.lookup "properties" params of
-                Just (Aeson.Object props) ->
-                    KeyMap.toList props >>= \(key, val) -> parseProperty requiredSet key val
-                _ -> []
+             in case KeyMap.lookup "properties" params of
+                    Just (Aeson.Object props) ->
+                        KeyMap.toList props >>= \(key, val) -> parseProperty requiredSet key val
+                    _ -> []
         parseParamsObject _ = []
 
         parseProperty :: Set Text -> Key.Key -> Aeson.Value -> [ParamProperty]
@@ -148,10 +149,10 @@ mkOpenAICompletion config completion = do
             case KeyMap.lookup "properties" obj of
                 Just (Aeson.Object props) ->
                     let nestedRequiredSet = case KeyMap.lookup "required" obj of
-                            Just (Aeson.Array arr) -> 
+                            Just (Aeson.Array arr) ->
                                 foldr (\v acc -> case v of Aeson.String s -> Set.insert s acc; _ -> acc) Set.empty arr
                             _ -> Set.empty
-                    in ObjectParamType $ KeyMap.toList props >>= \(k, v) -> parseProperty nestedRequiredSet k v
+                     in ObjectParamType $ KeyMap.toList props >>= \(k, v) -> parseProperty nestedRequiredSet k v
                 _ -> ObjectParamType []
         parseParamType _ "array" _ = OpaqueParamType "array"
         parseParamType _ other _ = OpaqueParamType other
@@ -185,25 +186,26 @@ mkOpenAICompletion config completion = do
     turnToMessages :: Turn -> [Aeson.Value]
     turnToMessages (LlmTurn turn _mUsage) =
         case Aeson.parse OpenAI.parseLLMResponse turn.llmResponse.rawResponse of
-          Aeson.Error _ -> []
-          Aeson.Success rsp -> [Aeson.Object rsp.chosenMessage]
+            Aeson.Error _ -> []
+            Aeson.Success rsp -> [Aeson.Object rsp.chosenMessage]
     turnToMessages (UserTurn turn _mUsage) =
-        let 
+        let
             mQuery = turn.userQuery
             userMsg = userQueryToMessages mQuery
             toolResponses = turn.userToolResponses
             toolMsgs = concatMap toolResponseToMessages toolResponses
-         in userMsg ++ toolMsgs
+         in
+            userMsg ++ toolMsgs
 
     userQueryToMessages :: Maybe UserQuery -> [Aeson.Value]
     userQueryToMessages mQuery = case mQuery of
-      Nothing -> []
-      Just (UserQuery q) ->
-        [ Aeson.object
-          [ "role" .= ("user" :: Text)
-          , "content" .= q
-          ]
-        ]
+        Nothing -> []
+        Just (UserQuery q) ->
+            [ Aeson.object
+                [ "role" .= ("user" :: Text)
+                , "content" .= q
+                ]
+            ]
 
     -- Convert a tool call/response pair to OpenAI message format
     toolResponseToMessages :: (LlmToolCall, UserToolResponse) -> [Aeson.Value]
@@ -244,11 +246,12 @@ mkOpenAICompletion config completion = do
     -- Extract LlmResponse and [LlmToolCall] from parsed Response
     extractResponse :: Aeson.Value -> OpenAI.Response -> (LlmResponse, [LlmToolCall])
     extractResponse rawValue rsp =
-        let llmRsp = LlmResponse
-                { responseText = rsp.rspContent
-                , responseThinking = rsp.rspReasoningContent  -- Extract thinking/reasoning content
-                , rawResponse = rawValue
-                }
+        let llmRsp =
+                LlmResponse
+                    { responseText = rsp.rspContent
+                    , responseThinking = rsp.rspReasoningContent -- Extract thinking/reasoning content
+                    , rawResponse = rawValue
+                    }
             toolCalls = case rsp.rspToolCalls of
                 Nothing -> []
                 Just calls -> map toolCallToLlmToolCall calls
@@ -266,5 +269,3 @@ newConfig tracer =
         <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
         <*> pure "gpt-4.1-mini"
         <*> pure OpenAI.OpenAIv1
-
-

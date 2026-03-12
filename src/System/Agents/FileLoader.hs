@@ -43,8 +43,9 @@ data InvalidAgentError
     = LoadFailure FilePath String
     deriving (Show)
 
--- | List all JSON files in a directory.
--- Returns an empty list if the directory does not exist.
+{- | List all JSON files in a directory.
+Returns an empty list if the directory does not exist.
+-}
 listJsonDirectory :: FilePath -> IO [FilePath]
 listJsonDirectory path = do
     exists <- doesDirectoryExist path
@@ -64,4 +65,3 @@ listJsonDirectory path = do
 
     isJson :: FilePath -> Bool
     isJson p = takeExtension p == ".json"
-

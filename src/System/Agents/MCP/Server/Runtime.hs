@@ -124,4 +124,3 @@ encodeConduit = do
         C.yield $ Chunk . L8.toStrict $ Aeson.encode m
         C.yield $ Chunk "\n"
         C.yield Flush
-

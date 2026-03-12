@@ -50,10 +50,11 @@ newStepId =
 -- They are re-exported from Session.Base for convenience.
 -------------------------------------------------------------------------------
 
--- | Reference to an additional agent outside the toolDirectory hierarchy
---
--- This enables agents to reference other agents explicitly, supporting
--- self-references and mutual recursion in the agent tree.
+{- | Reference to an additional agent outside the toolDirectory hierarchy
+
+This enables agents to reference other agents explicitly, supporting
+self-references and mutual recursion in the agent tree.
+-}
 data ExtraAgentRef
     = ExtraAgentRef
     { extraAgentSlug :: AgentSlug
@@ -65,17 +66,18 @@ data ExtraAgentRef
 
 -- | Custom JSON options for ExtraAgentRef to use hyphenated field names
 extraAgentRefOptions :: Aeson.Options
-extraAgentRefOptions = Aeson.defaultOptions
-    { Aeson.fieldLabelModifier = kebabCase . dropPrefix "extraAgent"
-    }
+extraAgentRefOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = kebabCase . dropPrefix "extraAgent"
+        }
   where
     -- Convert camelCase to kebab-case
     kebabCase [] = []
-    kebabCase (c:cs) = toLower c : go cs
+    kebabCase (c : cs) = toLower c : go cs
       where
         go [] = []
-        go (x:xs)
-            | x `elem` ['A'..'Z'] = '-' : toLower x : go xs
+        go (x : xs)
+            | x `elem` ['A' .. 'Z'] = '-' : toLower x : go xs
             | otherwise = x : go xs
     -- Drop the "extraAgent" prefix from field names
     dropPrefix prefix str
@@ -93,34 +95,35 @@ instance FromJSON ExtraAgentRef where
 -- OpenAPI Toolbox Configuration
 -------------------------------------------------------------------------------
 
--- | Configuration for an OpenAPI toolbox.
---
--- This describes an OpenAPI specification to load as a toolbox.
--- The toolbox will fetch the spec from 'openApiSpecUrl' and make
--- all operations available as tools to the agent.
---
--- The spec URL can be either:
--- * An HTTP/HTTPS URL (e.g., "https://api.example.com/openapi.json")
--- * A file URL (e.g., "file:///path/to/openapi.json")
---
--- Example configuration:
---
--- @
--- {
---   "tag": "OpenAPIServer",
---   "contents": {
---     "specUrl": "https://api.example.com/openapi.json",
---     "baseUrl": "https://api.example.com",
---     "headers": {"X-API-Version": "v1"},
---     "token": "${API_TOKEN}",
---     "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
---   }
--- }
--- @
---
--- The optional 'filter' field allows restricting which endpoints are
--- exposed as tools. See 'EndpointPredicate' for the available filter
--- predicates. If no filter is specified, all endpoints are included.
+{- | Configuration for an OpenAPI toolbox.
+
+This describes an OpenAPI specification to load as a toolbox.
+The toolbox will fetch the spec from 'openApiSpecUrl' and make
+all operations available as tools to the agent.
+
+The spec URL can be either:
+* An HTTP/HTTPS URL (e.g., "https://api.example.com/openapi.json")
+* A file URL (e.g., "file:///path/to/openapi.json")
+
+Example configuration:
+
+@
+{
+  "tag": "OpenAPIServer",
+  "contents": {
+    "specUrl": "https://api.example.com/openapi.json",
+    "baseUrl": "https://api.example.com",
+    "headers": {"X-API-Version": "v1"},
+    "token": "${API_TOKEN}",
+    "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
+  }
+}
+@
+
+The optional 'filter' field allows restricting which endpoints are
+exposed as tools. See 'EndpointPredicate' for the available filter
+predicates. If no filter is specified, all endpoints are included.
+-}
 data OpenAPIServerDescription
     = OpenAPIServerDescription
     { openApiSpecUrl :: Text
@@ -136,13 +139,15 @@ data OpenAPIServerDescription
     }
     deriving (Show, Ord, Eq, Generic)
 
--- | Custom JSON options for OpenAPIServerDescription to use camelCase field names
--- (matching the existing Agent JSON style)
+{- | Custom JSON options for OpenAPIServerDescription to use camelCase field names
+(matching the existing Agent JSON style)
+-}
 openApiServerOptions :: Aeson.Options
-openApiServerOptions = Aeson.defaultOptions
-    { Aeson.fieldLabelModifier = dropPrefix "openApi"
-    , Aeson.omitNothingFields = True
-    }
+openApiServerOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "openApi"
+        , Aeson.omitNothingFields = True
+        }
   where
     dropPrefix prefix str
         | take (length prefix) str == prefix = drop (length prefix) str
@@ -155,32 +160,33 @@ instance ToJSON OpenAPIServerDescription where
 instance FromJSON OpenAPIServerDescription where
     parseJSON = Aeson.genericParseJSON openApiServerOptions
 
--- | Reference to an OpenAPI server configuration stored on disk.
---
--- This allows the entire OpenAPI server configuration to be stored in a file
--- rather than embedded directly in the agent configuration. The file should
--- contain a JSON object matching the 'OpenAPIServerDescription' structure.
---
--- Example configuration:
---
--- @
--- {
---   "tag": "OpenAPIServerOnDisk",
---   "contents": "/path/to/openapi-config.json"
--- }
--- @
---
--- The referenced file should contain:
---
--- @
--- {
---   "specUrl": "https://api.example.com/openapi.json",
---   "baseUrl": "https://api.example.com",
---   "headers": {"X-API-Version": "v1"},
---   "token": "${API_TOKEN}",
---   "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
--- }
--- @
+{- | Reference to an OpenAPI server configuration stored on disk.
+
+This allows the entire OpenAPI server configuration to be stored in a file
+rather than embedded directly in the agent configuration. The file should
+contain a JSON object matching the 'OpenAPIServerDescription' structure.
+
+Example configuration:
+
+@
+{
+  "tag": "OpenAPIServerOnDisk",
+  "contents": "/path/to/openapi-config.json"
+}
+@
+
+The referenced file should contain:
+
+@
+{
+  "specUrl": "https://api.example.com/openapi.json",
+  "baseUrl": "https://api.example.com",
+  "headers": {"X-API-Version": "v1"},
+  "token": "${API_TOKEN}",
+  "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
+}
+@
+-}
 newtype OpenAPIServerOnDisk = OpenAPIServerOnDisk
     { openApiConfigPath :: FilePath
     -- ^ Path to the JSON file containing the OpenAPI server configuration
@@ -193,8 +199,9 @@ instance ToJSON OpenAPIServerOnDisk where
 instance FromJSON OpenAPIServerOnDisk where
     parseJSON v = OpenAPIServerOnDisk <$> Aeson.parseJSON v
 
--- | Wrapper type for JSON serialization with tag.
--- Similar to McpServerDescription, this allows extensible toolbox types.
+{- | Wrapper type for JSON serialization with tag.
+Similar to McpServerDescription, this allows extensible toolbox types.
+-}
 data OpenAPIToolboxDescription
     = OpenAPIServer OpenAPIServerDescription
     | OpenAPIServerOnDiskDescription OpenAPIServerOnDisk
@@ -226,58 +233,62 @@ instance FromJSON OpenAPIToolboxDescription where
 -- PostgREST Toolbox Configuration
 -------------------------------------------------------------------------------
 
--- | Configuration for a PostgREST toolbox.
---
--- This describes a PostgREST API to load as a toolbox.
--- PostgREST exposes PostgreSQL databases as REST APIs and provides
--- an OpenAPI/Swagger spec at the root endpoint.
---
--- The toolbox will fetch the spec from 'postgrestSpecUrl' and make
--- all table endpoints available as tools to the agent, with special
--- handling for row filters, pagination, ordering, and column selection.
---
--- The spec URL can be either:
--- * An HTTP/HTTPS URL (e.g., "http://localhost:3000/")
--- * A file URL (e.g., "file:///path/to/postgrest-spec.json")
---
--- By default, only read-only methods (GET, HEAD, OPTIONS) are exposed
--- for safety. Use 'allowedMethods' to enable write operations.
---
--- Example configuration:
---
--- @
--- {
---   "tag": "PostgRESTServer",
---   "contents": {
---     "specUrl": "http://localhost:3000/",
---     "baseUrl": "http://localhost:3000",
---     "headers": {"Accept-Profile": "myschema"},
---     "token": "${POSTGREST_TOKEN}",
---     "allowedMethods": ["GET", "POST", "PATCH"],
---     "filter": {"tag": "PathPrefix", "contents": "/public"}
---   }
--- }
--- @
---
--- The optional 'filter' field allows restricting which tables are
--- exposed as tools. See 'EndpointPredicate' for the available filter
--- predicates. If no filter is specified, all tables are included.
+{- | Configuration for a PostgREST toolbox.
+
+This describes a PostgREST API to load as a toolbox.
+PostgREST exposes PostgreSQL databases as REST APIs and provides
+an OpenAPI/Swagger spec at the root endpoint.
+
+The toolbox will fetch the spec from 'postgrestSpecUrl' and make
+all table endpoints available as tools to the agent, with special
+handling for row filters, pagination, ordering, and column selection.
+
+The spec URL can be either:
+* An HTTP/HTTPS URL (e.g., "http://localhost:3000/")
+* A file URL (e.g., "file:///path/to/postgrest-spec.json")
+
+By default, only read-only methods (GET, HEAD, OPTIONS) are exposed
+for safety. Use 'allowedMethods' to enable write operations.
+
+Example configuration:
+
+@
+{
+  "tag": "PostgRESTServer",
+  "contents": {
+    "specUrl": "http://localhost:3000/",
+    "baseUrl": "http://localhost:3000",
+    "headers": {"Accept-Profile": "myschema"},
+    "token": "${POSTGREST_TOKEN}",
+    "allowedMethods": ["GET", "POST", "PATCH"],
+    "filter": {"tag": "PathPrefix", "contents": "/public"}
+  }
+}
+@
+
+The optional 'filter' field allows restricting which tables are
+exposed as tools. See 'EndpointPredicate' for the available filter
+predicates. If no filter is specified, all tables are included.
+-}
 data PostgRESTServerDescription
     = PostgRESTServerDescription
     { postgrestSpecUrl :: Text
-    -- ^ URL to fetch the PostgREST OpenAPI specification from
-    -- (usually the root endpoint, e.g., "http://localhost:3000/")
+    {- ^ URL to fetch the PostgREST OpenAPI specification from
+    (usually the root endpoint, e.g., "http://localhost:3000/")
+    -}
     , postgrestBaseUrl :: Text
     -- ^ Base URL for API calls (can be different from spec URL)
     , postgrestHeaders :: Maybe (Map Text Text)
-    -- ^ Optional static headers to include in all requests
-    -- (e.g., for schema selection via Accept-Profile)
+    {- ^ Optional static headers to include in all requests
+    (e.g., for schema selection via Accept-Profile)
+    -}
     , postgrestToken :: Maybe Text
     -- ^ Optional Bearer token for JWT authentication
     , postgrestAllowedMethods :: Maybe [HttpMethod]
-    -- ^ Optional list of HTTP methods to expose as tools.
-    -- Default: read-only methods [GET, HEAD, OPTIONS] for safety.
-    -- To enable full CRUD: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    {- ^ Optional list of HTTP methods to expose as tools.
+    Default: read-only methods [GET, HEAD, OPTIONS] for safety.
+    To enable full CRUD: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    -}
     , postgrestFilter :: Maybe EndpointPredicate
     -- ^ Optional filter to restrict which tables/endpoints are exposed as tools
     }
@@ -285,10 +296,11 @@ data PostgRESTServerDescription
 
 -- | Custom JSON options for PostgRESTServerDescription to use camelCase field names
 postgrestServerOptions :: Aeson.Options
-postgrestServerOptions = Aeson.defaultOptions
-    { Aeson.fieldLabelModifier = dropPrefix "postgrest"
-    , Aeson.omitNothingFields = True
-    }
+postgrestServerOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "postgrest"
+        , Aeson.omitNothingFields = True
+        }
   where
     dropPrefix prefix str
         | take (length prefix) str == prefix = drop (length prefix) str
@@ -301,33 +313,34 @@ instance ToJSON PostgRESTServerDescription where
 instance FromJSON PostgRESTServerDescription where
     parseJSON = Aeson.genericParseJSON postgrestServerOptions
 
--- | Reference to a PostgREST server configuration stored on disk.
---
--- This allows the entire PostgREST server configuration to be stored in a file
--- rather than embedded directly in the agent configuration. The file should
--- contain a JSON object matching the 'PostgRESTServerDescription' structure.
---
--- Example configuration:
---
--- @
--- {
---   "tag": "PostgRESTServerOnDisk",
---   "contents": "/path/to/postgrest-config.json"
--- }
--- @
---
--- The referenced file should contain:
---
--- @
--- {
---   "specUrl": "http://localhost:3000/",
---   "baseUrl": "http://localhost:3000",
---   "headers": {"Accept-Profile": "myschema"},
---   "token": "${POSTGREST_TOKEN}",
---   "allowedMethods": ["GET", "POST", "PATCH"],
---   "filter": {"tag": "Not", "contents": {"tag": "PathContains", "contents": "_internal"}}
--- }
--- @
+{- | Reference to a PostgREST server configuration stored on disk.
+
+This allows the entire PostgREST server configuration to be stored in a file
+rather than embedded directly in the agent configuration. The file should
+contain a JSON object matching the 'PostgRESTServerDescription' structure.
+
+Example configuration:
+
+@
+{
+  "tag": "PostgRESTServerOnDisk",
+  "contents": "/path/to/postgrest-config.json"
+}
+@
+
+The referenced file should contain:
+
+@
+{
+  "specUrl": "http://localhost:3000/",
+  "baseUrl": "http://localhost:3000",
+  "headers": {"Accept-Profile": "myschema"},
+  "token": "${POSTGREST_TOKEN}",
+  "allowedMethods": ["GET", "POST", "PATCH"],
+  "filter": {"tag": "Not", "contents": {"tag": "PathContains", "contents": "_internal"}}
+}
+@
+-}
 newtype PostgRESTServerOnDisk = PostgRESTServerOnDisk
     { postgrestConfigPath :: FilePath
     -- ^ Path to the JSON file containing the PostgREST server configuration
@@ -340,8 +353,9 @@ instance ToJSON PostgRESTServerOnDisk where
 instance FromJSON PostgRESTServerOnDisk where
     parseJSON v = PostgRESTServerOnDisk <$> Aeson.parseJSON v
 
--- | Wrapper type for JSON serialization with tag.
--- Similar to OpenAPIToolboxDescription, this allows extensible toolbox types.
+{- | Wrapper type for JSON serialization with tag.
+Similar to OpenAPIToolboxDescription, this allows extensible toolbox types.
+-}
 data PostgRESTToolboxDescription
     = PostgRESTServer PostgRESTServerDescription
     | PostgRESTServerOnDiskDescription PostgRESTServerOnDisk
@@ -373,15 +387,16 @@ instance FromJSON PostgRESTToolboxDescription where
 -- Builtin Toolbox Configuration
 -------------------------------------------------------------------------------
 
--- | Access mode for SQLite databases.
---
--- Controls whether the database is opened in read-only or read-write mode.
--- This affects both file permissions and SQLite's internal locking behavior.
+{- | Access mode for SQLite databases.
+
+Controls whether the database is opened in read-only or read-write mode.
+This affects both file permissions and SQLite's internal locking behavior.
+-}
 data SqliteAccessMode
-    = SqliteReadOnly
-    -- ^ Open database in read-only mode. No modifications allowed.
-    | SqliteReadWrite
-    -- ^ Open database in read-write mode. Both reads and writes allowed.
+    = -- | Open database in read-only mode. No modifications allowed.
+      SqliteReadOnly
+    | -- | Open database in read-write mode. Both reads and writes allowed.
+      SqliteReadWrite
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SqliteAccessMode as kebab-case strings.
@@ -397,27 +412,28 @@ instance FromJSON SqliteAccessMode where
             "read-write" -> return SqliteReadWrite
             other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only' or 'read-write'."
 
--- | Configuration for a SQLite builtin toolbox.
---
--- This describes a SQLite database to load as a builtin toolbox.
--- The toolbox provides tools for querying and optionally modifying
--- the SQLite database.
---
--- Example configuration:
---
--- @
--- {
---   "name": "memory",
---   "description": "a set of memories",
---   "path": "/path/to/memories.sqlite",
---   "access": "read-write"
--- }
--- @
---
--- The 'access' field controls whether the database is opened in
--- read-only or read-write mode. Use 'read-only' for safety when
--- the agent should only query data, and 'read-write' when the agent
--- needs to modify the database.
+{- | Configuration for a SQLite builtin toolbox.
+
+This describes a SQLite database to load as a builtin toolbox.
+The toolbox provides tools for querying and optionally modifying
+the SQLite database.
+
+Example configuration:
+
+@
+{
+  "name": "memory",
+  "description": "a set of memories",
+  "path": "/path/to/memories.sqlite",
+  "access": "read-write"
+}
+@
+
+The 'access' field controls whether the database is opened in
+read-only or read-write mode. Use 'read-only' for safety when
+the agent should only query data, and 'read-write' when the agent
+needs to modify the database.
+-}
 data SqliteToolboxDescription
     = SqliteToolboxDescription
     { sqliteToolboxName :: Text
@@ -433,10 +449,11 @@ data SqliteToolboxDescription
 
 -- | Custom JSON options for SqliteToolboxDescription to use camelCase field names
 sqliteToolboxOptions :: Aeson.Options
-sqliteToolboxOptions = Aeson.defaultOptions
-    { Aeson.fieldLabelModifier = dropPrefix "sqliteToolbox"
-    , Aeson.omitNothingFields = True
-    }
+sqliteToolboxOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "sqliteToolbox"
+        , Aeson.omitNothingFields = True
+        }
   where
     dropPrefix prefix str
         | take (length prefix) str == prefix = drop (length prefix) str
@@ -449,22 +466,23 @@ instance ToJSON SqliteToolboxDescription where
 instance FromJSON SqliteToolboxDescription where
     parseJSON = Aeson.genericParseJSON sqliteToolboxOptions
 
--- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
---
--- This is a tagged union type that allows extensible builtin toolbox types.
--- New builtin toolbox types can be added in the future without breaking
--- existing configurations.
---
--- Example configuration:
---
--- @
--- {
---   "builtinToolboxes": [
---     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
---     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}}
---   ]
--- }
--- @
+{- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
+
+This is a tagged union type that allows extensible builtin toolbox types.
+New builtin toolbox types can be added in the future without breaking
+existing configurations.
+
+Example configuration:
+
+@
+{
+  "builtinToolboxes": [
+    {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
+    {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}}
+  ]
+}
+@
+-}
 data BuiltinToolboxDescription
     = SqliteToolbox SqliteToolboxDescription
     deriving (Show, Ord, Eq, Generic)
@@ -505,10 +523,11 @@ data Agent
 
 -- | Custom JSON options for Agent - uses camelCase to match existing format
 agentOptions :: Aeson.Options
-agentOptions = Aeson.defaultOptions
-    { Aeson.fieldLabelModifier = id
-    , Aeson.omitNothingFields = True
-    }
+agentOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = id
+        , Aeson.omitNothingFields = True
+        }
 
 instance ToJSON Agent where
     toJSON = Aeson.genericToJSON agentOptions
@@ -563,4 +582,3 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-

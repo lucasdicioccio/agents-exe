@@ -1,30 +1,31 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Endpoint predicate filtering for OpenAPI and PostgREST toolboxes.
---
--- This module provides a predicate calculus for filtering API endpoints
--- based on their paths, methods, and operation IDs. The predicates are
--- designed to be serializable from JSON for user configuration.
---
--- The primary use case is to reduce the number of tools exposed to agents
--- when working with large APIs like OpenAPI or PostgREST specs that may
--- generate many spurious tools. Users can define filters in their agent
--- configuration to include only the endpoints they need.
---
--- Example JSON configuration:
---
--- @
--- {
---   "filter": {
---     "tag": "And",
---     "contents": [
---       {"tag": "PathPrefix", "contents": "/api/v1"},
---       {"tag": "Not", "contents": {"tag": "PathSuffix", "contents": "/admin"}}
---     ]
---   }
--- }
--- @
+{- | Endpoint predicate filtering for OpenAPI and PostgREST toolboxes.
+
+This module provides a predicate calculus for filtering API endpoints
+based on their paths, methods, and operation IDs. The predicates are
+designed to be serializable from JSON for user configuration.
+
+The primary use case is to reduce the number of tools exposed to agents
+when working with large APIs like OpenAPI or PostgREST specs that may
+generate many spurious tools. Users can define filters in their agent
+configuration to include only the endpoints they need.
+
+Example JSON configuration:
+
+@
+{
+  "filter": {
+    "tag": "And",
+    "contents": [
+      {"tag": "PathPrefix", "contents": "/api/v1"},
+      {"tag": "Not", "contents": {"tag": "PathSuffix", "contents": "/admin"}}
+    ]
+  }
+}
+@
+-}
 module System.Agents.Tools.EndpointPredicate (
     -- * Predicate type
     EndpointPredicate (..),
@@ -48,7 +49,7 @@ module System.Agents.Tools.EndpointPredicate (
     Text,
 ) where
 
-import Data.Aeson ((.:), (.=), FromJSON (..), ToJSON (..))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.List (isPrefixOf, isSuffixOf)
 import Data.Text (Text)
@@ -63,14 +64,15 @@ import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 -- Endpoint Predicate Type
 -- -------------------------------------------------------------------------
 
--- | A predicate for filtering API endpoints.
---
--- Predicates can be combined using boolean logic (AND, OR, NOT) and
--- can match on various endpoint properties like path prefixes, suffixes,
--- or exact matches.
---
--- The predicates are designed to be JSON-serializable for configuration
--- in agent definitions.
+{- | A predicate for filtering API endpoints.
+
+Predicates can be combined using boolean logic (AND, OR, NOT) and
+can match on various endpoint properties like path prefixes, suffixes,
+or exact matches.
+
+The predicates are designed to be JSON-serializable for configuration
+in agent definitions.
+-}
 data EndpointPredicate
     = -- | Logical AND of two predicates
       And EndpointPredicate EndpointPredicate
@@ -102,14 +104,15 @@ data EndpointPredicate
 -- JSON Serialization
 -- -------------------------------------------------------------------------
 
--- | Custom JSON instances for tagged union format.
---
--- Example JSON:
---
--- @
--- {"tag": "PathPrefix", "contents": "/api/v1"}
--- {"tag": "And", "contents": [{"tag": "PathPrefix", "contents": "/api"}, {"tag": "Not", "contents": {"tag": "PathSuffix", "contents": "/admin"}}]}
--- @
+{- | Custom JSON instances for tagged union format.
+
+Example JSON:
+
+@
+{"tag": "PathPrefix", "contents": "/api/v1"}
+{"tag": "And", "contents": [{"tag": "PathPrefix", "contents": "/api"}, {"tag": "Not", "contents": {"tag": "PathSuffix", "contents": "/admin"}}]}
+@
+-}
 instance ToJSON EndpointPredicate where
     toJSON (And p1 p2) =
         Aeson.object
@@ -201,41 +204,44 @@ instance FromJSON EndpointPredicate where
 -- Path Utilities
 -- -------------------------------------------------------------------------
 
--- | Split a path into its components.
---
--- Examples:
---
--- >>> splitPath "/api/v1/users"
--- ["api","v1","users"]
---
--- >>> splitPath "/"
--- []
---
--- >>> splitPath ""
--- []
+{- | Split a path into its components.
+
+Examples:
+
+>>> splitPath "/api/v1/users"
+["api","v1","users"]
+
+>>> splitPath "/"
+[]
+
+>>> splitPath ""
+[]
+-}
 splitPath :: Text -> [Text]
 splitPath = filter (not . Text.null) . Text.splitOn "/" . normalizePath
 
--- | Normalize a path by:
--- * Removing trailing slashes
--- * Ensuring it starts with /
--- * Collapsing multiple consecutive slashes
---
--- Examples:
---
--- >>> normalizePath "api/v1/users"
--- "/api/v1/users"
---
--- >>> normalizePath "/api/v1/users/"
--- "/api/v1/users"
---
--- >>> normalizePath "//api///v1//users//"
--- "/api/v1/users"
+{- | Normalize a path by:
+* Removing trailing slashes
+* Ensuring it starts with /
+* Collapsing multiple consecutive slashes
+
+Examples:
+
+>>> normalizePath "api/v1/users"
+"/api/v1/users"
+
+>>> normalizePath "/api/v1/users/"
+"/api/v1/users"
+
+>>> normalizePath "//api///v1//users//"
+"/api/v1/users"
+-}
 normalizePath :: Text -> Text
 normalizePath path
     | Text.null path = "/"
     | otherwise =
-        let -- Ensure leading slash
+        let
+            -- Ensure leading slash
             withLeading = if Text.isPrefixOf "/" path then path else "/" <> path
             -- Remove trailing slash (but keep root /)
             withoutTrailing =
@@ -244,16 +250,18 @@ normalizePath path
                     else withLeading
             -- Collapse multiple slashes
             collapsed = Text.intercalate "/" $ filter (not . Text.null) $ Text.splitOn "/" withoutTrailing
-         in if Text.null collapsed then "/" else "/" <> collapsed
+         in
+            if Text.null collapsed then "/" else "/" <> collapsed
 
 -- -------------------------------------------------------------------------
 -- Matching Functions
 -- -------------------------------------------------------------------------
 
--- | Endpoint information used for matching.
---
--- This type captures the key information about an endpoint that
--- can be matched against predicates.
+{- | Endpoint information used for matching.
+
+This type captures the key information about an endpoint that
+can be matched against predicates.
+-}
 data EndpointInfo = EndpointInfo
     { endpointPath :: Text
     , endpointMethod :: Text
@@ -262,22 +270,23 @@ data EndpointInfo = EndpointInfo
     }
     deriving (Show, Eq)
 
--- | Check if an endpoint matches a predicate.
---
--- This is the core evaluation function that recursively evaluates
--- the predicate tree against endpoint information.
---
--- Examples:
---
--- >>> let ep = EndpointInfo "/api/v1/users" "GET" (Just "listUsers") Nothing
--- >>> matchesEndpoint (PathPrefix "/api") ep
--- True
---
--- >>> matchesEndpoint (And (PathPrefix "/api") (MethodEquals "GET")) ep
--- True
---
--- >>> matchesEndpoint (PathSuffix "/admin") ep
--- False
+{- | Check if an endpoint matches a predicate.
+
+This is the core evaluation function that recursively evaluates
+the predicate tree against endpoint information.
+
+Examples:
+
+>>> let ep = EndpointInfo "/api/v1/users" "GET" (Just "listUsers") Nothing
+>>> matchesEndpoint (PathPrefix "/api") ep
+True
+
+>>> matchesEndpoint (And (PathPrefix "/api") (MethodEquals "GET")) ep
+True
+
+>>> matchesEndpoint (PathSuffix "/admin") ep
+False
+-}
 matchesEndpoint :: EndpointPredicate -> EndpointInfo -> Bool
 matchesEndpoint predicate info =
     let normPath = normalizePath (endpointPath info)
@@ -296,39 +305,41 @@ matchesEndpoint predicate info =
             OperationIdEquals opId -> endpointOperationId info == Just opId
             TableNameEquals table -> endpointTableName info == Just table
 
--- | Check if a path is a prefix of another path.
---
--- Handles path components correctly (e.g., /api is a prefix of /api/v1/users
--- but not of /apikey).
---
--- Examples:
---
--- >>> "/api" `isPathPrefixOf` "/api/v1/users"
--- True
---
--- >>> "/api" `isPathPrefixOf` "/apikey"
--- False
---
--- >>> "/" `isPathPrefixOf` "/anything"
--- True
+{- | Check if a path is a prefix of another path.
+
+Handles path components correctly (e.g., /api is a prefix of /api/v1/users
+but not of /apikey).
+
+Examples:
+
+>>> "/api" `isPathPrefixOf` "/api/v1/users"
+True
+
+>>> "/api" `isPathPrefixOf` "/apikey"
+False
+
+>>> "/" `isPathPrefixOf` "/anything"
+True
+-}
 isPathPrefixOf :: Text -> Text -> Bool
 isPathPrefixOf prefix path =
     let prefixParts = splitPath prefix
         pathParts = splitPath path
      in prefixParts `isPrefixOf` pathParts
 
--- | Check if a path is a suffix of another path.
---
--- Examples:
---
--- >>> "/users" `isPathSuffixOf` "/api/v1/users"
--- True
---
--- >>> "users" `isPathSuffixOf` "/api/v1/users"
--- True
---
--- >>> "/admin" `isPathSuffixOf` "/api/v1/users"
--- False
+{- | Check if a path is a suffix of another path.
+
+Examples:
+
+>>> "/users" `isPathSuffixOf` "/api/v1/users"
+True
+
+>>> "users" `isPathSuffixOf` "/api/v1/users"
+True
+
+>>> "/admin" `isPathSuffixOf` "/api/v1/users"
+False
+-}
 isPathSuffixOf :: Text -> Text -> Bool
 isPathSuffixOf suffix path =
     let suffixParts = splitPath suffix
@@ -339,17 +350,19 @@ isPathSuffixOf suffix path =
 -- Tool Matching
 -- -------------------------------------------------------------------------
 
--- | Check if a generic tool matches a predicate.
---
--- This is a placeholder for generic Tool matching that always returns True.
--- Specific tool types (OpenAPI, PostgREST) have their own specialized matching.
+{- | Check if a generic tool matches a predicate.
+
+This is a placeholder for generic Tool matching that always returns True.
+Specific tool types (OpenAPI, PostgREST) have their own specialized matching.
+-}
 matchesTool :: EndpointPredicate -> tool -> Bool
 matchesTool _ _ = True
 
--- | Check if an OpenAPI tool matches a predicate.
---
--- Extracts the relevant endpoint information from the OpenAPI tool
--- and evaluates the predicate.
+{- | Check if an OpenAPI tool matches a predicate.
+
+Extracts the relevant endpoint information from the OpenAPI tool
+and evaluates the predicate.
+-}
 matchesOpenAPITool :: EndpointPredicate -> OpenAPI.OpenAPITool -> Bool
 matchesOpenAPITool predicate tool =
     let op = OpenAPI.toolOperation tool
@@ -362,10 +375,11 @@ matchesOpenAPITool predicate tool =
                 }
      in matchesEndpoint predicate info
 
--- | Check if a PostgREST tool matches a predicate.
---
--- Extracts the relevant endpoint information from the PostgREST tool
--- and evaluates the predicate.
+{- | Check if a PostgREST tool matches a predicate.
+
+Extracts the relevant endpoint information from the PostgREST tool
+and evaluates the predicate.
+-}
 matchesPostgRESTool :: EndpointPredicate -> PostgREST.PostgRESTool -> Bool
 matchesPostgRESTool predicate tool =
     let info =
@@ -376,4 +390,3 @@ matchesPostgRESTool predicate tool =
                 , endpointTableName = Just $ Text.dropWhile (== '/') (PostgREST.prtPath tool)
                 }
      in matchesEndpoint predicate info
-

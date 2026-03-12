@@ -31,20 +31,22 @@ data ScoopError
     = SomeError String
     deriving (Show)
 
--- | HTTP client runtime for making requests.
---
--- The runtime provides:
--- * Simple GET/POST functions for basic use cases
--- * A 'runRequest' function for executing fully custom requests with headers
---
--- The 'runRequest' function is essential for OpenAPI toolbox execution where
--- custom headers need to be passed per-request.
+{- | HTTP client runtime for making requests.
+
+The runtime provides:
+* Simple GET/POST functions for basic use cases
+* A 'runRequest' function for executing fully custom requests with headers
+
+The 'runRequest' function is essential for OpenAPI toolbox execution where
+custom headers need to be passed per-request.
+-}
 data Runtime = Runtime
     { get :: Tracer IO Trace -> Text -> IO (Either ScoopError (HttpClient.Response LByteString.ByteString))
     , post :: Tracer IO Trace -> Text -> Maybe Aeson.Value -> IO (Either ScoopError (HttpClient.Response LByteString.ByteString))
-    -- | Execute a fully-built HTTP request.
-    -- This allows custom headers, methods, and body to be specified.
     , runRequest :: Tracer IO Trace -> HttpClient.Request -> IO (Either ScoopError (HttpClient.Response LByteString.ByteString))
+    {- ^ Execute a fully-built HTTP request.
+    This allows custom headers, methods, and body to be specified.
+    -}
     }
 
 data Token
@@ -82,8 +84,8 @@ httpsClientApi token manager =
         rsp <- HttpClient.httpLbs req manager
         runTracer tracer $ RunRequest req rsp
         pure $ Right rsp
-    
-    -- | Execute a fully-built request, adding auth headers but preserving
+
+    -- \| Execute a fully-built request, adding auth headers but preserving
     -- all other request properties (method, body, custom headers).
     runRequestF tracer customReq = do
         -- Add auth headers to the existing request headers
@@ -91,15 +93,15 @@ httpsClientApi token manager =
         rsp <- HttpClient.httpLbs reqWithAuth manager
         runTracer tracer $ RunRequest reqWithAuth rsp
         pure $ Right rsp
-    
-    -- | Add auth headers to a request, preserving existing headers
+
+    -- \| Add auth headers to a request, preserving existing headers
     addBasicTokenAuthToReq :: Token -> HttpClient.Request -> HttpClient.Request
     addBasicTokenAuthToReq NoToken req = req
     addBasicTokenAuthToReq (BasicToken tokval) req =
-        req { HttpClient.requestHeaders = ("Authorization", Text.encodeUtf8 tokval) : HttpClient.requestHeaders req }
+        req{HttpClient.requestHeaders = ("Authorization", Text.encodeUtf8 tokval) : HttpClient.requestHeaders req}
     addBasicTokenAuthToReq (BearerToken tokval) req =
-        req { HttpClient.requestHeaders = ("Authorization", "Bearer " <> Text.encodeUtf8 tokval) : HttpClient.requestHeaders req }
-    
+        req{HttpClient.requestHeaders = ("Authorization", "Bearer " <> Text.encodeUtf8 tokval) : HttpClient.requestHeaders req}
+
     addBasicTokenAuth NoToken = id
     addBasicTokenAuth (BasicToken tokval) =
         addHeaders
@@ -139,4 +141,3 @@ readHeaderWith hdr f j = do
 
 responseHeaders :: HttpClient.Response body -> HttpTypes.ResponseHeaders
 responseHeaders = HttpClient.responseHeaders
-

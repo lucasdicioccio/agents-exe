@@ -2,32 +2,36 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Module for prompt alias functionality.
---
--- Aliases allow users to define reusable prompt templates with variable
--- substitution. This module handles alias definitions, lookup, and template
--- resolution.
-module System.Agents.CLI.Aliases
-    ( -- * Types
-      AliasInputMode (..)
-    , AliasDefinition (..)
-      -- * Default aliases
-    , defaultAliases
-      -- * Alias resolution
-    , resolveAliases
-    , lookupAlias
-    , formatAliasNotFoundError
-      -- * Template processing
-    , substituteTemplate
-    , detectLanguage
-    ) where
+{- | Module for prompt alias functionality.
 
+Aliases allow users to define reusable prompt templates with variable
+substitution. This module handles alias definitions, lookup, and template
+resolution.
+-}
+module System.Agents.CLI.Aliases (
+    -- * Types
+    AliasInputMode (..),
+    AliasDefinition (..),
+
+    -- * Default aliases
+    defaultAliases,
+
+    -- * Alias resolution
+    resolveAliases,
+    lookupAlias,
+    formatAliasNotFoundError,
+
+    -- * Template processing
+    substituteTemplate,
+    detectLanguage,
+) where
+
+import qualified Data.Aeson as Aeson
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
-import qualified Data.Aeson as Aeson
 import System.FilePath (takeExtension, takeFileName)
 
 -------------------------------------------------------------------------------
@@ -53,10 +57,11 @@ data AliasDefinition = AliasDefinition
     deriving (Show, Generic)
 
 instance Aeson.FromJSON AliasDefinition where
-    parseJSON = Aeson.withObject "AliasDefinition" $ \v -> AliasDefinition
-        <$> v Aeson..: "description"
-        <*> v Aeson..: "template"
-        <*> v Aeson..: "inputMode"
+    parseJSON = Aeson.withObject "AliasDefinition" $ \v ->
+        AliasDefinition
+            <$> v Aeson..: "description"
+            <*> v Aeson..: "template"
+            <*> v Aeson..: "inputMode"
 
 -------------------------------------------------------------------------------
 -- Default Aliases
@@ -64,24 +69,37 @@ instance Aeson.FromJSON AliasDefinition where
 
 -- | Default aliases available even without configuration
 defaultAliases :: Map Text AliasDefinition
-defaultAliases = Map.fromList
-    [ ("translate", AliasDefinition
-        "Translate to English"
-        "Please translate the following text to English:\n\n{{content}}"
-        AliasStdin)
-    , ("summarize", AliasDefinition
-        "Summarize text"
-        "Please provide a concise summary of the following:\n\n{{content}}"
-        AliasStdin)
-    , ("code-review", AliasDefinition
-        "Review code for issues"
-        "Please review the following code for potential bugs, security issues, and style improvements:\n\n```{{language}}\n{{content}}\n```"
-        AliasFile)
-    , ("explain", AliasDefinition
-        "Explain code in plain English"
-        "Please explain what the following code does in plain English:\n\n```{{language}}\n{{content}}\n```"
-        AliasFile)
-    ]
+defaultAliases =
+    Map.fromList
+        [
+            ( "translate"
+            , AliasDefinition
+                "Translate to English"
+                "Please translate the following text to English:\n\n{{content}}"
+                AliasStdin
+            )
+        ,
+            ( "summarize"
+            , AliasDefinition
+                "Summarize text"
+                "Please provide a concise summary of the following:\n\n{{content}}"
+                AliasStdin
+            )
+        ,
+            ( "code-review"
+            , AliasDefinition
+                "Review code for issues"
+                "Please review the following code for potential bugs, security issues, and style improvements:\n\n```{{language}}\n{{content}}\n```"
+                AliasFile
+            )
+        ,
+            ( "explain"
+            , AliasDefinition
+                "Explain code in plain English"
+                "Please explain what the following code does in plain English:\n\n```{{language}}\n{{content}}\n```"
+                AliasFile
+            )
+        ]
 
 -------------------------------------------------------------------------------
 -- Alias Resolution
@@ -106,7 +124,7 @@ formatAliasNotFoundError name aliases =
         , ""
         , "Available aliases:"
         ]
-        ++ map formatAlias (Map.toList aliases)
+            ++ map formatAlias (Map.toList aliases)
   where
     formatAlias (aliasName, def) = "  - " <> aliasName <> ": " <> aliasDescription def
 
@@ -114,11 +132,12 @@ formatAliasNotFoundError name aliases =
 -- Template Processing
 -------------------------------------------------------------------------------
 
--- | Substitute template variables in an alias template
--- Supported variables:
---   {{content}}  - The actual content from stdin or file
---   {{language}} - Auto-detected or specified language
---   {{filename}} - Name of the input file
+{- | Substitute template variables in an alias template
+Supported variables:
+  {{content}}  - The actual content from stdin or file
+  {{language}} - Auto-detected or specified language
+  {{filename}} - Name of the input file
+-}
 substituteTemplate :: Text -> Text -> Maybe FilePath -> Text
 substituteTemplate template content mFilePath =
     let withContent = Text.replace "{{content}}" content template
@@ -126,7 +145,7 @@ substituteTemplate template content mFilePath =
             Just fp -> Text.replace "{{filename}}" (Text.pack $ takeFileName fp) withContent
             Nothing -> Text.replace "{{filename}}" "" withContent
         language = detectLanguage mFilePath
-    in Text.replace "{{language}}" language withFilename
+     in Text.replace "{{language}}" language withFilename
 
 -- | Detect programming language from file extension
 detectLanguage :: Maybe FilePath -> Text
@@ -174,4 +193,3 @@ detectLanguage (Just fp) = case takeExtension fp of
     ".sass" -> "sass"
     ".sql" -> "sql"
     _ -> ""
-

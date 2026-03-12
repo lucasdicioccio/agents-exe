@@ -1,17 +1,19 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
--- | Module for injecting session content into prompts with varying verbosity levels.
---
--- This module provides functionality to format sessions at different "t-shirt sizes"
--- for use as prompt input. The sizes range from minimal (xs) to complete (xl).
-module System.Agents.SessionPrint.Inject
-    ( -- * Verbosity levels
-      SessionVerbosity (..)
-      -- * Formatting functions
-    , formatSessionForPrompt
-    , isToolOnlyTurn
-    ) where
+{- | Module for injecting session content into prompts with varying verbosity levels.
+
+This module provides functionality to format sessions at different "t-shirt sizes"
+for use as prompt input. The sizes range from minimal (xs) to complete (xl).
+-}
+module System.Agents.SessionPrint.Inject (
+    -- * Verbosity levels
+    SessionVerbosity (..),
+
+    -- * Formatting functions
+    formatSessionForPrompt,
+    isToolOnlyTurn,
+) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -23,31 +25,38 @@ import qualified System.Agents.Session.Base as Session
 
 -- | Verbosity levels for session formatting, from minimal to complete.
 data SessionVerbosity
-    = SessionXS   -- ^ Only queries and responses, skip tool-only turns
-    | SessionS    -- ^ Add thinking process and tool names called
-    | SessionM    -- ^ Add statistics
-    | SessionL    -- ^ Add tool-call results
-    | SessionXL   -- ^ Same as L (complete)
+    = -- | Only queries and responses, skip tool-only turns
+      SessionXS
+    | -- | Add thinking process and tool names called
+      SessionS
+    | -- | Add statistics
+      SessionM
+    | -- | Add tool-call results
+      SessionL
+    | -- | Same as L (complete)
+      SessionXL
     deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Format a session for injection into a prompt at the given verbosity level.
 formatSessionForPrompt :: SessionVerbosity -> Session.Session -> Text
 formatSessionForPrompt verbosity session =
     let turns = filterTurns verbosity session.turns
-        formattedTurns = zipWith (formatTurn verbosity) [1..] (reverse turns)
-        statsSection = if verbosity >= SessionM
-            then formatStatisticsSection session
-            else ""
+        formattedTurns = zipWith (formatTurn verbosity) [1 ..] (reverse turns)
+        statsSection =
+            if verbosity >= SessionM
+                then formatStatisticsSection session
+                else ""
         header = case verbosity of
             SessionXS -> "## Session Summary (minimal)\n\n"
-            SessionS  -> "## Session Summary\n\n"
-            SessionM  -> "## Session Summary with Statistics\n\n"
-            SessionL  -> "## Complete Session\n\n"
+            SessionS -> "## Session Summary\n\n"
+            SessionM -> "## Session Summary with Statistics\n\n"
+            SessionL -> "## Complete Session\n\n"
             SessionXL -> "## Complete Session\n\n"
-    in header <> statsSection <> Text.intercalate "\n---\n\n" formattedTurns
+     in header <> statsSection <> Text.intercalate "\n---\n\n" formattedTurns
 
--- | Filter turns based on verbosity level.
--- For XS verbosity, we skip tool-only turns (turns with no user query and no response text).
+{- | Filter turns based on verbosity level.
+For XS verbosity, we skip tool-only turns (turns with no user query and no response text).
+-}
 filterTurns :: SessionVerbosity -> [Session.Turn] -> [Session.Turn]
 filterTurns SessionXS = filter (not . isToolOnlyTurn)
 filterTurns _ = id
@@ -75,30 +84,35 @@ formatUserTurn _verbosity idx content =
         toolRespSection = case content.userToolResponses of
             [] -> ""
             _responses -> "_(tool responses available at higher verbosity)_\n\n"
-    in "### Turn " <> Text.pack (show idx) <> " (User)\n\n" <> querySection <> toolRespSection
+     in "### Turn " <> Text.pack (show idx) <> " (User)\n\n" <> querySection <> toolRespSection
 
 -- | Format an LLM turn.
 formatLlmTurn :: SessionVerbosity -> Int -> Session.LlmTurnContent -> Text
 formatLlmTurn verbosity idx content =
-    let thinkingSection = if verbosity >= SessionS
-            then case content.llmResponse.responseThinking of
-                Just thinking -> "**Thinking:**\n```\n" <> thinking <> "\n```\n\n"
-                Nothing -> ""
-            else ""
+    let thinkingSection =
+            if verbosity >= SessionS
+                then case content.llmResponse.responseThinking of
+                    Just thinking -> "**Thinking:**\n```\n" <> thinking <> "\n```\n\n"
+                    Nothing -> ""
+                else ""
         responseSection = case content.llmResponse.responseText of
             Just txt -> "**Assistant:** " <> txt <> "\n\n"
             Nothing -> "_(no response text)_\n\n"
-        toolCallsSection = if verbosity >= SessionS && not (null content.llmToolCalls)
-            then "**Tools called:** " <> Text.intercalate ", " (map extractToolName content.llmToolCalls) <> "\n\n"
-            else ""
-        toolResultsSection = if verbosity >= SessionL && not (null content.llmToolCalls)
-            then formatToolCallResults content.llmToolCalls
-            else ""
-    in "### Turn " <> Text.pack (show idx) <> " (Assistant)\n\n" 
-       <> thinkingSection 
-       <> responseSection 
-       <> toolCallsSection
-       <> toolResultsSection
+        toolCallsSection =
+            if verbosity >= SessionS && not (null content.llmToolCalls)
+                then "**Tools called:** " <> Text.intercalate ", " (map extractToolName content.llmToolCalls) <> "\n\n"
+                else ""
+        toolResultsSection =
+            if verbosity >= SessionL && not (null content.llmToolCalls)
+                then formatToolCallResults content.llmToolCalls
+                else ""
+     in "### Turn "
+            <> Text.pack (show idx)
+            <> " (Assistant)\n\n"
+            <> thinkingSection
+            <> responseSection
+            <> toolCallsSection
+            <> toolResultsSection
 
 -- | Extract tool name from a tool call.
 extractToolName :: Session.LlmToolCall -> Text
@@ -138,10 +152,16 @@ formatStatisticsSection session =
         userTurns = length [() | Session.UserTurn _ _ <- session.turns]
         llmTurns = length [() | Session.LlmTurn _ _ <- session.turns]
         toolCalls = sum [length ltc.llmToolCalls | Session.LlmTurn ltc _ <- session.turns]
-    in "**Statistics:**\n" <>
-       "- Total turns: " <> Text.pack (show (totalTurns :: Int)) <> "\n" <>
-       "- User turns: " <> Text.pack (show (userTurns :: Int)) <> "\n" <>
-       "- Assistant turns: " <> Text.pack (show (llmTurns :: Int)) <> "\n" <>
-       "- Total tool calls: " <> Text.pack (show (toolCalls :: Int)) <> "\n\n"
-
-
+     in "**Statistics:**\n"
+            <> "- Total turns: "
+            <> Text.pack (show (totalTurns :: Int))
+            <> "\n"
+            <> "- User turns: "
+            <> Text.pack (show (userTurns :: Int))
+            <> "\n"
+            <> "- Assistant turns: "
+            <> Text.pack (show (llmTurns :: Int))
+            <> "\n"
+            <> "- Total tool calls: "
+            <> Text.pack (show (toolCalls :: Int))
+            <> "\n\n"

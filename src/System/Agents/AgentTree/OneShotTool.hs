@@ -1,10 +1,11 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Provides a version of turnAgentRuntimeIntoIOTool based on OneShot.hs
--- implementation of LLM session calls.
+{- | Provides a version of turnAgentRuntimeIntoIOTool based on OneShot.hs
+implementation of LLM session calls.
+-}
 module System.Agents.AgentTree.OneShotTool (
-  turnAgentRuntimeIntoIOTool
+    turnAgentRuntimeIntoIOTool,
 ) where
 
 import Data.Aeson ((.=))
@@ -18,40 +19,41 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (contramap)
 
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newStepId, newConversationId)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newConversationId, newStepId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.OneShot (agentStoreSession)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
-import System.Agents.Session.Base
-    ( Agent (..)
-    , LlmResponse (..)
-    , LlmToolCall (..)
-    , LlmTurnContent (..)
-    , Session (..)
-    , SystemPrompt (..)
-    , SystemTool (..)
-    , SystemToolDefinitionV1 (..)
-    , SystemToolDefinition (..)
-    , UserQuery (..)
-    , UserToolResponse (..)
-    , defaultContextConfig
-    , newSessionId
-    , newTurnId
-    )
+import System.Agents.Session.Base (
+    Agent (..),
+    LlmResponse (..),
+    LlmToolCall (..),
+    LlmTurnContent (..),
+    Session (..),
+    SystemPrompt (..),
+    SystemTool (..),
+    SystemToolDefinition (..),
+    SystemToolDefinitionV1 (..),
+    UserQuery (..),
+    UserToolResponse (..),
+    defaultContextConfig,
+    newSessionId,
+    newTurnId,
+ )
 import System.Agents.Session.Loop (run)
-import System.Agents.OneShot (agentStoreSession)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
-import System.Agents.ToolRegistration
-    ( ToolRegistration (..)
-    , registerIOScriptInLLM
-    )
+import System.Agents.ToolRegistration (
+    ToolRegistration (..),
+    registerIOScriptInLLM,
+ )
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
+import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
+
 -- | Data type for the prompt argument to the sub-agent.
 newtype PromptOtherAgent = PromptOtherAgent
     { what :: Text
@@ -63,11 +65,13 @@ instance Aeson.FromJSON PromptOtherAgent where
         PromptOtherAgent <$> v Aeson..: "what"
 
 -------------------------------------------------------------------------------
--- | Converts a Runtime into an IO Tool using the OneShot session-based approach.
---
--- This version uses the LLM session calls from OneShot.hs instead of
--- Runtime.handleConversation. It creates an Agent from the Runtime,
--- runs it with a session, and returns the result.
+
+{- | Converts a Runtime into an IO Tool using the OneShot session-based approach.
+
+This version uses the LLM session calls from OneShot.hs instead of
+Runtime.handleConversation. It creates an Agent from the Runtime,
+runs it with a session, and returns the result.
+-}
 turnAgentRuntimeIntoIOTool ::
     -- | Optional session store for persisting sessions
     SessionStore ->
@@ -130,8 +134,10 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
         pure $ Text.encodeUtf8 result
 
 -------------------------------------------------------------------------------
--- | Creates an Agent from a Runtime configured for use as a tool.
--- Based on runtimeToAgent from OneShot.hs.
+
+{- | Creates an Agent from a Runtime configured for use as a tool.
+Based on runtimeToAgent from OneShot.hs.
+-}
 runtimeToAgentForToolInIOScriptExecution ::
     SessionStore ->
     Runtime ->
@@ -157,18 +163,18 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
 
     convId <- newConversationId
     pure $
-      agentStoreSession store Nothing convId $
-        Agent
-            { step = naiveTilNoToolCallStep
-            , sysPrompt = pure sPrompt
-            , sysTools = sTools
-            , usrQuery = pure Nothing
-            -- toolCall now accepts ToolExecutionContext as first argument
-            , toolCall = executeToolCall rt.agentId convId rt.agentTools
-            , complete = completeF
-            -- Add contextConfig field (required for Agent)
-            , contextConfig = defaultContextConfig
-            }
+        agentStoreSession store Nothing convId $
+            Agent
+                { step = naiveTilNoToolCallStep
+                , sysPrompt = pure sPrompt
+                , sysTools = sTools
+                , usrQuery = pure Nothing
+                , -- toolCall now accepts ToolExecutionContext as first argument
+                  toolCall = executeToolCall rt.agentId convId rt.agentTools
+                , complete = completeF
+                , -- Add contextConfig field (required for Agent)
+                  contextConfig = defaultContextConfig
+                }
   where
     -- Nest the trace to indicate this is a child agent call
     -- The tracer expects OpenAI.Trace, so we wrap Runtime.Trace appropriately
@@ -177,30 +183,36 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
         Runtime.AgentTrace_Conversation cSlug cId pConvId (Runtime.LLMTrace sId openaiTrace)
 
 -------------------------------------------------------------------------------
--- | Convert a ToolRegistration to a SystemTool for the Session agent.
--- Based on toolRegistrationToSystemTool from OneShot.hs.
+
+{- | Convert a ToolRegistration to a SystemTool for the Session agent.
+Based on toolRegistrationToSystemTool from OneShot.hs.
+-}
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
 toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool
-        toolDefv1 = SystemToolDefinitionV1
-            { name = llmTool.toolName.getToolName
-            , llmName = llmTool.toolName.getToolName
-            , description = llmTool.toolDescription
-            , properties = llmTool.toolParamProperties
-            , raw = Aeson.object
-                [ "type" .= ("function" :: Text)
-                , "function" .= Aeson.object
-                    [ "name" .= llmTool.toolName.getToolName
-                    , "description" .= llmTool.toolDescription
-                    , "parameters" .= toolParamsToJson llmTool.toolParamProperties
-                    ]
-                ]
-            }
+        toolDefv1 =
+            SystemToolDefinitionV1
+                { name = llmTool.toolName.getToolName
+                , llmName = llmTool.toolName.getToolName
+                , description = llmTool.toolDescription
+                , properties = llmTool.toolParamProperties
+                , raw =
+                    Aeson.object
+                        [ "type" .= ("function" :: Text)
+                        , "function"
+                            .= Aeson.object
+                                [ "name" .= llmTool.toolName.getToolName
+                                , "description" .= llmTool.toolDescription
+                                , "parameters" .= toolParamsToJson llmTool.toolParamProperties
+                                ]
+                        ]
+                }
      in SystemTool $ V1 toolDefv1
 
--- | Convert tool parameters to JSON schema.
---
--- Only properties with 'propertyRequired = True' are included in the 'required' array.
+{- | Convert tool parameters to JSON schema.
+
+Only properties with 'propertyRequired = True' are included in the 'required' array.
+-}
 toolParamsToJson :: [ParamProperty] -> Aeson.Value
 toolParamsToJson props =
     Aeson.object
@@ -212,16 +224,16 @@ toolParamsToJson props =
   where
     paramPropertyToJson :: ParamProperty -> (Aeson.Key, Aeson.Value)
     paramPropertyToJson p = (AesonKey.fromText p.propertyKey, paramTypeToJson p)
-    
+
     paramTypeToJson :: ParamProperty -> Aeson.Value
     paramTypeToJson p =
         Aeson.object $
             [ "type" .= paramTypeToString p.propertyType
             , "description" .= p.propertyDescription
             ]
-            ++ case p.propertyType of
-                EnumParamType values -> ["enum" .= values]
-                _ -> []
+                ++ case p.propertyType of
+                    EnumParamType values -> ["enum" .= values]
+                    _ -> []
 
     paramTypeToString :: ParamType -> Text
     paramTypeToString NullParamType = "null"
@@ -234,18 +246,25 @@ toolParamsToJson props =
     paramTypeToString (ObjectParamType _) = "object"
 
 -------------------------------------------------------------------------------
--- | Execute a tool call using the runtime's registered tools.
--- Based on executeToolCall from OneShot.hs.
---
--- The toolCall function in Agent now accepts a ToolExecutionContext as its
--- first argument, allowing tools to access session metadata.
-executeToolCall :: 
-    AgentId                    -- ^ Agent ID for context
-    -> ConversationId          -- ^ Conversation ID for context
-    -> IO [ToolRegistration]   -- ^ Tool registrations
-    -> ToolExecutionContext    -- ^ Context from runStepM
-    -> LlmToolCall             -- ^ Tool call from LLM
-    -> IO UserToolResponse
+
+{- | Execute a tool call using the runtime's registered tools.
+Based on executeToolCall from OneShot.hs.
+
+The toolCall function in Agent now accepts a ToolExecutionContext as its
+first argument, allowing tools to access session metadata.
+-}
+executeToolCall ::
+    -- | Agent ID for context
+    AgentId ->
+    -- | Conversation ID for context
+    ConversationId ->
+    -- | Tool registrations
+    IO [ToolRegistration] ->
+    -- | Context from runStepM
+    ToolExecutionContext ->
+    -- | Tool call from LLM
+    LlmToolCall ->
+    IO UserToolResponse
 executeToolCall _agentId _convId registrations _ctx (LlmToolCall _callVal) = do
     -- For simplicity in this OneShot-based version, we return the raw
     -- tool call result. In a more sophisticated implementation, we would
@@ -255,13 +274,13 @@ executeToolCall _agentId _convId registrations _ctx (LlmToolCall _callVal) = do
     pure $ UserToolResponse $ Aeson.String $ "Tool execution not implemented for " <> Text.pack (show (length regs)) <> " tools"
 
 -------------------------------------------------------------------------------
+
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
-    agent {usrQuery = pure (Just query)}
+    agent{usrQuery = pure (Just query)}
 
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
-

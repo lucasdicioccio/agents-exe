@@ -6,25 +6,25 @@ module System.Agents.TUI.Render where
 
 import Brick
 import Brick.Focus (focusGetCurrent)
+import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.List (renderList, listSelectedElement, listSelectedAttr)
+import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
-import qualified Brick.Util as BrickUtil
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Vty as Vty
 
-import System.Agents.TUI.Types
-import System.Agents.AgentTree (AgentTree(..))
+import System.Agents.AgentTree (AgentTree (..))
 import System.Agents.Base (ConversationId)
-import System.Agents.Runtime (Runtime(..))
-import System.Agents.Session.Base
-import System.Agents.Session.Types (StepByteUsage(..), sessionTotalBytes)
-import System.Agents.ToolRegistration (declareTool)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Runtime (Runtime (..))
+import System.Agents.Session.Base
+import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
+import System.Agents.TUI.Types
+import System.Agents.ToolRegistration (declareTool)
 
 -------------------------------------------------------------------------------
 -- Attribute Names
@@ -176,7 +176,8 @@ render_statusBar :: Maybe StatusMessage -> Widget N
 render_statusBar Nothing = emptyWidget
 render_statusBar (Just msg) =
     withAttr (statusAttr msg.statusSeverity) $
-        txt $ " " <> statusText msg
+        txt $
+            " " <> statusText msg
 
 -- | Get the appropriate attribute for a status severity level.
 statusAttr :: StatusSeverity -> AttrName
@@ -220,11 +221,11 @@ render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
 render_conversationItem st _ conv =
     let indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
-            ConversationStatus_WaitingForInput -> 
+            ConversationStatus_WaitingForInput ->
                 if isUnread then "● " else "  "
         baseText = indicator <> Text.take 18 (conversationName conv)
         widget = txt $ " " <> baseText
-    in widget
+     in widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
 
@@ -236,13 +237,13 @@ render_sessionList st =
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
-
 -- | Render a single conversation item.
 render_sessionItem :: TuiState -> Bool -> Session -> Widget N
 render_sessionItem _st _ sess =
     let
         widget = txt $ Text.pack $ " " <> show sess.sessionId
-    in widget
+     in
+        widget
 
 -------------------------------------------------------------------------------
 -- Agent Info Rendering
@@ -256,27 +257,29 @@ render_agentInfo st =
             Nothing -> txt "No agent selected"
             Just agent ->
                 let rt = agent.agentTree.agentRuntime
-                 in viewport AgentInfoWidget Both $ hLimit 60 $ vBox
-                        [ txt $ "Slug: " <> rt.agentSlug
-                        , txt $ "Announce: " <> rt.agentAnnounce
-                        , txt ""
-                        , txt "Model: " <=> txt (Text.pack $ show rt.agentModel.modelName)
-                        , txt ""
-                        , txt "System Prompt:"
-                        , txt $ OpenAI.getSystemPrompt rt.agentModel.modelSystemPrompt
-                        ]
+                 in viewport AgentInfoWidget Both $
+                        hLimit 60 $
+                            vBox
+                                [ txt $ "Slug: " <> rt.agentSlug
+                                , txt $ "Announce: " <> rt.agentAnnounce
+                                , txt ""
+                                , txt "Model: " <=> txt (Text.pack $ show rt.agentModel.modelName)
+                                , txt ""
+                                , txt "System Prompt:"
+                                , txt $ OpenAI.getSystemPrompt rt.agentModel.modelSystemPrompt
+                                ]
 
 -- | Render agent tools panel.
 render_agentTools :: TuiState -> Widget N
 render_agentTools st =
-  borderWithFocus st AgentToolsWidget "Tools" $
+    borderWithFocus st AgentToolsWidget "Tools" $
         case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
                 case lookup agent.agentTree.agentRuntime.agentId (st ^. tuiUI . coreAgentTools) of
-                   Nothing -> txt "Tools not loaded"
-                   Just toolz -> do
-                     txt $ Text.unlines [ OpenAI.getToolName $ OpenAI.toolName (declareTool tool) | tool <- toolz]
+                    Nothing -> txt "Tools not loaded"
+                    Just toolz -> do
+                        txt $ Text.unlines [OpenAI.getToolName $ OpenAI.toolName (declareTool tool) | tool <- toolz]
 
 -------------------------------------------------------------------------------
 -- Message Editor Rendering
@@ -298,7 +301,7 @@ render_messageEditor st =
 -- | Render the conversation history view.
 render_conversationView :: TuiState -> Widget N
 render_conversationView st =
-       borderWithFocus st ConversationViewWidget "Conversation" content
+    borderWithFocus st ConversationViewWidget "Conversation" content
   where
     content =
         case listSelectedElement (st ^. tuiUI . conversationList) of
@@ -309,7 +312,7 @@ render_conversationView st =
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
 render_sessionView st =
-       borderWithFocus st SessionViewWidget "Sessions" content
+    borderWithFocus st SessionViewWidget "Sessions" content
   where
     content =
         case listSelectedElement (st ^. tuiUI . sessionList) of
@@ -320,20 +323,22 @@ render_sessionView st =
 -- | Render a session's turns.
 render_session :: Maybe Session -> Set ConversationId -> Widget N
 render_session Nothing _ =
-    vBox $ [ txt "session not started yet" ]
+    vBox $ [txt "session not started yet"]
 render_session (Just session) _ongoingConvs =
-    vBox $ 
-        [ render_session_total_bytes session ] ++
-        map render_turn (Prelude.reverse (zip [(0 :: Int)..] $ Prelude.reverse session.turns))
+    vBox $
+        [render_session_total_bytes session]
+            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
 
 -- | Render total session bytes.
 render_session_total_bytes :: Session -> Widget N
 render_session_total_bytes session =
     let totalBytes = sessionTotalBytes session
-    in if totalBytes == 0
-        then emptyWidget
-        else withAttr byteUsageAttr $
-            txt $ "Session total: " <> formatBytes totalBytes <> "  "
+     in if totalBytes == 0
+            then emptyWidget
+            else
+                withAttr byteUsageAttr $
+                    txt $
+                        "Session total: " <> formatBytes totalBytes <> "  "
 
 -- | Format bytes in human-readable form.
 formatBytes :: Int -> Text
@@ -365,7 +370,7 @@ render_turn (k, turn) =
             withAttr llmMessageAttr $
                 vBox $
                     -- Show thinking content if present
-                    (case llmTurn.llmResponse.responseThinking of
+                    ( case llmTurn.llmResponse.responseThinking of
                         Just thinking ->
                             [ withAttr thinkingAttr $
                                 vBox
@@ -375,42 +380,45 @@ render_turn (k, turn) =
                                     ]
                             ]
                         Nothing -> []
-                    ) ++
-                    [ hBox
-                        [ case llmTurn.llmResponse.responseText of
-                            Just txt0 -> txt $ "< " <> txt0
-                            Nothing -> txt "< (no response)"
-                        , fill ' '
-                        , render_byte_usage mUsage
-                        ]
-                    , if null llmTurn.llmToolCalls
-                        then emptyWidget
-                        else hBox 
-                            [ txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
-                            , fill ' '
-                            , render_byte_usage mUsage
-                            ]
-                    ]
+                    )
+                        ++ [ hBox
+                                [ case llmTurn.llmResponse.responseText of
+                                    Just txt0 -> txt $ "< " <> txt0
+                                    Nothing -> txt "< (no response)"
+                                , fill ' '
+                                , render_byte_usage mUsage
+                                ]
+                           , if null llmTurn.llmToolCalls
+                                then emptyWidget
+                                else
+                                    hBox
+                                        [ txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
+                                        , fill ' '
+                                        , render_byte_usage mUsage
+                                        ]
+                           ]
 
 -- | Render byte usage for a turn.
 render_byte_usage :: Maybe StepByteUsage -> Widget N
 render_byte_usage Nothing = emptyWidget
 render_byte_usage (Just usage) =
-    withAttr byteUsageAttr $ 
-        txt $ "[" <> formatByteBreakdown usage <> "]"
+    withAttr byteUsageAttr $
+        txt $
+            "[" <> formatByteBreakdown usage <> "]"
 
 -- | Format byte usage breakdown for display.
 formatByteBreakdown :: StepByteUsage -> Text
 formatByteBreakdown usage =
-    let parts = concat
-            [ if stepInputBytes usage > 0 then ["in: " <> formatBytes (stepInputBytes usage)] else []
-            , if stepOutputBytes usage > 0 then ["out: " <> formatBytes (stepOutputBytes usage)] else []
-            , if stepReasoningBytes usage > 0 then ["reason: " <> formatBytes (stepReasoningBytes usage)] else []
-            , if stepToolBytes usage > 0 then ["tool: " <> formatBytes (stepToolBytes usage)] else []
-            ]
-    in if null parts 
-        then "total: " <> formatBytes (stepTotalBytes usage)
-        else Text.intercalate ", " parts
+    let parts =
+            concat
+                [ if stepInputBytes usage > 0 then ["in: " <> formatBytes (stepInputBytes usage)] else []
+                , if stepOutputBytes usage > 0 then ["out: " <> formatBytes (stepOutputBytes usage)] else []
+                , if stepReasoningBytes usage > 0 then ["reason: " <> formatBytes (stepReasoningBytes usage)] else []
+                , if stepToolBytes usage > 0 then ["tool: " <> formatBytes (stepToolBytes usage)] else []
+                ]
+     in if null parts
+            then "total: " <> formatBytes (stepTotalBytes usage)
+            else Text.intercalate ", " parts
 
 -- | Helper to extract text from SystemPrompt.
 getSystemPromptText :: SystemPrompt -> Text
@@ -449,5 +457,3 @@ tui_appAttrMap _ =
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         ]
-
-

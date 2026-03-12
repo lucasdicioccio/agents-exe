@@ -66,9 +66,9 @@ module System.Agents.Tools.SqliteToolbox (
     formatResults,
 ) where
 
-import Control.Exception (SomeException, try, bracket)
+import Control.Exception (SomeException, bracket, try)
 import Control.Monad (when)
-import Data.Aeson (Value (..), ToJSON (..), (.=))
+import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -90,13 +90,14 @@ import System.Agents.Base (SqliteAccessMode (..), SqliteToolboxDescription (..))
 -- Core Types
 -------------------------------------------------------------------------------
 
--- | Trace events for monitoring SQLite toolbox operations.
---
--- These events allow tracking of:
--- * Query execution progress
--- * Access violations
--- * Database errors
--- * Connection lifecycle
+{- | Trace events for monitoring SQLite toolbox operations.
+
+These events allow tracking of:
+* Query execution progress
+* Access violations
+* Database errors
+* Connection lifecycle
+-}
 data Trace
     = -- | Database connection opened
       ConnectionOpenedTrace !FilePath
@@ -112,13 +113,14 @@ data Trace
       QueryErrorTrace !Text !Text
     deriving (Show)
 
--- | Runtime state for a SQLite toolbox.
---
--- The toolbox maintains:
--- * A database connection (from sqlite-simple)
--- * A direct database handle for metadata access
--- * The configured access mode (read-only or read-write)
--- * Toolbox metadata (name, description)
+{- | Runtime state for a SQLite toolbox.
+
+The toolbox maintains:
+* A database connection (from sqlite-simple)
+* A direct database handle for metadata access
+* The configured access mode (read-only or read-write)
+* Toolbox metadata (name, description)
+-}
 data Toolbox = Toolbox
     { toolboxConnection :: Connection
     , toolboxDirectDb :: Direct.Database
@@ -128,10 +130,11 @@ data Toolbox = Toolbox
     , toolboxAccessMode :: AccessMode
     }
 
--- | Description of a SQLite tool.
---
--- Contains metadata about a specific SQLite query tool, including
--- its name, description, and associated database information.
+{- | Description of a SQLite tool.
+
+Contains metadata about a specific SQLite query tool, including
+its name, description, and associated database information.
+-}
 data ToolDescription = ToolDescription
     { toolDescriptionName :: Text
     -- ^ Name of the tool (e.g., "query_users")
@@ -144,13 +147,14 @@ data ToolDescription = ToolDescription
     }
     deriving (Show)
 
--- | Result of a SQL query execution.
---
--- Contains:
--- * Column names
--- * Row data (as JSON values)
--- * Row count
--- * Execution time
+{- | Result of a SQL query execution.
+
+Contains:
+* Column names
+* Row data (as JSON values)
+* Row count
+* Execution time
+-}
 data QueryResult = QueryResult
     { resultColumns :: [Text]
     , resultRows :: [[Value]]
@@ -183,18 +187,20 @@ data QueryError
 -- Access Control
 -------------------------------------------------------------------------------
 
--- | Access mode for the toolbox.
---
--- Controls what operations are allowed:
--- * 'ReadOnly': Only SELECT queries are allowed
--- * 'ReadWrite': All SQL operations are allowed
+{- | Access mode for the toolbox.
+
+Controls what operations are allowed:
+* 'ReadOnly': Only SELECT queries are allowed
+* 'ReadWrite': All SQL operations are allowed
+-}
 data AccessMode = ReadOnly | ReadWrite
     deriving (Show, Eq)
 
--- | SQL operation types for classification.
---
--- These are the common SQL statement types that can be identified
--- from the first keyword of a query.
+{- | SQL operation types for classification.
+
+These are the common SQL statement types that can be identified
+from the first keyword of a query.
+-}
 data SqlOperation
     = Select
     | Insert
@@ -211,29 +217,31 @@ fromBaseAccessMode :: SqliteAccessMode -> AccessMode
 fromBaseAccessMode SqliteReadOnly = ReadOnly
 fromBaseAccessMode SqliteReadWrite = ReadWrite
 
--- | Classify a SQL query by examining its first keyword.
---
--- This function performs a simple classification by looking at the first
--- non-whitespace, non-comment token in the query. It normalizes the query
--- by:
--- 1. Removing leading whitespace
--- 2. Removing single-line comments (-- ...)
--- 3. Removing multi-line comments (/* ... */)
--- 4. Extracting the first alphanumeric word
---
--- Examples:
---
--- >>> classifyQuery "SELECT * FROM users"
--- Select
---
--- >>> classifyQuery "  -- comment\\nINSERT INTO logs VALUES (1)"
--- Insert
---
--- >>> classifyQuery "/* multi-line\\ncomment */ UPDATE users SET x=1"
--- Update
+{- | Classify a SQL query by examining its first keyword.
+
+This function performs a simple classification by looking at the first
+non-whitespace, non-comment token in the query. It normalizes the query
+by:
+1. Removing leading whitespace
+2. Removing single-line comments (-- ...)
+3. Removing multi-line comments (/* ... */)
+4. Extracting the first alphanumeric word
+
+Examples:
+
+>>> classifyQuery "SELECT * FROM users"
+Select
+
+>>> classifyQuery "  -- comment\\nINSERT INTO logs VALUES (1)"
+Insert
+
+>>> classifyQuery "/* multi-line\\ncomment */ UPDATE users SET x=1"
+Update
+-}
 classifyQuery :: Text -> SqlOperation
 classifyQuery query =
-    let -- Remove leading whitespace
+    let
+        -- Remove leading whitespace
         stripped = Text.dropWhile (`elem` [' ', '\t', '\n', '\r']) query
         -- Remove single-line comments
         noSingleLine = removeSingleLineComments stripped
@@ -241,7 +249,8 @@ classifyQuery query =
         noComments = removeMultiLineComments noSingleLine
         -- Get first word (alphanumeric only)
         firstWord = Text.toUpper $ Text.takeWhile (`elem` (['A' .. 'Z'] ++ ['a' .. 'z'])) noComments
-     in case firstWord of
+     in
+        case firstWord of
             "SELECT" -> Select
             "INSERT" -> Insert
             "UPDATE" -> Update
@@ -266,30 +275,32 @@ classifyQuery query =
                     case Text.breakOn "*/" (Text.drop 2 rest) of
                         (_, end) -> before <> removeMultiLineComments (Text.drop 2 end)
 
--- | Check if an operation is allowed given an access mode.
---
--- * 'ReadOnly' mode allows only 'Select' operations
--- * 'ReadWrite' mode allows all operations
---
--- Examples:
---
--- >>> allowsOperation ReadOnly Select
--- True
---
--- >>> allowsOperation ReadOnly Insert
--- False
---
--- >>> allowsOperation ReadWrite Delete
--- True
+{- | Check if an operation is allowed given an access mode.
+
+* 'ReadOnly' mode allows only 'Select' operations
+* 'ReadWrite' mode allows all operations
+
+Examples:
+
+>>> allowsOperation ReadOnly Select
+True
+
+>>> allowsOperation ReadOnly Insert
+False
+
+>>> allowsOperation ReadWrite Delete
+True
+-}
 allowsOperation :: AccessMode -> SqlOperation -> Bool
 allowsOperation ReadOnly Select = True
 allowsOperation ReadOnly _ = False
 allowsOperation ReadWrite _ = True
 
--- | Validate that a query is allowed given an access mode.
---
--- Returns 'Right ()' if the query is allowed, or 'Left QueryError'
--- if access is denied.
+{- | Validate that a query is allowed given an access mode.
+
+Returns 'Right ()' if the query is allowed, or 'Left QueryError'
+if access is denied.
+-}
 validateAccess :: AccessMode -> Text -> Either QueryError ()
 validateAccess mode query =
     let operation = classifyQuery query
@@ -301,18 +312,19 @@ validateAccess mode query =
 -- Initialization
 -------------------------------------------------------------------------------
 
--- | Initialize a SQLite toolbox from a description.
---
--- This function:
--- 1. Opens a connection to the SQLite database using both sqlite-simple and direct-sqlite
--- 2. Sets up the connection based on the access mode
--- 3. Returns a 'Toolbox' ready for query execution
---
--- The access mode determines:
--- * Whether the database is opened in read-only mode
--- * What SQL operations will be allowed
---
--- Returns an error if the database cannot be opened.
+{- | Initialize a SQLite toolbox from a description.
+
+This function:
+1. Opens a connection to the SQLite database using both sqlite-simple and direct-sqlite
+2. Sets up the connection based on the access mode
+3. Returns a 'Toolbox' ready for query execution
+
+The access mode determines:
+* Whether the database is opened in read-only mode
+* What SQL operations will be allowed
+
+Returns an error if the database cannot be opened.
+-}
 initializeToolbox ::
     Tracer IO Trace ->
     SqliteToolboxDescription ->
@@ -327,10 +339,10 @@ initializeToolbox tracer desc = do
     result <- try $ do
         -- Open sqlite-simple connection
         conn <- SQLite.open dbPath
-        
+
         -- Open direct connection for metadata access
         directDb <- Direct.open (Text.pack dbPath)
-        
+
         -- Set foreign keys on for better data integrity
         _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
 
@@ -342,20 +354,22 @@ initializeToolbox tracer desc = do
             runTracer tracer (QueryErrorTrace "initialization" (Text.pack errMsg))
             pure $ Left errMsg
         Right (conn, directDb) -> do
-            pure $ Right
-                Toolbox
-                    { toolboxConnection = conn
-                    , toolboxDirectDb = directDb
-                    , toolboxName = desc.sqliteToolboxName
-                    , toolboxDescription = desc.sqliteToolboxDescription
-                    , toolboxPath = dbPath
-                    , toolboxAccessMode = accessMode
-                    }
+            pure $
+                Right
+                    Toolbox
+                        { toolboxConnection = conn
+                        , toolboxDirectDb = directDb
+                        , toolboxName = desc.sqliteToolboxName
+                        , toolboxDescription = desc.sqliteToolboxDescription
+                        , toolboxPath = dbPath
+                        , toolboxAccessMode = accessMode
+                        }
 
--- | Close a toolbox and release its resources.
---
--- This function should be called when the toolbox is no longer needed
--- to properly close the database connection.
+{- | Close a toolbox and release its resources.
+
+This function should be called when the toolbox is no longer needed
+to properly close the database connection.
+-}
 closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
 closeToolbox tracer toolbox = do
     SQLite.close (toolboxConnection toolbox)
@@ -366,15 +380,16 @@ closeToolbox tracer toolbox = do
 -- Query Execution
 -------------------------------------------------------------------------------
 
--- | Execute a SQL query and return results.
---
--- This is the general-purpose query execution function that respects
--- the toolbox's configured access mode. Use 'executeReadOnlyQuery'
--- or 'executeWriteQuery' for more explicit control.
---
--- Returns:
--- * 'Right QueryResult' on successful execution
--- * 'Left QueryError' on access violation or database error
+{- | Execute a SQL query and return results.
+
+This is the general-purpose query execution function that respects
+the toolbox's configured access mode. Use 'executeReadOnlyQuery'
+or 'executeWriteQuery' for more explicit control.
+
+Returns:
+* 'Right QueryResult' on successful execution
+* 'Left QueryError' on access violation or database error
+-}
 executeQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeQuery toolbox query = do
     -- Validate access based on toolbox mode
@@ -385,15 +400,16 @@ executeQuery toolbox query = do
         Right () -> do
             executeQueryInternal toolbox query
 
--- | Execute a read-only (SELECT) query.
---
--- This function ensures that only SELECT queries are executed,
--- regardless of the toolbox's configured access mode. Use this
--- for additional safety when you only need to read data.
---
--- Returns:
--- * 'Right QueryResult' on successful execution
--- * 'Left QueryError' if the query is not a SELECT or on database error
+{- | Execute a read-only (SELECT) query.
+
+This function ensures that only SELECT queries are executed,
+regardless of the toolbox's configured access mode. Use this
+for additional safety when you only need to read data.
+
+Returns:
+* 'Right QueryResult' on successful execution
+* 'Left QueryError' if the query is not a SELECT or on database error
+-}
 executeReadOnlyQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeReadOnlyQuery toolbox query =
     case classifyQuery query of
@@ -402,14 +418,15 @@ executeReadOnlyQuery toolbox query =
             let err = AccessDeniedError $ "Expected SELECT query, got: " <> Text.pack (show other)
             pure $ Left err
 
--- | Execute a write query (INSERT, UPDATE, DELETE, etc.).
---
--- This function ensures that the toolbox is in read-write mode
--- before executing the query. Use this for explicit write operations.
---
--- Returns:
--- * 'Right QueryResult' on successful execution
--- * 'Left QueryError' if the toolbox is read-only or on database error
+{- | Execute a write query (INSERT, UPDATE, DELETE, etc.).
+
+This function ensures that the toolbox is in read-write mode
+before executing the query. Use this for explicit write operations.
+
+Returns:
+* 'Right QueryResult' on successful execution
+* 'Left QueryError' if the toolbox is read-only or on database error
+-}
 executeWriteQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeWriteQuery toolbox query =
     case toolboxAccessMode toolbox of
@@ -425,24 +442,27 @@ executeQueryInternal toolbox query = do
 
     result <- try $ do
         let db = toolboxDirectDb toolbox
-        
+
         -- Prepare the statement
         stmt <- Direct.prepare db query
-        
+
         -- Get column names from the statement
         colCount <- Direct.columnCount stmt
-        columnNames <- mapM (\i -> do
-            mName <- Direct.columnName stmt i
-            case mName of
-                Just name -> return name
-                Nothing -> return (Text.pack $ "column_" ++ show i)
-            ) [0..fromIntegral colCount-1]
-        
+        columnNames <-
+            mapM
+                ( \i -> do
+                    mName <- Direct.columnName stmt i
+                    case mName of
+                        Just name -> return name
+                        Nothing -> return (Text.pack $ "column_" ++ show i)
+                )
+                [0 .. fromIntegral colCount - 1]
+
         -- Execute and collect rows
         rows <- collectRows stmt colCount
-        
+
         Direct.finalize stmt
-        
+
         let rowCount = length rows
         endTime <- getCurrentTime
         let execTime = diffUTCTime endTime startTime
@@ -466,7 +486,7 @@ executeQueryInternal toolbox query = do
         stepResult <- Direct.step stmt
         case stepResult of
             Direct.Row -> do
-                row <- mapM (\i -> sqlColumnToJson stmt (fromIntegral i)) [0..colCount-1]
+                row <- mapM (\i -> sqlColumnToJson stmt (fromIntegral i)) [0 .. colCount - 1]
                 rest <- collectRows stmt colCount
                 pure (row : rest)
             Direct.Done -> pure []
@@ -494,25 +514,26 @@ sqlColumnToJson stmt colIdx = do
 -- Result Formatting
 -------------------------------------------------------------------------------
 
--- | Format query results as JSON.
---
--- Returns a ByteString containing a JSON object with:
--- * "columns": Array of column names
--- * "rows": Array of row arrays, or array of row objects (if columns available)
--- * "rowCount": Number of rows returned
--- * "executionTime": Execution time in seconds (optional)
---
--- Example output:
---
--- > {
--- >   "columns": ["id", "name", "email"],
--- >   "rows": [
--- >     [1, "Alice", "alice@example.com"],
--- >     [2, "Bob", "bob@example.com"]
--- >   ],
--- >   "rowCount": 2,
--- >   "executionTime": 0.003
--- > }
+{- | Format query results as JSON.
+
+Returns a ByteString containing a JSON object with:
+* "columns": Array of column names
+* "rows": Array of row arrays, or array of row objects (if columns available)
+* "rowCount": Number of rows returned
+* "executionTime": Execution time in seconds (optional)
+
+Example output:
+
+> {
+>   "columns": ["id", "name", "email"],
+>   "rows": [
+>     [1, "Alice", "alice@example.com"],
+>     [2, "Bob", "bob@example.com"]
+>   ],
+>   "rowCount": 2,
+>   "executionTime": 0.003
+> }
+-}
 formatResults :: QueryResult -> ByteString
 formatResults result =
     LByteString.toStrict $ Aeson.encode jsonObj
@@ -529,9 +550,10 @@ formatResults result =
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
 
--- | Format query results as compact JSON (single line).
---
--- Useful for logging or when space is constrained.
+{- | Format query results as compact JSON (single line).
+
+Useful for logging or when space is constrained.
+-}
 formatResultsCompact :: QueryResult -> ByteString
 formatResultsCompact result =
     LByteString.toStrict $ Aeson.encode jsonObj
@@ -543,18 +565,19 @@ formatResultsCompact result =
             , "rowCount" Aeson..= resultRowCount result
             ]
 
--- | Format query results with rows as objects instead of arrays.
---
--- Example output:
---
--- > {
--- >   "columns": ["id", "name", "email"],
--- >   "rows": [
--- >     {"id": 1, "name": "Alice", "email": "alice@example.com"},
--- >     {"id": 2, "name": "Bob", "email": "bob@example.com"}
--- >   ],
--- >   "rowCount": 2
--- > }
+{- | Format query results with rows as objects instead of arrays.
+
+Example output:
+
+> {
+>   "columns": ["id", "name", "email"],
+>   "rows": [
+>     {"id": 1, "name": "Alice", "email": "alice@example.com"},
+>     {"id": 2, "name": "Bob", "email": "bob@example.com"}
+>   ],
+>   "rowCount": 2
+> }
+-}
 formatResultsAsObjects :: QueryResult -> ByteString
 formatResultsAsObjects result =
     LByteString.toStrict $ Aeson.encode jsonObj
@@ -571,4 +594,3 @@ formatResultsAsObjects result =
 rowToObject :: [Text] -> [Value] -> Value
 rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
-

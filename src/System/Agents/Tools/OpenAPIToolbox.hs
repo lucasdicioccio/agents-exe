@@ -2,46 +2,47 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | OpenAPI Toolbox runtime for executing tools from OpenAPI specifications.
---
--- This module provides a runtime that:
--- * Fetches OpenAPI specifications from URLs
--- * Converts operations to executable tools
--- * Handles HTTP execution with proper parameter substitution
--- * Integrates with the LLM tool registration system
---
--- The toolbox follows patterns similar to McpToolbox and BashToolbox for
--- consistent integration with the agents system.
---
--- Key feature: Name normalization for LLM compatibility.
--- OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
--- which are normalized to LLM-safe names using 'normalizeForLLM'.
---
--- Example usage:
---
--- @
--- import System.Agents
--- import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPI
---
--- main :: IO ()
--- main = do
---     let config = OpenAPI.Config
---             { configUrl = "https://api.example.com/openapi.json"
---             , configBaseUrl = "https://api.example.com"
---             , configHeaders = Map.empty
---             , configToken = Just "my-bearer-token"
---             , configFilter = Just (PathPrefix "/api/v1")
---             }
---     result <- OpenAPI.initializeToolbox tracer config
---     case result of
---         Right toolbox -> do
---             -- Register tools with LLM
---             regResult <- registerOpenAPITools toolbox
---             case regResult of
---                 Right registrations -> useWithAgent registrations
---                 Left err -> handleError err
---         Left err -> handleError err
--- @
+{- | OpenAPI Toolbox runtime for executing tools from OpenAPI specifications.
+
+This module provides a runtime that:
+* Fetches OpenAPI specifications from URLs
+* Converts operations to executable tools
+* Handles HTTP execution with proper parameter substitution
+* Integrates with the LLM tool registration system
+
+The toolbox follows patterns similar to McpToolbox and BashToolbox for
+consistent integration with the agents system.
+
+Key feature: Name normalization for LLM compatibility.
+OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
+which are normalized to LLM-safe names using 'normalizeForLLM'.
+
+Example usage:
+
+@
+import System.Agents
+import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPI
+
+main :: IO ()
+main = do
+    let config = OpenAPI.Config
+            { configUrl = "https://api.example.com/openapi.json"
+            , configBaseUrl = "https://api.example.com"
+            , configHeaders = Map.empty
+            , configToken = Just "my-bearer-token"
+            , configFilter = Just (PathPrefix "/api/v1")
+            }
+    result <- OpenAPI.initializeToolbox tracer config
+    case result of
+        Right toolbox -> do
+            -- Register tools with LLM
+            regResult <- registerOpenAPITools toolbox
+            case regResult of
+                Right registrations -> useWithAgent registrations
+                Left err -> handleError err
+        Left err -> handleError err
+@
+-}
 module System.Agents.Tools.OpenAPIToolbox (
     -- * Core types
     Trace (..),
@@ -102,68 +103,69 @@ import qualified Data.Text.Encoding as Text
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), runTracer)
+import qualified System.Agents.HttpClient as HttpClient
+import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Tools.Base (CallResult (..))
+import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.EndpointPredicate (
     EndpointPredicate,
     matchesOpenAPITool,
  )
+import System.Agents.Tools.IO (RunError (..))
 import System.Agents.Tools.OpenAPI.Converter (
-    OpenAPITool (..),
     NameMapping (..),
+    OpenAPITool (..),
     buildToolNameMapping,
+    convertOpenAPIToTools,
     findToolByNormalizedName,
     normalizeForLLM,
-    convertOpenAPIToTools,
  )
 import System.Agents.Tools.OpenAPI.Resolver (dereferenceSpec)
 import System.Agents.Tools.OpenAPI.Types (
     Method,
+    Operation (..),
     ParamLocation (..),
     Parameter (..),
     Path,
-    Operation (..),
     ToolResult (..),
-  )
-import qualified System.Agents.HttpClient as HttpClient
-import System.Agents.Tools.Base (CallResult (..))
-import System.Agents.Tools.Context (ToolExecutionContext)
-import System.Agents.Tools.IO (RunError (..))
+ )
 import System.Agents.Tools.Trace (ToolTrace (..))
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -- -------------------------------------------------------------------------
 -- Trace types
 -- -------------------------------------------------------------------------
 
--- | Trace events for OpenAPI toolbox operations.
---
--- These events allow monitoring of:
--- * Spec fetching progress
--- * Tool conversion status
--- * Endpoint execution
--- * Error conditions
+{- | Trace events for OpenAPI toolbox operations.
+
+These events allow monitoring of:
+* Spec fetching progress
+* Tool conversion status
+* Endpoint execution
+* Error conditions
+-}
 data Trace
-    = FetchingSpecTrace !Text
-    -- ^ URL being fetched
-    | FetchingSpecFromFileTrace !Text
-    -- ^ Loading spec from file path
-    | SpecFetchedTrace !Int
-    -- ^ HTTP status of spec fetch
-    | SpecLoadedFromFileTrace !FilePath
-    -- ^ Successfully loaded spec from file
-    | ToolsConvertedTrace !Int
-    -- ^ Number of tools converted from spec
-    | ToolsFilteredTrace !Int !Int
-    -- ^ Number of tools before and after filtering
-    | CallingEndpointTrace !Text !Text !Text
-    -- ^ method, url, path being called
-    | EndpointResponseTrace !Int
-    -- ^ HTTP status of endpoint response
-    | SchemaResolutionErrorTrace !Text
-    -- ^ Error during schema dereferencing
-    | ToolExecutionErrorTrace !Text
-    -- ^ Error during tool execution
-    | ToolNameNormalizedTrace !Text !Text
-    -- ^ Original name and normalized name (for debugging)
+    = -- | URL being fetched
+      FetchingSpecTrace !Text
+    | -- | Loading spec from file path
+      FetchingSpecFromFileTrace !Text
+    | -- | HTTP status of spec fetch
+      SpecFetchedTrace !Int
+    | -- | Successfully loaded spec from file
+      SpecLoadedFromFileTrace !FilePath
+    | -- | Number of tools converted from spec
+      ToolsConvertedTrace !Int
+    | -- | Number of tools before and after filtering
+      ToolsFilteredTrace !Int !Int
+    | -- | method, url, path being called
+      CallingEndpointTrace !Text !Text !Text
+    | -- | HTTP status of endpoint response
+      EndpointResponseTrace !Int
+    | -- | Error during schema dereferencing
+      SchemaResolutionErrorTrace !Text
+    | -- | Error during tool execution
+      ToolExecutionErrorTrace !Text
+    | -- | Original name and normalized name (for debugging)
+      ToolNameNormalizedTrace !Text !Text
     deriving (Show)
 
 -- -------------------------------------------------------------------------
@@ -172,14 +174,14 @@ data Trace
 
 -- | Errors that can occur during toolbox initialization.
 data InitializationError
-    = NetworkError !Text
-    -- ^ Network error fetching spec
-    | FileError !Text
-    -- ^ File error loading spec from disk
-    | ParseError !Text
-    -- ^ JSON parse error
-    | SpecError !Text
-    -- ^ OpenAPI spec validation error
+    = -- | Network error fetching spec
+      NetworkError !Text
+    | -- | File error loading spec from disk
+      FileError !Text
+    | -- | JSON parse error
+      ParseError !Text
+    | -- | OpenAPI spec validation error
+      SpecError !Text
     deriving (Show, Eq)
 
 -- | Configuration for initializing an OpenAPI toolbox.
@@ -193,20 +195,22 @@ data Config = Config
     , configToken :: Maybe Text
     -- ^ Optional Bearer token for authentication
     , configFilter :: Maybe EndpointPredicate
-    -- ^ Optional filter to restrict which endpoints are exposed as tools.
-    -- If not specified, all endpoints are included.
+    {- ^ Optional filter to restrict which endpoints are exposed as tools.
+    If not specified, all endpoints are included.
+    -}
     }
     deriving (Show, Eq)
 
--- | Runtime state for an OpenAPI toolbox.
---
--- The toolbox maintains:
--- * A name for identification
--- * The base URL for API calls
--- * A list of available tools (filtered by configFilter if provided)
--- * A name mapping for LLM-safe tool names
--- * The HTTP runtime for making requests
--- * An optional header function for dynamic auth headers
+{- | Runtime state for an OpenAPI toolbox.
+
+The toolbox maintains:
+* A name for identification
+* The base URL for API calls
+* A list of available tools (filtered by configFilter if provided)
+* A name mapping for LLM-safe tool names
+* The HTTP runtime for making requests
+* An optional header function for dynamic auth headers
+-}
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxBaseUrl :: Text
@@ -228,50 +232,53 @@ data Toolbox = Toolbox
 -- URL Helpers
 -- -------------------------------------------------------------------------
 
--- | Check if a URL is a file:// URL.
---
--- Example:
---
--- >>> isFileUrl "file:///path/to/spec.json"
--- True
---
--- >>> isFileUrl "https://api.example.com/openapi.json"
--- False
+{- | Check if a URL is a file:// URL.
+
+Example:
+
+>>> isFileUrl "file:///path/to/spec.json"
+True
+
+>>> isFileUrl "https://api.example.com/openapi.json"
+False
+-}
 isFileUrl :: Text -> Bool
 isFileUrl url = Text.isPrefixOf "file://" url
 
--- | Convert a file:// URL to a file path.
---
--- Handles both "file:///absolute/path" and "file://relative/path" formats.
---
--- Example:
---
--- >>> fileUrlToPath "file:///home/user/spec.json"
--- "/home/user/spec.json"
---
--- >>> fileUrlToPath "file://spec.json"
--- "spec.json"
+{- | Convert a file:// URL to a file path.
+
+Handles both "file:///absolute/path" and "file://relative/path" formats.
+
+Example:
+
+>>> fileUrlToPath "file:///home/user/spec.json"
+"/home/user/spec.json"
+
+>>> fileUrlToPath "file://spec.json"
+"spec.json"
+-}
 fileUrlToPath :: Text -> FilePath
 fileUrlToPath url =
-    let withoutPrefix = Text.drop 7 url  -- Drop "file://"
-    in Text.unpack withoutPrefix
+    let withoutPrefix = Text.drop 7 url -- Drop "file://"
+     in Text.unpack withoutPrefix
 
 -- -------------------------------------------------------------------------
 -- Initialization
 -- -------------------------------------------------------------------------
 
--- | Initialize an OpenAPI toolbox from a configuration.
---
--- This function:
--- 1. Creates an HTTP runtime with authentication
--- 2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
--- 3. Parses the JSON to an OpenAPISpec
--- 4. Dereferences schema references ($ref)
--- 5. Converts operations to tools
--- 6. Applies the optional filter to subset tools (using 'matchesOpenAPITool')
--- 7. Builds the name mapping for LLM-safe names
---
--- Returns an 'InitializationError' if any step fails.
+{- | Initialize an OpenAPI toolbox from a configuration.
+
+This function:
+1. Creates an HTTP runtime with authentication
+2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
+3. Parses the JSON to an OpenAPISpec
+4. Dereferences schema references ($ref)
+5. Converts operations to tools
+6. Applies the optional filter to subset tools (using 'matchesOpenAPITool')
+7. Builds the name mapping for LLM-safe names
+
+Returns an 'InitializationError' if any step fails.
+-}
 initializeToolbox ::
     Tracer IO Trace ->
     Config ->
@@ -304,7 +311,7 @@ initializeToolbox tracer config = do
                     let filteredTools = case config.configFilter of
                             Nothing -> allTools
                             Just predicate -> filter (matchesOpenAPITool predicate) allTools
-                    
+
                     -- Trace filtering results
                     runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
 
@@ -312,20 +319,23 @@ initializeToolbox tracer config = do
                     let nameMapping = buildToolNameMapping toolboxName filteredTools
 
                     -- Trace name normalizations (for debugging)
-                    mapM_ (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m)))
-                          (Map.elems nameMapping)
+                    mapM_
+                        (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m)))
+                        (Map.elems nameMapping)
 
                     -- Create toolbox
-                    pure $ Right $ Toolbox
-                        { toolboxName = toolboxName
-                        , toolboxBaseUrl = config.configBaseUrl
-                        , toolboxTools = filteredTools
-                        , toolboxNameMapping = nameMapping
-                        , httpRuntime = runtime
-                        , headerFunc = Nothing
-                        , staticHeaders = config.configHeaders
-                        , toolboxFilter = config.configFilter
-                        }
+                    pure $
+                        Right $
+                            Toolbox
+                                { toolboxName = toolboxName
+                                , toolboxBaseUrl = config.configBaseUrl
+                                , toolboxTools = filteredTools
+                                , toolboxNameMapping = nameMapping
+                                , httpRuntime = runtime
+                                , headerFunc = Nothing
+                                , staticHeaders = config.configHeaders
+                                , toolboxFilter = config.configFilter
+                                }
   where
     toolboxName = extractToolboxName config.configUrl
 
@@ -334,14 +344,15 @@ extractToolboxName :: Text -> Text
 extractToolboxName url =
     let withoutProtocol = Text.dropWhile (/= '/') $ Text.drop 8 url
         hostPart = Text.takeWhile (/= '/') withoutProtocol
-    in if Text.null hostPart
-       then "openapi"
-       else normalizeForLLM hostPart
+     in if Text.null hostPart
+            then "openapi"
+            else normalizeForLLM hostPart
 
--- | Fetch the OpenAPI spec from a URL or file.
---
--- Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
--- the spec is read directly from the filesystem.
+{- | Fetch the OpenAPI spec from a URL or file.
+
+Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
+the spec is read directly from the filesystem.
+-}
 fetchSpec ::
     Tracer IO Trace ->
     HttpClient.Runtime ->
@@ -384,19 +395,20 @@ fetchSpecFromUrl tracer runtime url = do
             let status = HttpTypes.statusCode (HttpClient.responseStatus response)
                 body = HttpClient.responseBody response
              in do
-                runTracer tracer (SpecFetchedTrace status)
-                pure $ Right body
+                    runTracer tracer (SpecFetchedTrace status)
+                    pure $ Right body
 
 -- -------------------------------------------------------------------------
 -- Tool Lookup
 -- -------------------------------------------------------------------------
 
--- | Get a tool by its normalized LLM name.
---
--- This is used during tool execution to find the original tool
--- when the LLM calls a tool by its normalized name.
---
--- Returns 'Nothing' if no tool with that normalized name exists.
+{- | Get a tool by its normalized LLM name.
+
+This is used during tool execution to find the original tool
+when the LLM calls a tool by its normalized name.
+
+Returns 'Nothing' if no tool with that normalized name exists.
+-}
 getToolByNormalizedName ::
     Toolbox ->
     Text ->
@@ -411,10 +423,11 @@ getToolByNormalizedName toolbox normalizedName = do
 -- Tool Handler Creation
 -- -------------------------------------------------------------------------
 
--- | Creates a handler function for an OpenAPI tool.
---
--- This handler integrates with the ToolExecutionContext system and
--- returns results in the standard CallResult format.
+{- | Creates a handler function for an OpenAPI tool.
+
+This handler integrates with the ToolExecutionContext system and
+returns results in the standard CallResult format.
+-}
 createToolHandler ::
     Toolbox ->
     OpenAPITool ->
@@ -437,16 +450,17 @@ createToolHandler toolbox tool tracer _ctx args = do
         -- For now, we just don't trace these events to the main tool tracer
         pure ()
 
--- | Handle a tool call by executing the HTTP request.
---
--- This function:
--- 1. Extracts path params (prefixed with p_)
--- 2. Extracts query params (prefixed with p_)
--- 3. Extracts body (param "b")
--- 4. Formats the path with path args
--- 5. Builds full URL
--- 6. Makes HTTP request
--- 7. Returns result
+{- | Handle a tool call by executing the HTTP request.
+
+This function:
+1. Extracts path params (prefixed with p_)
+2. Extracts query params (prefixed with p_)
+3. Extracts body (param "b")
+4. Formats the path with path args
+5. Builds full URL
+6. Makes HTTP request
+7. Returns result
+-}
 handleToolCall ::
     Toolbox ->
     OpenAPITool ->
@@ -496,7 +510,8 @@ extractParams obj op =
           where
             extractPathParam k (String v) acc
                 | Just p <- findParam params (Text.drop 2 k)
-                , paramIn p == ParamInPath = Map.insert (Text.drop 2 k) v acc
+                , paramIn p == ParamInPath =
+                    Map.insert (Text.drop 2 k) v acc
             extractPathParam _ _ acc = acc
 
         -- Extract query params
@@ -504,10 +519,12 @@ extractParams obj op =
           where
             extractQueryParam k (String v) acc
                 | Just p <- findParam params (Text.drop 2 k)
-                , paramIn p == ParamInQuery = Map.insert (Text.drop 2 k) v acc
+                , paramIn p == ParamInQuery =
+                    Map.insert (Text.drop 2 k) v acc
             extractQueryParam k v acc
                 | Just p <- findParam params (Text.drop 2 k)
-                , paramIn p == ParamInQuery = Map.insert (Text.drop 2 k) (valueToText v) acc
+                , paramIn p == ParamInQuery =
+                    Map.insert (Text.drop 2 k) (valueToText v) acc
             extractQueryParam _ _ acc = acc
 
         -- Extract body
@@ -533,17 +550,18 @@ valueToText _ = ""
 -- Path Formatting
 -- -------------------------------------------------------------------------
 
--- | Format a path template with path parameters.
---
--- Converts a path like @/pets/{petId}@ with @{p_petId: "123"}@ to @/pets/123@.
---
--- Example:
---
--- >>> formatPath "/pets/{petId}" (Map.fromList [("petId", "123")])
--- "/pets/123"
---
--- >>> formatPath "/pets/{petId}/owners/{ownerId}" (Map.fromList [("petId", "123"), ("ownerId", "456")])
--- "/pets/123/owners/456"
+{- | Format a path template with path parameters.
+
+Converts a path like @/pets/{petId}@ with @{p_petId: "123"}@ to @/pets/123@.
+
+Example:
+
+>>> formatPath "/pets/{petId}" (Map.fromList [("petId", "123")])
+"/pets/123"
+
+>>> formatPath "/pets/{petId}/owners/{ownerId}" (Map.fromList [("petId", "123"), ("ownerId", "456")])
+"/pets/123/owners/456"
+-}
 formatPath :: Path -> Map Text Text -> Path
 formatPath pathTemplate pathArgs =
     Map.foldrWithKey replaceParam pathTemplate pathArgs
@@ -611,11 +629,12 @@ buildRequest method fullUrl queryParams mbody headers = do
 
     pure finalReq
 
--- | Execute an HTTP request with custom headers.
---
--- This function builds a request with all parameters (method, URL, query params,
--- body, and custom headers) and executes it using the runtime's 'runRequest'
--- function.
+{- | Execute an HTTP request with custom headers.
+
+This function builds a request with all parameters (method, URL, query params,
+body, and custom headers) and executes it using the runtime's 'runRequest'
+function.
+-}
 executeRequest ::
     HttpClient.Runtime ->
     Method ->
@@ -640,9 +659,10 @@ executeRequest runtime method fullUrl queryParams mbody headers = do
 -- Response Handling
 -- -------------------------------------------------------------------------
 
--- | Handle an HTTP response, converting to ToolResult.
---
--- Returns both text for the LLM and a structured ToolResult.
+{- | Handle an HTTP response, converting to ToolResult.
+
+Returns both text for the LLM and a structured ToolResult.
+-}
 handleResponse ::
     (Method, Text) ->
     HttpClient.Response LByteString.ByteString ->
@@ -658,26 +678,30 @@ handleResponse (method, url) response = do
 
     -- Create text representation for LLM
     let textResult =
-            "HTTP " <> Text.pack (show status) <> "\n"
+            "HTTP "
+                <> Text.pack (show status)
+                <> "\n"
                 <> Text.decodeUtf8 (LByteString.toStrict body)
 
-    pure $ Right
-        ( textResult
-        , ToolResult
-            { resultPath = url
-            , resultMethod = method
-            , resultStatus = status
-            , resultPayload = payload
-            }
-        )
+    pure $
+        Right
+            ( textResult
+            , ToolResult
+                { resultPath = url
+                , resultMethod = method
+                , resultStatus = status
+                , resultPayload = payload
+                }
+            )
 
 -- -------------------------------------------------------------------------
 -- Operation helpers
 -- -------------------------------------------------------------------------
 
--- | Get operation ID from operation, falling back to tool name.
---
--- This is used for tool registration when creating unique tool names.
+{- | Get operation ID from operation, falling back to tool name.
+
+This is used for tool registration when creating unique tool names.
+-}
 getOperationId :: Operation -> Maybe Text
 getOperationId = opOperationId
 
@@ -685,36 +709,37 @@ getOperationId = opOperationId
 -- Naming helpers
 -- -------------------------------------------------------------------------
 
--- | Normalize a tool name for LLM compatibility.
---
--- This is a re-export of 'normalizeForLLM' for convenience.
+{- | Normalize a tool name for LLM compatibility.
+
+This is a re-export of 'normalizeForLLM' for convenience.
+-}
 normalizeToolName :: Text -> Text
 normalizeToolName = normalizeForLLM
 
--- | Convert an OpenAPI operation ID to an LLM tool name.
---
--- Names are prefixed with @openapi_@ and include the normalized toolbox name
--- and normalized operation ID to avoid conflicts and ensure LLM compatibility.
---
--- The operation ID is normalized to replace invalid characters:
--- - Dots (.) become underscores (_)
--- - Slashes (/) become underscores (_)
--- - Other invalid characters become underscores
--- - Names starting with digits are prefixed with 't'
---
--- Example:
---
--- >>> openapi2LLMName "myApi" "getPet"
--- ToolName {getToolName = "openapi_myApi_getPet"}
---
--- >>> openapi2LLMName "myApi" "pet.findByStatus"
--- ToolName {getToolName = "openapi_myApi_pet_findByStatus"}
---
--- >>> openapi2LLMName "myApi" "2.0/getPet"
--- ToolName {getToolName = "openapi_myApi_t2_0_getPet"}
+{- | Convert an OpenAPI operation ID to an LLM tool name.
+
+Names are prefixed with @openapi_@ and include the normalized toolbox name
+and normalized operation ID to avoid conflicts and ensure LLM compatibility.
+
+The operation ID is normalized to replace invalid characters:
+- Dots (.) become underscores (_)
+- Slashes (/) become underscores (_)
+- Other invalid characters become underscores
+- Names starting with digits are prefixed with 't'
+
+Example:
+
+>>> openapi2LLMName "myApi" "getPet"
+ToolName {getToolName = "openapi_myApi_getPet"}
+
+>>> openapi2LLMName "myApi" "pet.findByStatus"
+ToolName {getToolName = "openapi_myApi_pet_findByStatus"}
+
+>>> openapi2LLMName "myApi" "2.0/getPet"
+ToolName {getToolName = "openapi_myApi_t2_0_getPet"}
+-}
 openapi2LLMName :: Text -> Text -> OpenAI.ToolName
 openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
-    in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
-
+     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)

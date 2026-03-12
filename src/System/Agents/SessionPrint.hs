@@ -1,26 +1,31 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
--- | Module for printing session files in markdown format.
---
--- This module provides functionality to load and format session JSON files
--- as readable markdown output. It is used by the @session-print@ CLI command.
-module System.Agents.SessionPrint
-    ( -- * Options
-      SessionPrintOptions (..)
-    , OrderPreference (..)
-    , PrintVisibility (..)
-    , PrintAmount (..)
-      -- * Main handler
-    , handleSessionPrint
-      -- * Formatting functions
-    , formatSessionAsMarkdown
-      -- * Statistics
-    , SessionStatistics (..)
-    , calculateStatistics
-      -- * Elision
-    , elideDocument
-    ) where
+{- | Module for printing session files in markdown format.
+
+This module provides functionality to load and format session JSON files
+as readable markdown output. It is used by the @session-print@ CLI command.
+-}
+module System.Agents.SessionPrint (
+    -- * Options
+    SessionPrintOptions (..),
+    OrderPreference (..),
+    PrintVisibility (..),
+    PrintAmount (..),
+
+    -- * Main handler
+    handleSessionPrint,
+
+    -- * Formatting functions
+    formatSessionAsMarkdown,
+
+    -- * Statistics
+    SessionStatistics (..),
+    calculateStatistics,
+
+    -- * Elision
+    elideDocument,
+) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
@@ -41,45 +46,51 @@ import qualified System.Agents.Session.Base as Session
 
 -- | Preference for ordering session steps.
 data OrderPreference
-    = Chronological       -- ^ Oldest first (earlier steps shown first)
-    | Antichronological   -- ^ Newest first (recent steps shown first)
+    = -- | Oldest first (earlier steps shown first)
+      Chronological
+    | -- | Newest first (recent steps shown first)
+      Antichronological
     deriving (Show, Eq)
 
 -- | Amount of content to print (either in lines or characters).
 data PrintAmount
-    = Lines Int  -- ^ Number of lines to keep
-    | Chars Int  -- ^ Number of characters to keep
+    = -- | Number of lines to keep
+      Lines Int
+    | -- | Number of characters to keep
+      Chars Int
     deriving (Show, Eq)
 
--- | Visibility preference for displaying content.
---
--- - 'Hidden': Don't show the content at all
--- - 'Elided leading trailing': Show leading and trailing portions, eliding the middle
--- - 'ShownFull': Show the complete content
+{- | Visibility preference for displaying content.
+
+- 'Hidden': Don't show the content at all
+- 'Elided leading trailing': Show leading and trailing portions, eliding the middle
+- 'ShownFull': Show the complete content
+-}
 data PrintVisibility
     = Hidden
-    | Elided PrintAmount PrintAmount  -- ^ Keep leading amount and trailing amount
+    | -- | Keep leading amount and trailing amount
+      Elided PrintAmount PrintAmount
     | ShownFull
     deriving (Show, Eq)
 
 -- | Options for controlling the session print output.
 data SessionPrintOptions = SessionPrintOptions
-    { -- | Path to the session JSON file to print
-      sessionPrintFile :: FilePath
-      -- | How to display tool call results in the output
+    { sessionPrintFile :: FilePath
+    -- ^ Path to the session JSON file to print
     , showToolCallResults :: PrintVisibility
-      -- | How to display tool call arguments in the output
+    -- ^ How to display tool call results in the output
     , showToolCallArguments :: PrintVisibility
-      -- | Optional limit on the number of turns to display
+    -- ^ How to display tool call arguments in the output
     , nTurns :: Maybe Int
-      -- | Whether to repeat the system prompt at each turn
+    -- ^ Optional limit on the number of turns to display
     , repeatSystemPrompt :: Bool
-      -- | Whether to repeat the available tools at each turn
+    -- ^ Whether to repeat the system prompt at each turn
     , repeatTools :: Bool
-      -- | Order preference for displaying session steps
+    -- ^ Whether to repeat the available tools at each turn
     , orderPreference :: OrderPreference
-      -- | Whether to skip the ASCII art logo stamp in the header
+    -- ^ Order preference for displaying session steps
     , noFunnyStamp :: Bool
+    -- ^ Whether to skip the ASCII art logo stamp in the header
     }
 
 -- | Statistics about a session.
@@ -93,26 +104,29 @@ data SessionStatistics = SessionStatistics
     , statOutputBytes :: Int
     , statReasoningBytes :: Int
     , statTotalBytes :: Int
-    } deriving (Show, Eq)
+    }
+    deriving (Show, Eq)
 
 -- | Default ASCII art logo for the session report header.
 defaultLogo :: Text.Text
-defaultLogo = Text.intercalate "\n"
-    [ "```"
-    , "    λλ"
-    , "   λ⊙λ⊙"
-    , "  λλλλλλ"
-    , " λλλλλλλλ"
-    , "    λλ"
-    , "    λλ"
-    , "    λλ"
-    , "    λλ"
-    , "    λλ"
-    , "    λλ"
-    , "    λλ"
-    , "    λλ"
-    , "```"
-    ]
+defaultLogo =
+    Text.intercalate
+        "\n"
+        [ "```"
+        , "    λλ"
+        , "   λ⊙λ⊙"
+        , "  λλλλλλ"
+        , " λλλλλλλλ"
+        , "    λλ"
+        , "    λλ"
+        , "    λλ"
+        , "    λλ"
+        , "    λλ"
+        , "    λλ"
+        , "    λλ"
+        , "    λλ"
+        , "```"
+        ]
 
 -- | Handle the session-print command: load a session file and output it as markdown.
 handleSessionPrint :: SessionPrintOptions -> IO ()
@@ -125,23 +139,24 @@ handleSessionPrint opts = do
             let markdown = formatSessionAsMarkdown opts session
             Text.putStr markdown
 
--- | Elide a document by keeping leading and trailing portions.
---
--- This function intelligently handles overlapping regions. For example, if a
--- document is 7 lines long and we request @Elided (Lines 5) (Lines 5)@, all
--- 7 lines will be displayed (not duplicated).
---
--- >>> elideDocument (Lines 3) (Lines 3) "line1\nline2\nline3\nline4\nline5\nline6\nline7"
--- "line1\nline2\nline3\nline4\nline5\nline6\nline7"
---
--- >>> elideDocument (Lines 2) (Lines 2) "line1\nline2\nline3\nline4\nline5"
--- "line1\nline2\n... (1 line elided) ...\nline4\nline5"
---
--- >>> elideDocument (Chars 10) (Chars 5) "Hello, world! This is a test."
--- "Hello, wor... (elided 14 chars) ...test."
---
--- >>> elideDocument (Lines 100) (Lines 100) "short text"
--- "short text"
+{- | Elide a document by keeping leading and trailing portions.
+
+This function intelligently handles overlapping regions. For example, if a
+document is 7 lines long and we request @Elided (Lines 5) (Lines 5)@, all
+7 lines will be displayed (not duplicated).
+
+>>> elideDocument (Lines 3) (Lines 3) "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+"line1\nline2\nline3\nline4\nline5\nline6\nline7"
+
+>>> elideDocument (Lines 2) (Lines 2) "line1\nline2\nline3\nline4\nline5"
+"line1\nline2\n... (1 line elided) ...\nline4\nline5"
+
+>>> elideDocument (Chars 10) (Chars 5) "Hello, world! This is a test."
+"Hello, wor... (elided 14 chars) ...test."
+
+>>> elideDocument (Lines 100) (Lines 100) "short text"
+"short text"
+-}
 elideDocument :: PrintAmount -> PrintAmount -> Text.Text -> Text.Text
 elideDocument _ _ "" = ""
 elideDocument leading trailing content =
@@ -153,13 +168,13 @@ elideDocument leading trailing content =
             let lines' = Text.lines content
                 leadingLines = take n lines'
                 leadingChars = sum (map Text.length leadingLines) + length leadingLines
-            in elideChars leadingChars m content
+             in elideChars leadingChars m content
         (Chars n, Lines m) ->
             -- Convert trailing lines to chars for consistent handling
             let lines' = Text.lines content
                 trailingLines = take m (reverse lines')
                 trailingChars = sum (map Text.length trailingLines) + length trailingLines
-            in elideChars n trailingChars content
+             in elideChars n trailingChars content
 
 -- | Elide by lines, handling overlaps intelligently.
 elideLines :: Int -> Int -> Text.Text -> Text.Text
@@ -171,18 +186,19 @@ elideLines leadingCount trailingCount content =
         actualTrailing = min trailingCount totalLines
         -- Check for overlap
         overlap = actualLeading + actualTrailing - totalLines
-    in if overlap >= 0
-        then Text.intercalate "\n" lines'  -- No elision needed
-        else
-            let leading = take actualLeading lines'
-                trailing = drop (totalLines - actualTrailing) lines'
-                elidedCount = totalLines - actualLeading - actualTrailing
-            in Text.intercalate "\n" leading
-                <> "\n... ("
-                <> Text.pack (show elidedCount)
-                <> " line" <> (if elidedCount == 1 then "" else "s")
-                <> " elided) ...\n"
-                <> Text.intercalate "\n" trailing
+     in if overlap >= 0
+            then Text.intercalate "\n" lines' -- No elision needed
+            else
+                let leading = take actualLeading lines'
+                    trailing = drop (totalLines - actualTrailing) lines'
+                    elidedCount = totalLines - actualLeading - actualTrailing
+                 in Text.intercalate "\n" leading
+                        <> "\n... ("
+                        <> Text.pack (show elidedCount)
+                        <> " line"
+                        <> (if elidedCount == 1 then "" else "s")
+                        <> " elided) ...\n"
+                        <> Text.intercalate "\n" trailing
 
 -- | Elide by characters, handling overlaps intelligently.
 elideChars :: Int -> Int -> Text.Text -> Text.Text
@@ -193,51 +209,54 @@ elideChars leadingCount trailingCount content =
         actualTrailing = min trailingCount totalChars
         -- Check for overlap
         overlap = actualLeading + actualTrailing - totalChars
-    in if overlap >= 0
-        then content  -- No elision needed
-        else
-            let leading = Text.take actualLeading content
-                trailing = Text.drop (totalChars - actualTrailing) content
-                elidedCount = totalChars - actualLeading - actualTrailing
-            in leading
-                <> "... (elided "
-                <> Text.pack (show elidedCount)
-                <> " char" <> (if elidedCount == 1 then "" else "s")
-                <> ") ..."
-                <> trailing
+     in if overlap >= 0
+            then content -- No elision needed
+            else
+                let leading = Text.take actualLeading content
+                    trailing = Text.drop (totalChars - actualTrailing) content
+                    elidedCount = totalChars - actualLeading - actualTrailing
+                 in leading
+                        <> "... (elided "
+                        <> Text.pack (show elidedCount)
+                        <> " char"
+                        <> (if elidedCount == 1 then "" else "s")
+                        <> ") ..."
+                        <> trailing
 
--- | Format a Session as markdown text.
---
--- The logic for processing steps is:
--- 1. First, number the steps (zip with [1..]) - preserves original step numbers
--- 2. Then, cut the n-latest steps if n-turns limit is specified
--- 3. Then, reverse or not depending on the order preference
--- 4. Finally, traverse and print
+{- | Format a Session as markdown text.
+
+The logic for processing steps is:
+1. First, number the steps (zip with [1..]) - preserves original step numbers
+2. Then, cut the n-latest steps if n-turns limit is specified
+3. Then, reverse or not depending on the order preference
+4. Finally, traverse and print
+-}
 formatSessionAsMarkdown :: SessionPrintOptions -> Session.Session -> Text.Text
 formatSessionAsMarkdown opts session =
-    let -- Session turns are stored newest-first (last turn is first in the list)
+    let
+        -- Session turns are stored newest-first (last turn is first in the list)
         -- Step 1: Number the steps with their original position
         -- We reverse first to get chronological order for numbering, then zip
-        numberedChronological = zip [(1 :: Int)..] (reverse session.turns)
-        
+        numberedChronological = zip [(1 :: Int) ..] (reverse session.turns)
+
         -- Step 2: Apply n-turns limit (takes the last N steps in chronological order = most recent)
         limitedTurns = case opts.nTurns of
             Just n -> takeLast n numberedChronological
             Nothing -> numberedChronological
-        
+
         -- Step 3: Apply ordering preference
         orderedTurns = case opts.orderPreference of
-            Chronological -> limitedTurns  -- Already in chronological order
-            Antichronological -> reverse limitedTurns  -- Newest first
-        
+            Chronological -> limitedTurns -- Already in chronological order
+            Antichronological -> reverse limitedTurns -- Newest first
+
         -- Determine the first step number in display order for "is first turn" checks
         firstDisplayStepNum = case orderedTurns of
             [] -> Nothing
             ((n, _) : _) -> Just n
-        
+
         -- Calculate statistics for the full session
         stats = calculateStatistics session
-        
+
         mdHeader = formatHeader opts.noFunnyStamp
         sessionInfo = formatSessionInfo session
         statsSection = formatStatistics stats
@@ -245,9 +264,10 @@ formatSessionAsMarkdown opts session =
         limitNotice = case opts.nTurns of
             Just n -> "\n\n_(Showing last " <> Text.pack (show n) <> " turns)_\n"
             Nothing -> ""
-    in mdHeader <> sessionInfo <> "\n---\n\n" <> statsSection <> "\n---\n\n" <> turnsSection <> limitNotice
+     in
+        mdHeader <> sessionInfo <> "\n---\n\n" <> statsSection <> "\n---\n\n" <> turnsSection <> limitNotice
   where
-    -- | Take the last n elements from a list
+    -- \| Take the last n elements from a list
     takeLast :: Int -> [a] -> [a]
     takeLast n xs = drop (max 0 (length xs - n)) xs
 
@@ -260,14 +280,14 @@ formatHeader skipLogo =
   where
     logoLines = Text.lines defaultLogo
     titleLines = "# 📋 Session Report" : repeat ""
-    
+
     -- Combine a logo line with a title line, padding the logo to align nicely
     combineLogoLine :: Text.Text -> Text.Text -> Text.Text
     combineLogoLine logoLine titleLine =
         let paddedLogo = Text.justifyLeft 20 ' ' logoLine
-        in if Text.null titleLine
-            then paddedLogo
-            else paddedLogo <> "  " <> titleLine
+         in if Text.null titleLine
+                then paddedLogo
+                else paddedLogo <> "  " <> titleLine
 
 -- | Calculate statistics for a session.
 calculateStatistics :: Session.Session -> SessionStatistics
@@ -276,39 +296,39 @@ calculateStatistics session =
         totalTurns = length turns
         userTurns = length [() | Session.UserTurn _ _ <- turns]
         llmTurns = length [() | Session.LlmTurn _ _ <- turns]
-        
+
         -- Collect all LLM turn contents to extract tool calls
         llmTurnContents = [tc | Session.LlmTurn tc _ <- turns]
         allToolCalls = concatMap Session.llmToolCalls llmTurnContents
         toolCallCount = length allToolCalls
         toolCallsByName = countToolCallsByName allToolCalls
-        
+
         -- Calculate byte counts
         (inputBytes, outputBytes, reasoningBytes) = calculateByteCounts turns
         totalBytes = inputBytes + outputBytes + reasoningBytes
-    in SessionStatistics
-        { statTotalTurns = totalTurns
-        , statUserTurns = userTurns
-        , statLlmTurns = llmTurns
-        , statTotalToolCalls = toolCallCount
-        , statToolCallsByName = toolCallsByName
-        , statInputBytes = inputBytes
-        , statOutputBytes = outputBytes
-        , statReasoningBytes = reasoningBytes
-        , statTotalBytes = totalBytes
-        }
+     in SessionStatistics
+            { statTotalTurns = totalTurns
+            , statUserTurns = userTurns
+            , statLlmTurns = llmTurns
+            , statTotalToolCalls = toolCallCount
+            , statToolCallsByName = toolCallsByName
+            , statInputBytes = inputBytes
+            , statOutputBytes = outputBytes
+            , statReasoningBytes = reasoningBytes
+            , statTotalBytes = totalBytes
+            }
 
 -- | Count tool calls by name.
 countToolCallsByName :: [Session.LlmToolCall] -> Map Text.Text Int
 countToolCallsByName toolCalls =
     let toolNames = map extractToolCallName toolCalls
-    in Map.fromListWith (+) [(name, 1) | name <- toolNames, name /= "(unnamed)"]
+     in Map.fromListWith (+) [(name, 1) | name <- toolNames, name /= "(unnamed)"]
 
 -- | Calculate byte counts for input, output, and reasoning.
 calculateByteCounts :: [Session.Turn] -> (Int, Int, Int)
 calculateByteCounts turns =
     let (inputBytes, outputBytes, reasoningBytes) = foldr countTurn (0, 0, 0) turns
-    in (inputBytes, outputBytes, reasoningBytes)
+     in (inputBytes, outputBytes, reasoningBytes)
   where
     countTurn :: Session.Turn -> (Int, Int, Int) -> (Int, Int, Int)
     countTurn (Session.UserTurn utc _mUsage) (inp, out, reas) =
@@ -316,70 +336,78 @@ calculateByteCounts turns =
                 Session.SystemPrompt sp -> sp
             queryBytes = maybe 0 (textBytes . unwrapQuery) utc.userQuery
             toolRespBytes = sum [textBytes $ formatJsonAsText r | (_, Session.UserToolResponse r) <- utc.userToolResponses]
-        in (inp + userBytes + queryBytes + toolRespBytes, out, reas)
+         in (inp + userBytes + queryBytes + toolRespBytes, out, reas)
     countTurn (Session.LlmTurn ltc _mUsage) (inp, out, reas) =
         let response = ltc.llmResponse
             outBytes = maybe 0 textBytes response.responseText
             reasBytes = maybe 0 textBytes response.responseThinking
-        in (inp, out + outBytes, reas + reasBytes)
-    
+         in (inp, out + outBytes, reas + reasBytes)
+
     textBytes :: Text.Text -> Int
     textBytes = BS.length . Text.encodeUtf8
-    
+
     unwrapQuery :: Session.UserQuery -> Text.Text
     unwrapQuery (Session.UserQuery q) = q
 
 -- | Format statistics as markdown.
 formatStatistics :: SessionStatistics -> Text.Text
 formatStatistics stats =
-    "## 📊 Statistics\n\n" <>
-    "### Turn Counts\n\n" <>
-    "| Metric | Value |\n" <>
-    "|--------|-------|\n" <>
-    "| Total Turns | " <> Text.pack (show (statTotalTurns stats :: Int)) <> " |\n" <>
-    "| 👤 User Turns | " <> Text.pack (show (statUserTurns stats :: Int)) <> " |\n" <>
-    "| 🤖 LLM Turns | " <> Text.pack (show (statLlmTurns stats :: Int)) <> " |\n" <>
-    "\n### 🔧 Tool Calls\n\n" <>
-    "**Total Tool Calls:** " <> Text.pack (show (statTotalToolCalls stats :: Int)) <> "\n\n" <>
-    formatToolCallStats stats.statToolCallsByName <>
-    "\n### 💾 Byte Usage\n\n" <>
-    formatByteChart stats
+    "## 📊 Statistics\n\n"
+        <> "### Turn Counts\n\n"
+        <> "| Metric | Value |\n"
+        <> "|--------|-------|\n"
+        <> "| Total Turns | "
+        <> Text.pack (show (statTotalTurns stats :: Int))
+        <> " |\n"
+        <> "| 👤 User Turns | "
+        <> Text.pack (show (statUserTurns stats :: Int))
+        <> " |\n"
+        <> "| 🤖 LLM Turns | "
+        <> Text.pack (show (statLlmTurns stats :: Int))
+        <> " |\n"
+        <> "\n### 🔧 Tool Calls\n\n"
+        <> "**Total Tool Calls:** "
+        <> Text.pack (show (statTotalToolCalls stats :: Int))
+        <> "\n\n"
+        <> formatToolCallStats stats.statToolCallsByName
+        <> "\n### 💾 Byte Usage\n\n"
+        <> formatByteChart stats
 
 -- | Format tool call statistics with bar chart.
 formatToolCallStats :: Map Text.Text Int -> Text.Text
 formatToolCallStats toolMap
     | Map.null toolMap = "_No tool calls recorded_\n"
-    | otherwise = 
+    | otherwise =
         let maxCount = maximum (Map.elems toolMap)
             sortedTools = sortOn (negate . snd) (Map.toList toolMap)
-        in Text.intercalate "\n\n" $ map (formatToolBar maxCount) sortedTools <> [""]
+         in Text.intercalate "\n\n" $ map (formatToolBar maxCount) sortedTools <> [""]
 
 -- | Format a single tool bar in the chart.
 formatToolBar :: Int -> (Text.Text, Int) -> Text.Text
 formatToolBar maxCount (name, count) =
-    let barWidth = 60  -- Maximum width of the bar in characters
+    let barWidth = 60 -- Maximum width of the bar in characters
         filled = if maxCount == 0 then 0 else (count * barWidth) `div` maxCount
         bar = Text.replicate filled "█"
         label = Text.justifyLeft 20 ' ' name
         valueStr = Text.justifyRight 4 ' ' (Text.pack $ show count)
-    in "`" <> label <> "` " <> valueStr <> " " <> bar
+     in "`" <> label <> "` " <> valueStr <> " " <> bar
 
 -- | Format byte usage as bar chart.
 formatByteChart :: SessionStatistics -> Text.Text
 formatByteChart stats =
-    let categories = 
+    let categories =
             [ ("Input", statInputBytes stats)
             , ("Output", statOutputBytes stats)
             , ("Reasoning", statReasoningBytes stats)
             ]
         maxBytes = maximum (map snd categories)
         total = statTotalBytes stats
-    in if total == 0 
-       then "_No byte data recorded_\n"
-       else 
-           let chart = Text.intercalate "\n\n" $ map (formatByteBar maxBytes) categories
-               totalLine = "\n**Total:** " <> formatBytes total <> "\n"
-           in chart <> totalLine
+     in if total == 0
+            then "_No byte data recorded_\n"
+            else
+                let chart = Text.intercalate "\n\n" $ map (formatByteBar maxBytes) categories
+                    totalLine = "\n**Total:** " <> formatBytes total <> "\n"
+                 in chart <> totalLine
 
 -- | Format a single byte bar in the chart.
 formatByteBar :: Int -> (Text.Text, Int) -> Text.Text
@@ -389,7 +417,7 @@ formatByteBar maxBytes (label, bytes) =
         bar = Text.replicate filled "█"
         label' = Text.justifyLeft 10 ' ' label
         valueStr = Text.justifyRight 10 ' ' (formatBytes bytes)
-    in "`" <> label' <> "` " <> valueStr <> " " <> bar
+     in "`" <> label' <> "` " <> valueStr <> " " <> bar
 
 -- | Format bytes in human-readable form.
 formatBytes :: Int -> Text.Text
@@ -402,75 +430,90 @@ formatBytes n
 -- | Format session metadata.
 formatSessionInfo :: Session.Session -> Text.Text
 formatSessionInfo session =
-    "**🔑 Session ID:** " <> formatSessionId session.sessionId <> "\n" <>
-    maybe "" (\sid -> "**🍴 Forked from:** " <> formatSessionId sid <> "\n") session.forkedFromSessionId
+    "**🔑 Session ID:** "
+        <> formatSessionId session.sessionId
+        <> "\n"
+        <> maybe "" (\sid -> "**🍴 Forked from:** " <> formatSessionId sid <> "\n") session.forkedFromSessionId
 
 -- | Extract UUID text from SessionId.
 formatSessionId :: Session.SessionId -> Text.Text
 formatSessionId (Session.SessionId uuid) = Text.pack $ show uuid
 
--- | Format all turns (already numbered and ordered).
--- The firstDisplayStepNum indicates which step number appears first in the output
--- (used for determining whether to show system prompt/tools on the first displayed turn).
+{- | Format all turns (already numbered and ordered).
+The firstDisplayStepNum indicates which step number appears first in the output
+(used for determining whether to show system prompt/tools on the first displayed turn).
+-}
 formatTurns :: SessionPrintOptions -> Maybe Int -> [(Int, Session.Turn)] -> Text.Text
 formatTurns opts firstDisplayStepNum turns =
     Text.intercalate "\n\n---\n\n" $ map (formatTurn opts firstDisplayStepNum) turns
 
 -- | Format a single turn with its original step number.
 formatTurn :: SessionPrintOptions -> Maybe Int -> (Int, Session.Turn) -> Text.Text
-formatTurn opts firstDisplayStepNum (stepNum, turn) = 
+formatTurn opts firstDisplayStepNum (stepNum, turn) =
     let isFirstTurn = Just stepNum == firstDisplayStepNum
-    in case turn of
-        Session.UserTurn content _mUsage ->
-            "## 👤 Step " <> Text.pack (show (stepNum :: Int)) <> ": User Turn\n\n" <>
-            formatUserTurn opts isFirstTurn content
-        Session.LlmTurn content _mUsage ->
-            "## 🤖 Step " <> Text.pack (show (stepNum :: Int)) <> ": LLM Turn\n\n" <>
-            formatLlmTurn opts content
+     in case turn of
+            Session.UserTurn content _mUsage ->
+                "## 👤 Step "
+                    <> Text.pack (show (stepNum :: Int))
+                    <> ": User Turn\n\n"
+                    <> formatUserTurn opts isFirstTurn content
+            Session.LlmTurn content _mUsage ->
+                "## 🤖 Step "
+                    <> Text.pack (show (stepNum :: Int))
+                    <> ": LLM Turn\n\n"
+                    <> formatLlmTurn opts content
 
--- | Format user turn content.
--- The 'isFirstTurn' parameter ensures that system prompt and tools are shown
--- at least once, even when 'repeatSystemPrompt' or 'repeatTools' is False.
+{- | Format user turn content.
+The 'isFirstTurn' parameter ensures that system prompt and tools are shown
+at least once, even when 'repeatSystemPrompt' or 'repeatTools' is False.
+-}
 formatUserTurn :: SessionPrintOptions -> Bool -> Session.UserTurnContent -> Text.Text
 formatUserTurn opts isFirstTurn content =
-    let -- Show system prompt if repeatSystemPrompt is True, or if it's the first turn
+    let
+        -- Show system prompt if repeatSystemPrompt is True, or if it's the first turn
         systemPromptSection = case content.userPrompt of
-            Session.SystemPrompt sp | opts.repeatSystemPrompt || isFirstTurn ->
-                "### 📝 System Prompt\n\n```\n" <> sp <> "```\n"
+            Session.SystemPrompt sp
+                | opts.repeatSystemPrompt || isFirstTurn ->
+                    "### 📝 System Prompt\n\n```\n" <> sp <> "```\n"
             _ -> ""
         querySection = case content.userQuery of
             Just (Session.UserQuery q) -> "\n### 💬 User Query\n\n" <> q <> "\n"
             Nothing -> ""
         -- Show tools if repeatTools is True, or if it's the first turn (and tools exist)
-        toolsSection = if null content.userTools
-            then ""
-            else if opts.repeatTools || isFirstTurn
-                then "\n### 🛠️ Available Tools\n\n" <> formatAvailableTools content.userTools
-                else ""
+        toolsSection =
+            if null content.userTools
+                then ""
+                else
+                    if opts.repeatTools || isFirstTurn
+                        then "\n### 🛠️ Available Tools\n\n" <> formatAvailableTools content.userTools
+                        else ""
         toolResponsesSection = case opts.showToolCallResults of
             Hidden -> ""
             _ | null content.userToolResponses -> ""
             _ -> "\n### 📥 Tool Responses\n\n" <> formatToolResponses opts.showToolCallResults content.userToolResponses
-    in systemPromptSection <> querySection <> toolsSection <> toolResponsesSection
+     in
+        systemPromptSection <> querySection <> toolsSection <> toolResponsesSection
 
 -- | Format LLM turn content.
 formatLlmTurn :: SessionPrintOptions -> Session.LlmTurnContent -> Text.Text
 formatLlmTurn opts content =
     let thinkingSection = case content.llmResponse.responseThinking of
             Just thinking ->
-                "### 💭 Thinking Process\n\n" <>
-                "<details>\n" <>
-                "<summary>Click to expand reasoning</summary>\n\n" <>
-                thinking <> "\n" <>
-                "</details>\n\n"
+                "### 💭 Thinking Process\n\n"
+                    <> "<details>\n"
+                    <> "<summary>Click to expand reasoning</summary>\n\n"
+                    <> thinking
+                    <> "\n"
+                    <> "</details>\n\n"
             Nothing -> ""
         responseSection = case content.llmResponse.responseText of
             Just txt -> "### 💬 Response\n\n" <> txt <> "\n"
             Nothing -> "### 💬 Response\n\n_(No text response)_\n"
-        toolCallsSection = if null content.llmToolCalls
-            then ""
-            else "\n### 🔧 Tool Calls\n\n" <> formatLlmToolCalls opts.showToolCallArguments content.llmToolCalls
-    in thinkingSection <> responseSection <> toolCallsSection
+        toolCallsSection =
+            if null content.llmToolCalls
+                then ""
+                else "\n### 🔧 Tool Calls\n\n" <> formatLlmToolCalls opts.showToolCallArguments content.llmToolCalls
+     in thinkingSection <> responseSection <> toolCallsSection
 
 -- | Format available tools (just names and descriptions).
 formatAvailableTools :: [Session.SystemTool] -> Text.Text
@@ -482,27 +525,33 @@ formatSystemTool :: Session.SystemTool -> Text.Text
 formatSystemTool (Session.SystemTool toolDef) = case toolDef of
     Session.V0 val -> "- **Tool (V0):** `" <> formatJsonAsText val <> "`"
     Session.V1 def ->
-        "- **" <> def.name <> "** (`" <> def.llmName <> "`)\n" <>
-        "  - Description: " <> def.description
+        "- **"
+            <> def.name
+            <> "** (`"
+            <> def.llmName
+            <> "`)\n"
+            <> "  - Description: "
+            <> def.description
 
 -- | Format LLM tool calls (names and optionally arguments).
 formatLlmToolCalls :: PrintVisibility -> [Session.LlmToolCall] -> Text.Text
 formatLlmToolCalls visibility calls =
     Text.intercalate "\n\n" $ map (formatLlmToolCall visibility) calls
 
--- | Format a single LLM tool call, extracting the name and optionally arguments.
---
--- Tool calls from OpenAI have the structure:
--- @
--- {
---   "id": "call_xxx",
---   "type": "function",
---   "function": {
---     "name": "tool_name",
---     "arguments": "{\"key\": \"value\"}"  -- Note: this is a STRING, not an object
---   }
--- }
--- @
+{- | Format a single LLM tool call, extracting the name and optionally arguments.
+
+Tool calls from OpenAI have the structure:
+@
+{
+  "id": "call_xxx",
+  "type": "function",
+  "function": {
+    "name": "tool_name",
+    "arguments": "{\"key\": \"value\"}"  -- Note: this is a STRING, not an object
+  }
+}
+@
+-}
 formatLlmToolCall :: PrintVisibility -> Session.LlmToolCall -> Text.Text
 formatLlmToolCall visibility (Session.LlmToolCall val) =
     case val of
@@ -514,50 +563,56 @@ formatLlmToolCall visibility (Session.LlmToolCall val) =
                             Just (Aeson.String n) -> n
                             _ -> "(unnamed)"
                         args = formatToolArguments visibility funcObj
-                    in "- **" <> toolName <> "**" <> args
+                     in "- **" <> toolName <> "**" <> args
                 _ -> case KeyMap.lookup "name" obj of
-                    Just (Aeson.String toolName) -> 
+                    Just (Aeson.String toolName) ->
                         let args = formatToolArgumentsDirect visibility obj
-                        in "- **" <> toolName <> "**" <> args
+                         in "- **" <> toolName <> "**" <> args
                     _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
         _ -> "- (unnamed tool call): `" <> formatJsonAsText val <> "`"
 
--- | Format tool arguments from the function object.
---
--- The 'arguments' field is stored as a JSON string (because that's how the OpenAI API
--- returns it), so we need to parse it first before pretty-printing.
+{- | Format tool arguments from the function object.
+
+The 'arguments' field is stored as a JSON string (because that's how the OpenAI API
+returns it), so we need to parse it first before pretty-printing.
+-}
 formatToolArguments :: PrintVisibility -> KeyMap.KeyMap Aeson.Value -> Text.Text
 formatToolArguments Hidden _ = ""
 formatToolArguments visibility funcObj =
     case KeyMap.lookup "arguments" funcObj of
-        Just argsVal -> 
-            let -- Parse arguments: if it's a string, try to parse as JSON; otherwise use as-is
+        Just argsVal ->
+            let
+                -- Parse arguments: if it's a string, try to parse as JSON; otherwise use as-is
                 parsedVal = parseArgumentsValue argsVal
                 formatted = formatJsonValuePretty parsedVal
                 elided = applyVisibility visibility formatted
                 byteCount = BS.length $ Text.encodeUtf8 formatted
-            in if Text.null elided
-                then ""
-                else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+             in
+                if Text.null elided
+                    then ""
+                    else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
         Nothing -> ""
 
--- | Format tool arguments directly from the tool call object.
---
--- Similar to 'formatToolArguments', handles the case where arguments are stored
--- as a JSON string rather than a JSON object.
+{- | Format tool arguments directly from the tool call object.
+
+Similar to 'formatToolArguments', handles the case where arguments are stored
+as a JSON string rather than a JSON object.
+-}
 formatToolArgumentsDirect :: PrintVisibility -> KeyMap.KeyMap Aeson.Value -> Text.Text
 formatToolArgumentsDirect Hidden _ = ""
 formatToolArgumentsDirect visibility obj =
     case KeyMap.lookup "arguments" obj of
-        Just argsVal -> 
-            let -- Parse arguments: if it's a string, try to parse as JSON; otherwise use as-is
+        Just argsVal ->
+            let
+                -- Parse arguments: if it's a string, try to parse as JSON; otherwise use as-is
                 parsedVal = parseArgumentsValue argsVal
                 formatted = formatJsonValuePretty parsedVal
                 elided = applyVisibility visibility formatted
                 byteCount = BS.length $ Text.encodeUtf8 formatted
-            in if Text.null elided
-                then ""
-                else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
+             in
+                if Text.null elided
+                    then ""
+                    else "\n\n  ```json\n  " <> Text.replace "\n" "\n  " elided <> "\n  ```\n  _(" <> formatBytes byteCount <> ")_"
         Nothing -> ""
 
 -- | Apply visibility settings to format content.
@@ -566,17 +621,18 @@ applyVisibility ShownFull content = content
 applyVisibility (Elided leading trailing) content = elideDocument leading trailing content
 applyVisibility Hidden _ = ""
 
--- | Parse an arguments value.
---
--- The OpenAI API returns tool call arguments as a JSON string (e.g., "{\"key\": \"value\"}").
--- This function attempts to parse such strings into proper JSON values for pretty-printing.
--- If parsing fails or the value is not a string, it returns the original value.
+{- | Parse an arguments value.
+
+The OpenAI API returns tool call arguments as a JSON string (e.g., "{\"key\": \"value\"}").
+This function attempts to parse such strings into proper JSON values for pretty-printing.
+If parsing fails or the value is not a string, it returns the original value.
+-}
 parseArgumentsValue :: Aeson.Value -> Aeson.Value
 parseArgumentsValue (Aeson.String txt) =
     -- Try to parse the string as JSON
     case Aeson.decode (BSL.fromStrict $ Text.encodeUtf8 txt) of
         Just val -> val
-        Nothing -> Aeson.String txt  -- Keep as string if parsing fails
+        Nothing -> Aeson.String txt -- Keep as string if parsing fails
 parseArgumentsValue other = other
 
 -- | Format a JSON value as pretty-printed text.
@@ -596,9 +652,9 @@ formatToolResponse visibility (call, Session.UserToolResponse response) =
         formatted = formatJsonValuePretty response
         elided = applyVisibility visibility formatted
         byteCount = BS.length $ Text.encodeUtf8 formatted
-    in if Text.null elided
-        then ""
-        else "**" <> callName <> "** response:\n```json\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
+     in if Text.null elided
+            then ""
+            else "**" <> callName <> "** response:\n```json\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
 
 -- | Extract tool name from a tool call.
 extractToolCallName :: Session.LlmToolCall -> Text.Text
@@ -618,5 +674,3 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
-
-

@@ -46,12 +46,12 @@ tracePrintingTextResponses = Tracer f
             Left _ -> pure ()
             Right rsp ->
                 let byteInfo = " [" <> formatBytes bytes <> "]"
-                in Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent] <> byteInfo
+                 in Text.putStrLn $ Text.unwords [Text.intercalate "/" pfx, Maybe.fromMaybe "..." rsp.rspContent] <> byteInfo
     g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_Conversation childSlug _ _ sub)) =
         g (childSlug : pfx) sub
     g _ (Runtime.ChildrenTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
-    g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) = 
+    g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) =
         Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
     g _ (Runtime.NewConversation) = pure ()
     g _ (Runtime.WaitingForPrompt) = pure ()
@@ -139,5 +139,3 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
-
-

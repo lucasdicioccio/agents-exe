@@ -31,7 +31,7 @@ exportSchemaVersion = "1.0.0"
 data ExportPackage = ExportPackage
     { packageMetadata :: PackageMetadata
     , packageAgents :: [AgentExport]
-    , packageTools :: [StandaloneToolExport]  -- standalone tools without agents
+    , packageTools :: [StandaloneToolExport] -- standalone tools without agents
     , packageMcpServers :: [McpServerExport]
     }
     deriving (Show, Eq, Generic)
@@ -75,7 +75,7 @@ instance ToJSON AgentExport where
             [ "config" .= ae.agentConfig
             , "tools" .= ae.agentTools
             ]
-            ++ maybe [] (\ns -> ["namespace" .= ns]) ae.agentNamespace
+                ++ maybe [] (\ns -> ["namespace" .= ns]) ae.agentNamespace
 
 instance FromJSON AgentExport where
     parseJSON = Aeson.withObject "AgentExport" $ \v ->
@@ -93,7 +93,7 @@ data ToolExport = ToolExport
     { toolName :: Text
     , toolContent :: ByteString
     , toolPermissions :: FileMode
-    , toolMetadata :: Maybe ScriptInfo  -- Cached metadata from describe
+    , toolMetadata :: Maybe ScriptInfo -- Cached metadata from describe
     , toolNamespace :: Maybe Text
     }
     deriving (Show, Eq, Generic)
@@ -105,8 +105,8 @@ instance ToJSON ToolExport where
             , "content_base64" .= Text.decodeUtf8 (B64.encode te.toolContent)
             , "permissions" .= show te.toolPermissions
             ]
-            ++ maybe [] (\ns -> ["namespace" .= ns]) te.toolNamespace
-            ++ maybe [] (\m -> ["metadata" .= m]) te.toolMetadata
+                ++ maybe [] (\ns -> ["namespace" .= ns]) te.toolNamespace
+                ++ maybe [] (\m -> ["metadata" .= m]) te.toolMetadata
 
 instance FromJSON ToolExport where
     parseJSON = Aeson.withObject "ToolExport" $ \v -> do
@@ -127,7 +127,7 @@ data StandaloneToolExport = StandaloneToolExport
     { standaloneToolInfo :: ScriptInfo
     , standaloneToolScript :: ByteString
     , standaloneToolPermissions :: FileMode
-    , standaloneToolAuxFiles :: [(FilePath, ByteString)]  -- Additional files like config, libs
+    , standaloneToolAuxFiles :: [(FilePath, ByteString)] -- Additional files like config, libs
     }
     deriving (Show, Eq, Generic)
 
@@ -184,7 +184,7 @@ instance ToJSON McpServerExport where
         Aeson.object $
             [ "config" .= mse.mcpConfig
             ]
-            ++ maybe [] (\ns -> ["namespace" .= ns]) mse.mcpNamespace
+                ++ maybe [] (\ns -> ["namespace" .= ns]) mse.mcpNamespace
 
 instance FromJSON McpServerExport where
     parseJSON = Aeson.withObject "McpServerExport" $ \v ->
@@ -197,10 +197,12 @@ instance FromJSON McpServerExport where
 -------------------------------------------------------------------------------
 
 data PackageMetadata = PackageMetadata
-    { packageVersion :: Text        -- ^ Schema version (e.g., "1.0.0")
+    { packageVersion :: Text
+    -- ^ Schema version (e.g., "1.0.0")
     , packageCreatedAt :: UTCTime
     , packageDescription :: Maybe Text
-    , packageSource :: Maybe Text   -- ^ Source URL or path
+    , packageSource :: Maybe Text
+    -- ^ Source URL or path
     }
     deriving (Show, Eq, Generic)
 
@@ -210,8 +212,8 @@ instance ToJSON PackageMetadata where
             [ "version" .= pm.packageVersion
             , "created_at" .= pm.packageCreatedAt
             ]
-            ++ maybe [] (\d -> ["description" .= d]) pm.packageDescription
-            ++ maybe [] (\s -> ["source" .= s]) pm.packageSource
+                ++ maybe [] (\d -> ["description" .= d]) pm.packageDescription
+                ++ maybe [] (\s -> ["source" .= s]) pm.packageSource
 
 instance FromJSON PackageMetadata where
     parseJSON = Aeson.withObject "PackageMetadata" $ \v ->
@@ -256,7 +258,7 @@ instance FromJSON ToolPackage where
 -------------------------------------------------------------------------------
 
 -- | Hierarchical namespace for organizing exports
-newtype Namespace = Namespace { unNamespace :: [Text] }
+newtype Namespace = Namespace {unNamespace :: [Text]}
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Namespace where
@@ -274,9 +276,9 @@ parseNamespace t
     | Text.null t = Left "Empty namespace"
     | otherwise =
         let parts = Text.split (== '.') t
-        in if all (not . Text.null) parts
-            then Right $ Namespace parts
-            else Left "Namespace parts cannot be empty"
+         in if all (not . Text.null) parts
+                then Right $ Namespace parts
+                else Left "Namespace parts cannot be empty"
 
 -- | Convert namespace to filesystem path
 namespaceToPath :: Namespace -> FilePath
@@ -387,23 +389,24 @@ data GitExportOptions = GitExportOptions
     deriving (Show, Eq)
 
 data GitImportOptions = GitImportOptions
-    { gitRef :: Maybe Text  -- branch, tag, or commit
+    { gitRef :: Maybe Text -- branch, tag, or commit
     , gitSparsePaths :: [Namespace]
     }
     deriving (Show, Eq)
 
 -- | Default git export options
 defaultGitExportOptions :: GitExportOptions
-defaultGitExportOptions = GitExportOptions
-    { gitCommitMessage = "Update agent configurations"
-    , gitTag = Nothing
-    , gitPush = False
-    }
+defaultGitExportOptions =
+    GitExportOptions
+        { gitCommitMessage = "Update agent configurations"
+        , gitTag = Nothing
+        , gitPush = False
+        }
 
 -- | Default git import options
 defaultGitImportOptions :: GitImportOptions
-defaultGitImportOptions = GitImportOptions
-    { gitRef = Nothing
-    , gitSparsePaths = []
-    }
-
+defaultGitImportOptions =
+    GitImportOptions
+        { gitRef = Nothing
+        , gitSparsePaths = []
+        }

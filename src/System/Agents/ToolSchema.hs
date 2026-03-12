@@ -1,5 +1,5 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module System.Agents.ToolSchema where
 
@@ -14,9 +14,10 @@ data ParamProperty = ParamProperty
     , propertyType :: ParamType
     , propertyDescription :: Text
     , propertyRequired :: Bool
-    -- ^ Whether this property is required. When True, the property key
-    -- is included in the 'required' array of the JSON schema.
-    -- This allows the LLM to omit optional parameters.
+    {- ^ Whether this property is required. When True, the property key
+    is included in the 'required' array of the JSON schema.
+    This allows the LLM to omit optional parameters.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON ParamProperty
@@ -63,4 +64,3 @@ jsonSchema p =
                 , "additionalProperties" .= False
                 , "required" .= fmap propertyKey requiredProps
                 ]
-
