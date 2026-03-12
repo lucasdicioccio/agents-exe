@@ -15,6 +15,7 @@ module System.Agents.OneShot (
     mainOneShotTextWithThinking,
 ) where
 
+import Control.Concurrent.STM (readTVarIO)
 import Control.Exception (Exception)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -146,7 +147,7 @@ runtimeToAgent store mPath convId rt =
 runtimeToAgentWithThinking :: SessionStore -> Maybe FilePath -> ThinkingOutput -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
 runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
-    let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
+    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
     stepId <- newStepId
 
     -- Create OpenAI completion config from runtime
@@ -175,7 +176,7 @@ runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
                         _ -> pure ()
                     pure action
                 , sysPrompt = pure sPrompt
-                , sysTools = sTools
+                , sysTools = pure sTools
                 , usrQuery = pure Nothing
                 , toolCall = executeToolCall rt.agentId convId rt.agentTools
                 , complete = completeF
@@ -198,17 +199,17 @@ executeToolCall ::
     AgentId ->
     -- | Conversation ID for context
     ConversationId ->
-    IO [ToolRegistration] ->
+    Runtime.AgentTools ->
     -- | Context passed from runStepM (ignored, we construct fresh)
     ToolExecutionContext ->
     LlmToolCall ->
     IO UserToolResponse
-executeToolCall agentId convId registrations _ctx (LlmToolCall callVal) =
+executeToolCall agentId convId toolsTVar _ctx (LlmToolCall callVal) =
     -- Extract the tool call ID and function info from the LlmToolCall
     case parseLlmToolCall callVal of
         Nothing -> pure $ UserToolResponse $ Aeson.String "Failed to parse tool call"
         Just tc -> do
-            regs <- registrations
+            regs <- readTVarIO toolsTVar
             -- Construct context for this tool execution
             -- We don't have access to the full session here, so we generate a minimal context
             -- with the identifiers we have. In the future, we could pass session through the
@@ -424,3 +425,4 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+

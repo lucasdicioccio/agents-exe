@@ -3,12 +3,13 @@
 
 module System.Agents.Runtime.Runtime (
     Runtime (..),
+    AgentTools,
     addTracer,
     newRuntime,
     triggerRefreshTools,
 ) where
 
-import Control.Concurrent.STM (STM, atomically, readTVar)
+import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Data.Either (partitionEithers, rights)
 import qualified Data.Text.Encoding as Text
 import qualified Prod.Background as Background
@@ -33,6 +34,9 @@ import System.Agents.Runtime.Trace
 
 -------------------------------------------------------------------------------
 
+-- | Type alias for the mutable tool registrations storage
+type AgentTools = TVar [ToolRegistration]
+
 data Runtime
     = Runtime
     { agentSlug :: AgentSlug
@@ -41,7 +45,8 @@ data Runtime
     , agentTracer :: Tracer IO Trace
     , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
     , agentModel :: OpenAI.Model
-    , agentTools :: IO [ToolRegistration]
+    , agentTools :: AgentTools
+    -- ^ Mutable tool registrations - allows dynamic updates for sub-agent tools
     , agentTriggerRefreshTools :: STM Bool
     }
 
@@ -91,8 +96,15 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
             let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
 
+            -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite tools
+            toolsTVar <- newTVarIO []
+            
             let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes
-            let rt = Runtime slug uid announce tracer httpRt model readTools toolbox.triggerReload
+            -- Initialize the TVar with the base tools
+            baseTools <- readTools
+            atomically $ writeTVar toolsTVar baseTools
+            
+            let rt = Runtime slug uid announce tracer httpRt model toolsTVar toolbox.triggerReload
             pure $ Right rt
   where
     readAdditionalTools :: [SqliteToolbox.Toolbox] -> IO [ToolRegistration]
@@ -161,3 +173,4 @@ registerSqliteToolsWithTracing tracer toolbox = do
             runTracer tracer (BuiltinToolboxInitError (SqliteToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
+

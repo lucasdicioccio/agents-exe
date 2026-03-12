@@ -6,6 +6,7 @@
 module System.Agents.MCP.Server where
 
 import Conduit (stdinC)
+import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (void)
 import Control.Monad.Logger (LoggingT (..), defaultOutput, logDebugN)
 import Control.Monad.Reader (runReaderT)
@@ -292,7 +293,7 @@ construct the 'ToolExecutionContext' passed to tools.
 runtimeToAgent :: Runtime.Runtime -> IO (SessionBase.Agent (SessionBase.LlmTurnContent, SessionBase.Session))
 runtimeToAgent rt = do
     let sPrompt = SessionBase.SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
-    let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
+    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
     stepId <- newStepId
 
     -- Create a conversation ID for tracer setup
@@ -314,7 +315,7 @@ runtimeToAgent rt = do
         SessionBase.Agent
             { SessionBase.step = naiveTilNoToolCallStep
             , SessionBase.sysPrompt = pure sPrompt
-            , SessionBase.sysTools = sTools
+            , SessionBase.sysTools = pure sTools
             , SessionBase.usrQuery = pure Nothing
             , SessionBase.toolCall = executeToolCall rt.agentId rt.agentTools
             , SessionBase.complete = completeF
@@ -332,18 +333,18 @@ executeToolCall ::
     -- | Agent ID for context
     AgentId ->
     -- | Tool registrations
-    IO [ToolRegistration] ->
+    Runtime.AgentTools ->
     -- | Context from runStepM
     ToolExecutionContext ->
     -- | Tool call from LLM
     SessionBase.LlmToolCall ->
     IO SessionBase.UserToolResponse
-executeToolCall agentId0 registrations _ctx (SessionBase.LlmToolCall callVal) =
+executeToolCall agentId0 toolsTVar _ctx (SessionBase.LlmToolCall callVal) =
     -- Extract the tool call ID and function info from the LlmToolCall
     case parseLlmToolCall callVal of
         Nothing -> pure $ SessionBase.UserToolResponse $ Aeson.String "Failed to parse tool call"
         Just tc -> do
-            regs <- registrations
+            regs <- readTVarIO toolsTVar
             -- Construct context for this tool execution
             -- We generate a minimal context here since we don't have direct access
             -- to the session from this point. The AgentId is included.
@@ -554,3 +555,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+

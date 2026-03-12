@@ -353,7 +353,7 @@ handleHeartbeat = do
 
     -- Refresh tools.
     let itrees = fmap agentTree coreState.coreAgents
-    agentTools <- liftIO $ traverse (\itree -> itree.agentRuntime.agentTools) itrees
+    agentTools <- liftIO $ traverse (\itree -> readTVarIO $ itree.agentRuntime.agentTools) itrees
     let toolz = zipWith (,) [itree.agentRuntime.agentId | itree <- itrees] agentTools
     tuiUI . coreAgentTools .= toolz
 
@@ -592,3 +592,4 @@ handleSendMessage = do
                     -- Clear editor
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
