@@ -13,17 +13,13 @@ import Control.Monad (when, unless)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
-import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
-import qualified Data.ByteString.Lazy.Char8 as LByteChar8
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.List (find)
 import Data.Map (Map)
-import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
 import qualified Prod.Tracer as Prod
@@ -32,7 +28,6 @@ import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
 import System.Agents.CLI.Aliases
     ( AliasDefinition
-    , AliasInputMode (..)
     , defaultAliases
     , resolveAliases
     )
@@ -50,18 +45,15 @@ import System.Agents.CLI.PromptScript (PromptScriptDirective (..), PromptScript)
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.TUI as TUICmd
-import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import System.Agents.ExportImport.Types (ArchiveFormat (..), GitExportOptions (..))
 import qualified System.Agents.ExportImport.ToolInstall as ExportInstall
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.LLMs.OpenAI as LLMTrace
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Client as McpClient (LoopTrace (..))
 import qualified System.Agents.MCP.Client.Runtime as McpClientRuntime
 import qualified System.Agents.OneShot as OneShot
-import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.Runtime.Trace as RuntimeTrace
 import qualified System.Agents.SessionPrint as SessionPrint
 import System.Agents.SessionPrint (PrintVisibility (..), PrintAmount (..))
@@ -72,10 +64,9 @@ import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.Trace as ToolTrace
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
-import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory)
-import System.Exit (exitFailure, exitSuccess)
-import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
+import System.Exit (exitFailure)
+import System.FilePath (takeDirectory, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import Options.Applicative
@@ -121,6 +112,7 @@ defaultOpenAIAgent = Agent
     , mcpServers = Just []
     , openApiToolboxes = Nothing
     , postgrestToolboxes = Nothing
+    , builtinToolboxes = Just []
     , extraAgents = Nothing
     }
 
@@ -142,6 +134,7 @@ mistralAgent = Agent
     , mcpServers = Just []
     , openApiToolboxes = Nothing
     , postgrestToolboxes = Nothing
+    , builtinToolboxes = Just []
     , extraAgents = Nothing
     }
 
@@ -163,6 +156,7 @@ ollamaAgent = Agent
     , mcpServers = Just []
     , openApiToolboxes = Nothing
     , postgrestToolboxes = Nothing
+    , builtinToolboxes = Just []
     , extraAgents = Nothing
     }
 
@@ -188,6 +182,7 @@ orchestratorAgent = Agent
     , mcpServers = Just []
     , openApiToolboxes = Nothing
     , postgrestToolboxes = Nothing
+    , builtinToolboxes = Just []
     , extraAgents = Just
         [ ExtraAgentRef "openai-assistant" "openai-assistant.json"
         , ExtraAgentRef "mistral-assistant" "mistral-assistant.json"
@@ -1153,15 +1148,15 @@ main = do
 -- | Resolve agent files based on optional slug selection
 resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
 resolveAgentFiles files Nothing = pure $ Right files
-resolveAgentFiles files (Just slug) = do
+resolveAgentFiles files (Just agentSlug) = do
     -- Load all agents to find matching slug
     agentsWithFiles <- mapM loadAgentWithFile files
-    case find (\(_, agent) -> slug == agent.slug) agentsWithFiles of
+    case find (\(_, agent) -> agentSlug == agent.slug) agentsWithFiles of
         Just (file, _) -> pure $ Right [file]
         Nothing -> do
             -- Build error message with available slugs
             let availableSlugs = map (\(f, a) -> (a.slug, f)) agentsWithFiles
-            pure $ Left $ formatSlugNotFoundError slug availableSlugs
+            pure $ Left $ formatSlugNotFoundError agentSlug availableSlugs
   where
     loadAgentWithFile :: FilePath -> IO (FilePath, Agent)
     loadAgentWithFile file = do
@@ -1269,6 +1264,18 @@ toJsonTrace x = case x of
             Aeson.object
                 [ "conv-id" .= convId
                 , "val" .= baseVal
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.BuiltinToolboxTrace name tr) =
+        Just $
+            Aeson.object
+                [ "builtin-toolbox" .= name
+                , "trace" .= show tr
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.BuiltinToolboxInitError name err) =
+        Just $
+            Aeson.object
+                [ "builtin-toolbox-init-error" .= name
+                , "error" .= err
                 ]
 
     encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
