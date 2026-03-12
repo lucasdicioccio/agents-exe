@@ -103,8 +103,6 @@ tui_appHandleEvent ev = do
                     handleSessionViewEvent vtyEv
                 Just AgentInfoWidget ->
                     handleAgentInfoEvent vtyEv
-                Just AgentToolsWidget ->
-                    handleAgentToolsEvent vtyEv
                 _ ->
                     pure ()
         _ -> pure ()
@@ -198,20 +196,6 @@ handleAgentInfoEvent ev =
             hScrollBy (viewportScroll AgentInfoWidget) (-1)
         Vty.EvKey Vty.KRight _ ->
             hScrollBy (viewportScroll AgentInfoWidget) 1
-        _ -> pure ()
-
--- | Handle agent tools scrolling.
-handleAgentToolsEvent :: Vty.Event -> EventM N TuiState ()
-handleAgentToolsEvent ev =
-    case ev of
-        Vty.EvKey Vty.KUp _ ->
-            vScrollBy (viewportScroll AgentToolsWidget) (-1)
-        Vty.EvKey Vty.KDown _ ->
-            vScrollBy (viewportScroll AgentToolsWidget) 1
-        Vty.EvKey Vty.KLeft _ ->
-            hScrollBy (viewportScroll AgentToolsWidget) (-1)
-        Vty.EvKey Vty.KRight _ ->
-            hScrollBy (viewportScroll AgentToolsWidget) 1
         _ -> pure ()
 
 -------------------------------------------------------------------------------

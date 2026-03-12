@@ -24,7 +24,7 @@ import System.Agents.Runtime (Runtime (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
-import System.Agents.ToolRegistration (declareTool)
+import System.Agents.ToolRegistration (ToolRegistration, declareTool)
 
 -------------------------------------------------------------------------------
 -- Attribute Names
@@ -79,7 +79,6 @@ render_ui st
             Just ConversationViewWidget -> render_conversationView st
             Just SessionViewWidget -> render_sessionView st
             Just AgentInfoWidget -> render_agentInfo st
-            Just AgentToolsWidget -> render_agentTools st
             _ -> render_mainLayout st
     | otherwise = render_mainLayout st
 
@@ -114,7 +113,6 @@ render_contentArea st =
     case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
         Just AgentListWidget -> render_agentDetail st
         Just AgentInfoWidget -> render_agentDetail st
-        Just AgentToolsWidget -> render_agentDetail st
         Just SessionsListWidget -> render_sessionArea st
         Just SessionViewWidget -> render_sessionArea st
         Just MessageEditorWidget -> render_conversationArea st
@@ -125,9 +123,8 @@ render_contentArea st =
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
 render_agentDetail st =
-    hBox
+    vBox
         [ render_agentInfo st
-        , render_agentTools st
         ]
 
 -- | Conversation area with message input and conversation history.
@@ -256,30 +253,33 @@ render_agentInfo st =
         case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
-                let rt = agent.agentTree.agentRuntime
+                let mtools = lookup agent.agentTree.agentRuntime.agentId (st ^. tuiUI . coreAgentTools)
+                    rt = agent.agentTree.agentRuntime
                  in viewport AgentInfoWidget Both $
-                        hLimit 60 $
-                            vBox
-                                [ txt $ "Slug: " <> rt.agentSlug
-                                , txt $ "Announce: " <> rt.agentAnnounce
-                                , txt ""
-                                , txt "Model: " <=> txt (Text.pack $ show rt.agentModel.modelName)
-                                , txt ""
-                                , txt "System Prompt:"
-                                , txt $ OpenAI.getSystemPrompt rt.agentModel.modelSystemPrompt
-                                ]
+                      vBox $ mconcat [ agentHeader rt, agentTools rt mtools, agentPrompt rt ]
 
--- | Render agent tools panel.
-render_agentTools :: TuiState -> Widget N
-render_agentTools st =
-    borderWithFocus st AgentToolsWidget "Tools" $
-        case st ^. tuiUI . selectedAgentInfo of
-            Nothing -> txt "No agent selected"
-            Just agent ->
-                case lookup agent.agentTree.agentRuntime.agentId (st ^. tuiUI . coreAgentTools) of
-                    Nothing -> txt "Tools not loaded"
-                    Just toolz -> do
-                        txt $ Text.unlines [OpenAI.getToolName $ OpenAI.toolName (declareTool tool) | tool <- toolz]
+  where
+    agentHeader :: Runtime -> [Widget N]
+    agentHeader rt =
+      [ txt $ "# Slug: " <> rt.agentSlug
+      , txt $ "# Announce: " <> rt.agentAnnounce
+      , txt ""
+      , txt "# Model: " <=> txt (Text.pack $ show rt.agentModel.modelName)
+      , txt ""
+      ]
+    agentTools :: Runtime -> Maybe [ToolRegistration] -> [Widget N]
+    agentTools rt Nothing = 
+      [ txt "# Tools: not loaded"
+      ]
+    agentTools rt (Just toolz) = 
+      [ txt "# Tools:"
+      , txt $ Text.unlines [ "- " <> (OpenAI.getToolName $ OpenAI.toolName (declareTool tool)) | tool <- toolz]
+      ]
+    agentPrompt :: Runtime -> [Widget N]
+    agentPrompt rt =
+      [ txt "# System Prompt:"
+      , txt $ OpenAI.getSystemPrompt rt.agentModel.modelSystemPrompt
+      ]
 
 -------------------------------------------------------------------------------
 -- Message Editor Rendering
@@ -355,48 +355,45 @@ render_turn (k, turn) =
         UserTurn userTurn mUsage ->
             withAttr userMessageAttr $
                 vBox
-                    [ hBox
-                        [ if k == 0
-                            then txt $ "> " <> getSystemPromptText (userPrompt userTurn)
-                            else emptyWidget
-                        , fill ' '
-                        , render_byte_usage mUsage
-                        ]
+                    [ txt "-----------------------"
                     , case userQuery userTurn of
-                        Just (UserQuery q) -> hBox [txt $ "< " <> q, fill ' ', render_byte_usage mUsage]
+                        Just (UserQuery q) ->
+                           vBox
+                             [ txt $ "< " <> q
+                             , txt ""
+                             ]
                         Nothing -> emptyWidget
+                    , if k == 0
+                      then txt $ "+ " <> getSystemPromptText (userPrompt userTurn) 
+                      else txt $ "+ ..."
+                    , emptyWidget -- TODO n-tools, n-responses here
+                    , render_byte_usage mUsage
+                    , txt ""
                     ]
         LlmTurn llmTurn mUsage ->
             withAttr llmMessageAttr $
-                vBox $
-                    -- Show thinking content if present
-                    ( case llmTurn.llmResponse.responseThinking of
-                        Just thinking ->
-                            [ withAttr thinkingAttr $
-                                vBox
-                                    [ txt "🤔 Thinking..."
-                                    , txt thinking
-                                    , txt ""
-                                    ]
-                            ]
-                        Nothing -> []
-                    )
-                        ++ [ hBox
-                                [ case llmTurn.llmResponse.responseText of
-                                    Just txt0 -> txt $ "< " <> txt0
-                                    Nothing -> txt "< (no response)"
-                                , fill ' '
-                                , render_byte_usage mUsage
-                                ]
-                           , if null llmTurn.llmToolCalls
-                                then emptyWidget
-                                else
-                                    hBox
+                vBox [ txt "-----------------------"
+                     , vBox
+                         [ case llmTurn.llmResponse.responseText of
+                             Just txt0 -> txt $ "< " <> txt0
+                             Nothing -> txt "< (no response)"
+                         , case llmTurn.llmResponse.responseThinking of
+                             Just thinking ->
+                               withAttr thinkingAttr $
+                                 vBox [ txt "🤔 Thinking..." , txt thinking ]
+                             Nothing -> txt ""
+                         , render_byte_usage mUsage
+                         , txt " "
+                         ]
+                     , if null llmTurn.llmToolCalls
+                       then emptyWidget
+                       else
+                                    vBox
                                         [ txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
-                                        , fill ' '
                                         , render_byte_usage mUsage
+                                        , txt " "
                                         ]
-                           ]
+                     ]
 
 -- | Render byte usage for a turn.
 render_byte_usage :: Maybe StepByteUsage -> Widget N
@@ -407,6 +404,7 @@ render_byte_usage (Just usage) =
             "[" <> formatByteBreakdown usage <> "]"
 
 -- | Format byte usage breakdown for display.
+-- TODO: display tools and tool-responses explicitly
 formatByteBreakdown :: StepByteUsage -> Text
 formatByteBreakdown usage =
     let parts =
@@ -451,7 +449,7 @@ tui_appAttrMap _ =
         , (userMessageAttr, BrickUtil.fg Vty.green)
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
         , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
-        , (byteUsageAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
+        , (byteUsageAttr, BrickUtil.fg Vty.brightYellow `Vty.withStyle` Vty.dim)
         , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)

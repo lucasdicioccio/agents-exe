@@ -40,7 +40,6 @@ data WidgetName
     | ConversationViewWidget
     | SessionViewWidget
     | AgentInfoWidget
-    | AgentToolsWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -207,7 +206,6 @@ initUIState agents loadedSessions =
                 , MessageEditorWidget
                 , SessionViewWidget
                 , AgentInfoWidget
-                , AgentToolsWidget
                 ]
         , _zoomed = False
         , _agentList = list AgentListWidget (Vector.fromList agents) 1
