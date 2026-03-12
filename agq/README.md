@@ -45,9 +45,6 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
   "hooks": {
     "default": "git-agent-task.sh"
   },
-  "staticChecks": {
-    "default": "lint.sh"
-  },
   "labels": {
     "labelToBeTaken":    "agq/to-be-taken",
     "labelTaken":        "agq/taken",
@@ -70,8 +67,7 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
 | `defaultTries` | Default `tries_remaining` for tasks imported via `pull` |
 | `projects` | Maps a label → relative path inside the worktree |
 | `agents` | Maps a label → agent config file path |
-| `hooks` | Maps a label → hook script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to run no hook |
-| `staticChecks` | Maps a label → static-checks script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to skip. Called after the agent commit but before the push — see [Static checks hook](#static-checks-hook) |
+| `hooks` | Maps a label → hook script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to run no hook. The same script is invoked at three points with different first arguments: `prepare`, `static-check`, and `check` — see [Hook lifecycle](#hook-lifecycle) |
 | `labels.labelToBeTaken` | GitHub label meaning "ready to pick up" |
 | `labels.labelTaken` | GitHub label applied after an issue is imported |
 | `labels.labelWait` | GitHub label meaning "blocked on dependencies" |
@@ -296,41 +292,47 @@ agq recover
 
 ---
 
-## Static checks hook
+## Hook lifecycle
 
-The `staticChecks` config map lets you run a per-project script (e.g. a linter, formatter, or type-checker) after the agent's work is committed but before the PR is created.
+A single hook script (configured via `hooks`) is called at three points during task execution, distinguished by the first positional argument:
 
-### Invocation
+| Invocation | When | Arguments |
+|------------|------|-----------|
+| `prepare` | Before the agent runs | `prepare <label> <name> <instruction-file>` |
+| `static-check` | After agent commit, before push | `static-check <label> <name> <instruction-file>` |
+| `check` | After PR is created | `check <label> <name> <instruction-file>` |
 
-```
-<script> <label> <name> <instruction-file>
-```
+The script runs with its working directory set to the project directory inside the worktree.
 
-The script runs with its working directory set to the project directory inside the worktree (same as the `prepare` hook).
-
-### Commit behaviour
+### `static-check` — commit behaviour
 
 | Outcome | Result |
 |---------|--------|
 | Script exits; no file changes | Branch has **one commit** (the agent's work) |
 | Script exits; files changed | Branch has **two commits**: agent work + `Run static-checks for <name>` |
 
-### PR body
+The combined stdout+stderr is appended to the PR body under a `## Static checks` heading (fenced code block). Empty output is omitted.
 
-The combined stdout+stderr of the script is appended to the PR body under a `## Static checks` heading (fenced code block). Empty output is omitted.
+### Example hook script skeleton
 
-### Example configuration
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+phase="$1"; label="$2"; name="$3"; instr="$4"
 
-```json
-{
-  "staticChecks": {
-    "default":   "scripts/lint.sh",
-    "architect": "scripts/lint-strict.sh"
-  }
-}
+case "$phase" in
+  prepare)
+    # e.g. install dependencies
+    ;;
+  static-check)
+    # e.g. run linter/formatter — any file changes will be committed automatically
+    ./scripts/lint.sh
+    ;;
+  check)
+    # e.g. post extra diagnostics as a PR comment (stdout is used as body)
+    ;;
+esac
 ```
-
-The script receives the label, task name, and absolute path to the instruction file as positional arguments. A non-zero exit code is currently ignored (output is still captured and appended to the PR body).
 
 ---
 

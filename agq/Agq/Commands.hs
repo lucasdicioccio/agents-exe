@@ -317,9 +317,6 @@ execTask cfg conn t = do
       mHook     = Text.unpack <$> (case Map.lookup lbl (hooks cfg) of
                     Just h  -> Just h
                     Nothing -> Map.lookup "default" (hooks cfg))
-      mStaticCheck = Text.unpack <$> (case Map.lookup lbl (staticChecks cfg) of
-                    Just h  -> Just h
-                    Nothing -> Map.lookup "default" (staticChecks cfg))
       target    = if taskIsFinal t then "main" else base
 
   -- instrFile must be absolute: it is stored relative to the repo root but
@@ -360,12 +357,6 @@ execTask cfg conn t = do
       let absH = worktreeProj </> h
       exists <- doesFileExist absH
       -- return the relative hook location as it will run in the worktreeProj
-      return (if exists then Just h else Nothing)
-  mStaticCheckAbs <- case mStaticCheck of
-    Nothing -> return Nothing
-    Just h  -> do
-      let absH = worktreeProj </> h
-      exists <- doesFileExist absH
       return (if exists then Just h else Nothing)
   case mHookAbs of
     Nothing -> return ()
@@ -444,11 +435,11 @@ execTask cfg conn t = do
       void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
 
       -- static-checks hook: runs after agent commit, before push
-      staticCheckOutput <- case mStaticCheckAbs of
+      staticCheckOutput <- case mHookAbs of
         Nothing -> return ""
         Just h  -> do
           putStrLn $ "[agq] Running static-checks for task '" <> nameStr <> "'"
-          (_, scOut, scErr) <- runWithCwdBoth worktreeProj h [Text.unpack lbl, nameStr, instrFile]
+          (_, scOut, scErr) <- runWithCwdBoth worktreeProj h ["static-check", Text.unpack lbl, nameStr, instrFile]
           (_, scStatus) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
           unless (Text.null (Text.strip scStatus)) $ do
             putStrLn $ "[agq] static-checks modified files, committing..."
