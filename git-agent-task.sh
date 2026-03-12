@@ -48,6 +48,12 @@ case "$command" in
     echo ""
     echo "Nothing to prepare."
     ;;
+  static-check)
+    echo "Formatting."
+    if [[ -x `which fourmolu` ]]; then
+       find ./src ./app ./agq -name "*.hs"  -exec fourmolu -i '{}' \;
+    fi
+    ;;
   check)
     echo "Building."
     ./qa-agent/tools/cabal-build run
