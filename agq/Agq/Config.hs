@@ -47,6 +47,7 @@ data AgqConfig = AgqConfig
   , projects         :: Map Text Text
   , agents           :: Map Text Text
   , hooks            :: Map Text Text  -- label -> hook script path (relative to worktree project dir)
+  , staticChecks     :: Map Text Text  -- label -> static-checks script path (relative to worktree project dir)
   , labels           :: AgqLabels
   } deriving (Generic, Show)
 
@@ -71,6 +72,7 @@ defaultConfig = AgqConfig
       ]
   , hooks            = Map.fromList
       [ ("default", "git-agent-task.sh") ]
+  , staticChecks     = Map.empty
   , labels           = defaultLabels
   }
 

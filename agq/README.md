@@ -45,6 +45,9 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
   "hooks": {
     "default": "git-agent-task.sh"
   },
+  "staticChecks": {
+    "default": "lint.sh"
+  },
   "labels": {
     "labelToBeTaken":    "agq/to-be-taken",
     "labelTaken":        "agq/taken",
@@ -68,6 +71,7 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
 | `projects` | Maps a label → relative path inside the worktree |
 | `agents` | Maps a label → agent config file path |
 | `hooks` | Maps a label → hook script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to run no hook |
+| `staticChecks` | Maps a label → static-checks script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to skip. Called after the agent commit but before the push — see [Static checks hook](#static-checks-hook) |
 | `labels.labelToBeTaken` | GitHub label meaning "ready to pick up" |
 | `labels.labelTaken` | GitHub label applied after an issue is imported |
 | `labels.labelWait` | GitHub label meaning "blocked on dependencies" |
@@ -218,10 +222,11 @@ Executes a single named task directly (also used internally by `process`):
 5. **On agent failure**: writes the full stderr to `<sessionsDir>/<name>.err` inside the worktree, posts the last 100 lines as a comment on the originating GitHub issue (for `gh`-sourced tasks), marks the task `failed`, and stops.
 6. Runs `agents-exe session-print <session.json>` and writes the output to `<sessionsDir>/<name>.session.md` inside the worktree.
 7. `git checkout -b <name> && git add -A && git commit --no-verify -m <commit-msg>`
-8. `git push -u origin <name>`
-9. `gh pr create --base <target> --head <name> --label agq/agent-pr`
-10. Runs `<hook> preview <label> <name> <instruction-file>` if the hook exists.
-11. Marks the task `done` and releases locks.
+8. Runs the **static-checks hook** (if configured): `<static-checks-script> <label> <name> <instruction-file>`. If the script modifies any files a second commit is created (`Run static-checks for <name>`); a noop leaves the branch at one commit. stdout+stderr are appended to the PR body.
+9. `git push -u origin <name>`
+10. `gh pr create --base <target> --head <name> --label agq/agent-pr` (PR body includes static-checks output when non-empty)
+11. Runs `<hook> check <label> <name> <instruction-file>` if the hook exists, posting its output as a PR comment.
+12. Marks the task `done` and releases locks.
 
 Session and error files live **inside the worktree** so they are committed with the work.
 
@@ -288,6 +293,44 @@ resets those tasks to `pending`. Useful after a crash or `kill`.
 ```bash
 agq recover
 ```
+
+---
+
+## Static checks hook
+
+The `staticChecks` config map lets you run a per-project script (e.g. a linter, formatter, or type-checker) after the agent's work is committed but before the PR is created.
+
+### Invocation
+
+```
+<script> <label> <name> <instruction-file>
+```
+
+The script runs with its working directory set to the project directory inside the worktree (same as the `prepare` hook).
+
+### Commit behaviour
+
+| Outcome | Result |
+|---------|--------|
+| Script exits; no file changes | Branch has **one commit** (the agent's work) |
+| Script exits; files changed | Branch has **two commits**: agent work + `Run static-checks for <name>` |
+
+### PR body
+
+The combined stdout+stderr of the script is appended to the PR body under a `## Static checks` heading (fenced code block). Empty output is omitted.
+
+### Example configuration
+
+```json
+{
+  "staticChecks": {
+    "default":   "scripts/lint.sh",
+    "architect": "scripts/lint-strict.sh"
+  }
+}
+```
+
+The script receives the label, task name, and absolute path to the instruction file as positional arguments. A non-zero exit code is currently ignored (output is still captured and appended to the PR body).
 
 ---
 
