@@ -40,6 +40,7 @@ import qualified System.Agents.CLI.Export as ExportCmd
 import qualified System.Agents.CLI.Import as ImportCmd
 import qualified System.Agents.CLI.Initialize as InitializeCmd
 import qualified System.Agents.CLI.McpServer as McpServerCmd
+import System.Agents.CLI.OneShot (OneShotOptions)
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
 import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
@@ -1081,7 +1082,6 @@ parseProgOptions argparserargs =
                 <> help "raw log file"
                 <> showDefault
                 <> value "agents-logfile"
-                <> (maybe mempty value argparserargs.defaultLogRawFilepath)
             )
         <*> optional
             ( strOption
@@ -1323,17 +1323,23 @@ toJsonTrace x = case x of
                 [ "conv-id" .= convId
                 , "val" .= baseVal
                 ]
-    encodeBaseAgentTrace (RuntimeTrace.BuiltinToolboxTrace name tr) =
+    encodeBaseAgentTrace (RuntimeTrace.BuiltinToolboxTrace toolboxName tr) =
         Just $
             Aeson.object
-                [ "builtin-toolbox" .= name
+                [ "builtin-toolbox" .= toolboxName
                 , "trace" .= show tr
                 ]
-    encodeBaseAgentTrace (RuntimeTrace.BuiltinToolboxInitError name err) =
+    encodeBaseAgentTrace (RuntimeTrace.BuiltinToolboxInitError toolboxName err) =
         Just $
             Aeson.object
-                [ "builtin-toolbox-init-error" .= name
+                [ "builtin-toolbox-init-error" .= toolboxName
                 , "error" .= err
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.SystemToolboxTrace toolboxName tr) =
+        Just $
+            Aeson.object
+                [ "system-toolbox" .= toolboxName
+                , "trace" .= show tr
                 ]
 
     encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
@@ -1409,6 +1415,10 @@ toJsonTrace x = case x of
                         , "action" .= ("stop" :: Text)
                         , "tool" .= desc.ioSlug
                         ]
+            (RuntimeTrace.RunToolTrace _ (ToolTrace.SqliteToolsTrace _)) ->
+                Just $ Aeson.object ["x" .= ("sqlite-tool" :: Text)]
+            (RuntimeTrace.RunToolTrace _ (ToolTrace.SystemToolsTrace _)) ->
+                Just $ Aeson.object ["x" .= ("system-tool" :: Text)]
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text), "sub" .= subVal]
@@ -1469,3 +1479,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+

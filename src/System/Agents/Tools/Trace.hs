@@ -6,9 +6,14 @@ import Data.ByteString.Char8 (ByteString)
 -------------------------------------------------------------------------------
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
+import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
 -------------------------------------------------------------------------------
 data ToolTrace
     = BashToolsTrace !BashTools.RunTrace
     | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
+    | SqliteToolsTrace !SqliteTools.Trace
+    | SystemToolsTrace !SystemTools.Trace
     deriving (Show)
+

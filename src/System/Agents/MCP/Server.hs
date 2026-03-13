@@ -435,6 +435,14 @@ callResultToUserToolResponse _ result =
             SessionBase.UserToolResponse $ Aeson.toJSON toolResult
         PostgRESToolError _ err ->
             SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "PostgREST tool error: " <> err
+        SqliteToolResult _ toolResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
+        SqliteToolError _ err ->
+            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "SQLite tool error: " <> show err
+        SystemToolResult _ toolResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
+        SystemToolError _ err ->
+            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
 
 {- | Convert a ToolRegistration to a SystemTool for the Session agent.
 Based on toolRegistrationToSystemTool from OneShot.hs.

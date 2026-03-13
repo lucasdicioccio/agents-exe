@@ -304,6 +304,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         SqliteToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "SQLite tool error: " <> show err
+        SystemToolResult _ toolResult ->
+            UserToolResponse $ Aeson.toJSON toolResult
+        SystemToolError _ err ->
+            UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
