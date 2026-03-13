@@ -22,6 +22,7 @@ import System.Agents.Base (
     AgentSlug,
     BuiltinToolboxDescription (..),
     SqliteToolboxDescription (..),
+    SystemToolboxDescription (..),
     newAgentId,
  )
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -29,6 +30,7 @@ import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
+import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
 import System.Agents.Runtime.Trace
 
@@ -87,8 +89,8 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
     case toolz of
         Left err -> pure $ Left (show err)
         Right toolbox -> do
-            -- Initialize builtin toolboxes (SQLite)
-            sqliteToolboxes <- initializeBuiltinToolboxes tracer builtinDescriptions
+            -- Initialize builtin toolboxes (SQLite and System)
+            (sqliteToolboxes, systemToolboxes) <- initializeBuiltinToolboxes tracer builtinDescriptions
 
             let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey
             httpRt <- HttpClient.newRuntime auth
@@ -96,10 +98,10 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
             let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
 
-            -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite tools
+            -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite + System tools
             toolsTVar <- newTVarIO []
             
-            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes
+            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes systemToolboxes
             -- Initialize the TVar with the base tools
             baseTools <- readTools
             atomically $ writeTVar toolsTVar baseTools
@@ -107,12 +109,13 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
             let rt = Runtime slug uid announce tracer httpRt model toolsTVar toolbox.triggerReload
             pure $ Right rt
   where
-    readAdditionalTools :: [SqliteToolbox.Toolbox] -> IO [ToolRegistration]
-    readAdditionalTools sqliteToolboxes = do
+    readAdditionalTools :: [SqliteToolbox.Toolbox] -> [SystemToolbox.Toolbox] -> IO [ToolRegistration]
+    readAdditionalTools sqliteToolboxes systemToolboxes = do
         mcpTools <- readMcpToolsRegistrations
         sqliteTools <- readSqliteToolsRegistrations tracer sqliteToolboxes
+        systemTools <- readSystemToolsRegistrations tracer systemToolboxes
         -- OpenAPI tools are pre-registered and static
-        pure $ mcpTools <> sqliteTools <> openApiToolRegs
+        pure $ mcpTools <> sqliteTools <> systemTools <> openApiToolRegs
 
     readMcpToolsRegistrations :: IO [ToolRegistration]
     readMcpToolsRegistrations = do
@@ -122,32 +125,49 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
         pure $ mconcat $ zipWith reg mcpToolboxes lists
 
 {- | Initialize all builtin toolboxes from their descriptions.
-Currently only supports SQLite toolboxes.
+Supports both SQLite and System toolboxes.
 -}
 initializeBuiltinToolboxes ::
     Tracer IO Trace ->
     [BuiltinToolboxDescription] ->
-    IO [SqliteToolbox.Toolbox]
+    IO ([SqliteToolbox.Toolbox], [SystemToolbox.Toolbox])
 initializeBuiltinToolboxes tracer descriptions = do
-    results <- traverse (initializeBuiltinToolbox tracer) descriptions
-    let (errors, toolboxes) = partitionEithers results
-    -- Trace any initialization errors
-    mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "builtin" err)) errors
-    pure $ concat toolboxes
+    let sqliteDescs = [desc | SqliteToolbox desc <- descriptions]
+    let systemDescs = [desc | SystemToolbox desc <- descriptions]
+    
+    sqliteResults <- traverse (initializeSqliteToolbox tracer) sqliteDescs
+    systemResults <- traverse (initializeSystemToolbox tracer) systemDescs
+    
+    let (sqliteErrors, sqliteToolboxes) = partitionEithers sqliteResults
+    let (systemErrors, systemToolboxes) = partitionEithers systemResults
+    
+    -- Trace errors for each failed toolbox
+    mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "sqlite" err)) sqliteErrors
+    mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "system" err)) systemErrors
+    
+    pure (sqliteToolboxes, systemToolboxes)
 
-{- | Initialize a single builtin toolbox.
-Returns either an error message or a list of toolboxes (for SQLite, always a single toolbox).
+{- | Initialize a single SQLite builtin toolbox.
+Returns either an error message or the initialized toolbox.
 -}
-initializeBuiltinToolbox ::
+initializeSqliteToolbox ::
     Tracer IO Trace ->
-    BuiltinToolboxDescription ->
-    IO (Either String [SqliteToolbox.Toolbox])
-initializeBuiltinToolbox tracer (SqliteToolbox desc) = do
+    SqliteToolboxDescription ->
+    IO (Either String SqliteToolbox.Toolbox)
+initializeSqliteToolbox tracer desc = do
     let toolboxTracer = contramap (BuiltinToolboxTrace desc.sqliteToolboxName) tracer
-    result <- SqliteToolbox.initializeToolbox toolboxTracer desc
-    case result of
-        Left err -> pure $ Left err
-        Right toolbox -> pure $ Right [toolbox]
+    SqliteToolbox.initializeToolbox toolboxTracer desc
+
+{- | Initialize a single System builtin toolbox.
+Returns either an error message or the initialized toolbox.
+-}
+initializeSystemToolbox ::
+    Tracer IO Trace ->
+    SystemToolboxDescription ->
+    IO (Either String SystemToolbox.Toolbox)
+initializeSystemToolbox tracer desc = do
+    let toolboxTracer = contramap (SystemToolboxTrace desc.systemToolboxName) tracer
+    SystemToolbox.initializeToolbox toolboxTracer desc
 
 -- | Read SQLite tool registrations from initialized toolboxes.
 readSqliteToolsRegistrations ::
@@ -171,6 +191,31 @@ registerSqliteToolsWithTracing tracer toolbox = do
     case result of
         Left err -> do
             runTracer tracer (BuiltinToolboxInitError (SqliteToolbox.toolboxName toolbox) err)
+            pure $ Left err
+        Right regs -> pure $ Right regs
+
+-- | Read System tool registrations from initialized toolboxes.
+readSystemToolsRegistrations ::
+    Tracer IO Trace ->
+    [SystemToolbox.Toolbox] ->
+    IO [ToolRegistration]
+readSystemToolsRegistrations tracer toolboxes = do
+    results <- traverse (registerSystemToolsWithTracing tracer) toolboxes
+    let (errors, registrations) = partitionEithers results
+    -- Trace errors for each failed toolbox
+    mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "system" err)) errors
+    pure $ concat registrations
+
+-- | Register tools from a single System toolbox with error tracing.
+registerSystemToolsWithTracing ::
+    Tracer IO Trace ->
+    SystemToolbox.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerSystemToolsWithTracing tracer toolbox = do
+    result <- registerSystemTools toolbox
+    case result of
+        Left err -> do
+            runTracer tracer (BuiltinToolboxInitError (SystemToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
 
