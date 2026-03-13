@@ -9,7 +9,7 @@
     "toolDirectory": "tools",
     "extraAgents": [
       {"slug": "sub-agent"
-      ,"path": "./tools/sub-agent.json"
+      ,"path": "./sub-agents/sub-agent.json"
       }
     ],
     "announce": "The main agent, capable of reasoning.",
