@@ -52,6 +52,8 @@ data ToolDef
       SqliteTool !SqliteTools.ToolDescription
     | -- | System tool description
       SystemTool !SystemTools.ToolDescription
+    | -- | Lua tool: toolbox name (Lua scripts are anonymous)
+      LuaTool !Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -91,6 +93,10 @@ data CallResult call
       SystemToolResult call SystemTools.QueryResult
     | -- | System tool execution failed
       SystemToolError call SystemTools.QueryError
+    | -- | Lua tool executed successfully with result
+      LuaToolResult call Aeson.Value
+    | -- | Lua tool execution failed
+      LuaToolError call Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -113,6 +119,8 @@ mapCallResult f c =
         (SqliteToolError c e) -> SqliteToolError (f c) e
         (SystemToolResult v r) -> SystemToolResult (f v) r
         (SystemToolError v e) -> SystemToolError (f v) e
+        (LuaToolResult v r) -> LuaToolResult (f v) r
+        (LuaToolError v e) -> LuaToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -139,6 +147,8 @@ extractCall (SqliteToolResult c _) = c
 extractCall (SqliteToolError c _) = c
 extractCall (SystemToolResult c _) = c
 extractCall (SystemToolError c _) = c
+extractCall (LuaToolResult c _) = c
+extractCall (LuaToolError c _) = c
 
 -------------------------------------------------------------------------------
 -- Byte Counting Helpers
@@ -185,6 +195,10 @@ callResultByteSize (SystemToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (SystemToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
+callResultByteSize (LuaToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (LuaToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String err)))
 
 {- | Calculate total bytes for a list of tool responses.
 
@@ -193,3 +207,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+

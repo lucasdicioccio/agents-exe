@@ -2,6 +2,7 @@ module System.Agents.Tools.Trace where
 
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 (ByteString)
+import Data.Text (Text)
 
 -------------------------------------------------------------------------------
 import qualified System.Agents.Tools.Bash as BashTools
@@ -15,4 +16,6 @@ data ToolTrace
     | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
     | SqliteToolsTrace !SqliteTools.Trace
     | SystemToolsTrace !SystemTools.Trace
+    | LuaToolsTrace !Text  -- ^ Trace message or event type from Lua execution
     deriving (Show)
+

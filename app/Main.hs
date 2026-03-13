@@ -1419,6 +1419,8 @@ toJsonTrace x = case x of
                 Just $ Aeson.object ["x" .= ("sqlite-tool" :: Text)]
             (RuntimeTrace.RunToolTrace _ (ToolTrace.SystemToolsTrace _)) ->
                 Just $ Aeson.object ["x" .= ("system-tool" :: Text)]
+            (RuntimeTrace.RunToolTrace _ (ToolTrace.LuaToolsTrace msg)) ->
+                Just $ Aeson.object ["x" .= ("lua-tool" :: Text), "message" .= msg]
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text), "sub" .= subVal]
@@ -1479,3 +1481,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
