@@ -13,12 +13,14 @@ This module implements the Lua toolbox functionality, including:
 * Timeout enforcement via Haskell watchdog thread
 * Error handling and stack trace capture
 * Integration with the Tool Portal for calling other tools
+* Standard library modules: json, text, time, fs, http
 
 The toolbox is designed to be safe for LLM-generated code by:
 * Removing dangerous standard library functions (os.execute, io.popen, etc.)
 * Enforcing memory limits
 * Enforcing execution time limits
 * Providing only whitelisted tool access through the portal
+* Sandboxing filesystem and HTTP access
 
 Example usage:
 
@@ -46,6 +48,33 @@ main = do
                 Left err -> print err
         Left err -> putStrLn $ "Failed to initialize: " ++ err
 @
+
+Standard library modules available to Lua scripts:
+
+* @json@: JSON encoding/decoding with 'json.encode' and 'json.decode'
+* @text@: UTF-8 string utilities (split, find, trim, etc.)
+* @time@: Time functions (now, sleep, format, diff)
+* @fs@: Sandboxed filesystem operations (read, write, list, etc.)
+* @http@: HTTP requests with host whitelisting (get, post, request)
+
+Example Lua script using modules:
+
+> local json = require("json")
+> local text = require("text")
+> local time = require("time")
+> local fs = require("fs")
+>
+> -- Read and parse a JSON file
+> local data = json.decode(fs.read("/allowed/path/config.json"))
+>
+> -- Process text
+> local parts = text.split(data.name, " ")
+>
+> -- Get current time
+> local now = time.now()
+> local formatted = time.format(now, "%Y-%m-%d")
+>
+> return {parts = parts, date = formatted}
 -}
 module System.Agents.Tools.LuaToolbox (
     -- * Core types
@@ -66,9 +95,12 @@ module System.Agents.Tools.LuaToolbox (
     configureSandbox,
     applyMemoryLimit,
     applyTimeout,
+
+    -- * Module registration
+    registerStandardModules,
 ) where
 
-import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar, threadDelay)
 import Control.Exception (SomeException, try)
 import Control.Monad (void, when)
 import qualified Data.Aeson as Aeson
@@ -86,6 +118,14 @@ import Prod.Tracer (Tracer (..), runTracer)
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolPortal)
+
+-- Import standard library modules
+
+import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
+import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
+import qualified System.Agents.Tools.LuaToolbox.Modules.Json as JsonMod
+import qualified System.Agents.Tools.LuaToolbox.Modules.Text as TextMod
+import qualified System.Agents.Tools.LuaToolbox.Modules.Time as TimeMod
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -182,8 +222,9 @@ This function:
 1. Creates a new Lua state using hslua
 2. Configures the sandbox (removes dangerous functions)
 3. Sets up memory limit tracking
-4. Creates an MVar lock for serializing access
-5. Returns a 'Toolbox' ready for script execution
+4. Registers standard library modules (json, text, time, fs, http)
+5. Creates an MVar lock for serializing access
+6. Returns a 'Toolbox' ready for script execution
 
 Returns an error if the Lua state cannot be created.
 -}
@@ -209,6 +250,9 @@ initializeToolbox tracer desc = do
             when (desc.luaToolboxMaxMemoryMB > 0) $
                 applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
 
+            -- Register standard library modules
+            registerStandardModules lstate desc
+
             -- Create lock for serializing access
             lock <- newEmptyMVar
             putMVar lock ()
@@ -221,6 +265,40 @@ initializeToolbox tracer desc = do
                         , toolboxLock = lock
                         , toolboxName = desc.luaToolboxName
                         }
+
+{- | Register all standard library modules in the Lua state.
+
+This registers:
+* json: JSON encoding/decoding
+* text: UTF-8 string utilities
+* time: Time functions
+* fs: Sandboxed filesystem (using allowedPaths from config)
+* http: HTTP requests (using allowedHosts from config)
+-}
+registerStandardModules :: Lua.State -> LuaToolboxDescription -> IO ()
+registerStandardModules lstate desc = do
+    -- Register json module
+    JsonMod.registerJsonModule lstate
+
+    -- Register text module
+    TextMod.registerTextModule lstate
+
+    -- Register time module
+    TimeMod.registerTimeModule lstate
+
+    -- Register fs module with sandboxing
+    FsMod.registerFsModule
+        lstate
+        FsMod.FsConfig
+            { FsMod.fsAllowedPaths = desc.luaToolboxAllowedPaths
+            }
+
+    -- Register http module with sandboxing
+    HttpMod.registerHttpModule
+        lstate
+        HttpMod.HttpConfig
+            { HttpMod.httpAllowedHosts = desc.luaToolboxAllowedHosts
+            }
 
 {- | Close a toolbox and release its resources.
 
@@ -302,6 +380,7 @@ configureSandbox lstate = Lua.runWith lstate $ do
             ]
 
     -- Remove package table entirely (prevents module loading)
+    -- Note: We register our own modules directly, so this is safe
     Lua.pushglobaltable
     Lua.pushName (toName "package")
     Lua.pushnil
@@ -513,7 +592,7 @@ pcallWithTraceback nargs nresults = do
 -- | Set up the tool portal as a Lua function
 setupPortal :: Lua.State -> ToolPortal -> [Text.Text] -> IO ()
 setupPortal lstate _portal _allowedTools = do
-    -- This will be implemented in Phase 3 when we create the tools module
+    -- This will be implemented in Phase 4 when we create the tools module
     -- For now, just create a placeholder
     Lua.runWith lstate $ do
         Lua.pushstring "Tool portal not yet implemented"
