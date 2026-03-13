@@ -1,6 +1,7 @@
 **.swp
 **.key
 **.keys
+**.db-shm
 agents-logfile
 logs.json
 conv.*.json
