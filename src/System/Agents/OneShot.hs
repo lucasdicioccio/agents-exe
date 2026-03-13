@@ -436,4 +436,3 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
-

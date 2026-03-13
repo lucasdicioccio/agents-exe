@@ -639,6 +639,7 @@ instance FromJSON LuaToolboxDescription where
     parseJSON = Aeson.genericParseJSON luaToolboxOptions
 
 -------------------------------------------------------------------------------
+
 {- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
 
 This is a tagged union type that allows extensible builtin toolbox types.
@@ -773,4 +774,3 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-

@@ -16,6 +16,6 @@ data ToolTrace
     | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
     | SqliteToolsTrace !SqliteTools.Trace
     | SystemToolsTrace !SystemTools.Trace
-    | LuaToolsTrace !Text  -- ^ Trace message or event type from Lua execution
+    | -- | Trace message or event type from Lua execution
+      LuaToolsTrace !Text
     deriving (Show)
-

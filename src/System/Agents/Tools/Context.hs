@@ -140,8 +140,7 @@ data ToolCall = ToolCall
 instance ToJSON ToolCall
 instance FromJSON ToolCall
 
-{- | Result of a tool invocation through the portal.
--}
+-- | Result of a tool invocation through the portal.
 data ToolResult = ToolResult
     { resultData :: Aeson.Value
     -- ^ The result data from the tool
@@ -251,29 +250,39 @@ data ToolExecutionContext = ToolExecutionContext
 instance Eq ToolExecutionContext where
     (==) a b =
         ctxSessionId a == ctxSessionId b
-        && ctxConversationId a == ctxConversationId b
-        && ctxTurnId a == ctxTurnId b
-        && ctxAgentId a == ctxAgentId b
-        && ctxFullSession a == ctxFullSession b
-        && ctxCallStack a == ctxCallStack b
-        && ctxMaxDepth a == ctxMaxDepth b
-        && ctxAllowedTools a == ctxAllowedTools b
-        -- Note: ctxToolPortal is not compared (functions can't be compared)
+            && ctxConversationId a == ctxConversationId b
+            && ctxTurnId a == ctxTurnId b
+            && ctxAgentId a == ctxAgentId b
+            && ctxFullSession a == ctxFullSession b
+            && ctxCallStack a == ctxCallStack b
+            && ctxMaxDepth a == ctxMaxDepth b
+            && ctxAllowedTools a == ctxAllowedTools b
+
+-- Note: ctxToolPortal is not compared (functions can't be compared)
 
 -- | Custom Show instance for ToolExecutionContext that handles the function field
 instance Show ToolExecutionContext where
     show ctx =
         "ToolExecutionContext {"
-        ++ " ctxSessionId = " ++ show (ctxSessionId ctx)
-        ++ ", ctxConversationId = " ++ show (ctxConversationId ctx)
-        ++ ", ctxTurnId = " ++ show (ctxTurnId ctx)
-        ++ ", ctxAgentId = " ++ show (ctxAgentId ctx)
-        ++ ", ctxFullSession = " ++ show (ctxFullSession ctx)
-        ++ ", ctxCallStack = " ++ show (ctxCallStack ctx)
-        ++ ", ctxMaxDepth = " ++ show (ctxMaxDepth ctx)
-        ++ ", ctxToolPortal = " ++ portalStr
-        ++ ", ctxAllowedTools = " ++ show (ctxAllowedTools ctx)
-        ++ " }"
+            ++ " ctxSessionId = "
+            ++ show (ctxSessionId ctx)
+            ++ ", ctxConversationId = "
+            ++ show (ctxConversationId ctx)
+            ++ ", ctxTurnId = "
+            ++ show (ctxTurnId ctx)
+            ++ ", ctxAgentId = "
+            ++ show (ctxAgentId ctx)
+            ++ ", ctxFullSession = "
+            ++ show (ctxFullSession ctx)
+            ++ ", ctxCallStack = "
+            ++ show (ctxCallStack ctx)
+            ++ ", ctxMaxDepth = "
+            ++ show (ctxMaxDepth ctx)
+            ++ ", ctxToolPortal = "
+            ++ portalStr
+            ++ ", ctxAllowedTools = "
+            ++ show (ctxAllowedTools ctx)
+            ++ " }"
       where
         portalStr = case ctxToolPortal ctx of
             Nothing -> "Nothing"
@@ -283,17 +292,18 @@ instance Show ToolExecutionContext where
 Note: The tool portal function is not serialized (functions can't be serialized).
 -}
 instance ToJSON ToolExecutionContext where
-    toJSON ctx = Aeson.object
-        [ "sessionId" .= ctxSessionId ctx
-        , "conversationId" .= ctxConversationId ctx
-        , "turnId" .= ctxTurnId ctx
-        , "agentId" .= ctxAgentId ctx
-        , "fullSession" .= ctxFullSession ctx
-        , "callStack" .= ctxCallStack ctx
-        , "maxDepth" .= ctxMaxDepth ctx
-        , "allowedTools" .= ctxAllowedTools ctx
-        -- Note: ctxToolPortal is intentionally omitted (not serializable)
-        ]
+    toJSON ctx =
+        Aeson.object
+            [ "sessionId" .= ctxSessionId ctx
+            , "conversationId" .= ctxConversationId ctx
+            , "turnId" .= ctxTurnId ctx
+            , "agentId" .= ctxAgentId ctx
+            , "fullSession" .= ctxFullSession ctx
+            , "callStack" .= ctxCallStack ctx
+            , "maxDepth" .= ctxMaxDepth ctx
+            , "allowedTools" .= ctxAllowedTools ctx
+            -- Note: ctxToolPortal is intentionally omitted (not serializable)
+            ]
 
 instance FromJSON ToolExecutionContext where
     parseJSON = Aeson.withObject "ToolExecutionContext" $ \v ->
@@ -305,7 +315,7 @@ instance FromJSON ToolExecutionContext where
             <*> v .: "fullSession"
             <*> v .: "callStack"
             <*> v .: "maxDepth"
-            <*> pure Nothing  -- ToolPortal can't be deserialized
+            <*> pure Nothing -- ToolPortal can't be deserialized
             <*> v .: "allowedTools"
 
 -------------------------------------------------------------------------------
@@ -454,7 +464,7 @@ mkPortalContext ::
     [CallStackEntry] ->
     Maybe Int ->
     Maybe ToolPortal ->
-    [Text] ->  -- allowed tools
+    [Text] -> -- allowed tools
     ToolExecutionContext
 mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowed =
     ToolExecutionContext
@@ -610,4 +620,3 @@ isToolAllowed :: Text -> ToolExecutionContext -> Bool
 isToolAllowed toolName ctx =
     -- Empty allowed list means all tools allowed (backward compatibility)
     null (ctxAllowedTools ctx) || toolName `elem` ctxAllowedTools ctx
-

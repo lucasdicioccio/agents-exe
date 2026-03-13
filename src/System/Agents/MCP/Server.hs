@@ -570,4 +570,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-
