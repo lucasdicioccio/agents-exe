@@ -717,4 +717,3 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
-

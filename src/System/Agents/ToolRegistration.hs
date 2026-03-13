@@ -60,6 +60,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import Prod.Tracer (Tracer, contramap)
+import System.Agents.Base (SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.MCP.Client as McpClient
@@ -106,7 +107,6 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace (ToolTrace (..))
-import System.Agents.Base (SystemToolCapability (..))
 
 -------------------------------------------------------------------------------
 
@@ -997,4 +997,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-

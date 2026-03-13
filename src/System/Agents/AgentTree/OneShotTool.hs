@@ -284,4 +284,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
-

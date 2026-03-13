@@ -597,4 +597,3 @@ handleSendMessage = do
                     -- Clear editor
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-

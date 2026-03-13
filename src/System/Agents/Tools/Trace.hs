@@ -16,4 +16,3 @@ data ToolTrace
     | SqliteToolsTrace !SqliteTools.Trace
     | SystemToolsTrace !SystemTools.Trace
     deriving (Show)
-

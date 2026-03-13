@@ -237,12 +237,13 @@ executeQuery toolbox capabilityName = do
                             pure $ Left $ SystemInfoError err
                         Right (_, value) -> do
                             runTracer (Tracer (const (pure ()))) (SystemInfoRetrievedTrace capabilityName execTime)
-                            pure $ Right $
-                                QueryResult
-                                    { resultCapability = capabilityName
-                                    , resultData = value
-                                    , resultExecutionTime = execTime
-                                    }
+                            pure $
+                                Right $
+                                    QueryResult
+                                        { resultCapability = capabilityName
+                                        , resultData = value
+                                        , resultExecutionTime = execTime
+                                        }
 
 -- | Convert a capability name text to the corresponding SystemToolCapability.
 capabilityFromName :: Text -> Maybe SystemToolCapability
@@ -404,9 +405,10 @@ readOsRelease = do
                     | otherwise ->
                         let value = BS.drop 1 rest
                             -- Remove quotes if present
-                            value' = if BS.length value >= 2 && BS.head value == '"' && BS.last value == '"'
-                                then BS.drop 1 (BS.init value)
-                                else value
+                            value' =
+                                if BS.length value >= 2 && BS.head value == '"' && BS.last value == '"'
+                                    then BS.drop 1 (BS.init value)
+                                    else value
                          in Just (Text.decodeUtf8 key, Text.decodeUtf8 value')
 
 {- | Gather environment variable information.
@@ -424,8 +426,9 @@ getEnvVarsInfo mFilter = do
                  in filter (\(k, _) -> pattern' `isInfixOf` k) env
 
     -- Convert to Text for JSON
-    let envMap = KeyMap.fromList $
-            map (\(k, v) -> (AesonKey.fromText $ Text.pack k, String $ Text.pack v)) filtered
+    let envMap =
+            KeyMap.fromList $
+                map (\(k, v) -> (AesonKey.fromText $ Text.pack k, String $ Text.pack v)) filtered
 
     pure ("env-vars", Object envMap)
 
@@ -460,8 +463,7 @@ getRunningUserInfo = do
             ]
         )
 
-{- | Gather hostname information.
--}
+-- | Gather hostname information.
 getHostnameInfo :: IO (Text, Aeson.Value)
 getHostnameInfo = do
     hostname <- lookupEnv "HOSTNAME"
@@ -482,8 +484,7 @@ getHostnameInfo = do
     safeHead [] = Nothing
     safeHead (x : _) = Just (Text.strip x)
 
-{- | Gather working directory information.
--}
+-- | Gather working directory information.
 getWorkingDirectoryInfo :: IO (Text, Aeson.Value)
 getWorkingDirectoryInfo = do
     cwd <- getCurrentDirectory
@@ -537,7 +538,7 @@ getUptimeInfo = do
                         ]
                 )
   where
-    readMaybe :: Read a => String -> Maybe a
+    readMaybe :: (Read a) => String -> Maybe a
     readMaybe s = case reads s of
         [(x, "")] -> Just x
         _ -> Nothing
@@ -572,8 +573,7 @@ getCapabilityInfo capability = do
 -- Utility Functions
 -------------------------------------------------------------------------------
 
-{- | Try to read a file, returning Left with error message on failure.
--}
+-- | Try to read a file, returning Left with error message on failure.
 tryReadFile :: FilePath -> IO (Either String ByteString)
 tryReadFile path = do
     result <- try $ BS.readFile path
@@ -632,4 +632,3 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
-

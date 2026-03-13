@@ -100,12 +100,12 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
 
             -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite + System tools
             toolsTVar <- newTVarIO []
-            
+
             let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes systemToolboxes
             -- Initialize the TVar with the base tools
             baseTools <- readTools
             atomically $ writeTVar toolsTVar baseTools
-            
+
             let rt = Runtime slug uid announce tracer httpRt model toolsTVar toolbox.triggerReload
             pure $ Right rt
   where
@@ -134,17 +134,17 @@ initializeBuiltinToolboxes ::
 initializeBuiltinToolboxes tracer descriptions = do
     let sqliteDescs = [desc | SqliteToolbox desc <- descriptions]
     let systemDescs = [desc | SystemToolbox desc <- descriptions]
-    
+
     sqliteResults <- traverse (initializeSqliteToolbox tracer) sqliteDescs
     systemResults <- traverse (initializeSystemToolbox tracer) systemDescs
-    
+
     let (sqliteErrors, sqliteToolboxes) = partitionEithers sqliteResults
     let (systemErrors, systemToolboxes) = partitionEithers systemResults
-    
+
     -- Trace errors for each failed toolbox
     mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "sqlite" err)) sqliteErrors
     mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "system" err)) systemErrors
-    
+
     pure (sqliteToolboxes, systemToolboxes)
 
 {- | Initialize a single SQLite builtin toolbox.
@@ -218,4 +218,3 @@ registerSystemToolsWithTracing tracer toolbox = do
             runTracer tracer (BuiltinToolboxInitError (SystemToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
-

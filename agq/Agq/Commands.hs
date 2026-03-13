@@ -477,8 +477,9 @@ execTask cfg conn t = do
         Nothing -> putStrLn "[agq] Skipping prepare hook (hook file not found)"
         Just h -> do
             putStrLn $ "[agq] Executing prepare hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
-            mec <- withHookTimeout (hookTimeoutSeconds cfg) $
-                runWithCwd worktreeProj h ["prepare", Text.unpack lbl, nameStr, instrFile]
+            mec <-
+                withHookTimeout (hookTimeoutSeconds cfg) $
+                    runWithCwd worktreeProj h ["prepare", Text.unpack lbl, nameStr, instrFile]
             case mec of
                 Nothing -> putStrLn "[agq] prepare hook timed out — continuing"
                 Just _ -> return ()
@@ -579,8 +580,9 @@ execTask cfg conn t = do
                     return ""
                 Just h -> do
                     putStrLn $ "[agq] Executing static-check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
-                    mres <- withHookTimeout (hookTimeoutSeconds cfg) $
-                        runWithCwdBoth worktreeProj h ["static-check", Text.unpack lbl, nameStr, instrFile]
+                    mres <-
+                        withHookTimeout (hookTimeoutSeconds cfg) $
+                            runWithCwdBoth worktreeProj h ["static-check", Text.unpack lbl, nameStr, instrFile]
                     case mres of
                         Nothing -> do
                             putStrLn "[agq] static-check hook timed out — skipping"
@@ -628,8 +630,9 @@ execTask cfg conn t = do
                 Nothing -> putStrLn "[agq] Skipping check hook (none configured)"
                 Just h -> do
                     putStrLn $ "[agq] Executing check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
-                    mres <- withHookTimeout (hookTimeoutSeconds cfg) $
-                        runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
+                    mres <-
+                        withHookTimeout (hookTimeoutSeconds cfg) $
+                            runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
                     case mres of
                         Nothing -> putStrLn "[agq] check hook timed out — skipping PR comment"
                         Just (_, checkOut, checkErr) -> do
@@ -928,4 +931,3 @@ detectBaseBranch cfg = do
                         then Text.drop (Text.length "origin/") raw
                         else raw
         else return (baseBranch cfg)
-

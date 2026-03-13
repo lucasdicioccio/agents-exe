@@ -700,4 +700,3 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-

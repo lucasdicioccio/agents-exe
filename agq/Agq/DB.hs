@@ -215,8 +215,9 @@ listTasks conn = do
         )
         tasks
 
--- | Detailed task information including dependencies, tags, and blocking locks.
--- Returns (Task, deps, tags, incompleteDeps, blockingLocks).
+{- | Detailed task information including dependencies, tags, and blocking locks.
+Returns (Task, deps, tags, incompleteDeps, blockingLocks).
+-}
 listTasksWithDetails :: Connection -> IO [(Task, [Text], [Text], [Text], [Text])]
 listTasksWithDetails conn = do
     tasks <-
@@ -295,4 +296,3 @@ countPendingRunning conn = do
     return $ case rows of
         [Only n] -> n
         _ -> 0
-

@@ -396,11 +396,12 @@ runValue tracer script mCtx val = do
             if code /= ExitSuccess
                 then pure $ Left $ ScriptExecutionError path code err
                 else
-                    let -- Use lenient UTF-8 decoding to handle binary data safely.
+                    let
+                        -- Use lenient UTF-8 decoding to handle binary data safely.
                         -- Invalid bytes are replaced with U+FFFD (replacement character).
                         outText = Text.decodeUtf8With lenientDecode out
                         adjusted = case maybeBehavior of
                             Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
                             Nothing -> out
-                     in pure $ Right adjusted
-
+                     in
+                        pure $ Right adjusted
