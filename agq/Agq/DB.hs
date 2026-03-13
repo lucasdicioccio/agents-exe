@@ -10,6 +10,7 @@ module Agq.DB (
     insertTask,
     getTaskByName,
     listTasks,
+    listTasksWithDetails,
     updateTaskStatus,
     decrementTries,
     retryTask,
@@ -214,6 +215,40 @@ listTasks conn = do
         )
         tasks
 
+-- | Detailed task information including dependencies, tags, and blocking locks.
+-- Returns (Task, deps, tags, incompleteDeps, blockingLocks).
+listTasksWithDetails :: Connection -> IO [(Task, [Text], [Text], [Text], [Text])]
+listTasksWithDetails conn = do
+    tasks <-
+        query_
+            conn
+            ("SELECT " <> selectCols <> " FROM tasks ORDER BY id")
+    mapM
+        ( \t -> do
+            deps <- query conn "SELECT dep_name FROM task_deps WHERE task_id=?" (Only (taskId t))
+            tags <- query conn "SELECT tag FROM task_tags WHERE task_id=?" (Only (taskId t))
+            -- Find incomplete dependencies (deps that exist and are not done)
+            incompleteDeps <-
+                query
+                    conn
+                    "SELECT d.dep_name FROM task_deps d\
+                    \ JOIN tasks dep ON dep.name = d.dep_name\
+                    \ WHERE d.task_id = ? AND dep.status != 'done'"
+                    (Only (taskId t)) ::
+                    IO [Only Text]
+            -- Find locks that block this task's tags
+            blockingLocks <-
+                query
+                    conn
+                    "SELECT l.tag FROM locks l\
+                    \ JOIN task_tags tt ON tt.tag = l.tag\
+                    \ WHERE tt.task_id = ?"
+                    (Only (taskId t)) ::
+                    IO [Only Text]
+            return (t, map fromOnly deps, map fromOnly tags, map fromOnly incompleteDeps, map fromOnly blockingLocks)
+        )
+        tasks
+
 updateTaskStatus :: Connection -> Text -> TaskStatus -> Maybe Text -> IO ()
 updateTaskStatus conn name st merr = case merr of
     Nothing ->
@@ -260,3 +295,4 @@ countPendingRunning conn = do
     return $ case rows of
         [Only n] -> n
         _ -> 0
+
