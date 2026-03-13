@@ -56,6 +56,7 @@ module System.Agents.AgentTree (
     loadPostgRESTToolboxDescription,
 ) where
 
+import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Monad (unless, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
@@ -470,11 +471,10 @@ For each agent:
 2. Collect all referenced agent runtimes (children + extra-agents)
 3. Use registry to look up each referenced runtime
 4. Create tool registrations via agentToTool
-5. Update runtime's agentTools IO action
+5. Atomically update runtime's agentTools TVar with the new tools
 
-Note: This function modifies the existing runtimes in place by updating
-their tool resolution mechanisms. In a pure implementation, we would
-create new runtimes, but here we work with IO actions.
+This function modifies the existing runtimes in place by appending the
+sub-agent tools to their agentTools TVar.
 -}
 wireToolReferences ::
     Props ->
@@ -484,23 +484,24 @@ wireToolReferences ::
 wireToolReferences props graph runtimes = do
     mapM_ (wireAgentTools props graph runtimes) (Map.toList graph.graphNodes)
 
--- | Wire tools for a single agent
+-- | Wire tools for a single agent by appending sub-agent tools to the TVar.
 wireAgentTools ::
     Props ->
     AgentConfigGraph ->
     Map.Map AgentSlug Runtime ->
     (AgentSlug, AgentConfigNode) ->
     IO ()
-wireAgentTools props _graph runtimes (slug, node) = do
-    -- Get this agent's runtime
-    case Map.lookup slug runtimes of
+wireAgentTools props _graph _runtimes (slug, node) = do
+    -- Get this agent's runtime from the registry
+    mRt <- lookupRuntime props.runtimeRegistry slug
+    case mRt of
         Nothing -> pure () -- Should not happen
-        Just _rt -> do
-            -- Look up child runtimes
+        Just rt -> do
+            -- Look up child runtimes from registry
             childRuntimes <- mapM (lookupRuntime props.runtimeRegistry) node.nodeChildren
             let validChildren = Maybe.catMaybes childRuntimes
 
-            -- Look up extra agent runtimes
+            -- Look up extra agent runtimes from registry
             extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) node.nodeExtraRefs
             let validExtras = Maybe.catMaybes extraRuntimes
 
@@ -508,12 +509,10 @@ wireAgentTools props _graph runtimes (slug, node) = do
             let allHelpers = validChildren ++ validExtras
 
             -- Create tool registrations for helper agents
-            let _helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
+            let helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
 
-            -- Update the runtime's tools (this is a simplification - in reality
-            -- we'd need to modify the runtime structure or use a mutable reference)
-            -- For now, we rely on the registry for deferred lookup
-            pure ()
+            -- Atomically append helper tools to the runtime's agentTools TVar
+            atomically $ modifyTVar' rt.agentTools (\existingTools -> existingTools ++ helperTools)
 
 -------------------------------------------------------------------------------
 -- Phase 4: Build AgentTree
@@ -1090,3 +1089,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+

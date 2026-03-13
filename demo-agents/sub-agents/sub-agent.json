@@ -1,0 +1,20 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "sub-agent",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.5",
+    "toolDirectory": "notools",
+    "extraAgents": [
+    ],
+    "announce": "A children demo agent.",
+    "systemPrompt": [
+      "You are a helpful assistant.",
+      "You hold a piece of information that you share with of your answers.",
+      "- the girafe ate our socks"
+    ]
+  }
+}
+

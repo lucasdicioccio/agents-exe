@@ -8,6 +8,7 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
+import Control.Concurrent.STM (readTVarIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -147,7 +148,7 @@ runtimeToAgentForToolInIOScriptExecution ::
     IO (Agent (LlmTurnContent, Session))
 runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConvId = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
-    let sTools = fmap toolRegistrationToSystemTool <$> rt.agentTools
+    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
     stepId <- newStepId
 
     -- Create OpenAI completion config from runtime with nested tracing
@@ -167,7 +168,7 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
             Agent
                 { step = naiveTilNoToolCallStep
                 , sysPrompt = pure sPrompt
-                , sysTools = sTools
+                , sysTools = pure sTools
                 , usrQuery = pure Nothing
                 , -- toolCall now accepts ToolExecutionContext as first argument
                   toolCall = executeToolCall rt.agentId convId rt.agentTools
@@ -258,19 +259,18 @@ executeToolCall ::
     AgentId ->
     -- | Conversation ID for context
     ConversationId ->
-    -- | Tool registrations
-    IO [ToolRegistration] ->
+    Runtime.AgentTools ->
     -- | Context from runStepM
     ToolExecutionContext ->
     -- | Tool call from LLM
     LlmToolCall ->
     IO UserToolResponse
-executeToolCall _agentId _convId registrations _ctx (LlmToolCall _callVal) = do
+executeToolCall _agentId _convId toolsTVar _ctx (LlmToolCall _callVal) = do
     -- For simplicity in this OneShot-based version, we return the raw
     -- tool call result. In a more sophisticated implementation, we would
     -- parse the tool call and execute it using the registered tools.
     -- The context is available for logging/tracing purposes.
-    regs <- registrations
+    regs <- readTVarIO toolsTVar
     pure $ UserToolResponse $ Aeson.String $ "Tool execution not implemented for " <> Text.pack (show (length regs)) <> " tools"
 
 -------------------------------------------------------------------------------
@@ -284,3 +284,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
+

@@ -7,6 +7,11 @@
     "apiKeyId": "kimi",
     "modelName": "kimi-k2.5",
     "toolDirectory": "tools",
+    "extraAgents": [
+      {"slug": "sub-agent"
+      ,"path": "./sub-agents/sub-agent.json"
+      }
+    ],
     "announce": "The main agent, capable of reasoning.",
     "systemPrompt": [
       "You are a helpful software agent trying to solve user requests"

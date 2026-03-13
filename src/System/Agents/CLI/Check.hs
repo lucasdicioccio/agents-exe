@@ -13,6 +13,7 @@ module System.Agents.CLI.Check (
     CheckOptions (..),
 ) where
 
+import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
@@ -81,7 +82,7 @@ handleCheck opts apiKeysFile agentFiles = do
 -- | Display agent check information
 printAgentCheck :: CheckOptions -> AgentTree.AgentTree -> IO ()
 printAgentCheck opts tree = do
-    tools <- Runtime.agentTools tree.agentRuntime
+    tools <- readTVarIO $ Runtime.agentTools tree.agentRuntime
     let toolCount = length tools
     Text.putStrLn $
         Runtime.agentSlug tree.agentRuntime
@@ -147,3 +148,4 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
+
