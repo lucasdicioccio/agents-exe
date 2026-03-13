@@ -78,7 +78,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
 import qualified Data.Vector as Vector
-import Foreign.C.Types (CInt(..))
+import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
 import System.Timeout (timeout)
 
@@ -136,8 +136,7 @@ data Toolbox = Toolbox
     -- ^ Name of this toolbox instance
     }
 
-{- | Errors that can occur during Lua script execution.
--}
+-- | Errors that can occur during Lua script execution.
 data ScriptError
     = -- | Lua syntax error or runtime error
       LuaRuntimeError !Text.Text
@@ -214,13 +213,14 @@ initializeToolbox tracer desc = do
             lock <- newEmptyMVar
             putMVar lock ()
 
-            pure $ Right
-                Toolbox
-                    { toolboxLuaState = lstate
-                    , toolboxConfig = desc
-                    , toolboxLock = lock
-                    , toolboxName = desc.luaToolboxName
-                    }
+            pure $
+                Right
+                    Toolbox
+                        { toolboxLuaState = lstate
+                        , toolboxConfig = desc
+                        , toolboxLock = lock
+                        , toolboxName = desc.luaToolboxName
+                        }
 
 {- | Close a toolbox and release its resources.
 
@@ -248,7 +248,7 @@ toCInt = fromIntegral
 stackIndexToInt :: Lua.StackIndex -> Int
 stackIndexToInt (Lua.StackIndex n) = fromIntegral n
 
--- | Convert NumArgs to Int  
+-- | Convert NumArgs to Int
 numArgsToInt :: Lua.NumArgs -> Int
 numArgsToInt (Lua.NumArgs n) = fromIntegral n
 
@@ -284,20 +284,22 @@ configureSandbox lstate = Lua.runWith lstate $ do
         ]
 
     -- Remove dangerous functions from 'os' table
-    withTable "os" $ removeFields
-        [ "execute"
-        , "remove"
-        , "rename"
-        , "exit"
-        , "setlocale"
-        , "getenv" -- could leak sensitive environment variables
-        ]
+    withTable "os" $
+        removeFields
+            [ "execute"
+            , "remove"
+            , "rename"
+            , "exit"
+            , "setlocale"
+            , "getenv" -- could leak sensitive environment variables
+            ]
 
     -- Remove dangerous functions from 'io' table
-    withTable "io" $ removeFields
-        [ "popen"
-        , "tmpfile"
-        ]
+    withTable "io" $
+        removeFields
+            [ "popen"
+            , "tmpfile"
+            ]
 
     -- Remove package table entirely (prevents module loading)
     Lua.pushglobaltable
@@ -478,11 +480,12 @@ executeScriptInternal toolbox script mPortal allowedTools = do
         Just (Left err) ->
             pure $ Left err
         Just (Right val) ->
-            pure $ Right
-                ExecutionResult
-                    { resultValue = val
-                    , resultExecutionTime = execTime
-                    }
+            pure $
+                Right
+                    ExecutionResult
+                        { resultValue = val
+                        , resultExecutionTime = execTime
+                        }
 
 -- | Helper to call Lua function with stack trace capture
 pcallWithTraceback :: Lua.NumArgs -> Lua.NumResults -> Lua.Lua (Lua.Status, Text.Text)
@@ -597,8 +600,9 @@ isArray = do
                         mIdx <- Lua.tointeger (Lua.nthTop 1)
                         Lua.pop 2 -- pop key and value
                         case mIdx of
-                            Just idx | idx == fromIntegral expectedIdx -> 
-                                isSequential (expectedIdx + 1)
+                            Just idx
+                                | idx == fromIntegral expectedIdx ->
+                                    isSequential (expectedIdx + 1)
                             _ -> pure False
                     else do
                         Lua.pop 2 -- pop key and value
@@ -610,8 +614,9 @@ convertArray = do
     vals <- collectArrayValues
     pure $ Aeson.Array (Vector.fromList vals)
 
--- | Collect values from an array table using Lua # operator
--- Pop the table when done
+{- | Collect values from an array table using Lua # operator
+Pop the table when done
+-}
 collectArrayValues :: Lua.Lua [Aeson.Value]
 collectArrayValues = do
     -- Get table length using # operator
@@ -656,4 +661,3 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
-
