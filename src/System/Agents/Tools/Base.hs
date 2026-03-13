@@ -20,6 +20,7 @@ import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
+import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace (ToolTrace)
 
 -------------------------------------------------------------------------------
@@ -49,6 +50,8 @@ data ToolDef
       PostgRESTool !Text !Text
     | -- | SQLite tool description
       SqliteTool !SqliteTools.ToolDescription
+    | -- | System tool description
+      SystemTool !SystemTools.ToolDescription
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -84,6 +87,10 @@ data CallResult call
       SqliteToolResult call SqliteTools.QueryResult
     | -- | SQLite tool execution failed
       SqliteToolError call SqliteTools.QueryError
+    | -- | System tool executed successfully with query results
+      SystemToolResult call SystemTools.QueryResult
+    | -- | System tool execution failed
+      SystemToolError call SystemTools.QueryError
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -104,6 +111,8 @@ mapCallResult f c =
         (PostgRESToolError v e) -> PostgRESToolError (f v) e
         (SqliteToolResult c r) -> SqliteToolResult (f c) r
         (SqliteToolError c e) -> SqliteToolError (f c) e
+        (SystemToolResult v r) -> SystemToolResult (f v) r
+        (SystemToolError v e) -> SystemToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -128,6 +137,8 @@ extractCall (PostgRESToolResult c _) = c
 extractCall (PostgRESToolError c _) = c
 extractCall (SqliteToolResult c _) = c
 extractCall (SqliteToolError c _) = c
+extractCall (SystemToolResult c _) = c
+extractCall (SystemToolError c _) = c
 
 -------------------------------------------------------------------------------
 -- Byte Counting Helpers
@@ -170,6 +181,10 @@ callResultByteSize (SqliteToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (SqliteToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
+callResultByteSize (SystemToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (SystemToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 
 {- | Calculate total bytes for a list of tool responses.
 
@@ -178,3 +193,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+
