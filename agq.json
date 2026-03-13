@@ -27,6 +27,7 @@
     "labelTaken":     "agq/taken",
     "labelWait":      "agq/wait",
     "labelAgentPr":   "agq/agent-pr",
-    "labelDoneInBranch":   "agq/done-in-branch"
+    "labelDoneInBranch":   "agq/done-in-branch",
+    "labelArbitrageNeeded":   "agq/arbitrage-needed"
   }
 }
