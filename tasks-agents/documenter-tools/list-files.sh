@@ -16,8 +16,12 @@ if [[ "$1" == "run" ]]; then
     find ./app/ -name '*.hs'
     find ./src/ -name '*.hs'
     find ./test/ -name '*.hs'
-    find ./tasks-sessions/ -name '*.md'
+    find ./agq/ -name '*.hs'
     find ./ -name '*.cabal'
+    find ./app/ -name '*.md'
+    find ./src/ -name '*.md'
+    find ./test/ -name '*.md'
+    find ./agq/ -name '*.md'
     exit 0
 fi
 
