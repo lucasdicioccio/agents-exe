@@ -107,6 +107,7 @@ library agents-lib
                     , System.Agents.Tools.PostgREST.Converter
                     , System.Agents.Tools.PostgRESToolbox
                     , System.Agents.Tools.SqliteToolbox
+                    , System.Agents.Tools.SystemToolbox
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime
@@ -216,7 +217,7 @@ executable agents-exe
                       temporary,
                       unix
 
-    -- Directories containing source files.
+    -- Directories containing the source files.
     hs-source-dirs:   app
 
     -- Base language which the package written in.
