@@ -41,7 +41,7 @@ import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import System.Agents.Tools
+import System.Agents.Tools hiding (SystemTool)
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
 
 import qualified Data.Aeson.Key as AesonKey
