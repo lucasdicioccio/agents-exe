@@ -8,11 +8,24 @@
     "modelName": "qwen3:4b-thinking-2507-q4_K_M",
     "toolDirectory": "tools",
     "announce": "A main agent, capable of reasoning.",
-    "systemPrompt":
-            [ "You are a helpful software agent trying to solve user requests"
-            ]
+    "systemPrompt": [
+      "You are a helpful software agent trying to solve user requests"
+    ],
+    "builtinToolboxes": [
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "system",
+          "Description": "System context and information",
+          "Capabilities": [
+            "date",
+            "operating-system",
+            "running-user",
+            "hostname"
+          ],
+          "EnvVarFilter": null
+        }
+      }
+    ]
   }
 }
-
-
-

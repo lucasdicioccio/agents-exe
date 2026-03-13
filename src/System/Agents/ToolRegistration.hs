@@ -12,6 +12,7 @@ It supports registration of various tool types:
 * OpenAPI tools - Tools generated from OpenAPI specifications
 * PostgREST tools - Tools generated from PostgREST database APIs
 * SQLite tools - Tools for executing SQL queries against SQLite databases
+* System tools - Tools for gathering system information
 
 For OpenAPI tools, special handling is done for name normalization:
 OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
@@ -34,6 +35,8 @@ module System.Agents.ToolRegistration (
     registerPostgRESTool,
     registerSqliteTool,
     registerSqliteTools,
+    registerSystemTool,
+    registerSystemTools,
 
     -- * Naming policies
     io2LLMName,
@@ -42,6 +45,7 @@ module System.Agents.ToolRegistration (
     openapi2LLMName,
     postgrest2LLMName,
     sqlite2LLMName,
+    system2LLMName,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -100,7 +104,9 @@ import System.Agents.Tools.PostgREST.Converter (
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
+import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace (ToolTrace (..))
+import System.Agents.Base (SystemToolCapability (..))
 
 -------------------------------------------------------------------------------
 
@@ -151,6 +157,14 @@ Generates an LLM-safe tool name in the format: @sqlite_{toolboxName}_{toolName}@
 sqlite2LLMName :: SqliteTools.Toolbox -> Text -> OpenAI.ToolName
 sqlite2LLMName box toolName =
     OpenAI.ToolName (mconcat ["sqlite_", box.toolboxName, "_", toolName])
+
+{- | Naming policy for System tools.
+
+Generates an LLM-safe tool name in the format: @system_{toolboxName}_{toolName}@
+-}
+system2LLMName :: SystemTools.Toolbox -> Text -> OpenAI.ToolName
+system2LLMName box toolName =
+    OpenAI.ToolName (mconcat ["system_", box.toolboxName, "_", toolName])
 
 -------------------------------------------------------------------------------
 
@@ -751,6 +765,80 @@ registerSqliteTools box =
         Right reg -> Right [reg]
 
 -------------------------------------------------------------------------------
+-- System Tool Registration
+-------------------------------------------------------------------------------
+
+{- | Register a SystemToolbox tool with the LLM system.
+
+System tools expose functions based on configured capabilities.
+The tool accepts a 'capability' parameter to select which information to retrieve.
+-}
+registerSystemTool ::
+    SystemTools.Toolbox ->
+    Either String ToolRegistration
+registerSystemTool box =
+    let
+        toolName = "system_info"
+        llmName = system2LLMName box toolName
+
+        -- Single parameter: the capability to query
+        paramProps =
+            [ ParamProperty
+                { propertyKey = "capability"
+                , propertyType = StringParamType
+                , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
+                , propertyRequired = True
+                }
+            ]
+
+        openaiTool =
+            OpenAI.Tool
+                { OpenAI.toolName = llmName
+                , OpenAI.toolDescription = "Provides system information: " <> box.toolboxDescription
+                , OpenAI.toolParamProperties = paramProps
+                }
+
+        -- Create the tool
+        tool' = systemTool box
+
+        -- Find function - matches on the LLM name
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find call =
+            if call.toolCallFunction.toolCallFunctionName == llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+     in
+        Right $
+            ToolRegistration
+                { innerTool = mapToolResult (const ()) tool'
+                , declareTool = openaiTool
+                , findTool = find
+                }
+
+-- Helper to convert capability to text
+capabilityToText :: SystemToolCapability -> Text
+capabilityToText SystemToolDate = "date"
+capabilityToText SystemToolOperatingSystem = "operating-system"
+capabilityToText SystemToolEnvVars = "env-vars"
+capabilityToText SystemToolRunningUser = "running-user"
+capabilityToText SystemToolHostname = "hostname"
+capabilityToText SystemToolWorkingDirectory = "working-directory"
+capabilityToText SystemToolProcessInfo = "process-info"
+capabilityToText SystemToolUptime = "uptime"
+
+{- | Register all tools from a System toolbox.
+
+Currently System toolboxes expose a single system_info tool.
+-}
+registerSystemTools ::
+    SystemTools.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerSystemTools box =
+    pure $ case registerSystemTool box of
+        Left err -> Left err
+        Right reg -> Right [reg]
+
+-------------------------------------------------------------------------------
 -- Internal tool builders (copied from Tools to avoid import cycle)
 -------------------------------------------------------------------------------
 
@@ -845,6 +933,32 @@ sqliteTool box =
     run _tracer _ctx _ = do
         pure $ SqliteToolError call (SqliteTools.SqlError "Arguments must be a JSON object")
 
+-- | Builder for a SystemToolbox-based tool.
+systemTool :: SystemTools.Toolbox -> Tool ()
+systemTool box =
+    Tool
+        { toolDef = SystemTool toolDesc
+        , toolRun = run
+        }
+  where
+    call = ()
+    toolDesc =
+        SystemTools.ToolDescription
+            { SystemTools.toolDescriptionName = "system_info"
+            , SystemTools.toolDescriptionDescription = box.toolboxDescription
+            , SystemTools.toolDescriptionToolboxName = box.toolboxName
+            }
+    run _tracer _ctx (Aeson.Object v) = do
+        case KeyMap.lookup (AesonKey.fromText "capability") v of
+            Just (Aeson.String cap) -> do
+                result <- SystemTools.executeQuery box cap
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right rsp -> pure $ SystemToolResult call rsp
+            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
+    run _tracer _ctx _ = do
+        pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
+
 -------------------------------------------------------------------------------
 -- Schema adaptation helpers
 -------------------------------------------------------------------------------
@@ -883,3 +997,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

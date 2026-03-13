@@ -26,6 +26,8 @@ import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as Tools
+import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
+import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
 tracePrintingTextResponses :: Tracer IO Trace
 tracePrintingTextResponses = Tracer f
@@ -33,6 +35,9 @@ tracePrintingTextResponses = Tracer f
     f (AgentTrace (Runtime.AgentTrace_Conversation slug _ _ trace)) =
         g [slug] trace
     f (AgentTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
+    f (AgentTrace (Runtime.BuiltinToolboxTrace _ _)) = pure ()
+    f (AgentTrace (Runtime.BuiltinToolboxInitError _ _)) = pure ()
+    f (AgentTrace (Runtime.SystemToolboxTrace _ _)) = pure ()
     f (McpTrace _ _) = pure ()
     f (OpenAPITrace _ _) = pure ()
     f (PostgRESTTrace _ _) = pure ()
@@ -50,6 +55,9 @@ tracePrintingTextResponses = Tracer f
     g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_Conversation childSlug _ _ sub)) =
         g (childSlug : pfx) sub
     g _ (Runtime.ChildrenTrace (Runtime.AgentTrace_Loading _ _ _)) = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.BuiltinToolboxTrace _ _)) = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.BuiltinToolboxInitError _ _)) = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.SystemToolboxTrace _ _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) =
         Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
@@ -108,11 +116,45 @@ renderAgentTrace (Runtime.AgentTrace_Conversation slug _ _ tr) =
         [ mconcat ["@", slug, ":"]
         , renderConversationAgentTrace tr
         ]
+renderAgentTrace (Runtime.BuiltinToolboxTrace name tr) =
+    Text.unlines
+        [ mconcat ["@builtin/", name, ":"]
+        , renderBuiltinToolboxTrace tr
+        ]
+renderAgentTrace (Runtime.BuiltinToolboxInitError name err) =
+    Text.unlines
+        [ mconcat ["@builtin/", name, ":"]
+        , "Error: " <> Text.pack err
+        ]
+renderAgentTrace (Runtime.SystemToolboxTrace name tr) =
+    Text.unlines
+        [ mconcat ["@system/", name, ":"]
+        , renderSystemToolboxTrace tr
+        ]
 
 renderLoadingAgentTrace :: BashToolbox.Trace -> Text
 renderLoadingAgentTrace tr = case tr of
     BashToolbox.ReloadToolsTrace _ -> "(reload-tools...)"
     BashToolbox.BashToolsLoadingTrace _ -> "(reload-tools...)"
+
+renderBuiltinToolboxTrace :: SqliteTools.Trace -> Text
+renderBuiltinToolboxTrace tr = case tr of
+    SqliteTools.ConnectionOpenedTrace _ -> "(connection opened)"
+    SqliteTools.ConnectionClosedTrace -> "(connection closed)"
+    SqliteTools.QueryStartedTrace _ -> "(query started)"
+    SqliteTools.QueryCompletedTrace _ _ _ -> "(query completed)"
+    SqliteTools.AccessViolationTrace _ _ _ -> "(access violation)"
+    SqliteTools.QueryErrorTrace _ _ -> "(query error)"
+    SqliteTools.WaitingForLockTrace _ -> "(waiting for lock)"
+
+renderSystemToolboxTrace :: SystemTools.Trace -> Text
+renderSystemToolboxTrace tr = case tr of
+    SystemTools.SystemInfoRequestedTrace cap ->
+        Text.unwords ["system-info requested:", cap]
+    SystemTools.SystemInfoRetrievedTrace cap _ ->
+        Text.unwords ["system-info retrieved:", cap]
+    SystemTools.SystemInfoErrorTrace cap err ->
+        Text.unwords ["system-info error:", cap, "-", err]
 
 renderConversationAgentTrace :: Runtime.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of
@@ -129,6 +171,10 @@ renderConversationAgentTrace tr = case tr of
         Text.unwords ["io-tool", desc.ioSlug, "start"]
     Runtime.RunToolTrace _ (Tools.IOToolsTrace (Tools.IOScriptStopped desc _ _)) ->
         Text.unwords ["io-tool", desc.ioSlug, "stop"]
+    Runtime.RunToolTrace _ (Tools.SqliteToolsTrace _) ->
+        "sqlite-tool: (trace)"
+    Runtime.RunToolTrace _ (Tools.SystemToolsTrace _) ->
+        "system-tool: (trace)"
     Runtime.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
     Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes) ->
         Text.unwords ["to: llm", "[" <> formatBytes bytes <> "]"]
@@ -139,3 +185,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

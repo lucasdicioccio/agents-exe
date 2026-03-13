@@ -41,7 +41,7 @@ import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import System.Agents.Tools
+import System.Agents.Tools hiding (SystemTool)
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
 
 import qualified Data.Aeson.Key as AesonKey
@@ -304,6 +304,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         SqliteToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "SQLite tool error: " <> show err
+        SystemToolResult _ toolResult ->
+            UserToolResponse $ Aeson.toJSON toolResult
+        SystemToolError _ err ->
+            UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool

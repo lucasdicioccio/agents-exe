@@ -25,6 +25,20 @@
           "Path": ".knowledge.db",
           "Access": "read-write"
         }
+      },
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "system",
+          "Description": "System context and information",
+          "Capabilities": [
+            "date",
+            "operating-system",
+            "running-user",
+            "hostname"
+          ],
+          "EnvVarFilter": null
+        }
       }
     ]
   }
