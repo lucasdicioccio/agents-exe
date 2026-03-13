@@ -21,6 +21,7 @@ data AgqLabels = AgqLabels
     , labelWait :: Text -- issue is waiting on dependencies
     , labelAgentPr :: Text -- PR was created by an agent
     , labelDoneInBranch :: Text -- issue was closed by a PR merged into a feature branch
+    , labelArbitrageNeeded :: Text -- issue/PR is paused until human removes this label
     }
     deriving (Generic, Show)
 
@@ -35,6 +36,7 @@ defaultLabels =
         , labelWait = "agq/wait"
         , labelAgentPr = "agq/agent-pr"
         , labelDoneInBranch = "agq/done-in-branch"
+        , labelArbitrageNeeded = "agq/arbitrage-needed"
         }
 
 data AgqConfig = AgqConfig
@@ -92,3 +94,4 @@ loadConfig path = do
             putStrLn "Using default config."
             return defaultConfig
         Right cfg -> return cfg
+
