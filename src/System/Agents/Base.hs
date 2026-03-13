@@ -466,6 +466,115 @@ instance ToJSON SqliteToolboxDescription where
 instance FromJSON SqliteToolboxDescription where
     parseJSON = Aeson.genericParseJSON sqliteToolboxOptions
 
+-------------------------------------------------------------------------------
+-- System Toolbox Configuration
+-------------------------------------------------------------------------------
+
+{- | Enumeration of available system information capabilities.
+
+Each capability represents a category of system information that
+can be exposed to agents through the system toolbox.
+-}
+data SystemToolCapability
+    = -- | Current date/time information
+      SystemToolDate
+    | -- | OS name and version
+      SystemToolOperatingSystem
+    | -- | Environment variables (with optional filtering)
+      SystemToolEnvVars
+    | -- | Current user information
+      SystemToolRunningUser
+    | -- | Machine hostname
+      SystemToolHostname
+    | -- | Current working directory
+      SystemToolWorkingDirectory
+    | -- | Process ID and other process information
+      SystemToolProcessInfo
+    | -- | System uptime
+      SystemToolUptime
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Serialize SystemToolCapability as kebab-case strings.
+instance ToJSON SystemToolCapability where
+    toJSON SystemToolDate = Aeson.String "date"
+    toJSON SystemToolOperatingSystem = Aeson.String "operating-system"
+    toJSON SystemToolEnvVars = Aeson.String "env-vars"
+    toJSON SystemToolRunningUser = Aeson.String "running-user"
+    toJSON SystemToolHostname = Aeson.String "hostname"
+    toJSON SystemToolWorkingDirectory = Aeson.String "working-directory"
+    toJSON SystemToolProcessInfo = Aeson.String "process-info"
+    toJSON SystemToolUptime = Aeson.String "uptime"
+
+-- | Parse SystemToolCapability from kebab-case strings.
+instance FromJSON SystemToolCapability where
+    parseJSON = Aeson.withText "SystemToolCapability" $ \txt ->
+        case txt of
+            "date" -> return SystemToolDate
+            "operating-system" -> return SystemToolOperatingSystem
+            "env-vars" -> return SystemToolEnvVars
+            "running-user" -> return SystemToolRunningUser
+            "hostname" -> return SystemToolHostname
+            "working-directory" -> return SystemToolWorkingDirectory
+            "process-info" -> return SystemToolProcessInfo
+            "uptime" -> return SystemToolUptime
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime."
+
+{- | Configuration for the system toolbox.
+
+This describes which system information capabilities should be
+made available to an agent. The system toolbox provides contextual
+information about the running environment.
+
+Example configuration:
+
+@
+{
+  "tag": "SystemToolbox",
+  "contents": {
+    "name": "system",
+    "description": "System information and context",
+    "capabilities": ["date", "operating-system", "running-user", "hostname"],
+    "envVarFilter": null
+  }
+}
+@
+
+The 'envVarFilter' field is an optional regex/pattern to filter
+environment variables when the 'env-vars' capability is enabled.
+If not specified, all environment variables are exposed.
+-}
+data SystemToolboxDescription
+    = SystemToolboxDescription
+    { systemToolboxName :: Text
+    -- ^ Unique name for this toolbox instance (used as tool prefix)
+    , systemToolboxDescription :: Text
+    -- ^ Human-readable description of the toolbox purpose
+    , systemToolboxCapabilities :: [SystemToolCapability]
+    -- ^ List of system information capabilities to expose
+    , systemToolboxEnvVarFilter :: Maybe Text
+    -- ^ Optional regex/pattern to filter environment variables
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for SystemToolboxDescription to use camelCase field names
+systemToolboxOptions :: Aeson.Options
+systemToolboxOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "systemToolbox"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON SystemToolboxDescription where
+    toJSON = Aeson.genericToJSON systemToolboxOptions
+    toEncoding = Aeson.genericToEncoding systemToolboxOptions
+
+instance FromJSON SystemToolboxDescription where
+    parseJSON = Aeson.genericParseJSON systemToolboxOptions
+
 {- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
 
 This is a tagged union type that allows extensible builtin toolbox types.
@@ -478,19 +587,26 @@ Example configuration:
 {
   "builtinToolboxes": [
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
-    {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}}
+    {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
+    {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}}
   ]
 }
 @
 -}
 data BuiltinToolboxDescription
     = SqliteToolbox SqliteToolboxDescription
+    | SystemToolbox SystemToolboxDescription
     deriving (Show, Ord, Eq, Generic)
 
 instance ToJSON BuiltinToolboxDescription where
     toJSON (SqliteToolbox val) =
         Aeson.object
             [ "tag" .= ("SqliteToolbox" :: Text)
+            , "contents" .= val
+            ]
+    toJSON (SystemToolbox val) =
+        Aeson.object
+            [ "tag" .= ("SystemToolbox" :: Text)
             , "contents" .= val
             ]
 
@@ -500,7 +616,9 @@ instance FromJSON BuiltinToolboxDescription where
         case (tag :: Text) of
             "SqliteToolbox" ->
                 SqliteToolbox <$> v .: "contents"
-            _ -> fail "expecting 'SqliteToolbox' tag"
+            "SystemToolbox" ->
+                SystemToolbox <$> v .: "contents"
+            _ -> fail "expecting 'SqliteToolbox' or 'SystemToolbox' tag"
 
 -------------------------------------------------------------------------------
 data Agent
@@ -582,3 +700,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+
