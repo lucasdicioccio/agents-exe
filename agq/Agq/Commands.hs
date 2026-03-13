@@ -6,6 +6,7 @@ module Agq.Commands (
     cmdPull,
     cmdPromote,
     cmdStatus,
+    cmdNext,
     cmdProcess,
     cmdExec,
     cmdMergePRs,
@@ -287,6 +288,79 @@ cmdStatus _cfg conn = do
                 putStrLn $ "  [" <> Text.unpack tag <> "] held by " <> Text.unpack tname <> " since " <> show at
   where
     padR n s = let s' = take n s in s' <> replicate (n - length s') ' '
+
+-- ---------------------------------------------------------------------------
+-- cmdNext
+-- ---------------------------------------------------------------------------
+
+{- | Show which tasks are ready to be taken and explain why blocked tasks
+are not ready. Excludes "done" tasks from the blocked list.
+-}
+cmdNext :: AgqConfig -> Connection -> IO ()
+cmdNext _cfg conn = do
+    tasks <- listTasksWithDetails conn
+    let (ready, blocked) = partitionTasks tasks
+    if null ready
+        then putStrLn "No tasks are ready to be taken."
+        else do
+            putStrLn "Tasks ready to be taken (would be started by 'agq process'):"
+            putStrLn ""
+            forM_ ready $ \(t, deps, tags, _incompleteDeps, _blockingLocks) -> do
+                putStrLn $ "  " <> Text.unpack (taskName t)
+                putStrLn $ "    Label: " <> Text.unpack (taskLabel t)
+                putStrLn $ "    Tags:  " <> Text.unpack (Text.intercalate ", " tags)
+                unless (null deps) $ do
+                    putStrLn $ "    Deps:  " <> Text.unpack (Text.intercalate ", " deps) <> " (all satisfied)"
+                putStrLn $ "    Tries remaining: " <> show (taskTriesRemaining t)
+                putStrLn ""
+    unless (null blocked) $ do
+        putStrLn "Tasks that cannot be taken:"
+        putStrLn ""
+        forM_ blocked $ \(t, deps, tags, incompleteDeps, blockingLocks) -> do
+            let reason = explainBlockage t incompleteDeps blockingLocks
+            putStrLn $ "  " <> Text.unpack (taskName t) <> " — " <> reason
+            putStrLn $ "    Label: " <> Text.unpack (taskLabel t)
+            putStrLn $ "    Tags:  " <> Text.unpack (Text.intercalate ", " tags)
+            unless (null deps) $ do
+                let depStatus = map (\d -> if d `elem` incompleteDeps then d <> " (pending)" else d <> " (done)") deps
+                putStrLn $ "    Deps:  " <> Text.unpack (Text.intercalate ", " depStatus)
+            putStrLn $ "    Tries remaining: " <> show (taskTriesRemaining t)
+            putStrLn ""
+  where
+    -- Partition tasks into ready and blocked (excluding done tasks)
+    partitionTasks tasks = foldr partition ([], []) tasks
+      where
+        partition item@(t, _deps, _tags, incompleteDeps, blockingLocks) (ready, blocked) =
+            case taskStatus t of
+                Done -> (ready, blocked) -- Exclude done tasks from both lists
+                _ ->
+                    if isReady t incompleteDeps blockingLocks
+                        then (item : ready, blocked)
+                        else (ready, item : blocked)
+
+    -- A task is ready if it's pending, has tries remaining, no incomplete deps, and no blocking locks
+    isReady t incompleteDeps blockingLocks =
+        taskStatus t == Pending
+            && taskTriesRemaining t > 0
+            && null incompleteDeps
+            && null blockingLocks
+
+    -- Explain why a task is blocked
+    explainBlockage t incompleteDeps blockingLocks =
+        case taskStatus t of
+            Running -> "Already running"
+            Failed -> "Failed (use 'agq retry' to reset)"
+            Done -> "Done" -- Should not appear in blocked list
+            Pending ->
+                if taskTriesRemaining t <= 0
+                    then "No tries remaining (use 'agq retry' to restore)"
+                    else
+                        if not (null blockingLocks)
+                            then "Blocked by lock(s) on tag(s): " <> Text.unpack (Text.intercalate ", " blockingLocks)
+                            else
+                                if not (null incompleteDeps)
+                                    then "Waiting on incomplete dependency: " <> Text.unpack (Text.intercalate ", " incompleteDeps)
+                                    else "Unknown reason"
 
 -- ---------------------------------------------------------------------------
 -- cmdProcess
@@ -776,3 +850,4 @@ detectBaseBranch cfg = do
                         then Text.drop (Text.length "origin/") raw
                         else raw
         else return (baseBranch cfg)
+

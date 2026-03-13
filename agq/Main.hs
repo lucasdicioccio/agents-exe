@@ -22,6 +22,7 @@ data Command
     | Pull
     | Promote
     | Status
+    | Next -- show which tasks are ready and why others are blocked
     | Process Bool Bool -- parallel? loop?
     | Exec Text -- task name
     | MergePRs
@@ -94,6 +95,12 @@ parseCommand =
                 ( info
                     (pure Status)
                     (progDesc "Show queue status")
+                )
+            <> command
+                "next"
+                ( info
+                    (pure Next)
+                    (progDesc "Show tasks ready to be taken and why others are blocked")
                 )
             <> command
                 "process"
@@ -206,9 +213,11 @@ dispatch cfg conn cmd = case cmd of
     Pull -> cmdPull cfg conn
     Promote -> cmdPromote cfg
     Status -> cmdStatus cfg conn
+    Next -> cmdNext cfg conn
     Process p l -> cmdProcess cfg conn p l
     Exec n -> cmdExec cfg conn n
     MergePRs -> cmdMergePRs cfg
     Clean d f -> cmdClean cfg d f
     Recover -> cmdRecover cfg conn
     Retry n r -> cmdRetry cfg conn n r
+
