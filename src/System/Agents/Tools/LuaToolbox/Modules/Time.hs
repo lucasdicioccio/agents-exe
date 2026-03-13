@@ -1,21 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Time module for LuaToolbox.
--}
+-- | Time module for LuaToolbox.
 module System.Agents.Tools.LuaToolbox.Modules.Time (
     registerTimeModule,
 ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (liftIO)
-import Data.Time (UTCTime, defaultTimeLocale, formatTime, getCurrentTime, diffUTCTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds, posixSecondsToUTCTime)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.Time (UTCTime, defaultTimeLocale, diffUTCTime, formatTime, getCurrentTime)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
+import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
-import Foreign.C.Types (CInt(..))
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -120,4 +119,3 @@ luaDiff = do
                     Lua.pushnil
                     Lua.pushstring "Invalid timestamp arguments"
                     pure 2
-

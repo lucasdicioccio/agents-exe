@@ -1,19 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Sandboxed filesystem module for LuaToolbox.
--}
+-- | Sandboxed filesystem module for LuaToolbox.
 module System.Agents.Tools.LuaToolbox.Modules.Fs (
     FsConfig (..),
     registerFsModule,
 ) where
 
-import qualified Data.ByteString as BS
-import Control.Exception (try, IOException)
+import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.ByteString as BS
+import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
 import System.Directory (
     createDirectoryIfMissing,
@@ -21,9 +22,7 @@ import System.Directory (
     doesFileExist,
     listDirectory,
  )
-import System.FilePath (isAbsolute, normalise, (</>), takeDirectory, isPathSeparator)
-import Data.List (isPrefixOf)
-import Foreign.C.Types (CInt(..))
+import System.FilePath (isAbsolute, isPathSeparator, normalise, takeDirectory, (</>))
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -225,29 +224,30 @@ validatePath config path
     | null (fsAllowedPaths config) = Left "No paths allowed"
     | not (isAbsolute normalised) = Left "Path must be absolute"
     | containsTraversal normalised = Left "Path contains directory traversal"
-    | otherwise = 
+    | otherwise =
         if any (`isPathPrefixOf` normalised) (fsAllowedPaths config)
             then Right normalised
             else Left "Path not in allowed paths"
   where
     normalised = normalise path
     containsTraversal p = ".." `elem` splitPath p
-    
+
     splitPath :: FilePath -> [String]
     splitPath = go []
       where
         go acc [] = reverse acc
-        go acc (c:cs)
+        go acc (c : cs)
             | isPathSeparator c = go acc cs
-            | otherwise = 
-                let (part, rest) = break isPathSeparator (c:cs)
-                in go (part : acc) rest
+            | otherwise =
+                let (part, rest) = break isPathSeparator (c : cs)
+                 in go (part : acc) rest
 
     isPathPrefixOf :: FilePath -> FilePath -> Bool
-    isPathPrefixOf prefix p = 
-        prefix == p || 
-        (prefix `isPrefixOf` p && 
-         (null dropPrefix || isPathSeparator (head dropPrefix)))
+    isPathPrefixOf prefix p =
+        prefix == p
+            || ( prefix `isPrefixOf` p
+                    && (null dropPrefix || isPathSeparator (head dropPrefix))
+               )
       where
         dropPrefix = drop (length prefix) p
 
@@ -264,10 +264,11 @@ getPathArg config offset = do
 pushStringList :: [String] -> Lua.LuaE Lua.Exception ()
 pushStringList items = do
     Lua.newtable
-    mapM_ (\(i, s) -> do
-        Lua.pushstring (Text.encodeUtf8 $ Text.pack s)
-        Lua.pushinteger (fromIntegral i)
-        Lua.insert (Lua.nthTop 2)
-        Lua.settable (Lua.nthTop 3)
-        ) (zip [1..] items)
-
+    mapM_
+        ( \(i, s) -> do
+            Lua.pushstring (Text.encodeUtf8 $ Text.pack s)
+            Lua.pushinteger (fromIntegral i)
+            Lua.insert (Lua.nthTop 2)
+            Lua.settable (Lua.nthTop 3)
+        )
+        (zip [1 ..] items)

@@ -95,7 +95,7 @@ module System.Agents.Tools.LuaToolbox (
     configureSandbox,
     applyMemoryLimit,
     applyTimeout,
-    
+
     -- * Module registration
     registerStandardModules,
 ) where
@@ -120,11 +120,12 @@ import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolPortal)
 
 -- Import standard library modules
+
+import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
+import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Json as JsonMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Text as TextMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Time as TimeMod
-import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
-import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -278,22 +279,26 @@ registerStandardModules :: Lua.State -> LuaToolboxDescription -> IO ()
 registerStandardModules lstate desc = do
     -- Register json module
     JsonMod.registerJsonModule lstate
-    
+
     -- Register text module
     TextMod.registerTextModule lstate
-    
+
     -- Register time module
     TimeMod.registerTimeModule lstate
-    
+
     -- Register fs module with sandboxing
-    FsMod.registerFsModule lstate FsMod.FsConfig
-        { FsMod.fsAllowedPaths = desc.luaToolboxAllowedPaths
-        }
-    
+    FsMod.registerFsModule
+        lstate
+        FsMod.FsConfig
+            { FsMod.fsAllowedPaths = desc.luaToolboxAllowedPaths
+            }
+
     -- Register http module with sandboxing
-    HttpMod.registerHttpModule lstate HttpMod.HttpConfig
-        { HttpMod.httpAllowedHosts = desc.luaToolboxAllowedHosts
-        }
+    HttpMod.registerHttpModule
+        lstate
+        HttpMod.HttpConfig
+            { HttpMod.httpAllowedHosts = desc.luaToolboxAllowedHosts
+            }
 
 {- | Close a toolbox and release its resources.
 
@@ -735,4 +740,3 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
-

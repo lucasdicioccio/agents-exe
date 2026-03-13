@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | JSON module for LuaToolbox.
--}
+-- | JSON module for LuaToolbox.
 module System.Agents.Tools.LuaToolbox.Modules.Json (
     registerJsonModule,
 ) where
@@ -18,8 +17,8 @@ import qualified Data.Vector as Vector
 import qualified HsLua as Lua
 import qualified HsLua.Marshalling as Lua
 
-import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Key as AesonKey
+import qualified Data.Aeson.KeyMap as KeyMap
 
 -- | Register the json module in the Lua state.
 registerJsonModule :: Lua.State -> IO ()
@@ -136,12 +135,15 @@ convertArray = do
 collectArrayValues :: Lua.LuaE Lua.Exception [Aeson.Value]
 collectArrayValues = do
     len' <- Lua.rawlen (Lua.nthTop 1)
-    vals <- mapM (\i -> do
-        Lua.pushinteger (fromIntegral i)
-        _ <- Lua.gettable (Lua.nthTop 2)
-        val <- luaToAesonValue
-        pure val
-        ) [1 .. fromIntegral len']
+    vals <-
+        mapM
+            ( \i -> do
+                Lua.pushinteger (fromIntegral i)
+                _ <- Lua.gettable (Lua.nthTop 2)
+                val <- luaToAesonValue
+                pure val
+            )
+            [1 .. fromIntegral len']
     Lua.pop 1
     pure vals
 
@@ -170,24 +172,27 @@ collectObjectPairs = do
 aesonToLuaValue :: Aeson.Value -> Lua.LuaE Lua.Exception ()
 aesonToLuaValue Aeson.Null = Lua.pushnil
 aesonToLuaValue (Aeson.Bool b) = Lua.pushboolean b
-aesonToLuaValue (Aeson.Number n) = 
+aesonToLuaValue (Aeson.Number n) =
     case floatingOrInteger n of
         Left d -> Lua.pushnumber d
         Right i -> Lua.pushinteger (fromIntegral i)
 aesonToLuaValue (Aeson.String t) = Lua.pushstring (Text.encodeUtf8 t)
 aesonToLuaValue (Aeson.Array arr) = do
     Lua.newtable
-    mapM_ (\(i, val) -> do
-        aesonToLuaValue val
-        Lua.pushinteger (fromIntegral (i + 1))
-        Lua.insert (Lua.nthTop 2)
-        Lua.settable (Lua.nthTop 3)
-        ) (zip [0..] (Vector.toList arr))
+    mapM_
+        ( \(i, val) -> do
+            aesonToLuaValue val
+            Lua.pushinteger (fromIntegral (i + 1))
+            Lua.insert (Lua.nthTop 2)
+            Lua.settable (Lua.nthTop 3)
+        )
+        (zip [0 ..] (Vector.toList arr))
 aesonToLuaValue (Aeson.Object obj) = do
     Lua.newtable
-    mapM_ (\(k, val) -> do
-        Lua.pushstring (Text.encodeUtf8 $ AesonKey.toText k)
-        aesonToLuaValue val
-        Lua.settable (Lua.nthTop 3)
-        ) (KeyMap.toList obj)
-
+    mapM_
+        ( \(k, val) -> do
+            Lua.pushstring (Text.encodeUtf8 $ AesonKey.toText k)
+            aesonToLuaValue val
+            Lua.settable (Lua.nthTop 3)
+        )
+        (KeyMap.toList obj)

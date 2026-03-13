@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | UTF-8 text utilities module for LuaToolbox.
--}
+-- | UTF-8 text utilities module for LuaToolbox.
 module System.Agents.Tools.LuaToolbox.Modules.Text (
     registerTextModule,
 ) where
@@ -197,10 +196,11 @@ getTextArg idx = do
 pushTextList :: [Text] -> Lua.LuaE Lua.Exception ()
 pushTextList items = do
     Lua.newtable
-    mapM_ (\(i, txt) -> do
-        Lua.pushstring (Text.encodeUtf8 txt)
-        Lua.pushinteger (fromIntegral i)
-        Lua.insert (Lua.nthTop 2)
-        Lua.settable (Lua.nthTop 3)
-        ) (zip [1..] items)
-
+    mapM_
+        ( \(i, txt) -> do
+            Lua.pushstring (Text.encodeUtf8 txt)
+            Lua.pushinteger (fromIntegral i)
+            Lua.insert (Lua.nthTop 2)
+            Lua.settable (Lua.nthTop 3)
+        )
+        (zip [1 ..] items)
