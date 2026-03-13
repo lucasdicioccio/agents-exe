@@ -42,7 +42,7 @@ data ToolRegistration = ToolRegistration
 
 ### Registration Flow
 
-1. Tool sources (bash, MCP, OpenAPI) generate `ToolRegistration` values
+1. Tool sources (bash, MCP, OpenAPI, System) generate `ToolRegistration` values
 2. Registrations are combined into a single list
 3. The list is passed to the LLM API as available functions
 4. When the LLM calls a function, the executor is invoked
@@ -267,6 +267,85 @@ exampleTool slug agentId = ToolRegistration
 - Performance-critical operations
 - Stateful operations
 
+## System Toolbox (Builtin)
+
+The System Toolbox provides agents with contextual information about the running system through a configurable set of capabilities.
+
+### Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| `date` | Current UTC/local time and timezone info |
+| `operating-system` | OS name, version, kernel, architecture |
+| `env-vars` | Filtered environment variables |
+| `running-user` | Username, UID, GID, home, shell |
+| `hostname` | Machine hostname |
+| `working-directory` | Current working directory |
+| `process-info` | Process ID, parent PID, process name |
+| `uptime` | System uptime |
+
+### Configuration
+
+```json
+{
+  "builtinToolboxes": [
+    {
+      "tag": "SystemToolbox",
+      "contents": {
+        "name": "system",
+        "description": "System context and information",
+        "capabilities": ["date", "operating-system", "running-user", "hostname"],
+        "envVarFilter": null
+      }
+    }
+  ]
+}
+```
+
+### Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique name for this toolbox instance |
+| `description` | string | Human-readable description |
+| `capabilities` | [string] | List of enabled capabilities |
+| `envVarFilter` | string? | Optional substring filter for env vars |
+
+### Security Considerations
+
+- **Capability-based access**: Only enabled capabilities are exposed
+- **Env var filtering**: Use `envVarFilter` to limit variable exposure
+- **Read-only**: System tools gather information but cannot modify the system
+- **Linux-focused**: Initial implementation targets Linux systems
+
+### LLM Tool Interface
+
+The system toolbox exposes a single tool named `system_{name}_system_info` with:
+
+- **Parameter**: `capability` (string) - Which system info to retrieve
+- **Returns**: JSON object with the requested information
+
+Example tool call:
+```json
+{
+  "capability": "date"
+}
+```
+
+Example response:
+```json
+{
+  "capability": "date",
+  "data": {
+    "utc": "2024-01-15T10:30:00.123456Z",
+    "local": "2024-01-15T11:30:00.123456",
+    "timezone": "CET",
+    "timezoneOffset": "+0100"
+  },
+  "executionTime": 0.001
+}
+```
+
 ## Tool Execution Context
 
 Tools receive execution context for recursion tracking:
@@ -371,8 +450,11 @@ newRuntime ... = do
     -- OpenAPI tools from specs
     openApiTools <- mapM loadOpenApiTools openApiConfigs
     
+    -- System tools from builtin toolboxes
+    systemTools <- readSystemToolsRegistrations tracer systemToolboxes
+    
     -- Combine all
-    let allTools = ioTools ++ bashTools ++ mcpTools ++ openApiTools
+    let allTools = ioTools ++ bashTools ++ mcpTools ++ openApiTools ++ systemTools
 ```
 
 ## Error Handling
@@ -402,6 +484,14 @@ data OpenAPIError
     = SpecParseError String
     | SchemaResolutionError Text
     | ReferenceError RefPath
+```
+
+### System Toolbox Errors
+
+```haskell
+data QueryError
+    = CapabilityNotEnabledError Text
+    | SystemInfoError Text
 ```
 
 ## Best Practices
@@ -442,6 +532,17 @@ data OpenAPIError
         "specUrl": "https://api.github.com/openapi.json",
         "baseUrl": "https://api.github.com",
         "token": "${GITHUB_TOKEN}"
+      }
+    }
+  ],
+  "builtinToolboxes": [
+    {
+      "tag": "SystemToolbox",
+      "contents": {
+        "name": "system",
+        "description": "System context",
+        "capabilities": ["date", "hostname", "working-directory"],
+        "envVarFilter": null
       }
     }
   ],

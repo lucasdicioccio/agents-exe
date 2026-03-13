@@ -16,7 +16,7 @@ EOD
 
   run)
     echo "---"
-    git log --oneline
+    git log --oneline | head -n 20
   ;;
 esac
 

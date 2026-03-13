@@ -13,6 +13,14 @@ if [[ "$1" == "describe" ]]; then
             "backing_type": "string",
             "arity": "single",
             "mode": "positional"
+        },
+        {
+            "name": "rows",
+            "description": "The number of rows to limit the result",
+            "type": "string",
+            "backing_type": "string",
+            "arity": "single",
+            "mode": "positional"
         }
     ]
 }
@@ -27,7 +35,8 @@ if [[ "$1" == "run" ]]; then
     fi
     echo "---"
     pattern="$2"
-    git grep -I "${pattern}" -- . ":!tasks-sessions/*.json"
+    rows="$3"
+    git grep -I "${pattern}" -- . ":!tasks-sessions/*.json" | head -n "${nrow}"
     exit 0
 fi
 

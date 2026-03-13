@@ -27,7 +27,7 @@ The Terminal UI provides an interactive, real-time interface for agent conversat
 │  > _                                                              │
 │                                                                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ [Tab] Switch agent  [Enter] Send  [Ctrl+C] Quit  [Ctrl+R] Refresh│
+│ [Tab] Switch  [Enter] Send  [Ctrl+C] Quit  [Ctrl+[r|t]] View MD │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -274,6 +274,79 @@ initializeAgents propsList = do
             Left err -> error err
 ```
 
+## Session Export and Viewing
+
+The TUI supports exporting and viewing session content in markdown format.
+
+### Export to Markdown
+
+Press `Ctrl+p` to export the current session to a markdown file:
+
+```haskell
+handleDumpSessionToMarkdown :: EventM N TuiState ()
+handleDumpSessionToMarkdown = do
+    mSession <- use (tuiCore . coreSession)
+    mConvId <- getFocusedConversationId
+    case (mSession, mConvId) of
+        (Just session, Just (ConversationId cid)) -> do
+            let markdown = formatSessionMarkdown Chronological session
+                fileName = "conv." <> show cid <.> "md"
+            liftIO $ TextIO.writeFile fileName markdown
+            showStatus StatusInfo $ "Exported to " <> Text.pack fileName
+        ...
+```
+
+### View with External Viewer
+
+The TUI can display session content using an external markdown viewer configured via the `AGENT_MD_VIEWER` environment variable.
+
+**Chronological Order (Oldest First):**
+Press `Ctrl+t` to view the session in chronological order (oldest messages first):
+
+```haskell
+VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
+    handleViewSessionWithExternalViewer Chronological
+```
+
+**Antichronological Order (Newest First):**
+Press `Ctrl+r` to view the session in reverse chronological order (newest messages first):
+
+```haskell
+VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) ->
+    handleViewSessionWithExternalViewer Antichronological
+```
+
+**Example:**
+```bash
+# Set viewer (e.g., glow, bat, less)
+export AGENT_MD_VIEWER="glow -p"
+
+# Or use a pager
+export AGENT_MD_VIEWER="less -R"
+
+# Then start TUI
+agents-exe tui --agent-file agent.json
+```
+
+### Order Preference
+
+```haskell
+data OrderPreference = Chronological | Antichronological
+
+formatSessionMarkdown :: OrderPreference -> Session -> Text.Text
+formatSessionMarkdown orderPref session =
+    let opts = SessionPrintOptions
+            { ...
+            , orderPreference = orderPref
+            , ...
+            }
+     in formatSessionAsMarkdown opts session
+```
+
+Use cases:
+- **Chronological (`Ctrl+t`)**: Best for reviewing the full conversation from start to finish
+- **Antichronological (`Ctrl+r`)**: Best when you care about recent changes and want to see the most recent messages first
+
 ## Running the TUI
 
 ### Main Entry Point
@@ -343,6 +416,9 @@ attributeMap = attrMap V.defAttr
 | `Enter` | Send message |
 | `Ctrl+C` | Quit |
 | `Ctrl+R` | Refresh tools |
+| `Ctrl+P` | Export session to markdown file |
+| `Ctrl+T` | View session in chronological order (oldest first) |
+| `Ctrl+R` | View session in antichronological order (newest first) |
 | `Up/Down` | Scroll conversation |
 | `PageUp/PageDown` | Scroll by page |
 | `Home` | Scroll to top |
