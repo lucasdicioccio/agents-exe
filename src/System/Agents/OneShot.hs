@@ -26,6 +26,7 @@ import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
@@ -291,7 +292,9 @@ callResultToUserToolResponse _ result =
         McpToolResult _ res ->
             UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
-            UserToolResponse $ Aeson.String $ Text.decodeUtf8 v
+            -- Use lenient UTF-8 decoding to handle binary data safely.
+            -- Invalid bytes are replaced with U+FFFD (replacement character).
+            UserToolResponse $ Aeson.String $ Text.decodeUtf8With lenientDecode v
         OpenAPIToolResult _ toolResult ->
             UserToolResponse $ Aeson.toJSON toolResult
         OpenAPIToolError _ err ->
@@ -429,4 +432,3 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
-

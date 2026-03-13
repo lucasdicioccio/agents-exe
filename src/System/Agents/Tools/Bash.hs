@@ -14,6 +14,7 @@ import Data.List as List
 import Data.Maybe (maybeToList)
 import Data.Text as Text
 import Data.Text.Encoding as Text
+import Data.Text.Encoding.Error (lenientDecode)
 import Data.UUID (toString)
 import GHC.Generics (Generic)
 import Prod.Tracer (Tracer, runTracer)
@@ -351,7 +352,7 @@ buildToolEnvironment (Just ctx) baseEnv =
         , (turnIdEnvVar, turnIdToString ctx.ctxTurnId)
         ]
             ++ maybeToList (fmap (\aid -> (agentIdEnvVar, agentIdToString aid)) ctx.ctxAgentId)
-            ++ maybeToList (fmap (\sess -> (sessionJsonEnvVar, Text.unpack $ Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encode sess)) ctx.ctxFullSession)
+            ++ maybeToList (fmap (\sess -> (sessionJsonEnvVar, Text.unpack $ Text.decodeUtf8With lenientDecode $ LByteString.toStrict $ Aeson.encode sess)) ctx.ctxFullSession)
 
 {- | Executes a script given an opaque JSON object containing parameter values.
 
@@ -395,8 +396,12 @@ runValue tracer script mCtx val = do
             if code /= ExitSuccess
                 then pure $ Left $ ScriptExecutionError path code err
                 else
-                    let outText = Text.decodeUtf8 out
+                    let
+                        -- Use lenient UTF-8 decoding to handle binary data safely.
+                        -- Invalid bytes are replaced with U+FFFD (replacement character).
+                        outText = Text.decodeUtf8With lenientDecode out
                         adjusted = case maybeBehavior of
                             Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
                             Nothing -> out
-                     in pure $ Right adjusted
+                     in
+                        pure $ Right adjusted

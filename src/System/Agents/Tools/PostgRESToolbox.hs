@@ -107,6 +107,7 @@ import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.Text.Encoding.Error (lenientDecode)
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Numeric (showHex)
@@ -657,6 +658,9 @@ urlEncode = Text.concatMap encodeChar
 {- | Handle an HTTP response, converting to ToolResult.
 
 Returns both text for the LLM and a structured ToolResult.
+
+Note: Uses lenient UTF-8 decoding to handle binary data safely.
+Invalid bytes are replaced with U+FFFD (replacement character).
 -}
 handleResponse ::
     HttpMethod ->
@@ -667,12 +671,12 @@ handleResponse method url response = do
     let status = HttpTypes.statusCode (HttpClient.responseStatus response)
     let body = HttpClient.responseBody response
 
-    -- Parse body as JSON if possible
+    -- Parse body as JSON if possible, otherwise use lenient UTF-8 decoding
     let payload = case Aeson.decode body of
             Just val -> val
-            Nothing -> String (Text.decodeUtf8 $ LByteString.toStrict body)
+            Nothing -> String (Text.decodeUtf8With lenientDecode $ LByteString.toStrict body)
 
-    -- Create text representation for LLM
+    -- Create text representation for LLM using lenient UTF-8 decoding
     -- For HEAD requests, don't include body (there shouldn't be one)
     let textResult = case method of
             HEAD ->
@@ -681,7 +685,7 @@ handleResponse method url response = do
                 "HTTP "
                     <> Text.pack (show status)
                     <> "\n"
-                    <> Text.decodeUtf8 (LByteString.toStrict body)
+                    <> Text.decodeUtf8With lenientDecode (LByteString.toStrict body)
 
     pure $
         Right

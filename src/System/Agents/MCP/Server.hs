@@ -21,6 +21,7 @@ import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
+import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.Lazy as LText
 import Formatting ((%))
 import qualified Formatting as Format
@@ -426,7 +427,9 @@ callResultToUserToolResponse _ result =
         McpToolResult _ res ->
             SessionBase.UserToolResponse $ Aeson.toJSON res
         BlobToolSuccess _ v ->
-            SessionBase.UserToolResponse $ Aeson.String (TextEncoding.decodeUtf8 v)
+            -- Use lenient UTF-8 decoding to handle binary data safely.
+            -- Invalid bytes are replaced with U+FFFD (replacement character).
+            SessionBase.UserToolResponse $ Aeson.String (TextEncoding.decodeUtf8With lenientDecode v)
         OpenAPIToolResult _ toolResult ->
             SessionBase.UserToolResponse $ Aeson.toJSON toolResult
         OpenAPIToolError _ err ->
@@ -563,4 +566,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-

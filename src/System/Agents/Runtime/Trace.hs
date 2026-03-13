@@ -46,4 +46,3 @@ data ConversationTrace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
-

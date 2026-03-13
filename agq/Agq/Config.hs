@@ -94,4 +94,3 @@ loadConfig path = do
             putStrLn "Using default config."
             return defaultConfig
         Right cfg -> return cfg
-

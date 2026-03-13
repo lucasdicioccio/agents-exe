@@ -476,7 +476,7 @@ Returns:
 executeReadOnlyQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeReadOnlyQuery toolbox query =
     case classifyQuery query of
-        Select -> 
+        Select ->
             -- Acquire lock to serialize access within this toolbox instance
             withMVar (toolboxLock toolbox) $ \() -> do
                 executeQueryInternal toolbox query
@@ -502,13 +502,14 @@ executeWriteQuery toolbox query =
         ReadOnly -> do
             let err = AccessDeniedError "Write operations not allowed in read-only mode"
             pure $ Left err
-        ReadWrite -> 
+        ReadWrite ->
             -- Acquire lock to serialize access within this toolbox instance
             withMVar (toolboxLock toolbox) $ \() -> do
                 executeQueryInternal toolbox query
 
--- | Internal function to execute a query and extract results with column names.
--- This function does NOT acquire the lock - callers must hold the lock.
+{- | Internal function to execute a query and extract results with column names.
+This function does NOT acquire the lock - callers must hold the lock.
+-}
 executeQueryInternal :: Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeQueryInternal toolbox query = do
     startTime <- getCurrentTime
@@ -554,9 +555,9 @@ executeQueryInternal toolbox query = do
             let errStr = show e
             -- Check if this is a busy/locked error by examining the error message
             let lowerErr = Text.toLower errMsg
-            if "busy" `Text.isInfixOf` lowerErr || 
-               "locked" `Text.isInfixOf` lowerErr ||
-               "SQLITE_BUSY" `isInfixOf` errStr
+            if "busy" `Text.isInfixOf` lowerErr
+                || "locked" `Text.isInfixOf` lowerErr
+                || "SQLITE_BUSY" `isInfixOf` errStr
                 then pure $ Left $ DatabaseLockedError $ "Database is locked by another process. Try again later. Original error: " <> errMsg
                 else pure $ Left $ SqlError errMsg
         Right qr -> pure $ Right qr
@@ -674,4 +675,3 @@ formatResultsAsObjects result =
 rowToObject :: [Text] -> [Value] -> Value
 rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
-
