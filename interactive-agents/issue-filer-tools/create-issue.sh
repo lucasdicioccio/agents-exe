@@ -17,22 +17,8 @@ case $1 in
     , "arity": "single"
     , "mode": "positional"
     }
-  ,{ "name": "dependencies"
-    , "description": "comma-separated list of issue dependencies (e.g., '#42,#43'). If empty, the issue will be labeled 'agents/to-be-taken'. If non-empty, it will be labeled 'agents/wait'."
-    , "type": "string"
-    , "backing_type": "string"
-    , "arity": "single"
-    , "mode": "positional"
-    }
-  ,{ "name": "branch_name"
-    , "description": "The base branch for this issue (e.g., 'gh-123'). All PRs for this issue will be against this branch. Defaults to 'main'."
-    , "type": "string"
-    , "backing_type": "string"
-    , "arity": "single"
-    , "mode": "positional"
-    }
-  ,{ "name": "is_final"
-    , "description": "Set to 'true' if this is the final task that merges the feature branch into 'main'."
+  ,{ "name": "needs_arbitrage"
+    , "description": "Set to 'true' if this is the Issue needs arbitrage."
     , "type": "string"
     , "backing_type": "string"
     , "arity": "single"
@@ -52,9 +38,7 @@ EOD
 
   run)
     title="$2"
-    dependencies="$3"
-    branch_name="${4:-main}"
-    is_final="${5:-false}"
+    needs_arbitrage="$3"
     scope="root"
 
     case "${scope}" in
@@ -66,24 +50,23 @@ EOD
         ;;
     esac
 
-    # Determine the agent label based on dependencies
-    # If dependencies is empty or whitespace-only -> to-be-taken (ready to work)
-    # If dependencies has content -> wait (must wait for dependencies)
-    if [[ -z "${dependencies}" ]] || [[ "${dependencies}" =~ ^[[:space:]]*$ ]]; then
+    # Determine the agent label based on arbitrage
+    # FIX: not equal the string 'true'
+    if [[ "${needs_arbitrage}" != "true" ]]; then
       agent_label="agq/to-be-taken"
     else
-      agent_label="agq/wait"
+      agent_label=""
     fi
 
-    labels="${agent_label},${scope}"
+    labels="${scope}"
+    if [[ -n "${agent_label}" ]]; then
+      labels="${labels},${agent_label}"
+    fi
 
     # Use --body-file - to read the body from stdin
     # Prepend metadata to the body
     (
-        echo "Depends-on: ${dependencies}"
-        echo "Base-branch: ${branch_name}"
-        echo "Final: ${is_final}"
-        echo ""
+        echo "---"
         cat
     ) | gh issue create --title "${title}" --body-file - --label "${labels}"
   ;;

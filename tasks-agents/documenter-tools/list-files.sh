@@ -18,6 +18,8 @@ if [[ "$1" == "run" ]]; then
     find ./test/ -name '*.hs'
     find ./agq/ -name '*.hs'
     find ./ -name '*.cabal'
+    find ./ -name '*.dot'
+    find ./ -name '*.png'
     find ./app/ -name '*.md'
     find ./src/ -name '*.md'
     find ./test/ -name '*.md'

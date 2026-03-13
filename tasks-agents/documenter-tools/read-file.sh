@@ -4,7 +4,7 @@ if [[ "$1" == "describe" ]]; then
     cat << 'EOF'
 {
     "slug": "read-file",
-    "description": "Read the contents of a file",
+    "description": "Read the contents of a textual file, will fail for binary files.",
     "args": [
         {
             "name": "filepath",
