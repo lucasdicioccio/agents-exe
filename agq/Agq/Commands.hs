@@ -152,10 +152,13 @@ cmdPull cfg conn = do
         let num = extractInt issueVal "number"
             ghLabels = extractLabels issueVal
             hasTbt = labelToBeTaken (labels cfg) `elem` ghLabels
+            hasArbitrage = labelArbitrageNeeded (labels cfg) `elem` ghLabels
             label = findProjectLabel (Map.keys (projects cfg)) ghLabels
         case num of
             Nothing -> putStrLn "Skipping malformed issue."
             Just n
+                | hasArbitrage ->
+                    putStrLn $ "Skipping issue #" <> show n <> ": has arbitrage-needed label."
                 | not hasTbt ->
                     putStrLn $ "Skipping issue #" <> show n <> ": missing label '" <> Text.unpack (labelToBeTaken (labels cfg)) <> "'."
                 | Just lbl <- label -> importGhIssue cfg conn n lbl
@@ -218,7 +221,7 @@ cmdPromote cfg = do
             , "--author"
             , Text.unpack (githubUsername cfg)
             , "--json"
-            , "number,title"
+            , "number,title,labels"
             ]
     when (ec /= ExitSuccess) $ putStrLn "Warning: gh issue list failed."
     let issues = case Aeson.decode (lbsFromText out) of
@@ -229,15 +232,19 @@ cmdPromote cfg = do
         case extractInt issueVal "number" of
             Nothing -> return ()
             Just n -> do
-                (_, body) <- runGh ["issue", "view", show n, "--json", "body", "--jq", ".body"]
-                let deps = parseDeps body
-                allSat <- checkDepsSatisfied cfg deps
-                if allSat
-                    then do
-                        putStrLn $ "Promoting issue #" <> show n <> " to " <> Text.unpack (labelToBeTaken (labels cfg))
-                        void $ runGh ["issue", "edit", show n, "--remove-label", Text.unpack (labelWait (labels cfg)), "--add-label", Text.unpack (labelToBeTaken (labels cfg))]
-                    else
-                        putStrLn $ "Issue #" <> show n <> " still waiting on deps."
+                let ghLabels = extractLabels issueVal
+                if labelArbitrageNeeded (labels cfg) `elem` ghLabels
+                    then putStrLn $ "Skipping issue #" <> show n <> ": has arbitrage-needed label."
+                    else do
+                        (_, body) <- runGh ["issue", "view", show n, "--json", "body", "--jq", ".body"]
+                        let deps = parseDeps body
+                        allSat <- checkDepsSatisfied cfg deps
+                        if allSat
+                            then do
+                                putStrLn $ "Promoting issue #" <> show n <> " to " <> Text.unpack (labelToBeTaken (labels cfg))
+                                void $ runGh ["issue", "edit", show n, "--remove-label", Text.unpack (labelWait (labels cfg)), "--add-label", Text.unpack (labelToBeTaken (labels cfg))]
+                            else
+                                putStrLn $ "Issue #" <> show n <> " still waiting on deps."
 
 checkDepsSatisfied :: AgqConfig -> [Text] -> IO Bool
 checkDepsSatisfied cfg deps = do
@@ -598,7 +605,7 @@ execTask cfg conn t = do
                     let trimmed = Text.strip staticCheckOutput
                      in if Text.null trimmed
                             then ""
-                            else "\n\n## Static checks\n\n```\n" <> Text.unpack trimmed <> "\n```"
+                            else "\n\n## Static checks\n\n```\n" <> Text.unpack trimmed <> "```"
                 prBody = commit <> closesLine <> staticChecksSection
             (_, prUrl, _) <-
                 captureCmdBoth
@@ -643,20 +650,24 @@ cmdMergePRs :: AgqConfig -> IO ()
 cmdMergePRs cfg = do
     (_, defOut) <- runGh ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
     let def = Text.strip defOut
-    (_, out) <- runGh ["pr", "list", "--label", Text.unpack (labelAgentPr (labels cfg)), "--json", "number,baseRefName,title"]
+    (_, out) <- runGh ["pr", "list", "--label", Text.unpack (labelAgentPr (labels cfg)), "--json", "number,baseRefName,title,labels"]
     let prs = case Aeson.decode (lbsFromText out) of
             Just (Aeson.Array arr) -> foldr (:) [] arr
             _ -> []
     when (null prs) $ putStrLn $ "No PRs with label " <> Text.unpack (labelAgentPr (labels cfg)) <> "."
     forM_ prs $ \prVal ->
         case (extractInt prVal "number", extractText prVal "baseRefName") of
-            (Just n, Just b) ->
-                if b /= def
-                    then do
-                        putStrLn $ "Merging PR #" <> show n <> " (base=" <> Text.unpack b <> ")"
-                        void $ runCmd "gh" ["pr", "merge", show n, "--merge", "--auto"]
-                        labelClosedIssues cfg n
-                    else putStrLn $ "Skipping PR #" <> show n <> ": targets default branch."
+            (Just n, Just b) -> do
+                let prLabels = extractLabels prVal
+                if labelArbitrageNeeded (labels cfg) `elem` prLabels
+                    then putStrLn $ "Skipping PR #" <> show n <> ": has arbitrage-needed label."
+                    else
+                        if b /= def
+                            then do
+                                putStrLn $ "Merging PR #" <> show n <> " (base=" <> Text.unpack b <> ")"
+                                void $ runCmd "gh" ["pr", "merge", show n, "--merge", "--auto"]
+                                labelClosedIssues cfg n
+                            else putStrLn $ "Skipping PR #" <> show n <> ": targets default branch."
             _ -> return ()
 
 {- | Fetch the PR body, parse "Closes/Fixes/Resolves #N" references, and add
@@ -781,6 +792,7 @@ workflowLabelDefs lbls =
     , (labelWait lbls, "d93f0b", "Task is waiting for its dependencies to complete")
     , (labelAgentPr lbls, "6f42c1", "Pull request was created automatically by an agent")
     , (labelDoneInBranch lbls, "1d76db", "Issue was addressed by a PR merged into a feature branch")
+    , (labelArbitrageNeeded lbls, "b60205", "Paused until human removes this label (arbitration needed)")
     ]
 
 createLabel :: Text -> String -> String -> IO ()
