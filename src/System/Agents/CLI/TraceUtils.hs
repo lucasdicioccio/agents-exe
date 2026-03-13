@@ -175,6 +175,8 @@ renderConversationAgentTrace tr = case tr of
         "sqlite-tool: (trace)"
     Runtime.RunToolTrace _ (Tools.SystemToolsTrace _) ->
         "system-tool: (trace)"
+    Runtime.RunToolTrace _ (Tools.LuaToolsTrace msg) ->
+        Text.unwords ["lua-tool:", msg]
     Runtime.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
     Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes) ->
         Text.unwords ["to: llm", "[" <> formatBytes bytes <> "]"]

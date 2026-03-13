@@ -14,6 +14,7 @@ Design decisions:
 * Optional 'Session' allows performance optimization when full context isn't needed
 * Separate module to maintain clean import hierarchy
 * Recursion tracking via 'CallStackEntry' for nested agent calls
+* Tool portal for inter-toolbox communication
 -}
 module System.Agents.Tools.Context (
     -- * Core types
@@ -21,10 +22,17 @@ module System.Agents.Tools.Context (
     CallStackEntry (..),
     RecursionError (..),
 
+    -- * Tool Portal types
+    TraceId,
+    ToolCall (..),
+    ToolResult (..),
+    ToolPortal,
+
     -- * Construction
     mkToolExecutionContext,
     mkMinimalContext,
     mkRootContext,
+    mkPortalContext,
     pushAgentContext,
 
     -- * Access helpers
@@ -36,10 +44,15 @@ module System.Agents.Tools.Context (
     isAtDepth,
     callChain,
     isAgentInCallStack,
+
+    -- * Security helpers
+    isToolAllowed,
 ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
+import qualified Data.Aeson as Aeson
 import Data.Text (Text)
+import Data.Time (NominalDiffTime)
 import GHC.Generics (Generic)
 
 import System.Agents.Base (AgentId, ConversationId)
@@ -101,6 +114,57 @@ data RecursionError
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
+-- Tool Portal Types
+-------------------------------------------------------------------------------
+
+{- | Unique identifier for tool invocation traces.
+
+Using Text for simplicity. Can be strengthened to a newtype later if needed.
+-}
+type TraceId = Text
+
+{- | A tool call from Lua (or another tool) to another tool through the portal.
+
+This represents a synchronous call where the caller waits for the result.
+-}
+data ToolCall = ToolCall
+    { callToolName :: Text
+    -- ^ The name of the tool to invoke (e.g., "bash", "sqlite_query")
+    , callArgs :: Aeson.Value
+    -- ^ JSON arguments for the tool
+    , callCallerId :: Text
+    -- ^ Identifier for the calling tool (for tracing: who called whom)
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolCall
+instance FromJSON ToolCall
+
+-- | Result of a tool invocation through the portal.
+data ToolResult = ToolResult
+    { resultData :: Aeson.Value
+    -- ^ The result data from the tool
+    , resultDuration :: NominalDiffTime
+    -- ^ How long the invocation took
+    , resultTraceId :: TraceId
+    -- ^ Trace ID for book-keeping and call tree visualization
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolResult
+instance FromJSON ToolResult
+
+{- | The tool portal: a callback function that allows tools to invoke other tools.
+
+This is the core inter-toolbox communication mechanism. When Lua (or another
+tool) wants to call another tool, it uses this portal.
+
+Note: The portal is synchronous (IO ToolResult) for simplicity.
+Async support can be added later if needed.
+-}
+type ToolPortal = ToolCall -> IO ToolResult
+
+-------------------------------------------------------------------------------
 -- Tool Execution Context
 -------------------------------------------------------------------------------
 
@@ -117,6 +181,7 @@ The context is designed to be:
   support different use cases
 * LLM-agnostic - no types from LLM interfaces are included
 * Recursion-aware - tracks call stack for nested agent invocations
+* Portal-enabled - supports inter-toolbox communication
 
 === Fields
 
@@ -132,6 +197,10 @@ The context is designed to be:
   Root entry is at the end of the list (appended with ':').
 * 'ctxMaxDepth' - Optional maximum recursion depth limit. When 'Just n',
   agent calls beyond depth n will fail with 'MaxRecursionDepthExceeded'.
+* 'ctxToolPortal' - Optional tool portal for inter-toolbox communication.
+  When present, tools can invoke other tools through this callback.
+* 'ctxAllowedTools' - Whitelist of tool names allowed in this context.
+  Empty list means all tools are allowed (backward compatibility).
 -}
 data ToolExecutionContext = ToolExecutionContext
     { ctxSessionId :: SessionId
@@ -164,15 +233,90 @@ data ToolExecutionContext = ToolExecutionContext
     {- ^ Optional maximum recursion depth. When specified, nested agent
     calls that would exceed this depth will fail with a 'RecursionError'.
     -}
+    , ctxToolPortal :: Maybe ToolPortal
+    {- ^ Optional tool portal for inter-toolbox communication. When present,
+    tools can use this callback to invoke other tools. This enables Lua
+    scripts and other tools to orchestrate multiple tool calls.
+    -}
+    , ctxAllowedTools :: [Text]
+    {- ^ Whitelist of tool names allowed in this context. An empty list
+    means all tools are allowed (for backward compatibility). This is
+    checked before invoking tools through the portal.
+    -}
     }
-    deriving (Show, Eq, Generic)
+    deriving (Generic)
+
+-- | Custom Eq instance for ToolExecutionContext that handles the function field
+instance Eq ToolExecutionContext where
+    (==) a b =
+        ctxSessionId a == ctxSessionId b
+            && ctxConversationId a == ctxConversationId b
+            && ctxTurnId a == ctxTurnId b
+            && ctxAgentId a == ctxAgentId b
+            && ctxFullSession a == ctxFullSession b
+            && ctxCallStack a == ctxCallStack b
+            && ctxMaxDepth a == ctxMaxDepth b
+            && ctxAllowedTools a == ctxAllowedTools b
+
+-- Note: ctxToolPortal is not compared (functions can't be compared)
+
+-- | Custom Show instance for ToolExecutionContext that handles the function field
+instance Show ToolExecutionContext where
+    show ctx =
+        "ToolExecutionContext {"
+            ++ " ctxSessionId = "
+            ++ show (ctxSessionId ctx)
+            ++ ", ctxConversationId = "
+            ++ show (ctxConversationId ctx)
+            ++ ", ctxTurnId = "
+            ++ show (ctxTurnId ctx)
+            ++ ", ctxAgentId = "
+            ++ show (ctxAgentId ctx)
+            ++ ", ctxFullSession = "
+            ++ show (ctxFullSession ctx)
+            ++ ", ctxCallStack = "
+            ++ show (ctxCallStack ctx)
+            ++ ", ctxMaxDepth = "
+            ++ show (ctxMaxDepth ctx)
+            ++ ", ctxToolPortal = "
+            ++ portalStr
+            ++ ", ctxAllowedTools = "
+            ++ show (ctxAllowedTools ctx)
+            ++ " }"
+      where
+        portalStr = case ctxToolPortal ctx of
+            Nothing -> "Nothing"
+            Just _ -> "Just <portal>"
 
 {- | JSON serialization support for 'ToolExecutionContext'.
-Enables persistence and transmission of context across boundaries.
+Note: The tool portal function is not serialized (functions can't be serialized).
 -}
-instance ToJSON ToolExecutionContext
+instance ToJSON ToolExecutionContext where
+    toJSON ctx =
+        Aeson.object
+            [ "sessionId" .= ctxSessionId ctx
+            , "conversationId" .= ctxConversationId ctx
+            , "turnId" .= ctxTurnId ctx
+            , "agentId" .= ctxAgentId ctx
+            , "fullSession" .= ctxFullSession ctx
+            , "callStack" .= ctxCallStack ctx
+            , "maxDepth" .= ctxMaxDepth ctx
+            , "allowedTools" .= ctxAllowedTools ctx
+            -- Note: ctxToolPortal is intentionally omitted (not serializable)
+            ]
 
-instance FromJSON ToolExecutionContext
+instance FromJSON ToolExecutionContext where
+    parseJSON = Aeson.withObject "ToolExecutionContext" $ \v ->
+        ToolExecutionContext
+            <$> v .: "sessionId"
+            <*> v .: "conversationId"
+            <*> v .: "turnId"
+            <*> v .: "agentId"
+            <*> v .: "fullSession"
+            <*> v .: "callStack"
+            <*> v .: "maxDepth"
+            <*> pure Nothing -- ToolPortal can't be deserialized
+            <*> v .: "allowedTools"
 
 -------------------------------------------------------------------------------
 -- Construction Helpers
@@ -205,7 +349,18 @@ mkToolExecutionContext ::
     [CallStackEntry] ->
     Maybe Int ->
     ToolExecutionContext
-mkToolExecutionContext = ToolExecutionContext
+mkToolExecutionContext sessId convId tId mAgentId mSession stack maxDepth =
+    ToolExecutionContext
+        { ctxSessionId = sessId
+        , ctxConversationId = convId
+        , ctxTurnId = tId
+        , ctxAgentId = mAgentId
+        , ctxFullSession = mSession
+        , ctxCallStack = stack
+        , ctxMaxDepth = maxDepth
+        , ctxToolPortal = Nothing
+        , ctxAllowedTools = []
+        }
 
 {- | Create a minimal 'ToolExecutionContext' with only required identifiers.
 
@@ -236,6 +391,8 @@ mkMinimalContext sessId convId tId =
         , ctxFullSession = Nothing
         , ctxCallStack = []
         , ctxMaxDepth = Nothing
+        , ctxToolPortal = Nothing
+        , ctxAllowedTools = []
         }
 
 {- | Create a root-level context for the start of agent execution (depth 0).
@@ -274,6 +431,52 @@ mkRootContext sessId convId tId mAgentId mSession maxDepth =
         , ctxFullSession = mSession
         , ctxCallStack = [CallStackEntry "root" convId 0]
         , ctxMaxDepth = maxDepth
+        , ctxToolPortal = Nothing
+        , ctxAllowedTools = []
+        }
+
+{- | Create a context with tool portal support.
+
+This constructor is used when setting up a context that supports
+inter-toolbox communication through the tool portal mechanism.
+
+Example:
+
+@
+context <- mkPortalContext
+    sessionId
+    conversationId
+    turnId
+    (Just agentId)
+    (Just fullSession)
+    [CallStackEntry "root" conversationId 0]
+    (Just 5)
+    (Just toolPortal)  -- the portal function
+    ["bash", "sqlite"]  -- allowed tools
+@
+-}
+mkPortalContext ::
+    SessionId ->
+    ConversationId ->
+    TurnId ->
+    Maybe AgentId ->
+    Maybe Session ->
+    [CallStackEntry] ->
+    Maybe Int ->
+    Maybe ToolPortal ->
+    [Text] -> -- allowed tools
+    ToolExecutionContext
+mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowed =
+    ToolExecutionContext
+        { ctxSessionId = sessId
+        , ctxConversationId = convId
+        , ctxTurnId = tId
+        , ctxAgentId = mAgentId
+        , ctxFullSession = mSession
+        , ctxCallStack = stack
+        , ctxMaxDepth = maxDepth
+        , ctxToolPortal = portal
+        , ctxAllowedTools = allowed
         }
 
 {- | Create a nested context when calling a sub-agent.
@@ -397,3 +600,23 @@ if isAgentInCallStack "agent-a" ctx
 isAgentInCallStack :: Text -> ToolExecutionContext -> Bool
 isAgentInCallStack slug ctx =
     any ((== slug) . callAgentSlug) ctx.ctxCallStack
+
+-------------------------------------------------------------------------------
+-- Security Helpers
+-------------------------------------------------------------------------------
+
+{- | Check if a tool is allowed in this context.
+
+An empty allowed list means all tools are allowed (backward compatibility).
+This check should be performed before invoking tools through the portal.
+
+@
+if isToolAllowed "bash" ctx
+    then invokeTool "bash" args
+    else return $ ToolError "Tool not allowed"
+@
+-}
+isToolAllowed :: Text -> ToolExecutionContext -> Bool
+isToolAllowed toolName ctx =
+    -- Empty allowed list means all tools allowed (backward compatibility)
+    null (ctxAllowedTools ctx) || toolName `elem` ctxAllowedTools ctx

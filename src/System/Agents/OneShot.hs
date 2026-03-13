@@ -311,6 +311,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         SystemToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
+        LuaToolResult _ toolResult ->
+            UserToolResponse $ Aeson.toJSON toolResult
+        LuaToolError _ err ->
+            UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
