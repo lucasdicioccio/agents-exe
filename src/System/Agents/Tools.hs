@@ -32,8 +32,11 @@ module System.Agents.Tools (
     mcpTool,
     openapiTool,
     postgrestTool,
+    systemTool,
 ) where
 
+import qualified Data.Aeson.Key as AesonKey
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 as CByteString
 import Data.Maybe (fromMaybe)
@@ -51,6 +54,7 @@ import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
+import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace
 
 -------------------------------------------------------------------------------
@@ -204,6 +208,38 @@ postgrestTool toolbox prTool =
 
 -------------------------------------------------------------------------------
 
+{- | Builder for a SystemToolbox-based tool.
+
+This creates a tool that provides system information based on configured capabilities.
+The tool accepts a single parameter 'capability' specifying which information to retrieve.
+-}
+systemTool :: SystemTools.Toolbox -> Tool ()
+systemTool box =
+    Tool
+        { toolDef = SystemTool toolDesc
+        , toolRun = run
+        }
+  where
+    call = ()
+    toolDesc =
+        SystemTools.ToolDescription
+            { SystemTools.toolDescriptionName = "system_info"
+            , SystemTools.toolDescriptionDescription = box.toolboxDescription
+            , SystemTools.toolDescriptionToolboxName = box.toolboxName
+            }
+    run _tracer _ctx (Aeson.Object v) = do
+        case KeyMap.lookup (AesonKey.fromText "capability") v of
+            Just (Aeson.String cap) -> do
+                result <- SystemTools.executeQuery box cap
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right rsp -> pure $ SystemToolResult call rsp
+            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
+    run _tracer _ctx _ = do
+        pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
+
+-------------------------------------------------------------------------------
+
 {- | Builder for a tool based on an IO-tool script-description.
 
 The IO action receives the full 'ToolExecutionContext', giving it direct access
@@ -260,3 +296,4 @@ ioTool script =
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
+
