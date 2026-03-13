@@ -6,7 +6,7 @@ import Agq.DB (initDB)
 
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Database.SQLite.Simple (Connection, withConnection)
+import Database.SQLite.Simple (Connection, execute_, withConnection)
 import Options.Applicative
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
@@ -29,6 +29,7 @@ data Command
     | Clean Bool Bool -- do-it force
     | Recover
     | Retry Text Int -- task name, tries to restore
+    | MarkDone Text -- task name
 
 -- ---------------------------------------------------------------------------
 -- Parser
@@ -138,6 +139,12 @@ parseCommand =
                     parseRetry
                     (progDesc "Reset a failed task back to pending")
                 )
+            <> command
+                "mark-done"
+                ( info
+                    parseMarkDone
+                    (progDesc "Mark a task as done and release its lock")
+                )
         )
 
 parseAdd :: Parser Command
@@ -176,6 +183,9 @@ parseRetry =
                 <> help "tries_remaining to restore (0 = use defaultTries from config)"
             )
 
+parseMarkDone :: Parser Command
+parseMarkDone = MarkDone <$> textArg "NAME" "Task name to mark as done"
+
 parseClean :: Parser Command
 parseClean =
     Clean
@@ -201,6 +211,7 @@ main = do
         _ -> do
             cfg <- loadConfig cfgPath
             withConnection (queueDb cfg) $ \conn -> do
+                execute_ conn "PRAGMA busy_timeout = 5000"
                 initDB conn
                 dispatch cfg conn cmd
 
@@ -220,4 +231,5 @@ dispatch cfg conn cmd = case cmd of
     Clean d f -> cmdClean cfg d f
     Recover -> cmdRecover cfg conn
     Retry n r -> cmdRetry cfg conn n r
+    MarkDone n -> cmdMarkDone cfg conn n
 

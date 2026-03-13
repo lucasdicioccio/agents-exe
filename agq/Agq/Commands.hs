@@ -13,6 +13,7 @@ module Agq.Commands (
     cmdClean,
     cmdRecover,
     cmdRetry,
+    cmdMarkDone,
 ) where
 
 import Agq.Config (AgqConfig (..), AgqLabels (..), defaultConfig)
@@ -21,6 +22,7 @@ import Agq.Run
 import Agq.Schedule
 
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (race)
 import Control.Monad (forM_, guard, unless, void, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
@@ -428,15 +430,17 @@ execTask cfg conn t = do
     let instrFile = repoRoot </> taskInstructionFile t
 
     -- 1. Fetch base branch, creating it on origin from the default branch if absent
+    putStrLn $ "[agq] Step 1: fetching base branch '" <> base <> "' from origin"
     ecFetch <- runGit ["fetch", "origin", base]
     when (ecFetch /= ExitSuccess) $ do
-        putStrLn $ "Base branch '" <> base <> "' not found on origin, creating it..."
+        putStrLn $ "[agq] Base branch '" <> base <> "' not found on origin, creating it..."
         defaultBranch <- detectBaseBranch cfg
         void $ runGit ["fetch", "origin", Text.unpack defaultBranch]
         void $ runGit ["push", "origin", "refs/remotes/origin/" <> Text.unpack defaultBranch <> ":refs/heads/" <> base]
         void $ runGit ["fetch", "origin", base]
 
     -- 2. Set up worktree (remove old one first if present)
+    putStrLn $ "[agq] Step 2: setting up worktree '" <> nameStr <> "'"
     void $ runGit ["worktree", "remove", "--force", nameStr]
     void $ runGit ["worktree", "prune"]
     ecWt <- runGit ["worktree", "add", nameStr, "origin/" <> base]
@@ -454,6 +458,7 @@ execTask cfg conn t = do
     createDirectoryIfMissing True sessDir
 
     -- 3. Optional prepare hook
+    putStrLn $ "[agq] Step 3: " <> maybe "skipping prepare hook (none configured)" (\_ -> "running prepare hook") mHook
     mHookAbs <- case mHook of
         Nothing -> return Nothing
         Just h -> do
@@ -462,10 +467,17 @@ execTask cfg conn t = do
             -- return the relative hook location as it will run in the worktreeProj
             return (if exists then Just h else Nothing)
     case mHookAbs of
-        Nothing -> return ()
-        Just h -> void $ runWithCwd worktreeProj h ["prepare", Text.unpack lbl, nameStr, instrFile]
+        Nothing -> putStrLn "[agq] Skipping prepare hook (hook file not found)"
+        Just h -> do
+            putStrLn $ "[agq] Executing prepare hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
+            mec <- withHookTimeout (hookTimeoutSeconds cfg) $
+                runWithCwd worktreeProj h ["prepare", Text.unpack lbl, nameStr, instrFile]
+            case mec of
+                Nothing -> putStrLn "[agq] prepare hook timed out — continuing"
+                Just _ -> return ()
 
     -- 4. Run agent with inner attempt loop.
+    putStrLn $ "[agq] Step 4: running agent"
     -- Each attempt calls agents-exe with the same session file so it resumes
     -- where the previous attempt left off.  The number of attempts is bounded
     -- by agentAttempts from the config (default 1).
@@ -535,11 +547,12 @@ execTask cfg conn t = do
                     else Text.unpack (Text.strip commitMsg)
 
         -- 5. session-print → write sibling .md so it gets committed with the work
-        putStrLn $ "[agq] Printing session for task '" <> nameStr <> "' -> " <> sessMd
+        putStrLn $ "[agq] Step 5: printing session -> " <> sessMd
         (_, sessionMd) <- captureCmd "agents-exe" ["session-print", sessFile]
         Text.writeFile sessMd sessionMd
 
         -- 6. Commit and push
+        putStrLn "[agq] Step 6: committing and pushing"
         -- Branch name includes a short SHA and the tries_remaining counter so that
         -- successive retry attempts never collide with each other on the remote.
         -- e.g. gh-132-c7823.2  (tries_remaining=2 after this attempt was claimed)
@@ -554,19 +567,29 @@ execTask cfg conn t = do
 
             -- static-checks hook: runs after agent commit, before push
             staticCheckOutput <- case mHookAbs of
-                Nothing -> return ""
+                Nothing -> do
+                    putStrLn "[agq] Skipping static-check hook (none configured)"
+                    return ""
                 Just h -> do
-                    putStrLn $ "[agq] Running static-checks for task '" <> nameStr <> "'"
-                    (_, scOut, scErr) <- runWithCwdBoth worktreeProj h ["static-check", Text.unpack lbl, nameStr, instrFile]
-                    (_, scStatus) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
-                    unless (Text.null (Text.strip scStatus)) $ do
-                        putStrLn $ "[agq] static-checks modified files, committing..."
-                        void $ runGit ["-C", nameStr, "add", "-A"]
-                        void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", "Run static-checks for " <> nameStr]
-                    return (scOut <> scErr)
+                    putStrLn $ "[agq] Executing static-check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
+                    mres <- withHookTimeout (hookTimeoutSeconds cfg) $
+                        runWithCwdBoth worktreeProj h ["static-check", Text.unpack lbl, nameStr, instrFile]
+                    case mres of
+                        Nothing -> do
+                            putStrLn "[agq] static-check hook timed out — skipping"
+                            return ""
+                        Just (_, scOut, scErr) -> do
+                            (_, scStatus) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
+                            unless (Text.null (Text.strip scStatus)) $ do
+                                putStrLn $ "[agq] static-checks modified files, committing..."
+                                void $ runGit ["-C", nameStr, "add", "-A"]
+                                void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", "Run static-checks for " <> nameStr]
+                            return (scOut <> scErr)
 
+            putStrLn $ "[agq] Pushing branch '" <> branchName <> "' to origin"
             void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
 
+            putStrLn "[agq] Creating pull request"
             let prTitle = takeWhile (/= '\n') commit
                 closesLine = case taskSource t of
                     SourceGithub n -> "\n\nCloses #" <> show n <> "."
@@ -595,15 +618,21 @@ execTask cfg conn t = do
                     ]
 
             case mHookAbs of
-                Nothing -> return ()
+                Nothing -> putStrLn "[agq] Skipping check hook (none configured)"
                 Just h -> do
-                    (_, checkOut, checkErr) <- runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
-                    let checkOutput = Text.strip (checkOut <> checkErr)
-                        prUrlStr = Text.unpack (Text.strip prUrl)
-                    unless (Text.null checkOutput || null prUrlStr) $
-                        void $
-                            runCmd "gh" ["pr", "comment", prUrlStr, "--body", Text.unpack checkOutput]
+                    putStrLn $ "[agq] Executing check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
+                    mres <- withHookTimeout (hookTimeoutSeconds cfg) $
+                        runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
+                    case mres of
+                        Nothing -> putStrLn "[agq] check hook timed out — skipping PR comment"
+                        Just (_, checkOut, checkErr) -> do
+                            let checkOutput = Text.strip (checkOut <> checkErr)
+                                prUrlStr = Text.unpack (Text.strip prUrl)
+                            unless (Text.null checkOutput || null prUrlStr) $
+                                void $
+                                    runCmd "gh" ["pr", "comment", prUrlStr, "--body", Text.unpack checkOutput]
 
+        putStrLn $ "[agq] Task '" <> nameStr <> "' complete — releasing lock"
         releaseLock conn (taskName t) Done Nothing
 
 -- ---------------------------------------------------------------------------
@@ -779,6 +808,43 @@ cmdInitGithub cfg = do
     putStrLn "Project labels:"
     forM_ (Map.keys (projects cfg)) $ \proj ->
         createLabel proj "bfd4f2" ("Project: " <> Text.unpack proj)
+
+-- ---------------------------------------------------------------------------
+-- cmdMarkDone
+-- ---------------------------------------------------------------------------
+
+{- | Forcefully mark a task as done and release any lock it holds.
+Accepts tasks in any state so it can be used to unstick running or failed
+tasks without going through a full retry cycle.
+-}
+cmdMarkDone :: AgqConfig -> Connection -> Text -> IO ()
+cmdMarkDone _cfg conn name = do
+    mt <- getTaskByName conn name
+    case mt of
+        Nothing -> putStrLn $ "Task not found: " <> Text.unpack name
+        Just t -> do
+            releaseLock conn name Done Nothing
+            putStrLn $
+                "Task '"
+                    <> Text.unpack name
+                    <> "' marked done (was "
+                    <> Text.unpack (taskStatusText (taskStatus t))
+                    <> ")."
+
+-- ---------------------------------------------------------------------------
+-- Hook timeout helper
+-- ---------------------------------------------------------------------------
+
+{- | Run an IO action with a timeout. Returns Nothing if the timeout fires
+first, or Just the result otherwise.  Uses 'race' so the action thread is
+cancelled as soon as the deadline is reached.
+-}
+withHookTimeout :: Int -> IO a -> IO (Maybe a)
+withHookTimeout secs action = do
+    result <- race (threadDelay (secs * 1000000)) action
+    return $ case result of
+        Left () -> Nothing
+        Right v -> Just v
 
 -- ---------------------------------------------------------------------------
 -- Helpers

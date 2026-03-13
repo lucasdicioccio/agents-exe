@@ -18,6 +18,7 @@
     "architect": "tasks-agents/kimi-architect.json",
     "documenter": "tasks-agents/kimi-documenter.json"
   },
+  "hookTimeoutSeconds": 600,
   "hooks": {
     "default": "./git-agent-task.sh"
   },

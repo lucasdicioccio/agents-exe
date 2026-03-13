@@ -33,7 +33,9 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
   "githubUsername":   "lucasdicioccio",
   "pollSeconds":      30,
   "lockStaleSeconds": 7200,
-  "defaultTries":     3,
+  "defaultTries":        3,
+  "agentAttempts":       1,
+  "hookTimeoutSeconds":  300,
   "projects": {
     "root":      ".",
     "architect": "."
@@ -65,6 +67,8 @@ cabal install agq   # puts agq on PATH via ~/.cabal/bin
 | `pollSeconds` | How long `process --loop` sleeps between polls when the queue is empty |
 | `lockStaleSeconds` | Locks older than this (seconds) are released by `recover` |
 | `defaultTries` | Default `tries_remaining` for tasks imported via `pull` |
+| `agentAttempts` | Max `agents-exe` invocations per task try (each resumes the same session file) |
+| `hookTimeoutSeconds` | Max seconds any hook phase (`prepare`, `static-check`, `check`) may run before it is cancelled; the task continues without it |
 | `projects` | Maps a label → relative path inside the worktree |
 | `agents` | Maps a label → agent config file path |
 | `hooks` | Maps a label → hook script path (relative to the project dir inside the worktree); falls back to `"default"`; omit to run no hook. The same script is invoked at three points with different first arguments: `prepare`, `static-check`, and `check` — see [Hook lifecycle](#hook-lifecycle) |
@@ -245,6 +249,16 @@ agq retry gh-42 --tries 1
 
 ---
 
+### `agq mark-done <NAME>`
+
+Immediately marks a task as `done` and releases any lock it holds, regardless of its current state. Useful for tasks whose work was completed outside of `agq` (e.g. a manual commit) or to unstick a stuck `running` task without going through a retry cycle.
+
+```bash
+agq mark-done gh-42
+```
+
+---
+
 ### `agq merge-prs`
 
 Merges all open PRs labelled `agq/agent-pr` whose base branch is **not** the
@@ -303,6 +317,8 @@ A single hook script (configured via `hooks`) is called at three points during t
 | `check` | After PR is created | `check <label> <name> <instruction-file>` |
 
 The script runs with its working directory set to the project directory inside the worktree.
+
+Each invocation is subject to `hookTimeoutSeconds`. If a hook phase exceeds the deadline it is cancelled (via `Control.Concurrent.Async.race`) and execution continues as if the hook had been skipped — the task is never failed solely because of a hook timeout.
 
 ### `static-check` — commit behaviour
 

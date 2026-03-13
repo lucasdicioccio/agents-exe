@@ -47,6 +47,7 @@ data AgqConfig = AgqConfig
     , lockStaleSeconds :: Int
     , defaultTries :: Int -- default tries_remaining for new tasks (clean worktree runs)
     , agentAttempts :: Int -- max agents-exe invocations per try (resuming same session)
+    , hookTimeoutSeconds :: Int -- max seconds a hook may run before being killed
     , projects :: Map Text Text
     , agents :: Map Text Text
     , hooks :: Map Text Text -- label -> hook script path (relative to worktree project dir)
@@ -69,6 +70,7 @@ defaultConfig =
         , lockStaleSeconds = 7200
         , defaultTries = 3
         , agentAttempts = 1
+        , hookTimeoutSeconds = 300
         , projects = Map.fromList [("root", "."), ("architect", ".")]
         , agents =
             Map.fromList

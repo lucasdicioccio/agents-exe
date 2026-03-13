@@ -234,6 +234,7 @@ executable agq
     build-depends:    base >=4.18.3.0,
                       aeson,
                       aeson-pretty,
+                      async,
                       bytestring,
                       containers,
                       directory,
