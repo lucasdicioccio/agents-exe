@@ -132,7 +132,8 @@ import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
 import qualified Data.Vector as Vector
 import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
-import System.Timeout (timeout)
+import Control.Concurrent.Async (race)
+import Control.Concurrent (threadDelay)
 
 import Prod.Tracer (Tracer (..), runTracer)
 
@@ -513,7 +514,12 @@ The timeout is handled at the execution level using Haskell's
 async and timeout mechanisms, not within Lua itself.
 -}
 applyTimeout :: Int -> IO a -> IO (Maybe a)
-applyTimeout seconds = timeout (seconds * 1000000) -- microseconds
+applyTimeout seconds go =
+  fmap eitherToMaybe $ race (threadDelay (seconds * 1000000)) (go)
+  where 
+    eitherToMaybe :: Either a b -> Maybe b
+    eitherToMaybe (Right v) = Just v
+    eitherToMaybe _  = Nothing
 
 -------------------------------------------------------------------------------
 -- Script Execution
