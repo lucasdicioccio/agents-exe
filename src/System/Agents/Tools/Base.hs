@@ -94,7 +94,7 @@ data CallResult call
     | -- | System tool execution failed
       SystemToolError call SystemTools.QueryError
     | -- | Lua tool executed successfully with result
-      LuaToolResult call Aeson.Value
+      LuaToolResult call Aeson.Value  -- NOTE: the Aeson.Value is an array of results
     | -- | Lua tool execution failed
       LuaToolError call Text
     deriving (Show)

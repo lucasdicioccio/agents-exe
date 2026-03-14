@@ -122,7 +122,7 @@ module System.Agents.Tools.LuaToolbox (
 
 import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, try)
-import Control.Monad (void, when)
+import Control.Monad (void, when, replicateM)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Aeson.Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -234,7 +234,7 @@ Contains:
 * Optional trace information
 -}
 data ExecutionResult = ExecutionResult
-    { resultValue :: Aeson.Value
+    { resultValues :: [Aeson.Value]
     , resultExecutionTime :: NominalDiffTime
     }
     deriving (Show)
@@ -242,7 +242,7 @@ data ExecutionResult = ExecutionResult
 instance Aeson.ToJSON ExecutionResult where
     toJSON r =
         Aeson.object
-            [ "value" Aeson..= resultValue r
+            [ "values" Aeson..= resultValues r
             , "executionTime" Aeson..= resultExecutionTime r
             ]
 
@@ -624,17 +624,11 @@ executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
                             Lua.pop 1
                             pure $ Left $ LuaRuntimeError (Text.decodeUtf8 errMsg)
                         else do
+                            -- TODO: consider multiple-return values
                             -- Convert result to JSON
                             nrets <- Lua.gettop
-                            jsonValue <-
-                                if nrets > 0
-                                    then luaToJsonValue -- this pops a value
-                                    else pure Aeson.Null
-                            -- Pop all return values
-                            if nrets > 1
-                                then Lua.pop (stackIndexToInt $ nrets - 1)
-                                else pure ()
-                            pure $ Right jsonValue
+                            jsonValues <- replicateM (stackIndexToInt nrets) luaToJsonValue
+                            pure $ Right jsonValues
 
     endTime <- getCurrentTime
     let execTime = diffUTCTime endTime startTime
@@ -649,7 +643,7 @@ executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
             pure $
                 Right
                     ExecutionResult
-                        { resultValue = val
+                        { resultValues = val
                         , resultExecutionTime = execTime
                         }
 

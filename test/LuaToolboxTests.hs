@@ -127,7 +127,7 @@ testSimpleArithmetic = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.Number 2
+            execResult.resultValues @?= [Aeson.Number 2]
 
 testReturnTable0 :: Assertion
 testReturnTable0 = withTestToolbox $ \box -> do
@@ -135,8 +135,8 @@ testReturnTable0 = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue
-                @?= Aeson.Array (Vector.fromList [])
+            execResult.resultValues
+                @?= [Aeson.Array (Vector.fromList [])]
 
 testReturnTable1 :: Assertion
 testReturnTable1 = withTestToolbox $ \box -> do
@@ -144,8 +144,8 @@ testReturnTable1 = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue
-                @?= Aeson.object ["foo" .= (42 :: Int)]
+            execResult.resultValues
+                @?= [Aeson.object ["foo" .= (42 :: Int)]]
 
 testReturnTable2 :: Assertion
 testReturnTable2 = withTestToolbox $ \box -> do
@@ -153,8 +153,8 @@ testReturnTable2 = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue
-                @?= Aeson.object ["foo" .= ("bar" :: Text), "count" .= (42 :: Int)]
+            execResult.resultValues
+                @?= [Aeson.object ["foo" .= ("bar" :: Text), "count" .= (42 :: Int)]]
 
 testReturnArray :: Assertion
 testReturnArray = withTestToolbox $ \box -> do
@@ -162,8 +162,8 @@ testReturnArray = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue
-                @?= Aeson.Array (Vector.fromList [Aeson.Number 1, Aeson.Number 2, Aeson.Number 3])
+            execResult.resultValues
+                @?= [Aeson.Array (Vector.fromList [Aeson.Number 1, Aeson.Number 2, Aeson.Number 3])]
 
 testReturnString :: Assertion
 testReturnString = withTestToolbox $ \box -> do
@@ -171,7 +171,7 @@ testReturnString = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.String "hello world"
+            execResult.resultValues @?= [Aeson.String "hello world"]
 
 testReturnBoolean :: Assertion
 testReturnBoolean = withTestToolbox $ \box -> do
@@ -179,7 +179,7 @@ testReturnBoolean = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.Bool True
+            execResult.resultValues @?= [Aeson.Bool True]
 
 testReturnNil :: Assertion
 testReturnNil = withTestToolbox $ \box -> do
@@ -187,7 +187,7 @@ testReturnNil = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.Null
+            execResult.resultValues @?= [Aeson.Null]
 
 -------------------------------------------------------------------------------
 -- Sandbox Security Tests
@@ -308,7 +308,7 @@ testJsonAvailable = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.Bool True
+            execResult.resultValues @?= [Aeson.Bool True]
 
 testTextAvailable :: Assertion
 testTextAvailable = withTestToolbox $ \box -> do
@@ -317,7 +317,7 @@ testTextAvailable = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.Bool True
+            execResult.resultValues @?= [Aeson.Bool True]
 
 testTimeAvailable :: Assertion
 testTimeAvailable = withTestToolbox $ \box -> do
@@ -326,7 +326,7 @@ testTimeAvailable = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            execResult.resultValue @?= Aeson.Bool True
+            execResult.resultValues @?= [Aeson.Bool True]
 
 testFsBlocksUnauthorized :: Assertion
 testFsBlocksUnauthorized = withTestToolbox $ \box -> do
@@ -336,7 +336,7 @@ testFsBlocksUnauthorized = withTestToolbox $ \box -> do
         Left err -> assertFailure $ show err
         Right execResult ->
             -- Should return nil (access blocked)
-            execResult.resultValue @?= Aeson.Null
+            (drop 1 execResult.resultValues) @?= [Aeson.Null]
 
 -------------------------------------------------------------------------------
 -- Resource Limit Tests
@@ -409,8 +409,8 @@ testPcallError = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            case execResult.resultValue of
-                Aeson.Object obj -> do
+            case execResult.resultValues of
+                ((Aeson.Object obj):[]) -> do
                     case KeyMap.lookup "success" obj of
                         Just (Aeson.Bool b) -> b @?= False
                         _ -> assertFailure "Expected success=false"
@@ -468,15 +468,15 @@ testPortalToolCall = do
             case result of
                 Left err -> assertFailure $ show err
                 Right execResult -> do
-                    case execResult.resultValue of
-                        Aeson.Object resultObj -> do
+                    case execResult.resultValues of
+                        ((Aeson.Object resultObj):[]) -> do
                             case KeyMap.lookup "data" resultObj of
                                 Just (Aeson.Object dataObj) -> do
                                     case KeyMap.lookup "tool" dataObj of
                                         Just (Aeson.String t) -> t @?= "test_tool"
                                         _ -> assertFailure "Expected tool name in data"
                                 _ -> assertFailure "Expected data object"
-                        _ -> assertFailure $ "Unexpected result: " ++ show execResult.resultValue
+                        _ -> assertFailure $ "Unexpected result: " ++ show execResult.resultValues
 
 testNoPortal :: Assertion
 testNoPortal = withTestToolbox $ \box -> do
@@ -490,8 +490,8 @@ testNoPortal = withTestToolbox $ \box -> do
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
-            case execResult.resultValue of
-                Aeson.Object obj -> do
+            case execResult.resultValues of
+                ((Aeson.Object obj):[]) -> do
                     case KeyMap.lookup "result" obj of
                         Just Aeson.Null -> pure () -- Expected: result is nil
                         _ -> assertFailure "Expected nil result"
@@ -532,8 +532,8 @@ testToolWhitelist = do
             case result of
                 Left err -> assertFailure $ show err
                 Right execResult ->
-                    case execResult.resultValue of
-                        Aeson.Object obj -> do
+                    case execResult.resultValues of
+                        ((Aeson.Object obj):[]) -> do
                             case KeyMap.lookup "result" obj of
                                 Just Aeson.Null -> pure () -- Expected: result is nil
                                 _ -> assertFailure "Expected nil result for blocked tool"

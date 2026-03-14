@@ -976,7 +976,7 @@ luaTool box =
 
                 case result of
                     Left err -> pure $ LuaToolError call (Text.pack $ show err)
-                    Right execResult -> pure $ LuaToolResult call (LuaTools.resultValue execResult)
+                    Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
             _ ->
                 pure $ LuaToolError call "Missing 'script' parameter or invalid type"
     run _tracer _ctx _ =

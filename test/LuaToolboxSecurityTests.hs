@@ -167,9 +167,9 @@ hostValidationTests =
 
 -- | Check if a value indicates that fs/http access was blocked.
 -- When access is blocked, the function returns either nil or an error string.
-isAccessBlocked :: Aeson.Value -> Bool
-isAccessBlocked Aeson.Null = True
-isAccessBlocked (Aeson.String s) = 
+isAccessBlocked :: [Aeson.Value] -> Bool
+isAccessBlocked [] = True
+isAccessBlocked ((Aeson.String s):Aeson.Null:[]) = 
     -- Check if the string contains an access-related error message
     Text.isInfixOf "PathNotAllowed" s ||
     Text.isInfixOf "No hosts allowed" s ||
@@ -207,7 +207,7 @@ securityDefaultsTests =
                                 assertFailure $ "Script execution failed unexpectedly: " ++ show err
                             Right result -> do
                                 -- Check that access was blocked (nil or error string)
-                                let value = LuaToolbox.resultValue result
+                                let value = LuaToolbox.resultValues result
                                 assertBool ("Expected blocked access, got: " ++ show value) (isAccessBlocked value)
 
                         LuaToolbox.closeToolbox LuaToolbox.nullTracer toolbox
@@ -235,8 +235,8 @@ securityDefaultsTests =
                             assertFailure $ "Script execution failed unexpectedly: " ++ show err
                         Right result -> do
                             -- Check that access was blocked (nil or error string)
-                            let value = LuaToolbox.resultValue result
-                            assertBool ("Expected blocked access, got: " ++ show value) (isAccessBlocked value)
+                            let values = LuaToolbox.resultValues result
+                            assertBool ("Expected blocked access, got: " ++ show values) (isAccessBlocked values)
 
                     LuaToolbox.closeToolbox LuaToolbox.nullTracer toolbox
         ]
