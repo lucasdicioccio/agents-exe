@@ -1,5 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Tools module for LuaToolbox - portal integration for calling other tools.
@@ -43,8 +43,8 @@ module System.Agents.Tools.LuaToolbox.Modules.Tools (
 
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Aeson.Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Scientific as Scientific
@@ -237,7 +237,6 @@ addConvenienceMethods "bash" config = do
     Lua.pushName "run"
     Lua.pushHaskellFunction (luaBashRun config)
     Lua.settable (Lua.nthTop 3)
-
 addConvenienceMethods "sqlite" config = do
     -- tools.sqlite.query(db, sql, params)
     Lua.pushName "query"
@@ -248,7 +247,6 @@ addConvenienceMethods "sqlite" config = do
     Lua.pushName "execute"
     Lua.pushHaskellFunction (luaSqliteExecute config)
     Lua.settable (Lua.nthTop 3)
-
 addConvenienceMethods "postgrest" config = do
     -- tools.postgrest.get(endpoint, opts)
     Lua.pushName "get"
@@ -269,13 +267,11 @@ addConvenienceMethods "postgrest" config = do
     Lua.pushName "delete"
     Lua.pushHaskellFunction (luaPostgrestDelete config)
     Lua.settable (Lua.nthTop 3)
-
 addConvenienceMethods "system" config = do
     -- tools.system.info(capability)
     Lua.pushName "info"
     Lua.pushHaskellFunction (luaSystemInfo config)
     Lua.settable (Lua.nthTop 3)
-
 addConvenienceMethods _ _ = pure ()
 
 -------------------------------------------------------------------------------
@@ -737,8 +733,7 @@ isArrayAt idx = do
                         Lua.pop 2
                         pure False
 
-{- | Convert array table at index to Aeson Array.
--}
+-- | Convert array table at index to Aeson Array.
 convertArrayAt :: Lua.StackIndex -> Lua.LuaE Lua.Exception Aeson.Value
 convertArrayAt idx = do
     len' <- Lua.rawlen idx
@@ -753,8 +748,7 @@ convertArrayAt idx = do
             [1 .. fromIntegral len']
     pure $ Aeson.Array $ Vector.fromList vals
 
-{- | Convert object table at index to Aeson Object.
--}
+-- | Convert object table at index to Aeson Object.
 convertObjectAt :: Lua.StackIndex -> Lua.LuaE Lua.Exception Aeson.Value
 convertObjectAt idx = do
     Lua.pushnil
@@ -827,8 +821,7 @@ luaTableToKeyMap idx = do
 -- Aeson to Lua Conversion
 -------------------------------------------------------------------------------
 
-{- | Convert an Aeson Value to a Lua value on the stack.
--}
+-- | Convert an Aeson Value to a Lua value on the stack.
 aesonToLuaValue :: Aeson.Value -> Lua.Lua ()
 aesonToLuaValue Aeson.Null = Lua.pushnil
 aesonToLuaValue (Aeson.Bool b) = Lua.pushboolean b
@@ -856,4 +849,3 @@ aesonToLuaValue (Aeson.Object obj) = do
             Lua.settable (Lua.nthTop 3)
         )
         (KeyMap.toList obj)
-

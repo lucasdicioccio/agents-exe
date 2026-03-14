@@ -767,4 +767,3 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
-
