@@ -106,7 +106,7 @@ import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), runTracer)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Tools.Base (CallResult (..))
+import System.Agents.Tools.Base (CallResult (..), ToolTrace (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.EndpointPredicate (
     EndpointPredicate,
@@ -130,7 +130,6 @@ import System.Agents.Tools.OpenAPI.Types (
     Path,
     ToolResult (..),
  )
-import System.Agents.Tools.Trace (ToolTrace (..))
 
 -- -------------------------------------------------------------------------
 -- Trace types
@@ -747,3 +746,4 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
      in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
+

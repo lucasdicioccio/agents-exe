@@ -40,10 +40,11 @@ import System.Agents.Session.OpenAI
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.ToolPortal (makeToolPortal)
 import System.Agents.ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import System.Agents.Tools hiding (SystemTool)
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkPortalContext)
 
 import qualified Data.Aeson.Key as AesonKey
 import Prod.Tracer (Tracer (..), contramap)
@@ -138,7 +139,8 @@ extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
 
 The agent is configured with the runtime's agent ID and the provided conversation ID.
 These identifiers are used to construct the 'ToolExecutionContext' passed to tools
-during execution, allowing tools to access session metadata.
+during execution, allowing tools to access session metadata. The context includes
+a ToolPortal for inter-toolbox communication.
 -}
 runtimeToAgent :: SessionStore -> Maybe FilePath -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
 runtimeToAgent store mPath convId rt =
@@ -162,6 +164,9 @@ runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
                 }
     let completeF = mkOpenAICompletion completionConfig
 
+    -- Read tool registrations for the agent
+    toolRegs <- readTVarIO rt.agentTools
+
     pure $
         agentStoreSession store mPath convId $
             Agent
@@ -179,21 +184,25 @@ runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeToolCall rt.agentId convId rt.agentTools
+                , toolCall = executeToolCall rt.agentId convId rt.agentTools toolRegs
                 , complete = completeF
                 , contextConfig = defaultContextConfig
+                , toolRegistrations = toolRegs
                 }
 
 {- | Execute a tool call using the runtime's registered tools.
 
 Constructs a 'ToolExecutionContext' with the provided agent and session identifiers,
-then executes the tool with this context. The context gives tools access to:
+then executes the tool with this context. The context includes a ToolPortal for
+inter-toolbox communication, allowing tools to invoke other tools.
 
+The context gives tools access to:
 * 'ctxSessionId' - From the current session
 * 'ctxConversationId' - The conversation ID passed from the runtime
 * 'ctxTurnId' - From the current session
 * 'ctxAgentId' - The agent ID from the runtime configuration
-* 'ctxFullSession' - Populated according to 'ContextConfig' (not directly available here)
+* 'ctxToolPortal' - Portal for calling other tools
+* 'ctxAllowedTools' - Whitelist of allowed tool names
 -}
 executeToolCall ::
     -- | Agent ID for context
@@ -201,32 +210,20 @@ executeToolCall ::
     -- | Conversation ID for context
     ConversationId ->
     Runtime.AgentTools ->
-    -- | Context passed from runStepM (ignored, we construct fresh)
+    -- | Tool registrations for building the portal
+    [ToolRegistration] ->
+    -- | Context passed from runStepM (used for portal access)
     ToolExecutionContext ->
     LlmToolCall ->
     IO UserToolResponse
-executeToolCall agentId convId toolsTVar _ctx (LlmToolCall callVal) =
+executeToolCall agentId convId _toolsTVar toolRegs ctx (LlmToolCall callVal) =
     -- Extract the tool call ID and function info from the LlmToolCall
     case parseLlmToolCall callVal of
         Nothing -> pure $ UserToolResponse $ Aeson.String "Failed to parse tool call"
         Just tc -> do
-            regs <- readTVarIO toolsTVar
-            -- Construct context for this tool execution
-            -- We don't have access to the full session here, so we generate a minimal context
-            -- with the identifiers we have. In the future, we could pass session through the
-            -- Agent type or use a Reader pattern to access it here.
-            sessId <- newSessionId
-            tId <- newTurnId
-            let toolCtx =
-                    mkToolExecutionContext
-                        sessId
-                        convId
-                        tId
-                        (Just agentId)
-                        Nothing -- No full session available at this point
-                        [CallStackEntry "root" convId 0] -- Root call stack entry
-                        Nothing -- No max recursion depth by default
-            result <- llmCallTool regs toolCtx tc
+            -- Use the context provided by runStepM (which already has the portal)
+            -- The context was built with the portal from toolRegs
+            result <- llmCallTool toolRegs ctx tc
             pure $ callResultToUserToolResponse tc result
 
 -- | Parse an LlmToolCall into OpenAI's ToolCall format.
@@ -311,6 +308,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         SystemToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
+        LuaToolResult _ toolResult ->
+            UserToolResponse $ Aeson.toJSON toolResult
+        LuaToolError _ err ->
+            UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
@@ -432,3 +433,4 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+

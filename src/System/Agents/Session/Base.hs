@@ -37,6 +37,7 @@ module System.Agents.Session.Base (
 
 import Data.Text (Text)
 
+import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Tools.Context (ToolExecutionContext)
 
 -- Re-export all session types from Session.Types for backward compatibility
@@ -99,11 +100,13 @@ defaultContextConfig = ContextConfig False True
 {- | An agent is a decorated step function from a session step to an action that
 may yield a result r or some delay.
 Functions in its body.
+
+The agent includes 'toolRegistrations' which are used to construct the
+ToolExecutionContext with a ToolPortal for inter-toolbox communication.
 -}
 data Agent r = Agent
     { step :: Session -> IO (Action r)
-    , --
-      sysPrompt :: IO SystemPrompt
+    , sysPrompt :: IO SystemPrompt
     , sysTools :: IO [SystemTool]
     , usrQuery :: IO (Maybe UserQuery)
     , toolCall :: ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
@@ -112,6 +115,10 @@ data Agent r = Agent
     , --
       contextConfig :: ContextConfig
     -- ^ Configuration for what to include in tool execution context
+    , --
+      toolRegistrations :: [ToolRegistration]
+    -- ^ Tool registrations used to build the ToolExecutionContext with portal support.
+    -- This allows tools to invoke other tools through the portal mechanism.
     }
     deriving (Functor)
 
@@ -142,3 +149,4 @@ type OnSessionProgress = SessionProgress -> IO ()
 -- | A no-op session progress handler for when tracking is not needed.
 ignoreSessionProgress :: OnSessionProgress
 ignoreSessionProgress = const (pure ())
+

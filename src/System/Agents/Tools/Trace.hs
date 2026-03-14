@@ -1,18 +1,12 @@
-module System.Agents.Tools.Trace where
+{-# LANGUAGE PatternSynonyms #-}
 
-import qualified Data.Aeson.Types as Aeson
-import Data.ByteString.Char8 (ByteString)
+-- | Tool trace events for debugging and auditing.
+-- This module re-exports the 'ToolTrace' type from System.Agents.Tools.Base
+-- to maintain backward compatibility. The type was moved to Base to avoid
+-- module cycles.
+module System.Agents.Tools.Trace (
+    ToolTrace (..),
+) where
 
--------------------------------------------------------------------------------
-import qualified System.Agents.Tools.Bash as BashTools
-import qualified System.Agents.Tools.IO as IOTools
-import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
-import qualified System.Agents.Tools.SystemToolbox as SystemTools
+import System.Agents.Tools.Base (ToolTrace (..))
 
--------------------------------------------------------------------------------
-data ToolTrace
-    = BashToolsTrace !BashTools.RunTrace
-    | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
-    | SqliteToolsTrace !SqliteTools.Trace
-    | SystemToolsTrace !SystemTools.Trace
-    deriving (Show)

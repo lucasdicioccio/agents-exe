@@ -16,12 +16,44 @@ import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
-import System.Agents.Tools.Trace (ToolTrace)
+
+-------------------------------------------------------------------------------
+-- ToolTrace type (moved here from Tools.Trace to avoid module cycles)
+-------------------------------------------------------------------------------
+
+{- | Tool trace events for debugging and auditing.
+
+This type aggregates trace events from all tool types in the system,
+allowing unified tracing and logging of tool invocations.
+
+The trace events can be used for:
+* Debugging tool execution
+* Performance analysis
+* Security auditing
+* Call tree reconstruction for nested tool calls
+
+When adding new tool types, extend this type with a new constructor
+and implement the appropriate conversion from the tool's internal
+trace type.
+-}
+data ToolTrace
+    = -- | Trace from bash tool execution
+      BashToolsTrace !BashTools.RunTrace
+    | -- | Trace from IO tool execution
+      IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
+    | -- | Trace from SQLite toolbox operations
+      SqliteToolsTrace !SqliteTools.Trace
+    | -- | Trace from system toolbox operations
+      SystemToolsTrace !SystemTools.Trace
+    | -- | Trace from Lua toolbox operations
+      LuaToolsTrace !LuaTools.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 
@@ -52,6 +84,8 @@ data ToolDef
       SqliteTool !SqliteTools.ToolDescription
     | -- | System tool description
       SystemTool !SystemTools.ToolDescription
+    | -- | Lua tool: toolbox name (Lua scripts are anonymous)
+      LuaTool !Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -91,6 +125,10 @@ data CallResult call
       SystemToolResult call SystemTools.QueryResult
     | -- | System tool execution failed
       SystemToolError call SystemTools.QueryError
+    | -- | Lua tool executed successfully with result
+      LuaToolResult call Aeson.Value  -- NOTE: the Aeson.Value is an array of results
+    | -- | Lua tool execution failed
+      LuaToolError call Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -113,6 +151,8 @@ mapCallResult f c =
         (SqliteToolError c e) -> SqliteToolError (f c) e
         (SystemToolResult v r) -> SystemToolResult (f v) r
         (SystemToolError v e) -> SystemToolError (f v) e
+        (LuaToolResult v r) -> LuaToolResult (f v) r
+        (LuaToolError v e) -> LuaToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -139,6 +179,8 @@ extractCall (SqliteToolResult c _) = c
 extractCall (SqliteToolError c _) = c
 extractCall (SystemToolResult c _) = c
 extractCall (SystemToolError c _) = c
+extractCall (LuaToolResult c _) = c
+extractCall (LuaToolError c _) = c
 
 -------------------------------------------------------------------------------
 -- Byte Counting Helpers
@@ -185,6 +227,10 @@ callResultByteSize (SystemToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (SystemToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
+callResultByteSize (LuaToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (LuaToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String err)))
 
 {- | Calculate total bytes for a list of tool responses.
 
@@ -193,3 +239,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+

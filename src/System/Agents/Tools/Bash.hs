@@ -27,7 +27,7 @@ import System.Process (CreateProcess (..), proc)
 import System.Process.ByteString (readCreateProcessWithExitCode, readProcessWithExitCode)
 
 import System.Agents.Base (AgentId (..), ConversationId (..))
-import System.Agents.Session.Base (SessionId (..), TurnId (..))
+import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext (..))
 
 -------------------------------------------------------------------------------
@@ -405,3 +405,4 @@ runValue tracer script mCtx val = do
                             Nothing -> out
                      in
                         pure $ Right adjusted
+

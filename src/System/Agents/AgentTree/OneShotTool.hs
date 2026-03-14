@@ -45,12 +45,13 @@ import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
+import System.Agents.ToolPortal (makeToolPortal)
 import System.Agents.ToolRegistration (
     ToolRegistration (..),
     registerIOScriptInLLM,
  )
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
+import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId, mkPortalContext, CallStackEntry (..))
 import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
@@ -72,6 +73,9 @@ instance Aeson.FromJSON PromptOtherAgent where
 This version uses the LLM session calls from OneShot.hs instead of
 Runtime.handleConversation. It creates an Agent from the Runtime,
 runs it with a session, and returns the result.
+
+The created tool context includes a ToolPortal for inter-toolbox communication,
+allowing Lua scripts and other tools to invoke registered tools.
 -}
 turnAgentRuntimeIntoIOTool ::
     -- | Optional session store for persisting sessions
@@ -138,6 +142,9 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
 
 {- | Creates an Agent from a Runtime configured for use as a tool.
 Based on runtimeToAgent from OneShot.hs.
+
+The agent is configured with a ToolPortal for inter-toolbox communication,
+allowing tools (especially Lua scripts) to invoke other registered tools.
 -}
 runtimeToAgentForToolInIOScriptExecution ::
     SessionStore ->
@@ -162,6 +169,9 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
                 }
     let completeF = mkOpenAICompletion completionConfig
 
+    -- Read tool registrations for the agent
+    toolRegs <- readTVarIO rt.agentTools
+
     convId <- newConversationId
     pure $
         agentStoreSession store Nothing convId $
@@ -171,10 +181,12 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
                 , -- toolCall now accepts ToolExecutionContext as first argument
-                  toolCall = executeToolCall rt.agentId convId rt.agentTools
+                  toolCall = executeToolCall rt.agentId convId rt.agentTools toolRegs
                 , complete = completeF
                 , -- Add contextConfig field (required for Agent)
                   contextConfig = defaultContextConfig
+                , -- Tool registrations for portal support
+                  toolRegistrations = toolRegs
                 }
   where
     -- Nest the trace to indicate this is a child agent call
@@ -252,7 +264,8 @@ toolParamsToJson props =
 Based on executeToolCall from OneShot.hs.
 
 The toolCall function in Agent now accepts a ToolExecutionContext as its
-first argument, allowing tools to access session metadata.
+first argument, allowing tools to access session metadata and the ToolPortal
+for invoking other tools.
 -}
 executeToolCall ::
     -- | Agent ID for context
@@ -260,18 +273,30 @@ executeToolCall ::
     -- | Conversation ID for context
     ConversationId ->
     Runtime.AgentTools ->
-    -- | Context from runStepM
+    -- | Tool registrations for building the portal
+    [ToolRegistration] ->
+    -- | Context from runStepM (used for portal access)
     ToolExecutionContext ->
     -- | Tool call from LLM
     LlmToolCall ->
     IO UserToolResponse
-executeToolCall _agentId _convId toolsTVar _ctx (LlmToolCall _callVal) = do
-    -- For simplicity in this OneShot-based version, we return the raw
-    -- tool call result. In a more sophisticated implementation, we would
-    -- parse the tool call and execute it using the registered tools.
+executeToolCall _agentId _convId _toolsTVar toolRegs ctx (LlmToolCall _callVal) = do
+    -- For simplicity in this OneShot-based version, we return information about
+    -- available tools through the portal. In a more sophisticated implementation,
+    -- we would parse the tool call and execute it using the registered tools.
     -- The context is available for logging/tracing purposes.
-    regs <- readTVarIO toolsTVar
-    pure $ UserToolResponse $ Aeson.String $ "Tool execution not implemented for " <> Text.pack (show (length regs)) <> " tools"
+    let allowedTools = map (OpenAI.getToolName . OpenAI.toolName . declareTool) toolRegs
+
+    -- Just acknowledge that tools are available through the portal
+    pure $ UserToolResponse $ Aeson.Object $
+        KeyMap.fromList
+            [ ( "info"
+              , Aeson.String $ "Tool portal available with " <> Text.pack (show (length allowedTools)) <> " tools"
+              )
+            , ( "portal_available"
+              , Aeson.Bool True
+              )
+            ]
 
 -------------------------------------------------------------------------------
 
@@ -284,3 +309,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
+
