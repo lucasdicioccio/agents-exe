@@ -35,17 +35,20 @@ import System.Agents.CLI.Aliases (
 import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
 import qualified System.Agents.CLI.Cowsay as CowsayCmd
+import qualified System.Agents.CLI.DescribeTool as DescribeToolCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
 import qualified System.Agents.CLI.Export as ExportCmd
 import qualified System.Agents.CLI.Import as ImportCmd
 import qualified System.Agents.CLI.Initialize as InitializeCmd
 import qualified System.Agents.CLI.McpServer as McpServerCmd
+import qualified System.Agents.CLI.New as NewCmd
 import System.Agents.CLI.OneShot (OneShotOptions)
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
 import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
+import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.ExportImport.ToolInstall as ExportInstall
 import System.Agents.ExportImport.Types (ArchiveFormat (..), GitExportOptions (..))
@@ -396,6 +399,7 @@ data Command
     | OneShot OneShotCmd.OneShotOptions
     | EchoPrompt EchoPromptCmd.EchoPromptOptions
     | SelfDescribe SelfDescribeCmd.SelfDescribeOptions
+    | DescribeTool DescribeToolCmd.DescribeToolOptions
     | Initialize
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
@@ -404,6 +408,8 @@ data Command
     | Import ImportCmd.ImportOptions
     | Paths PathsCmd.PathsOptions
     | Cowsay CowsayCmd.CowsayOptions
+    | Spec SpecCmd.SpecOptions
+    | New NewCmd.NewOptions
 
 instance Show Command where
     show (Check _) = "Check"
@@ -411,6 +417,7 @@ instance Show Command where
     show (OneShot _) = "OneShot"
     show (EchoPrompt _) = "EchoPrompt"
     show (SelfDescribe _) = "SelfDescribe"
+    show (DescribeTool _) = "DescribeTool"
     show Initialize = "Initialize"
     show McpServer = "McpServer"
     show (SessionPrint _) = "SessionPrint"
@@ -419,6 +426,8 @@ instance Show Command where
     show (Import _) = "Import"
     show (Paths _) = "Paths"
     show (Cowsay _) = "Cowsay"
+    show (Spec _) = "Spec"
+    show (New _) = "New"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -737,6 +746,38 @@ parseSelfDescribeOptions argArgs =
                     <> maybe mempty value argArgs.defaultSelfDescribeDescription
                 )
             )
+
+-- | Parse the describe-tool command
+parseDescribeToolCommand :: Parser Command
+parseDescribeToolCommand = DescribeTool <$> parseDescribeToolOptions
+
+parseDescribeToolOptions :: Parser DescribeToolCmd.DescribeToolOptions
+parseDescribeToolOptions =
+    DescribeToolCmd.DescribeToolOptions
+        <$> strArgument
+            ( metavar "TOOLPATH"
+                <> help "Path to the tool script to describe"
+            )
+        <*> ( option
+                (maybeReader parseFormat)
+                ( long "format"
+                    <> short 'f'
+                    <> metavar "FORMAT"
+                    <> help "Output format: json or pretty (default: json)"
+                    <> value DescribeToolCmd.FormatJson
+                    <> showDefaultWith showFormat
+                )
+            )
+        <*> switch
+            ( long "check-only"
+                <> help "Only check validity, don't output full description"
+            )
+  where
+    parseFormat "json" = Just DescribeToolCmd.FormatJson
+    parseFormat "pretty" = Just DescribeToolCmd.FormatPretty
+    parseFormat _ = Nothing
+    showFormat DescribeToolCmd.FormatJson = "json"
+    showFormat DescribeToolCmd.FormatPretty = "pretty"
 
 parsePathsCommand :: Parser Command
 parsePathsCommand = Paths <$> parsePathsOptions
@@ -1065,6 +1106,103 @@ parseCowsayOptions =
                 <> showDefault
             )
 
+-- | Parse the spec command
+parseSpecCommand :: Parser Command
+parseSpecCommand = Spec <$> parseSpecOptions
+
+parseSpecOptions :: Parser SpecCmd.SpecOptions
+parseSpecOptions =
+    SpecCmd.SpecOptions
+        <$> subparser
+            ( command
+                "bash-tools"
+                ( info
+                    (pure SpecCmd.BashToolsSpec)
+                    (progDesc "Display the bash-tools specification documentation")
+                )
+            )
+
+-- | Parse the new command
+parseNewCommand :: Parser Command
+parseNewCommand = New <$> parseNewOptions
+
+parseNewOptions :: Parser NewCmd.NewOptions
+parseNewOptions =
+    NewCmd.NewOptions
+        <$> subparser
+            ( command
+                "agent"
+                (info parseNewAgentCommand (progDesc "Create a new agent from a template"))
+                <> command
+                    "tool"
+                    (info parseNewToolCommand (progDesc "Create a new tool from a template"))
+            )
+        <*> switch
+            ( long "force"
+                <> short 'f'
+                <> help "Overwrite existing files"
+            )
+
+parseNewAgentCommand :: Parser NewCmd.NewCommand
+parseNewAgentCommand =
+    NewCmd.NewAgent
+        <$> ( option
+                (maybeReader parseTemplate)
+                ( long "template"
+                    <> short 't'
+                    <> metavar "TEMPLATE"
+                    <> help "Template: openai, mistral, or ollama (default: openai)"
+                    <> value NewCmd.OpenAITemplate
+                    <> showDefaultWith showTemplate
+                )
+            )
+        <*> strArgument
+            ( metavar "SLUG"
+                <> help "Agent slug/name"
+            )
+        <*> strArgument
+            ( metavar "FILE"
+                <> help "Output file path"
+            )
+  where
+    parseTemplate "openai" = Just NewCmd.OpenAITemplate
+    parseTemplate "mistral" = Just NewCmd.MistralTemplate
+    parseTemplate "ollama" = Just NewCmd.OllamaTemplate
+    parseTemplate _ = Nothing
+    showTemplate NewCmd.OpenAITemplate = "openai"
+    showTemplate NewCmd.MistralTemplate = "mistral"
+    showTemplate NewCmd.OllamaTemplate = "ollama"
+
+parseNewToolCommand :: Parser NewCmd.NewCommand
+parseNewToolCommand =
+    NewCmd.NewTool
+        <$> ( option
+                (maybeReader parseLang)
+                ( long "language"
+                    <> short 'l'
+                    <> metavar "LANG"
+                    <> help "Language: bash, python, or haskell (default: bash)"
+                    <> value NewCmd.BashLang
+                    <> showDefaultWith showLang
+                )
+            )
+        <*> strArgument
+            ( metavar "SLUG"
+                <> help "Tool slug/name"
+            )
+        <*> strArgument
+            ( metavar "FILE"
+                <> help "Output file path"
+            )
+  where
+    parseLang "bash" = Just NewCmd.BashLang
+    parseLang "python" = Just NewCmd.PythonLang
+    parseLang "haskell" = Just NewCmd.HaskellLang
+    parseLang _ = Nothing
+    showLang NewCmd.BashLang = "bash"
+    showLang NewCmd.PythonLang = "python"
+    showLang NewCmd.HaskellLang = "haskell"
+
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
@@ -1133,6 +1271,7 @@ parseProgOptions argparserargs =
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info (parseSelfDescribeCommand argparserargs) (idm))
+                <> command "describe-tool" (info parseDescribeToolCommand (progDesc "Validate and describe a tool script without agent context"))
                 <> command "init" (info parseInitializeCommand (idm))
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
@@ -1160,6 +1299,18 @@ parseProgOptions argparserargs =
                     ( info
                         parseCowsayCommand
                         (progDesc "Display a message with the agents-exe mascot")
+                    )
+                <> command
+                    "spec"
+                    ( info
+                        parseSpecCommand
+                        (progDesc "Display specification documentation (e.g., bash-tools)")
+                    )
+                <> command
+                    "new"
+                    ( info
+                        parseNewCommand
+                        (progDesc "Create new agent or tool scaffolding")
                     )
             )
 
@@ -1258,6 +1409,8 @@ runCommand pargs baseTracer sessionStore agentFiles =
             OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile agentFiles pargs.progPromptAliases opts
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
+        DescribeTool opts ->
+            DescribeToolCmd.handleDescribeTool opts
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile agentFiles
         McpServer ->
@@ -1274,6 +1427,10 @@ runCommand pargs baseTracer sessionStore agentFiles =
             PathsCmd.handlePaths opts pargs.configDir agentFiles pargs.apiKeysFile pargs.sessionsJsonPrefix
         Cowsay opts ->
             CowsayCmd.handleCowsay opts
+        Spec opts ->
+            SpecCmd.handleSpec opts
+        New opts ->
+            NewCmd.handleNew opts
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

@@ -49,7 +49,7 @@ build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 
 -- Extra source files to be distributed with the package, such as examples, or a tutorial.
--- extra-source-files:
+extra-source-files: docs/binary-tool.md
 
 common warnings
     ghc-options: -Wall
@@ -68,17 +68,20 @@ library agents-lib
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
                     , System.Agents.CLI.Cowsay
+                    , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
                     , System.Agents.CLI.Export
                     , System.Agents.CLI.Import
                     , System.Agents.CLI.Initialize
                     , System.Agents.CLI.InitProject
                     , System.Agents.CLI.McpServer
+                    , System.Agents.CLI.New
                     , System.Agents.CLI.OneShot
                     , System.Agents.CLI.Paths
                     , System.Agents.CLI.PromptScript
                     , System.Agents.CLI.SelfDescribe
                     , System.Agents.CLI.SessionEdit
+                    , System.Agents.CLI.Spec
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
                     , System.Agents.ExportImport.Types
@@ -96,6 +99,7 @@ library agents-lib
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
+                    , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.EndpointPredicate
                     , System.Agents.Tools.IO
                     , System.Agents.Tools.McpToolbox
@@ -151,6 +155,7 @@ library agents-lib
                       direct-sqlite,
                       directory,
                       extra,
+                      file-embed,
                       filepath,
                       formatting,
                       free,
@@ -270,4 +275,5 @@ test-suite agents-tests
                       text,
                       tasty,
                       tasty-hunit
+
 

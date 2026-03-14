@@ -15,6 +15,7 @@ import Prod.Tracer (Tracer)
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
+import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
@@ -52,6 +53,8 @@ data ToolDef
       SqliteTool !SqliteTools.ToolDescription
     | -- | System tool description
       SystemTool !SystemTools.ToolDescription
+    | -- | Developer tool description
+      DeveloperTool !DeveloperTools.ToolDescription
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -91,6 +94,14 @@ data CallResult call
       SystemToolResult call SystemTools.QueryResult
     | -- | System tool execution failed
       SystemToolError call SystemTools.QueryError
+    | -- | Developer tool validation result
+      DeveloperToolResult call DeveloperTools.ValidationResult
+    | -- | Developer tool scaffold result
+      DeveloperToolScaffoldResult call DeveloperTools.ScaffoldResult
+    | -- | Developer tool spec result
+      DeveloperToolSpecResult call Text
+    | -- | Developer tool execution failed
+      DeveloperToolError call DeveloperTools.DeveloperToolError
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -113,6 +124,10 @@ mapCallResult f c =
         (SqliteToolError c e) -> SqliteToolError (f c) e
         (SystemToolResult v r) -> SystemToolResult (f v) r
         (SystemToolError v e) -> SystemToolError (f v) e
+        (DeveloperToolResult v r) -> DeveloperToolResult (f v) r
+        (DeveloperToolScaffoldResult v r) -> DeveloperToolScaffoldResult (f v) r
+        (DeveloperToolSpecResult v r) -> DeveloperToolSpecResult (f v) r
+        (DeveloperToolError v e) -> DeveloperToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -139,6 +154,10 @@ extractCall (SqliteToolResult c _) = c
 extractCall (SqliteToolError c _) = c
 extractCall (SystemToolResult c _) = c
 extractCall (SystemToolError c _) = c
+extractCall (DeveloperToolResult c _) = c
+extractCall (DeveloperToolScaffoldResult c _) = c
+extractCall (DeveloperToolSpecResult c _) = c
+extractCall (DeveloperToolError c _) = c
 
 -------------------------------------------------------------------------------
 -- Byte Counting Helpers
@@ -184,6 +203,14 @@ callResultByteSize (SqliteToolError _ err) =
 callResultByteSize (SystemToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (SystemToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
+callResultByteSize (DeveloperToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (DeveloperToolScaffoldResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (DeveloperToolSpecResult _ content) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String content)))
+callResultByteSize (DeveloperToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 
 {- | Calculate total bytes for a list of tool responses.

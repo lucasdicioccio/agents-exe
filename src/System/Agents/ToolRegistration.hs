@@ -13,6 +13,7 @@ It supports registration of various tool types:
 * PostgREST tools - Tools generated from PostgREST database APIs
 * SQLite tools - Tools for executing SQL queries against SQLite databases
 * System tools - Tools for gathering system information
+* Developer tools - Tools for writing/validating agents and tools
 
 For OpenAPI tools, special handling is done for name normalization:
 OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
@@ -37,6 +38,8 @@ module System.Agents.ToolRegistration (
     registerSqliteTools,
     registerSystemTool,
     registerSystemTools,
+    registerDeveloperTool,
+    registerDeveloperTools,
 
     -- * Naming policies
     io2LLMName,
@@ -46,6 +49,7 @@ module System.Agents.ToolRegistration (
     postgrest2LLMName,
     sqlite2LLMName,
     system2LLMName,
+    developer2LLMName,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -60,7 +64,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import Prod.Tracer (Tracer, contramap)
-import System.Agents.Base (SystemToolCapability (..))
+import System.Agents.Base (DeveloperToolCapability (..), SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.MCP.Client as McpClient
@@ -74,6 +78,7 @@ import System.Agents.Tools.Base (
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
+import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.McpToolbox (callTool)
@@ -165,6 +170,14 @@ Generates an LLM-safe tool name in the format: @system_{toolboxName}_{toolName}@
 system2LLMName :: SystemTools.Toolbox -> Text -> OpenAI.ToolName
 system2LLMName box toolName =
     OpenAI.ToolName (mconcat ["system_", box.toolboxName, "_", toolName])
+
+{- | Naming policy for Developer tools.
+
+Generates an LLM-safe tool name in the format: @developer_{toolboxName}_{toolName}@
+-}
+developer2LLMName :: DeveloperTools.Toolbox -> Text -> OpenAI.ToolName
+developer2LLMName box toolName =
+    OpenAI.ToolName (mconcat ["developer_", box.toolboxName, "_", toolName])
 
 -------------------------------------------------------------------------------
 
@@ -839,6 +852,123 @@ registerSystemTools box =
         Right reg -> Right [reg]
 
 -------------------------------------------------------------------------------
+-- Developer Tool Registration
+-------------------------------------------------------------------------------
+
+{- | Register a DeveloperToolbox tool with the LLM system.
+
+Developer tools expose functions based on configured capabilities:
+* validate-tool: Validate a tool script
+* scaffold-agent: Generate agent scaffolding
+* scaffold-tool: Generate tool scaffolding
+* show-spec: Display specification documentation
+
+The tool accepts a 'capability' parameter to select which operation to perform.
+-}
+registerDeveloperTool ::
+    DeveloperTools.Toolbox ->
+    Either String ToolRegistration
+registerDeveloperTool box =
+    let
+        toolName = "developer_tools"
+        llmName = developer2LLMName box toolName
+
+        -- Single parameter: the capability to execute
+        paramProps =
+            [ ParamProperty
+                { propertyKey = "capability"
+                , propertyType = StringParamType
+                , propertyDescription = "Capability to execute: " <> Text.intercalate ", " (map devCapabilityToText box.toolboxCapabilities)
+                , propertyRequired = True
+                }
+            , ParamProperty
+                { propertyKey = "tool_path"
+                , propertyType = StringParamType
+                , propertyDescription = "For validate-tool: Path to tool script"
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "template"
+                , propertyType = StringParamType
+                , propertyDescription = "For scaffold-agent: Template (openai, mistral, ollama)"
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "language"
+                , propertyType = StringParamType
+                , propertyDescription = "For scaffold-tool: Language (bash, python, haskell)"
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "slug"
+                , propertyType = StringParamType
+                , propertyDescription = "For scaffold operations: Slug/name for the generated file"
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "file_path"
+                , propertyType = StringParamType
+                , propertyDescription = "For scaffold operations: Output file path"
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "force"
+                , propertyType = BoolParamType
+                , propertyDescription = "For scaffold operations: Overwrite existing files"
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "spec_name"
+                , propertyType = StringParamType
+                , propertyDescription = "For show-spec: Spec name (bash-tools)"
+                , propertyRequired = False
+                }
+            ]
+
+        openaiTool =
+            OpenAI.Tool
+                { OpenAI.toolName = llmName
+                , OpenAI.toolDescription = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
+                , OpenAI.toolParamProperties = paramProps
+                }
+
+        -- Create the tool
+        tool' = developerTool box
+
+        -- Find function - matches on the LLM name
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find call =
+            if call.toolCallFunction.toolCallFunctionName == llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+     in
+        Right $
+            ToolRegistration
+                { innerTool = mapToolResult (const ()) tool'
+                , declareTool = openaiTool
+                , findTool = find
+                }
+
+-- Helper to convert developer capability to text
+devCapabilityToText :: DeveloperToolCapability -> Text
+devCapabilityToText DevToolValidateTool = "validate-tool"
+devCapabilityToText DevToolScaffoldAgent = "scaffold-agent"
+devCapabilityToText DevToolScaffoldTool = "scaffold-tool"
+devCapabilityToText DevToolShowSpec = "show-spec"
+
+{- | Register all tools from a Developer toolbox.
+
+Currently Developer toolboxes expose a single developer_tools tool.
+-}
+registerDeveloperTools ::
+    DeveloperTools.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerDeveloperTools box =
+    pure $ case registerDeveloperTool box of
+        Left err -> Left err
+        Right reg -> Right [reg]
+
+-------------------------------------------------------------------------------
 -- Internal tool builders (copied from Tools to avoid import cycle)
 -------------------------------------------------------------------------------
 
@@ -958,6 +1088,83 @@ systemTool box =
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
+
+-- | Builder for a DeveloperToolbox-based tool.
+developerTool :: DeveloperTools.Toolbox -> Tool ()
+developerTool box =
+    Tool
+        { toolDef = DeveloperTool toolDesc
+        , toolRun = run
+        }
+  where
+    call = ()
+    toolDesc =
+        DeveloperTools.ToolDescription
+            { DeveloperTools.toolDescriptionName = "developer_tools"
+            , DeveloperTools.toolDescriptionDescription = box.toolboxDescription
+            , DeveloperTools.toolDescriptionToolboxName = box.toolboxName
+            }
+    run _tracer _ctx (Aeson.Object v) = do
+        case KeyMap.lookup (AesonKey.fromText "capability") v of
+            Just (Aeson.String cap) -> executeDeveloperCapability box cap v
+            _ -> pure $ DeveloperToolError call (DeveloperTools.ValidationError "Missing 'capability' parameter or invalid type")
+    run _tracer _ctx _ = do
+        pure $ DeveloperToolError call (DeveloperTools.ValidationError "Arguments must be a JSON object")
+
+-- | Execute a developer tool capability
+executeDeveloperCapability :: DeveloperTools.Toolbox -> Text -> Aeson.Object -> IO (CallResult ())
+executeDeveloperCapability box cap params = case cap of
+    "validate-tool" -> do
+        case KeyMap.lookup (AesonKey.fromText "tool_path") params of
+            Just (Aeson.String toolPath) -> do
+                result <- DeveloperTools.executeValidateTool box (Text.unpack toolPath)
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right valResult -> pure $ DeveloperToolResult () valResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'tool_path' parameter")
+    "scaffold-agent" -> do
+        let mTemplate = case KeyMap.lookup (AesonKey.fromText "template") params of
+                Just (Aeson.String t) -> t
+                _ -> "openai"
+        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
+                Just (Aeson.String s) -> s
+                _ -> "new-agent"
+        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
+                Just (Aeson.String fp) -> Text.unpack fp
+                _ -> "new-agent.json"
+        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
+                Just (Aeson.Bool f) -> f
+                _ -> False
+        result <- DeveloperTools.executeScaffoldAgent box mTemplate mSlug mFilePath mForce
+        case result of
+            Left err -> pure $ DeveloperToolError () err
+            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
+    "scaffold-tool" -> do
+        let mLang = case KeyMap.lookup (AesonKey.fromText "language") params of
+                Just (Aeson.String l) -> l
+                _ -> "bash"
+        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
+                Just (Aeson.String s) -> s
+                _ -> "new-tool"
+        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
+                Just (Aeson.String fp) -> Text.unpack fp
+                _ -> "new-tool.sh"
+        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
+                Just (Aeson.Bool f) -> f
+                _ -> False
+        result <- DeveloperTools.executeScaffoldTool box mLang mSlug mFilePath mForce
+        case result of
+            Left err -> pure $ DeveloperToolError () err
+            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
+    "show-spec" -> do
+        case KeyMap.lookup (AesonKey.fromText "spec_name") params of
+            Just (Aeson.String specName) -> do
+                result <- DeveloperTools.executeShowSpec box specName
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right content -> pure $ DeveloperToolSpecResult () content
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'spec_name' parameter")
+    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
 -------------------------------------------------------------------------------
 -- Schema adaptation helpers
