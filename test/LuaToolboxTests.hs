@@ -112,11 +112,12 @@ basicExecutionTests =
     testGroup
         "Basic Execution"
         [ testCase "Simple arithmetic" testSimpleArithmetic
-        , testCase "Return table" testReturnTable
-        , testCase "Return array" testReturnArray
         , testCase "Return string" testReturnString
         , testCase "Return boolean" testReturnBoolean
         , testCase "Return nil" testReturnNil
+        , testCase "Return table - 1 value" testReturnTable1
+        , testCase "Return table - 2 mixed values" testReturnTable2
+        , testCase "Return array" testReturnArray
         ]
 
 testSimpleArithmetic :: Assertion
@@ -127,8 +128,17 @@ testSimpleArithmetic = withTestToolbox $ \box -> do
         Right execResult ->
             execResult.resultValue @?= Aeson.Number 2
 
-testReturnTable :: Assertion
-testReturnTable = withTestToolbox $ \box -> do
+testReturnTable1 :: Assertion
+testReturnTable1 = withTestToolbox $ \box -> do
+    result <- LuaToolbox.executeScript box "return {foo = 'bar'}"
+    case result of
+        Left err -> assertFailure $ show err
+        Right execResult ->
+            execResult.resultValue
+                @?= Aeson.object ["foo" .= ("bar" :: Text)]
+
+testReturnTable2 :: Assertion
+testReturnTable2 = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "return {foo = 'bar', count = 42}"
     case result of
         Left err -> assertFailure $ show err
