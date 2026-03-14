@@ -3,8 +3,8 @@ module System.Agents.Runtime.Trace where
 import Data.Text (Text)
 
 import System.Agents.Base
-import System.Agents.Tools
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
@@ -51,4 +51,3 @@ data ConversationTrace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
-

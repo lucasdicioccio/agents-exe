@@ -40,4 +40,3 @@ handleSpec ::
 handleSpec opts = case opts.specTopic of
     BashToolsSpec ->
         Text.putStrLn bashToolsDocumentation
-

@@ -710,13 +710,12 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*>
-            flag
-                SessionPrint.Chronological
-                SessionPrint.Antichronological
-                ( long "antichronological"
-                    <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
-                )
+        <*> flag
+            SessionPrint.Chronological
+            SessionPrint.Antichronological
+            ( long "antichronological"
+                <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
+            )
         <*> switch
             ( long "no-funny-stamp"
                 <> help "Skip the ASCII art logo stamp in the header (default: show logo)"
@@ -759,8 +758,7 @@ parseDescribeToolOptions =
             ( metavar "TOOLPATH"
                 <> help "Path to the tool script to describe"
             )
-        <*>
-            ( option
+        <*> ( option
                 (maybeReader parseFormat)
                 ( long "format"
                     <> short 'f'
@@ -1134,12 +1132,10 @@ parseNewOptions =
         <$> subparser
             ( command
                 "agent"
-                ( info parseNewAgentCommand (progDesc "Create a new agent from a template")
-                )
+                (info parseNewAgentCommand (progDesc "Create a new agent from a template"))
                 <> command
                     "tool"
-                    ( info parseNewToolCommand (progDesc "Create a new tool from a template")
-                    )
+                    (info parseNewToolCommand (progDesc "Create a new tool from a template"))
             )
         <*> switch
             ( long "force"
@@ -1640,4 +1636,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-

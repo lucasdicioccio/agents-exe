@@ -145,8 +145,7 @@ data Toolbox = Toolbox
     , toolboxCapabilities :: [DeveloperToolCapability]
     }
 
-{- | Result of a tool validation.
--}
+-- | Result of a tool validation.
 data ValidationResult = ValidationResult
     { validationPath :: FilePath
     , validationValid :: Bool
@@ -165,8 +164,7 @@ instance ToJSON ValidationResult where
             , "error" .= validationError result
             ]
 
-{- | Result of a scaffolding operation.
--}
+-- | Result of a scaffolding operation.
 data ScaffoldResult = ScaffoldResult
     { scaffoldSuccess :: Bool
     , scaffoldPath :: FilePath
@@ -327,14 +325,14 @@ Returns:
 -}
 executeScaffoldAgent ::
     Toolbox ->
+    -- | Template name (openai, mistral, ollama)
     Text ->
-    -- ^ Template name (openai, mistral, ollama)
+    -- | Agent slug
     Text ->
-    -- ^ Agent slug
+    -- | Output file path
     FilePath ->
-    -- ^ Output file path
+    -- | Force overwrite
     Bool ->
-    -- ^ Force overwrite
     IO (Either DeveloperToolError ScaffoldResult)
 executeScaffoldAgent toolbox templateName slug filePath force = do
     if DevToolScaffoldAgent `notElem` toolboxCapabilities toolbox
@@ -377,14 +375,14 @@ Returns:
 -}
 executeScaffoldTool ::
     Toolbox ->
+    -- | Language (bash, python, haskell)
     Text ->
-    -- ^ Language (bash, python, haskell)
+    -- | Tool slug
     Text ->
-    -- ^ Tool slug
+    -- | Output file path
     FilePath ->
-    -- ^ Output file path
+    -- | Force overwrite
     Bool ->
-    -- ^ Force overwrite
     IO (Either DeveloperToolError ScaffoldResult)
 executeScaffoldTool toolbox language slug filePath force = do
     if DevToolScaffoldTool `notElem` toolboxCapabilities toolbox
@@ -430,8 +428,8 @@ Returns:
 -}
 executeShowSpec ::
     Toolbox ->
+    -- | Spec name (bash-tools)
     Text ->
-    -- ^ Spec name (bash-tools)
     IO (Either DeveloperToolError Text)
 executeShowSpec toolbox specName = do
     if DevToolShowSpec `notElem` toolboxCapabilities toolbox
@@ -701,4 +699,3 @@ makeHaskellToolTemplate slug =
         , "    (_, _:value:_) -> Text.pack value"
         , "    _ -> \"\""
         ]
-

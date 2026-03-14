@@ -19,9 +19,9 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
+import qualified Prod.Tracer as Prod
 import System.Exit (exitFailure)
 import System.IO (stderr)
-import qualified Prod.Tracer as Prod
 
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptArgCallingMode (..), ScriptDescription (..), ScriptInfo (..))
 import qualified System.Agents.Tools.Bash as Bash
@@ -92,4 +92,3 @@ printPrettyDescription desc = do
         Text.putStrLn $ "      Arity: " <> Text.pack (show arg.argTypeArity)
         Text.putStrLn $ "      Mode: " <> Text.pack (show arg.argCallingMode)
         Text.putStrLn ""
-

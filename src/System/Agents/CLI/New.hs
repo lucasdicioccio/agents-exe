@@ -45,10 +45,10 @@ data ToolLanguage
 
 -- | Subcommands for the 'new' command
 data NewCommand
-    = NewAgent AgentTemplate Text FilePath
-    -- ^ Create a new agent with given template, slug, and file path
-    | NewTool ToolLanguage Text FilePath
-    -- ^ Create a new tool with given language, slug, and file path
+    = -- | Create a new agent with given template, slug, and file path
+      NewAgent AgentTemplate Text FilePath
+    | -- | Create a new tool with given language, slug, and file path
+      NewTool ToolLanguage Text FilePath
     deriving (Show, Eq)
 
 -- | Options for the new command
@@ -369,4 +369,3 @@ makeHaskellToolTemplate slug =
         , "    (_, _:value:_) -> Text.pack value"
         , "    _ -> \"\""
         ]
-
