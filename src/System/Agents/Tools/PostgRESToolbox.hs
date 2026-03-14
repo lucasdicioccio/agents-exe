@@ -100,7 +100,6 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.CaseInsensitive (mk)
-import Data.Char (intToDigit)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
@@ -115,7 +114,7 @@ import Prod.Tracer (Tracer (..), runTracer)
 
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Tools.Base (CallResult (..))
+import System.Agents.Tools.Base (CallResult (..), ToolTrace (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.EndpointPredicate (
     EndpointPredicate,
@@ -123,7 +122,6 @@ import System.Agents.Tools.EndpointPredicate (
  )
 import System.Agents.Tools.IO (RunError (..))
 import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
-import System.Agents.Tools.OpenAPI.Types (OpenAPISpec (..))
 import System.Agents.Tools.PostgREST.Converter (
     PostgRESTool (..),
     buildToolParameters,
@@ -143,7 +141,6 @@ import System.Agents.Tools.PostgREST.Types (
     isReadOnlyMethod,
  )
 import qualified System.Agents.Tools.PostgREST.Types as Types
-import System.Agents.Tools.Trace (ToolTrace (..))
 
 -- -------------------------------------------------------------------------
 -- Core types
@@ -717,3 +714,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+

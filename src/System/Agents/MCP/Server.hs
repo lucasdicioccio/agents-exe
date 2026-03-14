@@ -35,9 +35,10 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
+import System.Agents.ToolPortal (makeToolPortal)
 import System.Agents.Tools (mapCallResult, toolRun)
 import System.Agents.Tools.Base (CallResult (..))
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkPortalContext)
 
 import System.Agents.MCP.Server.Runtime
 
@@ -289,7 +290,8 @@ Based on runtimeToAgent from OneShot.hs.
 
 The agent is configured with the runtime's agent ID and will receive
 a conversation ID at execution time. These identifiers are used to
-construct the 'ToolExecutionContext' passed to tools.
+construct the 'ToolExecutionContext' passed to tools. The context includes
+a ToolPortal for inter-toolbox communication.
 -}
 runtimeToAgent :: Runtime.Runtime -> IO (SessionBase.Agent (SessionBase.LlmTurnContent, SessionBase.Session))
 runtimeToAgent rt = do
@@ -312,56 +314,47 @@ runtimeToAgent rt = do
                 }
     let completeF = mkOpenAICompletion completionConfig
 
+    -- Read tool registrations for the agent
+    toolRegs <- readTVarIO rt.agentTools
+
     pure $
         SessionBase.Agent
             { SessionBase.step = naiveTilNoToolCallStep
             , SessionBase.sysPrompt = pure sPrompt
             , SessionBase.sysTools = pure sTools
             , SessionBase.usrQuery = pure Nothing
-            , SessionBase.toolCall = executeToolCall rt.agentId rt.agentTools
+            , SessionBase.toolCall = executeToolCall rt.agentId rt.agentTools toolRegs
             , SessionBase.complete = completeF
             , SessionBase.contextConfig = SessionBase.defaultContextConfig
+            , SessionBase.toolRegistrations = toolRegs
             }
 
 {- | Execute a tool call using the runtime's registered tools.
 Based on executeToolCall from OneShot.hs.
 
-Constructs a 'ToolExecutionContext' with the agent's ID and the identifiers
-available at the point of execution. The context gives tools access to session
-metadata.
+Constructs a 'ToolExecutionContext' with the agent's ID and a ToolPortal for
+inter-toolbox communication. The context gives tools access to session
+metadata and allows them to invoke other tools.
 -}
 executeToolCall ::
     -- | Agent ID for context
     AgentId ->
     -- | Tool registrations
     Runtime.AgentTools ->
-    -- | Context from runStepM
+    -- | Tool registrations for building the portal
+    [ToolRegistration] ->
+    -- | Context passed from runStepM (used for portal access)
     ToolExecutionContext ->
     -- | Tool call from LLM
     SessionBase.LlmToolCall ->
     IO SessionBase.UserToolResponse
-executeToolCall agentId0 toolsTVar _ctx (SessionBase.LlmToolCall callVal) =
+executeToolCall agentId _toolsTVar toolRegs ctx (SessionBase.LlmToolCall callVal) =
     -- Extract the tool call ID and function info from the LlmToolCall
     case parseLlmToolCall callVal of
         Nothing -> pure $ SessionBase.UserToolResponse $ Aeson.String "Failed to parse tool call"
         Just tc -> do
-            regs <- readTVarIO toolsTVar
-            -- Construct context for this tool execution
-            -- We generate a minimal context here since we don't have direct access
-            -- to the session from this point. The AgentId is included.
-            sessId <- SessionBase.newSessionId
-            convId <- newConversationId
-            tId <- SessionBase.newTurnId
-            let toolCtx =
-                    mkToolExecutionContext
-                        sessId
-                        convId
-                        tId
-                        (Just agentId0)
-                        Nothing -- No full session available at this point
-                        [CallStackEntry "root" convId 0] -- Root call stack entry
-                        Nothing -- No max recursion depth by default
-            result <- llmCallTool regs toolCtx tc
+            -- Use the context provided by runStepM (which already has the portal)
+            result <- llmCallTool toolRegs ctx tc
             pure $ callResultToUserToolResponse tc result
 
 {- | Parse an LlmToolCall into OpenAI's ToolCall format.
@@ -393,7 +386,8 @@ parseLlmToolCall val =
 Based on llmCallTool from OneShot.hs.
 
 The 'ToolExecutionContext' is passed directly to the tool's 'toolRun' function,
-providing tools with access to session metadata.
+providing tools with access to session metadata and the ToolPortal for
+calling other tools.
 -}
 llmCallTool :: [ToolRegistration] -> ToolExecutionContext -> OpenAI.ToolCall -> IO (CallResult OpenAI.ToolCall)
 llmCallTool registrations ctx call =
@@ -570,3 +564,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+

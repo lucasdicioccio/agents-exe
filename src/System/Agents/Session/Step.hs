@@ -8,16 +8,17 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Text.Encoding (encodeUtf8)
 
 import Data.Void (Void)
 
 import System.Agents.Base (ConversationId)
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
-import System.Agents.Tools.Base (CallResult, callResultByteSize)
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.ToolPortal (makeToolPortal)
+import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkPortalContext)
 
 {- | Runs a single step of agent for a given session.
 Agent may be modified, may decide to return a session, or decide to stop.
@@ -41,8 +42,8 @@ runStepM convId agent sess =
                 sPrompt <- agent0.sysPrompt
                 sTools <- agent0.sysTools
                 uQuery <- if missing.missingQuery then agent0.usrQuery else pure Nothing
-                -- Construct ToolExecutionContext for each tool call
-                let ctx = buildContext agent0.contextConfig sess0 convId
+                -- Construct ToolExecutionContext for each tool call with portal support
+                let ctx = buildContext agent0.contextConfig agent0.toolRegistrations sess0 convId
                 toolResponses <- traverse (agent0.toolCall ctx) missing.missingToolCalls
                 let uToolResponses = zip missing.missingToolCalls toolResponses
                 -- Calculate byte usage for this user turn
@@ -63,11 +64,15 @@ The context is populated according to 'ContextConfig' settings:
 * 'includeAgentId' controls whether 'ctxAgentId' is included (as Nothing or Just)
 
 This creates a root-level context with a single "root" entry in the call stack
-at depth 0, and no recursion depth limit.
+at depth 0, and no recursion depth limit. It also includes a ToolPortal for
+inter-toolbox communication, allowing tools to invoke other tools.
 -}
-buildContext :: ContextConfig -> Session -> ConversationId -> ToolExecutionContext
-buildContext config sess convId =
-    mkToolExecutionContext
+buildContext :: ContextConfig -> [ToolRegistration] -> Session -> ConversationId -> ToolExecutionContext
+buildContext config toolRegs sess convId =
+    let portal = makeToolPortal toolRegs
+        -- Extract allowed tool names from registrations for whitelist
+        allowedTools = map (OpenAI.getToolName . OpenAI.toolName . declareTool) toolRegs
+    in mkPortalContext
         sess.sessionId
         convId
         sess.turnId
@@ -75,6 +80,8 @@ buildContext config sess convId =
         (if config.includeFullSession then Just sess else Nothing)
         [CallStackEntry "root" convId 0] -- Root call stack entry
         Nothing -- No max recursion depth by default
+        (Just portal) -- Enable the tool portal
+        allowedTools
 
 {- | Calculate byte usage for a user turn.
 
@@ -193,3 +200,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+

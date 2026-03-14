@@ -89,6 +89,7 @@ library agents-lib
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
+                    , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Context

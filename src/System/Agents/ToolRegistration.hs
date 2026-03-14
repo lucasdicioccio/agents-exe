@@ -66,7 +66,7 @@ import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import Prod.Tracer (Tracer, contramap)
+import Prod.Tracer (Tracer (..), contramap)
 import System.Agents.Base (LuaToolboxDescription (..), SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
@@ -76,6 +76,7 @@ import System.Agents.Tools.Base (
     CallResult (..),
     Tool (..),
     ToolDef (..),
+    ToolTrace (..),
     mapToolResult,
  )
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
@@ -116,7 +117,6 @@ import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
-import System.Agents.Tools.Trace (ToolTrace (..))
 
 -------------------------------------------------------------------------------
 
@@ -350,7 +350,6 @@ registerOpenAPITool toolbox tool =
                             }
 
                     -- Create the tool handler that uses the mapping
-                    runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
                     runFunc tr ctx argz = createToolHandler toolbox tool tr ctx argz
 
                     -- Create the Tool
@@ -495,7 +494,6 @@ registerPostgRESTool toolbox tool =
                 }
 
         -- Create the tool handler
-        runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
         runFunc tr ctx argz = PostgRESToolbox.createToolHandler toolbox tool tr ctx argz
 
         -- Create the Tool definition
@@ -952,7 +950,7 @@ luaTool box =
         }
   where
     call = ()
-    run tracer ctx (Aeson.Object v) = do
+    run _tracer ctx (Aeson.Object v) = do
         -- Extract script from arguments
         case KeyMap.lookup (AesonKey.fromText "script") v of
             Just (Aeson.String script) -> do
@@ -960,10 +958,9 @@ luaTool box =
                 let mPortal = Context.ctxToolPortal ctx
                 let allowedTools = Context.ctxAllowedTools ctx
 
-                -- Create tracer for Lua tools module that converts from ToolsMod.Trace to ToolTrace
-                -- The ToolsMod.Trace represents tool calls from within Lua scripts
-                let luaToolsTracer :: Tracer IO LuaToolsMod.Trace
-                    luaToolsTracer = contramap (LuaToolsTrace . LuaTools.ToolInvocationTrace) tracer
+                -- Use null tracer for internal tool calls from Lua
+                -- The main tracer is handled at the tool level
+                let luaToolsTracer = Tracer (const (pure ()))
 
                 -- Execute script with portal
                 result <-
@@ -1141,3 +1138,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+
