@@ -707,17 +707,26 @@ parseClosesRefs body = mapMaybe extractNum candidates
 -- cmdClean
 -- ---------------------------------------------------------------------------
 
+-- | Represents a git worktree entry parsed from 'git worktree list --porcelain'
+data WorktreeEntry = WorktreeEntry
+    { wtPath :: Text
+    -- ^ Absolute path to the worktree directory
+    , wtBranch :: Maybe Text
+    -- ^ Branch name (without 'refs/heads/' prefix), if not detached
+    }
+    deriving (Show)
+
 cmdClean :: AgqConfig -> Bool -> Bool -> IO ()
 cmdClean cfg doIt force = do
     (_, wtOut) <- captureCmd "git" ["worktree", "list", "--porcelain"]
     (_, rootOut) <- captureCmd "git" ["rev-parse", "--show-toplevel"]
     let root = Text.strip rootOut
         wts = parseWorktrees wtOut
-        nonMain = filter (\p -> Text.strip p /= root) wts
+        nonMain = filter (\p -> Text.strip (wtPath p) /= root) wts
     toClean <-
         myFilterM
             ( \wt -> do
-                let nm = takeBaseName (Text.unpack wt)
+                let nm = takeBaseName (Text.unpack (wtPath wt))
                     md = sessionsDir cfg </> nm <> ".session.md"
                 doesFileExist md
             )
@@ -728,27 +737,76 @@ cmdClean cfg doIt force = do
             if not doIt
                 then do
                     putStrLn "=== PREVIEW (use --do-it to execute) ==="
-                    mapM_ (putStrLn . ("  " <>) . Text.unpack) toClean
+                    mapM_ (putStrLn . ("  " <>) . Text.unpack . wtPath) toClean
                 else do
                     putStrLn "=== EXECUTING CLEANUP ==="
+                    -- Remove worktrees first
                     forM_ toClean $ \wt -> do
-                        let nm = takeBaseName (Text.unpack wt)
+                        let nm = takeBaseName (Text.unpack (wtPath wt))
                         putStrLn $ "Removing worktree: " <> nm
                         if force
                             then void $ runGit ["worktree", "remove", "--force", nm]
                             else void $ runGit ["worktree", "remove", nm]
                     void $ runGit ["worktree", "prune"]
+                    -- Delete branches associated with each worktree
                     forM_ toClean $ \wt -> do
-                        let nm = takeBaseName (Text.unpack wt)
-                        void $ runGit ["branch", "-D", nm]
+                        case wtBranch wt of
+                            Just branch -> do
+                                putStrLn $ "Deleting branch: " <> Text.unpack branch
+                                void $ runGit ["branch", "-D", Text.unpack branch]
+                            Nothing -> do
+                                let nm = takeBaseName (Text.unpack (wtPath wt))
+                                putStrLn $ "Warning: No branch found for worktree " <> nm <> ", skipping branch deletion"
 
-parseWorktrees :: Text -> [Text]
+{- | Parse the porcelain output of 'git worktree list --porcelain' into worktree entries.
+The porcelain format for each worktree is:
+  worktree <path>
+  HEAD <sha>
+  branch <ref>
+  ... (or "detached" instead of branch)
+Entries are separated by blank lines.
+-}
+parseWorktrees :: Text -> [WorktreeEntry]
 parseWorktrees txt =
-    mapMaybe parseLine (Text.lines txt)
+    map parseEntry (splitEntries (Text.lines txt))
   where
-    parseLine l
-        | "worktree " `Text.isPrefixOf` l = Just (Text.drop (Text.length "worktree ") l)
-        | otherwise = Nothing
+    -- Split lines into groups separated by blank lines
+    splitEntries :: [Text] -> [[Text]]
+    splitEntries = filter (not . null) . foldr accumulate [[]]
+      where
+        accumulate line ([] : rest) | Text.null (Text.strip line) = [] : rest
+        accumulate line (current : rest)
+            | Text.null (Text.strip line) = [] : current : rest
+            | otherwise = (line : current) : rest
+        accumulate line [] = [[line]]
+
+    -- Parse a single entry group into a WorktreeEntry
+    parseEntry :: [Text] -> WorktreeEntry
+    parseEntry entryLines =
+        WorktreeEntry
+            { wtPath = fromMaybe "" (getValue "worktree " entryLines)
+            , wtBranch = extractBranch (lookupLine "branch " entryLines)
+            }
+
+    -- Get the value after a prefix from the first matching line
+    getValue :: Text -> [Text] -> Maybe Text
+    getValue prefix ls =
+        lookupLine prefix ls >>= \line ->
+            Just (Text.drop (Text.length prefix) line)
+
+    -- Find a line starting with the given prefix
+    lookupLine :: Text -> [Text] -> Maybe Text
+    lookupLine prefix =
+        foldr (\line acc -> if prefix `Text.isPrefixOf` line then Just line else acc) Nothing
+
+    -- Extract branch name from refs/heads/... or return Nothing if detached
+    extractBranch :: Maybe Text -> Maybe Text
+    extractBranch Nothing = Nothing
+    extractBranch (Just line) =
+        let ref = Text.drop (Text.length "branch ") line
+         in if "refs/heads/" `Text.isPrefixOf` ref
+                then Just (Text.drop (Text.length "refs/heads/") ref)
+                else Nothing
 
 myFilterM :: (Monad m) => (a -> m Bool) -> [a] -> m [a]
 myFilterM _ [] = return []
