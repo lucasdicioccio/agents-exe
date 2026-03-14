@@ -120,4 +120,3 @@ printPrettyDescription desc = do
         Text.putStrLn $ "      Arity: " <> Text.pack (show arg.argTypeArity)
         Text.putStrLn $ "      Mode: " <> Text.pack (show arg.argCallingMode)
         Text.putStrLn ""
-
