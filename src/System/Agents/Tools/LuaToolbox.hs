@@ -442,9 +442,12 @@ configureSandbox lstate = Lua.runWith lstate $ do
 
     withTable :: Text.Text -> Lua.Lua () -> Lua.Lua ()
     withTable name action = do
-        _ <- Lua.getglobal (toName name)
-        action
-        Lua.pop 1
+        ty <- Lua.getglobal (toName name)
+        if ty == Lua.TypeNil
+            then Lua.pop 1 -- pop nil, nothing to do
+            else do
+                action
+                Lua.pop 1
 
     removeFields :: [Text.Text] -> Lua.Lua ()
     removeFields names = mapM_ removeField names
@@ -613,12 +616,13 @@ executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
                     Lua.pop 1
                     pure $ Left $ LuaRuntimeError (Text.decodeUtf8 errMsg)
                 else do
-                    -- Execute the loaded chunk
-                    callResult <- pcallWithTraceback 0 Lua.multret
-                    if fst callResult /= Lua.OK
+                    -- Execute the loaded chunk with regular pcall (no traceback)
+                    execStatus <- Lua.pcall 0 Lua.multret Nothing
+                    if execStatus /= Lua.OK
                         then do
-                            let errMsg = snd callResult
-                            pure $ Left $ LuaRuntimeError errMsg
+                            errMsg <- Lua.tostring' (Lua.nthTop 1)
+                            Lua.pop 1
+                            pure $ Left $ LuaRuntimeError (Text.decodeUtf8 errMsg)
                         else do
                             -- Convert result to JSON
                             nrets <- Lua.gettop
@@ -646,29 +650,6 @@ executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
                         { resultValue = val
                         , resultExecutionTime = execTime
                         }
-
--- | Helper to call Lua function with stack trace capture
-pcallWithTraceback :: Lua.NumArgs -> Lua.NumResults -> Lua.Lua (Lua.Status, Text.Text)
-pcallWithTraceback nargs nresults = do
-    -- Get debug.traceback for error handling
-    _ <- Lua.getglobal (toName "debug")
-    _ <- Lua.getfield (Lua.nthTop 1) (toName "traceback")
-    Lua.remove (Lua.nthTop 2) -- remove 'debug' table
-
-    -- Insert traceback function before function to be called
-    let nargsCInt = toCInt (numArgsToInt nargs)
-    Lua.insert (Lua.nthTop (2 + nargsCInt))
-
-    -- Call with error handler
-    status <- Lua.pcall nargs nresults (Just (Lua.nthTop (-(2 + nargsCInt))))
-
-    if status /= Lua.OK
-        then do
-            errMsg <- Lua.tostring' (Lua.nthTop 1)
-            Lua.pop 1
-            pure (status, Text.decodeUtf8 errMsg)
-        else
-            pure (status, "")
 
 -------------------------------------------------------------------------------
 -- Lua to JSON Conversion
@@ -812,3 +793,4 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
+
