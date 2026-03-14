@@ -13,7 +13,7 @@ This module implements the Lua toolbox functionality, including:
 * Timeout enforcement via Haskell watchdog thread
 * Error handling and stack trace capture
 * Integration with the Tool Portal for calling other tools
-* Standard library modules: json, text, time, fs, http
+* Standard library modules: json, text, time, fs, http, tools
 
 The toolbox is designed to be safe for LLM-generated code by:
 * Removing dangerous standard library functions (os.execute, io.popen, etc.)
@@ -56,6 +56,7 @@ Standard library modules available to Lua scripts:
 * @time@: Time functions (now, sleep, format, diff)
 * @fs@: Sandboxed filesystem operations (read, write, list, etc.)
 * @http@: HTTP requests with host whitelisting (get, post, request)
+* @tools@: Tool portal integration for calling other tools
 
 Example Lua script using modules:
 
@@ -63,6 +64,7 @@ Example Lua script using modules:
 > local text = require("text")
 > local time = require("time")
 > local fs = require("fs")
+> local tools = require("tools")
 >
 > -- Read and parse a JSON file
 > local data = json.decode(fs.read("/allowed/path/config.json"))
@@ -73,6 +75,10 @@ Example Lua script using modules:
 > -- Get current time
 > local now = time.now()
 > local formatted = time.format(now, "%Y-%m-%d")
+>
+> -- Call another tool through the portal
+> local result = tools.bash.run("echo hello")
+> print(result.data.stdout)
 >
 > return {parts = parts, date = formatted}
 -}
@@ -120,12 +126,12 @@ import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolPortal)
 
 -- Import standard library modules
-
 import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Json as JsonMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Text as TextMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Time as TimeMod
+import qualified System.Agents.Tools.LuaToolbox.Modules.Tools as ToolsMod
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -338,7 +344,6 @@ This removes access to:
 * os.rename - could move files
 * io.popen - could execute shell commands
 * loadfile/dofile - could load arbitrary Lua files
-* require - could load arbitrary modules
 * package.loadlib - could load native libraries
 
 The safe subset includes:
@@ -349,16 +354,19 @@ The safe subset includes:
 * Coroutine support (coroutine library)
 * Error handling (pcall, xpcall)
 * Basic io (print, tostring, tonumber, etc.)
+* require - for loading our pre-registered modules
+
+This also configures the package.path to prevent loading external Lua files.
 -}
 configureSandbox :: Lua.State -> IO ()
 configureSandbox lstate = Lua.runWith lstate $ do
     Lua.openlibs -- First load all standard libraries
 
     -- Then remove dangerous functions from global namespace
+    -- Note: We keep 'require' for our pre-registered modules
     removeGlobals
         [ "dofile"
         , "loadfile"
-        , "require"
         ]
 
     -- Remove dangerous functions from 'os' table
@@ -379,13 +387,9 @@ configureSandbox lstate = Lua.runWith lstate $ do
             , "tmpfile"
             ]
 
-    -- Remove package table entirely (prevents module loading)
-    -- Note: We register our own modules directly, so this is safe
-    Lua.pushglobaltable
-    Lua.pushName (toName "package")
-    Lua.pushnil
-    Lua.settable (Lua.nthTop 3)
-    Lua.pop 1
+    -- Configure package.path to prevent loading external Lua files
+    -- Our modules are pre-registered as globals
+    configurePackagePath
   where
     removeGlobals :: [Text.Text] -> Lua.Lua ()
     removeGlobals names = mapM_ removeGlobal names
@@ -412,6 +416,34 @@ configureSandbox lstate = Lua.runWith lstate $ do
         Lua.pushName (toName name)
         Lua.pushnil
         Lua.settable (Lua.nthTop 3)
+
+{- | Configure package.path to prevent loading external Lua files.
+
+We keep the 'require' function for our pre-registered modules,
+but set package.path and package.cpath to empty strings to
+prevent loading external files.
+
+The preload table is also cleared to prevent loading of C modules.
+-}
+configurePackagePath :: Lua.Lua ()
+configurePackagePath = do
+    -- Set package.path to empty to prevent loading external Lua files
+    Lua.getglobal (Lua.Name "package")
+    Lua.pushName "path"
+    Lua.pushstring ""
+    Lua.settable (Lua.nthTop 3)
+
+    -- Set package.cpath to empty to prevent loading C modules
+    Lua.pushName "cpath"
+    Lua.pushstring ""
+    Lua.settable (Lua.nthTop 3)
+
+    -- Clear package.preload to prevent preloaded C modules
+    Lua.pushName "preload"
+    Lua.newtable
+    Lua.settable (Lua.nthTop 3)
+
+    Lua.pop 1
 
 {- | Apply a memory limit to the Lua state.
 
@@ -474,13 +506,13 @@ executeScript toolbox script =
 {- | Execute a Lua script with access to the tool portal.
 
 This is the full execution function that:
-1. Sets up the tool portal as a global Lua function
+1. Sets up the tools module with the portal
 2. Executes the script with the portal available
 3. Handles timeouts and memory limits
 4. Provides detailed error information
 
-The portal is exposed to Lua as a 'call_tool' function that takes
-a tool name and arguments table.
+The portal is exposed to Lua through the 'tools' module, which provides
+functions like tools.call(), tools.bash.run(), etc.
 -}
 executeScriptWithPortal ::
     Toolbox ->
@@ -515,10 +547,14 @@ executeScriptInternal toolbox script mPortal allowedTools = do
     let lstate = toolboxLuaState toolbox
     let maxTime = (toolboxConfig toolbox).luaToolboxMaxExecutionTimeSeconds
 
-    -- Set up portal if provided
-    case mPortal of
-        Just portal -> setupPortal lstate portal allowedTools
-        Nothing -> pure ()
+    -- Set up tools module with portal
+    let toolsConfig =
+            ToolsMod.ToolsConfig
+                { ToolsMod.toolsPortal = mPortal
+                , ToolsMod.toolsAllowed = allowedTools
+                , ToolsMod.toolsCallerId = toolboxName toolbox
+                }
+    ToolsMod.registerToolsModule lstate toolsConfig
 
     -- Execute with timeout
     result <- applyTimeout maxTime $ do
@@ -588,15 +624,6 @@ pcallWithTraceback nargs nresults = do
             pure (status, Text.decodeUtf8 errMsg)
         else
             pure (status, "")
-
--- | Set up the tool portal as a Lua function
-setupPortal :: Lua.State -> ToolPortal -> [Text.Text] -> IO ()
-setupPortal lstate _portal _allowedTools = do
-    -- This will be implemented in Phase 4 when we create the tools module
-    -- For now, just create a placeholder
-    Lua.runWith lstate $ do
-        Lua.pushstring "Tool portal not yet implemented"
-        Lua.setglobal (toName "__PORTAL_ERROR") :: Lua.Lua ()
 
 -------------------------------------------------------------------------------
 -- Lua to JSON Conversion
@@ -740,3 +767,4 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
+
