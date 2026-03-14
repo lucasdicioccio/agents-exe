@@ -710,12 +710,13 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*> flag
-            SessionPrint.Chronological
-            SessionPrint.Antichronological
-            ( long "antichronological"
-                <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
-            )
+        <*>
+            flag
+                SessionPrint.Chronological
+                SessionPrint.Antichronological
+                ( long "antichronological"
+                    <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
+                )
         <*> switch
             ( long "no-funny-stamp"
                 <> help "Skip the ASCII art logo stamp in the header (default: show logo)"
@@ -1132,10 +1133,10 @@ parseNewOptions =
         <$> subparser
             ( command
                 "agent"
-                (info parseNewAgentCommand (progDesc "Create a new agent from a template"))
+                (info parseNewAgentCommand (progDesc "Create a new agent configuration"))
                 <> command
                     "tool"
-                    (info parseNewToolCommand (progDesc "Create a new tool from a template"))
+                    (info parseNewToolCommand (progDesc "Create a new tool script"))
             )
         <*> switch
             ( long "force"
@@ -1145,54 +1146,57 @@ parseNewOptions =
 
 parseNewAgentCommand :: Parser NewCmd.NewCommand
 parseNewAgentCommand =
-    NewCmd.NewAgent
-        <$> ( option
-                (maybeReader parseTemplate)
-                ( long "template"
-                    <> short 't'
-                    <> metavar "TEMPLATE"
-                    <> help "Template: openai, mistral, or ollama (default: openai)"
-                    <> value NewCmd.OpenAITemplate
-                    <> showDefaultWith showTemplate
-                )
-            )
-        <*> strArgument
+    NewCmd.NewAgent <$> parseNewAgentOptions
+
+parseNewAgentOptions :: Parser NewCmd.NewAgentOptions
+parseNewAgentOptions =
+    NewCmd.NewAgentOptions
+        <$> strArgument
             ( metavar "SLUG"
-                <> help "Agent slug/name"
+                <> help "Unique identifier for the agent"
             )
         <*> strArgument
             ( metavar "FILE"
-                <> help "Output file path"
+                <> help "Path where agent configuration will be written"
             )
-  where
-    parseTemplate "openai" = Just NewCmd.OpenAITemplate
-    parseTemplate "mistral" = Just NewCmd.MistralTemplate
-    parseTemplate "ollama" = Just NewCmd.OllamaTemplate
-    parseTemplate _ = Nothing
-    showTemplate NewCmd.OpenAITemplate = "openai"
-    showTemplate NewCmd.MistralTemplate = "mistral"
-    showTemplate NewCmd.OllamaTemplate = "ollama"
+        <*> optional
+            ( strArgument
+                ( metavar "MODEL"
+                    <> help "Model name (e.g., gpt-4o, mistral-large)"
+                )
+            )
+        <*> strOption
+            ( long "preset"
+                <> short 'p'
+                <> metavar "PRESET"
+                <> help "Provider preset (openai, mistral, ollama)"
+                <> value "openai"
+                <> showDefault
+            )
 
 parseNewToolCommand :: Parser NewCmd.NewCommand
 parseNewToolCommand =
-    NewCmd.NewTool
-        <$> ( option
-                (maybeReader parseLang)
-                ( long "language"
-                    <> short 'l'
-                    <> metavar "LANG"
-                    <> help "Language: bash, python, or haskell (default: bash)"
-                    <> value NewCmd.BashLang
-                    <> showDefaultWith showLang
-                )
-            )
-        <*> strArgument
+    NewCmd.NewTool <$> parseNewToolOptions
+
+parseNewToolOptions :: Parser NewCmd.NewToolOptions
+parseNewToolOptions =
+    NewCmd.NewToolOptions
+        <$> strArgument
             ( metavar "SLUG"
                 <> help "Tool slug/name"
             )
         <*> strArgument
             ( metavar "FILE"
                 <> help "Output file path"
+            )
+        <*> option
+            (maybeReader parseLang)
+            ( long "language"
+                <> short 'l'
+                <> metavar "LANG"
+                <> help "Language: bash, python, or haskell (default: bash)"
+                <> value NewCmd.BashLang
+                <> showDefaultWith showLang
             )
   where
     parseLang "bash" = Just NewCmd.BashLang
@@ -1636,3 +1640,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
