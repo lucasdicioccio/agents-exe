@@ -9,6 +9,7 @@ module Agq.DB (
     initDB,
     insertTask,
     getTaskByName,
+    getTaskByGithubIssue,
     listTasks,
     listTasksWithDetails,
     updateTaskStatus,
@@ -201,6 +202,20 @@ getTaskByName conn name = do
         [t] -> Just t
         _ -> Nothing
 
+-- | Look up a task by its GitHub issue number.
+-- Returns the task if found, Nothing otherwise.
+getTaskByGithubIssue :: Connection -> Int -> IO (Maybe Task)
+getTaskByGithubIssue conn issueNum = do
+    let sourcePattern = "github:" <> Text.pack (show issueNum)
+    rows <-
+        query
+            conn
+            ("SELECT " <> selectCols <> " FROM tasks WHERE source=?")
+            (Only sourcePattern)
+    return $ case rows of
+        [t] -> Just t
+        _ -> Nothing
+
 listTasks :: Connection -> IO [(Task, [Text], [Text])]
 listTasks conn = do
     tasks <-
@@ -296,3 +311,4 @@ countPendingRunning conn = do
     return $ case rows of
         [Only n] -> n
         _ -> 0
+
