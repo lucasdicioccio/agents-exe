@@ -21,9 +21,9 @@ import System.Agents.Base (
     AgentId,
     AgentSlug,
     BuiltinToolboxDescription (..),
+    LuaToolboxDescription (..),
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
-    LuaToolboxDescription (..),
     newAgentId,
  )
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -261,4 +261,3 @@ registerLuaToolsWithTracing tracer toolbox = do
             runTracer tracer (LuaToolboxInitError (LuaToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
-

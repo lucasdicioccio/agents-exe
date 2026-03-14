@@ -40,4 +40,3 @@ data ToolTrace
     | -- | Trace from Lua toolbox operations
       LuaToolsTrace !LuaTools.Trace
     deriving (Show)
-

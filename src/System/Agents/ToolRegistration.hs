@@ -80,8 +80,8 @@ import System.Agents.Tools.Base (
  )
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
-import qualified System.Agents.Tools.Context as Context
 import System.Agents.Tools.Context (ToolExecutionContext)
+import qualified System.Agents.Tools.Context as Context
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.LuaToolbox as LuaTools
@@ -966,12 +966,13 @@ luaTool box =
                     luaToolsTracer = contramap (LuaToolsTrace . LuaTools.ToolInvocationTrace) tracer
 
                 -- Execute script with portal
-                result <- LuaTools.executeScriptWithPortal
-                    box
-                    script
-                    mPortal
-                    allowedTools
-                    luaToolsTracer
+                result <-
+                    LuaTools.executeScriptWithPortal
+                        box
+                        script
+                        mPortal
+                        allowedTools
+                        luaToolsTracer
 
                 case result of
                     Left err -> pure $ LuaToolError call (Text.pack $ show err)
@@ -1140,4 +1141,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-
