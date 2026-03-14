@@ -732,12 +732,14 @@ isArray = do
                 if isNum
                     then do
                         mIdx <- Lua.tointeger (Lua.nthTop 1)
-                        Lua.pop 2 -- pop key and value
                         case mIdx of
                             Just idx
-                                | idx == fromIntegral expectedIdx ->
+                                | idx == fromIntegral expectedIdx -> do
+                                    Lua.pop 1 -- pop value
                                     isSequential (expectedIdx + 1)
-                            _ -> pure False
+                            _ -> do
+                              Lua.pop 2 -- pop key and value
+                              pure False
                     else do
                         Lua.pop 2 -- pop key and value
                         pure False
