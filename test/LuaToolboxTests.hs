@@ -211,7 +211,7 @@ testSandboxBlocksOsExecute :: Assertion
 testSandboxBlocksOsExecute = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "os.execute('echo pwned')"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -221,7 +221,7 @@ testSandboxBlocksIoPopen :: Assertion
 testSandboxBlocksIoPopen = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "io.popen('echo pwned')"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -231,7 +231,7 @@ testSandboxBlocksDofile :: Assertion
 testSandboxBlocksDofile = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "dofile('/etc/passwd')"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -241,7 +241,7 @@ testSandboxBlocksLoadfile :: Assertion
 testSandboxBlocksLoadfile = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "loadfile('/etc/passwd')"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -251,7 +251,7 @@ testSandboxBlocksOsRemove :: Assertion
 testSandboxBlocksOsRemove = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "os.remove('/tmp/test')"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -261,7 +261,7 @@ testSandboxBlocksOsRename :: Assertion
 testSandboxBlocksOsRename = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "os.rename('/tmp/a', '/tmp/b')"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -271,7 +271,7 @@ testSandboxBlocksOsExit :: Assertion
 testSandboxBlocksOsExit = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "os.exit(0)"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -281,7 +281,7 @@ testSandboxBlocksIoTmpfile :: Assertion
 testSandboxBlocksIoTmpfile = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "io.tmpfile()"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -382,7 +382,7 @@ testSyntaxError :: Assertion
 testSyntaxError = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScript box "return 1 +"
     case result of
-        Left (LuaRuntimeError msg) ->
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention syntax" $
                 "syntax" `Text.isInfixOf` msg || "expected" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -390,20 +390,20 @@ testSyntaxError = withTestToolbox $ \box -> do
 
 testRuntimeError :: Assertion
 testRuntimeError = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return nonexistent_variable"
+    result <- LuaToolbox.executeScript box "return error(\"aie\")"
     case result of
-        Left (LuaRuntimeError msg) ->
-            assertBool "Error should mention nil or attempt" $
-                "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
+        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+            assertBool "Error should mention aie" $
+                "aie" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
-        Right _ -> assertFailure "Should have failed with runtime error"
+        Right _ -> assertFailure ("Should have failed with runtime error, got: " <> show result)
 
 testPcallError :: Assertion
 testPcallError = withTestToolbox $ \box -> do
     result <-
         LuaToolbox.executeScript box $
             Text.unlines
-                [ "local ok, err = pcall(function() return nonexistent end)"
+                [ "local ok, err = pcall(function() return error(\"aie\") end)"
                 , "return {success = ok, error = err}"
                 ]
     case result of
@@ -493,8 +493,8 @@ testNoPortal = withTestToolbox $ \box -> do
             case execResult.resultValues of
                 ((Aeson.Object obj):[]) -> do
                     case KeyMap.lookup "result" obj of
-                        Just Aeson.Null -> pure () -- Expected: result is nil
-                        _ -> assertFailure "Expected nil result"
+                        Nothing -> pure () -- Expected: result-key is absent
+                        _ -> assertFailure ("Expected no result, got:" <> show obj)
                 _ -> assertFailure "Expected object result"
 
 testToolWhitelist :: Assertion
@@ -535,7 +535,7 @@ testToolWhitelist = do
                     case execResult.resultValues of
                         ((Aeson.Object obj):[]) -> do
                             case KeyMap.lookup "result" obj of
-                                Just Aeson.Null -> pure () -- Expected: result is nil
-                                _ -> assertFailure "Expected nil result for blocked tool"
+                                Nothing -> pure () -- Expected: result is missing
+                                _ -> assertFailure ("Expected no result for blocked tool, got:" <> show obj)
                         _ -> assertFailure "Expected object result"
 

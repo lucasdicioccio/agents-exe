@@ -214,7 +214,7 @@ data Toolbox = Toolbox
 -- | Errors that can occur during Lua script execution.
 data ScriptError
     = -- | Lua syntax error or runtime error
-      LuaRuntimeError !Text.Text
+      LuaRuntimeError ![Aeson.Value]
     | -- | Script exceeded maximum execution time
       TimeoutError !Int
     | -- | Script exceeded memory limit
@@ -618,17 +618,18 @@ executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
             status <- Lua.loadbuffer scriptBS (toName "=user")
             if status /= Lua.OK
                 then do
-                    errMsg <- Lua.tostring' (Lua.nthTop 1)
-                    Lua.pop 1
-                    pure $ Left $ LuaRuntimeError (Text.decodeUtf8 errMsg)
+                    nrets <- Lua.gettop
+                    jsonValues <- replicateM (stackIndexToInt nrets) luaToJsonValue
+                    pure $ Left $ LuaRuntimeError jsonValues
                 else do
                     -- Execute the loaded chunk with regular pcall (no traceback)
                     execStatus <- Lua.pcall 0 Lua.multret Nothing
                     if execStatus /= Lua.OK
                         then do
-                            errMsg <- Lua.tostring' (Lua.nthTop 1)
-                            Lua.pop 1
-                            pure $ Left $ LuaRuntimeError (Text.decodeUtf8 errMsg)
+                            -- errMsg <- Lua.tostring' (Lua.nthTop 1)
+                            nrets <- Lua.gettop
+                            jsonValues <- replicateM (stackIndexToInt nrets) luaToJsonValue
+                            pure $ Left $ LuaRuntimeError jsonValues
                         else do
                             -- TODO: consider multiple-return values
                             -- Convert result to JSON
