@@ -575,6 +575,91 @@ instance ToJSON SystemToolboxDescription where
 instance FromJSON SystemToolboxDescription where
     parseJSON = Aeson.genericParseJSON systemToolboxOptions
 
+-------------------------------------------------------------------------------
+-- Developer Toolbox Configuration
+-------------------------------------------------------------------------------
+
+{- | Enumeration of available developer tools capabilities.
+
+Each capability represents a tool that can help developers write
+and validate agents and tools.
+-}
+data DeveloperToolCapability
+    = -- | Validate a tool script
+      DevToolValidateTool
+    | -- | Generate agent scaffolding
+      DevToolScaffoldAgent
+    | -- | Generate tool scaffolding
+      DevToolScaffoldTool
+    | -- | Show bash-tools specification
+      DevToolShowSpec
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Serialize DeveloperToolCapability as kebab-case strings.
+instance ToJSON DeveloperToolCapability where
+    toJSON DevToolValidateTool = Aeson.String "validate-tool"
+    toJSON DevToolScaffoldAgent = Aeson.String "scaffold-agent"
+    toJSON DevToolScaffoldTool = Aeson.String "scaffold-tool"
+    toJSON DevToolShowSpec = Aeson.String "show-spec"
+
+-- | Parse DeveloperToolCapability from kebab-case strings.
+instance FromJSON DeveloperToolCapability where
+    parseJSON = Aeson.withText "DeveloperToolCapability" $ \txt ->
+        case txt of
+            "validate-tool" -> return DevToolValidateTool
+            "scaffold-agent" -> return DevToolScaffoldAgent
+            "scaffold-tool" -> return DevToolScaffoldTool
+            "show-spec" -> return DevToolShowSpec
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec."
+
+{- | Configuration for the developer toolbox.
+
+This describes which developer tools should be made available to an agent.
+These tools help with writing and validating agents and tools.
+
+Example configuration:
+
+@
+{
+  "tag": "DeveloperToolbox",
+  "contents": {
+    "name": "developer",
+    "description": "Tools for developing agents and tools",
+    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool"]
+  }
+}
+@
+-}
+data DeveloperToolboxDescription
+    = DeveloperToolboxDescription
+    { developerToolboxName :: Text
+    -- ^ Unique name for this toolbox instance (used as tool prefix)
+    , developerToolboxDescription :: Text
+    -- ^ Human-readable description of the toolbox purpose
+    , developerToolboxCapabilities :: [DeveloperToolCapability]
+    -- ^ List of developer tool capabilities to expose
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for DeveloperToolboxDescription to use camelCase field names
+developerToolboxOptions :: Aeson.Options
+developerToolboxOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "developerToolbox"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON DeveloperToolboxDescription where
+    toJSON = Aeson.genericToJSON developerToolboxOptions
+    toEncoding = Aeson.genericToEncoding developerToolboxOptions
+
+instance FromJSON DeveloperToolboxDescription where
+    parseJSON = Aeson.genericParseJSON developerToolboxOptions
+
 {- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
 
 This is a tagged union type that allows extensible builtin toolbox types.
@@ -588,7 +673,8 @@ Example configuration:
   "builtinToolboxes": [
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
-    {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}}
+    {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
+    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent"]}}
   ]
 }
 @
@@ -596,6 +682,7 @@ Example configuration:
 data BuiltinToolboxDescription
     = SqliteToolbox SqliteToolboxDescription
     | SystemToolbox SystemToolboxDescription
+    | DeveloperToolbox DeveloperToolboxDescription
     deriving (Show, Ord, Eq, Generic)
 
 instance ToJSON BuiltinToolboxDescription where
@@ -609,6 +696,11 @@ instance ToJSON BuiltinToolboxDescription where
             [ "tag" .= ("SystemToolbox" :: Text)
             , "contents" .= val
             ]
+    toJSON (DeveloperToolbox val) =
+        Aeson.object
+            [ "tag" .= ("DeveloperToolbox" :: Text)
+            , "contents" .= val
+            ]
 
 instance FromJSON BuiltinToolboxDescription where
     parseJSON = Aeson.withObject "BuiltinToolboxDescription" $ \v -> do
@@ -618,7 +710,9 @@ instance FromJSON BuiltinToolboxDescription where
                 SqliteToolbox <$> v .: "contents"
             "SystemToolbox" ->
                 SystemToolbox <$> v .: "contents"
-            _ -> fail "expecting 'SqliteToolbox' or 'SystemToolbox' tag"
+            "DeveloperToolbox" ->
+                DeveloperToolbox <$> v .: "contents"
+            _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', or 'DeveloperToolbox' tag"
 
 -------------------------------------------------------------------------------
 data Agent
@@ -700,3 +794,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+
