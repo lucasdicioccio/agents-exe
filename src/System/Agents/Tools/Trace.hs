@@ -36,11 +36,12 @@ data ToolTrace
       SqliteToolsTrace !SqliteTools.Trace
     | -- | Trace from system toolbox operations
       SystemToolsTrace !SystemTools.Trace
-    | -- | Generic trace message or event type from Lua execution
-      -- The Text contains a message or event type identifier
+    | {- | Generic trace message or event type from Lua execution
+      The Text contains a message or event type identifier
+      -}
       LuaToolsTrace !Text
-    | -- | Trace of a tool call from within Lua
-      -- Arguments: tool name, JSON arguments
+    | {- | Trace of a tool call from within Lua
+      Arguments: tool name, JSON arguments
+      -}
       LuaToolCallTrace !Text !Aeson.Value
     deriving (Show)
-

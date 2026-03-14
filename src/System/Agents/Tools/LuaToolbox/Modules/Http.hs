@@ -1,18 +1,19 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | HTTP client module for LuaToolbox with enhanced host whitelisting.
---
--- This module provides HTTP request capabilities that are restricted to
--- specific allowed hosts. Key security features:
---
--- * Proper URI parsing for host extraction
--- * Host whitelist validation
--- * Secure default: empty allowedHosts means NO network access
--- * Standard HTTP methods: GET, POST, and generic request
---
--- Host validation extracts the host from the URL and validates it against
--- the whitelist before making any requests.
+{- | HTTP client module for LuaToolbox with enhanced host whitelisting.
+
+This module provides HTTP request capabilities that are restricted to
+specific allowed hosts. Key security features:
+
+* Proper URI parsing for host extraction
+* Host whitelist validation
+* Secure default: empty allowedHosts means NO network access
+* Standard HTTP methods: GET, POST, and generic request
+
+Host validation extracts the host from the URL and validates it against
+the whitelist before making any requests.
+-}
 module System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     registerHttpModule,
@@ -42,7 +43,7 @@ import Network.HTTP.Client (
  )
 import qualified Network.HTTP.Client.TLS as HTTPS
 import Network.HTTP.Types (statusCode)
-import Network.URI (URI(..), parseURI, uriAuthority, uriRegName)
+import Network.URI (URI (..), parseURI, uriAuthority, uriRegName)
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -50,18 +51,19 @@ stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 getStackInt :: Lua.StackIndex -> Int
 getStackInt = stackIdxToInt
 
--- | HTTP module configuration.
---
--- Security defaults:
--- * Empty allowedHosts means NO network access
--- * All hosts must be explicitly whitelisted
---
--- Example:
--- @
--- HttpConfig
---     { httpAllowedHosts = ["localhost", "127.0.0.1", "api.example.com"]
---     }
--- @
+{- | HTTP module configuration.
+
+Security defaults:
+* Empty allowedHosts means NO network access
+* All hosts must be explicitly whitelisted
+
+Example:
+@
+HttpConfig
+    { httpAllowedHosts = ["localhost", "127.0.0.1", "api.example.com"]
+    }
+@
+-}
 data HttpConfig = HttpConfig
     { httpAllowedHosts :: [Text]
     -- ^ Whitelist of allowed hosts. If empty, NO hosts are allowed (secure default).
@@ -89,28 +91,30 @@ registerHttpModule lstate config = do
 
         Lua.setglobal (Lua.Name "http")
 
--- | Extract host from URL using proper URI parsing.
---
--- This function properly parses the URL and extracts the host component,
--- handling various URL formats correctly.
---
--- Returns Left with error message if URL is invalid or has no host.
+{- | Extract host from URL using proper URI parsing.
+
+This function properly parses the URL and extracts the host component,
+handling various URL formats correctly.
+
+Returns Left with error message if URL is invalid or has no host.
+-}
 extractHost :: Text -> Either Text Text
 extractHost url =
     case parseURI (Text.unpack url) of
         Nothing -> Left "Invalid URL"
         Just uri -> case uriAuthority uri of
             Nothing -> Left "No host in URL"
-            Just auth -> 
+            Just auth ->
                 let host = Text.pack $ uriRegName auth
-                in if Text.null host
-                    then Left "No host in URL"
-                    else Right host
+                 in if Text.null host
+                        then Left "No host in URL"
+                        else Right host
 
--- | Validate host against whitelist.
---
--- An empty whitelist means no hosts are allowed (secure default).
--- Returns Left with error message if host is not allowed.
+{- | Validate host against whitelist.
+
+An empty whitelist means no hosts are allowed (secure default).
+Returns Left with error message if host is not allowed.
+-}
 validateHost :: HttpConfig -> Text -> Either Text ()
 validateHost config host
     | null (httpAllowedHosts config) = Left "No hosts allowed (empty whitelist)"
@@ -358,4 +362,3 @@ pushResponse response = do
     Lua.pushstring "body"
     Lua.pushstring (LBS.toStrict $ responseBody response)
     Lua.settable (Lua.nthTop 3)
-

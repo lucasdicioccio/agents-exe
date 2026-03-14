@@ -81,19 +81,23 @@ import System.Agents.Tools.Context (ToolCall (..), ToolPortal, ToolResult (..))
 -- | Unique identifier for trace events.
 type TraceId = Text
 
--- | Trace events for tool invocations.
---
--- These events allow detailed tracing of tool calls for debugging,
--- performance analysis, and call tree reconstruction.
+{- | Trace events for tool invocations.
+
+These events allow detailed tracing of tool calls for debugging,
+performance analysis, and call tree reconstruction.
+-}
 data Trace
-    = -- | Tool call has started.
-      -- Arguments: traceId, callerId, toolName, args
+    = {- | Tool call has started.
+      Arguments: traceId, callerId, toolName, args
+      -}
       ToolCallStarted TraceId Text Text Aeson.Value
-    | -- | Tool call completed successfully.
-      -- Arguments: traceId, duration, result
+    | {- | Tool call completed successfully.
+      Arguments: traceId, duration, result
+      -}
       ToolCallCompleted TraceId NominalDiffTime ToolResult
-    | -- | Tool call failed with an error.
-      -- Arguments: traceId, error message
+    | {- | Tool call failed with an error.
+      Arguments: traceId, error message
+      -}
       ToolCallFailed TraceId Text
     deriving (Show)
 
@@ -256,15 +260,16 @@ isToolAllowed' toolName config =
 -- Tool Call with Tracing
 -------------------------------------------------------------------------------
 
--- | Call a tool with full tracing support.
---
--- This function:
--- 1. Checks if the tool is allowed
--- 2. Generates a unique trace ID
--- 3. Emits ToolCallStarted event
--- 4. Executes the tool call
--- 5. Emits ToolCallCompleted or ToolCallFailed event
--- 6. Returns the result with traceId
+{- | Call a tool with full tracing support.
+
+This function:
+1. Checks if the tool is allowed
+2. Generates a unique trace ID
+3. Emits ToolCallStarted event
+4. Executes the tool call
+5. Emits ToolCallCompleted or ToolCallFailed event
+6. Returns the result with traceId
+-}
 callToolWithTracing :: Text -> Aeson.Value -> ToolsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 callToolWithTracing toolName args config = do
     if not (isToolAllowed' toolName config)
@@ -283,8 +288,9 @@ callToolWithTracing toolName args config = do
                 startTime <- liftIO getCurrentTime
 
                 -- Trace start
-                liftIO $ runTracer (toolsTracer config) $
-                    ToolCallStarted traceId (toolsCallerId config) toolName args
+                liftIO $
+                    runTracer (toolsTracer config) $
+                        ToolCallStarted traceId (toolsCallerId config) toolName args
 
                 let call =
                         ToolCall
@@ -302,16 +308,18 @@ callToolWithTracing toolName args config = do
                 case result of
                     Left (e :: SomeException) -> do
                         let errMsg = Text.pack $ show e
-                        liftIO $ runTracer (toolsTracer config) $
-                            ToolCallFailed traceId errMsg
+                        liftIO $
+                            runTracer (toolsTracer config) $
+                                ToolCallFailed traceId errMsg
                         Lua.pushnil
                         Lua.pushstring (Text.encodeUtf8 errMsg)
                         pure 2
                     Right toolResult -> do
                         -- Create result with our trace ID for call tree reconstruction
-                        let resultWithTrace = toolResult { resultTraceId = traceId }
-                        liftIO $ runTracer (toolsTracer config) $
-                            ToolCallCompleted traceId duration resultWithTrace
+                        let resultWithTrace = toolResult{resultTraceId = traceId}
+                        liftIO $
+                            runTracer (toolsTracer config) $
+                                ToolCallCompleted traceId duration resultWithTrace
                         pushToolResult resultWithTrace
                         pure 1
 
@@ -924,4 +932,3 @@ aesonToLuaValue (Aeson.Object obj) = do
             Lua.settable (Lua.nthTop 3)
         )
         (KeyMap.toList obj)
-

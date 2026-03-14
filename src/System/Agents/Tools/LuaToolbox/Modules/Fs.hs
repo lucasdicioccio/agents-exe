@@ -1,19 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | Sandboxed filesystem module for LuaToolbox with enhanced path validation.
---
--- This module provides filesystem operations that are sandboxed to specific
--- allowed paths. Key security features:
---
--- * Path canonicalization to prevent symlink traversal attacks
--- * Absolute path requirement
--- * Whitelist-based access control
--- * Secure default: empty whitelist means NO access
--- * fs.patch() for code patching with diff generation
---
--- Path validation uses canonicalizePath which resolves symlinks, making it
--- resistant to traversal attacks through symlinks.
+{- | Sandboxed filesystem module for LuaToolbox with enhanced path validation.
+
+This module provides filesystem operations that are sandboxed to specific
+allowed paths. Key security features:
+
+* Path canonicalization to prevent symlink traversal attacks
+* Absolute path requirement
+* Whitelist-based access control
+* Secure default: empty whitelist means NO access
+* fs.patch() for code patching with diff generation
+
+Path validation uses canonicalizePath which resolves symlinks, making it
+resistant to traversal attacks through symlinks.
+-}
 module System.Agents.Tools.LuaToolbox.Modules.Fs (
     FsConfig (..),
     PathError (..),
@@ -32,11 +33,11 @@ import qualified Data.Text.IO as TextIO
 import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
 import System.Directory (
+    canonicalizePath,
     createDirectoryIfMissing,
     doesDirectoryExist,
     doesFileExist,
     listDirectory,
-    canonicalizePath,
  )
 import System.FilePath (isAbsolute, isPathSeparator, normalise, takeDirectory, (</>))
 
@@ -46,38 +47,41 @@ stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 getStackInt :: Lua.StackIndex -> Int
 getStackInt = stackIdxToInt
 
--- | Path validation error types.
---
--- These errors provide detailed information about why a path was rejected,
--- useful for debugging and logging.
+{- | Path validation error types.
+
+These errors provide detailed information about why a path was rejected,
+useful for debugging and logging.
+-}
 data PathError
-    = PathNotAllowed FilePath
-    -- ^ Path is not in the allowed whitelist
-    | PathNotAbsolute FilePath
-    -- ^ Path is not absolute (must start with /)
-    | PathOutsideSandbox FilePath FilePath
-    -- ^ Path escapes the sandbox directory (child, parent)
-    | PathIOError FilePath String
-    -- ^ IO error during path validation
+    = -- | Path is not in the allowed whitelist
+      PathNotAllowed FilePath
+    | -- | Path is not absolute (must start with /)
+      PathNotAbsolute FilePath
+    | -- | Path escapes the sandbox directory (child, parent)
+      PathOutsideSandbox FilePath FilePath
+    | -- | IO error during path validation
+      PathIOError FilePath String
     deriving (Show, Eq)
 
--- | Filesystem module configuration with path sandboxing.
---
--- Security defaults:
--- * Empty allowedPaths means NO filesystem access
--- * All paths in allowedPaths should be absolute and canonical
--- * Canonicalization is performed on each path check
---
--- Example:
--- @
--- FsConfig
---     { fsAllowedPaths = ["/home/user/allowed", "/tmp/sandbox"]
---     }
--- @
+{- | Filesystem module configuration with path sandboxing.
+
+Security defaults:
+* Empty allowedPaths means NO filesystem access
+* All paths in allowedPaths should be absolute and canonical
+* Canonicalization is performed on each path check
+
+Example:
+@
+FsConfig
+    { fsAllowedPaths = ["/home/user/allowed", "/tmp/sandbox"]
+    }
+@
+-}
 data FsConfig = FsConfig
     { fsAllowedPaths :: [FilePath]
-    -- ^ Whitelist of allowed paths. If empty, NO paths are allowed (secure default).
-    -- Paths should be absolute and canonical.
+    {- ^ Whitelist of allowed paths. If empty, NO paths are allowed (secure default).
+    Paths should be absolute and canonical.
+    -}
     }
     deriving (Show, Eq)
 
@@ -120,14 +124,15 @@ registerFsModule lstate config = Lua.runWith lstate $ do
 
     Lua.setglobal (Lua.Name "fs")
 
--- | Validate and canonicalize a path against allowed paths.
---
--- This function performs the following security checks:
--- 1. Path must be absolute
--- 2. Path is canonicalized (resolves symlinks, .., etc.)
--- 3. Canonical path must be within one of the allowed paths
---
--- Returns the canonical path if valid, or an error.
+{- | Validate and canonicalize a path against allowed paths.
+
+This function performs the following security checks:
+1. Path must be absolute
+2. Path is canonicalized (resolves symlinks, .., etc.)
+3. Canonical path must be within one of the allowed paths
+
+Returns the canonical path if valid, or an error.
+-}
 validatePath :: FsConfig -> FilePath -> IO (Either PathError FilePath)
 validatePath config path = do
     -- Path must be absolute
@@ -141,15 +146,16 @@ validatePath config path = do
             -- Check against allowed paths
             if null (fsAllowedPaths config)
                 then pure $ Left $ PathNotAllowed canonical
-                else if any (isPathWithin canonical) (fsAllowedPaths config)
-                    then pure $ Right canonical
-                    else pure $ Left $ PathOutsideSandbox canonical (show $ fsAllowedPaths config)
+                else
+                    if any (isPathWithin canonical) (fsAllowedPaths config)
+                        then pure $ Right canonical
+                        else pure $ Left $ PathOutsideSandbox canonical (show $ fsAllowedPaths config)
   where
     -- Check if child is within parent (handles path separator edge cases)
     isPathWithin :: FilePath -> FilePath -> Bool
     isPathWithin child parent =
         let parent' = if last parent == '/' then parent else parent ++ "/"
-        in child == parent || take (length parent') child == parent'
+         in child == parent || take (length parent') child == parent'
 
 -- | Read file contents with enhanced error handling.
 luaRead :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
@@ -338,14 +344,15 @@ luaIsFile config = do
             Lua.pushboolean isFile
             pure 1
 
--- | Patch a file by replacing search pattern with replacement.
---
--- fs.patch(path, search, replace) -> success, error, diff
---
--- Returns:
--- * success: boolean indicating if any replacements were made
--- * error: empty string on success, error message on failure
--- * diff: unified diff of changes (or nil if no changes)
+{- | Patch a file by replacing search pattern with replacement.
+
+fs.patch(path, search, replace) -> success, error, diff
+
+Returns:
+* success: boolean indicating if any replacements were made
+* error: empty string on success, error message on failure
+* diff: unified diff of changes (or nil if no changes)
+-}
 luaPatch :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaPatch config = do
     top <- Lua.gettop
@@ -398,32 +405,36 @@ luaPatch config = do
                             if success
                                 then do
                                     Lua.pushstring ""
-                                    Lua.pushstring (Text.encodeUtf8 $ Text.pack $
-                                        "Replaced " ++ show count ++ " occurrence(s)\n\n" ++ Text.unpack diff)
+                                    Lua.pushstring
+                                        ( Text.encodeUtf8 $
+                                            Text.pack $
+                                                "Replaced " ++ show count ++ " occurrence(s)\n\n" ++ Text.unpack diff
+                                        )
                                 else do
                                     Lua.pushstring "Pattern not found"
                                     Lua.pushnil
                             pure 3
 
--- | Generate a simple unified diff for the patch.
---
--- This generates a basic unified diff showing the change made.
--- For more complex diffs, a proper diff library would be needed.
+{- | Generate a simple unified diff for the patch.
+
+This generates a basic unified diff showing the change made.
+For more complex diffs, a proper diff library would be needed.
+-}
 generateDiff :: Text -> Text -> Text -> Text -> Int -> Text
 generateDiff search replace oldContent newContent count =
     let oldLines = Text.lines oldContent
         newLines = Text.lines newContent
         -- Find context (simplified: show first few lines around change)
         contextLines = 3
-    in Text.unlines
-        [ "--- a/original"
-        , "+++ b/modified"
-        , "@@ -1," <> Text.pack (show (min contextLines (length oldLines))) <> " +1," <> Text.pack (show (min contextLines (length newLines))) <> " @@"
-        , "-" <> search
-        , "+" <> replace
-        , ""
-        , "(Changed " <> Text.pack (show count) <> " occurrence(s))"
-        ]
+     in Text.unlines
+            [ "--- a/original"
+            , "+++ b/modified"
+            , "@@ -1," <> Text.pack (show (min contextLines (length oldLines))) <> " +1," <> Text.pack (show (min contextLines (length newLines))) <> " @@"
+            , "-" <> search
+            , "+" <> replace
+            , ""
+            , "(Changed " <> Text.pack (show count) <> " occurrence(s))"
+            ]
 
 -- | Push a list of strings as a Lua table.
 pushStringList :: [String] -> Lua.LuaE Lua.Exception ()
@@ -437,4 +448,3 @@ pushStringList items = do
             Lua.settable (Lua.nthTop 3)
         )
         (zip [1 ..] items)
-

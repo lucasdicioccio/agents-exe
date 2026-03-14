@@ -154,10 +154,11 @@ import qualified System.Agents.Tools.LuaToolbox.Modules.Tools as ToolsMod
 -- Utilities
 -------------------------------------------------------------------------------
 
--- | A tracer that does nothing (discards all trace events).
---
--- This is useful when you don't need tracing or when initializing
--- the toolbox without a proper tracer.
+{- | A tracer that does nothing (discards all trace events).
+
+This is useful when you don't need tracing or when initializing
+the toolbox without a proper tracer.
+-}
 nullTracer :: Tracer IO a
 nullTracer = Tracer (const (pure ()))
 
@@ -818,4 +819,3 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
-
