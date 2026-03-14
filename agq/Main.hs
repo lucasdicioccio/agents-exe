@@ -21,7 +21,7 @@ data Command
     | Add Text Text [Text] [Text] Int -- label name deps tags tries
     | Pull
     | Promote
-    | Status
+    | Status Bool -- trim-done?
     | Next -- show which tasks are ready and why others are blocked
     | Process Bool Bool -- parallel? loop?
     | Exec Text -- task name
@@ -94,7 +94,7 @@ parseCommand =
             <> command
                 "status"
                 ( info
-                    (pure Status)
+                    parseStatus
                     (progDesc "Show queue status")
                 )
             <> command
@@ -162,6 +162,16 @@ parseAdd =
                 <> help "Number of allowed execution attempts (0 = use defaultTries from config)"
             )
 
+parseStatus :: Parser Command
+parseStatus =
+    Status
+        <$> flag
+            True
+            False
+            ( long "no-trim-done"
+                <> help "Show all done tasks (default: hide old done tasks, keep only 3 latest)"
+            )
+
 parseProcess :: Parser Command
 parseProcess =
     Process
@@ -223,7 +233,7 @@ dispatch cfg conn cmd = case cmd of
     Add l n d t r -> cmdAdd cfg conn l n d t (if r <= 0 then defaultTries cfg else r)
     Pull -> cmdPull cfg conn
     Promote -> cmdPromote cfg
-    Status -> cmdStatus cfg conn
+    Status trimDone -> cmdStatus cfg conn trimDone
     Next -> cmdNext cfg conn
     Process p l -> cmdProcess cfg conn p l
     Exec n -> cmdExec cfg conn n
@@ -232,3 +242,4 @@ dispatch cfg conn cmd = case cmd of
     Recover -> cmdRecover cfg conn
     Retry n r -> cmdRetry cfg conn n r
     MarkDone n -> cmdMarkDone cfg conn n
+

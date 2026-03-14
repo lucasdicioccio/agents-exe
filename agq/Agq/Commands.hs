@@ -30,8 +30,10 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS
 import Data.Char (isDigit)
+import Data.List (partition, sortOn)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Ord (Down (..))
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -273,20 +275,28 @@ checkDepsSatisfied cfg deps = do
 -- cmdStatus
 -- ---------------------------------------------------------------------------
 
-cmdStatus :: AgqConfig -> Connection -> IO ()
-cmdStatus _cfg conn = do
+{- | Show queue status with optional trimming of done tasks.
+When trimDone is True, only the 3 most recent done tasks are shown.
+-}
+cmdStatus :: AgqConfig -> Connection -> Bool -> IO ()
+cmdStatus _cfg conn trimDone = do
     tasks <- listTasks conn
-    putStrLn $ padR 6 "ID" <> padR 30 "NAME" <> padR 12 "LABEL" <> padR 10 "STATUS" <> padR 6 "TRIES" <> padR 20 "DEPS" <> "TAGS"
-    putStrLn (replicate 96 '-')
-    forM_ tasks $ \(t, deps, tags) ->
+    let filteredTasks = if trimDone then trimDoneTasks tasks else tasks
+    putStrLn $ padR 6 "ID" <> padR 30 "NAME" <> padR 12 "LABEL" <> padR 12 "BASE_BRANCH" <> padR 10 "STATUS" <> padR 6 "TRIES" <> padR 20 "DEPS" <> "TAGS"
+    putStrLn (replicate 110 '-')
+    forM_ filteredTasks $ \(t, deps, tags) ->
         putStrLn $
             padR 6 (show (taskId t))
                 <> padR 30 (Text.unpack (taskName t))
                 <> padR 12 (Text.unpack (taskLabel t))
+                <> padR 12 (Text.unpack (taskBaseBranch t))
                 <> padR 10 (Text.unpack (taskStatusText (taskStatus t)))
                 <> padR 6 (show (taskTriesRemaining t))
                 <> padR 20 (Text.unpack (Text.intercalate "," deps))
                 <> Text.unpack (Text.intercalate "," tags)
+    when (length filteredTasks < length tasks) $ do
+        let hiddenCount = length tasks - length filteredTasks
+        putStrLn $ "\n(" <> show hiddenCount <> " older done task(s) hidden; use --no-trim-done to show all)"
     putStrLn ""
     locks <- query_ conn "SELECT tag, task_name, acquired_at FROM locks" :: IO [(Text, Text, Int)]
     if null locks
@@ -297,6 +307,17 @@ cmdStatus _cfg conn = do
                 putStrLn $ "  [" <> Text.unpack tag <> "] held by " <> Text.unpack tname <> " since " <> show at
   where
     padR n s = let s' = take n s in s' <> replicate (n - length s') ' '
+
+    -- Trim done tasks to keep only the 3 most recent by taskId
+    trimDoneTasks :: [(Task, [Text], [Text])] -> [(Task, [Text], [Text])]
+    trimDoneTasks ts =
+        let (doneTasks, otherTasks) = partition (\(t, _, _) -> taskStatus t == Done) ts
+            -- Sort done tasks by taskId descending (most recent first)
+            sortedDone = sortOn (\(t, _, _) -> Down (taskId t)) doneTasks
+            -- Keep only the 3 most recent
+            keptDone = take 3 sortedDone
+         in -- Combine other tasks with kept done tasks, preserving original order by taskId
+            sortOn (\(t, _, _) -> taskId t) (otherTasks <> keptDone)
 
 -- ---------------------------------------------------------------------------
 -- cmdNext
@@ -337,9 +358,9 @@ cmdNext _cfg conn = do
             putStrLn ""
   where
     -- Partition tasks into ready and blocked (excluding done tasks)
-    partitionTasks tasks = foldr partition ([], []) tasks
+    partitionTasks tasks = foldr partitionTask ([], []) tasks
       where
-        partition item@(t, _deps, _tags, incompleteDeps, blockingLocks) (ready, blocked) =
+        partitionTask item@(t, _deps, _tags, incompleteDeps, blockingLocks) (ready, blocked) =
             case taskStatus t of
                 Done -> (ready, blocked) -- Exclude done tasks from both lists
                 _ ->
@@ -485,7 +506,7 @@ execTask cfg conn t = do
                 Just _ -> return ()
 
     -- 4. Run agent with inner attempt loop.
-    putStrLn $ "[agq] Step 4: running agent"
+    putStrLn "[agq] Step 4: running agent"
     -- Each attempt calls agents-exe with the same session file so it resumes
     -- where the previous attempt left off.  The number of attempts is bounded
     -- by agentAttempts from the config (default 1).
@@ -989,3 +1010,4 @@ detectBaseBranch cfg = do
                         then Text.drop (Text.length "origin/") raw
                         else raw
         else return (baseBranch cfg)
+
