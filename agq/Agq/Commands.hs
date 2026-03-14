@@ -609,9 +609,10 @@ execTask cfg conn t = do
         putStrLn $ "[agq] Stderr log written to " <> errFile
         let errSnippet = Text.unlines . reverse . take 100 . reverse . Text.lines $ agentErr
             errMsg = "agents-exe failed for task `" <> Text.pack nameStr <> "`\n\n```\n" <> errSnippet <> "```"
-        -- For GitHub-sourced tasks, post the failure snippet as an issue comment
+        -- For GitHub-sourced and PR-review tasks, post the failure snippet as a comment
         case taskSource t of
             SourceGithub n -> void $ runGh ["issue", "comment", show n, "--body", Text.unpack errMsg]
+            SourcePrReview n -> void $ runGh ["pr", "comment", show n, "--body", Text.unpack errMsg]
             SourceLocal -> return ()
         releaseLock conn (taskName t) Failed (Just "agents-exe returned non-zero")
 
@@ -663,52 +664,84 @@ execTask cfg conn t = do
                                 void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", "Run static-checks for " <> nameStr]
                             return (scOut <> scErr)
 
-            putStrLn $ "[agq] Pushing branch '" <> branchName <> "' to origin"
-            void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
+            case taskSource t of
+                SourcePrReview prNum -> do
+                    putStrLn $ "[agq] Pushing to existing PR #" <> show prNum <> " branch '" <> base <> "'"
+                    void $ runGit ["-C", nameStr, "push", "origin", "HEAD:" <> base]
+                    putStrLn $ "[agq] Commenting on PR #" <> show prNum
+                    let staticChecksSection =
+                            let trimmed = Text.strip staticCheckOutput
+                             in if Text.null trimmed
+                                    then ""
+                                    else "\n\n## Static checks\n\n```\n" <> Text.unpack trimmed <> "```"
+                    void $ runGh ["pr", "comment", show prNum, "--body", commit <> staticChecksSection]
+                    case mHookAbs of
+                        Nothing -> putStrLn "[agq] Skipping check hook (none configured)"
+                        Just h -> do
+                            putStrLn $ "[agq] Executing check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
+                            mres <-
+                                withHookTimeout (hookTimeoutSeconds cfg) $
+                                    runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
+                            case mres of
+                                Nothing -> putStrLn "[agq] check hook timed out — skipping PR comment"
+                                Just (_, checkOut, checkErr) -> do
+                                    let checkOutput = Text.strip (checkOut <> checkErr)
+                                    unless (Text.null checkOutput) $
+                                        void $ runGh ["pr", "comment", show prNum, "--body", Text.unpack checkOutput]
+                _ -> do
+                    putStrLn $ "[agq] Pushing branch '" <> branchName <> "' to origin"
+                    void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
 
-            putStrLn "[agq] Creating pull request"
-            let prTitle = takeWhile (/= '\n') commit
-                closesLine = case taskSource t of
-                    SourceGithub n -> "\n\nCloses #" <> show n <> "."
-                    SourceLocal -> ""
-                staticChecksSection =
-                    let trimmed = Text.strip staticCheckOutput
-                     in if Text.null trimmed
-                            then ""
-                            else "\n\n## Static checks\n\n```\n" <> Text.unpack trimmed <> "```"
-                prBody = commit <> closesLine <> staticChecksSection
-            (_, prUrl, _) <-
-                captureCmdBoth
-                    "gh"
-                    [ "pr"
-                    , "create"
-                    , "--base"
-                    , target
-                    , "--head"
-                    , branchName
-                    , "--title"
-                    , prTitle
-                    , "--body"
-                    , prBody
-                    , "--label"
-                    , Text.unpack (labelAgentPr (labels cfg))
-                    ]
+                    putStrLn "[agq] Creating pull request"
+                    let prTitle = takeWhile (/= '\n') commit
+                        closesLine = case taskSource t of
+                            SourceGithub n -> "\n\nCloses #" <> show n <> "."
+                            _ -> ""
+                        staticChecksSection =
+                            let trimmed = Text.strip staticCheckOutput
+                             in if Text.null trimmed
+                                    then ""
+                                    else "\n\n## Static checks\n\n```\n" <> Text.unpack trimmed <> "```"
+                        prBody = commit <> closesLine <> staticChecksSection
+                    (_, prUrl, _) <-
+                        captureCmdBoth
+                            "gh"
+                            [ "pr"
+                            , "create"
+                            , "--base"
+                            , target
+                            , "--head"
+                            , branchName
+                            , "--title"
+                            , prTitle
+                            , "--body"
+                            , prBody
+                            , "--label"
+                            , Text.unpack (labelAgentPr (labels cfg))
+                            ]
 
-            case mHookAbs of
-                Nothing -> putStrLn "[agq] Skipping check hook (none configured)"
-                Just h -> do
-                    putStrLn $ "[agq] Executing check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
-                    mres <-
-                        withHookTimeout (hookTimeoutSeconds cfg) $
-                            runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
-                    case mres of
-                        Nothing -> putStrLn "[agq] check hook timed out — skipping PR comment"
-                        Just (_, checkOut, checkErr) -> do
-                            let checkOutput = Text.strip (checkOut <> checkErr)
-                                prUrlStr = Text.unpack (Text.strip prUrl)
-                            unless (Text.null checkOutput || null prUrlStr) $
-                                void $
-                                    runCmd "gh" ["pr", "comment", prUrlStr, "--body", Text.unpack checkOutput]
+                    case mHookAbs of
+                        Nothing -> putStrLn "[agq] Skipping check hook (none configured)"
+                        Just h -> do
+                            putStrLn $ "[agq] Executing check hook: " <> h <> " (timeout=" <> show (hookTimeoutSeconds cfg) <> "s)"
+                            mres <-
+                                withHookTimeout (hookTimeoutSeconds cfg) $
+                                    runWithCwdBoth worktreeProj h ["check", Text.unpack lbl, nameStr, instrFile]
+                            case mres of
+                                Nothing -> putStrLn "[agq] check hook timed out — skipping PR comment"
+                                Just (_, checkOut, checkErr) -> do
+                                    let checkOutput = Text.strip (checkOut <> checkErr)
+                                        prUrlStr = Text.unpack (Text.strip prUrl)
+                                    unless (Text.null checkOutput || null prUrlStr) $
+                                        void $
+                                            runCmd "gh" ["pr", "comment", prUrlStr, "--body", Text.unpack checkOutput]
+
+        -- For PR review tasks that produced no code changes, still acknowledge the review
+        when (Text.null (Text.strip statusOut)) $
+            case taskSource t of
+                SourcePrReview prNum ->
+                    void $ runGh ["pr", "comment", show prNum, "--body", commit <> "\n\n(No code changes were necessary.)"]
+                _ -> return ()
 
         putStrLn $ "[agq] Task '" <> nameStr <> "' complete — releasing lock"
         releaseLock conn (taskName t) Done Nothing
@@ -717,22 +750,26 @@ execTask cfg conn t = do
 -- cmdMergePRs
 -- ---------------------------------------------------------------------------
 
-cmdMergePRs :: AgqConfig -> IO ()
-cmdMergePRs cfg = do
+cmdMergePRs :: AgqConfig -> Connection -> IO ()
+cmdMergePRs cfg conn = do
     (_, defOut) <- runGh ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
     let def = Text.strip defOut
-    (_, out) <- runGh ["pr", "list", "--label", Text.unpack (labelAgentPr (labels cfg)), "--json", "number,baseRefName,title,labels"]
+    (_, repoOut) <- runGh ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]
+    let repoName = Text.strip repoOut
+    (_, out) <- runGh ["pr", "list", "--label", Text.unpack (labelAgentPr (labels cfg)), "--json", "number,baseRefName,headRefName,title,labels"]
     let prs = case Aeson.decode (lbsFromText out) of
             Just (Aeson.Array arr) -> foldr (:) [] arr
             _ -> []
     when (null prs) $ putStrLn $ "No PRs with label " <> Text.unpack (labelAgentPr (labels cfg)) <> "."
     forM_ prs $ \prVal ->
-        case (extractInt prVal "number", extractText prVal "baseRefName") of
-            (Just n, Just b) -> do
+        case (extractInt prVal "number", extractText prVal "baseRefName", extractText prVal "headRefName") of
+            (Just n, Just b, Just headRef) -> do
                 let prLabels = extractLabels prVal
                 if labelArbitrageNeeded (labels cfg) `elem` prLabels
                     then putStrLn $ "Skipping PR #" <> show n <> ": has arbitrage-needed label."
-                    else
+                    else do
+                        -- Check for new human review requests on this PR
+                        pullPrReviews cfg conn repoName n headRef prLabels
                         if b /= def
                             then do
                                 putStrLn $ "Merging PR #" <> show n <> " (base=" <> Text.unpack b <> ")"
@@ -740,6 +777,100 @@ cmdMergePRs cfg = do
                                 labelClosedIssues cfg n
                             else putStrLn $ "Skipping PR #" <> show n <> ": targets default branch."
             _ -> return ()
+
+{- | Fetch PR reviews via the GitHub REST API, filter out reviews by the
+configured agent account, and enqueue a task for each new human review.
+Loop prevention: only PR *reviews* (not general comments) trigger tasks, and
+the agent uses 'gh pr comment' (not 'gh pr review'), so agent replies never
+appear here.
+-}
+pullPrReviews :: AgqConfig -> Connection -> Text -> Int -> Text -> [Text] -> IO ()
+pullPrReviews cfg conn repoName prNum headRef prLabels = do
+    (ec, reviewsOut) <-
+        runGh
+            [ "api"
+            , "repos/" <> Text.unpack repoName <> "/pulls/" <> show prNum <> "/reviews"
+            ]
+    when (ec /= ExitSuccess) $
+        putStrLn $ "Warning: could not fetch reviews for PR #" <> show prNum
+    let reviews = case Aeson.decode (lbsFromText reviewsOut) of
+            Just (Aeson.Array arr) -> foldr (:) [] arr
+            _ -> []
+    forM_ reviews $ \rev -> do
+        let mId = extractInt rev "id"
+            mLogin = extractObject rev "user" >>= \u -> extractText u "login"
+            mBody = extractText rev "body"
+            mState = extractText rev "state"
+        case (mId, mLogin, mBody, mState) of
+            (Just rid, Just login, Just body, Just state)
+                -- Skip agent's own reviews (loop prevention) and pending/approved reviews
+                | login /= githubUsername cfg
+                , state `elem` ["CHANGES_REQUESTED", "COMMENTED"]
+                , not (Text.null (Text.strip body)) ->
+                    importPrReview cfg conn prNum headRef rid login body prLabels
+            _ -> return ()
+
+importPrReview :: AgqConfig -> Connection -> Int -> Text -> Int -> Text -> Text -> [Text] -> IO ()
+importPrReview cfg conn prNum headRef reviewId reviewer reviewBody prLabels = do
+    let taskNameStr = "pr-" <> show prNum <> "-r" <> show reviewId
+        tName = Text.pack taskNameStr
+        fname = taskDir cfg </> taskNameStr <> ".md"
+    -- Resolve label: prefer the project label carried on the PR, then fall back
+    -- to the original task that created the PR (identified by headRef prefix),
+    -- then to the first configured project.
+    lbl <- do
+        rows <-
+            query
+                conn
+                "SELECT label FROM tasks WHERE ? LIKE name || '-%' LIMIT 1"
+                (Only headRef) ::
+                IO [Only Text]
+        return $ case rows of
+            (Only l : _) -> l
+            [] ->
+                case findProjectLabel (Map.keys (projects cfg)) prLabels of
+                    Just l -> l
+                    Nothing -> case Map.keys (projects cfg) of
+                        (k : _) -> k
+                        [] -> "default"
+    exists <- doesFileExist fname
+    unless exists $ do
+        (_, prInfo) <-
+            runGh
+                [ "pr"
+                , "view"
+                , show prNum
+                , "--json"
+                , "title,body"
+                , "--jq"
+                , "\"# \" + .title + \"\\n\\n\" + .body"
+                ]
+        let instrContent =
+                "# Address PR review on #"
+                    <> Text.pack (show prNum)
+                    <> "\n\nA reviewer has requested changes. Address the feedback below.\n\n"
+                    <> "## Review by @"
+                    <> reviewer
+                    <> "\n\n"
+                    <> reviewBody
+                    <> "\n\n---\n\n"
+                    <> Text.strip prInfo
+                    <> "\n"
+        Text.writeFile fname instrContent
+    let task =
+            Task
+                { taskId = 0
+                , taskName = tName
+                , taskLabel = lbl
+                , taskSource = SourcePrReview prNum
+                , taskStatus = Pending
+                , taskInstructionFile = fname
+                , taskBaseBranch = headRef
+                , taskIsFinal = False
+                , taskTriesRemaining = defaultTries cfg
+                }
+    insertTask conn task [] [lbl]
+    putStrLn $ "Enqueued PR review task: " <> taskNameStr <> " (PR #" <> show prNum <> ", reviewer=@" <> Text.unpack reviewer <> ")"
 
 {- | Fetch the PR body, parse "Closes/Fixes/Resolves #N" references, and add
 labelDoneInBranch to each referenced issue so that promote() treats them as
@@ -1011,6 +1142,11 @@ extractText val key = case val of
         case KeyMap.lookup (Key.fromText key) obj of
             Just (Aeson.String s) -> Just s
             _ -> Nothing
+    _ -> Nothing
+
+extractObject :: Aeson.Value -> Text -> Maybe Aeson.Value
+extractObject val key = case val of
+    Aeson.Object obj -> KeyMap.lookup (Key.fromText key) obj
     _ -> Nothing
 
 extractLabels :: Aeson.Value -> [Text]

@@ -46,11 +46,14 @@ data TaskSource
       SourceLocal
     | -- | Imported from a GitHub issue; carries the issue number
       SourceGithub Int
+    | -- | Spawned to address a PR review comment; carries the PR number
+      SourcePrReview Int
     deriving (Show, Eq)
 
 taskSourceText :: TaskSource -> Text
 taskSourceText SourceLocal = "local"
 taskSourceText (SourceGithub n) = "github:" <> Text.pack (show n)
+taskSourceText (SourcePrReview n) = "pr-review:" <> Text.pack (show n)
 
 parseTaskSource :: Text -> TaskSource
 parseTaskSource t
@@ -61,6 +64,10 @@ parseTaskSource t
             _ -> SourceLocal -- malformed → fall back
             -- legacy value stored before the ADT existed
     | t == "github" = SourceLocal
+    | "pr-review:" `Text.isPrefixOf` t =
+        case reads (Text.unpack (Text.drop 10 t)) of
+            [(n, "")] -> SourcePrReview n
+            _ -> SourceLocal
     | otherwise = SourceLocal
 
 data Task = Task
