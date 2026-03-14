@@ -104,6 +104,7 @@ library agents-lib
                     , System.Agents.Tools.LuaToolbox.Modules.Time
                     , System.Agents.Tools.LuaToolbox.Modules.Fs
                     , System.Agents.Tools.LuaToolbox.Modules.Http
+                    , System.Agents.Tools.LuaToolbox.Modules.Tools
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver
@@ -205,7 +206,7 @@ executable agents-exe
     -- Modules included in the executable, other than Main.
     -- other-modules:
 
-    -- LANGUAGE extensions used by modules in the component.
+    -- LANGUAGE extensions used by modules in the executable.
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
