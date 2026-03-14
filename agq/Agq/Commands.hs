@@ -758,13 +758,14 @@ cmdClean cfg doIt force = do
                                 let nm = takeBaseName (Text.unpack (wtPath wt))
                                 putStrLn $ "Warning: No branch found for worktree " <> nm <> ", skipping branch deletion"
 
--- | Parse the porcelain output of 'git worktree list --porcelain' into worktree entries.
--- The porcelain format for each worktree is:
---   worktree <path>
---   HEAD <sha>
---   branch <ref>
---   ... (or "detached" instead of branch)
--- Entries are separated by blank lines.
+{- | Parse the porcelain output of 'git worktree list --porcelain' into worktree entries.
+The porcelain format for each worktree is:
+  worktree <path>
+  HEAD <sha>
+  branch <ref>
+  ... (or "detached" instead of branch)
+Entries are separated by blank lines.
+-}
 parseWorktrees :: Text -> [WorktreeEntry]
 parseWorktrees txt =
     map parseEntry (splitEntries (Text.lines txt))
@@ -988,4 +989,3 @@ detectBaseBranch cfg = do
                         then Text.drop (Text.length "origin/") raw
                         else raw
         else return (baseBranch cfg)
-
