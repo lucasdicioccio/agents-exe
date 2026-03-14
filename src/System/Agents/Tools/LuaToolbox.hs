@@ -690,7 +690,7 @@ luaToJsonValue = do
                         else pure $ Aeson.Number (fromRational (toRational n))
         Lua.TypeString -> do
             s <- Lua.tostring' (Lua.nthTop 1)
-            Lua.pop 1
+            Lua.pop 2 -- tostring' actually pushes the converted string
             pure $ Aeson.String (Text.decodeUtf8 s)
         Lua.TypeTable -> do
             convertTable
@@ -790,8 +790,9 @@ collectObjectPairs = do
             else do
                 -- Stack: table, key, value
                 key <- Lua.tostring' (Lua.nthTop 2)
+                Lua.pop 1
+                -- Stack: table, key, value, str-key
+                -- Stack: table, key, value
                 val <- luaToJsonValue -- This pops the value
                 -- Stack: table, key
-                Lua.pop 1 -- pop key
-                -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)

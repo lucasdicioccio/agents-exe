@@ -115,6 +115,7 @@ basicExecutionTests =
         , testCase "Return string" testReturnString
         , testCase "Return boolean" testReturnBoolean
         , testCase "Return nil" testReturnNil
+        , testCase "Return table - 0 value : array" testReturnTable0
         , testCase "Return table - 1 value" testReturnTable1
         , testCase "Return table - 2 mixed values" testReturnTable2
         , testCase "Return array" testReturnArray
@@ -128,14 +129,23 @@ testSimpleArithmetic = withTestToolbox $ \box -> do
         Right execResult ->
             execResult.resultValue @?= Aeson.Number 2
 
-testReturnTable1 :: Assertion
-testReturnTable1 = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {foo = 'bar'}"
+testReturnTable0 :: Assertion
+testReturnTable0 = withTestToolbox $ \box -> do
+    result <- LuaToolbox.executeScript box "return {}"
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
             execResult.resultValue
-                @?= Aeson.object ["foo" .= ("bar" :: Text)]
+                @?= Aeson.Array (Vector.fromList [])
+
+testReturnTable1 :: Assertion
+testReturnTable1 = withTestToolbox $ \box -> do
+    result <- LuaToolbox.executeScript box "return {foo = 42}"
+    case result of
+        Left err -> assertFailure $ show err
+        Right execResult ->
+            execResult.resultValue
+                @?= Aeson.object ["foo" .= (42 :: Int)]
 
 testReturnTable2 :: Assertion
 testReturnTable2 = withTestToolbox $ \box -> do
