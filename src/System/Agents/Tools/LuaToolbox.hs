@@ -628,10 +628,12 @@ executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
                             nrets <- Lua.gettop
                             jsonValue <-
                                 if nrets > 0
-                                    then luaToJsonValue
+                                    then luaToJsonValue -- this pops a value
                                     else pure Aeson.Null
                             -- Pop all return values
-                            Lua.pop (stackIndexToInt nrets)
+                            if nrets > 1
+                                then Lua.pop (stackIndexToInt $ nrets - 1)
+                                else pure ()
                             pure $ Right jsonValue
 
     endTime <- getCurrentTime
