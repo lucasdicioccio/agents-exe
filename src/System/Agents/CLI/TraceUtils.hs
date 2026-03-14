@@ -177,6 +177,8 @@ renderConversationAgentTrace tr = case tr of
         "system-tool: (trace)"
     Runtime.RunToolTrace _ (Tools.LuaToolsTrace msg) ->
         Text.unwords ["lua-tool:", msg]
+    Runtime.RunToolTrace _ (Tools.LuaToolCallTrace toolName args) ->
+        Text.unwords ["lua-tool-call:", toolName, "args:", jsonTxt args]
     Runtime.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
     Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes) ->
         Text.unwords ["to: llm", "[" <> formatBytes bytes <> "]"]

@@ -1,10 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | HTTP client module for LuaToolbox.
+{- | HTTP client module for LuaToolbox with enhanced host whitelisting.
+
+This module provides HTTP request capabilities that are restricted to
+specific allowed hosts. Key security features:
+
+* Proper URI parsing for host extraction
+* Host whitelist validation
+* Secure default: empty allowedHosts means NO network access
+* Standard HTTP methods: GET, POST, and generic request
+
+Host validation extracts the host from the URL and validates it against
+the whitelist before making any requests.
+-}
 module System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     registerHttpModule,
+    extractHost,
+    validateHost,
 ) where
 
 import Control.Exception (SomeException, try)
@@ -28,7 +42,8 @@ import Network.HTTP.Client (
     parseRequest,
  )
 import qualified Network.HTTP.Client.TLS as HTTPS
-import Network.HTTP.Types (Status, statusCode)
+import Network.HTTP.Types (statusCode)
+import Network.URI (URI (..), parseURI, uriAuthority, uriRegName)
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -36,9 +51,22 @@ stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 getStackInt :: Lua.StackIndex -> Int
 getStackInt = stackIdxToInt
 
--- | HTTP module configuration.
+{- | HTTP module configuration.
+
+Security defaults:
+* Empty allowedHosts means NO network access
+* All hosts must be explicitly whitelisted
+
+Example:
+@
+HttpConfig
+    { httpAllowedHosts = ["localhost", "127.0.0.1", "api.example.com"]
+    }
+@
+-}
 data HttpConfig = HttpConfig
     { httpAllowedHosts :: [Text]
+    -- ^ Whitelist of allowed hosts. If empty, NO hosts are allowed (secure default).
     }
     deriving (Show, Eq)
 
@@ -63,7 +91,37 @@ registerHttpModule lstate config = do
 
         Lua.setglobal (Lua.Name "http")
 
--- | HTTP GET request.
+{- | Extract host from URL using proper URI parsing.
+
+This function properly parses the URL and extracts the host component,
+handling various URL formats correctly.
+
+Returns Left with error message if URL is invalid or has no host.
+-}
+extractHost :: Text -> Either Text Text
+extractHost url =
+    case parseURI (Text.unpack url) of
+        Nothing -> Left "Invalid URL"
+        Just uri -> case uriAuthority uri of
+            Nothing -> Left "No host in URL"
+            Just auth ->
+                let host = Text.pack $ uriRegName auth
+                 in if Text.null host
+                        then Left "No host in URL"
+                        else Right host
+
+{- | Validate host against whitelist.
+
+An empty whitelist means no hosts are allowed (secure default).
+Returns Left with error message if host is not allowed.
+-}
+validateHost :: HttpConfig -> Text -> Either Text ()
+validateHost config host
+    | null (httpAllowedHosts config) = Left "No hosts allowed (empty whitelist)"
+    | host `elem` httpAllowedHosts config = Right ()
+    | otherwise = Left $ "Host not in allowed list: " <> host
+
+-- | HTTP GET request with host validation.
 luaGet :: HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
 luaGet config manager = do
     top <- Lua.gettop
@@ -87,16 +145,24 @@ luaGet config manager = do
             Lua.pop (getStackInt top)
 
             let url = Text.unpack $ Text.decodeUtf8 urlBs
-            case validateUrl config url of
+
+            -- Validate host
+            case extractHost (Text.pack url) of
                 Left err -> do
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
-                Right validUrl -> do
-                    let opts = fromMaybe defaultOptions mOptions
-                    performRequest manager "GET" validUrl opts (RequestBodyLBS LBS.empty)
+                Right hostVal ->
+                    case validateHost config hostVal of
+                        Left err -> do
+                            Lua.pushnil
+                            Lua.pushstring (Text.encodeUtf8 err)
+                            pure 2
+                        Right () -> do
+                            let opts = fromMaybe defaultOptions mOptions
+                            performRequest manager "GET" url opts (RequestBodyLBS LBS.empty)
 
--- | HTTP POST request.
+-- | HTTP POST request with host validation.
 luaPost :: HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
 luaPost config manager = do
     top <- Lua.gettop
@@ -121,16 +187,24 @@ luaPost config manager = do
             Lua.pop (getStackInt top)
 
             let url = Text.unpack $ Text.decodeUtf8 urlBs
-            case validateUrl config url of
+
+            -- Validate host
+            case extractHost (Text.pack url) of
                 Left err -> do
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
-                Right validUrl -> do
-                    let opts = fromMaybe defaultOptions mOptions
-                    performRequest manager "POST" validUrl opts (RequestBodyBS bodyBs)
+                Right hostVal ->
+                    case validateHost config hostVal of
+                        Left err -> do
+                            Lua.pushnil
+                            Lua.pushstring (Text.encodeUtf8 err)
+                            pure 2
+                        Right () -> do
+                            let opts = fromMaybe defaultOptions mOptions
+                            performRequest manager "POST" url opts (RequestBodyBS bodyBs)
 
--- | Generic HTTP request.
+-- | Generic HTTP request with host validation.
 luaRequest :: HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
 luaRequest config manager = do
     top <- Lua.gettop
@@ -170,18 +244,26 @@ luaRequest config manager = do
             Lua.pop (getStackInt top)
 
             let url = Text.unpack $ Text.decodeUtf8 urlBs
-            case validateUrl config url of
+
+            -- Validate host
+            case extractHost (Text.pack url) of
                 Left err -> do
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
-                Right validUrl -> do
-                    let opts = fromMaybe defaultOptions mOptions
-                    let reqMethod = if BS.null mMethodBs then "GET" else Text.decodeUtf8 mMethodBs
-                    let reqBody = case mBodyBs of
-                            Just bs -> RequestBodyBS bs
-                            Nothing -> RequestBodyLBS LBS.empty
-                    performRequest manager (Text.unpack reqMethod) validUrl opts reqBody
+                Right hostVal ->
+                    case validateHost config hostVal of
+                        Left err -> do
+                            Lua.pushnil
+                            Lua.pushstring (Text.encodeUtf8 err)
+                            pure 2
+                        Right () -> do
+                            let opts = fromMaybe defaultOptions mOptions
+                            let reqMethod = if BS.null mMethodBs then "GET" else Text.decodeUtf8 mMethodBs
+                            let reqBody = case mBodyBs of
+                                    Just bs -> RequestBodyBS bs
+                                    Nothing -> RequestBodyLBS LBS.empty
+                            performRequest manager (Text.unpack reqMethod) url opts reqBody
 
 -- | Request options.
 data RequestOptions = RequestOptions
@@ -234,29 +316,6 @@ parseOptions idx = do
                     valBs <- Lua.tostring' (Lua.nthTop 1)
                     Lua.pop 1
                     go ((keyBs, valBs) : acc)
-
--- | Validate URL.
-validateUrl :: HttpConfig -> String -> Either Text String
-validateUrl config url
-    | null (httpAllowedHosts config) = Left "No hosts allowed"
-    | otherwise =
-        case extractHost url of
-            Nothing -> Left "Could not extract host from URL"
-            Just host ->
-                if host `elem` httpAllowedHosts config
-                    then Right url
-                    else Left $ "Host not allowed: " <> host
-
--- | Extract host from URL.
-extractHost :: String -> Maybe Text
-extractHost url =
-    let url' =
-            if "://" `Text.isInfixOf` Text.pack url
-                then drop 1 $ dropWhile (/= '/') $ dropWhile (/= ':') $ dropWhile (/= '/') url
-                else url
-        hostPort = takeWhile (/= '/') url'
-        host = takeWhile (/= ':') hostPort
-     in if null host then Nothing else Just (Text.pack host)
 
 -- | Perform HTTP request.
 performRequest :: Manager -> String -> String -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults

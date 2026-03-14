@@ -34,6 +34,8 @@ import qualified SessionEditTests
 import qualified SessionPrintTests
 -- Import EndpointPredicate tests
 import qualified EndpointPredicateTests
+-- Import LuaToolbox security tests
+import qualified LuaToolboxSecurityTests
 
 main :: IO ()
 main = defaultMain tests
@@ -61,6 +63,7 @@ tests =
         , EndpointPredicateTests.tests
         , turnRetroCompatibilityTests
         , turnRoundTripTests
+        , LuaToolboxSecurityTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

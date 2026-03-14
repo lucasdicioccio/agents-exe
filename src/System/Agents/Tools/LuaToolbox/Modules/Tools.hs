@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Tools module for LuaToolbox - portal integration for calling other tools.
+{- | Tools module for LuaToolbox - portal integration for calling other tools with tracing.
 
 This module provides Lua scripts with the ability to call other tools through
 the portal mechanism. It implements:
@@ -10,10 +10,12 @@ the portal mechanism. It implements:
 * Generic tool invocation via @tools.call(toolName, args)@
 * Convenience wrappers for common tools (bash, sqlite, postgrest)
 * Tool whitelist enforcement for security
+* Comprehensive tracing for nested tool calls with unique trace IDs
 * Proper error handling and result conversion
 
 The module integrates with the ToolPortal from System.Agents.Tools.Context
-to enable inter-tool communication.
+to enable inter-toolbox communication and uses Prod.Tracer for detailed
+trace events.
 
 Example Lua usage:
 
@@ -32,10 +34,22 @@ for _, row in ipairs(rows.data.rows) do
     print(row[1], row[2])
 end
 @
+
+Tracing:
+Each tool call generates unique trace events:
+* ToolCallStarted - when the call begins
+* ToolCallCompleted - when the call succeeds
+* ToolCallFailed - when the call fails
+
+These events include timing information for performance analysis.
 -}
 module System.Agents.Tools.LuaToolbox.Modules.Tools (
     -- * Configuration
     ToolsConfig (..),
+
+    -- * Tracing
+    Trace (..),
+    TraceId,
 
     -- * Module registration
     registerToolsModule,
@@ -47,14 +61,45 @@ import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Aeson.Key
 import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.Scientific as Scientific
+import Data.Scientific as Scientific
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
+import qualified Data.UUID.V4 as UUID
 import qualified Data.Vector as Vector
 import qualified HsLua as Lua
 
+import Prod.Tracer (Tracer, runTracer)
+
 import System.Agents.Tools.Context (ToolCall (..), ToolPortal, ToolResult (..))
+
+-------------------------------------------------------------------------------
+-- Tracing Types
+-------------------------------------------------------------------------------
+
+-- | Unique identifier for trace events.
+type TraceId = Text
+
+{- | Trace events for tool invocations.
+
+These events allow detailed tracing of tool calls for debugging,
+performance analysis, and call tree reconstruction.
+-}
+data Trace
+    = {- | Tool call has started.
+      Arguments: traceId, callerId, toolName, args
+      -}
+      ToolCallStarted TraceId Text Text Aeson.Value
+    | {- | Tool call completed successfully.
+      Arguments: traceId, duration, result
+      -}
+      ToolCallCompleted TraceId NominalDiffTime ToolResult
+    | {- | Tool call failed with an error.
+      Arguments: traceId, error message
+      -}
+      ToolCallFailed TraceId Text
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Helpers for Lua stack operations
@@ -70,8 +115,11 @@ stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 
 {- | Configuration for the tools module.
 
-The configuration includes the optional portal callback for invoking tools,
-a whitelist of allowed tool names, and a caller identifier for tracing.
+The configuration includes:
+* Optional portal callback for invoking tools
+* Whitelist of allowed tool names
+* Caller identifier for tracing
+* Tracer for emitting trace events
 
 An empty whitelist means all tools are allowed (backward compatibility).
 -}
@@ -82,9 +130,11 @@ data ToolsConfig = ToolsConfig
     -- ^ Whitelist of allowed tool names. Empty list means all tools allowed.
     , toolsCallerId :: Text
     -- ^ Identifier for this Lua script (used for tracing nested calls)
+    , toolsTracer :: Tracer IO Trace
+    -- ^ Tracer for emitting tool call events
     }
 
--- | Custom Show instance that doesn't try to show the portal function
+-- | Custom Show instance that doesn't try to show the portal function or tracer
 instance Show ToolsConfig where
     show cfg =
         "ToolsConfig { toolsPortal = "
@@ -93,7 +143,7 @@ instance Show ToolsConfig where
             <> show cfg.toolsAllowed
             <> ", toolsCallerId = "
             <> show cfg.toolsCallerId
-            <> " }"
+            <> ", toolsTracer = <tracer> }"
       where
         portalStr = case cfg.toolsPortal of
             Nothing -> "Nothing"
@@ -137,12 +187,19 @@ registerToolsModule lstate config = Lua.runWith lstate $ do
     Lua.setglobal (Lua.Name "tools")
 
 -------------------------------------------------------------------------------
--- Core Tool Call Function
+-- Core Tool Call Function with Tracing
 -------------------------------------------------------------------------------
 
 {- | Lua function: tools.call(toolName, args)
 
-Calls a tool through the portal and returns the result.
+Calls a tool through the portal with tracing and returns the result.
+
+Tracing flow:
+1. Generate unique trace ID
+2. Emit ToolCallStarted event
+3. Execute tool call
+4. Emit ToolCallCompleted or ToolCallFailed event
+5. Return result with traceId
 
 Returns one of:
 * result table with data, duration, and traceId on success
@@ -153,7 +210,7 @@ The result table has the following structure:
 {
     data = { ... },         -- Tool-specific result data
     duration = 0.123,       -- Execution time in seconds
-    traceId = "trace-..."   -- Trace identifier for debugging
+    traceId = "uuid-..."    -- Trace identifier for debugging
 }
 @
 -}
@@ -189,7 +246,7 @@ luaCall config = do
                         Lua.pop topInt
                         pure (Aeson.Object mempty)
 
-            callTool toolName argsValue config
+            callToolWithTracing toolName argsValue config
 
 {- | Check if a tool is allowed based on the whitelist.
 
@@ -198,6 +255,73 @@ Empty whitelist means all tools are allowed.
 isToolAllowed' :: Text -> ToolsConfig -> Bool
 isToolAllowed' toolName config =
     null config.toolsAllowed || toolName `elem` config.toolsAllowed
+
+-------------------------------------------------------------------------------
+-- Tool Call with Tracing
+-------------------------------------------------------------------------------
+
+{- | Call a tool with full tracing support.
+
+This function:
+1. Checks if the tool is allowed
+2. Generates a unique trace ID
+3. Emits ToolCallStarted event
+4. Executes the tool call
+5. Emits ToolCallCompleted or ToolCallFailed event
+6. Returns the result with traceId
+-}
+callToolWithTracing :: Text -> Aeson.Value -> ToolsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+callToolWithTracing toolName args config = do
+    if not (isToolAllowed' toolName config)
+        then do
+            Lua.pushnil
+            Lua.pushstring (Text.encodeUtf8 $ "Tool not allowed: " <> toolName)
+            pure 2
+        else case toolsPortal config of
+            Nothing -> do
+                Lua.pushnil
+                Lua.pushstring "Tool portal not available"
+                pure 2
+            Just portal -> do
+                -- Generate unique trace ID
+                traceId <- liftIO $ Text.pack . show <$> UUID.nextRandom
+                startTime <- liftIO getCurrentTime
+
+                -- Trace start
+                liftIO $
+                    runTracer (toolsTracer config) $
+                        ToolCallStarted traceId (toolsCallerId config) toolName args
+
+                let call =
+                        ToolCall
+                            { callToolName = toolName
+                            , callArgs = args
+                            , callCallerId = toolsCallerId config
+                            }
+
+                -- Execute through portal (blocking IO)
+                result <- liftIO $ try $ portal call
+
+                endTime <- liftIO getCurrentTime
+                let duration = diffUTCTime endTime startTime
+
+                case result of
+                    Left (e :: SomeException) -> do
+                        let errMsg = Text.pack $ show e
+                        liftIO $
+                            runTracer (toolsTracer config) $
+                                ToolCallFailed traceId errMsg
+                        Lua.pushnil
+                        Lua.pushstring (Text.encodeUtf8 errMsg)
+                        pure 2
+                    Right toolResult -> do
+                        -- Create result with our trace ID for call tree reconstruction
+                        let resultWithTrace = toolResult{resultTraceId = traceId}
+                        liftIO $
+                            runTracer (toolsTracer config) $
+                                ToolCallCompleted traceId duration resultWithTrace
+                        pushToolResult resultWithTrace
+                        pure 1
 
 -------------------------------------------------------------------------------
 -- Convenience Wrappers
@@ -315,7 +439,7 @@ luaBashRun config = do
                         , "timeout" .= KeyMap.lookup (Aeson.Key.fromText "timeout") opts
                         ]
 
-            callTool "bash" args config
+            callToolWithTracing "bash" args config
 
 -------------------------------------------------------------------------------
 -- SQLite Tool Convenience Functions
@@ -363,7 +487,7 @@ luaSqliteQuery config = do
                         , "params" .= params
                         ]
 
-            callTool "sqlite_query" args config
+            callToolWithTracing "sqlite_query" args config
 
 {- | tools.sqlite.execute(db, sql, params)
 
@@ -407,7 +531,7 @@ luaSqliteExecute config = do
                         , "params" .= params
                         ]
 
-            callTool "sqlite_execute" args config
+            callToolWithTracing "sqlite_execute" args config
 
 -------------------------------------------------------------------------------
 -- PostgREST Tool Convenience Functions
@@ -449,7 +573,7 @@ luaPostgrestGet config = do
                         , "options" .= opts
                         ]
 
-            callTool "postgrest" args config
+            callToolWithTracing "postgrest" args config
 
 {- | tools.postgrest.post(endpoint, body, opts)
 
@@ -487,7 +611,7 @@ luaPostgrestPost config = do
                         , "options" .= opts
                         ]
 
-            callTool "postgrest" args config
+            callToolWithTracing "postgrest" args config
 
 {- | tools.postgrest.patch(endpoint, body, opts)
 
@@ -524,7 +648,7 @@ luaPostgrestPatch config = do
                         , "options" .= opts
                         ]
 
-            callTool "postgrest" args config
+            callToolWithTracing "postgrest" args config
 
 {- | tools.postgrest.delete(endpoint, opts)
 
@@ -559,7 +683,7 @@ luaPostgrestDelete config = do
                         , "options" .= opts
                         ]
 
-            callTool "postgrest" args config
+            callToolWithTracing "postgrest" args config
 
 -------------------------------------------------------------------------------
 -- System Tool Convenience Functions
@@ -588,7 +712,7 @@ luaSystemInfo config = do
             Lua.pop topInt
 
             let args = Aeson.object ["capability" .= capability]
-            callTool "system" args config
+            callToolWithTracing "system" args config
 
 -------------------------------------------------------------------------------
 -- Helper Functions
@@ -620,48 +744,7 @@ luaCallWithPrefix prefix config = do
                 Lua.pop topInt
                 pure (Aeson.Object mempty)
 
-    callTool prefix argsValue config
-
-{- | Generic tool call helper.
-
-This is the central function that:
-1. Checks if the tool is allowed
-2. Verifies the portal is available
-3. Creates the ToolCall record
-4. Invokes the portal
-5. Converts the result to a Lua table
--}
-callTool :: Text -> Aeson.Value -> ToolsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-callTool toolName args config = do
-    if not (isToolAllowed' toolName config)
-        then do
-            Lua.pushnil
-            Lua.pushstring (Text.encodeUtf8 $ "Tool not allowed: " <> toolName)
-            pure 2
-        else case config.toolsPortal of
-            Nothing -> do
-                Lua.pushnil
-                Lua.pushstring "Tool portal not available"
-                pure 2
-            Just portal -> do
-                let call =
-                        ToolCall
-                            { callToolName = toolName
-                            , callArgs = args
-                            , callCallerId = config.toolsCallerId
-                            }
-
-                -- Execute through portal (blocking IO)
-                result <- liftIO $ try $ portal call
-
-                case result of
-                    Left (e :: SomeException) -> do
-                        Lua.pushnil
-                        Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
-                        pure 2
-                    Right toolResult -> do
-                        pushToolResult toolResult
-                        pure 1
+    callToolWithTracing prefix argsValue config
 
 {- | Convert a ToolResult to a Lua table.
 
