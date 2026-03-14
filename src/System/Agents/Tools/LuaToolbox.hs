@@ -116,14 +116,11 @@ module System.Agents.Tools.LuaToolbox (
     -- * Module registration
     registerStandardModules,
 
-    -- * Tool tracing (re-exported from Tools module)
-    ToolTrace (..),
-
     -- * Utilities
     nullTracer,
 ) where
 
-import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar, threadDelay)
+import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, try)
 import Control.Monad (void, when)
 import qualified Data.Aeson as Aeson
@@ -194,9 +191,6 @@ data Trace
     | -- | Tool invocation trace (wrapper for ToolsMod.Trace)
       ToolInvocationTrace !ToolsMod.Trace
     deriving (Show)
-
--- | Re-export ToolsMod.Trace as ToolTrace for convenience
-type ToolTrace = ToolsMod.Trace
 
 {- | Runtime state for a Lua toolbox.
 
@@ -472,7 +466,7 @@ The preload table is also cleared to prevent loading of C modules.
 configurePackagePath :: Lua.Lua ()
 configurePackagePath = do
     -- Set package.path to empty to prevent loading external Lua files
-    Lua.getglobal (Lua.Name "package")
+    _ <- Lua.getglobal (Lua.Name "package")
     Lua.pushName "path"
     Lua.pushstring ""
     Lua.settable (Lua.nthTop 3)
@@ -547,7 +541,7 @@ executeScript ::
     IO (Either ScriptError ExecutionResult)
 executeScript toolbox script =
     -- Without portal - just execute script with no tool access
-    executeScriptWithPortal toolbox script Nothing []
+    executeScriptWithPortal toolbox script Nothing [] nullTracer
 
 {- | Execute a Lua script with access to the tool portal.
 
@@ -569,11 +563,10 @@ executeScriptWithPortal ::
     Maybe ToolPortal ->
     -- | Allowed tools whitelist
     [Text.Text] ->
+    -- | Tracer for tool invocation events
+    Tracer IO ToolsMod.Trace ->
     IO (Either ScriptError ExecutionResult)
-executeScriptWithPortal toolbox script mPortal allowedTools = do
-    -- Create a null tracer for the tools module if no external tracer is provided
-    let toolsTracer = nullTracer
-
+executeScriptWithPortal toolbox script mPortal allowedTools toolsTracer = do
     -- Acquire lock to serialize access within this toolbox instance
     withMVar (toolboxLock toolbox) $ \() ->
         executeScriptInternal toolbox script mPortal allowedTools toolsTracer
@@ -819,3 +812,4 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
+

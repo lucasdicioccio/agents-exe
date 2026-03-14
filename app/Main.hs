@@ -1341,6 +1341,18 @@ toJsonTrace x = case x of
                 [ "system-toolbox" .= toolboxName
                 , "trace" .= show tr
                 ]
+    encodeBaseAgentTrace (RuntimeTrace.LuaToolboxTrace toolboxName tr) =
+        Just $
+            Aeson.object
+                [ "lua-toolbox" .= toolboxName
+                , "trace" .= show tr
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.LuaToolboxInitError toolboxName err) =
+        Just $
+            Aeson.object
+                [ "lua-toolbox-init-error" .= toolboxName
+                , "error" .= err
+                ]
 
     encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =
@@ -1419,8 +1431,8 @@ toJsonTrace x = case x of
                 Just $ Aeson.object ["x" .= ("sqlite-tool" :: Text)]
             (RuntimeTrace.RunToolTrace _ (ToolTrace.SystemToolsTrace _)) ->
                 Just $ Aeson.object ["x" .= ("system-tool" :: Text)]
-            (RuntimeTrace.RunToolTrace _ (ToolTrace.LuaToolsTrace msg)) ->
-                Just $ Aeson.object ["x" .= ("lua-tool" :: Text), "message" .= msg]
+            (RuntimeTrace.RunToolTrace _ (ToolTrace.LuaToolsTrace luaTrace)) ->
+                Just $ Aeson.object ["x" .= ("lua-tool" :: Text), "trace" .= show luaTrace]
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text), "sub" .= subVal]
@@ -1481,3 +1493,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+

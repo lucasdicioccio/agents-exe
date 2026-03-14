@@ -7,6 +7,7 @@ import Data.Text (Text)
 -------------------------------------------------------------------------------
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
@@ -36,12 +37,7 @@ data ToolTrace
       SqliteToolsTrace !SqliteTools.Trace
     | -- | Trace from system toolbox operations
       SystemToolsTrace !SystemTools.Trace
-    | {- | Generic trace message or event type from Lua execution
-      The Text contains a message or event type identifier
-      -}
-      LuaToolsTrace !Text
-    | {- | Trace of a tool call from within Lua
-      Arguments: tool name, JSON arguments
-      -}
-      LuaToolCallTrace !Text !Aeson.Value
+    | -- | Trace from Lua toolbox operations
+      LuaToolsTrace !LuaTools.Trace
     deriving (Show)
+

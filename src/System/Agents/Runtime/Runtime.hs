@@ -23,11 +23,13 @@ import System.Agents.Base (
     BuiltinToolboxDescription (..),
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
+    LuaToolboxDescription (..),
     newAgentId,
  )
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
@@ -89,8 +91,8 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
     case toolz of
         Left err -> pure $ Left (show err)
         Right toolbox -> do
-            -- Initialize builtin toolboxes (SQLite and System)
-            (sqliteToolboxes, systemToolboxes) <- initializeBuiltinToolboxes tracer builtinDescriptions
+            -- Initialize builtin toolboxes (SQLite, System, and Lua)
+            (sqliteToolboxes, systemToolboxes, luaToolboxes) <- initializeBuiltinToolboxes tracer builtinDescriptions
 
             let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey
             httpRt <- HttpClient.newRuntime auth
@@ -98,10 +100,10 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
             let registerTools xs = fmap registerBashToolInLLM xs
             let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
 
-            -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite + System tools
+            -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite + System + Lua tools
             toolsTVar <- newTVarIO []
 
-            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes systemToolboxes
+            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes systemToolboxes luaToolboxes
             -- Initialize the TVar with the base tools
             baseTools <- readTools
             atomically $ writeTVar toolsTVar baseTools
@@ -109,13 +111,14 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
             let rt = Runtime slug uid announce tracer httpRt model toolsTVar toolbox.triggerReload
             pure $ Right rt
   where
-    readAdditionalTools :: [SqliteToolbox.Toolbox] -> [SystemToolbox.Toolbox] -> IO [ToolRegistration]
-    readAdditionalTools sqliteToolboxes systemToolboxes = do
+    readAdditionalTools :: [SqliteToolbox.Toolbox] -> [SystemToolbox.Toolbox] -> [LuaToolbox.Toolbox] -> IO [ToolRegistration]
+    readAdditionalTools sqliteToolboxes systemToolboxes luaToolboxes = do
         mcpTools <- readMcpToolsRegistrations
         sqliteTools <- readSqliteToolsRegistrations tracer sqliteToolboxes
         systemTools <- readSystemToolsRegistrations tracer systemToolboxes
+        luaTools <- readLuaToolsRegistrations tracer luaToolboxes
         -- OpenAPI tools are pre-registered and static
-        pure $ mcpTools <> sqliteTools <> systemTools <> openApiToolRegs
+        pure $ mconcat [mcpTools, sqliteTools, systemTools, luaTools, openApiToolRegs]
 
     readMcpToolsRegistrations :: IO [ToolRegistration]
     readMcpToolsRegistrations = do
@@ -125,27 +128,31 @@ newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes open
         pure $ mconcat $ zipWith reg mcpToolboxes lists
 
 {- | Initialize all builtin toolboxes from their descriptions.
-Supports both SQLite and System toolboxes.
+Supports SQLite, System, and Lua toolboxes.
 -}
 initializeBuiltinToolboxes ::
     Tracer IO Trace ->
     [BuiltinToolboxDescription] ->
-    IO ([SqliteToolbox.Toolbox], [SystemToolbox.Toolbox])
+    IO ([SqliteToolbox.Toolbox], [SystemToolbox.Toolbox], [LuaToolbox.Toolbox])
 initializeBuiltinToolboxes tracer descriptions = do
     let sqliteDescs = [desc | SqliteToolbox desc <- descriptions]
     let systemDescs = [desc | SystemToolbox desc <- descriptions]
+    let luaDescs = [desc | LuaToolbox desc <- descriptions]
 
     sqliteResults <- traverse (initializeSqliteToolbox tracer) sqliteDescs
     systemResults <- traverse (initializeSystemToolbox tracer) systemDescs
+    luaResults <- traverse (initializeLuaToolbox tracer) luaDescs
 
     let (sqliteErrors, sqliteToolboxes) = partitionEithers sqliteResults
     let (systemErrors, systemToolboxes) = partitionEithers systemResults
+    let (luaErrors, luaToolboxes) = partitionEithers luaResults
 
     -- Trace errors for each failed toolbox
     mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "sqlite" err)) sqliteErrors
     mapM_ (\err -> runTracer tracer (BuiltinToolboxInitError "system" err)) systemErrors
+    mapM_ (\err -> runTracer tracer (LuaToolboxInitError "lua" err)) luaErrors
 
-    pure (sqliteToolboxes, systemToolboxes)
+    pure (sqliteToolboxes, systemToolboxes, luaToolboxes)
 
 {- | Initialize a single SQLite builtin toolbox.
 Returns either an error message or the initialized toolbox.
@@ -168,6 +175,17 @@ initializeSystemToolbox ::
 initializeSystemToolbox tracer desc = do
     let toolboxTracer = contramap (SystemToolboxTrace desc.systemToolboxName) tracer
     SystemToolbox.initializeToolbox toolboxTracer desc
+
+{- | Initialize a single Lua builtin toolbox.
+Returns either an error message or the initialized toolbox.
+-}
+initializeLuaToolbox ::
+    Tracer IO Trace ->
+    LuaToolboxDescription ->
+    IO (Either String LuaToolbox.Toolbox)
+initializeLuaToolbox tracer desc = do
+    let toolboxTracer = contramap (LuaToolboxTrace desc.luaToolboxName) tracer
+    LuaToolbox.initializeToolbox toolboxTracer desc
 
 -- | Read SQLite tool registrations from initialized toolboxes.
 readSqliteToolsRegistrations ::
@@ -218,3 +236,29 @@ registerSystemToolsWithTracing tracer toolbox = do
             runTracer tracer (BuiltinToolboxInitError (SystemToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
+
+-- | Read Lua tool registrations from initialized toolboxes.
+readLuaToolsRegistrations ::
+    Tracer IO Trace ->
+    [LuaToolbox.Toolbox] ->
+    IO [ToolRegistration]
+readLuaToolsRegistrations tracer toolboxes = do
+    results <- traverse (registerLuaToolsWithTracing tracer) toolboxes
+    let (errors, registrations) = partitionEithers results
+    -- Trace errors for each failed toolbox
+    mapM_ (\err -> runTracer tracer (LuaToolboxInitError "lua" err)) errors
+    pure $ concat registrations
+
+-- | Register tools from a single Lua toolbox with error tracing.
+registerLuaToolsWithTracing ::
+    Tracer IO Trace ->
+    LuaToolbox.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerLuaToolsWithTracing tracer toolbox = do
+    result <- registerLuaTools toolbox
+    case result of
+        Left err -> do
+            runTracer tracer (LuaToolboxInitError (LuaToolbox.toolboxName toolbox) err)
+            pure $ Left err
+        Right regs -> pure $ Right regs
+
