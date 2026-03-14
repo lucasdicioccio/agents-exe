@@ -42,7 +42,8 @@ data ModelPreset = ModelPreset
     , presetModelUrl :: Text
     , presetModelName :: Text
     , presetApiKeyId :: Text
-    } deriving (Show, Eq)
+    }
+    deriving (Show, Eq)
 
 -- | Options for new agent command
 data NewAgentOptions = NewAgentOptions
@@ -52,14 +53,16 @@ data NewAgentOptions = NewAgentOptions
     -- ^ Optional model name override
     , newAgentPreset :: Text
     -- ^ Preset name (openai, mistral, ollama)
-    } deriving (Show, Eq)
+    }
+    deriving (Show, Eq)
 
 -- | Options for new tool command
 data NewToolOptions = NewToolOptions
     { newToolSlug :: Text
     , newToolFilePath :: FilePath
     , newToolLanguage :: ToolLanguage
-    } deriving (Show, Eq)
+    }
+    deriving (Show, Eq)
 
 -- | Programming language for tool scaffolding
 data ToolLanguage
@@ -81,36 +84,40 @@ data NewOptions = NewOptions
     { newCommand :: NewCommand
     , newForce :: Bool
     -- ^ Overwrite existing files
-    } deriving (Show, Eq)
+    }
+    deriving (Show, Eq)
 
 -- | Default presets for common providers
 defaultPresets :: Map Text ModelPreset
 defaultPresets =
     Map.fromList
-        [ ( "openai"
-          , ModelPreset
+        [
+            ( "openai"
+            , ModelPreset
                 { presetFlavor = "OpenAIv1"
                 , presetModelUrl = "https://api.openai.com/v1"
                 , presetModelName = "gpt-4-turbo-preview"
                 , presetApiKeyId = "main-key"
                 }
-          )
-        , ( "mistral"
-          , ModelPreset
+            )
+        ,
+            ( "mistral"
+            , ModelPreset
                 { presetFlavor = "OpenAIv1"
                 , presetModelUrl = "https://api.mistral.ai/v1"
                 , presetModelName = "mistral-large-latest"
                 , presetApiKeyId = "mistral-key"
                 }
-          )
-        , ( "ollama"
-          , ModelPreset
+            )
+        ,
+            ( "ollama"
+            , ModelPreset
                 { presetFlavor = "OpenAIv1"
                 , presetModelUrl = "http://localhost:11434/v1"
                 , presetModelName = "llama3.2"
                 , presetApiKeyId = "ollama-key"
                 }
-          )
+            )
         ]
 
 -- | Default system prompt based on agent slug
@@ -404,4 +411,3 @@ makeHaskellToolTemplate slug =
         , "    (_, _:value:_) -> Text.pack value"
         , "    _ -> \"\""
         ]
-
