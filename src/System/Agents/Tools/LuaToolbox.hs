@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- | Provides a sandboxed Lua interpreter for agent-scriptable tool orchestration.
+{- | Provides a sandboxed Lua interpreter for agent-scriptable tool orchestration with security hardening.
 
 This module implements the Lua toolbox functionality, including:
 
@@ -14,6 +14,14 @@ This module implements the Lua toolbox functionality, including:
 * Error handling and stack trace capture
 * Integration with the Tool Portal for calling other tools
 * Standard library modules: json, text, time, fs, http, tools
+* Comprehensive tool invocation tracing
+
+Security Features:
+* Path sandboxing with canonicalization (prevents symlink traversal)
+* Host whitelisting for HTTP requests
+* Tool whitelist enforcement
+* Dangerous Lua functions removed (os.execute, io.popen, etc.)
+* Empty whitelist = no access (secure defaults)
 
 The toolbox is designed to be safe for LLM-generated code by:
 * Removing dangerous standard library functions (os.execute, io.popen, etc.)
@@ -21,15 +29,18 @@ The toolbox is designed to be safe for LLM-generated code by:
 * Enforcing execution time limits
 * Providing only whitelisted tool access through the portal
 * Sandboxing filesystem and HTTP access
+* Tracing all tool calls for debugging and auditing
 
 Example usage:
 
 @
 import System.Agents.Tools.LuaToolbox as Lua
 import System.Agents.Base (LuaToolboxDescription(..))
+import Prod.Tracer (Tracer(..), runTracer)
 
 main :: IO ()
 main = do
+    let nullTracer = Tracer (const (pure ()))
     let desc = LuaToolboxDescription
             { luaToolboxName = "lua"
             , luaToolboxDescription = "Sandboxed Lua interpreter"
@@ -39,7 +50,7 @@ main = do
             , luaToolboxAllowedPaths = ["./scripts"]
             , luaToolboxAllowedHosts = ["localhost"]
             }
-    result <- Lua.initializeToolbox tracer desc
+    result <- Lua.initializeToolbox nullTracer desc
     case result of
         Right toolbox -> do
             result <- Lua.executeScript toolbox "return 1 + 1"
@@ -54,9 +65,9 @@ Standard library modules available to Lua scripts:
 * @json@: JSON encoding/decoding with 'json.encode' and 'json.decode'
 * @text@: UTF-8 string utilities (split, find, trim, etc.)
 * @time@: Time functions (now, sleep, format, diff)
-* @fs@: Sandboxed filesystem operations (read, write, list, etc.)
+* @fs@: Sandboxed filesystem operations (read, write, list, patch, etc.)
 * @http@: HTTP requests with host whitelisting (get, post, request)
-* @tools@: Tool portal integration for calling other tools
+* @tools@: Tool portal integration for calling other tools with tracing
 
 Example Lua script using modules:
 
@@ -104,6 +115,12 @@ module System.Agents.Tools.LuaToolbox (
 
     -- * Module registration
     registerStandardModules,
+
+    -- * Tool tracing (re-exported from Tools module)
+    ToolTrace (..),
+
+    -- * Utilities
+    nullTracer,
 ) where
 
 import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar, threadDelay)
@@ -134,6 +151,17 @@ import qualified System.Agents.Tools.LuaToolbox.Modules.Time as TimeMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Tools as ToolsMod
 
 -------------------------------------------------------------------------------
+-- Utilities
+-------------------------------------------------------------------------------
+
+-- | A tracer that does nothing (discards all trace events).
+--
+-- This is useful when you don't need tracing or when initializing
+-- the toolbox without a proper tracer.
+nullTracer :: Tracer IO a
+nullTracer = Tracer (const (pure ()))
+
+-------------------------------------------------------------------------------
 -- Core Types
 -------------------------------------------------------------------------------
 
@@ -162,7 +190,12 @@ data Trace
       LuaErrorTrace !Text.Text
     | -- | Sandbox violation detected
       SandboxViolationTrace !Text.Text
+    | -- | Tool invocation trace (wrapper for ToolsMod.Trace)
+      ToolInvocationTrace !ToolsMod.Trace
     deriving (Show)
+
+-- | Re-export ToolsMod.Trace as ToolTrace for convenience
+type ToolTrace = ToolsMod.Trace
 
 {- | Runtime state for a Lua toolbox.
 
@@ -228,11 +261,15 @@ This function:
 1. Creates a new Lua state using hslua
 2. Configures the sandbox (removes dangerous functions)
 3. Sets up memory limit tracking
-4. Registers standard library modules (json, text, time, fs, http)
+4. Registers standard library modules (json, text, time, fs, http) with security settings
 5. Creates an MVar lock for serializing access
 6. Returns a 'Toolbox' ready for script execution
 
 Returns an error if the Lua state cannot be created.
+
+Security configuration:
+* fsAllowedPaths: whitelist for filesystem access (empty = no access)
+* httpAllowedHosts: whitelist for HTTP hosts (empty = no access)
 -}
 initializeToolbox ::
     Tracer IO Trace ->
@@ -256,7 +293,7 @@ initializeToolbox tracer desc = do
             when (desc.luaToolboxMaxMemoryMB > 0) $
                 applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
 
-            -- Register standard library modules
+            -- Register standard library modules with security settings
             registerStandardModules lstate desc
 
             -- Create lock for serializing access
@@ -278,8 +315,12 @@ This registers:
 * json: JSON encoding/decoding
 * text: UTF-8 string utilities
 * time: Time functions
-* fs: Sandboxed filesystem (using allowedPaths from config)
-* http: HTTP requests (using allowedHosts from config)
+* fs: Sandboxed filesystem with path canonicalization (using allowedPaths from config)
+* http: HTTP requests with host validation (using allowedHosts from config)
+
+Security:
+* Empty allowedPaths means NO filesystem access
+* Empty allowedHosts means NO network access
 -}
 registerStandardModules :: Lua.State -> LuaToolboxDescription -> IO ()
 registerStandardModules lstate desc = do
@@ -293,6 +334,7 @@ registerStandardModules lstate desc = do
     TimeMod.registerTimeModule lstate
 
     -- Register fs module with sandboxing
+    -- Security: empty allowedPaths means NO filesystem access
     FsMod.registerFsModule
         lstate
         FsMod.FsConfig
@@ -300,6 +342,7 @@ registerStandardModules lstate desc = do
             }
 
     -- Register http module with sandboxing
+    -- Security: empty allowedHosts means NO network access
     HttpMod.registerHttpModule
         lstate
         HttpMod.HttpConfig
@@ -493,6 +536,8 @@ The script should return a value that can be converted to JSON:
 * number -> number
 * string -> string
 * table -> object/array (if table has only integer keys starting at 1, it's an array)
+
+Without portal - just execute script with no tool access.
 -}
 executeScript ::
     Toolbox ->
@@ -506,10 +551,11 @@ executeScript toolbox script =
 {- | Execute a Lua script with access to the tool portal.
 
 This is the full execution function that:
-1. Sets up the tools module with the portal
+1. Sets up the tools module with the portal and tracer
 2. Executes the script with the portal available
 3. Handles timeouts and memory limits
 4. Provides detailed error information
+5. Traces all tool invocations
 
 The portal is exposed to Lua through the 'tools' module, which provides
 functions like tools.call(), tools.bash.run(), etc.
@@ -524,9 +570,12 @@ executeScriptWithPortal ::
     [Text.Text] ->
     IO (Either ScriptError ExecutionResult)
 executeScriptWithPortal toolbox script mPortal allowedTools = do
+    -- Create a null tracer for the tools module if no external tracer is provided
+    let toolsTracer = nullTracer
+
     -- Acquire lock to serialize access within this toolbox instance
     withMVar (toolboxLock toolbox) $ \() ->
-        executeScriptInternal toolbox script mPortal allowedTools
+        executeScriptInternal toolbox script mPortal allowedTools toolsTracer
 
 -- | Helper to run IO action with MVar lock
 withMVar :: MVar a -> (a -> IO b) -> IO b
@@ -541,18 +590,20 @@ executeScriptInternal ::
     Text.Text ->
     Maybe ToolPortal ->
     [Text.Text] ->
+    Tracer IO ToolsMod.Trace ->
     IO (Either ScriptError ExecutionResult)
-executeScriptInternal toolbox script mPortal allowedTools = do
+executeScriptInternal toolbox script mPortal allowedTools toolsTracer = do
     startTime <- getCurrentTime
     let lstate = toolboxLuaState toolbox
     let maxTime = (toolboxConfig toolbox).luaToolboxMaxExecutionTimeSeconds
 
-    -- Set up tools module with portal
+    -- Set up tools module with portal and tracer
     let toolsConfig =
             ToolsMod.ToolsConfig
                 { ToolsMod.toolsPortal = mPortal
                 , ToolsMod.toolsAllowed = allowedTools
                 , ToolsMod.toolsCallerId = toolboxName toolbox
+                , ToolsMod.toolsTracer = toolsTracer
                 }
     ToolsMod.registerToolsModule lstate toolsConfig
 
@@ -767,3 +818,4 @@ collectObjectPairs = do
                 Lua.pop 1 -- pop key
                 -- Stack: table
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
+

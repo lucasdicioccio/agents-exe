@@ -1,10 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | Sandboxed filesystem module for LuaToolbox.
+-- | Sandboxed filesystem module for LuaToolbox with enhanced path validation.
+--
+-- This module provides filesystem operations that are sandboxed to specific
+-- allowed paths. Key security features:
+--
+-- * Path canonicalization to prevent symlink traversal attacks
+-- * Absolute path requirement
+-- * Whitelist-based access control
+-- * Secure default: empty whitelist means NO access
+-- * fs.patch() for code patching with diff generation
+--
+-- Path validation uses canonicalizePath which resolves symlinks, making it
+-- resistant to traversal attacks through symlinks.
 module System.Agents.Tools.LuaToolbox.Modules.Fs (
     FsConfig (..),
+    PathError (..),
     registerFsModule,
+    validatePath,
 ) where
 
 import Control.Exception (IOException, try)
@@ -14,6 +28,7 @@ import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import qualified Data.Text.IO as TextIO
 import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
 import System.Directory (
@@ -21,6 +36,7 @@ import System.Directory (
     doesDirectoryExist,
     doesFileExist,
     listDirectory,
+    canonicalizePath,
  )
 import System.FilePath (isAbsolute, isPathSeparator, normalise, takeDirectory, (</>))
 
@@ -30,9 +46,38 @@ stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 getStackInt :: Lua.StackIndex -> Int
 getStackInt = stackIdxToInt
 
+-- | Path validation error types.
+--
+-- These errors provide detailed information about why a path was rejected,
+-- useful for debugging and logging.
+data PathError
+    = PathNotAllowed FilePath
+    -- ^ Path is not in the allowed whitelist
+    | PathNotAbsolute FilePath
+    -- ^ Path is not absolute (must start with /)
+    | PathOutsideSandbox FilePath FilePath
+    -- ^ Path escapes the sandbox directory (child, parent)
+    | PathIOError FilePath String
+    -- ^ IO error during path validation
+    deriving (Show, Eq)
+
 -- | Filesystem module configuration with path sandboxing.
+--
+-- Security defaults:
+-- * Empty allowedPaths means NO filesystem access
+-- * All paths in allowedPaths should be absolute and canonical
+-- * Canonicalization is performed on each path check
+--
+-- Example:
+-- @
+-- FsConfig
+--     { fsAllowedPaths = ["/home/user/allowed", "/tmp/sandbox"]
+--     }
+-- @
 data FsConfig = FsConfig
     { fsAllowedPaths :: [FilePath]
+    -- ^ Whitelist of allowed paths. If empty, NO paths are allowed (secure default).
+    -- Paths should be absolute and canonical.
     }
     deriving (Show, Eq)
 
@@ -69,16 +114,57 @@ registerFsModule lstate config = Lua.runWith lstate $ do
     Lua.pushHaskellFunction (luaIsFile config)
     Lua.settable (Lua.nthTop 3)
 
+    Lua.pushName "patch"
+    Lua.pushHaskellFunction (luaPatch config)
+    Lua.settable (Lua.nthTop 3)
+
     Lua.setglobal (Lua.Name "fs")
 
--- | Read file contents.
+-- | Validate and canonicalize a path against allowed paths.
+--
+-- This function performs the following security checks:
+-- 1. Path must be absolute
+-- 2. Path is canonicalized (resolves symlinks, .., etc.)
+-- 3. Canonical path must be within one of the allowed paths
+--
+-- Returns the canonical path if valid, or an error.
+validatePath :: FsConfig -> FilePath -> IO (Either PathError FilePath)
+validatePath config path = do
+    -- Path must be absolute
+    if not (isAbsolute path)
+        then pure $ Left $ PathNotAbsolute path
+        else do
+            -- Canonicalize to resolve symlinks, .., etc.
+            -- This is crucial for preventing symlink traversal attacks
+            canonical <- canonicalizePath path
+
+            -- Check against allowed paths
+            if null (fsAllowedPaths config)
+                then pure $ Left $ PathNotAllowed canonical
+                else if any (isPathWithin canonical) (fsAllowedPaths config)
+                    then pure $ Right canonical
+                    else pure $ Left $ PathOutsideSandbox canonical (show $ fsAllowedPaths config)
+  where
+    -- Check if child is within parent (handles path separator edge cases)
+    isPathWithin :: FilePath -> FilePath -> Bool
+    isPathWithin child parent =
+        let parent' = if last parent == '/' then parent else parent ++ "/"
+        in child == parent || take (length parent') child == parent'
+
+-- | Read file contents with enhanced error handling.
 luaRead :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaRead config = do
-    mPath <- getPathArg config 1
-    case mPath of
+    -- Get path from top of stack
+    pathBytes <- Lua.tostring' (Lua.nthTop 1)
+    Lua.pop 1
+
+    let path = Text.unpack $ Text.decodeUtf8 pathBytes
+
+    validation <- liftIO $ validatePath config path
+    case validation of
         Left err -> do
             Lua.pushnil
-            Lua.pushstring (Text.encodeUtf8 err)
+            Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
         Right validPath -> do
             result <- liftIO $ try $ BS.readFile validPath
@@ -91,7 +177,7 @@ luaRead config = do
                     Lua.pushstring content
                     pure 1
 
--- | Write file contents.
+-- | Write file contents with enhanced error handling.
 luaWrite :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaWrite config = do
     top <- Lua.gettop
@@ -104,13 +190,17 @@ luaWrite config = do
             pure 2
         else do
             let pathIdx = topInt - 1
-            mPath <- getPathArg config pathIdx
+            pathBytes <- Lua.tostring' (Lua.nthTop (fromIntegral pathIdx))
             content <- Lua.tostring' (Lua.nthTop 1)
             Lua.pop topInt
-            case mPath of
+
+            let path = Text.unpack $ Text.decodeUtf8 pathBytes
+            validation <- liftIO $ validatePath config path
+
+            case validation of
                 Left err -> do
                     Lua.pushboolean False
-                    Lua.pushstring (Text.encodeUtf8 err)
+                    Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
                     pure 2
                 Right validPath -> do
                     let parentDir = takeDirectory validPath
@@ -134,8 +224,14 @@ luaWrite config = do
 -- | Check if path exists.
 luaExists :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaExists config = do
-    mPath <- getPathArg config 1
-    case mPath of
+    -- Get path from top of stack
+    pathBytes <- Lua.tostring' (Lua.nthTop 1)
+    Lua.pop 1
+
+    let path = Text.unpack $ Text.decodeUtf8 pathBytes
+    validation <- liftIO $ validatePath config path
+
+    case validation of
         Left _ -> do
             Lua.pushboolean False
             pure 1
@@ -148,11 +244,17 @@ luaExists config = do
 -- | List directory contents.
 luaList :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaList config = do
-    mPath <- getPathArg config 1
-    case mPath of
+    -- Get path from top of stack
+    pathBytes <- Lua.tostring' (Lua.nthTop 1)
+    Lua.pop 1
+
+    let path = Text.unpack $ Text.decodeUtf8 pathBytes
+    validation <- liftIO $ validatePath config path
+
+    case validation of
         Left err -> do
             Lua.pushnil
-            Lua.pushstring (Text.encodeUtf8 err)
+            Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
         Right validPath -> do
             isDir <- liftIO $ doesDirectoryExist validPath
@@ -175,11 +277,17 @@ luaList config = do
 -- | Create directory.
 luaMkdir :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaMkdir config = do
-    mPath <- getPathArg config 1
-    case mPath of
+    -- Get path from top of stack
+    pathBytes <- Lua.tostring' (Lua.nthTop 1)
+    Lua.pop 1
+
+    let path = Text.unpack $ Text.decodeUtf8 pathBytes
+    validation <- liftIO $ validatePath config path
+
+    case validation of
         Left err -> do
             Lua.pushboolean False
-            Lua.pushstring (Text.encodeUtf8 err)
+            Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
         Right validPath -> do
             result <- liftIO $ try $ createDirectoryIfMissing True validPath
@@ -195,8 +303,14 @@ luaMkdir config = do
 -- | Check if path is a directory.
 luaIsDir :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaIsDir config = do
-    mPath <- getPathArg config 1
-    case mPath of
+    -- Get path from top of stack
+    pathBytes <- Lua.tostring' (Lua.nthTop 1)
+    Lua.pop 1
+
+    let path = Text.unpack $ Text.decodeUtf8 pathBytes
+    validation <- liftIO $ validatePath config path
+
+    case validation of
         Left _ -> do
             Lua.pushboolean False
             pure 1
@@ -208,8 +322,14 @@ luaIsDir config = do
 -- | Check if path is a file.
 luaIsFile :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaIsFile config = do
-    mPath <- getPathArg config 1
-    case mPath of
+    -- Get path from top of stack
+    pathBytes <- Lua.tostring' (Lua.nthTop 1)
+    Lua.pop 1
+
+    let path = Text.unpack $ Text.decodeUtf8 pathBytes
+    validation <- liftIO $ validatePath config path
+
+    case validation of
         Left _ -> do
             Lua.pushboolean False
             pure 1
@@ -218,47 +338,92 @@ luaIsFile config = do
             Lua.pushboolean isFile
             pure 1
 
--- | Validate and normalize path.
-validatePath :: FsConfig -> FilePath -> Either Text FilePath
-validatePath config path
-    | null (fsAllowedPaths config) = Left "No paths allowed"
-    | not (isAbsolute normalised) = Left "Path must be absolute"
-    | containsTraversal normalised = Left "Path contains directory traversal"
-    | otherwise =
-        if any (`isPathPrefixOf` normalised) (fsAllowedPaths config)
-            then Right normalised
-            else Left "Path not in allowed paths"
-  where
-    normalised = normalise path
-    containsTraversal p = ".." `elem` splitPath p
-
-    splitPath :: FilePath -> [String]
-    splitPath = go []
-      where
-        go acc [] = reverse acc
-        go acc (c : cs)
-            | isPathSeparator c = go acc cs
-            | otherwise =
-                let (part, rest) = break isPathSeparator (c : cs)
-                 in go (part : acc) rest
-
-    isPathPrefixOf :: FilePath -> FilePath -> Bool
-    isPathPrefixOf prefix p =
-        prefix == p
-            || ( prefix `isPrefixOf` p
-                    && (null dropPrefix || isPathSeparator (head dropPrefix))
-               )
-      where
-        dropPrefix = drop (length prefix) p
-
--- | Helper to get and validate a path argument.
-getPathArg :: FsConfig -> Int -> Lua.LuaE Lua.Exception (Either Text FilePath)
-getPathArg config offset = do
+-- | Patch a file by replacing search pattern with replacement.
+--
+-- fs.patch(path, search, replace) -> success, error, diff
+--
+-- Returns:
+-- * success: boolean indicating if any replacements were made
+-- * error: empty string on success, error message on failure
+-- * diff: unified diff of changes (or nil if no changes)
+luaPatch :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaPatch config = do
     top <- Lua.gettop
-    let idx = getStackInt top - offset + 1
-    bs <- Lua.tostring' (Lua.nthTop (fromIntegral idx))
-    let path = Text.unpack $ Text.decodeUtf8 bs
-    pure $ validatePath config path
+    let topInt = getStackInt top
+
+    if topInt < 3
+        then do
+            Lua.pop topInt
+            Lua.pushboolean False
+            Lua.pushstring "Usage: fs.patch(path, search, replace)"
+            Lua.pushnil
+            pure 3
+        else do
+            pathBytes <- Lua.tostring' (Lua.nthTop 3)
+            searchBytes <- Lua.tostring' (Lua.nthTop 2)
+            replaceBytes <- Lua.tostring' (Lua.nthTop 1)
+            Lua.pop 3
+
+            let path = Text.unpack $ Text.decodeUtf8 pathBytes
+            let search = Text.decodeUtf8 searchBytes
+            let replace = Text.decodeUtf8 replaceBytes
+
+            validation <- liftIO $ validatePath config path
+            case validation of
+                Left err -> do
+                    Lua.pushboolean False
+                    Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
+                    Lua.pushnil
+                    pure 3
+                Right validPath -> do
+                    result <- liftIO $ try $ do
+                        content <- TextIO.readFile validPath
+                        let newContent = Text.replace search replace content
+                        let count = Text.count search content
+                        if count > 0
+                            then do
+                                TextIO.writeFile validPath newContent
+                                let diff = generateDiff search replace content newContent count
+                                pure (True, count, diff)
+                            else
+                                pure (False, 0, Text.empty)
+                    case result of
+                        Left (e :: IOException) -> do
+                            Lua.pushboolean False
+                            Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
+                            Lua.pushnil
+                            pure 3
+                        Right (success, count, diff) -> do
+                            Lua.pushboolean success
+                            if success
+                                then do
+                                    Lua.pushstring ""
+                                    Lua.pushstring (Text.encodeUtf8 $ Text.pack $
+                                        "Replaced " ++ show count ++ " occurrence(s)\n\n" ++ Text.unpack diff)
+                                else do
+                                    Lua.pushstring "Pattern not found"
+                                    Lua.pushnil
+                            pure 3
+
+-- | Generate a simple unified diff for the patch.
+--
+-- This generates a basic unified diff showing the change made.
+-- For more complex diffs, a proper diff library would be needed.
+generateDiff :: Text -> Text -> Text -> Text -> Int -> Text
+generateDiff search replace oldContent newContent count =
+    let oldLines = Text.lines oldContent
+        newLines = Text.lines newContent
+        -- Find context (simplified: show first few lines around change)
+        contextLines = 3
+    in Text.unlines
+        [ "--- a/original"
+        , "+++ b/modified"
+        , "@@ -1," <> Text.pack (show (min contextLines (length oldLines))) <> " +1," <> Text.pack (show (min contextLines (length newLines))) <> " @@"
+        , "-" <> search
+        , "+" <> replace
+        , ""
+        , "(Changed " <> Text.pack (show count) <> " occurrence(s))"
+        ]
 
 -- | Push a list of strings as a Lua table.
 pushStringList :: [String] -> Lua.LuaE Lua.Exception ()
@@ -272,3 +437,4 @@ pushStringList items = do
             Lua.settable (Lua.nthTop 3)
         )
         (zip [1 ..] items)
+
