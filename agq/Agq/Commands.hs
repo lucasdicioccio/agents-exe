@@ -1010,4 +1010,3 @@ detectBaseBranch cfg = do
                         then Text.drop (Text.length "origin/") raw
                         else raw
         else return (baseBranch cfg)
-

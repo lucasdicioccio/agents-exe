@@ -242,4 +242,3 @@ dispatch cfg conn cmd = case cmd of
     Recover -> cmdRecover cfg conn
     Retry n r -> cmdRetry cfg conn n r
     MarkDone n -> cmdMarkDone cfg conn n
-
