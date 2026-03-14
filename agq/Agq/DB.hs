@@ -202,8 +202,9 @@ getTaskByName conn name = do
         [t] -> Just t
         _ -> Nothing
 
--- | Look up a task by its GitHub issue number.
--- Returns the task if found, Nothing otherwise.
+{- | Look up a task by its GitHub issue number.
+Returns the task if found, Nothing otherwise.
+-}
 getTaskByGithubIssue :: Connection -> Int -> IO (Maybe Task)
 getTaskByGithubIssue conn issueNum = do
     let sourcePattern = "github:" <> Text.pack (show issueNum)
@@ -311,4 +312,3 @@ countPendingRunning conn = do
     return $ case rows of
         [Only n] -> n
         _ -> 0
-

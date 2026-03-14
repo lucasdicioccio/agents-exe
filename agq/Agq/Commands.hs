@@ -201,7 +201,7 @@ handlePulledIssue cfg conn issueNum label = do
                 Running -> do
                     -- Task is currently running, wait for it to complete
                     putStrLn $ "Issue #" <> show issueNum <> " has task '" <> Text.unpack name <> "' currently running. Waiting for completion..."
-                    -- Do NOT update labels - the task is already being processed
+                -- Do NOT update labels - the task is already being processed
                 Done -> do
                     -- Task is already done
                     putStrLn $ "Warning: Issue #" <> show issueNum <> " has task '" <> Text.unpack name <> "' already marked as done."
@@ -1036,4 +1036,3 @@ detectBaseBranch cfg = do
                         then Text.drop (Text.length "origin/") raw
                         else raw
         else return (baseBranch cfg)
-
