@@ -163,9 +163,56 @@ cmdPull cfg conn = do
                     putStrLn $ "Skipping issue #" <> show n <> ": has arbitrage-needed label."
                 | not hasTbt ->
                     putStrLn $ "Skipping issue #" <> show n <> ": missing label '" <> Text.unpack (labelToBeTaken (labels cfg)) <> "'."
-                | Just lbl <- label -> importGhIssue cfg conn n lbl
+                | Just lbl <- label -> handlePulledIssue cfg conn n lbl
                 | otherwise ->
                     putStrLn $ "Skipping issue #" <> show n <> ": no project label."
+
+{- | Handle a GitHub issue that has the 'to-be-taken' label.
+
+This function implements the retry-via-GitHub feature:
+- If the issue is new (not in DB), import it as a new task
+- If the issue already exists in DB:
+  - Failed -> Retry it (reset to pending)
+  - Running -> Wait for completion (do nothing)
+  - Done -> Log a warning that it's already complete
+  - Pending -> It's already queued, just update labels
+-}
+handlePulledIssue :: AgqConfig -> Connection -> Int -> Text -> IO ()
+handlePulledIssue cfg conn issueNum label = do
+    -- Check if this issue already exists in the database
+    mExistingTask <- getTaskByGithubIssue conn issueNum
+    case mExistingTask of
+        Nothing ->
+            -- New issue, import normally
+            importGhIssue cfg conn issueNum label
+        Just task -> do
+            -- Issue already exists, handle based on current status
+            let name = taskName task
+            case taskStatus task of
+                Failed -> do
+                    -- Retry the failed task
+                    putStrLn $ "Issue #" <> show issueNum <> " has task '" <> Text.unpack name <> "' in failed state. Retrying..."
+                    let tries = defaultTries cfg
+                    ok <- retryTask conn name tries
+                    if ok
+                        then do
+                            -- Update GitHub labels to mark as taken
+                            void $ runGh ["issue", "edit", show issueNum, "--remove-label", Text.unpack (labelToBeTaken (labels cfg)), "--add-label", Text.unpack (labelTaken (labels cfg))]
+                            putStrLn $ "Retrying task: " <> Text.unpack name <> " (tries_remaining=" <> show tries <> ")"
+                        else putStrLn $ "Failed to retry task: " <> Text.unpack name
+                Running -> do
+                    -- Task is currently running, wait for it to complete
+                    putStrLn $ "Issue #" <> show issueNum <> " has task '" <> Text.unpack name <> "' currently running. Waiting for completion..."
+                -- Do NOT update labels - the task is already being processed
+                Done -> do
+                    -- Task is already done
+                    putStrLn $ "Warning: Issue #" <> show issueNum <> " has task '" <> Text.unpack name <> "' already marked as done."
+                    -- Remove the to-be-taken label since it's already done
+                    void $ runGh ["issue", "edit", show issueNum, "--remove-label", Text.unpack (labelToBeTaken (labels cfg))]
+                Pending -> do
+                    -- Task is already pending, just update labels
+                    putStrLn $ "Issue #" <> show issueNum <> " has task '" <> Text.unpack name <> "' already pending. Updating labels..."
+                    void $ runGh ["issue", "edit", show issueNum, "--remove-label", Text.unpack (labelToBeTaken (labels cfg)), "--add-label", Text.unpack (labelTaken (labels cfg))]
 
 importGhIssue :: AgqConfig -> Connection -> Int -> Text -> IO ()
 importGhIssue cfg conn n lbl = do
@@ -743,7 +790,7 @@ cmdClean cfg doIt force = do
     (_, rootOut) <- captureCmd "git" ["rev-parse", "--show-toplevel"]
     let root = Text.strip rootOut
         wts = parseWorktrees wtOut
-        nonMain = filter (\p -> Text.strip (wtPath p) /= root) wts
+        nonMain = filter (\wt -> Text.strip (wtPath wt) /= root) wts
     toClean <-
         myFilterM
             ( \wt -> do
