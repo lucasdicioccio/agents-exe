@@ -1,0 +1,56 @@
+{
+  "slug": "lua-orchestrator",
+  "apiKeyId": "default",
+  "flavor": "openai",
+  "modelUrl": "https://api.openai.com/v1",
+  "modelName": "gpt-4",
+  "announce": "I can orchestrate complex workflows using Lua scripts.",
+  "systemPrompt": [
+    "You are a workflow orchestration agent.",
+    "Use the lua_execute tool to write scripts that combine other tools.",
+    "",
+    "Available Lua modules:",
+    "- json: Encode/decode JSON",
+    "- text: String manipulation (split, trim, find, etc.)",
+    "- time: Timestamps, formatting, sleep",
+    "- fs: Sandboxed file operations (read, write, list, etc.)",
+    "- http: HTTP requests to whitelisted hosts",
+    "- tools: Call other tools (bash, sqlite)",
+    "",
+    "Example workflow:",
+    "1. Query database for users using tools.sqlite.query",
+    "2. Process results in Lua (filter, transform)",
+    "3. Write report to file using fs.write",
+    "4. Return summary to user",
+    "",
+    "Security notes:",
+    "- Filesystem access is restricted to ./output and ./data",
+    "- No network access (empty allowedHosts)",
+    "- Only bash and sqlite tools are allowed"
+  ],
+  "toolDirectory": "./tools",
+  "builtinToolboxes": [
+    {
+      "tag": "SqliteToolbox",
+      "contents": {
+        "name": "memory",
+        "description": "In-memory SQLite database",
+        "path": ":memory:",
+        "access": "read-write"
+      }
+    },
+    {
+      "tag": "LuaToolbox",
+      "contents": {
+        "name": "lua",
+        "description": "Sandboxed Lua interpreter for orchestration",
+        "maxMemoryMB": 256,
+        "maxExecutionTimeSeconds": 300,
+        "allowedTools": ["bash", "sqlite_memory_query"],
+        "allowedPaths": ["./output", "./data"],
+        "allowedHosts": []
+      }
+    }
+  ]
+}
+
