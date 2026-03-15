@@ -8,6 +8,8 @@ To date, there are two ways to provide tools:
 * MCP tools (tools exposed via Model Context Protocol)
 * OpenAPI tools (tools generated from OpenAPI specifications)
 * PostgREST tools (tools generated from PostgREST database APIs)
+* System tools (tools providing system information)
+* Developer tools (tools for writing/validating agents and tools)
 
 Technically, we could implement bash-tools as a sepecific implementation of
 IO-tools however having a separate constructor enables to surface a bit more
@@ -33,6 +35,7 @@ module System.Agents.Tools (
     openapiTool,
     postgrestTool,
     systemTool,
+    developerTool,
 ) where
 
 import qualified Data.Aeson.Key as AesonKey
@@ -48,6 +51,7 @@ import Prod.Tracer (contramap)
 import qualified System.Agents.MCP.Client as McpClient
 import System.Agents.Tools.Base
 import qualified System.Agents.Tools.Bash as BashTools
+import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
@@ -237,6 +241,94 @@ systemTool box =
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
+
+-------------------------------------------------------------------------------
+
+{- | Builder for a DeveloperToolbox-based tool.
+
+This creates a tool that provides developer utilities for writing and validating
+agents and tools. The tool accepts parameters based on the capability:
+
+* validate-tool: { "tool_path": "/path/to/tool.sh" }
+* scaffold-agent: { "template": "openai", "slug": "my-agent", "file_path": "my-agent.json", "force": false }
+* scaffold-tool: { "language": "bash", "slug": "my-tool", "file_path": "my-tool.sh", "force": false }
+* show-spec: { "spec_name": "bash-tools" }
+-}
+developerTool :: DeveloperTools.Toolbox -> Tool ()
+developerTool box =
+    Tool
+        { toolDef = DeveloperTool toolDesc
+        , toolRun = run
+        }
+  where
+    call = ()
+    toolDesc =
+        DeveloperTools.ToolDescription
+            { DeveloperTools.toolDescriptionName = "developer_tools"
+            , DeveloperTools.toolDescriptionDescription = box.toolboxDescription
+            , DeveloperTools.toolDescriptionToolboxName = box.toolboxName
+            }
+    run _tracer _ctx (Aeson.Object v) = do
+        case KeyMap.lookup (AesonKey.fromText "capability") v of
+            Just (Aeson.String cap) -> executeDeveloperCapability box cap v
+            _ -> pure $ DeveloperToolError call (DeveloperTools.ValidationError "Missing 'capability' parameter or invalid type")
+    run _tracer _ctx _ = do
+        pure $ DeveloperToolError call (DeveloperTools.ValidationError "Arguments must be a JSON object")
+
+-- | Execute a developer tool capability
+executeDeveloperCapability :: DeveloperTools.Toolbox -> Text.Text -> Aeson.Object -> IO (CallResult ())
+executeDeveloperCapability box cap params = case cap of
+    "validate-tool" -> do
+        case KeyMap.lookup (AesonKey.fromText "tool_path") params of
+            Just (Aeson.String toolPath) -> do
+                result <- DeveloperTools.executeValidateTool box (Text.unpack toolPath)
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right valResult -> pure $ DeveloperToolResult () valResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'tool_path' parameter")
+    "scaffold-agent" -> do
+        let mTemplate = case KeyMap.lookup (AesonKey.fromText "template") params of
+                Just (Aeson.String t) -> t
+                _ -> "openai"
+        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
+                Just (Aeson.String s) -> s
+                _ -> "new-agent"
+        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
+                Just (Aeson.String fp) -> Text.unpack fp
+                _ -> "new-agent.json"
+        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
+                Just (Aeson.Bool f) -> f
+                _ -> False
+        result <- DeveloperTools.executeScaffoldAgent box mTemplate mSlug mFilePath mForce
+        case result of
+            Left err -> pure $ DeveloperToolError () err
+            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
+    "scaffold-tool" -> do
+        let mLang = case KeyMap.lookup (AesonKey.fromText "language") params of
+                Just (Aeson.String l) -> l
+                _ -> "bash"
+        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
+                Just (Aeson.String s) -> s
+                _ -> "new-tool"
+        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
+                Just (Aeson.String fp) -> Text.unpack fp
+                _ -> "new-tool.sh"
+        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
+                Just (Aeson.Bool f) -> f
+                _ -> False
+        result <- DeveloperTools.executeScaffoldTool box mLang mSlug mFilePath mForce
+        case result of
+            Left err -> pure $ DeveloperToolError () err
+            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
+    "show-spec" -> do
+        case KeyMap.lookup (AesonKey.fromText "spec_name") params of
+            Just (Aeson.String specName) -> do
+                result <- DeveloperTools.executeShowSpec box specName
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right content -> pure $ DeveloperToolSpecResult () content
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'spec_name' parameter")
+    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
 -------------------------------------------------------------------------------
 
