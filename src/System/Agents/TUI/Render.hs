@@ -152,7 +152,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+Space: pause | Ctrl+p: export md | Ctrl+[r|t]: view md"
+            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md"
             ]
 
 -- | Conversation area with message input and conversation history.

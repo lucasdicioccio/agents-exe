@@ -81,7 +81,7 @@ tui_appHandleEvent ev = do
             handleRestoredConversation
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
-        VtyEvent (Vty.EvKey (Vty.KChar ' ') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) ->
             handleTogglePauseConversation
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) ->
             handleDumpSessionToMarkdown
@@ -501,7 +501,7 @@ handleRestoredConversation = do
             pure ()
 
 {- | Toggle pause/unpause for the currently selected conversation.
-Ctrl+Space pauses/unpauses the conversation, blocking the step iteration.
+Ctrl+E pauses/unpauses the conversation, blocking the step iteration.
 -}
 handleTogglePauseConversation :: EventM N TuiState ()
 handleTogglePauseConversation = do
