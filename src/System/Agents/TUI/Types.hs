@@ -154,9 +154,10 @@ data Core = Core
     , corePausedConversations :: Set ConversationId
     -- ^ Set of conversation IDs that are currently paused
     , coreBufferedMessages :: TVar (Map ConversationId [Text])
-    -- ^ Buffered messages per conversation - allows users to send messages
-    -- while the agent is processing tool calls. Messages are consumed and
-    -- concatenated when the agent collects user input.
+    {- ^ Buffered messages per conversation - allows users to send messages
+    while the agent is processing tool calls. Messages are consumed and
+    concatenated when the agent collects user input.
+    -}
     }
 
 makeLenses ''Core
@@ -176,8 +177,9 @@ data UIState = UIState
     , _selectedAgentInfo :: Maybe TuiAgent
     , _unreadConversations :: Set ConversationId
     , _ongoingConversations :: Set ConversationId
-    -- ^ Conversations currently being processed by an agent
-    -- (kept for backward compatibility and heartbeat tracking)
+    {- ^ Conversations currently being processed by an agent
+    (kept for backward compatibility and heartbeat tracking)
+    -}
     , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background async tasks (e.g., external viewers)
     , _coreAgentTools :: [(AgentId, [ToolRegistration])]
@@ -250,4 +252,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-

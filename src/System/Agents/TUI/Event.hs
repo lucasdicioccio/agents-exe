@@ -549,8 +549,9 @@ buildOnProgress convId outChan progress = do
         SessionFailed sess _ -> do
             writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
 
--- | STM operation to read and clear buffered messages for a conversation.
--- Returns the messages that were buffered (if any).
+{- | STM operation to read and clear buffered messages for a conversation.
+Returns the messages that were buffered (if any).
+-}
 readAndClearBufferedMessagesSTM :: ConversationId -> TVar (Map ConversationId [Text]) -> STM [Text]
 readAndClearBufferedMessagesSTM convId bufferVar = do
     buffers <- readTVar bufferVar
@@ -560,14 +561,15 @@ readAndClearBufferedMessagesSTM convId bufferVar = do
             writeTVar bufferVar (Map.insert convId [] buffers)
             pure msgs
 
--- | Read and clear buffered messages for a conversation.
--- Returns the concatenated messages (if any) that were buffered.
+{- | Read and clear buffered messages for a conversation.
+Returns the concatenated messages (if any) that were buffered.
+-}
 readAndClearBufferedMessages :: ConversationId -> Core -> IO (Maybe Text.Text)
 readAndClearBufferedMessages convId core = do
     msgs <- atomically $ readAndClearBufferedMessagesSTM convId core.coreBufferedMessages
     pure $ case msgs of
         [] -> Nothing
-        _ -> Just $ Text.unlines $ reverse msgs  -- Reverse to maintain order (oldest first)
+        _ -> Just $ Text.unlines $ reverse msgs -- Reverse to maintain order (oldest first)
 
 -- | Add a message to the buffer for a conversation.
 addBufferedMessage :: ConversationId -> Core -> Text.Text -> IO ()
@@ -630,7 +632,7 @@ runConversation baseTuiAgent session = do
                             combinedQuery <- collectBufferedQuery (if missing.missingQuery then Nothing else Just (UserQuery "")) core
                             let newMissing = missing{missingQuery = combinedQuery == Nothing, missingToolCalls = missing.missingToolCalls}
                             pure $ AskUserPrompt newMissing{missingQuery = combinedQuery == Nothing}
-                                -- Note: The query will be provided via usrQuery below
+                        -- Note: The query will be provided via usrQuery below
                         _ -> pure ret
                 , usrQuery = do
                     -- First check for buffered messages
@@ -644,7 +646,7 @@ runConversation baseTuiAgent session = do
                         (Just b, Nothing) -> Just (UserQuery b)
                         (Nothing, Just q) -> q
                         (Just b, Just (UserQuery q)) -> Just (UserQuery $ b <> "\n" <> q)
-                        (Just b, Just Nothing) -> Just (UserQuery b)  -- Channel sent Nothing (shouldn't happen in normal flow)
+                        (Just b, Just Nothing) -> Just (UserQuery b) -- Channel sent Nothing (shouldn't happen in normal flow)
                 }
 
     -- \* wrap in Conversation
@@ -675,10 +677,11 @@ runConversation baseTuiAgent session = do
     tuiUI . uiFocusRing %= focusRingModify (CList.insertR ConversationViewWidget)
     tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
 
--- | Send a message in the current conversation.
--- Messages are now buffered if the conversation is being processed by the agent,
--- allowing users to "interrupt" or provide additional context while the agent
--- is executing tool calls.
+{- | Send a message in the current conversation.
+Messages are now buffered if the conversation is being processed by the agent,
+allowing users to "interrupt" or provide additional context while the agent
+is executing tool calls.
+-}
 handleSendMessage :: EventM N TuiState ()
 handleSendMessage = do
     -- Get message text
@@ -712,4 +715,3 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-
