@@ -399,6 +399,8 @@ bashToolboxTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -420,6 +422,8 @@ bashToolboxTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
