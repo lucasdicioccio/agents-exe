@@ -8,6 +8,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Database.SQLite.Simple (Connection, execute_, withConnection)
 import Options.Applicative
+import System.Exit (die)
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 -- ---------------------------------------------------------------------------
@@ -29,7 +30,18 @@ data Command
     | Clean Bool Bool -- do-it force
     | Recover
     | Retry Text Int -- task name, tries to restore
-    | MarkDone Text -- task name
+    | MarkDone Text
+    | Describe -- output JSON tool description (binary-tool protocol)
+    | Run RunOpts -- binary-tool protocol run command
+
+data RunOpts = RunOpts
+    { runSubcommand :: Text
+    , runLabel :: Maybe Text
+    , runName :: Maybe Text
+    , runDeps :: [Text]
+    , runTags :: [Text]
+    , runTries :: Int
+    } -- task name
 
 -- ---------------------------------------------------------------------------
 -- Parser
@@ -145,6 +157,18 @@ parseCommand =
                     parseMarkDone
                     (progDesc "Mark a task as done and release its lock")
                 )
+            <> command
+                "describe"
+                ( info
+                    (pure Describe)
+                    (progDesc "Output JSON tool description (binary-tool protocol)")
+                )
+            <> command
+                "run"
+                ( info
+                    parseRun
+                    (progDesc "Run a queue operation (binary-tool protocol)")
+                )
         )
 
 parseAdd :: Parser Command
@@ -202,6 +226,114 @@ parseClean =
         <$> switch (long "do-it" <> help "Actually remove worktrees (default: preview)")
         <*> switch (long "force" <> help "Force-remove worktrees with uncommitted changes")
 
+parseRun :: Parser Command
+parseRun =
+    fmap Run $
+        RunOpts
+            <$> fmap
+                Text.pack
+                ( strOption
+                    ( long "subcommand"
+                        <> metavar "CMD"
+                        <> help "One of: status, next, add, exec, retry, process"
+                    )
+                )
+            <*> optional (fmap Text.pack $ strOption (long "label" <> metavar "TEXT" <> help "Project label (for add)"))
+            <*> optional (fmap Text.pack $ strOption (long "name" <> metavar "TEXT" <> help "Task name (for add, exec, retry)"))
+            <*> textList "dep" "Dependency task name for add (repeatable)"
+            <*> textList "tag" "Extra tag for add (repeatable)"
+            <*> option
+                auto
+                ( long "tries"
+                    <> metavar "N"
+                    <> value 0
+                    <> help "Execution attempts for add or retry (0 = config default)"
+                )
+
+-- ---------------------------------------------------------------------------
+-- Binary-tool protocol
+-- ---------------------------------------------------------------------------
+
+cmdDescribe :: IO ()
+cmdDescribe =
+    putStr $
+        unlines
+            [ "{"
+            , "  \"slug\": \"agq\","
+            , "  \"description\": \"Agent queue scheduler: inspect and manage tasks for AI agents\","
+            , "  \"args\": ["
+            , "    {"
+            , "      \"name\": \"subcommand\","
+            , "      \"description\": \"Action to perform: status (show queue), next (show ready tasks), add (enqueue a task), exec (execute a named task), retry (reset a failed task), process (run one processing cycle without looping)\","
+            , "      \"type\": \"string\","
+            , "      \"backing_type\": \"string\","
+            , "      \"arity\": \"single\","
+            , "      \"mode\": \"dashdashspace\""
+            , "    },"
+            , "    {"
+            , "      \"name\": \"label\","
+            , "      \"description\": \"Project label for 'add' (must match a key in the projects config)\","
+            , "      \"type\": \"string\","
+            , "      \"backing_type\": \"string\","
+            , "      \"arity\": \"optional\","
+            , "      \"mode\": \"dashdashspace\""
+            , "    },"
+            , "    {"
+            , "      \"name\": \"name\","
+            , "      \"description\": \"Task name for 'add', 'exec', or 'retry'\","
+            , "      \"type\": \"string\","
+            , "      \"backing_type\": \"string\","
+            , "      \"arity\": \"optional\","
+            , "      \"mode\": \"dashdashspace\""
+            , "    },"
+            , "    {"
+            , "      \"name\": \"dep\","
+            , "      \"description\": \"Dependency task name for 'add' (can be repeated)\","
+            , "      \"type\": \"string\","
+            , "      \"backing_type\": \"string\","
+            , "      \"arity\": \"optional\","
+            , "      \"mode\": \"dashdashspace\""
+            , "    },"
+            , "    {"
+            , "      \"name\": \"tag\","
+            , "      \"description\": \"Extra tag for 'add' (can be repeated)\","
+            , "      \"type\": \"string\","
+            , "      \"backing_type\": \"string\","
+            , "      \"arity\": \"optional\","
+            , "      \"mode\": \"dashdashspace\""
+            , "    },"
+            , "    {"
+            , "      \"name\": \"tries\","
+            , "      \"description\": \"Execution attempt limit for 'add' or 'retry' (0 = use config default)\","
+            , "      \"type\": \"number\","
+            , "      \"backing_type\": \"string\","
+            , "      \"arity\": \"optional\","
+            , "      \"mode\": \"dashdashspace\""
+            , "    }"
+            , "  ],"
+            , "  \"empty-result\": { \"tag\": \"AddMessage\", \"contents\": \"No output\" }"
+            , "}"
+            ]
+
+dispatchRun :: AgqConfig -> Connection -> RunOpts -> IO ()
+dispatchRun cfg conn opts = case runSubcommand opts of
+    "status" -> cmdStatus cfg conn True
+    "next" -> cmdNext cfg conn
+    "add" -> case (runLabel opts, runName opts) of
+        (Just label, Just name) ->
+            cmdAdd cfg conn label name (runDeps opts) (runTags opts) tries
+        _ -> die "agq run add: --label and --name are required"
+    "exec" -> case runName opts of
+        Just name -> cmdExec cfg conn name
+        Nothing -> die "agq run exec: --name is required"
+    "retry" -> case runName opts of
+        Just name -> cmdRetry cfg conn name tries
+        Nothing -> die "agq run retry: --name is required"
+    "process" -> cmdProcess cfg conn False False -- no parallel, no loop
+    other -> die $ "agq run: unknown subcommand '" <> Text.unpack other <> "' (expected: status, next, add, exec, retry, process)"
+  where
+    tries = if runTries opts <= 0 then defaultTries cfg else runTries opts
+
 -- ---------------------------------------------------------------------------
 -- Main
 -- ---------------------------------------------------------------------------
@@ -215,9 +347,10 @@ main = do
             info
                 (liftA2 (,) parseCfgPath parseCommand <**> helper)
                 (fullDesc <> progDesc "agq — Agent Queue scheduler")
-    -- 'init' needs no config file or DB connection
+    -- 'init' and 'describe' need no config file or DB connection
     case cmd of
         Init -> cmdInit cfgPath
+        Describe -> cmdDescribe
         _ -> do
             cfg <- loadConfig cfgPath
             withConnection (queueDb cfg) $ \conn -> do
@@ -228,6 +361,7 @@ main = do
 dispatch :: AgqConfig -> Connection -> Command -> IO ()
 dispatch cfg conn cmd = case cmd of
     Init -> return () -- handled in main before reaching here
+    Describe -> return () -- handled in main before reaching here
     InitQueue -> cmdInitQueue cfg conn
     InitGithub -> cmdInitGithub cfg
     Add l n d t r -> cmdAdd cfg conn l n d t (if r <= 0 then defaultTries cfg else r)
@@ -242,3 +376,4 @@ dispatch cfg conn cmd = case cmd of
     Recover -> cmdRecover cfg conn
     Retry n r -> cmdRetry cfg conn n r
     MarkDone n -> cmdMarkDone cfg conn n
+    Run opts -> dispatchRun cfg conn opts
