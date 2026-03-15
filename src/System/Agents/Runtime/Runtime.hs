@@ -13,6 +13,8 @@ module System.Agents.Runtime.Runtime (
 import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Data.Either (partitionEithers, rights)
 import Data.Maybe (maybeToList)
+import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap, runTracer, traceBoth)
@@ -36,6 +38,10 @@ import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.Skills.Source as SkillsSource
+import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
+import System.Agents.Tools.Skills.Types (SkillSource)
+import qualified System.Agents.Tools.Skills.Types as SkillsTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
@@ -57,6 +63,8 @@ data Runtime
     , agentTools :: AgentTools
     -- ^ Mutable tool registrations - allows dynamic updates for sub-agent tools
     , agentTriggerRefreshTools :: STM Bool
+    , agentSkillsStore :: Maybe SkillsTypes.SkillsStore
+    -- ^ Loaded skills store (if skills are configured)
     }
 
 {- | Adds an extra tracer to the runtime, hence returning a modified Runtime.
@@ -97,8 +105,10 @@ newRuntime ::
     [ToolRegistration] ->
     -- | Builtin toolbox descriptions - to be initialized
     [BuiltinToolboxDescription] ->
+    -- | Skill sources - to be loaded
+    [SkillSource] ->
     IO (Either String Runtime)
-newRuntime agentdir slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
+newRuntime agentdir slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions skillSources = do
     -- Convert single directory to multi-source format
     let legacyDesc = FileSystemDirectory $ FileSystemDirectoryDescription agentdir tooldir Nothing
     newRuntimeWithMultiBash
@@ -112,6 +122,7 @@ newRuntime agentdir slug announce tracer apiKey model tooldir mkIoTools mcpToolb
         mcpToolboxes
         openApiToolRegs
         builtinDescriptions
+        skillSources
 
 {- | Create a new runtime with multiple bash tool sources.
 
@@ -143,8 +154,10 @@ newRuntimeWithMultiBash ::
     [ToolRegistration] ->
     -- | Builtin toolbox descriptions - to be initialized
     [BuiltinToolboxDescription] ->
+    -- | Skill sources - to be loaded
+    [SkillSource] ->
     IO (Either String Runtime)
-newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
+newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions skillSources = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
 
@@ -157,6 +170,23 @@ newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools 
             -- Initialize builtin toolboxes (SQLite, System, and Developer)
             (sqliteToolboxes, systemToolboxes, developerToolboxes) <- initializeBuiltinToolboxes tracer builtinDescriptions
 
+            -- Load skills from skill sources
+            (mSkillsStore, skillErrors) <- loadSkills tracer skillSources
+
+            -- Trace any skill loading errors
+            mapM_ (\err -> runTracer tracer (SkillsToolboxInitError "skills" err)) skillErrors
+
+            -- Register skill tools from the skills store
+            -- Create meta tools (describe, enable, disable) for each skill
+            let allSkillRegs = case mSkillsStore of
+                    Just store ->
+                        let skills = SkillsTypes.allSkills store
+                            metaToolsPerSkill = map (SkillsToolbox.makeMetaTools store) skills
+                            metaTools = concat metaToolsPerSkill
+                            mListTool = SkillsToolbox.makeListSkillsTool store
+                         in maybe metaTools (: metaTools) mListTool
+                    Nothing -> []
+
             let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey
             httpRt <- HttpClient.newRuntime auth
 
@@ -164,10 +194,10 @@ newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools 
             toolsTVar <- newTVarIO []
 
             -- Read tools from all sources
-            baseTools <- readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs
+            baseTools <- readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs allSkillRegs
             atomically $ writeTVar toolsTVar baseTools
 
-            let rt = Runtime slug uid announce tracer httpRt model toolsTVar (BashToolbox.triggerAllReloads multiToolbox)
+            let rt = Runtime slug uid announce tracer httpRt model toolsTVar (BashToolbox.triggerAllReloads multiToolbox) mSkillsStore
             pure $ Right rt
   where
     readAllTools ::
@@ -178,8 +208,9 @@ newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools 
         [DeveloperToolbox.Toolbox] ->
         [McpToolConfig] ->
         [ToolRegistration] ->
+        [ToolRegistration] ->
         IO [ToolRegistration]
-    readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs' = do
+    readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs' skillToolRegs = do
         -- Read bash tools from all sources
         bashScripts <- BashToolbox.readMultiSourceTools multiToolbox
         let bashTools = map registerBashToolInLLM bashScripts
@@ -196,14 +227,35 @@ newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools 
         -- Read Developer tools
         developerTools <- readDeveloperToolsRegistrations tracer developerToolboxes
 
-        -- Combine all tools: bash + IO + MCP + OpenAPI + SQLite + System + Developer
-        pure $ bashTools ++ ioTools ++ mcpTools ++ openApiToolRegs' ++ sqliteTools ++ systemTools ++ developerTools
+        -- Combine all tools: bash + IO + MCP + OpenAPI + SQLite + System + Developer + Skills
+        pure $ bashTools ++ ioTools ++ mcpTools ++ openApiToolRegs' ++ sqliteTools ++ systemTools ++ developerTools ++ skillToolRegs
 
     readMcpToolsRegistrations :: [McpToolConfig] -> IO [ToolRegistration]
     readMcpToolsRegistrations configs = do
         lists <- traverse (atomically . readTVar . McpTools.toolsList) configs
         let reg tb tds = rights [registerMcpToolInLLM tb td | td <- tds]
         pure $ mconcat $ zipWith reg configs lists
+
+{- | Load skills from skill sources.
+
+Returns:
+* (Just SkillsStore, []) on success
+* (Nothing, [errors]) on failure
+-}
+loadSkills ::
+    Tracer IO Trace ->
+    [SkillSource] ->
+    IO (Maybe SkillsTypes.SkillsStore, [String])
+loadSkills _tracer [] = pure (Nothing, [])
+loadSkills tracer sources = do
+    runTracer tracer (SkillsToolboxTrace "skills" (SkillsToolbox.SkillsLoadingTrace sources))
+    result <- SkillsSource.loadSkillsFromSources sources
+    case result of
+        Left err -> pure (Nothing, [Text.unpack err])
+        Right store ->
+            if null (SkillsTypes.allSkills store)
+                then pure (Nothing, ["No skills found in sources"])
+                else pure (Just store, [])
 
 {- | Initialize all builtin toolboxes from their descriptions.
 Supports SQLite, System, and Developer toolboxes.
@@ -339,3 +391,4 @@ registerDeveloperToolsWithTracing tracer toolbox = do
             runTracer tracer (BuiltinToolboxInitError (DeveloperToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
+

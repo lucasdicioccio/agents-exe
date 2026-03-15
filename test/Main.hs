@@ -34,6 +34,8 @@ import qualified SessionEditTests
 import qualified SessionPrintTests
 -- Import EndpointPredicate tests
 import qualified EndpointPredicateTests
+-- Import Skills tests
+import qualified SkillsTests
 
 main :: IO ()
 main = defaultMain tests
@@ -60,6 +62,7 @@ tests =
         , SessionEditTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
+        , SkillsTests.skillsTestSuite
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         ]
@@ -194,6 +197,8 @@ agentSerializationTests =
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -214,6 +219,8 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -236,6 +243,8 @@ agentSerializationTests =
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
                         ]
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -264,6 +273,8 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Just [builtinToolbox]
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -297,6 +308,8 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Just builtinToolboxes
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -386,6 +399,8 @@ bashToolboxTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -407,6 +422,8 @@ bashToolboxTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -1422,6 +1439,8 @@ agentConfigGraphTests =
         , Base.postgrestToolboxes = Nothing
         , Base.builtinToolboxes = Nothing
         , Base.extraAgents = Nothing
+        , Base.skillSources = Nothing
+        , Base.autoEnableSkills = Nothing
         }
 
     mkTestAgentWithExtra slug extras = Base.Agent
@@ -1439,6 +1458,8 @@ agentConfigGraphTests =
         , Base.postgrestToolboxes = Nothing
         , Base.builtinToolboxes = Nothing
         , Base.extraAgents = Just [Base.ExtraAgentRef e (Text.unpack e <> ".json") | e <- extras]
+        , Base.skillSources = Nothing
+        , Base.autoEnableSkills = Nothing
         }
 
 -------------------------------------------------------------------------------
@@ -1498,6 +1519,8 @@ referenceValidationTests =
                 , Base.postgrestToolboxes = Nothing
                 , Base.builtinToolboxes = Nothing
                 , Base.extraAgents = Nothing
+                , Base.skillSources = Nothing
+                , Base.autoEnableSkills = Nothing
                 }
             agent2 = Base.Agent
                 { Base.slug = "agent-2"
@@ -1514,6 +1537,8 @@ referenceValidationTests =
                 , Base.postgrestToolboxes = Nothing
                 , Base.builtinToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "agent-1" "/agent-1.json"]
+                , Base.skillSources = Nothing
+                , Base.autoEnableSkills = Nothing
                 }
 
             node1 = AgentTree.AgentConfigNode
@@ -1549,6 +1574,8 @@ referenceValidationTests =
                 , Base.postgrestToolboxes = Nothing
                 , Base.builtinToolboxes = Nothing
                 , Base.extraAgents = Just [Base.ExtraAgentRef "nonexistent" "/nonexistent.json"]
+                , Base.skillSources = Nothing
+                , Base.autoEnableSkills = Nothing
                 }
 
             node = AgentTree.AgentConfigNode
@@ -1682,5 +1709,7 @@ cycleDetectionTests =
         , Base.postgrestToolboxes = Nothing
         , Base.builtinToolboxes = Nothing
         , Base.extraAgents = Nothing
+        , Base.skillSources = Nothing
+        , Base.autoEnableSkills = Nothing
         }
 

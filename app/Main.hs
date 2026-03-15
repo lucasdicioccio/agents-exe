@@ -70,6 +70,7 @@ import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
+import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.Trace as ToolTrace
 import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (exitFailure)
@@ -1529,6 +1530,18 @@ toJsonTrace x = case x of
                 [ "developer-toolbox" .= toolboxName
                 , "trace" .= show tr
                 ]
+    encodeBaseAgentTrace (RuntimeTrace.SkillsToolboxTrace toolboxName tr) =
+        Just $
+            Aeson.object
+                [ "skills-toolbox" .= toolboxName
+                , "trace" .= show tr
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.SkillsToolboxInitError toolboxName err) =
+        Just $
+            Aeson.object
+                [ "skills-toolbox-init-error" .= toolboxName
+                , "error" .= err
+                ]
 
     encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =
@@ -1669,3 +1682,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
