@@ -88,4 +88,3 @@ withEditor run = do
             chunks = words cmd
          in
             (unwords $ take 1 chunks, drop 1 chunks)
-

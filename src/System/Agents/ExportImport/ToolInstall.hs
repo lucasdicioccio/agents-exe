@@ -355,4 +355,3 @@ getFileMode' :: FilePath -> IO FileMode
 getFileMode' path = do
     status <- getFileStatus path
     pure $ fileMode status
-

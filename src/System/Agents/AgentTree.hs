@@ -339,9 +339,10 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
   where
     tracer = props.interactiveTracer
 
--- | Discover child agent files from an agent configuration.
--- This looks at the legacy 'toolDirectory' field and any 'FileSystemDirectory'
--- entries in 'bashToolboxes' to find sub-agent JSON files.
+{- | Discover child agent files from an agent configuration.
+This looks at the legacy 'toolDirectory' field and any 'FileSystemDirectory'
+entries in 'bashToolboxes' to find sub-agent JSON files.
+-}
 discoverChildFiles :: FilePath -> Agent -> IO [FilePath]
 discoverChildFiles rootDir agent = do
     -- Collect all directories to scan for sub-agents
@@ -1153,4 +1154,3 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
-

@@ -1,6 +1,6 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 {- | Provides a runtime value capable to load and reload bash tools from multiple sources.
 
@@ -23,10 +23,11 @@ import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap)
 import System.FilePath (takeFileName)
 
-import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Base (BashToolboxDescription (..), FileSystemDirectoryDescription (..), SingleToolDescription (..))
+import qualified System.Agents.Tools.Bash as BashTools
 
 -------------------------------------------------------------------------------
+
 -- | Trace events for monitoring bash toolbox operations.
 data Trace
     = BashToolsLoadingTrace !BashTools.LoadTrace
@@ -35,13 +36,15 @@ data Trace
     deriving (Show)
 
 -------------------------------------------------------------------------------
--- | A source of bash tools.
--- Tracks the source configuration and the tools loaded from it.
+
+{- | A source of bash tools.
+Tracks the source configuration and the tools loaded from it.
+-}
 data ToolSource
-    = DirectorySource FilePath (Maybe Text) FilePath
-    -- ^ Directory source with filter and full path
-    | SingleSource FilePath
-    -- ^ Single executable file
+    = -- | Directory source with filter and full path
+      DirectorySource FilePath (Maybe Text) FilePath
+    | -- | Single executable file
+      SingleSource FilePath
     deriving (Show)
 
 -- | Get the source path for display/tracing.
@@ -55,6 +58,7 @@ resolvedPath (DirectorySource _ _ resolved) = resolved
 resolvedPath (SingleSource path) = path
 
 -------------------------------------------------------------------------------
+
 -- | Background bash tools state for a single source.
 data BackgroundBashTools = BackgroundBashTools
     { source :: ToolSource
@@ -69,33 +73,37 @@ data MultiSourceBashTools = MultiSourceBashTools
     }
 
 -------------------------------------------------------------------------------
--- | Convert a BashToolboxDescription to a ToolSource.
--- The FilePath parameter is the base directory for resolving relative paths.
+
+{- | Convert a BashToolboxDescription to a ToolSource.
+The FilePath parameter is the base directory for resolving relative paths.
+-}
 descriptionToSource :: FilePath -> BashToolboxDescription -> ToolSource
 descriptionToSource baseDir (FileSystemDirectory desc) =
     let resolved = if isRelative desc.fsDirPath then baseDir ++ "/" ++ desc.fsDirPath else desc.fsDirPath
-    in DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved
+     in DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved
 descriptionToSource baseDir (SingleTool desc) =
     let resolved = if isRelative desc.singleToolPath then baseDir ++ "/" ++ desc.singleToolPath else desc.singleToolPath
-    in SingleSource resolved
+     in SingleSource resolved
 
 -- | Check if a path is relative (simple heuristic).
 isRelative :: FilePath -> Bool
 isRelative path = not (List.isPrefixOf "/" path) && not (List.isPrefixOf "~" path)
 
 -------------------------------------------------------------------------------
+
 -- | Loading error type.
 data LoadingError
     = LoadingError String [BashTools.InvalidScriptError]
     deriving (Show)
 
--- | Initialize multiple bash tool sources.
---
--- This creates background loaders for each source, allowing async reloading.
+{- | Initialize multiple bash tool sources.
+
+This creates background loaders for each source, allowing async reloading.
+-}
 initializeMultiSourceToolbox ::
     Tracer IO Trace ->
+    -- | Base directory for resolving relative paths
     FilePath ->
-    -- ^ Base directory for resolving relative paths
     [BashToolboxDescription] ->
     IO (Either LoadingError MultiSourceBashTools)
 initializeMultiSourceToolbox tracer baseDir descriptions = do
@@ -191,19 +199,22 @@ initializeSingleSource tracer path source = do
             Left _ -> pure ([], ()) -- Keep empty on error, will retry on next reload
             Right script -> pure ([script], ())
 
--- | Filter scripts by basename filter.
--- Only keeps scripts whose filename contains the filter string.
+{- | Filter scripts by basename filter.
+Only keeps scripts whose filename contains the filter string.
+-}
 filterScriptsByBasename :: Text -> BashTools.Scripts -> BashTools.Scripts
 filterScriptsByBasename filt scripts =
     let filteredDescs = filter matchesFilter scripts.scriptDescriptions
         matchesFilter :: BashTools.ScriptDescription -> Bool
         matchesFilter desc = Text.isInfixOf filt (Text.pack $ takeFileName desc.scriptPath)
-    in scripts{BashTools.scriptDescriptions = filteredDescs}
+     in scripts{BashTools.scriptDescriptions = filteredDescs}
 
 -------------------------------------------------------------------------------
--- | Legacy compatibility: Initialize a single directory toolbox.
---
--- This is kept for backward compatibility with existing code.
+
+{- | Legacy compatibility: Initialize a single directory toolbox.
+
+This is kept for backward compatibility with existing code.
+-}
 initializeBackroundToolbox ::
     Tracer IO Trace ->
     FilePath ->
@@ -217,4 +228,3 @@ readMultiSourceTools :: MultiSourceBashTools -> IO [BashTools.ScriptDescription]
 readMultiSourceTools multi = do
     allTools <- mapM (Background.readBackgroundVal . tools) multi.sources
     pure $ concat allTools
-

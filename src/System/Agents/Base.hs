@@ -846,6 +846,7 @@ instance FromJSON BuiltinToolboxDescription where
             _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', or 'DeveloperToolbox' tag"
 
 -------------------------------------------------------------------------------
+
 {- | Agent definition.
 
 An agent can load tools from multiple sources:
@@ -965,4 +966,3 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
-

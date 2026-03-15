@@ -477,4 +477,3 @@ makeNodeToolTemplate slug =
         , ""
         , "main();"
         ]
-
