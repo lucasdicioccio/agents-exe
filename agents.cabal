@@ -67,6 +67,7 @@ library agents-lib
                     , System.Agents.CLI.Aliases
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
+                    , System.Agents.CLI.CheckToolCall
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
@@ -112,6 +113,7 @@ library agents-lib
                     , System.Agents.Tools.PostgRESToolbox
                     , System.Agents.Tools.SqliteToolbox
                     , System.Agents.Tools.SystemToolbox
+                    , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime

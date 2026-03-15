@@ -50,6 +50,9 @@ module System.Agents.ToolRegistration (
     sqlite2LLMName,
     system2LLMName,
     developer2LLMName,
+
+    -- * Schema helpers
+    mapArg,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -181,6 +184,20 @@ developer2LLMName box toolName =
 
 -------------------------------------------------------------------------------
 
+{- | Convert a ScriptArg to a ParamProperty for schema validation.
+
+This function maps bash script arguments to the LLM schema format,
+allowing validation of tool call payloads against the defined schema.
+-}
+mapArg :: ScriptArg -> ParamProperty
+mapArg arg =
+    ParamProperty
+        { propertyKey = arg.argName
+        , propertyType = OpaqueParamType arg.argBackingTypeString
+        , propertyDescription = arg.argDescription
+        , propertyRequired = True
+        }
+
 registerBashToolInLLM ::
     ScriptDescription ->
     ToolRegistration
@@ -195,15 +212,6 @@ registerBashToolInLLM script =
                 { OpenAI.toolName = bash2LLMName bash
                 , OpenAI.toolDescription = bash.scriptInfo.scriptDescription
                 , OpenAI.toolParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
-                }
-
-        mapArg :: ScriptArg -> ParamProperty
-        mapArg arg =
-            ParamProperty
-                { propertyKey = arg.argName
-                , propertyType = OpaqueParamType arg.argBackingTypeString
-                , propertyDescription = arg.argDescription
-                , propertyRequired = True
                 }
 
         tool :: Tool ()

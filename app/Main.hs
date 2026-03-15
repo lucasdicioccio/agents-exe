@@ -35,6 +35,7 @@ import System.Agents.CLI.Aliases (
  )
 import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
+import qualified System.Agents.CLI.CheckToolCall as CheckToolCallCmd
 import qualified System.Agents.CLI.Cowsay as CowsayCmd
 import qualified System.Agents.CLI.DescribeTool as DescribeToolCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
@@ -396,6 +397,7 @@ data Prog = Prog
 -- | Available commands
 data Command
     = Check CheckCmd.CheckOptions
+    | CheckToolCall CheckToolCallCmd.CheckToolCallOptions
     | TerminalUI TUICmd.TuiOptions
     | OneShot OneShotCmd.OneShotOptions
     | EchoPrompt EchoPromptCmd.EchoPromptOptions
@@ -414,6 +416,7 @@ data Command
 
 instance Show Command where
     show (Check _) = "Check"
+    show (CheckToolCall _) = "CheckToolCall"
     show (TerminalUI _) = "TerminalUI"
     show (OneShot _) = "OneShot"
     show (EchoPrompt _) = "EchoPrompt"
@@ -466,6 +469,20 @@ parseCheckOptions :: Parser CheckCmd.CheckOptions
 parseCheckOptions =
     CheckCmd.CheckOptions
         <$> parseToolsOption
+
+-- | Parse the check-tool-call command
+parseCheckToolCallCommand :: Parser Command
+parseCheckToolCallCommand = CheckToolCall <$> parseCheckToolCallOptions
+
+parseCheckToolCallOptions :: Parser CheckToolCallCmd.CheckToolCallOptions
+parseCheckToolCallOptions =
+    CheckToolCallCmd.CheckToolCallOptions
+        <$> strOption
+            ( long "tool"
+                <> short 't'
+                <> metavar "TOOLPATH"
+                <> help "Path to the tool script to validate against"
+            )
 
 parseTuiChatCommand :: Parser Command
 parseTuiChatCommand = TerminalUI <$> parseTuiOptions
@@ -1268,6 +1285,7 @@ parseProgOptions argparserargs =
         <*> pure argparserargs.argPromptAliases
         <*> hsubparser
             ( command "check" (info parseCheckCommand (progDesc "Validate agent configurations and optionally dump tool schemas"))
+                <> command "check-tool-call" (info parseCheckToolCallCommand (progDesc "Validate a tool call payload against a tool schema (reads JSON from stdin)"))
                 <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
@@ -1402,6 +1420,8 @@ runCommand pargs baseTracer sessionStore agentFiles =
     case pargs.mainCommand of
         Check checkOpts ->
             CheckCmd.handleCheck checkOpts pargs.apiKeysFile agentFiles
+        CheckToolCall opts ->
+            CheckToolCallCmd.handleCheckToolCall opts
         TerminalUI _ ->
             TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile agentFiles
         EchoPrompt opts ->
