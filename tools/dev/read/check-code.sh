@@ -32,10 +32,10 @@ if [[ "$1" == "run" ]]; then
     if [[ "$action" == "compile" ]]; then
         echo "Compiling Haskell code..."
         echo "Using cabal"
-        cabal build | grep -v Compiling 2>&1
+        cabal build 2>&1
     elif [[ "$action" == "test" ]]; then
         echo "Running Haskell tests..."
-        cabal test | grep -v Compiling 2>&1
+        cabal test 2>&1
     else
         echo "Error: action must be either 'compile' or 'test'"
         exit 1
