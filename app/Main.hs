@@ -1178,8 +1178,9 @@ parseNewToolCommand :: Parser NewCmd.NewCommand
 parseNewToolCommand =
     NewCmd.NewTool <$> parseNewToolOptions
 
--- | Parse the new tool command options
--- Format: agents-exe new tool <slug> <language> <file>
+{- | Parse the new tool command options
+Format: agents-exe new tool <slug> <language> <file>
+-}
 parseNewToolOptions :: Parser NewCmd.NewToolOptions
 parseNewToolOptions =
     NewCmd.NewToolOptions
@@ -1187,7 +1188,8 @@ parseNewToolOptions =
             ( metavar "SLUG"
                 <> help "Unique identifier for the tool (used in describe output)"
             )
-        <*> argument parseLanguage
+        <*> argument
+            parseLanguage
             ( metavar "LANGUAGE"
                 <> help "Programming language (bash, python, haskell, node)"
             )
@@ -1635,4 +1637,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-
