@@ -687,7 +687,8 @@ execTask cfg conn t = do
                                 Just (_, checkOut, checkErr) -> do
                                     let checkOutput = Text.strip (checkOut <> checkErr)
                                     unless (Text.null checkOutput) $
-                                        void $ runGh ["pr", "comment", show prNum, "--body", Text.unpack checkOutput]
+                                        void $
+                                            runGh ["pr", "comment", show prNum, "--body", Text.unpack checkOutput]
                 _ -> do
                     putStrLn $ "[agq] Pushing branch '" <> branchName <> "' to origin"
                     void $ runGit ["-C", nameStr, "push", "-u", "origin", branchName]
@@ -792,7 +793,8 @@ pullPrReviews cfg conn repoName prNum headRef prLabels = do
             , "repos/" <> Text.unpack repoName <> "/pulls/" <> show prNum <> "/reviews"
             ]
     when (ec /= ExitSuccess) $
-        putStrLn $ "Warning: could not fetch reviews for PR #" <> show prNum
+        putStrLn $
+            "Warning: could not fetch reviews for PR #" <> show prNum
     let reviews = case Aeson.decode (lbsFromText reviewsOut) of
             Just (Aeson.Array arr) -> foldr (:) [] arr
             _ -> []
