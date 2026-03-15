@@ -311,6 +311,14 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         SystemToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
+        DeveloperToolResult _ valResult ->
+            UserToolResponse $ Aeson.toJSON valResult
+        DeveloperToolScaffoldResult _ scaffoldResult ->
+            UserToolResponse $ Aeson.toJSON scaffoldResult
+        DeveloperToolSpecResult _ content ->
+            UserToolResponse $ Aeson.String content
+        DeveloperToolError _ err ->
+            UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool

@@ -446,6 +446,14 @@ callResultToUserToolResponse _ result =
             SessionBase.UserToolResponse $ Aeson.toJSON toolResult
         SystemToolError _ err ->
             SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
+        DeveloperToolResult _ valResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON valResult
+        DeveloperToolScaffoldResult _ scaffoldResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON scaffoldResult
+        DeveloperToolSpecResult _ content ->
+            SessionBase.UserToolResponse $ Aeson.String content
+        DeveloperToolError _ err ->
+            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
 
 {- | Convert a ToolRegistration to a SystemTool for the Session agent.
 Based on toolRegistrationToSystemTool from OneShot.hs.
