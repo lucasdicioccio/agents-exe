@@ -62,6 +62,10 @@ statusErrorAttr = attrName "statusError"
 byteUsageAttr :: AttrName
 byteUsageAttr = attrName "byteUsage"
 
+-- | Attribute for paused conversation indicator.
+pausedAttr :: AttrName
+pausedAttr = attrName "paused"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -148,7 +152,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+p: export md | Ctrl+[r|t]: view md"
+            [ txt "Ctrl+Space: pause | Ctrl+p: export md | Ctrl+[r|t]: view md"
             ]
 
 -- | Conversation area with message input and conversation history.
@@ -220,8 +224,12 @@ render_conversationItem st _ conv =
             ConversationStatus_Active -> "⟳ "
             ConversationStatus_WaitingForInput ->
                 if isUnread then "● " else "  "
+            ConversationStatus_Paused -> "⏸ "
         baseText = indicator <> Text.take 18 (conversationName conv)
-        widget = txt $ " " <> baseText
+        widget = case conversationStatus conv of
+            ConversationStatus_Paused ->
+                withAttr pausedAttr $ txt $ " " <> baseText
+            _ -> txt $ " " <> baseText
      in widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
@@ -456,4 +464,5 @@ tui_appAttrMap _ =
         , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
+        , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
         ]
