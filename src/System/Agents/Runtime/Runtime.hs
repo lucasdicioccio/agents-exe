@@ -6,11 +6,13 @@ module System.Agents.Runtime.Runtime (
     AgentTools,
     addTracer,
     newRuntime,
+    newRuntimeWithMultiBash,
     triggerRefreshTools,
 ) where
 
 import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Data.Either (partitionEithers, rights)
+import Data.Maybe (maybeToList)
 import qualified Data.Text.Encoding as Text
 import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap, runTracer, traceBoth)
@@ -20,8 +22,11 @@ import System.Agents.Base (
     AgentAnnounce,
     AgentId,
     AgentSlug,
+    BashToolboxDescription (..),
     BuiltinToolboxDescription (..),
     DeveloperToolboxDescription (..),
+    FileSystemDirectoryDescription (..),
+    SingleToolDescription (..),
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
     newAgentId,
@@ -70,7 +75,16 @@ type ToolboxDirectory = FilePath
 type IOToolBuilder = AgentSlug -> AgentId -> ToolRegistration
 type McpToolConfig = McpTools.Toolbox
 
+{- | Legacy runtime creation with a single tool directory.
+
+This function is kept for backward compatibility. It creates a runtime
+with a single bash toolbox directory.
+
+For new code, prefer 'newRuntimeWithMultiBash' which supports multiple
+bash tool sources.
+-}
 newRuntime ::
+    Maybe FilePath ->
     AgentSlug ->
     AgentAnnounce ->
     Tracer IO Trace ->
@@ -84,48 +98,112 @@ newRuntime ::
     -- | Builtin toolbox descriptions - to be initialized
     [BuiltinToolboxDescription] ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
+newRuntime agentdir slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
+    -- Convert single directory to multi-source format
+    let legacyDesc = FileSystemDirectory $ FileSystemDirectoryDescription agentdir tooldir Nothing
+    newRuntimeWithMultiBash
+        slug
+        announce
+        tracer
+        apiKey
+        model
+        [legacyDesc]
+        mkIoTools
+        mcpToolboxes
+        openApiToolRegs
+        builtinDescriptions
+
+{- | Create a new runtime with multiple bash tool sources.
+
+This is the preferred way to create a runtime when you need to load
+tools from multiple directories or single executables.
+
+Example:
+
+@
+let bashSources =
+        [ FileSystemDirectory $ FileSystemDirectoryDescription (Just "agents/" "./tools" Nothing
+        , FileSystemDirectory $ FileSystemDirectoryDescription Nothing "./extra" (Just ".sh")
+        , SingleTool $ SingleToolDescription "/path/to/special.sh"
+        ]
+result <- newRuntimeWithMultiBash slug announce tracer apiKey model bashSources ...
+@
+-}
+newRuntimeWithMultiBash ::
+    AgentSlug ->
+    AgentAnnounce ->
+    Tracer IO Trace ->
+    OpenAI.ApiKey ->
+    OpenAI.Model ->
+    -- | Bash tool sources (directories and/or single tools)
+    [BashToolboxDescription] ->
+    [IOToolBuilder] ->
+    [McpToolConfig] ->
+    -- | OpenAPI tool registrations - initialized and ready to use
+    [ToolRegistration] ->
+    -- | Builtin toolbox descriptions - to be initialized
+    [BuiltinToolboxDescription] ->
+    IO (Either String Runtime)
+newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
-    toolz <- BashToolbox.initializeBackroundToolbox (contramap (AgentTrace_Loading slug uid) tracer) tooldir
-    case toolz of
+
+    -- Initialize bash tools from multiple sources
+    multiToolboxResult <- BashToolbox.initializeMultiSourceToolbox (contramap (AgentTrace_Loading slug uid) tracer) "." bashSources
+
+    case multiToolboxResult of
         Left err -> pure $ Left (show err)
-        Right toolbox -> do
+        Right multiToolbox -> do
             -- Initialize builtin toolboxes (SQLite, System, and Developer)
             (sqliteToolboxes, systemToolboxes, developerToolboxes) <- initializeBuiltinToolboxes tracer builtinDescriptions
 
             let auth = HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey
             httpRt <- HttpClient.newRuntime auth
-            let appendIOTools xs = ioTools <> xs
-            let registerTools xs = fmap registerBashToolInLLM xs
-            let bkgToolsWithIOTools = fmap (appendIOTools . registerTools) toolbox.tools
 
-            -- Create mutable TVar for tools, initialized with bash + IO + MCP + OpenAPI + SQLite + System + Developer tools
+            -- Create mutable TVar for tools
             toolsTVar <- newTVarIO []
 
-            let readTools = (<>) <$> Background.readBackgroundVal bkgToolsWithIOTools <*> readAdditionalTools sqliteToolboxes systemToolboxes developerToolboxes
-            -- Initialize the TVar with the base tools
-            baseTools <- readTools
+            -- Read tools from all sources
+            baseTools <- readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs
             atomically $ writeTVar toolsTVar baseTools
 
-            let rt = Runtime slug uid announce tracer httpRt model toolsTVar toolbox.triggerReload
+            let rt = Runtime slug uid announce tracer httpRt model toolsTVar (BashToolbox.triggerAllReloads multiToolbox)
             pure $ Right rt
   where
-    readAdditionalTools :: [SqliteToolbox.Toolbox] -> [SystemToolbox.Toolbox] -> [DeveloperToolbox.Toolbox] -> IO [ToolRegistration]
-    readAdditionalTools sqliteToolboxes systemToolboxes developerToolboxes = do
-        mcpTools <- readMcpToolsRegistrations
-        sqliteTools <- readSqliteToolsRegistrations tracer sqliteToolboxes
-        systemTools <- readSystemToolsRegistrations tracer systemToolboxes
-        developerTools <- readDeveloperToolsRegistrations tracer developerToolboxes
-        -- OpenAPI tools are pre-registered and static
-        pure $ mcpTools <> sqliteTools <> systemTools <> developerTools <> openApiToolRegs
+    readAllTools ::
+        BashToolbox.MultiSourceBashTools ->
+        [ToolRegistration] ->
+        [SqliteToolbox.Toolbox] ->
+        [SystemToolbox.Toolbox] ->
+        [DeveloperToolbox.Toolbox] ->
+        [McpToolConfig] ->
+        [ToolRegistration] ->
+        IO [ToolRegistration]
+    readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs' = do
+        -- Read bash tools from all sources
+        bashScripts <- BashToolbox.readMultiSourceTools multiToolbox
+        let bashTools = map registerBashToolInLLM bashScripts
 
-    readMcpToolsRegistrations :: IO [ToolRegistration]
-    readMcpToolsRegistrations = do
-        -- TODO: would be nice to collect the lefts and trace errors upon relaoding
-        lists <- traverse (atomically . readTVar . McpTools.toolsList) $ mcpToolboxes
+        -- Read MCP tools
+        mcpTools <- readMcpToolsRegistrations mcpToolboxes
+
+        -- Read SQLite tools
+        sqliteTools <- readSqliteToolsRegistrations tracer sqliteToolboxes
+
+        -- Read System tools
+        systemTools <- readSystemToolsRegistrations tracer systemToolboxes
+
+        -- Read Developer tools
+        developerTools <- readDeveloperToolsRegistrations tracer developerToolboxes
+
+        -- Combine all tools: bash + IO + MCP + OpenAPI + SQLite + System + Developer
+        pure $ bashTools ++ ioTools ++ mcpTools ++ openApiToolRegs' ++ sqliteTools ++ systemTools ++ developerTools
+
+    readMcpToolsRegistrations :: [McpToolConfig] -> IO [ToolRegistration]
+    readMcpToolsRegistrations configs = do
+        lists <- traverse (atomically . readTVar . McpTools.toolsList) configs
         let reg tb tds = rights [registerMcpToolInLLM tb td | td <- tds]
-        pure $ mconcat $ zipWith reg mcpToolboxes lists
+        pure $ mconcat $ zipWith reg configs lists
 
 {- | Initialize all builtin toolboxes from their descriptions.
 Supports SQLite, System, and Developer toolboxes.

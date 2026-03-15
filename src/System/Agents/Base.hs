@@ -92,6 +92,139 @@ instance FromJSON ExtraAgentRef where
     parseJSON = Aeson.genericParseJSON extraAgentRefOptions
 
 -------------------------------------------------------------------------------
+-- Bash Toolbox Configuration
+-------------------------------------------------------------------------------
+
+{- | Configuration for a filesystem directory as a bash tool source.
+
+Describes a directory containing executable bash tools that follow
+the standard bash-tool protocol (describe|run).
+
+Example configuration:
+
+@
+{
+  "tag": "FileSystemDirectory",
+  "contents": {
+    "path": "./tools",
+    "basenameFilter": ".sh"
+  }
+}
+@
+
+The optional 'basenameFilter' field allows filtering tools by their
+filename. If specified, only executables whose names contain the
+filter string will be loaded.
+-}
+data FileSystemDirectoryDescription
+    = FileSystemDirectoryDescription
+    { fsDirRoot :: Maybe FilePath
+    -- ^ Root path, this field is here to support legacy tools definitions
+    , fsDirPath :: FilePath
+    -- ^ Path to the directory containing bash tools
+    , fsDirBasenameFilter :: Maybe Text
+    -- ^ Optional filter for tool filenames (e.g., ".sh" to load only .sh files)
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for FileSystemDirectoryDescription
+fsDirOptions :: Aeson.Options
+fsDirOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "fsDir"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON FileSystemDirectoryDescription where
+    toJSON = Aeson.genericToJSON fsDirOptions
+    toEncoding = Aeson.genericToEncoding fsDirOptions
+
+instance FromJSON FileSystemDirectoryDescription where
+    parseJSON = Aeson.genericParseJSON fsDirOptions
+
+{- | Configuration for a single tool executable.
+
+Describes a single executable file to be loaded as a bash tool.
+This is useful when you want to add a specific tool without loading
+an entire directory.
+
+Example configuration:
+
+@
+{
+  "tag": "SingleTool",
+  "contents": {
+    "path": "/path/to/my-tool.sh"
+  }
+}
+@
+-}
+newtype SingleToolDescription = SingleToolDescription
+    { singleToolPath :: FilePath
+    -- ^ Path to the single executable tool
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON SingleToolDescription where
+    toJSON (SingleToolDescription path) = Aeson.toJSON path
+
+instance FromJSON SingleToolDescription where
+    parseJSON v = SingleToolDescription <$> Aeson.parseJSON v
+
+{- | Wrapper type for bash toolbox descriptions with tag-based JSON serialization.
+
+This is a tagged union type that allows extensible bash toolbox types.
+New bash toolbox types can be added in the future without breaking
+existing configurations.
+
+Example configuration:
+
+@
+{
+  "bashToolboxes": [
+    {"tag": "FileSystemDirectory", "contents": {"path": "./tools", "basenameFilter": null}},
+    {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools", "basenameFilter": ".sh"}},
+    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
+  ]
+}
+@
+
+The old 'tools' key (singular directory path) is still supported for
+backward compatibility. If both 'tools' and 'bashToolboxes' are specified,
+both will be used.
+-}
+data BashToolboxDescription
+    = FileSystemDirectory FileSystemDirectoryDescription
+    | SingleTool SingleToolDescription
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON BashToolboxDescription where
+    toJSON (FileSystemDirectory val) =
+        Aeson.object
+            [ "tag" .= ("FileSystemDirectory" :: Text)
+            , "contents" .= val
+            ]
+    toJSON (SingleTool val) =
+        Aeson.object
+            [ "tag" .= ("SingleTool" :: Text)
+            , "contents" .= val
+            ]
+
+instance FromJSON BashToolboxDescription where
+    parseJSON = Aeson.withObject "BashToolboxDescription" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "FileSystemDirectory" ->
+                FileSystemDirectory <$> v .: "contents"
+            "SingleTool" ->
+                SingleTool <$> v .: "contents"
+            _ -> fail "expecting 'FileSystemDirectory' or 'SingleTool' tag"
+
+-------------------------------------------------------------------------------
 -- OpenAPI Toolbox Configuration
 -------------------------------------------------------------------------------
 
@@ -715,6 +848,44 @@ instance FromJSON BuiltinToolboxDescription where
             _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', or 'DeveloperToolbox' tag"
 
 -------------------------------------------------------------------------------
+
+{- | Agent definition.
+
+An agent can load tools from multiple sources:
+
+1. The legacy @tools@ field (optional) - a single directory of bash tools.
+2. The new @bashToolboxes@ field (optional) - a list of bash tool sources
+   including directories with optional filters and single executable tools.
+3. MCP servers from @mcpServers@.
+4. OpenAPI toolboxes from @openApiToolboxes@.
+5. PostgREST toolboxes from @postgrestToolboxes@.
+6. Builtin toolboxes (SQLite, System, Developer) from @builtinToolboxes@.
+
+If both @tools@ and @bashToolboxes@ are specified, both will be used.
+This maintains backward compatibility while allowing gradual migration.
+
+Example configuration:
+
+@
+{
+  "slug": "my-agent",
+  "apiKeyId": "openai",
+  "flavor": "openai",
+  "modelUrl": "https://api.openai.com/v1",
+  "modelName": "gpt-4",
+  "announce": "A helpful assistant",
+  "systemPrompt": ["You are a helpful assistant."],
+  "tools": "tools",
+  "bashToolboxes": [
+    {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools"}},
+    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
+  ],
+  "mcpServers": [...],
+  "openApiToolboxes": [...],
+  "builtinToolboxes": [...]
+}
+@
+-}
 data Agent
     = Agent
     { slug :: Text
@@ -724,7 +895,10 @@ data Agent
     , modelName :: Text
     , announce :: Text
     , systemPrompt :: [Text]
-    , toolDirectory :: FilePath
+    , toolDirectory :: Maybe FilePath
+    -- ^ Legacy single tool directory (optional for backward compatibility)
+    , bashToolboxes :: Maybe [BashToolboxDescription]
+    -- ^ New multiple bash tool sources
     , mcpServers :: Maybe [McpServerDescription]
     , openApiToolboxes :: Maybe [OpenAPIToolboxDescription]
     , postgrestToolboxes :: Maybe [PostgRESTToolboxDescription]

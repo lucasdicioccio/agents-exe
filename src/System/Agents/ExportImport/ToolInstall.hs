@@ -10,6 +10,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Either (partitionEithers)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -63,8 +64,9 @@ defaultInstallOptions =
 -- | Install tools to an agent's tool directory
 installToolsToAgent :: [StandaloneToolExport] -> Agent -> InstallOptions -> IO (Either InstallError ())
 installToolsToAgent tools agent opts = do
-    let toolDir = toolDirectory agent
-    installTools tools toolDir opts
+    case toolDirectory agent of
+        Nothing -> pure $ Left $ InvalidToolDirectory "Agent has no toolDirectory configured"
+        Just toolDir -> installTools tools toolDir opts
 
 -- | Install tools to a specific directory
 installTools :: [StandaloneToolExport] -> FilePath -> InstallOptions -> IO (Either InstallError ())
@@ -93,17 +95,21 @@ installToolsGlobally tools globalDir opts = do
 -- | Copy tools from one agent to another
 copyToolsBetweenAgents :: Agent -> Agent -> InstallOptions -> IO (Either InstallError ())
 copyToolsBetweenAgents fromAgent toAgent opts = do
-    -- Load tools from source agent
-    result <- try $ do
-        toolFiles <- listDirectory (toolDirectory fromAgent)
-        -- Read and create exports for each tool
-        toolExports <- mapM (loadToolFromPath (toolDirectory fromAgent)) toolFiles
-        let validExports = [e | Right e <- toolExports]
-        installToolsToAgent validExports toAgent opts
+    case (toolDirectory fromAgent, toolDirectory toAgent) of
+        (Nothing, _) -> pure $ Left $ InvalidToolDirectory "Source agent has no toolDirectory"
+        (_, Nothing) -> pure $ Left $ InvalidToolDirectory "Target agent has no toolDirectory"
+        (Just fromDir, Just toDir) -> do
+            -- Load tools from source agent
+            result <- try $ do
+                toolFiles <- listDirectory fromDir
+                -- Read and create exports for each tool
+                toolExports <- mapM (loadToolFromPath fromDir) toolFiles
+                let validExports = [e | Right e <- toolExports]
+                installTools validExports toDir opts
 
-    case result of
-        Left (e :: IOException) -> pure $ Left $ InstallIOError e
-        Right r -> pure r
+            case result of
+                Left (e :: IOException) -> pure $ Left $ InstallIOError e
+                Right r -> pure r
 
 -------------------------------------------------------------------------------
 -- Individual Tool Installation
@@ -300,7 +306,9 @@ resolveImportDestination dest = case dest of
             case Aeson.eitherDecode content of
                 Left err -> pure $ Left $ ValidationFailed $ "Failed to parse agent file: " ++ err
                 Right (AgentDescription agent) ->
-                    pure $ Right $ toolDirectory agent
+                    case toolDirectory agent of
+                        Nothing -> pure $ Left $ InvalidToolDirectory "Agent has no toolDirectory configured"
+                        Just toolDir -> pure $ Right toolDir
         case result of
             Left (e :: IOException) -> pure $ Left $ InstallIOError e
             Right r -> pure r

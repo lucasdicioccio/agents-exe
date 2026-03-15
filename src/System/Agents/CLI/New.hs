@@ -169,7 +169,8 @@ buildAgentConfig opts = do
             , modelName = modelName
             , announce = "a helpful assistant powered by " <> modelName
             , systemPrompt = defaultSystemPrompt opts.newAgentSlug
-            , toolDirectory = "tools"
+            , toolDirectory = Just "tools"
+            , bashToolboxes = Nothing
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
@@ -208,14 +209,20 @@ handleNewAgent force opts = do
         Right agent -> do
             -- Create directory structure
             createDirectoryIfMissing True (takeDirectory opts.newAgentFilePath)
-            createDirectoryIfMissing True (takeDirectory opts.newAgentFilePath </> agent.toolDirectory)
+            -- Create tool directory if toolDirectory is specified
+            case agent.toolDirectory of
+                Just toolDir -> do
+                    createDirectoryIfMissing True (takeDirectory opts.newAgentFilePath </> toolDir)
+                    Text.putStrLn $ "Created agent: " <> Text.pack opts.newAgentFilePath
+                    Text.putStrLn $ "Tool directory: " <> Text.pack (takeDirectory opts.newAgentFilePath </> toolDir)
+                Nothing -> do
+                    Text.putStrLn $ "Created agent: " <> Text.pack opts.newAgentFilePath
+                    Text.putStrLn $ "No tool directory configured"
 
             -- Write agent file
             LByteString.writeFile opts.newAgentFilePath $
                 Aeson.encodePretty (AgentDescription agent)
 
-            Text.putStrLn $ "Created agent: " <> Text.pack opts.newAgentFilePath
-            Text.putStrLn $ "Tool directory: " <> Text.pack (takeDirectory opts.newAgentFilePath </> agent.toolDirectory)
             Text.putStrLn $ "Model: " <> agent.modelName
             Text.putStrLn $ "Provider: " <> opts.newAgentPreset
 
