@@ -219,17 +219,227 @@ agents-exe init [--agent-file FILE]
 agents-exe init --agent-file ./my-agent.json
 ```
 
-### describe
+### new
 
-Output self-describing schema for the agent.
+Create scaffolding for new agents or tools.
 
 ```bash
-agents-exe describe
+agents-exe new (agent|tool) [OPTIONS]
 ```
 
-**Output:** JSON schema for tool calling.
+#### new agent
 
-**Use case:** Integration with external systems that need to understand the agent's interface.
+Create a new agent configuration file from a template.
+
+```bash
+agents-exe new agent [OPTIONS] SLUG
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--file FILE` | Output file path (default: `./{slug}.json`) |
+| `--preset PRESET` | Model preset: `openai`, `mistral`, `ollama` (default: `openai`) |
+| `--model MODEL` | Override the model name from preset |
+| `--force` | Overwrite existing file |
+
+**Presets:**
+
+| Preset | Model URL | Default Model | API Key ID |
+|--------|-----------|---------------|------------|
+| `openai` | https://api.openai.com/v1 | gpt-4-turbo-preview | main-key |
+| `mistral` | https://api.mistral.ai/v1 | mistral-large-latest | mistral-key |
+| `ollama` | http://localhost:11434/v1 | llama3.2 | ollama-key |
+
+**Examples:**
+
+```bash
+# Create agent with OpenAI preset (default)
+agents-exe new agent my-assistant
+
+# Create agent with specific preset
+agents-exe new agent my-assistant --preset mistral
+
+# Create agent with custom model
+agents-exe new agent coder --preset openai --model gpt-4o
+
+# Create agent with custom output path
+agents-exe new agent my-assistant --file ./agents/assistant.json
+
+# Overwrite existing
+agents-exe new agent my-assistant --force
+```
+
+**Generated agent file:**
+```json
+{
+  "agent": {
+    "slug": "my-assistant",
+    "apiKeyId": "main-key",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
+    "modelName": "gpt-4-turbo-preview",
+    "announce": "a helpful assistant powered by gpt-4-turbo-preview",
+    "systemPrompt": [
+      "You are my-assistant, a helpful AI assistant.",
+      "You provide clear, accurate, and concise responses.",
+      "When using tools, you explain your actions to the user."
+    ],
+    "toolDirectory": "tools",
+    "mcpServers": [],
+    "openApiToolboxes": null,
+    "postgrestToolboxes": null,
+    "builtinToolboxes": [],
+    "extraAgents": null
+  }
+}
+```
+
+#### new tool
+
+Create a new tool script from a template.
+
+```bash
+agents-exe new tool [OPTIONS] SLUG
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--file FILE` | Output file path (default: `./tools/{slug}`) |
+| `--language LANG` | Language: `bash`, `python`, `haskell`, `node` (default: `bash`) |
+| `--force` | Overwrite existing file |
+
+**Examples:**
+
+```bash
+# Create bash tool (default)
+agents-exe new tool my-tool
+
+# Create Python tool
+agents-exe new tool my-tool --language python
+
+# Create Haskell tool
+agents-exe new tool my-tool --language haskell
+
+# Create Node.js tool
+agents-exe new tool my-tool --language node
+
+# Custom output path
+agents-exe new tool my-tool --file ./scripts/my-tool.sh
+```
+
+**Generated bash tool:**
+```bash
+#!/bin/bash
+# my-tool - A bash tool for agents-exe
+
+set -euo pipefail
+
+# Agents-exe tool protocol: describe|run
+# Environment variables available during 'run':
+#   AGENT_SESSION_ID      - UUID of the current session
+#   AGENT_CONVERSATION_ID - UUID of the conversation
+#   AGENT_TURN_ID         - UUID of the current turn
+#   AGENT_AGENT_ID        - UUID of the executing agent (if available)
+
+case "${1:-}" in
+  describe)
+    cat <<'DESCRIBE_EOF'
+{
+  "slug": "my-tool",
+  "description": "Tool my-tool - describe what this tool does",
+  "args": [],
+  "empty-result": {
+    "tag": "AddMessage",
+    "contents": "--no output--"
+  }
+}
+DESCRIBE_EOF
+    ;;
+  run)
+    # TODO: Implement tool logic
+    # Access arguments via environment or command line
+    echo "Tool my-tool executed"
+    ;;
+  *)
+    echo "Usage: my-tool <describe|run>" >&2
+    exit 1
+    ;;
+esac
+```
+
+**Next steps after creating a tool:**
+1. Edit the `args` array in the describe function
+2. Implement the `run` function logic
+3. Test with: `agents-exe describe-tool ./tools/my-tool`
+
+### spec
+
+Display embedded specification documentation.
+
+```bash
+agents-exe spec TOPIC
+```
+
+**Topics:**
+
+| Topic | Description |
+|-------|-------------|
+| `bash-tools` | Binary tool protocol specification |
+
+**Examples:**
+
+```bash
+# Display bash-tools specification
+agents-exe spec bash-tools
+```
+
+**Use case:** Learn the protocol for writing bash tools without leaving the CLI.
+
+### describe-tool
+
+Display information about a tool script.
+
+```bash
+agents-exe describe-tool TOOL_PATH
+```
+
+**Description:**
+Loads and displays the tool's description (the output of `tool describe`).
+
+**Example:**
+```bash
+agents-exe describe-tool ./tools/my-tool.sh
+```
+
+**Output:**
+```json
+{
+  "slug": "my-tool",
+  "description": "What this tool does",
+  "args": [...],
+  "empty-result": {...}
+}
+```
+
+### check-tool-call
+
+Validate and test a tool call.
+
+```bash
+agents-exe check-tool-call TOOL_PATH [--arg name=value ...]
+```
+
+**Description:**
+Validates that a tool call matches the tool's declared schema.
+
+**Example:**
+```bash
+agents-exe check-tool-call ./tools/my-tool.sh --arg input="test"
+```
 
 ### export
 
@@ -362,6 +572,67 @@ agents-exe import \
   --to ./tools/
 ```
 
+### session-edit
+
+Edit a session file.
+
+```bash
+agents-exe session-edit [OPTIONS] SESSIONFILE
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--compress-turns N` | Compress turns older than N |
+| `--remove-tool-calls` | Remove all tool calls |
+| `--remove-empty-messages` | Remove empty messages |
+
+**Examples:**
+
+```bash
+# Compress old turns
+agents-exe session-edit --compress-turns 10 session.json
+
+# Clean up session
+agents-exe session-edit --remove-empty-messages session.json
+```
+
+### describe
+
+Output self-describing schema for the agent.
+
+```bash
+agents-exe describe
+```
+
+**Output:** JSON schema for tool calling.
+
+**Use case:** Integration with external systems that need to understand the agent's interface.
+
+### cowsay
+
+Display a fun message (utility command).
+
+```bash
+agents-exe cowsay [MESSAGE]
+```
+
+**Example:**
+```bash
+agents-exe cowsay "Hello, agents!"
+```
+
+### self-describe
+
+Output information about the agents-exe binary itself.
+
+```bash
+agents-exe self-describe
+```
+
+**Output:** Version, build info, and available commands.
+
 ## Configuration File
 
 Project-level configuration in `agents-exe.cfg.json`:
@@ -416,25 +687,28 @@ Project-level configuration in `agents-exe.cfg.json`:
 
 ```bash
 # 1. Initialize new agent
-agents-exe init --agent-file ./my-agent.json
+agents-exe new agent my-assistant
 
-# 2. Edit configuration
-# (edit my-agent.json)
+# 2. Create a custom tool
+agents-exe new tool file-reader --language python
 
-# 3. Check configuration
-agents-exe check --agent-file ./my-agent.json
+# 3. Edit tool and agent configurations
+# (edit files as needed)
 
-# 4. Test with one-shot
-agents-exe run --agent-file ./my-agent.json --prompt "Test"
+# 4. Check configuration
+agents-exe check --agent-file ./my-assistant.json
 
-# 5. Start interactive session
-agents-exe tui --agent-file ./my-agent.json
+# 5. Test with one-shot
+agents-exe run --agent-file ./my-assistant.json --prompt "Test"
 
-# 6. Export for sharing
-agents-exe export --agent-file ./my-agent.json --output ./my-agent.tar.gz
+# 6. Start interactive session
+agents-exe tui --agent-file ./my-assistant.json
 
-# 7. Import elsewhere
-agents-exe import --from-file ./my-agent.tar.gz --to ./new-location/
+# 7. Export for sharing
+agents-exe export --agent-file ./my-assistant.json --output ./my-assistant.tar.gz
+
+# 8. Import elsewhere
+agents-exe import --from-file ./my-assistant.tar.gz --to ./new-location/
 ```
 
 ### Multi-Agent Setup
@@ -449,7 +723,7 @@ agents-exe tui \
 # Start multi-agent MCP server
 agents-exe mcp-server \
   --agent-file ./router.json \
-  --agent-file ./coder.json \
+  --agent-file ./coder.json
 ```
 
 ### Automation
@@ -469,5 +743,23 @@ agents-exe run \
     --agent-file ./reviewer.json \
     --shell "git diff --cached" \
     --prompt "Review these changes."
+```
+
+### Developer Workflow
+
+```bash
+# Learn the tool protocol
+agents-exe spec bash-tools
+
+# Create and validate a tool
+agents-exe new tool my-validator --language bash
+# (edit the tool)
+agents-exe describe-tool ./tools/my-validator
+agents-exe check-tool-call ./tools/my-validator --arg input="test"
+
+# Create agent with dev tools
+agents-exe new agent dev-assistant
+# (add DeveloperToolbox to builtinToolboxes)
+# Now the agent can validate tools and scaffold new ones!
 ```
 
