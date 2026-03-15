@@ -11,8 +11,10 @@ import Brick.Widgets.Edit (Editor, editorText)
 import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
-import Control.Concurrent.STM (TVar)
+import Control.Concurrent.STM (TVar, newTVarIO)
 import Control.Lens (makeLenses)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -151,6 +153,10 @@ data Core = Core
     , coreConversations :: [Conversation]
     , corePausedConversations :: Set ConversationId
     -- ^ Set of conversation IDs that are currently paused
+    , coreBufferedMessages :: TVar (Map ConversationId [Text])
+    -- ^ Buffered messages per conversation - allows users to send messages
+    -- while the agent is processing tool calls. Messages are consumed and
+    -- concatenated when the agent collects user input.
     }
 
 makeLenses ''Core
@@ -171,6 +177,7 @@ data UIState = UIState
     , _unreadConversations :: Set ConversationId
     , _ongoingConversations :: Set ConversationId
     -- ^ Conversations currently being processed by an agent
+    -- (kept for backward compatibility and heartbeat tracking)
     , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background async tasks (e.g., external viewers)
     , _coreAgentTools :: [(AgentId, [ToolRegistration])]
@@ -225,8 +232,10 @@ initUIState agents loadedSessions =
         }
 
 -- | Create initial Core state.
-initCore :: [TuiAgent] -> Core
-initCore agents = Core agents [] Set.empty
+initCore :: [TuiAgent] -> IO Core
+initCore agents = do
+    bufferVar <- newTVarIO Map.empty
+    pure $ Core agents [] Set.empty bufferVar
 
 -------------------------------------------------------------------------------
 -- Utility Functions
@@ -241,3 +250,4 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+

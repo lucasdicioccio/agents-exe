@@ -12,11 +12,14 @@ import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelect
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
-import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
 import Control.Lens (to, use, (%=), (.=))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
@@ -546,6 +549,31 @@ buildOnProgress convId outChan progress = do
         SessionFailed sess _ -> do
             writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
 
+-- | STM operation to read and clear buffered messages for a conversation.
+-- Returns the messages that were buffered (if any).
+readAndClearBufferedMessagesSTM :: ConversationId -> TVar (Map ConversationId [Text]) -> STM [Text]
+readAndClearBufferedMessagesSTM convId bufferVar = do
+    buffers <- readTVar bufferVar
+    case Map.lookup convId buffers of
+        Nothing -> pure []
+        Just msgs -> do
+            writeTVar bufferVar (Map.insert convId [] buffers)
+            pure msgs
+
+-- | Read and clear buffered messages for a conversation.
+-- Returns the concatenated messages (if any) that were buffered.
+readAndClearBufferedMessages :: ConversationId -> Core -> IO (Maybe Text.Text)
+readAndClearBufferedMessages convId core = do
+    msgs <- atomically $ readAndClearBufferedMessagesSTM convId core.coreBufferedMessages
+    pure $ case msgs of
+        [] -> Nothing
+        _ -> Just $ Text.unlines $ reverse msgs  -- Reverse to maintain order (oldest first)
+
+-- | Add a message to the buffer for a conversation.
+addBufferedMessage :: ConversationId -> Core -> Text.Text -> IO ()
+addBufferedMessage convId core msg =
+    atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
+
 runConversation :: TuiAgent -> Session -> EventM N TuiState ()
 runConversation baseTuiAgent session = do
     -- Get session configuration
@@ -564,10 +592,21 @@ runConversation baseTuiAgent session = do
     -- Note: runtimeToAgent now requires convId as a parameter
     agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.agentTree.agentRuntime)
 
-    -- Get reference to core state for pause checking
+    -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
 
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+
+    -- Helper to collect buffered messages and combine with a new query
+    let collectBufferedQuery :: Maybe UserQuery -> Core -> IO (Maybe UserQuery)
+        collectBufferedQuery mQuery core = do
+            buffered <- readAndClearBufferedMessages convId core
+            pure $ case (mQuery, buffered) of
+                (Nothing, Nothing) -> Nothing
+                (Just (UserQuery q), Nothing) -> Just (UserQuery q)
+                (Nothing, Just b) -> Just (UserQuery b)
+                (Just (UserQuery q), Just b) -> Just (UserQuery $ q <> "\n" <> b)
+
     let a =
             agent0
                 { step = \sess -> do
@@ -585,8 +624,27 @@ runConversation baseTuiAgent session = do
                         Stop _r ->
                             -- smoll hack to reuse the naive step from runtimeToAgent
                             pure $ AskUserPrompt (MissingUserPrompt True [])
+                        AskUserPrompt missing -> do
+                            -- Collect buffered messages and combine with existing query
+                            core <- readTVarIO coreRef
+                            combinedQuery <- collectBufferedQuery (if missing.missingQuery then Nothing else Just (UserQuery "")) core
+                            let newMissing = missing{missingQuery = combinedQuery == Nothing, missingToolCalls = missing.missingToolCalls}
+                            pure $ AskUserPrompt newMissing{missingQuery = combinedQuery == Nothing}
+                                -- Note: The query will be provided via usrQuery below
                         _ -> pure ret
-                , usrQuery = notifyNeedInput >> readBChan inChan
+                , usrQuery = do
+                    -- First check for buffered messages
+                    core <- readTVarIO coreRef
+                    buffered <- readAndClearBufferedMessages convId core
+                    -- Then wait for user input from the channel
+                    channelInput <- readBChan inChan
+                    -- Combine buffered messages with channel input
+                    pure $ case (buffered, channelInput) of
+                        (Nothing, Nothing) -> Nothing
+                        (Just b, Nothing) -> Just (UserQuery b)
+                        (Nothing, Just q) -> q
+                        (Just b, Just (UserQuery q)) -> Just (UserQuery $ b <> "\n" <> q)
+                        (Just b, Just Nothing) -> Just (UserQuery b)  -- Channel sent Nothing (shouldn't happen in normal flow)
                 }
 
     -- \* wrap in Conversation
@@ -618,6 +676,9 @@ runConversation baseTuiAgent session = do
     tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
 
 -- | Send a message in the current conversation.
+-- Messages are now buffered if the conversation is being processed by the agent,
+-- allowing users to "interrupt" or provide additional context while the agent
+-- is executing tool calls.
 handleSendMessage :: EventM N TuiState ()
 handleSendMessage = do
     -- Get message text
@@ -629,14 +690,26 @@ handleSendMessage = do
         selected <- use (tuiUI . conversationList . to listSelectedElement)
         case selected of
             Just (_idx, conv) -> do
-                -- Write message unconditionally
-                liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText)
+                -- Get core reference for message buffering
+                coreRef <- use tuiCore
+                core <- liftIO $ readTVarIO coreRef
 
                 -- Check if conversation is already being processed
                 ongoing <- use (tuiUI . ongoingConversations)
-                when (not $ Set.member (conversationId conv) ongoing) $ do
-                    -- Mark as ongoing
-                    tuiUI . ongoingConversations %= Set.insert (conversationId conv)
-                    -- Clear editor
-                    tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                let isOngoing = Set.member (conversationId conv) ongoing
+
+                if isOngoing
+                    then do
+                        -- Buffer the message - agent will pick it up when collecting tool responses
+                        liftIO $ addBufferedMessage (conversationId conv) core msgText
+                        showStatus StatusInfo "Message buffered - will be sent with tool responses"
+                    else do
+                        -- Conversation is waiting for input - send directly via channel
+                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText)
+                        -- Mark as ongoing since we're starting agent processing
+                        tuiUI . ongoingConversations %= Set.insert (conversationId conv)
+
+                -- Always clear the editor - user can type more messages
+                tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
