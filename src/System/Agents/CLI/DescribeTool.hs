@@ -1,10 +1,18 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | Module for the standalone 'describe' command handler.
+{- | Module for the standalone 'describe-tool' command handler.
 
-The describe command validates and displays tool registration information
-for bash tool scripts without requiring an agent configuration.
+The describe-tool command validates and displays tool registration information
+for bash tool scripts without requiring an agent configuration. This enables
+rapid iteration when developing new tools.
+
+Example usage:
+
+> agents-exe describe-tool /path/to/tool-script
+
+Outputs the parsed 'ScriptInfo' as formatted JSON on success, or a helpful
+error message on failure.
 -}
 module System.Agents.CLI.DescribeTool (
     handleDescribeTool,
@@ -12,18 +20,18 @@ module System.Agents.CLI.DescribeTool (
     OutputFormat (..),
 ) where
 
-import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import System.Exit (exitFailure)
-import System.IO (stderr)
+import System.IO (stderr, stdout)
 
-import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptArgCallingMode (..), ScriptDescription (..), ScriptInfo (..))
+import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..), ScriptInfo (..))
 import qualified System.Agents.Tools.Bash as Bash
 
 -- | Output format for tool description
@@ -53,18 +61,38 @@ handleDescribeTool opts = do
     result <- Bash.loadScript Prod.silent opts.describeToolPath
     case result of
         Left err -> do
-            Text.hPutStrLn stderr $ "Error loading tool: " <> Text.pack (show err)
+            Text.hPutStrLn stderr $ formatError err
             exitFailure
         Right scriptDesc -> do
             if opts.describeCheckOnly
                 then do
                     Text.putStrLn $ "Tool '" <> scriptDesc.scriptInfo.scriptSlug <> "' is valid."
                 else case opts.describeOutputFormat of
-                    FormatJson ->
-                        LByteString.writeFile "/dev/stdout" $
-                            Aeson.encodePretty scriptDesc.scriptInfo
+                    FormatJson -> do
+                        LByteString.hPutStr stdout $ Aeson.encodePretty scriptDesc.scriptInfo
+                        -- Add trailing newline after JSON output
+                        Text.putStrLn ""
                     FormatPretty ->
                         printPrettyDescription scriptDesc
+
+-- | Format an error for display
+formatError :: Bash.InvalidScriptError -> Text
+formatError (Bash.InvalidScriptError path code errOutput) =
+    Text.unlines
+        [ "Error: Tool script failed during describe"
+        , "  Path: " <> Text.pack path
+        , "  Exit code: " <> Text.pack (show code)
+        , "  Stderr: " <> Text.decodeUtf8With lenientDecode errOutput
+        ]
+formatError (Bash.InvalidDescriptionError path jsonErr) =
+    Text.unlines
+        [ "Error: Tool returned invalid JSON description"
+        , "  Path: " <> Text.pack path
+        , "  Parse error: " <> Text.pack jsonErr
+        , ""
+        , "Hint: Run the tool with 'describe' argument manually to see its output:"
+        , "  " <> Text.pack path <> " describe"
+        ]
 
 -- | Print a human-readable description of the tool
 printPrettyDescription :: ScriptDescription -> IO ()
