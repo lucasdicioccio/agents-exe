@@ -11,12 +11,14 @@
   "projects": {
     "root": ".",
     "architect": ".",
-    "documenter": "."
+    "documenter": ".",
+    "issuer": "."
   },
   "agents": {
-    "default": "tasks-agents/kimi-agent-oneshot.json",
-    "architect": "tasks-agents/kimi-architect.json",
-    "documenter": "tasks-agents/kimi-documenter.json"
+    "default": "agents/oneshot.json",
+    "architect": "agents/architect.json",
+    "documenter": "agents/documenter.json",
+    "issuer": "agents/issuer.json"
   },
   "hookTimeoutSeconds": 600,
   "hooks": {

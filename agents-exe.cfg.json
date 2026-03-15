@@ -1,4 +1,4 @@
-{ "agentsDirectories":["./interactive-agents/", "./tasks-agents/", "./demo-agents", "./qa-agent", "./localdev-agents/", "./recursive-agents/"]
+{ "agentsDirectories":["./interactive-agents/", "./agents/", "./demo-agents", "./qa-agent", "./localdev-agents/", "./recursive-agents/"]
 , "agentsFiles":[]
 , "agentsLogs": {
     "logJsonPath": "logs.json"
