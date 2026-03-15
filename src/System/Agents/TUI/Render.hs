@@ -226,10 +226,16 @@ render_conversationItem st _ conv =
                 if isUnread then "● " else "  "
             ConversationStatus_Paused -> "⏸ "
         baseText = indicator <> Text.take 18 (conversationName conv)
+        -- Add turn count next to conversation name
+        turnCount = case conversationSession conv of
+            Nothing -> 0
+            Just session -> length session.turns
+        turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
+        fullText = baseText <> turnSuffix
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
-                withAttr pausedAttr $ txt $ " " <> baseText
-            _ -> txt $ " " <> baseText
+                withAttr pausedAttr $ txt $ " " <> fullText
+            _ -> txt $ " " <> fullText
      in widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
@@ -337,16 +343,17 @@ render_session (Just session) _ongoingConvs =
         [render_session_total_bytes session]
             ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
 
--- | Render total session bytes.
+-- | Render total session bytes and turn count.
 render_session_total_bytes :: Session -> Widget N
 render_session_total_bytes session =
     let totalBytes = sessionTotalBytes session
-     in if totalBytes == 0
+        turnCount = length session.turns
+     in if totalBytes == 0 && turnCount == 0
             then emptyWidget
             else
                 withAttr byteUsageAttr $
                     txt $
-                        "Session total: " <> formatBytes totalBytes <> "  "
+                        "Session total: " <> formatBytes totalBytes <> "  (" <> Text.pack (show turnCount) <> " turns)  "
 
 -- | Format bytes in human-readable form.
 formatBytes :: Int -> Text
