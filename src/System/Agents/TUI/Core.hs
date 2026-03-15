@@ -16,11 +16,12 @@ module System.Agents.TUI.Core (
     Conversation (..),
     ConversationStatus (..),
     AuxiliaryTask (..),
-    Core (..),
+    Core,
     UIState (..),
     TuiState (..),
     SessionConfig (..),
     initUIState,
+    initCore,
     updateConversationSession,
     updateConversation,
 
@@ -34,6 +35,9 @@ module System.Agents.TUI.Core (
     unreadConversations,
     ongoingConversations,
     auxiliaryTasks,
+    coreAgents,
+    coreConversations,
+    corePausedConversations,
     tuiCore,
     tuiUI,
     eventChan,
@@ -149,7 +153,7 @@ runTUIWithConfig config props = do
     evChan <- newBChan 100
 
     -- Create core state with loaded conversations
-    core0 <- newTVarIO (Core tuiAgents mempty)
+    core0 <- newTVarIO (initCore tuiAgents)
 
     -- Create UI state
     let ui0 = initUIState tuiAgents [s | (_, Just s) <- loadedSessions]
@@ -176,3 +180,4 @@ runTUIWithConfig config props = do
     createAgentForTree itree = do
         convId <- newConversationId
         runtimeToAgent config.sessionStore Nothing convId (agentRuntime itree)
+

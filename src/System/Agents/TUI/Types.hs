@@ -98,6 +98,8 @@ data ConversationStatus
       ConversationStatus_Active
     | -- | Conversation is waiting for user input
       ConversationStatus_WaitingForInput
+    | -- | Conversation is paused (blocks step iteration until unpaused)
+      ConversationStatus_Paused
     deriving (Show, Eq)
 
 -- | A conversation with an agent.
@@ -147,6 +149,8 @@ data SessionConfig = SessionConfig
 data Core = Core
     { coreAgents :: [TuiAgent]
     , coreConversations :: [Conversation]
+    , corePausedConversations :: Set ConversationId
+    -- ^ Set of conversation IDs that are currently paused
     }
 
 makeLenses ''Core
@@ -220,6 +224,10 @@ initUIState agents loadedSessions =
         , _statusMessage = Nothing
         }
 
+-- | Create initial Core state.
+initCore :: [TuiAgent] -> Core
+initCore agents = Core agents [] Set.empty
+
 -------------------------------------------------------------------------------
 -- Utility Functions
 -------------------------------------------------------------------------------
@@ -233,3 +241,4 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+

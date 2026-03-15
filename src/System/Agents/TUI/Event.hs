@@ -10,7 +10,7 @@ import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRingModify, focu
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (to, use, (%=), (.=))
@@ -81,6 +81,8 @@ tui_appHandleEvent ev = do
             handleRestoredConversation
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
+        VtyEvent (Vty.EvKey (Vty.KChar ' ') [Vty.MCtrl]) ->
+            handleTogglePauseConversation
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) ->
             handleDumpSessionToMarkdown
         VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
@@ -498,6 +500,36 @@ handleRestoredConversation = do
         _ ->
             pure ()
 
+{- | Toggle pause/unpause for the currently selected conversation.
+Ctrl+Space pauses/unpauses the conversation, blocking the step iteration.
+-}
+handleTogglePauseConversation :: EventM N TuiState ()
+handleTogglePauseConversation = do
+    mSelectedConv <- use (tuiUI . conversationList . to listSelectedElement)
+    case mSelectedConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just (_, conv) -> do
+            let convId = conversationId conv
+            coreRef <- use tuiCore
+            isPaused <- Set.member convId . corePausedConversations <$> liftIO (readTVarIO coreRef)
+            if isPaused
+                then do
+                    -- Unpause: remove from paused set and update status
+                    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                        c{corePausedConversations = Set.delete convId (corePausedConversations c)}
+                    updateConversationStatus convId ConversationStatus_WaitingForInput
+                    showStatus StatusInfo $ "Unpaused: " <> conversationName conv
+                else do
+                    -- Pause: add to paused set and update status
+                    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                        c{corePausedConversations = Set.insert convId (corePausedConversations c)}
+                    updateConversationStatus convId ConversationStatus_Paused
+                    showStatus StatusInfo $ "Paused: " <> conversationName conv
+
+-- | Check if a conversation is currently paused.
+isConversationPaused :: ConversationId -> Core -> Bool
+isConversationPaused convId core = Set.member convId (corePausedConversations core)
+
 {- | Build the progress callback for a conversation.
 Combines the global session config with TUI-specific notification needs.
 -}
@@ -531,10 +563,22 @@ runConversation baseTuiAgent session = do
     -- Create the agent with the progress callback
     -- Note: runtimeToAgent now requires convId as a parameter
     agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.agentTree.agentRuntime)
+
+    -- Get reference to core state for pause checking
+    coreRef <- use tuiCore
+
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
     let a =
             agent0
                 { step = \sess -> do
+                    -- Check if conversation is paused and block until unpaused
+                    let waitIfPaused = do
+                            core <- readTVarIO coreRef
+                            when (isConversationPaused convId core) $ do
+                                threadDelay 100000 -- Check every 100ms
+                                waitIfPaused
+                    waitIfPaused
+
                     notifyProgress (SessionUpdated sess)
                     ret <- agent0.step sess
                     case ret of
@@ -565,7 +609,6 @@ runConversation baseTuiAgent session = do
                 }
 
     -- Add to core
-    coreRef <- use tuiCore
     liftIO $ atomically $ modifyTVar coreRef $ \c ->
         c{coreConversations = conv : coreConversations c}
     -- Update UI
@@ -597,3 +640,4 @@ handleSendMessage = do
                     -- Clear editor
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
