@@ -25,6 +25,7 @@ import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as Tools
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
@@ -38,6 +39,7 @@ tracePrintingTextResponses = Tracer f
     f (AgentTrace (Runtime.BuiltinToolboxTrace _ _)) = pure ()
     f (AgentTrace (Runtime.BuiltinToolboxInitError _ _)) = pure ()
     f (AgentTrace (Runtime.SystemToolboxTrace _ _)) = pure ()
+    f (AgentTrace (Runtime.DeveloperToolboxTrace _ _)) = pure ()
     f (McpTrace _ _) = pure ()
     f (OpenAPITrace _ _) = pure ()
     f (PostgRESTTrace _ _) = pure ()
@@ -58,6 +60,7 @@ tracePrintingTextResponses = Tracer f
     g _ (Runtime.ChildrenTrace (Runtime.BuiltinToolboxTrace _ _)) = pure ()
     g _ (Runtime.ChildrenTrace (Runtime.BuiltinToolboxInitError _ _)) = pure ()
     g _ (Runtime.ChildrenTrace (Runtime.SystemToolboxTrace _ _)) = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.DeveloperToolboxTrace _ _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) =
         Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
@@ -131,6 +134,11 @@ renderAgentTrace (Runtime.SystemToolboxTrace name tr) =
         [ mconcat ["@system/", name, ":"]
         , renderSystemToolboxTrace tr
         ]
+renderAgentTrace (Runtime.DeveloperToolboxTrace name tr) =
+    Text.unlines
+        [ mconcat ["@developer/", name, ":"]
+        , renderDeveloperToolboxTrace tr
+        ]
 
 renderLoadingAgentTrace :: BashToolbox.Trace -> Text
 renderLoadingAgentTrace tr = case tr of
@@ -156,6 +164,27 @@ renderSystemToolboxTrace tr = case tr of
     SystemTools.SystemInfoErrorTrace cap err ->
         Text.unwords ["system-info error:", cap, "-", err]
 
+renderDeveloperToolboxTrace :: DeveloperTools.Trace -> Text
+renderDeveloperToolboxTrace tr = case tr of
+    DeveloperTools.ValidateToolStartedTrace path ->
+        Text.unwords ["validate-tool started:", Text.pack path]
+    DeveloperTools.ValidateToolCompletedTrace path valid ->
+        Text.unwords ["validate-tool completed:", Text.pack path, "valid:", Text.pack (show valid)]
+    DeveloperTools.ScaffoldAgentStartedTrace template _ ->
+        Text.unwords ["scaffold-agent started:", template]
+    DeveloperTools.ScaffoldAgentCompletedTrace template _ ->
+        Text.unwords ["scaffold-agent completed:", template]
+    DeveloperTools.ScaffoldToolStartedTrace lang _ ->
+        Text.unwords ["scaffold-tool started:", lang]
+    DeveloperTools.ScaffoldToolCompletedTrace lang _ ->
+        Text.unwords ["scaffold-tool completed:", lang]
+    DeveloperTools.ShowSpecStartedTrace specName ->
+        Text.unwords ["show-spec started:", specName]
+    DeveloperTools.ShowSpecCompletedTrace specName ->
+        Text.unwords ["show-spec completed:", specName]
+    DeveloperTools.DeveloperToolErrorTrace op err ->
+        Text.unwords ["developer-tool error:", op, "-", err]
+
 renderConversationAgentTrace :: Runtime.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of
     Runtime.NewConversation -> ""
@@ -175,6 +204,8 @@ renderConversationAgentTrace tr = case tr of
         "sqlite-tool: (trace)"
     Runtime.RunToolTrace _ (Tools.SystemToolsTrace _) ->
         "system-tool: (trace)"
+    Runtime.RunToolTrace _ (Tools.DeveloperToolsTrace devTr) ->
+        Text.unwords ["developer-tool:", renderDeveloperToolboxTrace devTr]
     Runtime.LLMTrace _ (OpenAI.HttpClientTrace _) -> "(http)"
     Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes) ->
         Text.unwords ["to: llm", "[" <> formatBytes bytes <> "]"]
@@ -185,3 +216,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

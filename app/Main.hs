@@ -1499,6 +1499,12 @@ toJsonTrace x = case x of
                 [ "system-toolbox" .= toolboxName
                 , "trace" .= show tr
                 ]
+    encodeBaseAgentTrace (RuntimeTrace.DeveloperToolboxTrace toolboxName tr) =
+        Just $
+            Aeson.object
+                [ "developer-toolbox" .= toolboxName
+                , "trace" .= show tr
+                ]
 
     encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =
@@ -1577,6 +1583,8 @@ toJsonTrace x = case x of
                 Just $ Aeson.object ["x" .= ("sqlite-tool" :: Text)]
             (RuntimeTrace.RunToolTrace _ (ToolTrace.SystemToolsTrace _)) ->
                 Just $ Aeson.object ["x" .= ("system-tool" :: Text)]
+            (RuntimeTrace.RunToolTrace _ (ToolTrace.DeveloperToolsTrace _)) ->
+                Just $ Aeson.object ["x" .= ("developer-tool" :: Text)]
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text), "sub" .= subVal]
@@ -1637,3 +1645,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
