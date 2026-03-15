@@ -22,6 +22,8 @@ if [[ "$1" == "run" ]]; then
     find ./src/ -name '*.md'
     find ./test/ -name '*.md'
     find ./agq/ -name '*.md'
+    find ./docs -name '*.md'
+    find ./docs -name '*.png'
     find ./tools/
     exit 0
 fi
