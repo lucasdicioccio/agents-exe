@@ -972,9 +972,9 @@ This combines:
 
 If both are specified, both will be used.
 -}
-buildBashToolSources :: Agent -> [BashToolboxDescription]
-buildBashToolSources agent =
-    let legacySource = fmap (\dir -> FileSystemDirectory $ FileSystemDirectoryDescription dir Nothing) agent.toolDirectory
+buildBashToolSources :: Maybe FilePath -> Agent -> [BashToolboxDescription]
+buildBashToolSources agentroot agent =
+    let legacySource = fmap (\dir -> FileSystemDirectory $ FileSystemDirectoryDescription agentroot dir Nothing) agent.toolDirectory
         toolboxSources = Maybe.fromMaybe [] agent.bashToolboxes
      in maybeToList legacySource ++ toolboxSources
 
@@ -1016,7 +1016,7 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                     let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
 
                     -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
-                    let bashSources = buildBashToolSources desc
+                    let bashSources = buildBashToolSources (Just rootDir) desc
 
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
@@ -1080,7 +1080,7 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                     let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
 
                     -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
-                    let bashSources = buildBashToolSources desc
+                    let bashSources = buildBashToolSources (Just rootDir) desc
 
                     Runtime.newRuntimeWithMultiBash
                         desc.slug

@@ -118,7 +118,9 @@ filter string will be loaded.
 -}
 data FileSystemDirectoryDescription
     = FileSystemDirectoryDescription
-    { fsDirPath :: FilePath
+    { fsDirRoot :: Maybe FilePath
+    -- ^ Root path, this field is here to support legacy tools definitions
+    , fsDirPath :: FilePath
     -- ^ Path to the directory containing bash tools
     , fsDirBasenameFilter :: Maybe Text
     -- ^ Optional filter for tool filenames (e.g., ".sh" to load only .sh files)

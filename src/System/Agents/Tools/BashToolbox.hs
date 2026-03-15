@@ -16,12 +16,12 @@ import Control.Concurrent.STM (STM, atomically)
 import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, takeTMVar, tryPutTMVar)
 import Data.Either (partitionEithers)
 import qualified Data.List as List
-import Data.Maybe (maybeToList)
+import Data.Maybe (maybeToList, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap)
-import System.FilePath (takeFileName)
+import System.FilePath (takeFileName, (</>))
 
 import System.Agents.Base (BashToolboxDescription (..), FileSystemDirectoryDescription (..), SingleToolDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
@@ -79,7 +79,8 @@ The FilePath parameter is the base directory for resolving relative paths.
 -}
 descriptionToSource :: FilePath -> BashToolboxDescription -> ToolSource
 descriptionToSource baseDir (FileSystemDirectory desc) =
-    let resolved = if isRelative desc.fsDirPath then baseDir ++ "/" ++ desc.fsDirPath else desc.fsDirPath
+    let fsDir = fromMaybe "" desc.fsDirRoot </> desc.fsDirPath
+        resolved = if isRelative fsDir then baseDir ++ "/" ++ fsDir else desc.fsDirPath
      in DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved
 descriptionToSource baseDir (SingleTool desc) =
     let resolved = if isRelative desc.singleToolPath then baseDir ++ "/" ++ desc.singleToolPath else desc.singleToolPath

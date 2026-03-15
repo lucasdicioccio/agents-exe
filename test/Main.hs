@@ -327,7 +327,8 @@ bashToolboxTests =
         "Bash Toolbox Descriptions"
         [ testCase "FileSystemDirectory serialization" $ do
             let desc = Base.FileSystemDirectoryDescription
-                    { Base.fsDirPath = "./tools"
+                    { Base.fsDirRoot = Nothing
+                    , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Nothing
                     }
             let json = encode desc
@@ -335,7 +336,8 @@ bashToolboxTests =
             mDesc @?= Just desc
         , testCase "FileSystemDirectory with filter serialization" $ do
             let desc = Base.FileSystemDirectoryDescription
-                    { Base.fsDirPath = "./extra-tools"
+                    { Base.fsDirRoot = Nothing
+                    , Base.fsDirPath = "./extra-tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
                     }
             let json = encode desc
@@ -350,7 +352,8 @@ bashToolboxTests =
             mDesc @?= Just desc
         , testCase "BashToolboxDescription FileSystemDirectory wrapper" $ do
             let desc = Base.FileSystemDirectoryDescription
-                    { Base.fsDirPath = "./tools"
+                    { Base.fsDirRoot = Nothing
+                    , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
                     }
             let wrapped = Base.FileSystemDirectory desc
@@ -366,7 +369,7 @@ bashToolboxTests =
             let mWrapped = decode json :: Maybe Base.BashToolboxDescription
             mWrapped @?= Just wrapped
         , testCase "agent with bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription "./tools" Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing
             let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh"
             let agent = Base.Agent
                     { Base.slug = "test-agent"
@@ -388,7 +391,7 @@ bashToolboxTests =
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
         , testCase "agent with both legacy toolDirectory and bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription "./extra-tools" Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"

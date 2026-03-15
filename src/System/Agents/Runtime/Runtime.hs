@@ -84,6 +84,7 @@ For new code, prefer 'newRuntimeWithMultiBash' which supports multiple
 bash tool sources.
 -}
 newRuntime ::
+    Maybe FilePath ->
     AgentSlug ->
     AgentAnnounce ->
     Tracer IO Trace ->
@@ -97,9 +98,9 @@ newRuntime ::
     -- | Builtin toolbox descriptions - to be initialized
     [BuiltinToolboxDescription] ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
+newRuntime agentdir slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions = do
     -- Convert single directory to multi-source format
-    let legacyDesc = FileSystemDirectory $ FileSystemDirectoryDescription tooldir Nothing
+    let legacyDesc = FileSystemDirectory $ FileSystemDirectoryDescription agentdir tooldir Nothing
     newRuntimeWithMultiBash
         slug
         announce
@@ -121,8 +122,8 @@ Example:
 
 @
 let bashSources =
-        [ FileSystemDirectory $ FileSystemDirectoryDescription "./tools" Nothing
-        , FileSystemDirectory $ FileSystemDirectoryDescription "./extra" (Just ".sh")
+        [ FileSystemDirectory $ FileSystemDirectoryDescription (Just "agents/" "./tools" Nothing
+        , FileSystemDirectory $ FileSystemDirectoryDescription Nothing "./extra" (Just ".sh")
         , SingleTool $ SingleToolDescription "/path/to/special.sh"
         ]
 result <- newRuntimeWithMultiBash slug announce tracer apiKey model bashSources ...
