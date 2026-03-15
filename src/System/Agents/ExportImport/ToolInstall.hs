@@ -10,7 +10,6 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Either (partitionEithers)
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -355,3 +354,4 @@ getFileMode' :: FilePath -> IO FileMode
 getFileMode' path = do
     status <- getFileStatus path
     pure $ fileMode status
+

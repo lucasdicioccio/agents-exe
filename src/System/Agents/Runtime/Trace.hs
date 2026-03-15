@@ -27,11 +27,11 @@ traceAgentSlug :: Trace -> AgentSlug
 traceAgentSlug (AgentTrace_Loading aSlug _ _) = aSlug
 traceAgentSlug (AgentTrace_Conversation aSlug _ _ _) = aSlug
 traceAgentSlug (BuiltinToolboxTrace _ _) = "builtin"
-traceAgentSlug (BuiltinToolboxInitError name _) = name
-traceAgentSlug (SystemToolboxTrace name _) = name
-traceAgentSlug (DeveloperToolboxTrace name _) = name
-traceAgentSlug (SkillsToolboxTrace name _) = name
-traceAgentSlug (SkillsToolboxInitError name _) = name
+traceAgentSlug (BuiltinToolboxInitError tName _) = tName
+traceAgentSlug (SystemToolboxTrace tName _) = tName
+traceAgentSlug (DeveloperToolboxTrace tName _) = tName
+traceAgentSlug (SkillsToolboxTrace tName _) = tName
+traceAgentSlug (SkillsToolboxInitError tName _) = tName
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId

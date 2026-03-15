@@ -32,9 +32,7 @@ module System.Agents.Tools.Skills.State (
 import qualified Data.Aeson
 import qualified Data.Aeson.KeyMap
 import Data.Foldable (foldl')
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -185,3 +183,4 @@ getEnabledScripts (SkillsSessionState activeSkills) skillName =
             if Map.null scriptsState
                 then Nothing -- All scripts enabled (no explicit list)
                 else Just $ Map.keys $ Map.filter (== Enabled) scriptsState
+

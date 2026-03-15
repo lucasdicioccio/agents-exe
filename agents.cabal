@@ -3,8 +3,8 @@ cabal-version:      3.0
 -- and can be different from the cabal-install (the tool) version and the
 -- Cabal (the library) version you are using. As such, the Cabal (the library)
 -- version used must be equal or greater than the version stated in this field.
--- Starting from the specification version 2.2, the cabal-version field must be
--- the first thing in the .cabal specification.
+-- Starting from the specification version 2.2, the cabal-version field must
+-- be the first thing in the .cabal specification.
 
 -- The name of the package.
 name:               agents
@@ -48,7 +48,7 @@ extra-doc-files:    CHANGELOG.md
 extra-source-files: docs/binary-tool.md
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Werror
 
 library agents-lib
     import:           warnings
@@ -265,11 +265,12 @@ test-suite agents-tests
     type: exitcode-stdio-1.0
     hs-source-dirs: test
     main-is: Main.hs
-    other-modules: OpenAPIToolboxTests
-                   PostgRESTParseTest
-                   SessionEditTests
-                   SessionPrintTests
-                   EndpointPredicateTests
+    other-modules: EndpointPredicateTests
+                   , OpenAPIToolboxTests
+                   , PostgRESTParseTest
+                   , SessionEditTests
+                   , SessionPrintTests
+                   , SkillsTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,

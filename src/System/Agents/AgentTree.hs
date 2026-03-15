@@ -83,7 +83,6 @@ import System.Agents.Base (
     AgentId,
     AgentSlug,
     BashToolboxDescription (..),
-    BuiltinToolboxDescription (..),
     ExtraAgentRef (..),
     FileSystemDirectoryDescription (..),
     McpServerDescription (..),
@@ -1162,4 +1161,5 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+
 

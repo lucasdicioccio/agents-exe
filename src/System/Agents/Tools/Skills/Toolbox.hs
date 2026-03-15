@@ -46,32 +46,27 @@ module System.Agents.Tools.Skills.Toolbox (
 ) where
 
 import Control.Exception (try)
-import Control.Monad (forM)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (toList)
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import System.Exit (ExitCode (..))
-import System.IO.Error (IOError)
 import System.Process (readProcessWithExitCode)
 
-import Prod.Tracer (Tracer, contramap)
+import Prod.Tracer (Tracer)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (Session (..))
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..), ToolDef (..), mapToolResult)
 import System.Agents.Tools.Context (ToolExecutionContext)
-import System.Agents.Tools.Skills.Parser (loadScriptDescription)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
-import System.Agents.Tools.Skills.State (foldSession, getEnabledScripts, isScriptEnabled)
+import System.Agents.Tools.Skills.State (foldSession, isScriptEnabled)
 import System.Agents.Tools.Skills.Types
 import System.Agents.Tools.Trace (ToolTrace (..))
 

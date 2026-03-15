@@ -96,7 +96,6 @@ import qualified Data.CaseInsensitive as CI
 import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -747,3 +746,4 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
      in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
+

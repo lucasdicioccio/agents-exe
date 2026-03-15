@@ -44,7 +44,6 @@ import qualified System.Agents.CLI.Import as ImportCmd
 import qualified System.Agents.CLI.Initialize as InitializeCmd
 import qualified System.Agents.CLI.McpServer as McpServerCmd
 import qualified System.Agents.CLI.New as NewCmd
-import System.Agents.CLI.OneShot (OneShotOptions)
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
 import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
@@ -70,7 +69,6 @@ import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
-import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.Trace as ToolTrace
 import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (exitFailure)
@@ -126,6 +124,8 @@ defaultOpenAIAgent =
         , postgrestToolboxes = Nothing
         , builtinToolboxes = Just []
         , extraAgents = Nothing
+        , skillSources = Nothing
+        , autoEnableSkills = Nothing
         }
 
 -- | Mistral AI agent configuration
@@ -150,6 +150,8 @@ mistralAgent =
         , postgrestToolboxes = Nothing
         , builtinToolboxes = Just []
         , extraAgents = Nothing
+        , skillSources = Nothing
+        , autoEnableSkills = Nothing
         }
 
 -- | Ollama local LLM agent configuration
@@ -174,6 +176,8 @@ ollamaAgent =
         , postgrestToolboxes = Nothing
         , builtinToolboxes = Just []
         , extraAgents = Nothing
+        , skillSources = Nothing
+        , autoEnableSkills = Nothing
         }
 
 -- | Orchestrator agent that can delegate to other agents
@@ -207,16 +211,18 @@ orchestratorAgent =
                 , ExtraAgentRef "mistral-assistant" "mistral-assistant.json"
                 , ExtraAgentRef "ollama-assistant" "ollama-assistant.json"
                 ]
+        , skillSources = Nothing
+        , autoEnableSkills = Nothing
         }
 
 -- | Ensure the config directory structure exists with default files
 ensureConfigStructure :: FilePath -> FilePath -> IO ()
-ensureConfigStructure configDir secretKeysPath = do
+ensureConfigStructure cfgDir secretKeysPath = do
     -- Create config directory
-    createDirectoryIfMissing True configDir
+    createDirectoryIfMissing True cfgDir
 
     -- Create default agents directory
-    let defaultAgentsDir = configDir </> "default"
+    let defaultAgentsDir = cfgDir </> "default"
     createDirectoryIfMissing True defaultAgentsDir
 
     -- Create API keys file if it doesn't exist
@@ -1421,36 +1427,36 @@ resolveAgentFiles files (Just agentSlug) = do
 
 -- | Run the selected command
 runCommand :: Prog -> Prod.Tracer IO AgentTree.Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
-runCommand pargs baseTracer sessionStore agentFiles =
+runCommand pargs baseTracer sessionStore files =
     case pargs.mainCommand of
         Check checkOpts ->
-            CheckCmd.handleCheck checkOpts pargs.apiKeysFile agentFiles
+            CheckCmd.handleCheck checkOpts pargs.apiKeysFile files
         CheckToolCall opts ->
             CheckToolCallCmd.handleCheckToolCall opts
         TerminalUI _ ->
-            TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile agentFiles
+            TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile files
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
-            OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile agentFiles pargs.progPromptAliases opts
+            OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         DescribeTool opts ->
             DescribeToolCmd.handleDescribeTool opts
         Initialize ->
-            InitializeCmd.handleInitialize pargs.apiKeysFile agentFiles
+            InitializeCmd.handleInitialize pargs.apiKeysFile files
         McpServer ->
-            McpServerCmd.handleMcpServer baseTracer sessionStore pargs.apiKeysFile agentFiles
+            McpServerCmd.handleMcpServer baseTracer sessionStore pargs.apiKeysFile files
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
             SessionEditCmd.handleSessionEdit opts
         Export opts ->
-            ExportCmd.handleExport opts agentFiles pargs.configDir
+            ExportCmd.handleExport opts files pargs.configDir
         Import opts ->
             ImportCmd.handleImport opts
         Paths opts ->
-            PathsCmd.handlePaths opts pargs.configDir agentFiles pargs.apiKeysFile pargs.sessionsJsonPrefix
+            PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile pargs.sessionsJsonPrefix
         Cowsay opts ->
             CowsayCmd.handleCowsay opts
         Spec opts ->
@@ -1548,6 +1554,7 @@ toJsonTrace x = case x of
         case bt of
             (BashToolbox.BashToolsLoadingTrace _) -> Nothing
             (BashToolbox.ReloadToolsTrace _) -> Nothing
+            (BashToolbox.SourceLoadingError _ _) -> Nothing
 
     encodeBaseTrace_Conversation :: RuntimeTrace.ConversationTrace -> Maybe Aeson.Value
     encodeBaseTrace_Conversation bt =

@@ -145,7 +145,7 @@ mkOpenAICompletion config completion = do
         parseParamType _ "number" _ = NumberParamType
         parseParamType _ "boolean" _ = BoolParamType
         parseParamType _ "null" _ = NullParamType
-        parseParamType requiredSet "object" obj =
+        parseParamType _requiredSet "object" obj =
             case KeyMap.lookup "properties" obj of
                 Just (Aeson.Object props) ->
                     let nestedRequiredSet = case KeyMap.lookup "required" obj of
@@ -269,3 +269,4 @@ newConfig tracer =
         <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
         <*> pure "gpt-4.1-mini"
         <*> pure OpenAI.OpenAIv1
+

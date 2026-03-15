@@ -110,15 +110,16 @@ formatSpeechBubble lines' =
 
         -- Format content lines based on how many there are
         content = case paddedLines of
+            [] -> "" -- This should not happen due to the first line guard, but handles the warning
             [single] ->
                 -- Single line: use < >
                 "< " <> single <> " >"
-            _ ->
+            (first : rest) ->
                 -- Multiple lines: use / | \
-                let firstLine = "/ " <> head paddedLines <> " \\"
-                    lastLine = "\\ " <> last paddedLines <> " /"
+                let firstLine = "/ " <> first <> " \\"
+                    lastLine = "\\ " <> last rest <> " /"
                     -- Middle lines use | on both sides
-                    middleLines = case tail (init paddedLines) of
+                    middleLines = case init rest of
                         [] -> []
                         mids -> map (\line -> "| " <> line <> " |") mids
                  in Text.unlines $ [firstLine] ++ middleLines ++ [lastLine]
@@ -132,3 +133,4 @@ formatMascot =
         leader = "        \\\n         \\"
      in
         leader <> "\n" <> Text.unlines defaultLogo
+

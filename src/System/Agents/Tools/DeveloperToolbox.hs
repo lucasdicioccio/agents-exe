@@ -65,19 +65,18 @@ module System.Agents.Tools.DeveloperToolbox (
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, when)
-import Data.Aeson (ToJSON (..), Value (..), (.=))
+import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.FileEmbed (embedStringFile)
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.Directory (createDirectoryIfMissing, doesFileExist)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (takeDirectory)
 
-import Prod.Tracer (Tracer (..), runTracer)
+import Prod.Tracer (Tracer (..))
 
 import System.Agents.Base (
     Agent (..),
@@ -295,8 +294,8 @@ executeValidateTool toolbox toolPath = do
                                 , validationSlug = Nothing
                                 , validationError = Just errMsg
                                 }
-                Right (Left err) -> do
-                    let errMsg = Text.pack $ show err
+                Right (Left _err) -> do
+                    let errMsg = "Failed to load script"
                     pure $
                         Right $
                             ValidationResult
@@ -334,7 +333,7 @@ executeScaffoldAgent ::
     -- | Force overwrite
     Bool ->
     IO (Either DeveloperToolError ScaffoldResult)
-executeScaffoldAgent toolbox templateName slug filePath force = do
+executeScaffoldAgent toolbox templateName agentSlug filePath force = do
     if DevToolScaffoldAgent `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "scaffold-agent"
         else do
@@ -343,7 +342,7 @@ executeScaffoldAgent toolbox templateName slug filePath force = do
                 when exists $ do
                     error $ "File already exists: " <> filePath
             result <- try $ do
-                let agent = makeAgentTemplate templateName slug
+                let agent = makeAgentTemplate templateName agentSlug
                 createDirectoryIfMissing True (takeDirectory filePath)
                 LByteString.writeFile filePath $
                     Aeson.encodePretty (AgentDescription agent)
@@ -384,7 +383,7 @@ executeScaffoldTool ::
     -- | Force overwrite
     Bool ->
     IO (Either DeveloperToolError ScaffoldResult)
-executeScaffoldTool toolbox language slug filePath force = do
+executeScaffoldTool toolbox language toolSlug filePath force = do
     if DevToolScaffoldTool `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "scaffold-tool"
         else do
@@ -393,7 +392,7 @@ executeScaffoldTool toolbox language slug filePath force = do
                 when exists $ do
                     error $ "File already exists: " <> filePath
             result <- try $ do
-                let content = makeToolTemplate language slug
+                let content = makeToolTemplate language toolSlug
                 createDirectoryIfMissing True (takeDirectory filePath)
                 Text.writeFile filePath content
             case result of
@@ -444,10 +443,10 @@ executeShowSpec toolbox specName = do
 
 -- | Create an agent from a template
 makeAgentTemplate :: Text -> Text -> Agent
-makeAgentTemplate templateName slug = case templateName of
+makeAgentTemplate templateName agentSlug = case templateName of
     "mistral" ->
         Agent
-            { slug = slug
+            { slug = agentSlug
             , apiKeyId = "mistral-key"
             , flavor = "OpenAIv1"
             , modelUrl = "https://api.mistral.ai/v1"
@@ -465,10 +464,12 @@ makeAgentTemplate templateName slug = case templateName of
             , postgrestToolboxes = Nothing
             , builtinToolboxes = Just []
             , extraAgents = Nothing
+            , skillSources = Nothing
+            , autoEnableSkills = Nothing
             }
     "ollama" ->
         Agent
-            { slug = slug
+            { slug = agentSlug
             , apiKeyId = "ollama-key"
             , flavor = "OpenAIv1"
             , modelUrl = "http://localhost:11434/v1"
@@ -486,11 +487,13 @@ makeAgentTemplate templateName slug = case templateName of
             , postgrestToolboxes = Nothing
             , builtinToolboxes = Just []
             , extraAgents = Nothing
+            , skillSources = Nothing
+            , autoEnableSkills = Nothing
             }
     _ ->
         -- Default to OpenAI template
         Agent
-            { slug = slug
+            { slug = agentSlug
             , apiKeyId = "main-key"
             , flavor = "OpenAIv1"
             , modelUrl = "https://api.openai.com/v1"
@@ -508,6 +511,8 @@ makeAgentTemplate templateName slug = case templateName of
             , postgrestToolboxes = Nothing
             , builtinToolboxes = Just []
             , extraAgents = Nothing
+            , skillSources = Nothing
+            , autoEnableSkills = Nothing
             }
 
 -------------------------------------------------------------------------------
@@ -516,23 +521,23 @@ makeAgentTemplate templateName slug = case templateName of
 
 -- | Create a tool template for a given language
 makeToolTemplate :: Text -> Text -> Text
-makeToolTemplate language slug = case language of
-    "python" -> makePythonToolTemplate slug
-    "haskell" -> makeHaskellToolTemplate slug
-    _ -> makeBashToolTemplate slug
+makeToolTemplate language toolSlug = case language of
+    "python" -> makePythonToolTemplate toolSlug
+    "haskell" -> makeHaskellToolTemplate toolSlug
+    _ -> makeBashToolTemplate toolSlug
 
 -- | Create a bash tool template
 makeBashToolTemplate :: Text -> Text
-makeBashToolTemplate slug =
+makeBashToolTemplate toolSlug =
     Text.unlines
         [ "#!/bin/bash"
         , ""
-        , "# " <> slug <> " - Tool description here"
+        , "# " <> toolSlug <> " - Tool description here"
         , ""
         , "if [ \"$1\" == \"describe\" ]; then"
         , "    cat <<'EOF'"
         , "{"
-        , "  \"slug\": \"" <> slug <> "\","
+        , "  \"slug\": \"" <> toolSlug <> "\","
         , "  \"description\": \"Description of what this tool does\","
         , "  \"args\": ["
         , "    {"
@@ -565,22 +570,22 @@ makeBashToolTemplate slug =
         , "done"
         , ""
         , "# Main logic here"
-        , "echo \"Tool " <> slug <> " executed with: $EXAMPLE_ARG\""
+        , "echo \"Tool " <> toolSlug <> " executed with: $EXAMPLE_ARG\""
         ]
 
 -- | Create a Python tool template
 makePythonToolTemplate :: Text -> Text
-makePythonToolTemplate slug =
+makePythonToolTemplate toolSlug =
     Text.unlines
         [ "#!/usr/bin/env python3"
         , ""
-        , "\"\"\"" <> slug <> " - Tool description here\"\"\""
+        , "\"\"\"" <> toolSlug <> " - Tool description here\"\"\""
         , ""
         , "import json"
         , "import sys"
         , ""
         , "DESCRIPTION = {"
-        , "    \"slug\": \"" <> slug <> "\","
+        , "    \"slug\": \"" <> toolSlug <> "\","
         , "    \"description\": \"Description of what this tool does\","
         , "    \"args\": ["
         , "        {"
@@ -612,7 +617,7 @@ makePythonToolTemplate slug =
         , "            i += 1"
         , ""
         , "    # Main logic here"
-        , "    print(f'Tool " <> slug <> " executed with: {example_arg}')"
+        , "    print(f'Tool " <> toolSlug <> " executed with: {example_arg}')"
         , ""
         , ""
         , "if __name__ == \"__main__\":"
@@ -621,12 +626,12 @@ makePythonToolTemplate slug =
 
 -- | Create a Haskell tool template
 makeHaskellToolTemplate :: Text -> Text
-makeHaskellToolTemplate slug =
+makeHaskellToolTemplate toolSlug =
     Text.unlines
         [ "#!/usr/bin/env runhaskell"
         , "{-# LANGUAGE OverloadedStrings #-}"
         , ""
-        , "-- | " <> slug <> " - Tool description here"
+        , "-- | " <> toolSlug <> " - Tool description here"
         , ""
         , "import qualified Data.Aeson as Aeson"
         , "import qualified Data.ByteString.Lazy as LBS"
@@ -670,7 +675,7 @@ makeHaskellToolTemplate slug =
         , ""
         , "description :: ScriptInfo"
         , "description = ScriptInfo"
-        , "    { scriptSlug = \"" <> slug <> "\""
+        , "    { scriptSlug = \"" <> toolSlug <> "\""
         , "    , scriptDescription = \"Description of what this tool does\""
         , "    , scriptArgs ="
         , "        [ ScriptArg"
@@ -693,12 +698,13 @@ makeHaskellToolTemplate slug =
         , "        (\"run\":_) -> do"
         , "            -- Parse arguments and execute"
         , "            let exampleArg = parseArg args \"--example-arg\""
-        , "            Text.putStrLn $ \"Tool " <> slug <> " executed with: \" <> exampleArg"
+        , "            Text.putStrLn $ \"Tool " <> toolSlug <> " executed with: \" <> exampleArg"
         , "        _ -> do"
-        , "            Text.hPutStrLn stderr \"Usage: " <> slug <> " describe|run\""
+        , "            Text.hPutStrLn stderr \"Usage: " <> toolSlug <> " describe|run\""
         , ""
         , "parseArg :: [String] -> Text -> Text"
         , "parseArg args name = case break (== Text.unpack name) args of"
         , "    (_, _:value:_) -> Text.pack value"
         , "    _ -> \"\""
         ]
+

@@ -6,9 +6,7 @@ module System.Agents.Session.Step where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Text.Encoding (encodeUtf8)
 
 import Data.Void (Void)
 
@@ -16,7 +14,6 @@ import System.Agents.Base (ConversationId)
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
-import System.Agents.Tools.Base (CallResult, callResultByteSize)
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
 
 {- | Runs a single step of agent for a given session.
@@ -193,3 +190,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+

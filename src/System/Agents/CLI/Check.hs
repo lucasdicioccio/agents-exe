@@ -18,7 +18,6 @@ import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy.Char8 as LBS8
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 
@@ -47,10 +46,6 @@ data CheckOptions = CheckOptions
     { toolsOutputMode :: ToolsOutputMode
     }
     deriving (Show, Eq)
-
--- | Default check options
-defaultCheckOptions :: CheckOptions
-defaultCheckOptions = CheckOptions{toolsOutputMode = ToolsNone}
 
 -- | Handle the check command: validate and display agent configuration
 handleCheck ::
@@ -148,3 +143,4 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
+

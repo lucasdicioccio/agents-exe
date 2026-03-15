@@ -203,7 +203,7 @@ validateParamTypeWithPath path paramType value = case (paramType, value) of
         []
     (BoolParamType, _) ->
         [ValidationError path $ "Expected boolean but got " <> valueTypeName value]
-    (NumberParamType, Aeson.Number n) ->
+    (NumberParamType, Aeson.Number _) ->
         -- Note: Aeson.Number includes both integers and floats
         []
     (NumberParamType, Aeson.String s) ->
@@ -325,3 +325,4 @@ formatValidationErrors toolName errors =
         if Text.null err.errorPath
             then err.errorMessage
             else err.errorPath <> ": " <> err.errorMessage
+

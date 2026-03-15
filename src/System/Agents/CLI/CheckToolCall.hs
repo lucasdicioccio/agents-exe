@@ -20,7 +20,6 @@ module System.Agents.CLI.CheckToolCall (
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.Exit (exitFailure)
@@ -73,3 +72,4 @@ handleCheckToolCall opts = do
                                         <> ")"
                             Text.putStrLn $ formatValidationErrors toolName errors
                             exitFailure
+

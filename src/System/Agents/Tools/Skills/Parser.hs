@@ -15,10 +15,6 @@ module System.Agents.Tools.Skills.Parser (
 
 import Control.Exception (try)
 import qualified Data.Aeson as Aeson
-import Data.Bifunctor (first)
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -30,7 +26,6 @@ import System.Directory (
  )
 import System.Exit (ExitCode (..))
 import System.FilePath (dropExtension, takeDirectory, takeExtension, takeFileName, (</>))
-import System.IO.Error (IOError)
 import System.Process (readProcessWithExitCode)
 
 import System.Agents.Tools.Skills.Types
@@ -93,7 +88,7 @@ extractFrontmatter content =
             (firstLine : rest)
                 | Text.strip firstLine == "---" ->
                     case break (== "---") (map Text.strip rest) of
-                        (frontLines, (_ : bodyLines)) ->
+                        (frontLines, (_ : _bodyLines)) ->
                             Right
                                 ( Text.unlines (take (length frontLines) rest)
                                 , Text.unlines (drop (length frontLines + 1) rest)
@@ -178,7 +173,7 @@ loadScriptDescription script = do
     case result of
         Left (e :: IOError) ->
             return $ Left $ "Failed to execute script describe: " <> Text.pack (show e)
-        Right (exitCode, stdout, stderr) -> case exitCode of
+        Right (exitCode, stdout, _stderr) -> case exitCode of
             ExitSuccess ->
                 case Aeson.eitherDecodeStrict (Text.encodeUtf8 $ Text.pack stdout) of
                     Left err ->
@@ -195,8 +190,6 @@ loadScriptDescription script = do
                     Left $
                         "Script describe failed with exit code "
                             <> Text.pack (show code)
-                            <> ": "
-                            <> Text.pack stderr
 
 -- | Script description from describe output.
 data ScriptDescriptionOutput = ScriptDescriptionOutput
@@ -284,13 +277,14 @@ findSkillMdFiles dir = do
 -------------------------------------------------------------------------------
 
 filterM :: (Monad m) => (a -> m Bool) -> [a] -> m [a]
-filterM _pred [] = return []
-filterM pred (x : xs) = do
-    b <- pred x
-    if b then (x :) <$> filterM pred xs else filterM pred xs
+filterM _predicate [] = return []
+filterM predicate (x : xs) = do
+    b <- predicate x
+    if b then (x :) <$> filterM predicate xs else filterM predicate xs
 
 partitionEithers :: [Either a b] -> ([a], [b])
 partitionEithers = foldr go ([], [])
   where
     go (Left a) (as, bs) = (a : as, bs)
     go (Right b) (as, bs) = (as, b : bs)
+

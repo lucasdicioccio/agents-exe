@@ -424,8 +424,8 @@ initializeToolbox tracer desc = do
 This function should be called when the toolbox is no longer needed
 to properly close the database connection.
 -}
-closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
-closeToolbox tracer toolbox = do
+_closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
+_closeToolbox tracer toolbox = do
     SQLite.close (toolboxConnection toolbox)
     Direct.close (toolboxDirectDb toolbox)
     runTracer tracer ConnectionClosedTrace
@@ -635,8 +635,8 @@ formatExecutionTime = realToFrac
 
 Useful for logging or when space is constrained.
 -}
-formatResultsCompact :: QueryResult -> ByteString
-formatResultsCompact result =
+_formatResultsCompact :: QueryResult -> ByteString
+_formatResultsCompact result =
     LByteString.toStrict $ Aeson.encode jsonObj
   where
     jsonObj =
@@ -659,19 +659,20 @@ Example output:
 >   "rowCount": 2
 > }
 -}
-formatResultsAsObjects :: QueryResult -> ByteString
-formatResultsAsObjects result =
+_formatResultsAsObjects :: QueryResult -> ByteString
+_formatResultsAsObjects result =
     LByteString.toStrict $ Aeson.encode jsonObj
   where
     jsonObj =
         Aeson.object
             [ "columns" Aeson..= resultColumns result
-            , "rows" Aeson..= map (rowToObject (resultColumns result)) (resultRows result)
+            , "rows" Aeson..= map (_rowToObject (resultColumns result)) (resultRows result)
             , "rowCount" Aeson..= resultRowCount result
             , "executionTime" Aeson..= formatExecutionTime (resultExecutionTime result)
             ]
 
 -- | Convert a row (list of values) to an object using column names.
-rowToObject :: [Text] -> [Value] -> Value
-rowToObject cols values =
+_rowToObject :: [Text] -> [Value] -> Value
+_rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
+

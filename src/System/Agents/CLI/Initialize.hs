@@ -48,6 +48,8 @@ handleInitialize apiKeysFile agentFiles = do
                 , postgrestToolboxes = Nothing
                 , builtinToolboxes = Just []
                 , extraAgents = Nothing
+                , skillSources = Nothing
+                , autoEnableSkills = Nothing
                 }
 
     forM_ (take 1 agentFiles) $ \agentFile -> do
@@ -57,3 +59,4 @@ handleInitialize apiKeysFile agentFiles = do
   where
     handleInitError :: InitProject.InitializeError -> IO ()
     handleInitError e = putStrLn $ "Note: " ++ show e
+

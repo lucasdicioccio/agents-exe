@@ -33,7 +33,6 @@ module System.Agents.Tools.PostgREST.Converter (
     SubsetSchema (..),
     RankingSchema (..),
     HttpMethod (..),
-    methodToText,
 
     -- * Main conversion functions
     convertPostgRESToTools,
@@ -70,13 +69,11 @@ module System.Agents.Tools.PostgREST.Converter (
     module System.Agents.Tools.PostgREST.Types,
 ) where
 
-import Data.Aeson (Value (..))
-import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (isLetter)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -258,7 +255,7 @@ convertTable toolboxName path method op rowFilters requestBodySchema =
         { prtPath = path
         , prtMethod = method
         , prtName = deriveToolName toolboxName path method
-        , prtDescription = buildToolDescription op path method
+        , prtDescription = buildToolDescription op path
         , prtRowFilters = rowFilters
         , prtHasPagination = hasPaginationParams op
         , prtHasOrdering = hasOrderingParam op
@@ -342,10 +339,10 @@ Examples:
 []
 -}
 extractRowFilters :: Operation -> OpenAPISpec -> [RowFilter]
-extractRowFilters op spec =
+extractRowFilters op _spec =
     -- Look for parameters with rowFilter references
     let filterRefs = extractFilterRefs op
-     in mapMaybe (resolveFilterRef spec) filterRefs
+     in mapMaybe resolveFilterRef filterRefs
 
 {- | Extract filter reference strings from operation parameters.
 
@@ -353,15 +350,13 @@ Scans parameter schemas for $ref entries pointing to rowFilter definitions.
 -}
 extractFilterRefs :: Operation -> [Text]
 extractFilterRefs op =
-    catMaybes $ map extractRefFromParam (opParameters op)
+    mapMaybe extractRefFromParam (opParameters op)
   where
     extractRefFromParam :: Parameter -> Maybe Text
     extractRefFromParam param =
         case paramSchema param of
             Just schema -> schemaRef schema
             Nothing -> Nothing
-
-    catMaybes = mapMaybe id
 
 {- | Parse a rowFilter reference string.
 
@@ -395,13 +390,13 @@ parseRowFilterRef ref =
 
 Looks up the parameter definition in the spec to get type information.
 -}
-resolveFilterRef :: OpenAPISpec -> Text -> Maybe RowFilter
-resolveFilterRef _spec ref =
+resolveFilterRef :: Text -> Maybe RowFilter
+resolveFilterRef ref =
     -- For now, parse the reference and create a basic RowFilter
     -- In a full implementation, we'd look up the parameter definition
     -- in specComponents to get the actual type
     case parseRowFilterRef ref of
-        Just (table, column) ->
+        Just (_table, column) ->
             Just $
                 RowFilter
                     { rfColumn = column
@@ -418,32 +413,15 @@ resolveFilterRef _spec ref =
 
 Combines operation summary/description with table path and method information.
 -}
-buildToolDescription :: Operation -> Path -> HttpMethod -> Text
-buildToolDescription op path method =
+buildToolDescription :: Operation -> Path -> Text
+buildToolDescription op path =
     let baseDesc = case (opSummary op, opDescription op) of
             (Just summary, Just desc) -> summary <> ":\n" <> desc
             (Just summary, Nothing) -> summary
             (Nothing, Just desc) -> desc
-            (Nothing, Nothing) -> defaultAction method <> " " <> tableName
+            (Nothing, Nothing) -> "Table: " <> tableName
         tableName = Text.dropWhile (== '/') path
-        methodDesc = case method of
-            GET -> "Query rows from"
-            HEAD -> "Check existence/count in"
-            POST -> "Create new rows in"
-            PUT -> "Upsert (update or insert) rows in"
-            PATCH -> "Partially update rows in"
-            DELETE -> "Delete rows from"
-            OPTIONS -> "Get metadata about"
-     in baseDesc <> "\nTable: " <> tableName <> "\nMethod: " <> methodToText method
-  where
-    defaultAction :: HttpMethod -> Text
-    defaultAction GET = "Query"
-    defaultAction HEAD = "Check"
-    defaultAction POST = "Create"
-    defaultAction PUT = "Upsert"
-    defaultAction PATCH = "Update"
-    defaultAction DELETE = "Delete"
-    defaultAction OPTIONS = "Get metadata for"
+     in baseDesc <> "\nTable: " <> tableName
 
 -- -------------------------------------------------------------------------
 -- Parameter Detection
@@ -611,3 +589,4 @@ buildRankingSchema tool =
                     { rsOrder = Just "Ordering clause (e.g., 'created_at.desc,name.asc')"
                     }
         else Nothing
+

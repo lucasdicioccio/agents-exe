@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
@@ -45,7 +46,6 @@ module System.Agents.Tools.Skills.Types (
 
 import Data.Aeson (FromJSON, FromJSONKey, ToJSON, ToJSONKey)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as AesonTypes
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -65,7 +65,8 @@ Names must be:
 - No consecutive hyphens
 -}
 newtype SkillName = SkillName {unSkillName :: Text}
-    deriving (Show, Eq, Ord, Generic, FromJSONKey, ToJSONKey)
+    deriving stock (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSONKey, ToJSONKey)
 
 -- | Parse SkillName from a JSON/YAML string, validating the format.
 instance FromJSON SkillName where
@@ -109,7 +110,8 @@ validateSkillName txt
 
 -- | Name of a script within a skill.
 newtype ScriptName = ScriptName {unScriptName :: Text}
-    deriving (Show, Eq, Ord, Generic, FromJSONKey, ToJSONKey)
+    deriving stock (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSONKey, ToJSONKey)
 
 -- | Parse ScriptName from a JSON/YAML string.
 instance FromJSON ScriptName where
@@ -336,19 +338,8 @@ Provides O(log n) lookup by skill name.
 newtype SkillsStore = SkillsStore
     { getSkillsMap :: Map SkillName Skill
     }
-    deriving (Show, Eq, Generic)
-
-instance FromJSON SkillsStore where
-    parseJSON = Aeson.withObject "SkillsStore" $ \o -> do
-        -- Parse as a list of skills and build the map
-        skills <- o Aeson..: "skills"
-        return $ SkillsStore $ Map.fromList [(smName (skillMetadata s), s) | s <- skills]
-
-instance ToJSON SkillsStore where
-    toJSON store =
-        Aeson.object
-            [ "skills" Aeson..= Map.elems (getSkillsMap store)
-            ]
+    deriving stock (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON)
 
 instance Semigroup SkillsStore where
     (SkillsStore m1) <> (SkillsStore m2) = SkillsStore (Map.union m2 m1)
@@ -395,7 +386,8 @@ Later state overrides earlier state (last enable/disable wins).
 newtype SkillsSessionState = SkillsSessionState
     { sssActiveSkills :: Map SkillName SkillScriptsState
     }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    deriving stock (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON)
 
 instance Semigroup SkillsSessionState where
     (SkillsSessionState s1) <> (SkillsSessionState s2) =

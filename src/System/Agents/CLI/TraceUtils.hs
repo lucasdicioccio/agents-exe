@@ -27,6 +27,8 @@ import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as Tools
+import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
+import qualified System.Agents.Tools.Skills.Types as SkillsTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
@@ -40,6 +42,8 @@ tracePrintingTextResponses = Tracer f
     f (AgentTrace (Runtime.BuiltinToolboxInitError _ _)) = pure ()
     f (AgentTrace (Runtime.SystemToolboxTrace _ _)) = pure ()
     f (AgentTrace (Runtime.DeveloperToolboxTrace _ _)) = pure ()
+    f (AgentTrace (Runtime.SkillsToolboxTrace _ _)) = pure ()
+    f (AgentTrace (Runtime.SkillsToolboxInitError _ _)) = pure ()
     f (McpTrace _ _) = pure ()
     f (OpenAPITrace _ _) = pure ()
     f (PostgRESTrace _ _) = pure ()
@@ -61,6 +65,8 @@ tracePrintingTextResponses = Tracer f
     g _ (Runtime.ChildrenTrace (Runtime.BuiltinToolboxInitError _ _)) = pure ()
     g _ (Runtime.ChildrenTrace (Runtime.SystemToolboxTrace _ _)) = pure ()
     g _ (Runtime.ChildrenTrace (Runtime.DeveloperToolboxTrace _ _)) = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.SkillsToolboxTrace _ _)) = pure ()
+    g _ (Runtime.ChildrenTrace (Runtime.SkillsToolboxInitError _ _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) =
         Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
@@ -139,11 +145,22 @@ renderAgentTrace (Runtime.DeveloperToolboxTrace name tr) =
         [ mconcat ["@developer/", name, ":"]
         , renderDeveloperToolboxTrace tr
         ]
+renderAgentTrace (Runtime.SkillsToolboxTrace name tr) =
+    Text.unlines
+        [ mconcat ["@skills/", name, ":"]
+        , renderSkillsToolboxTrace tr
+        ]
+renderAgentTrace (Runtime.SkillsToolboxInitError name err) =
+    Text.unlines
+        [ mconcat ["@skills/", name, ":"]
+        , "Error: " <> Text.pack err
+        ]
 
 renderLoadingAgentTrace :: BashToolbox.Trace -> Text
 renderLoadingAgentTrace tr = case tr of
     BashToolbox.ReloadToolsTrace _ -> "(reload-tools...)"
     BashToolbox.BashToolsLoadingTrace _ -> "(reload-tools...)"
+    BashToolbox.SourceLoadingError _ _ -> "(source loading error)"
 
 renderBuiltinToolboxTrace :: SqliteTools.Trace -> Text
 renderBuiltinToolboxTrace tr = case tr of
@@ -185,6 +202,23 @@ renderDeveloperToolboxTrace tr = case tr of
     DeveloperTools.DeveloperToolErrorTrace op err ->
         Text.unwords ["developer-tool error:", op, "-", err]
 
+renderSkillsToolboxTrace :: SkillsToolbox.Trace -> Text
+renderSkillsToolboxTrace tr = case tr of
+    SkillsToolbox.SkillsLoadingTrace _sources ->
+        "(skills loading...)"
+    SkillsToolbox.SkillLoadedTrace name _path ->
+        Text.unwords ["skill loaded:", SkillsTypes.skillNameToText name]
+    SkillsToolbox.SkillLoadErrorTrace path err ->
+        Text.unwords ["skill load error:", Text.pack path, "-", err]
+    SkillsToolbox.ScriptExecutedTrace sName scriptName exitCode ->
+        Text.unwords ["script executed:", SkillsTypes.skillNameToText sName, "/", SkillsTypes.unScriptName scriptName, "(exit:", Text.pack (show exitCode), ")"]
+    SkillsToolbox.ScriptExecutionErrorTrace sName scriptName err ->
+        Text.unwords ["script execution error:", SkillsTypes.skillNameToText sName, "/", SkillsTypes.unScriptName scriptName, "-", err]
+    SkillsToolbox.SkillEnabledTrace name ->
+        Text.unwords ["skill enabled:", SkillsTypes.skillNameToText name]
+    SkillsToolbox.SkillDisabledTrace name ->
+        Text.unwords ["skill disabled:", SkillsTypes.skillNameToText name]
+
 renderConversationAgentTrace :: Runtime.ConversationTrace -> Text
 renderConversationAgentTrace tr = case tr of
     Runtime.NewConversation -> ""
@@ -216,3 +250,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

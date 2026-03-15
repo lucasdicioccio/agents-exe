@@ -271,7 +271,7 @@ render_agentInfo st =
                     rt = agent.agentTree.agentRuntime
                  in viewport AgentInfoWidget Both $
                         vBox $
-                            mconcat [agentHeader rt, agentTools rt mtools, agentPrompt rt]
+                            mconcat [agentHeader rt, renderToolsSection mtools, agentPrompt rt]
   where
     agentHeader :: Runtime -> [Widget N]
     agentHeader rt =
@@ -281,11 +281,11 @@ render_agentInfo st =
         , txt "# Model: " <=> txt (Text.pack $ show rt.agentModel.modelName)
         , txt ""
         ]
-    agentTools :: Runtime -> Maybe [ToolRegistration] -> [Widget N]
-    agentTools rt Nothing =
+    renderToolsSection :: Maybe [ToolRegistration] -> [Widget N]
+    renderToolsSection Nothing =
         [ txt "# Tools: not loaded"
         ]
-    agentTools rt (Just toolz) =
+    renderToolsSection (Just toolz) =
         [ txt "# Tools:"
         , txt $ Text.unlines ["- " <> (OpenAI.getToolName $ OpenAI.toolName (declareTool tool)) | tool <- toolz]
         ]
@@ -473,3 +473,4 @@ tui_appAttrMap _ =
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
         ]
+

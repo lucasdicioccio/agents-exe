@@ -119,9 +119,10 @@ parseRef ref
                 ("definitions" : name : _) ->
                     Just $ RefPath "definitions" "" name
                 -- Generic format: try to extract name from the last segment
-                parts'
+                parts'@(first : _)
                     | not (null parts') ->
-                        Just $ RefPath (head parts') (if length parts' > 2 then parts' !! 1 else "") (last parts')
+                        let section = if length parts' > 2 then parts' !! 1 else ""
+                         in Just $ RefPath first section (last parts')
                 _ -> Nothing
     -- Relative refs not starting with #/ are not supported
     | otherwise = Nothing
@@ -297,3 +298,4 @@ dereferenceSpec spec =
     resolveRequestBody :: Components -> RequestBody -> RequestBody
     resolveRequestBody comps body =
         body{reqBodyContent = Map.map (\s -> resolveSchema s comps) body.reqBodyContent}
+

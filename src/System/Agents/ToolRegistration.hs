@@ -60,7 +60,6 @@ import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
 import Data.Foldable.WithIndex (ifoldl')
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
@@ -88,7 +87,6 @@ import System.Agents.Tools.McpToolbox (callTool)
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (
     NameMapping (..),
-    OpenAPITool (..),
     normalizeForLLM,
     toOpenAITool,
  )
@@ -96,7 +94,6 @@ import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import System.Agents.Tools.OpenAPI.Types (Schema (..))
 import System.Agents.Tools.OpenAPIToolbox (
     createToolHandler,
-    getToolByNormalizedName,
     openapi2LLMName,
  )
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
@@ -110,7 +107,6 @@ import System.Agents.Tools.PostgREST.Converter (
     buildToolParameters,
     methodToText,
  )
-import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
@@ -163,24 +159,24 @@ postgrest2LLMName box tool =
 Generates an LLM-safe tool name in the format: @sqlite_{toolboxName}_{toolName}@
 -}
 sqlite2LLMName :: SqliteTools.Toolbox -> Text -> OpenAI.ToolName
-sqlite2LLMName box toolName =
-    OpenAI.ToolName (mconcat ["sqlite_", box.toolboxName, "_", toolName])
+sqlite2LLMName box tName =
+    OpenAI.ToolName (mconcat ["sqlite_", box.toolboxName, "_", tName])
 
 {- | Naming policy for System tools.
 
 Generates an LLM-safe tool name in the format: @system_{toolboxName}_{toolName}@
 -}
 system2LLMName :: SystemTools.Toolbox -> Text -> OpenAI.ToolName
-system2LLMName box toolName =
-    OpenAI.ToolName (mconcat ["system_", box.toolboxName, "_", toolName])
+system2LLMName box tName =
+    OpenAI.ToolName (mconcat ["system_", box.toolboxName, "_", tName])
 
 {- | Naming policy for Developer tools.
 
 Generates an LLM-safe tool name in the format: @developer_{toolboxName}_{toolName}@
 -}
 developer2LLMName :: DeveloperTools.Toolbox -> Text -> OpenAI.ToolName
-developer2LLMName box toolName =
-    OpenAI.ToolName (mconcat ["developer_", box.toolboxName, "_", toolName])
+developer2LLMName box tName =
+    OpenAI.ToolName (mconcat ["developer_", box.toolboxName, "_", tName])
 
 -------------------------------------------------------------------------------
 
@@ -344,7 +340,7 @@ registerOpenAPITool toolbox tool =
      in
         case mNameMapping of
             Nothing -> Left $ "Tool not found in name mapping: " <> Text.unpack originalOpId
-            Just nameMapping ->
+            Just _nameMapping ->
                 let
                     -- Convert to OpenAI Tool format with normalized name
                     openaiTool =
@@ -736,8 +732,8 @@ registerSqliteTool ::
 registerSqliteTool box =
     let
         -- Tool name is "query" since SQLite toolboxes expose a single query tool
-        toolName = "query"
-        llmName = sqlite2LLMName box toolName
+        tName = "query"
+        llmName = sqlite2LLMName box tName
 
         -- Single parameter: the SQL query
         paramProps =
@@ -799,8 +795,8 @@ registerSystemTool ::
     Either String ToolRegistration
 registerSystemTool box =
     let
-        toolName = "system_info"
-        llmName = system2LLMName box toolName
+        tName = "system_info"
+        llmName = system2LLMName box tName
 
         -- Single parameter: the capability to query
         paramProps =
@@ -878,8 +874,8 @@ registerDeveloperTool ::
     Either String ToolRegistration
 registerDeveloperTool box =
     let
-        toolName = "developer_tools"
-        llmName = developer2LLMName box toolName
+        tName = "developer_tools"
+        llmName = developer2LLMName box tName
 
         -- Single parameter: the capability to execute
         paramProps =
@@ -1124,8 +1120,8 @@ executeDeveloperCapability :: DeveloperTools.Toolbox -> Text -> Aeson.Object -> 
 executeDeveloperCapability box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
-            Just (Aeson.String toolPath) -> do
-                result <- DeveloperTools.executeValidateTool box (Text.unpack toolPath)
+            Just (Aeson.String tPath) -> do
+                result <- DeveloperTools.executeValidateTool box (Text.unpack tPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult

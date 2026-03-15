@@ -100,7 +100,6 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.CaseInsensitive (mk)
-import Data.Char (intToDigit)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
@@ -123,7 +122,6 @@ import System.Agents.Tools.EndpointPredicate (
  )
 import System.Agents.Tools.IO (RunError (..))
 import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
-import System.Agents.Tools.OpenAPI.Types (OpenAPISpec (..))
 import System.Agents.Tools.PostgREST.Converter (
     PostgRESTool (..),
     buildToolParameters,
@@ -131,11 +129,8 @@ import System.Agents.Tools.PostgREST.Converter (
     methodToText,
  )
 import System.Agents.Tools.PostgREST.Types (
-    FilterSchema (..),
     HttpMethod (..),
-    RankingSchema (..),
     RowFilter (..),
-    SubsetSchema (..),
     ToolParameters (..),
     ToolResult (..),
     Trace (..),
@@ -185,8 +180,8 @@ data Config = Config
     deriving (Show, Eq)
 
 -- | Convert toolbox Config to base Types.Config.
-toBaseConfig :: Config -> Types.Config
-toBaseConfig cfg =
+_toBaseConfig :: Config -> Types.Config
+_toBaseConfig cfg =
     Types.Config
         { Types.configUrl = cfg.configUrl
         , Types.configBaseUrl = cfg.configBaseUrl
@@ -479,7 +474,7 @@ handleToolCall toolbox tool args = do
 
 -- | Extract request body from arguments.
 extractRequestBody :: Object -> ToolParameters -> Maybe Value
-extractRequestBody obj params =
+extractRequestBody obj _params =
     case KeyMap.lookup "body" obj of
         Just val -> Just val
         Nothing -> Nothing
@@ -542,7 +537,7 @@ Extracts filters, subset, and ranking from the arguments object
 and converts them to PostgREST query parameters.
 -}
 buildQueryStringFromArgs :: Object -> ToolParameters -> Text
-buildQueryStringFromArgs obj params =
+buildQueryStringFromArgs obj _params =
     let objMap = KeyMap.toMapText obj
 
         -- Extract filters
@@ -717,3 +712,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+

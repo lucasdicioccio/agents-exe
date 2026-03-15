@@ -4,17 +4,16 @@ module System.Agents.Tools.Base where
 
 -------------------------------------------------------------------------------
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Prod.Tracer (Tracer)
 
 import qualified System.Agents.MCP.Base as Mcp
-import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
+import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
@@ -127,8 +126,8 @@ mapCallResult f c =
         (OpenAPIToolError v e) -> OpenAPIToolError (f v) e
         (PostgRESToolResult v r) -> PostgRESToolResult (f v) r
         (PostgRESToolError v e) -> PostgRESToolError (f v) e
-        (SqliteToolResult c r) -> SqliteToolResult (f c) r
-        (SqliteToolError c e) -> SqliteToolError (f c) e
+        (SqliteToolResult callCtx r) -> SqliteToolResult (f callCtx) r
+        (SqliteToolError callCtx e) -> SqliteToolError (f callCtx) e
         (SystemToolResult v r) -> SystemToolResult (f v) r
         (SystemToolError v e) -> SystemToolError (f v) e
         (DeveloperToolResult v r) -> DeveloperToolResult (f v) r
@@ -227,3 +226,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+

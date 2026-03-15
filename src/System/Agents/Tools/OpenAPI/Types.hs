@@ -41,7 +41,7 @@ module System.Agents.Tools.OpenAPI.Types (
 ) where
 
 import Control.Applicative ((<|>))
-import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), decode, withObject, (.:), (.:?))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withObject, (.:), (.:?))
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Key (Key, fromText, toText)
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -659,3 +659,4 @@ infixr 8 .=?
 (.=) k v = Just ((Aeson..=) k v)
 
 infixr 8 .=
+

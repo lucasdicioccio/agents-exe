@@ -306,7 +306,7 @@ buildToolNameMapping toolboxName tools =
 
     -- Local foldl' to avoid import
     foldl' :: (a -> b -> a) -> a -> [b] -> a
-    foldl' f z [] = z
+    foldl' _f z [] = z
     foldl' f z (x : xs) = let z' = f z x in z' `seq` foldl' f z' xs
 
 {- | Find a tool by its normalized LLM name.
@@ -676,3 +676,4 @@ The actual handler should be provided by the caller.
 -}
 defaultHandler :: ToolHandler
 defaultHandler _ = pure $ Left "Tool handler not implemented"
+

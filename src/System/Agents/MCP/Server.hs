@@ -450,8 +450,8 @@ callResultToUserToolResponse _ result =
             SessionBase.UserToolResponse $ Aeson.toJSON valResult
         DeveloperToolScaffoldResult _ scaffoldResult ->
             SessionBase.UserToolResponse $ Aeson.toJSON scaffoldResult
-        DeveloperToolSpecResult _ content ->
-            SessionBase.UserToolResponse $ Aeson.String content
+        DeveloperToolSpecResult _ specContent ->
+            SessionBase.UserToolResponse $ Aeson.String specContent
         DeveloperToolError _ err ->
             SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
 
@@ -574,3 +574,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+

@@ -12,17 +12,9 @@ module System.Agents.Tools.Skills.Source (
     cloneGitRepo,
 ) where
 
-import Control.Exception (bracket, try)
-import Control.Monad (unless)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.IO as Text
-import System.Directory (
-    createDirectoryIfMissing,
-    doesDirectoryExist,
-    listDirectory,
-    removeDirectoryRecursive,
- )
+import System.Directory (removeDirectoryRecursive)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
@@ -89,19 +81,17 @@ cloneGitRepo url = do
     -- Create a temp directory for the clone
     withSystemTempDirectory "agents-skills-" $ \tempDir -> do
         let cloneDir = tempDir </> "repo"
-        (exitCode, stdout, stderr) <-
+        (exitCode, _stdout, stderr) <-
             readProcessWithExitCode
                 "git"
                 ["clone", "--depth", "1", Text.unpack url, cloneDir]
                 ""
         case exitCode of
             ExitSuccess -> return $ Right cloneDir
-            ExitFailure code ->
+            ExitFailure _code ->
                 return $
                     Left $
-                        "Git clone failed with exit code "
-                            <> Text.pack (show code)
-                            <> ": "
+                        "Git clone failed: "
                             <> Text.pack stderr
 
 -------------------------------------------------------------------------------
@@ -113,3 +103,4 @@ partitionEithers = foldr go ([], [])
   where
     go (Left a) (as, bs) = (a : as, bs)
     go (Right b) (as, bs) = (as, b : bs)
+

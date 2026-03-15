@@ -16,7 +16,7 @@ import Control.Concurrent.STM (STM, atomically)
 import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, takeTMVar, tryPutTMVar)
 import Data.Either (partitionEithers)
 import qualified Data.List as List
-import Data.Maybe (maybeToList, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Prod.Background as Background
@@ -108,8 +108,8 @@ initializeMultiSourceToolbox ::
     [BashToolboxDescription] ->
     IO (Either LoadingError MultiSourceBashTools)
 initializeMultiSourceToolbox tracer baseDir descriptions = do
-    let sources = map (descriptionToSource baseDir) descriptions
-    results <- mapM (initializeSource tracer) sources
+    let toolSources = map (descriptionToSource baseDir) descriptions
+    results <- mapM (initializeSource tracer) toolSources
     let (errors, bgTools) = partitionEithers results
     if null errors
         then do
@@ -127,9 +127,9 @@ initializeSource ::
     Tracer IO Trace ->
     ToolSource ->
     IO (Either LoadingError BackgroundBashTools)
-initializeSource tracer source = case source of
-    DirectorySource _ mFilter path -> initializeDirectorySource tracer mFilter path source
-    SingleSource path -> initializeSingleSource tracer path source
+initializeSource tracer toolSource = case toolSource of
+    DirectorySource _ mFilter path -> initializeDirectorySource tracer mFilter path toolSource
+    SingleSource path -> initializeSingleSource tracer path toolSource
 
 -- | Initialize a directory source.
 initializeDirectorySource ::
@@ -138,19 +138,19 @@ initializeDirectorySource ::
     FilePath ->
     ToolSource ->
     IO (Either LoadingError BackgroundBashTools)
-initializeDirectorySource tracer mFilter path source = do
+initializeDirectorySource tracer mFilter path toolSource = do
     (startingTools, errs) <- loadDirectoryOnce mFilter
     if null errs
         then do
             lock <- newEmptyTMVarIO
-            bkgTools <-
+            bgToolsVal <-
                 Background.background
                     (contramap ReloadToolsTrace tracer)
                     ()
                     startingTools.scriptDescriptions
                     (const (reloadDirectoryOnTrigger lock mFilter))
             let triggerReloadTools = tryPutTMVar lock ()
-            pure $ Right (BackgroundBashTools source bkgTools triggerReloadTools)
+            pure $ Right (BackgroundBashTools toolSource bgToolsVal triggerReloadTools)
         else do
             pure $ Left (LoadingError ("errors when loading directory: " ++ path) errs)
   where
@@ -174,20 +174,20 @@ initializeSingleSource ::
     FilePath ->
     ToolSource ->
     IO (Either LoadingError BackgroundBashTools)
-initializeSingleSource tracer path source = do
+initializeSingleSource tracer path toolSource = do
     result <- loadScriptOnce
     case result of
         Left err -> pure $ Left (LoadingError ("error when loading script: " ++ path) [err])
         Right script -> do
             lock <- newEmptyTMVarIO
-            bkgTools <-
+            bgToolsVal <-
                 Background.background
                     (contramap ReloadToolsTrace tracer)
                     ()
                     [script]
                     (const (reloadScriptOnTrigger lock))
             let triggerReloadTools = tryPutTMVar lock ()
-            pure $ Right (BackgroundBashTools source bkgTools triggerReloadTools)
+            pure $ Right (BackgroundBashTools toolSource bgToolsVal triggerReloadTools)
   where
     loadScriptOnce :: IO (Either BashTools.InvalidScriptError BashTools.ScriptDescription)
     loadScriptOnce = BashTools.loadScript (contramap BashToolsLoadingTrace tracer) path
@@ -221,11 +221,12 @@ initializeBackroundToolbox ::
     FilePath ->
     IO (Either LoadingError BackgroundBashTools)
 initializeBackroundToolbox tracer tooldir = do
-    let source = DirectorySource tooldir Nothing tooldir
-    initializeSource tracer source
+    let toolSource = DirectorySource tooldir Nothing tooldir
+    initializeSource tracer toolSource
 
 -- | Read all tools from a multi-source toolbox.
 readMultiSourceTools :: MultiSourceBashTools -> IO [BashTools.ScriptDescription]
 readMultiSourceTools multi = do
     allTools <- mapM (Background.readBackgroundVal . tools) multi.sources
     pure $ concat allTools
+

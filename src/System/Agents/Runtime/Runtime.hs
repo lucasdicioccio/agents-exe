@@ -10,13 +10,10 @@ module System.Agents.Runtime.Runtime (
     triggerRefreshTools,
 ) where
 
-import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
+import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Data.Either (partitionEithers, rights)
-import Data.Maybe (maybeToList)
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap, runTracer, traceBoth)
 import qualified System.Agents.HttpClient as HttpClient
 
@@ -28,7 +25,6 @@ import System.Agents.Base (
     BuiltinToolboxDescription (..),
     DeveloperToolboxDescription (..),
     FileSystemDirectoryDescription (..),
-    SingleToolDescription (..),
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
     newAgentId,
@@ -210,13 +206,13 @@ newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools 
         [ToolRegistration] ->
         [ToolRegistration] ->
         IO [ToolRegistration]
-    readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs' skillToolRegs = do
+    readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolConfigs openApiToolRegs' skillToolRegs = do
         -- Read bash tools from all sources
         bashScripts <- BashToolbox.readMultiSourceTools multiToolbox
         let bashTools = map registerBashToolInLLM bashScripts
 
         -- Read MCP tools
-        mcpTools <- readMcpToolsRegistrations mcpToolboxes
+        mcpTools <- readMcpToolsRegistrations mcpToolConfigs
 
         -- Read SQLite tools
         sqliteTools <- readSqliteToolsRegistrations tracer sqliteToolboxes

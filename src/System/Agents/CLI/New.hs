@@ -23,7 +23,6 @@ module System.Agents.CLI.New (
 ) where
 
 import Control.Monad (unless, when)
-import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Map (Map)
@@ -145,8 +144,8 @@ defaultPresets =
 
 -- | Default system prompt based on agent slug
 defaultSystemPrompt :: Text -> [Text]
-defaultSystemPrompt slug =
-    [ "You are " <> slug <> ", a helpful AI assistant."
+defaultSystemPrompt agentSlug =
+    [ "You are " <> agentSlug <> ", a helpful AI assistant."
     , "You provide clear, accurate, and concise responses."
     , "When using tools, you explain your actions to the user."
     ]
@@ -158,7 +157,7 @@ buildAgentConfig opts = do
         Nothing -> Left $ "Unknown preset: " ++ Text.unpack opts.newAgentPreset
         Just p -> Right p
 
-    let modelName = fromMaybe preset.presetModelName opts.newAgentModel
+    let selectedModelName = fromMaybe preset.presetModelName opts.newAgentModel
 
     pure $
         Agent
@@ -166,8 +165,8 @@ buildAgentConfig opts = do
             , apiKeyId = preset.presetApiKeyId
             , flavor = preset.presetFlavor
             , modelUrl = preset.presetModelUrl
-            , modelName = modelName
-            , announce = "a helpful assistant powered by " <> modelName
+            , modelName = selectedModelName
+            , announce = "a helpful assistant powered by " <> selectedModelName
             , systemPrompt = defaultSystemPrompt opts.newAgentSlug
             , toolDirectory = Just "tools"
             , bashToolboxes = Nothing
@@ -176,6 +175,8 @@ buildAgentConfig opts = do
             , postgrestToolboxes = Nothing
             , builtinToolboxes = Just []
             , extraAgents = Nothing
+            , skillSources = Nothing
+            , autoEnableSkills = Nothing
             }
 
 -- | Handle the new command: create agent or tool scaffolding
@@ -263,18 +264,18 @@ handleNewTool force opts = do
 
 -- | Create a tool template for a given language
 makeToolTemplate :: ToolLanguage -> Text -> Text
-makeToolTemplate language slug = case language of
-    BashLang -> makeBashToolTemplate slug
-    PythonLang -> makePythonToolTemplate slug
-    HaskellLang -> makeHaskellToolTemplate slug
-    NodeLang -> makeNodeToolTemplate slug
+makeToolTemplate language toolSlug = case language of
+    BashLang -> makeBashToolTemplate toolSlug
+    PythonLang -> makePythonToolTemplate toolSlug
+    HaskellLang -> makeHaskellToolTemplate toolSlug
+    NodeLang -> makeNodeToolTemplate toolSlug
 
 -- | Create a bash tool template
 makeBashToolTemplate :: Text -> Text
-makeBashToolTemplate slug =
+makeBashToolTemplate toolSlug =
     Text.unlines
         [ "#!/bin/bash"
-        , "# " <> slug <> " - A bash tool for agents-exe"
+        , "# " <> toolSlug <> " - A bash tool for agents-exe"
         , ""
         , "set -euo pipefail"
         , ""
@@ -289,8 +290,8 @@ makeBashToolTemplate slug =
         , "  describe)"
         , "    cat <<'DESCRIBE_EOF'"
         , "{"
-        , "  \"slug\": \"" <> slug <> "\","
-        , "  \"description\": \"Tool " <> slug <> " - describe what this tool does\","
+        , "  \"slug\": \"" <> toolSlug <> "\","
+        , "  \"description\": \"Tool " <> toolSlug <> " - describe what this tool does\","
         , "  \"args\": [],"
         , "  \"empty-result\": {"
         , "    \"tag\": \"AddMessage\","
@@ -302,10 +303,10 @@ makeBashToolTemplate slug =
         , "  run)"
         , "    # TODO: Implement tool logic"
         , "    # Access arguments via environment or command line"
-        , "    echo \"Tool " <> slug <> " executed\""
+        , "    echo \"Tool " <> toolSlug <> " executed\""
         , "    ;;"
         , "  *)"
-        , "    echo \"Usage: " <> slug <> " <describe|run>\" >&2"
+        , "    echo \"Usage: " <> toolSlug <> " <describe|run>\" >&2"
         , "    exit 1"
         , "    ;;"
         , "esac"
@@ -313,10 +314,10 @@ makeBashToolTemplate slug =
 
 -- | Create a Python tool template
 makePythonToolTemplate :: Text -> Text
-makePythonToolTemplate slug =
+makePythonToolTemplate toolSlug =
     Text.unlines
         [ "#!/usr/bin/env python3"
-        , "# " <> slug <> " - A Python tool for agents-exe"
+        , "# " <> toolSlug <> " - A Python tool for agents-exe"
         , ""
         , "\"\"\"Agents-exe tool protocol: describe|run"
         , ""
@@ -335,8 +336,8 @@ makePythonToolTemplate slug =
         , "def describe() -> dict:"
         , "    \"\"\"Return tool description metadata.\"\"\""
         , "    return {"
-        , "        \"slug\": \"" <> slug <> "\","
-        , "        \"description\": \"Tool " <> slug <> " - describe what this tool does\","
+        , "        \"slug\": \"" <> toolSlug <> "\","
+        , "        \"description\": \"Tool " <> toolSlug <> " - describe what this tool does\","
         , "        \"args\": [],"
         , "        \"empty-result\": {"
         , "            \"tag\": \"AddMessage\","
@@ -350,7 +351,7 @@ makePythonToolTemplate slug =
         , "    # TODO: Implement tool logic"
         , "    # Access environment variables:"
         , "    # session_id = os.environ.get('AGENT_SESSION_ID')"
-        , "    print(f\"Tool " <> slug <> " executed\")"
+        , "    print(f\"Tool " <> toolSlug <> " executed\")"
         , ""
         , ""
         , "def main() -> int:"
@@ -377,11 +378,11 @@ makePythonToolTemplate slug =
 
 -- | Create a Haskell tool template
 makeHaskellToolTemplate :: Text -> Text
-makeHaskellToolTemplate slug =
+makeHaskellToolTemplate toolSlug =
     Text.unlines
         [ "#!/usr/bin/env runhaskell"
         , "{-# LANGUAGE OverloadedStrings #-}"
-        , "-- | " <> slug <> " - A Haskell tool for agents-exe"
+        , "-- | " <> toolSlug <> " - A Haskell tool for agents-exe"
         , ""
         , "-- Agents-exe tool protocol: describe|run"
         , "-- Environment variables available during 'run':"
@@ -403,15 +404,15 @@ makeHaskellToolTemplate slug =
         , "        [\"describe\"] -> describe"
         , "        [\"run\"] -> run"
         , "        _ -> do"
-        , "            hPutStrLn stderr \"Usage: " <> slug <> " <describe|run>\""
+        , "            hPutStrLn stderr \"Usage: " <> toolSlug <> " <describe|run>\""
         , "            exitFailure"
         , ""
         , "describe :: IO ()"
         , "describe = do"
         , "    LBS.putStrLn $ encode $ object"
         , "        [ \"args\" .= ([] :: [Value])"
-        , "        , \"slug\" .= (\"" <> slug <> "\" :: String)"
-        , "        , \"description\" .= (\"Tool " <> slug <> " - describe what this tool does\" :: String)"
+        , "        , \"slug\" .= (\"" <> toolSlug <> "\" :: String)"
+        , "        , \"description\" .= (\"Tool " <> toolSlug <> " - describe what this tool does\" :: String)"
         , "        , \"empty-result\" .= object"
         , "            [ \"tag\" .= (\"AddMessage\" :: String)"
         , "            , \"contents\" .= (\"--no output--\" :: String)"
@@ -423,15 +424,15 @@ makeHaskellToolTemplate slug =
         , "    -- TODO: Implement tool logic"
         , "    -- Access environment variables:"
         , "    -- sessionId <- lookupEnv \"AGENT_SESSION_ID\""
-        , "    putStrLn \"Tool " <> slug <> " executed\""
+        , "    putStrLn \"Tool " <> toolSlug <> " executed\""
         ]
 
 -- | Create a Node.js tool template
 makeNodeToolTemplate :: Text -> Text
-makeNodeToolTemplate slug =
+makeNodeToolTemplate toolSlug =
     Text.unlines
         [ "#!/usr/bin/env node"
-        , "// " <> slug <> " - A Node.js tool for agents-exe"
+        , "// " <> toolSlug <> " - A Node.js tool for agents-exe"
         , ""
         , "// Agents-exe tool protocol: describe|run"
         , "// Environment variables available during 'run':"
@@ -443,8 +444,8 @@ makeNodeToolTemplate slug =
         , "function describe() {"
         , "    return {"
         , "        args: [],"
-        , "        slug: \"" <> slug <> "\","
-        , "        description: \"Tool " <> slug <> " - describe what this tool does\","
+        , "        slug: \"" <> toolSlug <> "\","
+        , "        description: \"Tool " <> toolSlug <> " - describe what this tool does\","
         , "        'empty-result': {"
         , "            tag: 'AddMessage',"
         , "            contents: '--no output--'"
@@ -456,7 +457,7 @@ makeNodeToolTemplate slug =
         , "    // TODO: Implement tool logic"
         , "    // Access environment variables:"
         , "    // const sessionId = process.env.AGENT_SESSION_ID;"
-        , "    console.log('Tool " <> slug <> " executed');"
+        , "    console.log('Tool " <> toolSlug <> " executed');"
         , "}"
         , ""
         , "function main() {"
@@ -470,10 +471,11 @@ makeNodeToolTemplate slug =
         , "            run();"
         , "            process.exit(0);"
         , "        default:"
-        , "            console.error('Usage: " <> slug <> " <describe|run>');"
+        , "            console.error('Usage: " <> toolSlug <> " <describe|run>');"
         , "            process.exit(1);"
         , "    }"
         , "}"
         , ""
         , "main();"
         ]
+

@@ -4,8 +4,7 @@
 {- | PostgREST-specific types for database API mapping.
 
 PostgREST (https://postgrest.org) is a standalone web server that turns
-PostgreSQL databases directly into RESTful APIs. This module provides
-types for:
+PostgreSQL databases directly into RESTful APIs. This module provides types for:
 
 * Configuration for connecting to PostgREST instances
 * Row filter definitions for column-based filtering
@@ -52,7 +51,6 @@ module System.Agents.Tools.PostgREST.Types (
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..))
 import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -349,3 +347,4 @@ instance ToJSON ToolResult where
             , "status" Aeson..= resultStatus tr
             , "payload" Aeson..= resultPayload tr
             ]
+
