@@ -7,6 +7,7 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
+import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
@@ -18,6 +19,8 @@ data Trace
     | BuiltinToolboxInitError !Text !String
     | SystemToolboxTrace !Text !SystemToolbox.Trace
     | DeveloperToolboxTrace !Text !DeveloperToolbox.Trace
+    | SkillsToolboxTrace !Text !SkillsToolbox.Trace
+    | SkillsToolboxInitError !Text !String
     deriving (Show)
 
 traceAgentSlug :: Trace -> AgentSlug
@@ -27,6 +30,8 @@ traceAgentSlug (BuiltinToolboxTrace _ _) = "builtin"
 traceAgentSlug (BuiltinToolboxInitError name _) = name
 traceAgentSlug (SystemToolboxTrace name _) = name
 traceAgentSlug (DeveloperToolboxTrace name _) = name
+traceAgentSlug (SkillsToolboxTrace name _) = name
+traceAgentSlug (SkillsToolboxInitError name _) = name
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
@@ -35,6 +40,8 @@ traceAgentId (BuiltinToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-
 traceAgentId (BuiltinToolboxInitError _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (SystemToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (DeveloperToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
+traceAgentId (SkillsToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
+traceAgentId (SkillsToolboxInitError _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 
 traceConversationId :: Trace -> Maybe ConversationId
 traceConversationId (AgentTrace_Loading _ _ _) = Nothing
@@ -43,6 +50,8 @@ traceConversationId (BuiltinToolboxTrace _ _) = Nothing
 traceConversationId (BuiltinToolboxInitError _ _) = Nothing
 traceConversationId (SystemToolboxTrace _ _) = Nothing
 traceConversationId (DeveloperToolboxTrace _ _) = Nothing
+traceConversationId (SkillsToolboxTrace _ _) = Nothing
+traceConversationId (SkillsToolboxInitError _ _) = Nothing
 
 data ConversationTrace
     = NewConversation
@@ -51,3 +60,4 @@ data ConversationTrace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
+

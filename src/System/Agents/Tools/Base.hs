@@ -20,6 +20,7 @@ import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
+import qualified System.Agents.Tools.Skills.Types as SkillTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace (ToolTrace)
@@ -55,6 +56,12 @@ data ToolDef
       SystemTool !SystemTools.ToolDescription
     | -- | Developer tool description
       DeveloperTool !DeveloperTools.ToolDescription
+    | -- | Skill tool: skill name and action (describe, enable, disable)
+      SkillTool !SkillTypes.SkillName !Text
+    | -- | Skill script tool: skill name and script name
+      SkillScriptTool !SkillTypes.SkillName !SkillTypes.ScriptName
+    | -- | Skill list tool
+      SkillListTool
     deriving (Show)
 
 -------------------------------------------------------------------------------

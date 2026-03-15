@@ -1018,6 +1018,9 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                     -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
                     let bashSources = buildBashToolSources (Just rootDir) desc
 
+                    -- Get skill sources from agent config
+                    let skillSources = Maybe.fromMaybe [] desc.skillSources
+
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
                     -- extra agents (resolved via registry at call time)
@@ -1040,6 +1043,7 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
                         builtinDescriptions
+                        skillSources
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
@@ -1082,6 +1086,9 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                     -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
                     let bashSources = buildBashToolSources (Just rootDir) desc
 
+                    -- Get skill sources from agent config
+                    let skillSources = Maybe.fromMaybe [] desc.skillSources
+
                     Runtime.newRuntimeWithMultiBash
                         desc.slug
                         desc.announce
@@ -1101,6 +1108,7 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
                         builtinDescriptions
+                        skillSources
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
@@ -1154,3 +1162,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+

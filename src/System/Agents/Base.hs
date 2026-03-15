@@ -17,6 +17,7 @@ import GHC.Generics (Generic)
 
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
+import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
 type AgentSlug = Text
 type AgentAnnounce = Text
@@ -848,6 +849,37 @@ instance FromJSON BuiltinToolboxDescription where
             _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', or 'DeveloperToolbox' tag"
 
 -------------------------------------------------------------------------------
+-- Skills Toolbox Configuration
+-------------------------------------------------------------------------------
+
+{- | Configuration for skills toolboxes per agentskills.io specification.
+
+Skills provide procedural knowledge and executable capabilities via
+progressive disclosure. The agent configuration specifies:
+- skillSources: Where to load skills from (local directories, git repos)
+- autoEnableSkills: Which skills to enable automatically at session start
+
+Example configuration:
+
+@
+{
+  "skillSources": [
+    {"tag": "SkillDirectory", "contents": "./skills"},
+    {"tag": "SkillGitRepo", "contents": {"url": "https://github.com/example/shared-skills.git"}}
+  ],
+  "autoEnableSkills": ["pdf-processing", "code-review"]
+}
+@
+
+Progressive disclosure:
+- Initially, only metadata tools are visible (skill_describe_{name}, skill_enable_{name})
+- After skill_enable_{name} is called, script tools become available
+- Tool availability is computed as a pure function of Session history
+-}
+
+-------------------------------------------------------------------------------
+-- Agent Definition
+-------------------------------------------------------------------------------
 
 {- | Agent definition.
 
@@ -904,8 +936,12 @@ data Agent
     , postgrestToolboxes :: Maybe [PostgRESTToolboxDescription]
     , builtinToolboxes :: Maybe [BuiltinToolboxDescription]
     , extraAgents :: Maybe [ExtraAgentRef]
+    , skillSources :: Maybe [SkillSource]
+    -- ^ Sources to load skills from (directories, git repos)
+    , autoEnableSkills :: Maybe [SkillName]
+    -- ^ Skills to enable automatically at session start
     }
-    deriving (Show, Ord, Eq, Generic)
+    deriving (Show, Eq, Generic)
 
 -- | Custom JSON options for Agent - uses camelCase to match existing format
 agentOptions :: Aeson.Options
@@ -922,9 +958,13 @@ instance ToJSON Agent where
 instance FromJSON Agent where
     parseJSON = Aeson.genericParseJSON agentOptions
 
+instance Ord Agent where
+    compare a1 a2 = compare (slug a1) (slug a2)
+
 data AgentDescription
     = AgentDescription Agent
     deriving (Show, Ord, Eq, Generic)
+
 instance ToJSON AgentDescription where
     toJSON (AgentDescription val) =
         Aeson.object
@@ -954,6 +994,7 @@ instance ToJSON McpSimpleBinaryConfiguration
 data McpServerDescription
     = McpSimpleBinary McpSimpleBinaryConfiguration
     deriving (Show, Ord, Eq, Generic)
+
 instance ToJSON McpServerDescription where
     toJSON (McpSimpleBinary val) =
         Aeson.object
