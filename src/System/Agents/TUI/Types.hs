@@ -241,4 +241,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-

@@ -180,4 +180,3 @@ runTUIWithConfig config props = do
     createAgentForTree itree = do
         convId <- newConversationId
         runtimeToAgent config.sessionStore Nothing convId (agentRuntime itree)
-
