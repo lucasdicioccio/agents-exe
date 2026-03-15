@@ -371,7 +371,7 @@ dispatch cfg conn cmd = case cmd of
     Next -> cmdNext cfg conn
     Process p l -> cmdProcess cfg conn p l
     Exec n -> cmdExec cfg conn n
-    MergePRs -> cmdMergePRs cfg
+    MergePRs -> cmdMergePRs cfg conn
     Clean d f -> cmdClean cfg d f
     Recover -> cmdRecover cfg conn
     Retry n r -> cmdRetry cfg conn n r
