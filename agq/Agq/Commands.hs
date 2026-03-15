@@ -609,10 +609,41 @@ execTask cfg conn t = do
         putStrLn $ "[agq] Stderr log written to " <> errFile
         let errSnippet = Text.unlines . reverse . take 100 . reverse . Text.lines $ agentErr
             errMsg = "agents-exe failed for task `" <> Text.pack nameStr <> "`\n\n```\n" <> errSnippet <> "```"
+        -- Append a start+end snapshot of the session file (params shown, results elided)
+        sessionSnippet <- do
+            sessExists <- doesFileExist sessFile
+            if not sessExists
+                then return ""
+                else do
+                    (_, sessionMd) <-
+                        captureCmd
+                            "agents-exe"
+                            [ "session-print"
+                            , sessFile
+                            , "--show-tool-call-results"
+                            , "hidden"
+                            , "--show-tool-call-arguments"
+                            , "shown"
+                            , "--no-funny-stamp"
+                            ]
+                    let allLines = Text.lines sessionMd
+                        n = length allLines
+                        headN = 40
+                        tailN = 40
+                        snippet
+                            | n <= headN + tailN = sessionMd
+                            | otherwise =
+                                Text.unlines (take headN allLines)
+                                    <> "\n... ("
+                                    <> Text.pack (show (n - headN - tailN))
+                                    <> " lines elided) ...\n\n"
+                                    <> Text.unlines (drop (n - tailN) allLines)
+                    return $ "\n\n## Session trace (params shown, results elided)\n\n" <> snippet
         -- For GitHub-sourced and PR-review tasks, post the failure snippet as a comment
+        let fullErrMsg = errMsg <> sessionSnippet
         case taskSource t of
-            SourceGithub n -> void $ runGh ["issue", "comment", show n, "--body", Text.unpack errMsg]
-            SourcePrReview n -> void $ runGh ["pr", "comment", show n, "--body", Text.unpack errMsg]
+            SourceGithub n -> void $ runGh ["issue", "comment", show n, "--body", Text.unpack fullErrMsg]
+            SourcePrReview n -> void $ runGh ["pr", "comment", show n, "--body", Text.unpack fullErrMsg]
             SourceLocal -> return ()
         releaseLock conn (taskName t) Failed (Just "agents-exe returned non-zero")
 
