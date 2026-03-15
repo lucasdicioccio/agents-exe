@@ -117,8 +117,7 @@ validateToolInput ::
 validateToolInput schema input =
     validateToolInputWithConfig defaultConfig schema input
 
-{- | Validate with custom configuration.
--}
+-- | Validate with custom configuration.
 validateToolInputWithConfig ::
     ValidationConfig ->
     [ParamProperty] ->
@@ -126,14 +125,16 @@ validateToolInputWithConfig ::
     [ValidationError]
 validateToolInputWithConfig config schema = \case
     Aeson.Object obj ->
-        let -- Check for extra properties if not allowed
+        let
+            -- Check for extra properties if not allowed
             extraPropErrors =
                 if allowExtraProperties config
                     then []
                     else checkExtraProperties schema obj
             -- Validate each property in the schema
             propertyErrors = concatMap (validatePropertyField obj) schema
-         in extraPropErrors ++ propertyErrors
+         in
+            extraPropErrors ++ propertyErrors
     Aeson.Null ->
         -- Null is only valid if all properties are optional
         concatMap checkRequiredProperty schema
@@ -232,7 +233,8 @@ validateParamTypeWithPath path paramType value = case (paramType, value) of
         -- For now, we accept any value (could be made stricter)
         []
     (ObjectParamType nestedProps, Aeson.Object obj) ->
-        let -- Check required nested properties
+        let
+            -- Check required nested properties
             requiredProps = filter propertyRequired nestedProps
             missingErrors =
                 [ ValidationError (path <> "." <> propertyKey prop) "Required property missing"
@@ -241,7 +243,8 @@ validateParamTypeWithPath path paramType value = case (paramType, value) of
                 ]
             -- Validate present properties
             presentErrors = concatMap (validateNestedProperty obj) nestedProps
-         in missingErrors ++ presentErrors
+         in
+            missingErrors ++ presentErrors
     (ObjectParamType _, _) ->
         [ValidationError path $ "Expected object but got " <> valueTypeName value]
   where
@@ -255,8 +258,7 @@ validateParamTypeWithPath path paramType value = case (paramType, value) of
                     (propertyType nestedProp)
                     nestedValue
 
-{- | Get a human-readable type name for a JSON value.
--}
+-- | Get a human-readable type name for a JSON value.
 valueTypeName :: Aeson.Value -> Text
 valueTypeName Aeson.Null = "null"
 valueTypeName (Aeson.String _) = "string"
@@ -323,4 +325,3 @@ formatValidationErrors toolName errors =
         if Text.null err.errorPath
             then err.errorMessage
             else err.errorPath <> ": " <> err.errorMessage
-

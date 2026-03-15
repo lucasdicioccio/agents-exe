@@ -27,9 +27,9 @@ import System.Exit (exitFailure)
 import System.IO (stderr)
 
 import qualified Prod.Tracer as Prod
+import qualified System.Agents.ToolRegistration as ToolReg
 import System.Agents.Tools.Bash (ScriptDescription (..), ScriptInfo (..), loadScript)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
-import qualified System.Agents.ToolRegistration as ToolReg
 
 -- | Options for the check-tool-call command
 data CheckToolCallOptions = CheckToolCallOptions
@@ -73,4 +73,3 @@ handleCheckToolCall opts = do
                                         <> ")"
                             Text.putStrLn $ formatValidationErrors toolName errors
                             exitFailure
-

@@ -183,6 +183,7 @@ developer2LLMName box toolName =
     OpenAI.ToolName (mconcat ["developer_", box.toolboxName, "_", toolName])
 
 -------------------------------------------------------------------------------
+
 {- | Convert a ScriptArg to a ParamProperty for schema validation.
 
 This function maps bash script arguments to the LLM schema format,
@@ -1211,4 +1212,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-
