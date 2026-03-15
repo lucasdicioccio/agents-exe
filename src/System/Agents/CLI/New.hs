@@ -17,6 +17,9 @@ module System.Agents.CLI.New (
     buildAgentConfig,
     defaultPresets,
     defaultSystemPrompt,
+    toolLanguageToExtension,
+    makeToolTemplate,
+    supportedLanguages,
 ) where
 
 import Control.Monad (unless, when)
@@ -31,8 +34,9 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.Exit (exitFailure)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (takeDirectory, (<.>), (</>))
 import System.IO (stderr)
+import System.Posix.Files (ownerExecuteMode, ownerReadMode, ownerWriteMode, setFileMode, unionFileModes)
 
 import System.Agents.Base (Agent (..), AgentDescription (..))
 
@@ -56,19 +60,38 @@ data NewAgentOptions = NewAgentOptions
     }
     deriving (Show, Eq)
 
--- | Options for new tool command
-data NewToolOptions = NewToolOptions
-    { newToolSlug :: Text
-    , newToolFilePath :: FilePath
-    , newToolLanguage :: ToolLanguage
-    }
-    deriving (Show, Eq)
-
 -- | Programming language for tool scaffolding
 data ToolLanguage
     = BashLang
     | PythonLang
     | HaskellLang
+    | NodeLang
+    deriving (Show, Eq, Ord)
+
+-- | Supported languages mapping for CLI parsing
+supportedLanguages :: Map Text ToolLanguage
+supportedLanguages =
+    Map.fromList
+        [ ("bash", BashLang)
+        , ("python", PythonLang)
+        , ("haskell", HaskellLang)
+        , ("node", NodeLang)
+        , ("nodejs", NodeLang)
+        ]
+
+-- | Get file extension for a language
+toolLanguageToExtension :: ToolLanguage -> String
+toolLanguageToExtension BashLang = ""
+toolLanguageToExtension PythonLang = ".py"
+toolLanguageToExtension HaskellLang = ".hs"
+toolLanguageToExtension NodeLang = ".js"
+
+-- | Options for new tool command
+data NewToolOptions = NewToolOptions
+    { newToolSlug :: Text
+    , newToolLanguage :: ToolLanguage
+    , newToolFilePath :: FilePath
+    }
     deriving (Show, Eq)
 
 -- | Subcommands for the 'new' command
@@ -199,82 +222,86 @@ handleNewAgent force opts = do
 -- | Handle the new tool command
 handleNewTool :: Bool -> NewToolOptions -> IO ()
 handleNewTool force opts = do
+    let extension = toolLanguageToExtension opts.newToolLanguage
+    let finalPath = opts.newToolFilePath <.> extension
+
+    -- Check if file already exists
     unless force $ do
-        exists <- doesFileExist opts.newToolFilePath
+        exists <- doesFileExist finalPath
         when exists $ do
             Text.hPutStrLn stderr $
-                "File already exists: "
-                    <> Text.pack opts.newToolFilePath
-                    <> "\nUse --force to overwrite."
+                "Error: File already exists: " <> Text.pack finalPath
+            Text.hPutStrLn stderr "Use --force to overwrite"
             exitFailure
 
-    createDirectoryIfMissing True (takeDirectory opts.newToolFilePath)
+    -- Create directory
+    createDirectoryIfMissing True (takeDirectory finalPath)
+
+    -- Generate and write tool content
     let content = makeToolTemplate opts.newToolLanguage opts.newToolSlug
-    Text.writeFile opts.newToolFilePath content
-    -- Make executable for bash scripts
-    case opts.newToolLanguage of
-        BashLang -> do
-            -- Set executable permissions would need unix module
-            -- For now, just inform the user
-            Text.putStrLn $ "Created tool: " <> Text.pack opts.newToolFilePath
-            Text.putStrLn $ "  Remember to make it executable: chmod +x " <> Text.pack opts.newToolFilePath
-        _ -> do
-            Text.putStrLn $ "Created tool: " <> Text.pack opts.newToolFilePath
-    Text.putStrLn $ "  Slug: " <> opts.newToolSlug
-    Text.putStrLn $ "  Language: " <> Text.pack (show opts.newToolLanguage)
+    Text.writeFile finalPath content
+
+    -- Set executable permissions for all languages
+    let mode = ownerReadMode `unionFileModes` ownerWriteMode `unionFileModes` ownerExecuteMode
+    setFileMode finalPath mode
+
+    -- Output success message with next steps
+    Text.putStrLn $ "Created tool: " <> Text.pack finalPath
+    Text.putStrLn $ "Language: " <> Text.pack (show opts.newToolLanguage)
+    Text.putStrLn ""
+    Text.putStrLn "Next steps:"
+    Text.putStrLn "  1. Edit the 'args' array in the describe function"
+    Text.putStrLn "  2. Implement the run function"
+    Text.putStrLn $ "  3. Test with: agents-exe describe-tool " <> Text.pack finalPath
 
 -- | Create a tool template for a given language
 makeToolTemplate :: ToolLanguage -> Text -> Text
 makeToolTemplate language slug = case language of
+    BashLang -> makeBashToolTemplate slug
     PythonLang -> makePythonToolTemplate slug
     HaskellLang -> makeHaskellToolTemplate slug
-    BashLang -> makeBashToolTemplate slug
+    NodeLang -> makeNodeToolTemplate slug
 
 -- | Create a bash tool template
 makeBashToolTemplate :: Text -> Text
 makeBashToolTemplate slug =
     Text.unlines
         [ "#!/bin/bash"
+        , "# " <> slug <> " - A bash tool for agents-exe"
         , ""
-        , "# " <> slug <> " - Tool description here"
+        , "set -euo pipefail"
         , ""
-        , "if [ \"$1\" == \"describe\" ]; then"
-        , "    cat <<'EOF'"
+        , "# Agents-exe tool protocol: describe|run"
+        , "# Environment variables available during 'run':"
+        , "#   AGENT_SESSION_ID      - UUID of the current session"
+        , "#   AGENT_CONVERSATION_ID - UUID of the conversation"
+        , "#   AGENT_TURN_ID         - UUID of the current turn"
+        , "#   AGENT_AGENT_ID        - UUID of the executing agent (if available)"
+        , ""
+        , "case \"${1:-}\" in"
+        , "  describe)"
+        , "    cat <<'DESCRIBE_EOF'"
         , "{"
         , "  \"slug\": \"" <> slug <> "\","
-        , "  \"description\": \"Description of what this tool does\","
-        , "  \"args\": ["
-        , "    {"
-        , "      \"name\": \"example_arg\","
-        , "      \"description\": \"An example argument\","
-        , "      \"type\": \"string\","
-        , "      \"backing_type\": \"string\","
-        , "      \"arity\": \"single\","
-        , "      \"mode\": \"dashdashspace\""
-        , "    }"
-        , "  ],"
-        , "  \"empty-result\": { \"tag\": \"AddMessage\", \"contents\": \"No results\" }"
+        , "  \"description\": \"Tool " <> slug <> " - describe what this tool does\","
+        , "  \"args\": [],"
+        , "  \"empty-result\": {"
+        , "    \"tag\": \"AddMessage\","
+        , "    \"contents\": \"--no output--\""
+        , "  }"
         , "}"
-        , "EOF"
-        , "    exit 0"
-        , "fi"
-        , ""
-        , "# Parse arguments for 'run' command"
-        , "EXAMPLE_ARG=\"\""
-        , "while [[ $# -gt 0 ]]; do"
-        , "    case $1 in"
-        , "        --example-arg)"
-        , "            EXAMPLE_ARG=\"$2\""
-        , "            shift 2"
-        , "            ;;"
-        , "        *)"
-        , "            shift"
-        , "            ;;"
-        , "    esac"
-        , "done"
-        , ""
-        , "# Main logic here"
-        , "echo \"Tool " <> slug <> " executed with: $EXAMPLE_ARG\""
+        , "DESCRIBE_EOF"
+        , "    ;;"
+        , "  run)"
+        , "    # TODO: Implement tool logic"
+        , "    # Access arguments via environment or command line"
+        , "    echo \"Tool " <> slug <> " executed\""
+        , "    ;;"
+        , "  *)"
+        , "    echo \"Usage: " <> slug <> " <describe|run>\" >&2"
+        , "    exit 1"
+        , "    ;;"
+        , "esac"
         ]
 
 -- | Create a Python tool template
@@ -282,50 +309,63 @@ makePythonToolTemplate :: Text -> Text
 makePythonToolTemplate slug =
     Text.unlines
         [ "#!/usr/bin/env python3"
+        , "# " <> slug <> " - A Python tool for agents-exe"
         , ""
-        , "\"\"\"" <> slug <> " - Tool description here\"\"\""
+        , "\"\"\"Agents-exe tool protocol: describe|run"
+        , ""
+        , "Environment variables available during 'run':"
+        , "  AGENT_SESSION_ID      - UUID of the current session"
+        , "  AGENT_CONVERSATION_ID - UUID of the conversation"
+        , "  AGENT_TURN_ID         - UUID of the current turn"
+        , "  AGENT_AGENT_ID        - UUID of the executing agent (if available)"
+        , "\"\"\""
         , ""
         , "import json"
         , "import sys"
+        , "import os"
         , ""
-        , "DESCRIPTION = {"
-        , "    \"slug\": \"" <> slug <> "\","
-        , "    \"description\": \"Description of what this tool does\","
-        , "    \"args\": ["
-        , "        {"
-        , "            \"name\": \"example_arg\","
-        , "            \"description\": \"An example argument\","
-        , "            \"type\": \"string\","
-        , "            \"backing_type\": \"string\","
-        , "            \"arity\": \"single\","
-        , "            \"mode\": \"dashdashspace\""
+        , ""
+        , "def describe() -> dict:"
+        , "    \"\"\"Return tool description metadata.\"\"\""
+        , "    return {"
+        , "        \"slug\": \"" <> slug <> "\","
+        , "        \"description\": \"Tool " <> slug <> " - describe what this tool does\","
+        , "        \"args\": [],"
+        , "        \"empty-result\": {"
+        , "            \"tag\": \"AddMessage\","
+        , "            \"contents\": \"--no output--\""
         , "        }"
-        , "    ],"
-        , "    \"empty-result\": {\"tag\": \"AddMessage\", \"contents\": \"No results\"}"
-        , "}"
+        , "    }"
         , ""
         , ""
-        , "def main():"
-        , "    if len(sys.argv) > 1 and sys.argv[1] == \"describe\":"
-        , "        print(json.dumps(DESCRIPTION))"
-        , "        sys.exit(0)"
+        , "def run() -> None:"
+        , "    \"\"\"Execute the tool logic.\"\"\""
+        , "    # TODO: Implement tool logic"
+        , "    # Access environment variables:"
+        , "    # session_id = os.environ.get('AGENT_SESSION_ID')"
+        , "    print(f\"Tool " <> slug <> " executed\")"
         , ""
-        , "    # Parse arguments"
-        , "    example_arg = \"\""
-        , "    i = 2  # Skip 'run' command"
-        , "    while i < len(sys.argv):"
-        , "        if sys.argv[i] == \"--example-arg\" and i + 1 < len(sys.argv):"
-        , "            example_arg = sys.argv[i + 1]"
-        , "            i += 2"
-        , "        else:"
-        , "            i += 1"
         , ""
-        , "    # Main logic here"
-        , "    print(f'Tool " <> slug <> " executed with: {example_arg}')"
+        , "def main() -> int:"
+        , "    \"\"\"Main entry point.\"\"\""
+        , "    if len(sys.argv) < 2:"
+        , "        print(f\"Usage: {sys.argv[0]} <describe|run>\", file=sys.stderr)"
+        , "        return 1"
+        , ""
+        , "    command = sys.argv[1]"
+        , "    if command == \"describe\":"
+        , "        print(json.dumps(describe()))"
+        , "        return 0"
+        , "    elif command == \"run\":"
+        , "        run()"
+        , "        return 0"
+        , "    else:"
+        , "        print(f\"Unknown command: {command}\", file=sys.stderr)"
+        , "        return 1"
         , ""
         , ""
         , "if __name__ == \"__main__\":"
-        , "    main()"
+        , "    sys.exit(main())"
         ]
 
 -- | Create a Haskell tool template
@@ -334,80 +374,100 @@ makeHaskellToolTemplate slug =
     Text.unlines
         [ "#!/usr/bin/env runhaskell"
         , "{-# LANGUAGE OverloadedStrings #-}"
+        , "-- | " <> slug <> " - A Haskell tool for agents-exe"
         , ""
-        , "-- | " <> slug <> " - Tool description here"
+        , "-- Agents-exe tool protocol: describe|run"
+        , "-- Environment variables available during 'run':"
+        , "--   AGENT_SESSION_ID      - UUID of the current session"
+        , "--   AGENT_CONVERSATION_ID - UUID of the conversation"
+        , "--   AGENT_TURN_ID         - UUID of the current turn"
+        , "--   AGENT_AGENT_ID        - UUID of the executing agent (if available)"
         , ""
-        , "import qualified Data.Aeson as Aeson"
-        , "import qualified Data.ByteString.Lazy as LBS"
-        , "import Data.Text (Text)"
-        , "import qualified Data.Text as Text"
-        , "import qualified Data.Text.IO as Text"
-        , "import System.Environment (getArgs)"
-        , ""
-        , "-- | Tool description"
-        , "data ScriptInfo = ScriptInfo"
-        , "    { scriptSlug :: Text"
-        , "    , scriptDescription :: Text"
-        , "    , scriptArgs :: [ScriptArg]"
-        , "    } deriving (Show)"
-        , ""
-        , "data ScriptArg = ScriptArg"
-        , "    { argName :: Text"
-        , "    , argDescription :: Text"
-        , "    , argType :: Text"
-        , "    , argBackingType :: Text"
-        , "    , argArity :: Text"
-        , "    , argMode :: Text"
-        , "    } deriving (Show)"
-        , ""
-        , "instance Aeson.ToJSON ScriptInfo where"
-        , "    toJSON s = Aeson.object"
-        , "        [ \"slug\" Aeson..= scriptSlug s"
-        , "        , \"description\" Aeson..= scriptDescription s"
-        , "        , \"args\" Aeson..= scriptArgs s"
-        , "        ]"
-        , ""
-        , "instance Aeson.ToJSON ScriptArg where"
-        , "    toJSON a = Aeson.object"
-        , "        [ \"name\" Aeson..= argName a"
-        , "        , \"description\" Aeson..= argDescription a"
-        , "        , \"type\" Aeson..= argType a"
-        , "        , \"backing_type\" Aeson..= argBackingType a"
-        , "        , \"arity\" Aeson..= argArity a"
-        , "        , \"mode\" Aeson..= argMode a"
-        , "        ]"
-        , ""
-        , "description :: ScriptInfo"
-        , "description = ScriptInfo"
-        , "    { scriptSlug = \"" <> slug <> "\""
-        , "    , scriptDescription = \"Description of what this tool does\""
-        , "    , scriptArgs ="
-        , "        [ ScriptArg"
-        , "            { argName = \"example_arg\""
-        , "            , argDescription = \"An example argument\""
-        , "            , argType = \"string\""
-        , "            , argBackingType = \"string\""
-        , "            , argArity = \"single\""
-        , "            , argMode = \"dashdashspace\""
-        , "            }"
-        , "        ]"
-        , "    }"
+        , "import Data.Aeson ((.=), object, encode, Value)"
+        , "import qualified Data.ByteString.Lazy.Char8 as LBS"
+        , "import System.Environment (getArgs, lookupEnv)"
+        , "import System.Exit (exitFailure)"
+        , "import System.IO (hPutStrLn, stderr)"
         , ""
         , "main :: IO ()"
         , "main = do"
         , "    args <- getArgs"
         , "    case args of"
-        , "        (\"describe\":_) -> do"
-        , "            LBS.putStr $ Aeson.encode description"
-        , "        (\"run\":_) -> do"
-        , "            -- Parse arguments and execute"
-        , "            let exampleArg = parseArg args \"--example-arg\""
-        , "            Text.putStrLn $ \"Tool " <> slug <> " executed with: \" <> exampleArg"
+        , "        [\"describe\"] -> describe"
+        , "        [\"run\"] -> run"
         , "        _ -> do"
-        , "            Text.hPutStrLn stderr \"Usage: " <> slug <> " describe|run\""
+        , "            hPutStrLn stderr \"Usage: " <> slug <> " <describe|run>\""
+        , "            exitFailure"
         , ""
-        , "parseArg :: [String] -> Text -> Text"
-        , "parseArg args name = case break (== Text.unpack name) args of"
-        , "    (_, _:value:_) -> Text.pack value"
-        , "    _ -> \"\""
+        , "describe :: IO ()"
+        , "describe = do"
+        , "    LBS.putStrLn $ encode $ object"
+        , "        [ \"args\" .= ([] :: [Value])"
+        , "        , \"slug\" .= (\"" <> slug <> "\" :: String)"
+        , "        , \"description\" .= (\"Tool " <> slug <> " - describe what this tool does\" :: String)"
+        , "        , \"empty-result\" .= object"
+        , "            [ \"tag\" .= (\"AddMessage\" :: String)"
+        , "            , \"contents\" .= (\"--no output--\" :: String)"
+        , "            ]"
+        , "        ]"
+        , ""
+        , "run :: IO ()"
+        , "run = do"
+        , "    -- TODO: Implement tool logic"
+        , "    -- Access environment variables:"
+        , "    -- sessionId <- lookupEnv \"AGENT_SESSION_ID\""
+        , "    putStrLn \"Tool " <> slug <> " executed\""
         ]
+
+-- | Create a Node.js tool template
+makeNodeToolTemplate :: Text -> Text
+makeNodeToolTemplate slug =
+    Text.unlines
+        [ "#!/usr/bin/env node"
+        , "// " <> slug <> " - A Node.js tool for agents-exe"
+        , ""
+        , "// Agents-exe tool protocol: describe|run"
+        , "// Environment variables available during 'run':"
+        , "//   AGENT_SESSION_ID      - UUID of the current session"
+        , "//   AGENT_CONVERSATION_ID - UUID of the conversation"
+        , "//   AGENT_TURN_ID         - UUID of the current turn"
+        , "//   AGENT_AGENT_ID        - UUID of the executing agent (if available)"
+        , ""
+        , "function describe() {"
+        , "    return {"
+        , "        args: [],"
+        , "        slug: \"" <> slug <> "\","
+        , "        description: \"Tool " <> slug <> " - describe what this tool does\","
+        , "        'empty-result': {"
+        , "            tag: 'AddMessage',"
+        , "            contents: '--no output--'"
+        , "        }"
+        , "    };"
+        , "}"
+        , ""
+        , "function run() {"
+        , "    // TODO: Implement tool logic"
+        , "    // Access environment variables:"
+        , "    // const sessionId = process.env.AGENT_SESSION_ID;"
+        , "    console.log('Tool " <> slug <> " executed');"
+        , "}"
+        , ""
+        , "function main() {"
+        , "    const command = process.argv[2];"
+        , ""
+        , "    switch (command) {"
+        , "        case 'describe':"
+        , "            console.log(JSON.stringify(describe()));"
+        , "            process.exit(0);"
+        , "        case 'run':"
+        , "            run();"
+        , "            process.exit(0);"
+        , "        default:"
+        , "            console.error('Usage: " <> slug <> " <describe|run>');"
+        , "            process.exit(1);"
+        , "    }"
+        , "}"
+        , ""
+        , "main();"
+        ]
+
