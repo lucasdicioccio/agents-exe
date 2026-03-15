@@ -9,15 +9,22 @@ module System.Agents.CLI.New (
     handleNew,
     NewOptions (..),
     NewCommand (..),
-    AgentTemplate (..),
+    NewAgentOptions (..),
+    NewToolOptions (..),
+    ModelPreset (..),
     ToolLanguage (..),
+    -- Exported for testing
+    buildAgentConfig,
+    defaultPresets,
+    defaultSystemPrompt,
 ) where
 
-import Control.Exception (catch)
 import Control.Monad (unless, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy as LByteString
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -29,11 +36,32 @@ import System.IO (stderr)
 
 import System.Agents.Base (Agent (..), AgentDescription (..))
 
--- | Template for agent scaffolding
-data AgentTemplate
-    = OpenAITemplate
-    | MistralTemplate
-    | OllamaTemplate
+-- | Model preset configurations
+data ModelPreset = ModelPreset
+    { presetFlavor :: Text
+    , presetModelUrl :: Text
+    , presetModelName :: Text
+    , presetApiKeyId :: Text
+    }
+    deriving (Show, Eq)
+
+-- | Options for new agent command
+data NewAgentOptions = NewAgentOptions
+    { newAgentSlug :: Text
+    , newAgentFilePath :: FilePath
+    , newAgentModel :: Maybe Text
+    -- ^ Optional model name override
+    , newAgentPreset :: Text
+    -- ^ Preset name (openai, mistral, ollama)
+    }
+    deriving (Show, Eq)
+
+-- | Options for new tool command
+data NewToolOptions = NewToolOptions
+    { newToolSlug :: Text
+    , newToolFilePath :: FilePath
+    , newToolLanguage :: ToolLanguage
+    }
     deriving (Show, Eq)
 
 -- | Programming language for tool scaffolding
@@ -45,10 +73,10 @@ data ToolLanguage
 
 -- | Subcommands for the 'new' command
 data NewCommand
-    = -- | Create a new agent with given template, slug, and file path
-      NewAgent AgentTemplate Text FilePath
-    | -- | Create a new tool with given language, slug, and file path
-      NewTool ToolLanguage Text FilePath
+    = -- | Create a new agent with given options
+      NewAgent NewAgentOptions
+    | -- | Create a new tool with given options
+      NewTool NewToolOptions
     deriving (Show, Eq)
 
 -- | Options for the new command
@@ -59,127 +87,141 @@ data NewOptions = NewOptions
     }
     deriving (Show, Eq)
 
+-- | Default presets for common providers
+defaultPresets :: Map Text ModelPreset
+defaultPresets =
+    Map.fromList
+        [
+            ( "openai"
+            , ModelPreset
+                { presetFlavor = "OpenAIv1"
+                , presetModelUrl = "https://api.openai.com/v1"
+                , presetModelName = "gpt-4-turbo-preview"
+                , presetApiKeyId = "main-key"
+                }
+            )
+        ,
+            ( "mistral"
+            , ModelPreset
+                { presetFlavor = "OpenAIv1"
+                , presetModelUrl = "https://api.mistral.ai/v1"
+                , presetModelName = "mistral-large-latest"
+                , presetApiKeyId = "mistral-key"
+                }
+            )
+        ,
+            ( "ollama"
+            , ModelPreset
+                { presetFlavor = "OpenAIv1"
+                , presetModelUrl = "http://localhost:11434/v1"
+                , presetModelName = "llama3.2"
+                , presetApiKeyId = "ollama-key"
+                }
+            )
+        ]
+
+-- | Default system prompt based on agent slug
+defaultSystemPrompt :: Text -> [Text]
+defaultSystemPrompt slug =
+    [ "You are " <> slug <> ", a helpful AI assistant."
+    , "You provide clear, accurate, and concise responses."
+    , "When using tools, you explain your actions to the user."
+    ]
+
+-- | Build agent configuration from options
+buildAgentConfig :: NewAgentOptions -> Either String Agent
+buildAgentConfig opts = do
+    preset <- case Map.lookup opts.newAgentPreset defaultPresets of
+        Nothing -> Left $ "Unknown preset: " ++ Text.unpack opts.newAgentPreset
+        Just p -> Right p
+
+    let modelName = fromMaybe preset.presetModelName opts.newAgentModel
+
+    pure $
+        Agent
+            { slug = opts.newAgentSlug
+            , apiKeyId = preset.presetApiKeyId
+            , flavor = preset.presetFlavor
+            , modelUrl = preset.presetModelUrl
+            , modelName = modelName
+            , announce = "a helpful assistant powered by " <> modelName
+            , systemPrompt = defaultSystemPrompt opts.newAgentSlug
+            , toolDirectory = "tools"
+            , mcpServers = Just []
+            , openApiToolboxes = Nothing
+            , postgrestToolboxes = Nothing
+            , builtinToolboxes = Just []
+            , extraAgents = Nothing
+            }
+
 -- | Handle the new command: create agent or tool scaffolding
 handleNew ::
     -- | Options for new command
     NewOptions ->
     IO ()
 handleNew opts = case opts.newCommand of
-    NewAgent template slug filePath ->
-        handleNewAgent opts.newForce template slug filePath
-    NewTool language slug filePath ->
-        handleNewTool opts.newForce language slug filePath
+    NewAgent agentOpts ->
+        handleNewAgent opts.newForce agentOpts
+    NewTool toolOpts ->
+        handleNewTool opts.newForce toolOpts
 
--- | Create a new agent from a template
-handleNewAgent :: Bool -> AgentTemplate -> Text -> FilePath -> IO ()
-handleNewAgent force template slug filePath = do
+-- | Handle the new agent command
+handleNewAgent :: Bool -> NewAgentOptions -> IO ()
+handleNewAgent force opts = do
+    -- Check if file already exists
     unless force $ do
-        exists <- doesFileExist filePath
+        exists <- doesFileExist opts.newAgentFilePath
+        when exists $ do
+            Text.hPutStrLn stderr $
+                "Error: File already exists: " <> Text.pack opts.newAgentFilePath
+            Text.hPutStrLn stderr "Use --force to overwrite"
+            exitFailure
+
+    -- Build agent config
+    case buildAgentConfig opts of
+        Left err -> do
+            Text.hPutStrLn stderr $ "Error: " <> Text.pack err
+            exitFailure
+        Right agent -> do
+            -- Create directory structure
+            createDirectoryIfMissing True (takeDirectory opts.newAgentFilePath)
+            createDirectoryIfMissing True (takeDirectory opts.newAgentFilePath </> agent.toolDirectory)
+
+            -- Write agent file
+            LByteString.writeFile opts.newAgentFilePath $
+                Aeson.encodePretty (AgentDescription agent)
+
+            Text.putStrLn $ "Created agent: " <> Text.pack opts.newAgentFilePath
+            Text.putStrLn $ "Tool directory: " <> Text.pack (takeDirectory opts.newAgentFilePath </> agent.toolDirectory)
+            Text.putStrLn $ "Model: " <> agent.modelName
+            Text.putStrLn $ "Provider: " <> opts.newAgentPreset
+
+-- | Handle the new tool command
+handleNewTool :: Bool -> NewToolOptions -> IO ()
+handleNewTool force opts = do
+    unless force $ do
+        exists <- doesFileExist opts.newToolFilePath
         when exists $ do
             Text.hPutStrLn stderr $
                 "File already exists: "
-                    <> Text.pack filePath
+                    <> Text.pack opts.newToolFilePath
                     <> "\nUse --force to overwrite."
             exitFailure
 
-    let agent = makeAgentTemplate template slug
-    createDirectoryIfMissing True (takeDirectory filePath)
-    LByteString.writeFile filePath $ Aeson.encodePretty (AgentDescription agent)
-    Text.putStrLn $ "Created agent: " <> Text.pack filePath
-    Text.putStrLn $ "  Slug: " <> agent.slug
-    Text.putStrLn $ "  Model: " <> agent.modelName
-    Text.putStrLn $ "  Tool directory: " <> Text.pack agent.toolDirectory
-
--- | Create a new tool from a template
-handleNewTool :: Bool -> ToolLanguage -> Text -> FilePath -> IO ()
-handleNewTool force language slug filePath = do
-    unless force $ do
-        exists <- doesFileExist filePath
-        when exists $ do
-            Text.hPutStrLn stderr $
-                "File already exists: "
-                    <> Text.pack filePath
-                    <> "\nUse --force to overwrite."
-            exitFailure
-
-    createDirectoryIfMissing True (takeDirectory filePath)
-    let content = makeToolTemplate language slug
-    Text.writeFile filePath content
+    createDirectoryIfMissing True (takeDirectory opts.newToolFilePath)
+    let content = makeToolTemplate opts.newToolLanguage opts.newToolSlug
+    Text.writeFile opts.newToolFilePath content
     -- Make executable for bash scripts
-    case language of
+    case opts.newToolLanguage of
         BashLang -> do
             -- Set executable permissions would need unix module
             -- For now, just inform the user
-            Text.putStrLn $ "Created tool: " <> Text.pack filePath
-            Text.putStrLn $ "  Remember to make it executable: chmod +x " <> Text.pack filePath
+            Text.putStrLn $ "Created tool: " <> Text.pack opts.newToolFilePath
+            Text.putStrLn $ "  Remember to make it executable: chmod +x " <> Text.pack opts.newToolFilePath
         _ -> do
-            Text.putStrLn $ "Created tool: " <> Text.pack filePath
-    Text.putStrLn $ "  Slug: " <> slug
-    Text.putStrLn $ "  Language: " <> Text.pack (show language)
-
--- | Create an agent from a template
-makeAgentTemplate :: AgentTemplate -> Text -> Agent
-makeAgentTemplate template slug = case template of
-    OpenAITemplate ->
-        Agent
-            { slug = slug
-            , apiKeyId = "main-key"
-            , flavor = "OpenAIv1"
-            , modelUrl = "https://api.openai.com/v1"
-            , modelName = "gpt-4-turbo-preview"
-            , announce = "a helpful assistant powered by OpenAI"
-            , systemPrompt =
-                [ "You are a helpful assistant."
-                , "You provide clear, accurate, and concise responses."
-                , "When using tools, you explain your actions to the user."
-                ]
-            , toolDirectory = "tools"
-            , mcpServers = Just []
-            , openApiToolboxes = Nothing
-            , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
-            , extraAgents = Nothing
-            }
-    MistralTemplate ->
-        Agent
-            { slug = slug
-            , apiKeyId = "mistral-key"
-            , flavor = "OpenAIv1"
-            , modelUrl = "https://api.mistral.ai/v1"
-            , modelName = "mistral-large-latest"
-            , announce = "a helpful assistant powered by Mistral AI"
-            , systemPrompt =
-                [ "You are a helpful assistant powered by Mistral AI."
-                , "You provide clear, accurate, and concise responses."
-                , "You excel at reasoning and following instructions precisely."
-                ]
-            , toolDirectory = "tools"
-            , mcpServers = Just []
-            , openApiToolboxes = Nothing
-            , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
-            , extraAgents = Nothing
-            }
-    OllamaTemplate ->
-        Agent
-            { slug = slug
-            , apiKeyId = "ollama-key"
-            , flavor = "OpenAIv1"
-            , modelUrl = "http://localhost:11434/v1"
-            , modelName = "llama3.2"
-            , announce = "a helpful assistant running locally via Ollama"
-            , systemPrompt =
-                [ "You are a helpful assistant running locally on the user's machine."
-                , "You provide clear and accurate responses while respecting privacy."
-                , "Note: You are running on local hardware, which may limit capabilities."
-                ]
-            , toolDirectory = "tools"
-            , mcpServers = Just []
-            , openApiToolboxes = Nothing
-            , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
-            , extraAgents = Nothing
-            }
+            Text.putStrLn $ "Created tool: " <> Text.pack opts.newToolFilePath
+    Text.putStrLn $ "  Slug: " <> opts.newToolSlug
+    Text.putStrLn $ "  Language: " <> Text.pack (show opts.newToolLanguage)
 
 -- | Create a tool template for a given language
 makeToolTemplate :: ToolLanguage -> Text -> Text
