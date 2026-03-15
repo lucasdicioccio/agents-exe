@@ -18,6 +18,7 @@ import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.List (find)
 import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -1177,34 +1178,31 @@ parseNewToolCommand :: Parser NewCmd.NewCommand
 parseNewToolCommand =
     NewCmd.NewTool <$> parseNewToolOptions
 
+{- | Parse the new tool command options
+Format: agents-exe new tool <slug> <language> <file>
+-}
 parseNewToolOptions :: Parser NewCmd.NewToolOptions
 parseNewToolOptions =
     NewCmd.NewToolOptions
         <$> strArgument
             ( metavar "SLUG"
-                <> help "Tool slug/name"
+                <> help "Unique identifier for the tool (used in describe output)"
+            )
+        <*> argument
+            parseLanguage
+            ( metavar "LANGUAGE"
+                <> help "Programming language (bash, python, haskell, node)"
             )
         <*> strArgument
             ( metavar "FILE"
-                <> help "Output file path"
-            )
-        <*> option
-            (maybeReader parseLang)
-            ( long "language"
-                <> short 'l'
-                <> metavar "LANG"
-                <> help "Language: bash, python, or haskell (default: bash)"
-                <> value NewCmd.BashLang
-                <> showDefaultWith showLang
+                <> help "Path where tool script will be written (without extension)"
             )
   where
-    parseLang "bash" = Just NewCmd.BashLang
-    parseLang "python" = Just NewCmd.PythonLang
-    parseLang "haskell" = Just NewCmd.HaskellLang
-    parseLang _ = Nothing
-    showLang NewCmd.BashLang = "bash"
-    showLang NewCmd.PythonLang = "python"
-    showLang NewCmd.HaskellLang = "haskell"
+    parseLanguage :: ReadM NewCmd.ToolLanguage
+    parseLanguage = eitherReader $ \lang ->
+        case Map.lookup (Text.toLower $ Text.pack lang) NewCmd.supportedLanguages of
+            Just l -> Right l
+            Nothing -> Left $ "Unknown language: " <> lang <> ". Supported: bash, python, haskell, node"
 
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
