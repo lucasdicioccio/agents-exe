@@ -32,7 +32,8 @@ handleInitialize apiKeysFile agentFiles = do
                 , modelUrl = "https://api.openai.com/v1"
                 , modelName = "gpt-4-turbo"
                 , announce = "a helpful puppet-master capable of orchestrating other agents ensuring"
-                , toolDirectory = "tools"
+                , toolDirectory = Just "tools"
+                , bashToolboxes = Nothing
                 , systemPrompt =
                     [ "You are a helpful software agent trying to solve user requests"
                     , "Your preferred action mode is to act as a puppet master capable of driving other agents."
@@ -56,3 +57,4 @@ handleInitialize apiKeysFile agentFiles = do
   where
     handleInitError :: InitProject.InitializeError -> IO ()
     handleInitError e = putStrLn $ "Note: " ++ show e
+

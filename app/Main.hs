@@ -118,7 +118,8 @@ defaultOpenAIAgent =
             , "You provide clear, accurate, and concise responses."
             , "When using tools, you explain your actions to the user."
             ]
-        , toolDirectory = "tools"
+        , toolDirectory = Just "tools"
+        , bashToolboxes = Nothing
         , mcpServers = Just []
         , openApiToolboxes = Nothing
         , postgrestToolboxes = Nothing
@@ -141,7 +142,8 @@ mistralAgent =
             , "You provide clear, accurate, and concise responses."
             , "You excel at reasoning and following instructions precisely."
             ]
-        , toolDirectory = "tools"
+        , toolDirectory = Just "tools"
+        , bashToolboxes = Nothing
         , mcpServers = Just []
         , openApiToolboxes = Nothing
         , postgrestToolboxes = Nothing
@@ -164,7 +166,8 @@ ollamaAgent =
             , "You provide clear and accurate responses while respecting privacy."
             , "Note: You are running on local hardware, which may limit capabilities."
             ]
-        , toolDirectory = "tools"
+        , toolDirectory = Just "tools"
+        , bashToolboxes = Nothing
         , mcpServers = Just []
         , openApiToolboxes = Nothing
         , postgrestToolboxes = Nothing
@@ -191,7 +194,8 @@ orchestratorAgent =
             , "You notify users as you progress."
             , "If an agent fails, do not retry and abdicate."
             ]
-        , toolDirectory = "tools"
+        , toolDirectory = Just "tools"
+        , bashToolboxes = Nothing
         , mcpServers = Just []
         , openApiToolboxes = Nothing
         , postgrestToolboxes = Nothing
@@ -1472,7 +1476,7 @@ toJsonTrace x = case x of
     AgentTree.AgentTrace v -> encodeAgentTrace v
     AgentTree.McpTrace cfg v -> encodeMcpTrace cfg v
     AgentTree.OpenAPITrace _desc _v -> Nothing
-    AgentTree.PostgRESTTrace _desc _v -> Nothing
+    AgentTree.PostgRESTrace _desc _v -> Nothing
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
     AgentTree.CyclicReferencesWarning _ -> Nothing
@@ -1665,3 +1669,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+

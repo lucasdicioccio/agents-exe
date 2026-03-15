@@ -458,7 +458,8 @@ makeAgentTemplate templateName slug = case templateName of
                 , "You provide clear, accurate, and concise responses."
                 , "You excel at reasoning and following instructions precisely."
                 ]
-            , toolDirectory = "tools"
+            , toolDirectory = Just "tools"
+            , bashToolboxes = Nothing
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
@@ -478,7 +479,8 @@ makeAgentTemplate templateName slug = case templateName of
                 , "You provide clear and accurate responses while respecting privacy."
                 , "Note: You are running on local hardware, which may limit capabilities."
                 ]
-            , toolDirectory = "tools"
+            , toolDirectory = Just "tools"
+            , bashToolboxes = Nothing
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
@@ -499,7 +501,8 @@ makeAgentTemplate templateName slug = case templateName of
                 , "You provide clear, accurate, and concise responses."
                 , "When using tools, you explain your actions to the user."
                 ]
-            , toolDirectory = "tools"
+            , toolDirectory = Just "tools"
+            , bashToolboxes = Nothing
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
@@ -699,3 +702,4 @@ makeHaskellToolTemplate slug =
         , "    (_, _:value:_) -> Text.pack value"
         , "    _ -> \"\""
         ]
+

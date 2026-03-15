@@ -32,18 +32,22 @@ initAgentFile o path = do
         else do
             Directory.createDirectoryIfMissing True (takeDirectory path)
             LByteString.writeFile path $ Aeson.encodePretty (AgentDescription o)
-            _ <- openFileWithEditor path
             putStrLn $ unwords ["agent definition saved at:", path]
             readBack <- Aeson.eitherDecodeFileStrict' path
             case readBack of
                 (Left err) -> throwIO $ UnparseableAgentFile err
                 (Right (AgentDescription o2)) -> do
-                    createDirectoryIfMissing True o2.toolDirectory
-                    putStrLn $ unwords ["tool dir:", o2.toolDirectory, "ok"]
+                    case o2.toolDirectory of
+                        Just toolDir -> do
+                            createDirectoryIfMissing True toolDir
+                            putStrLn $ unwords ["tool dir:", toolDir, "ok"]
+                        Nothing -> putStrLn "no tool directory configured"
 
 initAgentTooldir :: Agent -> FilePath -> IO ()
 initAgentTooldir o path = do
-    Directory.createDirectoryIfMissing True (takeDirectory path </> o.toolDirectory)
+    case o.toolDirectory of
+        Just toolDir -> Directory.createDirectoryIfMissing True (takeDirectory path </> toolDir)
+        Nothing -> pure ()
 
 initKeyFile :: FilePath -> IO ()
 initKeyFile path = do
@@ -84,3 +88,4 @@ withEditor run = do
             chunks = words cmd
          in
             (unwords $ take 1 chunks, drop 1 chunks)
+

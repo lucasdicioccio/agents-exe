@@ -321,14 +321,17 @@ loadAgentFromFile path = do
 
 -- | Load tools for an agent
 loadToolsForAgent :: FilePath -> Agent -> IO [ToolExport]
-loadToolsForAgent agentFile agent = do
-    let toolDir = takeDirectory agentFile </> toolDirectory agent
-    exists <- doesDirectoryExist toolDir
-    if not exists
-        then pure []
-        else do
-            toolFiles <- ExportInstall.discoverTools toolDir
-            mapM (loadToolExport toolDir) toolFiles
+loadToolsForAgent agentFile agent =
+    case toolDirectory agent of
+        Nothing -> pure []
+        Just toolDirPath -> do
+            let toolDir = takeDirectory agentFile </> toolDirPath
+            exists <- doesDirectoryExist toolDir
+            if not exists
+                then pure []
+                else do
+                    toolFiles <- ExportInstall.discoverTools toolDir
+                    mapM (loadToolExport toolDir) toolFiles
   where
     loadToolExport :: FilePath -> FilePath -> IO ToolExport
     loadToolExport _baseDir toolPath = do
@@ -348,14 +351,17 @@ loadToolsForAgent agentFile agent = do
 
 -- | Load standalone tools for an agent
 loadStandaloneToolsForAgent :: FilePath -> Agent -> IO [StandaloneToolExport]
-loadStandaloneToolsForAgent agentFile agent = do
-    let toolDir = takeDirectory agentFile </> toolDirectory agent
-    exists <- doesDirectoryExist toolDir
-    if not exists
-        then pure []
-        else do
-            toolFiles <- ExportInstall.discoverTools toolDir
-            mapM (loadStandaloneTool toolDir) toolFiles
+loadStandaloneToolsForAgent agentFile agent =
+    case toolDirectory agent of
+        Nothing -> pure []
+        Just toolDirPath -> do
+            let toolDir = takeDirectory agentFile </> toolDirPath
+            exists <- doesDirectoryExist toolDir
+            if not exists
+                then pure []
+                else do
+                    toolFiles <- ExportInstall.discoverTools toolDir
+                    mapM (loadStandaloneTool toolDir) toolFiles
   where
     loadStandaloneTool :: FilePath -> FilePath -> IO StandaloneToolExport
     loadStandaloneTool _baseDir toolPath = do
@@ -385,3 +391,4 @@ loadStandaloneToolsForAgent agentFile agent = do
             , scriptDescription = "Imported tool"
             , scriptEmptyResultBehavior = Nothing
             }
+

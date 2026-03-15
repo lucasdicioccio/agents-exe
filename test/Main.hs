@@ -45,6 +45,7 @@ tests =
         [ openAIRateLimitTests
         , extraAgentRefTests
         , agentSerializationTests
+        , bashToolboxTests
         , callStackEntryTests
         , toolExecutionContextTests
         , recursionTrackingTests
@@ -130,6 +131,25 @@ agentSerializationTests =
                     Base.slug agent @?= "test-agent"
                     Base.extraAgents agent @?= Nothing
                     Base.builtinToolboxes agent @?= Nothing
+                    Base.toolDirectory agent @?= Just "tools"
+        , testCase "agent with optional toolDirectory omitted" $ do
+            let json = Text.unlines
+                    [ "{"
+                    , "  \"slug\": \"test-agent\","
+                    , "  \"apiKeyId\": \"openai\","
+                    , "  \"flavor\": \"openai\","
+                    , "  \"modelUrl\": \"https://api.openai.com/v1\","
+                    , "  \"modelName\": \"gpt-4\","
+                    , "  \"announce\": \"A test agent\","
+                    , "  \"systemPrompt\": [\"You are helpful\"]"
+                    , "}"
+                    ]
+            let mAgent = decode (encodeUtf8 json) :: Maybe Base.Agent
+            case mAgent of
+                Nothing -> assertFailure "Failed to parse agent without toolDirectory"
+                Just agent -> do
+                    Base.slug agent @?= "test-agent"
+                    Base.toolDirectory agent @?= Nothing
         , testCase "agent with extra-agents" $ do
             let json = Text.unlines
                     [ "{"
@@ -165,7 +185,8 @@ agentSerializationTests =
                     , Base.modelName = "gpt-4"
                     , Base.announce = "A test agent"
                     , Base.systemPrompt = ["You are helpful"]
-                    , Base.toolDirectory = "tools"
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
@@ -186,7 +207,8 @@ agentSerializationTests =
                     , Base.modelName = "gpt-4"
                     , Base.announce = "A test agent"
                     , Base.systemPrompt = ["You are helpful"]
-                    , Base.toolDirectory = "tools"
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
@@ -205,7 +227,8 @@ agentSerializationTests =
                     , Base.modelName = "gpt-4"
                     , Base.announce = "A test agent"
                     , Base.systemPrompt = ["You are helpful"]
-                    , Base.toolDirectory = "tools"
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Just []
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
@@ -234,7 +257,8 @@ agentSerializationTests =
                     , Base.modelName = "gpt-4"
                     , Base.announce = "A test agent"
                     , Base.systemPrompt = ["You are helpful"]
-                    , Base.toolDirectory = "tools"
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
@@ -266,7 +290,8 @@ agentSerializationTests =
                     , Base.modelName = "gpt-4"
                     , Base.announce = "A test agent"
                     , Base.systemPrompt = ["You are helpful"]
-                    , Base.toolDirectory = "tools"
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
@@ -291,6 +316,99 @@ agentSerializationTests =
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- Bash Toolbox Tests
+-------------------------------------------------------------------------------
+
+bashToolboxTests :: TestTree
+bashToolboxTests =
+    testGroup
+        "Bash Toolbox Descriptions"
+        [ testCase "FileSystemDirectory serialization" $ do
+            let desc = Base.FileSystemDirectoryDescription
+                    { Base.fsDirPath = "./tools"
+                    , Base.fsDirBasenameFilter = Nothing
+                    }
+            let json = encode desc
+            let mDesc = decode json :: Maybe Base.FileSystemDirectoryDescription
+            mDesc @?= Just desc
+        , testCase "FileSystemDirectory with filter serialization" $ do
+            let desc = Base.FileSystemDirectoryDescription
+                    { Base.fsDirPath = "./extra-tools"
+                    , Base.fsDirBasenameFilter = Just ".sh"
+                    }
+            let json = encode desc
+            let mDesc = decode json :: Maybe Base.FileSystemDirectoryDescription
+            mDesc @?= Just desc
+        , testCase "SingleTool serialization" $ do
+            let desc = Base.SingleToolDescription
+                    { Base.singleToolPath = "/path/to/special-tool.sh"
+                    }
+            let json = encode desc
+            let mDesc = decode json :: Maybe Base.SingleToolDescription
+            mDesc @?= Just desc
+        , testCase "BashToolboxDescription FileSystemDirectory wrapper" $ do
+            let desc = Base.FileSystemDirectoryDescription
+                    { Base.fsDirPath = "./tools"
+                    , Base.fsDirBasenameFilter = Just ".sh"
+                    }
+            let wrapped = Base.FileSystemDirectory desc
+            let json = encode wrapped
+            let mWrapped = decode json :: Maybe Base.BashToolboxDescription
+            mWrapped @?= Just wrapped
+        , testCase "BashToolboxDescription SingleTool wrapper" $ do
+            let desc = Base.SingleToolDescription
+                    { Base.singleToolPath = "/path/to/tool.sh"
+                    }
+            let wrapped = Base.SingleTool desc
+            let json = encode wrapped
+            let mWrapped = decode json :: Maybe Base.BashToolboxDescription
+            mWrapped @?= Just wrapped
+        , testCase "agent with bashToolboxes" $ do
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription "./tools" Nothing
+            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh"
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = Nothing
+                    , Base.bashToolboxes = Just [fsDir, single]
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Nothing
+                    , Base.extraAgents = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            mAgent @?= Just agent
+        , testCase "agent with both legacy toolDirectory and bashToolboxes" $ do
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription "./extra-tools" Nothing
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Just [fsDir]
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Nothing
+                    , Base.extraAgents = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            mAgent @?= Just agent
+        ]
 
 -------------------------------------------------------------------------------
 -- Turn Retro-compatibility Tests
@@ -1294,7 +1412,8 @@ agentConfigGraphTests =
         , Base.modelName = "gpt-4"
         , Base.announce = "Test agent " <> slug
         , Base.systemPrompt = ["You are helpful"]
-        , Base.toolDirectory = "tools"
+        , Base.toolDirectory = Just "tools"
+        , Base.bashToolboxes = Nothing
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing
@@ -1310,7 +1429,8 @@ agentConfigGraphTests =
         , Base.modelName = "gpt-4"
         , Base.announce = "Test agent " <> slug
         , Base.systemPrompt = ["You are helpful"]
-        , Base.toolDirectory = "tools"
+        , Base.toolDirectory = Just "tools"
+        , Base.bashToolboxes = Nothing
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing
@@ -1368,7 +1488,8 @@ referenceValidationTests =
                 , Base.modelName = "gpt-4"
                 , Base.announce = "Agent 1"
                 , Base.systemPrompt = ["Helpful"]
-                , Base.toolDirectory = "tools"
+                , Base.toolDirectory = Just "tools"
+                , Base.bashToolboxes = Nothing
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
                 , Base.postgrestToolboxes = Nothing
@@ -1383,7 +1504,8 @@ referenceValidationTests =
                 , Base.modelName = "gpt-4"
                 , Base.announce = "Agent 2"
                 , Base.systemPrompt = ["Helpful"]
-                , Base.toolDirectory = "tools"
+                , Base.toolDirectory = Just "tools"
+                , Base.bashToolboxes = Nothing
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
                 , Base.postgrestToolboxes = Nothing
@@ -1417,7 +1539,8 @@ referenceValidationTests =
                 , Base.modelName = "gpt-4"
                 , Base.announce = "Agent with bad ref"
                 , Base.systemPrompt = ["Helpful"]
-                , Base.toolDirectory = "tools"
+                , Base.toolDirectory = Just "tools"
+                , Base.bashToolboxes = Nothing
                 , Base.mcpServers = Nothing
                 , Base.openApiToolboxes = Nothing
                 , Base.postgrestToolboxes = Nothing
@@ -1549,7 +1672,8 @@ cycleDetectionTests =
         , Base.modelName = "gpt-4"
         , Base.announce = "Agent " <> slug
         , Base.systemPrompt = ["Helpful"]
-        , Base.toolDirectory = "tools"
+        , Base.toolDirectory = Just "tools"
+        , Base.bashToolboxes = Nothing
         , Base.mcpServers = Nothing
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing

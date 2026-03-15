@@ -42,7 +42,7 @@ tracePrintingTextResponses = Tracer f
     f (AgentTrace (Runtime.DeveloperToolboxTrace _ _)) = pure ()
     f (McpTrace _ _) = pure ()
     f (OpenAPITrace _ _) = pure ()
-    f (PostgRESTTrace _ _) = pure ()
+    f (PostgRESTrace _ _) = pure ()
     f (DataLoadingTrace _) = pure ()
     f (ConfigLoadedTrace _) = pure ()
     f (CyclicReferencesWarning _) = pure ()
@@ -83,7 +83,7 @@ traceUsefulPromptHandle h = Tracer f
         Text.hPutStrLn h (Text.pack $ show tr)
     f (OpenAPITrace _ tr) =
         Text.hPutStrLn h (Text.pack $ show tr)
-    f (PostgRESTTrace _ tr) =
+    f (PostgRESTrace _ tr) =
         Text.hPutStrLn h (Text.pack $ show tr)
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
     f (ConfigLoadedTrace x) =
@@ -216,3 +216,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

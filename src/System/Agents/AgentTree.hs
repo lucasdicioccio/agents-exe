@@ -82,8 +82,10 @@ import System.Agents.Base (
     AgentDescription (..),
     AgentId,
     AgentSlug,
+    BashToolboxDescription (..),
     BuiltinToolboxDescription (..),
     ExtraAgentRef (..),
+    FileSystemDirectoryDescription (..),
     McpServerDescription (..),
     McpSimpleBinaryConfiguration (..),
     OpenAPIServerDescription (..),
@@ -95,6 +97,7 @@ import System.Agents.Base (
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.FileNotification (initRuntime)
 import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
@@ -109,7 +112,7 @@ data Trace
     = AgentTrace Runtime.Trace
     | McpTrace McpServerDescription McpTools.Trace
     | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
-    | PostgRESTTrace PostgRESTToolboxDescription PostgREST.Trace
+    | PostgRESTrace PostgRESTToolboxDescription PostgREST.Trace
     | DataLoadingTrace FileLoader.Trace
     | ConfigLoadedTrace AgentConfigTree
     | CyclicReferencesWarning [[AgentSlug]]
@@ -303,10 +306,9 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                                         [existingNode.nodeFile, filePath]
                              in pure $ Left (NonEmpty.singleton $ ReferenceError err)
                         Nothing -> do
-                            -- Discover children from toolDirectory
+                            -- Discover children from toolDirectory (if specified)
                             let rootDir = FilePath.takeDirectory filePath
-                            let toolDir = rootDir </> agent.toolDirectory
-                            childFiles <- FileLoader.listJsonDirectory toolDir
+                            childFiles <- discoverChildFiles rootDir agent
 
                             -- Get extra agent refs
                             let extraRefs = maybe [] (fmap extraAgentSlug) agent.extraAgents
@@ -336,6 +338,29 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                             bfsDiscovery props (queue ++ childQueue ++ extraQueue) visited'
   where
     tracer = props.interactiveTracer
+
+-- | Discover child agent files from an agent configuration.
+-- This looks at the legacy 'toolDirectory' field and any 'FileSystemDirectory'
+-- entries in 'bashToolboxes' to find sub-agent JSON files.
+discoverChildFiles :: FilePath -> Agent -> IO [FilePath]
+discoverChildFiles rootDir agent = do
+    -- Collect all directories to scan for sub-agents
+    let legacyDir = fmap (rootDir </>) agent.toolDirectory
+    let bashToolboxDirs =
+            [ rootDir </> desc.fsDirPath
+            | FileSystemDirectory desc <- Maybe.fromMaybe [] agent.bashToolboxes
+            ]
+
+    -- Also look in bashToolboxes directories for sub-agents
+    let allDirs = maybeToList legacyDir ++ bashToolboxDirs
+
+    -- Scan all directories for JSON files
+    allFiles <- mapM FileLoader.listJsonDirectory allDirs
+    pure $ concat allFiles
+
+maybeToList :: Maybe a -> [a]
+maybeToList Nothing = []
+maybeToList (Just x) = [x]
 
 {- | Find a node by its file path using normalized comparison.
 Both the search path and stored paths are normalized before comparison.
@@ -407,7 +432,7 @@ For each agent in the graph:
 2. Register in RuntimeRegistry
 3. Store in result map
 
-Note: Helper agents (from toolDirectory) are resolved immediately.
+Note: Helper agents (from toolDirectory hierarchy) are resolved immediately.
 Extra agents will be wired up in phase 3.
 -}
 createRuntimeShells ::
@@ -651,8 +676,16 @@ loadAgentTreeConfig props = do
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
         Right (AgentDescription agent) -> do
             let rootdir = FilePath.takeDirectory props.rootAgentFile
-            let tooldir = rootdir </> agent.toolDirectory
-            subConfigs <- FileLoader.listJsonDirectory tooldir
+            let legacyToolDirs = maybeToList $ fmap (rootdir </>) agent.toolDirectory
+            let bashToolboxDirs =
+                    [ rootdir </> desc.fsDirPath
+                    | FileSystemDirectory desc <- Maybe.fromMaybe [] agent.bashToolboxes
+                    ]
+            let allDirs = legacyToolDirs ++ bashToolboxDirs
+
+            -- Collect child configs from all directories
+            subConfigs <- concat <$> mapM FileLoader.listJsonDirectory allDirs
+
             let propz = [props{rootAgentFile = c} | c <- subConfigs]
             (kos, oks) <- fmap Either.partitionEithers $ traverse loadAgentTreeConfig propz
             case NonEmpty.nonEmpty kos of
@@ -697,12 +730,23 @@ loadAgentTree props tree = do
 
                     let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt oks extraSlugs
                     -- Set up file notification for hot-reloading
-                    let tooldir = agentRootDir tree </> tree.agentConfig.toolDirectory
-                    _ <-
-                        Notify.initRuntime
-                            reloadNotificationTracer
-                            [(ret, tooldir)]
-                            (\_ ev -> Notify.isAboutFileChange ev)
+                    let legacyToolDir = fmap (\d -> agentRootDir tree </> d) tree.agentConfig.toolDirectory
+                    let bashToolboxDirs =
+                            [ agentRootDir tree </> desc.fsDirPath
+                            | FileSystemDirectory desc <- Maybe.fromMaybe [] tree.agentConfig.bashToolboxes
+                            ]
+                    let allDirs = maybeToList legacyToolDir ++ bashToolboxDirs
+
+                    -- Set up notifications for all directories
+                    mapM_
+                        ( \dir ->
+                            initRuntime
+                                reloadNotificationTracer
+                                [(ret, dir)]
+                                (\_ ev -> Notify.isAboutFileChange ev)
+                        )
+                        allDirs
+
                     pure $ Right $ ret
 
 -------------------------------------------------------------------------------
@@ -899,7 +943,7 @@ initializePostgRESToolboxes tracer baseDir descriptions = do
             Left err -> pure $ Left err
             Right srvDesc -> do
                 let config = postgrestDescToConfig srvDesc
-                initResult <- PostgREST.initializeToolbox (contramap (PostgRESTTrace desc) tracer) config
+                initResult <- PostgREST.initializeToolbox (contramap (PostgRESTrace desc) tracer) config
                 case initResult of
                     Left err ->
                         pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) (show err)
@@ -918,6 +962,20 @@ initializePostgRESToolboxes tracer baseDir descriptions = do
 
 -- | Type alias for prompt modification functions.
 type PromptModifier = Text -> Text
+
+{- | Build the list of bash tool sources from an agent configuration.
+
+This combines:
+1. The legacy 'toolDirectory' field (if present)
+2. The new 'bashToolboxes' field (if present)
+
+If both are specified, both will be used.
+-}
+buildBashToolSources :: Agent -> [BashToolboxDescription]
+buildBashToolSources agent =
+    let legacySource = fmap (\dir -> FileSystemDirectory $ FileSystemDirectoryDescription dir Nothing) agent.toolDirectory
+        toolboxSources = Maybe.fromMaybe [] agent.bashToolboxes
+     in maybeToList legacySource ++ toolboxSources
 
 {- | Initialize a runtime with deferred tool resolution for extra agents.
 
@@ -956,10 +1014,13 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                     -- Get builtin toolbox descriptions from agent config
                     let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
 
+                    -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
+                    let bashSources = buildBashToolSources desc
+
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
                     -- extra agents (resolved via registry at call time)
-                    Runtime.newRuntime
+                    Runtime.newRuntimeWithMultiBash
                         desc.slug
                         desc.announce
                         (contramap AgentTrace tracer)
@@ -973,7 +1034,7 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                                     Text.unlines desc.systemPrompt
                             )
                         )
-                        (rootDir </> desc.toolDirectory)
+                        bashSources
                         [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
@@ -1017,7 +1078,10 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                     -- Get builtin toolbox descriptions from agent config
                     let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
 
-                    Runtime.newRuntime
+                    -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
+                    let bashSources = buildBashToolSources desc
+
+                    Runtime.newRuntimeWithMultiBash
                         desc.slug
                         desc.announce
                         (contramap AgentTrace tracer)
@@ -1031,7 +1095,7 @@ initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (A
                                     Text.unlines desc.systemPrompt
                             )
                         )
-                        (rootDir </> desc.toolDirectory)
+                        bashSources
                         [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
@@ -1089,3 +1153,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+
