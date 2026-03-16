@@ -10,6 +10,9 @@ module System.Agents.Runtime.Runtime (
     triggerRefreshTools,
 ) where
 
+import Control.Monad (forever)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (async)
 import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Data.Either (partitionEithers, rights)
 import qualified Data.Text as Text
@@ -190,8 +193,15 @@ newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools 
             toolsTVar <- newTVarIO []
 
             -- Read tools from all sources
-            baseTools <- readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs allSkillRegs
-            atomically $ writeTVar toolsTVar baseTools
+            let doWriteTools = do
+                    baseTools <- readAllTools multiToolbox ioTools sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs allSkillRegs
+                    atomically $ writeTVar toolsTVar baseTools
+
+            doWriteTools
+            _ <- async $ forever $ do
+                threadDelay 1000000
+                doWriteTools
+ 
 
             let rt = Runtime slug uid announce tracer httpRt model toolsTVar (BashToolbox.triggerAllReloads multiToolbox) mSkillsStore
             pure $ Right rt

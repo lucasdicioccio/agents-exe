@@ -284,14 +284,14 @@ type FlagsSet a = [a]
 
 data ClientFlag
     = RootsListChanged
-    deriving (Show, Eq)
+    deriving (Show, Eq, Ord)
 
 data ServerFlag
     = PromptsListChanged
     | ResourcesSubscribe
     | ResourcesListChanged
     | ToolsListChanged
-    deriving (Show, Eq)
+    deriving (Show, Eq, Ord)
 
 data ClientCapabilities
     = ClientCapabilities
@@ -299,7 +299,7 @@ data ClientCapabilities
     , sampling :: Maybe Aeson.Value
     , flags :: FlagsSet ClientFlag
     }
-    deriving (Show)
+    deriving (Show,Eq,Ord)
 
 instance FromJSON ClientCapabilities where
     parseJSON = withObject "ClientCapabilities" $ \p -> do
@@ -343,7 +343,7 @@ data ServerCapabilities
     , logging :: Maybe Aeson.Value
     , flags :: FlagsSet ServerFlag
     }
-    deriving (Show)
+    deriving (Show, Eq, Ord)
 
 instance FromJSON ServerCapabilities where
     parseJSON = withObject "ServerCapabilities" $ \p -> do
@@ -420,7 +420,7 @@ data InitializeRequest = InitializeRequest
     , capabilities :: ClientCapabilities
     , clientInfo :: Implementation
     }
-    deriving (Show)
+    deriving (Show,Eq,Ord)
 
 instance FromJSON InitializeRequest where
     parseJSON = withObject "InitializeRequest.params" $ \p ->
@@ -443,7 +443,7 @@ data InitializeResult = InitializeResult
     , serverInfo :: Implementation
     , instructions :: Maybe Text
     }
-    deriving (Show)
+    deriving (Show,Eq,Ord)
 
 instance ToJSON InitializeResult where
     toJSON ir =
@@ -460,13 +460,14 @@ instance FromJSON InitializeResult where
             <$> o .: "protocolVersion"
             <*> o .: "capabilities"
             <*> o .: "serverInfo"
-            <*> o .: "instructions"
+            <*> o .:? "instructions"
 
 data Implementation = Implementation
     { name :: Text
     , version :: Text
+    -- TODO: optional title; title :: Text
     }
-    deriving (Show)
+    deriving (Show,Eq,Ord)
 
 instance FromJSON Implementation where
     parseJSON = withObject "Implementation" $ \p ->

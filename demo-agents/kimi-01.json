@@ -8,8 +8,9 @@
     "modelName": "kimi-k2.5",
     "toolDirectory": "tools",
     "extraAgents": [
-      {"slug": "sub-agent"
-      ,"path": "./sub-agents/sub-agent.json"
+      {
+        "slug": "sub-agent",
+        "path": "./sub-agents/sub-agent.json"
       }
     ],
     "announce": "The main agent, capable of reasoning.",
@@ -38,6 +39,18 @@
             "hostname"
           ],
           "EnvVarFilter": null
+        }
+      }
+    ],
+    "mcpServers": [
+      {
+        "tag": "McpSimpleBinary",
+        "contents": {
+          "name": "chrome",
+          "executable": "npx",
+          "args": [
+            "chrome-devtools-mcp@latest"
+          ]
         }
       }
     ]

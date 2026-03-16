@@ -3,8 +3,8 @@ cabal-version:      3.0
 -- and can be different from the cabal-install (the tool) version and the
 -- Cabal (the library) version you are using. As such, the Cabal (the library)
 -- version used must be equal or greater than the version stated in this field.
--- Starting from the specification version 2.2, the cabal-version field must
--- be the first thing in the .cabal specification.
+-- Starting from the specification version 2.2, the cabal-version field must be
+-- the first thing in the .cabal specification.
 
 -- The name of the package.
 name:               agents
@@ -266,6 +266,7 @@ test-suite agents-tests
     hs-source-dirs: test
     main-is: Main.hs
     other-modules: EndpointPredicateTests
+                   , McpImplementationTests
                    , OpenAPIToolboxTests
                    , PostgRESTParseTest
                    , SessionEditTests

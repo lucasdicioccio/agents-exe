@@ -36,6 +36,8 @@ import qualified SessionPrintTests
 import qualified EndpointPredicateTests
 -- Import Skills tests
 import qualified SkillsTests
+-- Import MCP Implementation tests
+import qualified McpImplementationTests
 
 main :: IO ()
 main = defaultMain tests
@@ -63,6 +65,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite
+        , McpImplementationTests.mcpImplementationTestSuite
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         ]

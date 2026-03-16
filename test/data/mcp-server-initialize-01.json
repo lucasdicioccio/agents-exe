@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "experimental": null,
+      "logging": null,
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "serverInfo": {
+      "name": "test-mcp-server",
+      "version": "1.0.0"
+    },
+    "instructions": "Test MCP server for verification purposes"
+  }
+}
+
