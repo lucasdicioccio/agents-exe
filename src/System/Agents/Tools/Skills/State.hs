@@ -183,4 +183,3 @@ getEnabledScripts (SkillsSessionState activeSkills) skillName =
             if Map.null scriptsState
                 then Nothing -- All scripts enabled (no explicit list)
                 else Just $ Map.keys $ Map.filter (== Enabled) scriptsState
-

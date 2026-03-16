@@ -287,4 +287,3 @@ partitionEithers = foldr go ([], [])
   where
     go (Left a) (as, bs) = (a : as, bs)
     go (Right b) (as, bs) = (as, b : bs)
-

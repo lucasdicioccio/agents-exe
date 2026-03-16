@@ -676,4 +676,3 @@ The actual handler should be provided by the caller.
 -}
 defaultHandler :: ToolHandler
 defaultHandler _ = pure $ Left "Tool handler not implemented"
-

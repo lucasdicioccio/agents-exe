@@ -269,4 +269,3 @@ newConfig tracer =
         <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
         <*> pure "gpt-4.1-mini"
         <*> pure OpenAI.OpenAIv1
-

@@ -72,4 +72,3 @@ handleCheckToolCall opts = do
                                         <> ")"
                             Text.putStrLn $ formatValidationErrors toolName errors
                             exitFailure
-

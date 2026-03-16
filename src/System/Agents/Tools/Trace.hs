@@ -18,4 +18,3 @@ data ToolTrace
     | SystemToolsTrace !SystemTools.Trace
     | DeveloperToolsTrace !DeveloperTools.Trace
     deriving (Show)
-

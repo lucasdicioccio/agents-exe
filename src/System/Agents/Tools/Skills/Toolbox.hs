@@ -416,4 +416,3 @@ valueToText val = case val of
     Aeson.Number n -> Just $ Text.pack $ show n
     Aeson.Bool b -> Just $ Text.pack $ show b
     _ -> Nothing
-

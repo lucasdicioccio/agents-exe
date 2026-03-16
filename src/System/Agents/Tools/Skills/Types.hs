@@ -397,4 +397,3 @@ instance Semigroup SkillsSessionState where
 
 instance Monoid SkillsSessionState where
     mempty = SkillsSessionState Map.empty
-

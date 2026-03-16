@@ -141,18 +141,21 @@ data ClientInfos
 handleClient ::
     (ClientInfos -> Rpc.JSONRPCT McpStack ()) -> Rpc.JSONRPCT McpStack ()
 handleClient act = do
+    liftIO $ threadDelay 1000000
     initSrv <- initialize
     case initSrv of
         (Just (Right srv)) -> do
+            x <- act (ClientInfos srv)
             _ <- notifyInitialized
-            act (ClientInfos srv)
-        _ -> do
+            pure x
+        z -> do
+            liftIO $ print ("not-initialized" :: String, z)
             pure ()
   where
     -- primitives
     initialize :: Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj InitializeResultRsp))
     initialize =
-        Rpc.sendRequest $
+        sendRequest' $
             InitializeMsg $
                 Mcp.InitializeRequest
                     clientProtocolVersion
@@ -225,11 +228,13 @@ data LoopProps = LoopProps
 defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
 defaultLoop props clientInfos = do
     withAsync loopToolCalls $ \_ -> do
+        liftIO $ print ("initialized" :: String)
         if hasToolsChangedNotif
             then do
                 doRefreshTools
                 loopEnumerateTools_Notif
-            else
+            else do
+                doRefreshTools
                 loopEnumerateTools_Poll
   where
     waitToolChangeNotification :: Rpc.JSONRPCT McpStack Bool
@@ -258,7 +263,8 @@ defaultLoop props clientInfos = do
         Mcp.ToolsListChanged `elem` clientInfos.initializeResult.getInitializeResult.capabilities.flags
 
     doRefreshTools :: Rpc.JSONRPCT McpStack ()
-    doRefreshTools =
+    doRefreshTools = do
+        liftIO $ print ("refresh tools" :: String)
         enumerateTools >>= liftIO . runTracer props.tracer . ToolsRefreshed
 
     loopEnumerateTools_Notif :: Rpc.JSONRPCT McpStack ()
