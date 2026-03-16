@@ -19,7 +19,6 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
@@ -552,7 +551,7 @@ buildOnProgress convId outChan progress = do
 {- | STM operation to read and clear buffered messages for a conversation.
 Returns the messages that were buffered (if any).
 -}
-readAndClearBufferedMessagesSTM :: ConversationId -> TVar (Map ConversationId [Text]) -> STM [Text]
+readAndClearBufferedMessagesSTM :: ConversationId -> TVar (Map ConversationId [Text.Text]) -> STM [Text.Text]
 readAndClearBufferedMessagesSTM convId bufferVar = do
     buffers <- readTVar bufferVar
     case Map.lookup convId buffers of
@@ -597,8 +596,6 @@ runConversation baseTuiAgent session = do
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
 
-    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-
     -- Helper to collect buffered messages and combine with a new query
     let collectBufferedQuery :: Maybe UserQuery -> Core -> IO (Maybe UserQuery)
         collectBufferedQuery mQuery core = do
@@ -639,14 +636,14 @@ runConversation baseTuiAgent session = do
                     core <- readTVarIO coreRef
                     buffered <- readAndClearBufferedMessages convId core
                     -- Then wait for user input from the channel
-                    channelInput <- readBChan inChan
+                    mUserQuery <- readBChan inChan
                     -- Combine buffered messages with channel input
-                    pure $ case (buffered, channelInput) of
+                    -- mUserQuery is Maybe UserQuery, where Nothing signals end of input
+                    pure $ case (buffered, mUserQuery) of
                         (Nothing, Nothing) -> Nothing
                         (Just b, Nothing) -> Just (UserQuery b)
-                        (Nothing, Just q) -> q
+                        (Nothing, Just (UserQuery q)) -> Just (UserQuery q)
                         (Just b, Just (UserQuery q)) -> Just (UserQuery $ b <> "\n" <> q)
-                        (Just b, Just Nothing) -> Just (UserQuery b) -- Channel sent Nothing (shouldn't happen in normal flow)
                 }
 
     -- \* wrap in Conversation
@@ -715,3 +712,4 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
