@@ -596,16 +596,7 @@ runConversation baseTuiAgent session = do
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
 
-    -- Helper to collect buffered messages and combine with a new query
-    let collectBufferedQuery :: Maybe UserQuery -> Core -> IO (Maybe UserQuery)
-        collectBufferedQuery mQuery core = do
-            buffered <- readAndClearBufferedMessages convId core
-            pure $ case (mQuery, buffered) of
-                (Nothing, Nothing) -> Nothing
-                (Just (UserQuery q), Nothing) -> Just (UserQuery q)
-                (Nothing, Just b) -> Just (UserQuery b)
-                (Just (UserQuery q), Just b) -> Just (UserQuery $ q <> "\n" <> b)
-
+    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
     let a =
             agent0
                 { step = \sess -> do
@@ -613,7 +604,7 @@ runConversation baseTuiAgent session = do
                     let waitIfPaused = do
                             core <- readTVarIO coreRef
                             when (isConversationPaused convId core) $ do
-                                threadDelay 100000 -- Check every 100ms
+                                threadDelay 200000 -- Check every 200ms
                                 waitIfPaused
                     waitIfPaused
 
@@ -623,27 +614,14 @@ runConversation baseTuiAgent session = do
                         Stop _r ->
                             -- smoll hack to reuse the naive step from runtimeToAgent
                             pure $ AskUserPrompt (MissingUserPrompt True [])
-                        AskUserPrompt missing -> do
-                            -- Collect buffered messages and combine with existing query
-                            core <- readTVarIO coreRef
-                            combinedQuery <- collectBufferedQuery (if missing.missingQuery then Nothing else Just (UserQuery "")) core
-                            let newMissing = missing{missingQuery = combinedQuery == Nothing, missingToolCalls = missing.missingToolCalls}
-                            pure $ AskUserPrompt newMissing{missingQuery = combinedQuery == Nothing}
-                        -- Note: The query will be provided via usrQuery below
                         _ -> pure ret
                 , usrQuery = do
                     -- First check for buffered messages
                     core <- readTVarIO coreRef
                     buffered <- readAndClearBufferedMessages convId core
-                    -- Then wait for user input from the channel
-                    mUserQuery <- readBChan inChan
-                    -- Combine buffered messages with channel input
-                    -- mUserQuery is Maybe UserQuery, where Nothing signals end of input
-                    pure $ case (buffered, mUserQuery) of
-                        (Nothing, Nothing) -> Nothing
-                        (Just b, Nothing) -> Just (UserQuery b)
-                        (Nothing, Just (UserQuery q)) -> Just (UserQuery q)
-                        (Just b, Just (UserQuery q)) -> Just (UserQuery $ b <> "\n" <> q)
+                    case buffered of
+                      Nothing ->  notifyNeedInput >> readBChan inChan
+                      Just buftxt -> pure (Just $ UserQuery buftxt)
                 }
 
     -- \* wrap in Conversation

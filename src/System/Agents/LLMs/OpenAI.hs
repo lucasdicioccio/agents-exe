@@ -273,6 +273,7 @@ callLLMPayload ::
     payload ->
     IO (Either String Value)
 callLLMPayload tracer rt (ApiBaseUrl baseUrl) payload = do
+    threadDelay 1000000  -- TODO: remove this is for 2x-checking the buffering
     let payloadVal = Aeson.toJSON payload
     let requestBytes = calculatePayloadBytes payloadVal
     runTracer tracer (CallChatCompletion payloadVal requestBytes)
