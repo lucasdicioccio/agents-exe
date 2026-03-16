@@ -38,6 +38,7 @@ module System.Agents.TUI.Core (
     coreAgents,
     coreConversations,
     corePausedConversations,
+    coreBufferedMessages,
     tuiCore,
     tuiUI,
     eventChan,
@@ -153,13 +154,14 @@ runTUIWithConfig config props = do
     evChan <- newBChan 100
 
     -- Create core state with loaded conversations
-    core0 <- newTVarIO (initCore tuiAgents)
+    core0 <- initCore tuiAgents
+    coreTVar <- newTVarIO core0
 
     -- Create UI state
     let ui0 = initUIState tuiAgents [s | (_, Just s) <- loadedSessions]
 
     -- Create TUI state with session configuration
-    let st = TuiState core0 ui0 evChan config
+    let st = TuiState coreTVar ui0 evChan config
 
     -- Build and run the app
     let app =

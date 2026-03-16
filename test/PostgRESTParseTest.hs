@@ -9,7 +9,7 @@ import Data.Aeson (decode)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isJust, fromJust, isNothing)
+import Data.Maybe (isJust, fromJust, listToMaybe, isNothing)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -126,14 +126,14 @@ test_convertPostgRESTToToolsWithBodySchema = testCase "Converts PostgREST to too
             let postTools = filter (\t -> prtMethod t == POST) tools
             assertEqual "Should have one POST tool" 1 (length postTools)
             -- The POST tool should have a request body schema
-            let postTool = head postTools
+            let postTool = listToMaybe postTools
             assertBool "POST tool should have request body schema" 
-                (isJust $ prtRequestBodySchema postTool)
+                (isJust $ prtRequestBodySchema =<< postTool)
             -- Find the PATCH tool
             let patchTools = filter (\t -> prtMethod t == PATCH) tools
             assertEqual "Should have one PATCH tool" 1 (length patchTools)
             -- The PATCH tool should have a request body schema
-            let patchTool = head patchTools
+            let patchTool = listToMaybe patchTools
             assertBool "PATCH tool should have request body schema" 
-                (isJust $ prtRequestBodySchema patchTool)
+                (isJust $ prtRequestBodySchema =<< patchTool)
 

@@ -149,7 +149,6 @@ handleClient act = do
             _ <- notifyInitialized
             pure x
         z -> do
-            liftIO $ print ("not-initialized" :: String, z)
             pure ()
   where
     -- primitives
@@ -228,7 +227,6 @@ data LoopProps = LoopProps
 defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
 defaultLoop props clientInfos = do
     withAsync loopToolCalls $ \_ -> do
-        liftIO $ print ("initialized" :: String)
         if hasToolsChangedNotif
             then do
                 doRefreshTools
@@ -264,7 +262,6 @@ defaultLoop props clientInfos = do
 
     doRefreshTools :: Rpc.JSONRPCT McpStack ()
     doRefreshTools = do
-        liftIO $ print ("refresh tools" :: String)
         enumerateTools >>= liftIO . runTracer props.tracer . ToolsRefreshed
 
     loopEnumerateTools_Notif :: Rpc.JSONRPCT McpStack ()
