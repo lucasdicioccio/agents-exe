@@ -59,4 +59,3 @@ handleInitialize apiKeysFile agentFiles = do
   where
     handleInitError :: InitProject.InitializeError -> IO ()
     handleInitError e = putStrLn $ "Note: " ++ show e
-

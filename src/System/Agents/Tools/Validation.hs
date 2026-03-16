@@ -325,4 +325,3 @@ formatValidationErrors toolName errors =
         if Text.null err.errorPath
             then err.errorMessage
             else err.errorPath <> ": " <> err.errorMessage
-

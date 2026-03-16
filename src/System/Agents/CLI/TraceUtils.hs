@@ -250,4 +250,3 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
-

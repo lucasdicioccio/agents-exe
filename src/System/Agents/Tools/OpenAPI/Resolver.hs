@@ -298,4 +298,3 @@ dereferenceSpec spec =
     resolveRequestBody :: Components -> RequestBody -> RequestBody
     resolveRequestBody comps body =
         body{reqBodyContent = Map.map (\s -> resolveSchema s comps) body.reqBodyContent}
-

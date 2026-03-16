@@ -478,4 +478,3 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
-

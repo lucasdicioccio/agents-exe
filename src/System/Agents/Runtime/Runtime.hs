@@ -387,4 +387,3 @@ registerDeveloperToolsWithTracing tracer toolbox = do
             runTracer tracer (BuiltinToolboxInitError (DeveloperToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
-

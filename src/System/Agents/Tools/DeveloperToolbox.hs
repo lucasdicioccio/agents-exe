@@ -707,4 +707,3 @@ makeHaskellToolTemplate toolSlug =
         , "    (_, _:value:_) -> Text.pack value"
         , "    _ -> \"\""
         ]
-

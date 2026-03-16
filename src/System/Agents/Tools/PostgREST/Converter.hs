@@ -589,4 +589,3 @@ buildRankingSchema tool =
                     { rsOrder = Just "Ordering clause (e.g., 'created_at.desc,name.asc')"
                     }
         else Nothing
-

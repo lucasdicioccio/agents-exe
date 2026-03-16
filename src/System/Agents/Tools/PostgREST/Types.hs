@@ -347,4 +347,3 @@ instance ToJSON ToolResult where
             , "status" Aeson..= resultStatus tr
             , "payload" Aeson..= resultPayload tr
             ]
-

@@ -229,4 +229,3 @@ readMultiSourceTools :: MultiSourceBashTools -> IO [BashTools.ScriptDescription]
 readMultiSourceTools multi = do
     allTools <- mapM (Background.readBackgroundVal . tools) multi.sources
     pure $ concat allTools
-

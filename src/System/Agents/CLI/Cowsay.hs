@@ -133,4 +133,3 @@ formatMascot =
         leader = "        \\\n         \\"
      in
         leader <> "\n" <> Text.unlines defaultLogo
-

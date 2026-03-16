@@ -48,19 +48,22 @@ data Toolbox = Toolbox
     , job :: Async ()
     , toolsList :: TVar [ToolDescription]
     , callTool :: ToolDescription -> Maybe Aeson.Object -> IO (McpClient.ToolCallResponse)
-    , -- | MVar that is filled when the initial tool discovery completes.
-      -- Use 'waitForInitialDiscovery' to wait for this event.
-      initialDiscoveryDone :: MVar ()
+    , initialDiscoveryDone :: MVar ()
+    {- ^ MVar that is filled when the initial tool discovery completes.
+    Use 'waitForInitialDiscovery' to wait for this event.
+    -}
     }
 
--- | Wait for the initial tool discovery to complete.
--- This blocks until the first 'ToolsRefreshed' event is received from the MCP server.
--- If the discovery has already completed, this returns immediately.
+{- | Wait for the initial tool discovery to complete.
+This blocks until the first 'ToolsRefreshed' event is received from the MCP server.
+If the discovery has already completed, this returns immediately.
+-}
 waitForInitialDiscovery :: Toolbox -> IO ()
 waitForInitialDiscovery = readMVar . initialDiscoveryDone
 
--- | Wait for the initial tool discovery to complete with a timeout.
--- Returns 'True' if discovery completed, 'False' if the timeout was reached.
+{- | Wait for the initial tool discovery to complete with a timeout.
+Returns 'True' if discovery completed, 'False' if the timeout was reached.
+-}
 waitForInitialDiscoveryTimeout :: Int -> Toolbox -> IO Bool
 waitForInitialDiscoveryTimeout microsecs toolbox = do
     result <- timeout microsecs (readMVar $ initialDiscoveryDone toolbox)
@@ -103,8 +106,9 @@ initializeMcpToolbox ttracer tname proc = do
     ajob <- async (McpClient.runClient clientTracer mcpRt (McpClient.defaultLoop props))
     pure $ Toolbox tname ajob discoveredTools doCallTool initialDiscoveryMVar
 
--- | Tracer that stores discovered tools in the TVar and signals completion
--- via the MVar on the first 'ToolsRefreshed' event.
+{- | Tracer that stores discovered tools in the TVar and signals completion
+via the MVar on the first 'ToolsRefreshed' event.
+-}
 storeToolsInDiscoveredValues ::
     TVar [ToolDescription] ->
     MVar () ->
@@ -128,7 +132,6 @@ storeToolsInDiscoveredValues list discoveryMVar = Tracer f
     extractToolDescriptions mitems =
         let g (Just (Right rsp)) =
                 fmap ToolDescription $
-                Mcp.tools (McpClient.getListToolsResult rsp)
+                    Mcp.tools (McpClient.getListToolsResult rsp)
             g _ = []
          in mconcat $ map g mitems
-
