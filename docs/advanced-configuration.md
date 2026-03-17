@@ -7,7 +7,7 @@ This guide covers advanced configuration patterns for agents-exe, including recu
 - [Recursive Agent References](#recursive-agent-references)
   - [Self-References](#self-references)
   - [Mutual Recursion](#mutual-recursion)
-  - [Configuration via extraAgents](#configuration-via-extraAgents)
+  - [Configuration via extraAgents](#configuration-via-extraagents)
 - [Recursion Safety](#recursion-safety)
   - [Depth Limits](#depth-limits)
   - [Call Stack Tracking](#call-stack-tracking)
@@ -94,6 +94,14 @@ data ExtraAgentRef = ExtraAgentRef
     }
 ```
 
+> **Important**: The `slug` field in `extraAgents` must match the target agent's 
+> actual `slug` as defined in its JSON file. It is NOT an alias. The system uses 
+> this slug to look up the agent in the registry after all configurations are loaded.
+>
+> For example, if you want to reference an agent defined in `helper.json` that has
+> `"slug": "my-helper"`, your extraAgents entry must use `"slug": "my-helper"`,
+> not any other name.
+
 **JSON Format:**
 
 ```json
@@ -112,7 +120,7 @@ data ExtraAgentRef = ExtraAgentRef
         "path": "../helpers/helper-agent.json"
       },
       {
-        "slug": "self-reference",
+        "slug": "my-agent",
         "path": "./agent.json"
       }
     ],
@@ -129,8 +137,13 @@ data ExtraAgentRef = ExtraAgentRef
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `slug` | string | Unique identifier for this agent reference |
+| `slug` | string | Must match the target agent's actual `slug` as defined in its JSON file |
 | `path` | string | Relative or absolute path to the agent's JSON file |
+
+> **Warning**: A common mistake is to use an arbitrary name for the `slug` field
+> in `extraAgents`. This will cause a `MissingAgentReference` error because the
+> system cannot find an agent with that slug. Always ensure the slug in
+> `extraAgents` matches the `slug` field in the target agent's configuration file.
 
 ---
 
@@ -244,6 +257,9 @@ refine-agent/
 }
 ```
 
+Note that the `slug` in `extraAgents` (`"refine-code"`) matches the agent's own
+`slug` field. This is required for self-references to work correctly.
+
 **Usage:**
 
 ```bash
@@ -324,6 +340,11 @@ plan-exec/
   }
 }
 ```
+
+Note that in `planner.json`, the `extraAgents` slug is `"task-executor"` which
+must match the `slug` field in `executor.json`. Similarly, in `executor.json`,
+the `extraAgents` slug is `"task-planner"` which must match the `slug` field in
+`planner.json`.
 
 **Usage:**
 
@@ -527,13 +548,55 @@ Review these warnings to ensure cycles are intentional.
 **Problem:** An agent references a slug that doesn't exist.
 
 ```
-ReferenceError (MissingAgentReference "my-agent" "./agent.json" "missing-slug")
+ReferenceError: Missing agent reference 'self-reference'
+  Referrer: 'local:lrm' in file: localdev-agents/kimi-07.err1.json
+  
+  Hint: The slug 'self-reference' was not found in any loaded agent configuration.
+  
+  Did you mean to reference one of these agents?
+    - 'local:lrm' (defined in localdev-agents/kimi-07.err1.json)
+  
+  Remember: The 'slug' in extraAgents must match the target agent's actual slug,
+  not an arbitrary name. Check that your extraAgents configuration uses the 
+  correct slug from the target file.
 ```
 
+**Common Causes:**
+1. The `slug` in `extraAgents` doesn't match the target agent's actual `slug`
+2. The referenced agent file doesn't exist at the specified path
+3. The referenced agent file has a different `slug` than expected
+
 **Solutions:**
-1. Check the `extraAgents` path is correct
-2. Verify the referenced agent's JSON has the expected `slug`
-3. Ensure relative paths are from the referencing agent's directory
+1. Check that the `slug` in `extraAgents` matches the target agent's `slug` field exactly
+2. Verify the `path` in `extraAgents` points to the correct file
+3. Open the target agent's JSON file and confirm its `slug` field
+4. Remember: The `slug` in `extraAgents` is NOT an alias - it must match the target's actual slug
+
+**Example Fix:**
+
+If you have an agent file `helper.json`:
+```json
+{
+  "contents": {
+    "slug": "my-helper",
+    ...
+  }
+}
+```
+
+Your `extraAgents` entry must use `"slug": "my-helper"`:
+```json
+{
+  "extraAgents": [
+    {
+      "slug": "my-helper",
+      "path": "./helper.json"
+    }
+  ]
+}
+```
+
+Using `"slug": "helper"` or any other name will cause the error.
 
 ### "DuplicateAgentSlug" Error
 
@@ -580,10 +643,11 @@ ReferenceError (DuplicateAgentSlug "helper" ["./a/helper.json", "./b/helper.json
 Recursive agent references enable powerful patterns like iterative refinement and collaborative problem-solving. The key points are:
 
 1. Use `extraAgents` to declare references outside `toolDirectory`
-2. The system validates all references before runtime
-3. Implement depth limits via `ToolExecutionContext`
-4. Monitor for cycles and unintended infinite recursion
-5. Document recursion patterns in system prompts
+2. **Important**: The `slug` in `extraAgents` must match the target agent's actual `slug`
+3. The system validates all references before runtime
+4. Implement depth limits via `ToolExecutionContext`
+5. Monitor for cycles and unintended infinite recursion
+6. Document recursion patterns in system prompts
 
 For more information, see:
 - `System.Agents.AgentTree` - Loading and initialization

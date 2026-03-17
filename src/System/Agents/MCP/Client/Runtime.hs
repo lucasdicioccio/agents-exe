@@ -1,10 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
+
 module System.Agents.MCP.Client.Runtime where
 
 import Conduit (ConduitT, Flush, Void, (.|))
 import qualified Conduit as C
 import Control.Monad.Logger (MonadLoggerIO, logDebugS)
-import Control.Monad.Reader (runReaderT, reader)
+import Control.Monad.Reader (reader, runReaderT)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as L8
@@ -14,10 +15,10 @@ import qualified Network.JSONRPC as Rpc
 import Prod.Tracer (Tracer, runTracer)
 import System.Exit (ExitCode)
 import System.Process (CreateProcess)
-import UnliftIO (Async, MonadUnliftIO, async, atomically, liftIO, wait, withAsync, readTVar, writeTVar, newEmptyTMVar, takeTMVar)
+import UnliftIO (Async, MonadUnliftIO, async, atomically, liftIO, newEmptyTMVar, readTVar, takeTMVar, wait, withAsync, writeTVar)
 
-import Control.Monad (unless, forM, liftM)
-import qualified Data.HashMap.Strict        as M
+import Control.Monad (forM, liftM, unless)
+import qualified Data.HashMap.Strict as M
 
 data BufferStream
     = In
@@ -105,22 +106,26 @@ encodeConduit = do
         C.yield $ C.Chunk "\n"
         C.yield C.Flush
 
--- | Returns Nothing if did not receive response, could not parse it, or
--- request is a notification. Just Left contains the error object returned
--- by server if any. Just Right means response was received just right.
-sendRequest' :: (MonadLoggerIO m , Aeson.ToJSON q, Rpc.ToRequest q, Rpc.FromResponse r)
-            => q -> Rpc.JSONRPCT m (Maybe (Either Rpc.ErrorObj r))
+{- | Returns Nothing if did not receive response, could not parse it, or
+request is a notification. Just Left contains the error object returned
+by server if any. Just Right means response was received just right.
+-}
+sendRequest' ::
+    (MonadLoggerIO m, Aeson.ToJSON q, Rpc.ToRequest q, Rpc.FromResponse r) =>
+    q -> Rpc.JSONRPCT m (Maybe (Either Rpc.ErrorObj r))
 sendRequest' q = do
     f `liftM` sendBatchRequest' [q]
   where
     f :: [Maybe (Either Rpc.ErrorObj r)] -> Maybe (Either Rpc.ErrorObj r)
     f [] = Nothing
-    f (x:_) = x
+    f (x : _) = x
 
--- | Send multiple requests in a batch. If only a single request, do not
--- put it in a batch.
-sendBatchRequest' :: (MonadLoggerIO m, Aeson.ToJSON q, Rpc.ToRequest q, Rpc.FromResponse r)
-                 => [q] -> Rpc.JSONRPCT m [Maybe (Either Rpc.ErrorObj r)]
+{- | Send multiple requests in a batch. If only a single request, do not
+put it in a batch.
+-}
+sendBatchRequest' ::
+    (MonadLoggerIO m, Aeson.ToJSON q, Rpc.ToRequest q, Rpc.FromResponse r) =>
+    [q] -> Rpc.JSONRPCT m [Maybe (Either Rpc.ErrorObj r)]
 sendBatchRequest' qs = do
     v <- reader Rpc.rpcVer
     l <- reader Rpc.lastId
@@ -142,25 +147,24 @@ sendBatchRequest' qs = do
                         then return (Rpc.buildRequest v q i, Nothing)
                         else return (Rpc.buildRequest v q i, Just p)
         case map fst aps of
-            []  -> return ()
+            [] -> return ()
             [a] -> unless d $ writeTBMChan o $ Rpc.MsgRequest a
-            as  -> unless d $ writeTBMChan o $ Rpc.MsgBatch $ map Rpc.MsgRequest as
+            as -> unless d $ writeTBMChan o $ Rpc.MsgBatch $ map Rpc.MsgRequest as
         return aps
     if null aps
         then $logDebugS "json-rpc" "no responses pending"
         else $logDebugS "json-rpc" "listening for responses if pending"
-    (ret,_) <- fmap unzip . liftIO . atomically $ forM aps $ \(a, pM) ->
+    (ret, _) <- fmap unzip . liftIO . atomically $ forM aps $ \(a, pM) ->
         case pM of
             Nothing -> do
                 return (Nothing, "branch-1" :: String)
-            Just  p -> do
+            Just p -> do
                 rM <- takeTMVar p
                 case rM of
                     Nothing -> return (Nothing, "branch-2")
                     Just r@Rpc.Response{} ->
                         case Rpc.fromResponse (Rpc.getReqMethod a) r of
                             Nothing -> return (Nothing, "branch-3")
-                            Just  x -> return (Just $ Right x, "branch-4")
+                            Just x -> return (Just $ Right x, "branch-4")
                     Just e -> return (Just $ Left $ Rpc.getError e, "branch-5")
     pure ret
-

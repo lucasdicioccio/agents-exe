@@ -291,4 +291,3 @@ defaultLoop props clientInfos = do
                         runTracer props.tracer (EndToolCall tname obj r)
                         resp r
                 loopToolCalls
-
