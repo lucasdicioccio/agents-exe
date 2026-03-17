@@ -416,4 +416,3 @@ instance FromJSON Response where
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
-
