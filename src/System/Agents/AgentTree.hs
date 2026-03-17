@@ -227,16 +227,16 @@ formatReferenceError (MissingAgentReference referrerSlug referrerFile missingSlu
     let
         -- Get all available slugs and their files for suggestions
         availableAgents = Map.toList allNodes
-        
+
         -- Find agents defined in the same directory as the referrer
         referrerDir = FilePath.takeDirectory referrerFile
-        sameDirAgents = 
+        sameDirAgents =
             [ (s, node.nodeFile)
             | (s, node) <- availableAgents
             , FilePath.takeDirectory node.nodeFile == referrerDir
             , s /= referrerSlug
             ]
-        
+
         -- Build suggestion message
         suggestionMsg =
             if null sameDirAgents
@@ -250,7 +250,7 @@ formatReferenceError (MissingAgentReference referrerSlug referrerFile missingSlu
                             | (s, f) <- sameDirAgents
                             ]
                         ]
-        
+
         -- Find agents with similar slugs (simple case-insensitive contains check)
         similarSlugs =
             [ s
@@ -259,7 +259,7 @@ formatReferenceError (MissingAgentReference referrerSlug referrerFile missingSlu
                 || Text.toLower s `Text.isInfixOf` Text.toLower missingSlug
             , s /= missingSlug
             ]
-        
+
         similarMsg =
             if null similarSlugs
                 then ""
@@ -269,7 +269,7 @@ formatReferenceError (MissingAgentReference referrerSlug referrerFile missingSlu
                         , "  Similar slugs found:"
                         , Text.unlines ["    - '" <> s <> "'" | s <- similarSlugs]
                         ]
-    in
+     in
         Text.unlines
             [ "ReferenceError: Missing agent reference '" <> missingSlug <> "'"
             , "  Referrer: '" <> referrerSlug <> "' in file: " <> Text.pack referrerFile
@@ -593,17 +593,18 @@ wireToolReferences ::
 wireToolReferences props graph runtimes = do
     mapM_ (wireAgentTools props graph runtimes) (Map.toList graph.graphNodes)
 
--- | Wire tools for a single agent by appending sub-agent tools to the TVar.
--- 
--- This function partitions extra agents to prevent infinite loops during tool
--- wiring. Specifically, if an agent references itself in extraAgents (self-reference),
--- we skip wiring it as a tool to avoid redundant registration. However, the agent
--- is still available in the registry and can be looked up at runtime if needed.
--- 
--- The logic:
--- - Child agents (from toolDirectory) are always wired
--- - Extra agents are wired only if they differ from the current agent's slug
---   (prevents self-reference loops during wiring phase)
+{- | Wire tools for a single agent by appending sub-agent tools to the TVar.
+
+This function partitions extra agents to prevent infinite loops during tool
+wiring. Specifically, if an agent references itself in extraAgents (self-reference),
+we skip wiring it as a tool to avoid redundant registration. However, the agent
+is still available in the registry and can be looked up at runtime if needed.
+
+The logic:
+- Child agents (from toolDirectory) are always wired
+- Extra agents are wired only if they differ from the current agent's slug
+  (prevents self-reference loops during wiring phase)
+-}
 wireAgentTools ::
     Props ->
     AgentConfigGraph ->
@@ -625,13 +626,13 @@ wireAgentTools props _graph _runtimes (slug, node) = do
             -- This prevents infinite loops while still allowing self-reference
             -- to work at runtime (the agent is registered, just not wired as its own tool here)
             let (selfRefs, otherExtraRefs) = List.partition (== slug) node.nodeExtraRefs
-            
+
             -- Log self-references for debugging (they're valid but skipped during wiring)
             unless (null selfRefs) $
                 runTracer props.interactiveTracer $
                     ReferenceValidationTrace $
                         MissingReferenceDetected slug node.nodeFile slug
-            
+
             extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) otherExtraRefs
             let validExtras = Maybe.catMaybes extraRuntimes
 
@@ -1266,4 +1267,3 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
-

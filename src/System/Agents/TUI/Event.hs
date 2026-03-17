@@ -620,8 +620,8 @@ runConversation baseTuiAgent session = do
                     core <- readTVarIO coreRef
                     buffered <- readAndClearBufferedMessages convId core
                     case buffered of
-                      Nothing ->  notifyNeedInput >> readBChan inChan
-                      Just buftxt -> pure (Just $ UserQuery buftxt)
+                        Nothing -> notifyNeedInput >> readBChan inChan
+                        Just buftxt -> pure (Just $ UserQuery buftxt)
                 }
 
     -- \* wrap in Conversation
@@ -690,4 +690,3 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-

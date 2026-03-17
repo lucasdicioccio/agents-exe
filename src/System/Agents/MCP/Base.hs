@@ -299,7 +299,7 @@ data ClientCapabilities
     , sampling :: Maybe Aeson.Value
     , flags :: FlagsSet ClientFlag
     }
-    deriving (Show,Eq,Ord)
+    deriving (Show, Eq, Ord)
 
 instance FromJSON ClientCapabilities where
     parseJSON = withObject "ClientCapabilities" $ \p -> do
@@ -420,7 +420,7 @@ data InitializeRequest = InitializeRequest
     , capabilities :: ClientCapabilities
     , clientInfo :: Implementation
     }
-    deriving (Show,Eq,Ord)
+    deriving (Show, Eq, Ord)
 
 instance FromJSON InitializeRequest where
     parseJSON = withObject "InitializeRequest.params" $ \p ->
@@ -443,7 +443,7 @@ data InitializeResult = InitializeResult
     , serverInfo :: Implementation
     , instructions :: Maybe Text
     }
-    deriving (Show,Eq,Ord)
+    deriving (Show, Eq, Ord)
 
 instance ToJSON InitializeResult where
     toJSON ir =
@@ -467,7 +467,7 @@ data Implementation = Implementation
     , version :: Text
     -- TODO: optional title; title :: Text
     }
-    deriving (Show,Eq,Ord)
+    deriving (Show, Eq, Ord)
 
 instance FromJSON Implementation where
     parseJSON = withObject "Implementation" $ \p ->
