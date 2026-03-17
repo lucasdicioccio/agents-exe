@@ -1484,7 +1484,7 @@ referenceValidationTests =
                 Left errs -> do
                     -- Should have at least one MissingAgentReference error
                     let isMissingRef err = case err of
-                            AgentTree.ReferenceError (AgentTree.MissingAgentReference _ _ _) -> True
+                            AgentTree.RefLoadingError (AgentTree.MissingAgentReference _ _ _) -> True
                             _ -> False
                     assertBool "Expected MissingAgentReference error" (any isMissingRef errs)
                 Right () -> assertFailure "Expected validation to fail due to missing reference"
@@ -1715,4 +1715,5 @@ cycleDetectionTests =
         , Base.skillSources = Nothing
         , Base.autoEnableSkills = Nothing
         }
+
 

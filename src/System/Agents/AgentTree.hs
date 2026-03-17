@@ -21,6 +21,7 @@ module System.Agents.AgentTree (
     AgentConfigGraph (..),
     AgentConfigNode (..),
     ReferenceError (..),
+    formatReferenceError,
     ReferenceValidationTrace (..),
 
     -- * Loading and initialization
@@ -30,6 +31,7 @@ module System.Agents.AgentTree (
     LoadAgentResult (..),
     withAgentTreeRuntime,
     LoadingError (..),
+    formatLoadingError,
 
     -- * Two-phase loading algorithm
     discoverAgentConfigs,
@@ -212,9 +214,79 @@ data ReferenceError
       DuplicateAgentSlug AgentSlug [FilePath]
     deriving (Show)
 
+-- | Format a ReferenceError into a helpful user-facing message
+formatReferenceError :: ReferenceError -> Map.Map AgentSlug AgentConfigNode -> Text
+formatReferenceError (DuplicateAgentSlug slug files) _ =
+    Text.unlines
+        [ "ReferenceError: Duplicate agent slug '" <> slug <> "'"
+        , "  This slug is defined in multiple files:"
+        , Text.unlines ["    - " <> Text.pack f | f <- files]
+        , "  Solution: Use unique slugs for each agent configuration."
+        ]
+formatReferenceError (MissingAgentReference referrerSlug referrerFile missingSlug) allNodes =
+    let
+        -- Get all available slugs and their files for suggestions
+        availableAgents = Map.toList allNodes
+        
+        -- Find agents defined in the same directory as the referrer
+        referrerDir = FilePath.takeDirectory referrerFile
+        sameDirAgents = 
+            [ (s, node.nodeFile)
+            | (s, node) <- availableAgents
+            , FilePath.takeDirectory node.nodeFile == referrerDir
+            , s /= referrerSlug
+            ]
+        
+        -- Build suggestion message
+        suggestionMsg =
+            if null sameDirAgents
+                then ""
+                else
+                    Text.unlines
+                        [ ""
+                        , "  Did you mean to reference one of these agents?"
+                        , Text.unlines
+                            [ "    - '" <> s <> "' (defined in " <> Text.pack f <> ")"
+                            | (s, f) <- sameDirAgents
+                            ]
+                        ]
+        
+        -- Find agents with similar slugs (simple case-insensitive contains check)
+        similarSlugs =
+            [ s
+            | (s, _) <- availableAgents
+            , Text.toLower missingSlug `Text.isInfixOf` Text.toLower s
+                || Text.toLower s `Text.isInfixOf` Text.toLower missingSlug
+            , s /= missingSlug
+            ]
+        
+        similarMsg =
+            if null similarSlugs
+                then ""
+                else
+                    Text.unlines
+                        [ ""
+                        , "  Similar slugs found:"
+                        , Text.unlines ["    - '" <> s <> "'" | s <- similarSlugs]
+                        ]
+    in
+        Text.unlines
+            [ "ReferenceError: Missing agent reference '" <> missingSlug <> "'"
+            , "  Referrer: '" <> referrerSlug <> "' in file: " <> Text.pack referrerFile
+            , ""
+            , "  Hint: The slug '" <> missingSlug <> "' was not found in any loaded agent configuration."
+            , suggestionMsg
+            , similarMsg
+            , "  Remember: The 'slug' in extraAgents must match the target agent's actual slug,"
+            , "  not an arbitrary name. Check that your extraAgents configuration uses the"
+            , "  correct slug from the target file."
+            , ""
+            , "  For more information, see: docs/advanced-configuration.md"
+            ]
+
 data LoadingError
     = AgentLoadingError FileLoader.InvalidAgentError
-    | ReferenceError ReferenceError
+    | RefLoadingError ReferenceError
     | -- | Description and error message
       OpenAPIInitError Text String
     | -- | Description and error message
@@ -223,6 +295,18 @@ data LoadingError
       ConfigFileError FilePath String
     | OtherError String
     deriving (Show)
+
+-- | Format a LoadingError into a user-facing message
+formatLoadingError :: LoadingError -> Map.Map AgentSlug AgentConfigNode -> Text
+formatLoadingError (AgentLoadingError err) _ = Text.pack $ show err
+formatLoadingError (RefLoadingError err) allNodes = formatReferenceError err allNodes
+formatLoadingError (OpenAPIInitError desc msg) _ =
+    "OpenAPI Initialization Error for " <> desc <> ": " <> Text.pack msg
+formatLoadingError (PostgRESTInitError desc msg) _ =
+    "PostgREST Initialization Error for " <> desc <> ": " <> Text.pack msg
+formatLoadingError (ConfigFileError path msg) _ =
+    "Configuration File Error in " <> Text.pack path <> ": " <> Text.pack msg
+formatLoadingError (OtherError msg) _ = Text.pack msg
 
 data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
@@ -303,7 +387,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                                     DuplicateAgentSlug
                                         slug
                                         [existingNode.nodeFile, filePath]
-                             in pure $ Left (NonEmpty.singleton $ ReferenceError err)
+                             in pure $ Left (NonEmpty.singleton $ RefLoadingError err)
                         Nothing -> do
                             -- Discover children from toolDirectory (if specified)
                             let rootDir = FilePath.takeDirectory filePath
@@ -414,7 +498,7 @@ checkMissingReferences graph fromSlug refs =
                             then Nothing
                             else
                                 Just $
-                                    ReferenceError $
+                                    RefLoadingError $
                                         MissingAgentReference fromSlug node.nodeFile ref
                     )
                     refs
@@ -510,6 +594,16 @@ wireToolReferences props graph runtimes = do
     mapM_ (wireAgentTools props graph runtimes) (Map.toList graph.graphNodes)
 
 -- | Wire tools for a single agent by appending sub-agent tools to the TVar.
+-- 
+-- This function partitions extra agents to prevent infinite loops during tool
+-- wiring. Specifically, if an agent references itself in extraAgents (self-reference),
+-- we skip wiring it as a tool to avoid redundant registration. However, the agent
+-- is still available in the registry and can be looked up at runtime if needed.
+-- 
+-- The logic:
+-- - Child agents (from toolDirectory) are always wired
+-- - Extra agents are wired only if they differ from the current agent's slug
+--   (prevents self-reference loops during wiring phase)
 wireAgentTools ::
     Props ->
     AgentConfigGraph ->
@@ -527,7 +621,18 @@ wireAgentTools props _graph _runtimes (slug, node) = do
             let validChildren = Maybe.catMaybes childRuntimes
 
             -- Look up extra agent runtimes from registry
-            extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) node.nodeExtraRefs
+            -- Partition extra refs to skip self-references during wiring
+            -- This prevents infinite loops while still allowing self-reference
+            -- to work at runtime (the agent is registered, just not wired as its own tool here)
+            let (selfRefs, otherExtraRefs) = List.partition (== slug) node.nodeExtraRefs
+            
+            -- Log self-references for debugging (they're valid but skipped during wiring)
+            unless (null selfRefs) $
+                runTracer props.interactiveTracer $
+                    ReferenceValidationTrace $
+                        MissingReferenceDetected slug node.nodeFile slug
+            
+            extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) otherExtraRefs
             let validExtras = Maybe.catMaybes extraRuntimes
 
             -- Combine all helper runtimes
@@ -1161,3 +1266,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+
