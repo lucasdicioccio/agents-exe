@@ -47,6 +47,7 @@ import qualified System.Agents.CLI.New as NewCmd
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
 import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
+import qualified System.Agents.CLI.ReplayToolCall as ReplayToolCallCmd
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
@@ -409,6 +410,8 @@ data Prog = Prog
 data Command
     = Check CheckCmd.CheckOptions
     | CheckToolCall CheckToolCallCmd.CheckToolCallOptions
+    | ListToolCalls ReplayToolCallCmd.ListToolCallsOptions
+    | ReplayToolCall ReplayToolCallCmd.ReplayToolCallOptions
     | TerminalUI TUICmd.TuiOptions
     | OneShot OneShotCmd.OneShotOptions
     | EchoPrompt EchoPromptCmd.EchoPromptOptions
@@ -428,6 +431,8 @@ data Command
 instance Show Command where
     show (Check _) = "Check"
     show (CheckToolCall _) = "CheckToolCall"
+    show (ListToolCalls _) = "ListToolCalls"
+    show (ReplayToolCall _) = "ReplayToolCall"
     show (TerminalUI _) = "TerminalUI"
     show (OneShot _) = "OneShot"
     show (EchoPrompt _) = "EchoPrompt"
@@ -493,6 +498,77 @@ parseCheckToolCallOptions =
                 <> short 't'
                 <> metavar "TOOLPATH"
                 <> help "Path to the tool script to validate against"
+            )
+
+-- | Parse the list-tool-calls command
+parseListToolCallsCommand :: Parser Command
+parseListToolCallsCommand = ListToolCalls <$> parseListToolCallsOptions
+
+parseListToolCallsOptions :: Parser ReplayToolCallCmd.ListToolCallsOptions
+parseListToolCallsOptions =
+    ReplayToolCallCmd.ListToolCallsOptions
+        <$> strArgument
+            ( metavar "SESSIONFILE"
+                <> help "Path to the session JSON file to extract tool calls from"
+            )
+        <*> parseListFormatOption
+
+parseListFormatOption :: Parser ReplayToolCallCmd.ListFormat
+parseListFormatOption =
+    option
+        (maybeReader parseFormat)
+        ( long "format"
+            <> short 'f'
+            <> metavar "FORMAT"
+            <> help "Output format: human, json, or brief (default: human)"
+            <> value ReplayToolCallCmd.ListFormatHuman
+            <> showDefaultWith showFormat
+        )
+  where
+    parseFormat :: String -> Maybe ReplayToolCallCmd.ListFormat
+    parseFormat "human" = Just ReplayToolCallCmd.ListFormatHuman
+    parseFormat "json" = Just ReplayToolCallCmd.ListFormatJson
+    parseFormat "brief" = Just ReplayToolCallCmd.ListFormatBrief
+    parseFormat _ = Nothing
+
+    showFormat :: ReplayToolCallCmd.ListFormat -> String
+    showFormat ReplayToolCallCmd.ListFormatHuman = "human"
+    showFormat ReplayToolCallCmd.ListFormatJson = "json"
+    showFormat ReplayToolCallCmd.ListFormatBrief = "brief"
+
+-- | Parse the replay-tool-call command
+parseReplayToolCallCommand :: Parser Command
+parseReplayToolCallCommand = ReplayToolCall <$> parseReplayToolCallOptions
+
+parseReplayToolCallOptions :: Parser ReplayToolCallCmd.ReplayToolCallOptions
+parseReplayToolCallOptions =
+    ReplayToolCallCmd.ReplayToolCallOptions
+        <$> strOption
+            ( long "session"
+                <> short 's'
+                <> metavar "SESSIONFILE"
+                <> help "Path to the session file containing the tool call"
+            )
+        <*> option
+            auto
+            ( long "tool-call"
+                <> short 'i'
+                <> metavar "INDEX"
+                <> help "Index of the tool call to replay (0-based)"
+            )
+        <*> strOption
+            ( long "tool"
+                <> short 't'
+                <> metavar "TOOLPATH"
+                <> help "Path to the tool script to execute"
+            )
+        <*> switch
+            ( long "validate-only"
+                <> help "Only validate the tool call arguments, don't execute"
+            )
+        <*> switch
+            ( long "raw"
+                <> help "Show raw output instead of formatted"
             )
 
 parseTuiChatCommand :: Parser Command
@@ -1297,6 +1373,8 @@ parseProgOptions argparserargs =
         <*> hsubparser
             ( command "check" (info parseCheckCommand (progDesc "Validate agent configurations and optionally dump tool schemas"))
                 <> command "check-tool-call" (info parseCheckToolCallCommand (progDesc "Validate a tool call payload against a tool schema (reads JSON from stdin)"))
+                <> command "list-tool-calls" (info parseListToolCallsCommand (progDesc "List all tool calls from a session file"))
+                <> command "replay-tool-call" (info parseReplayToolCallCommand (progDesc "Replay a tool call from a session file, validating and optionally executing"))
                 <> command "tui" (info parseTuiChatCommand (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
@@ -1433,6 +1511,10 @@ runCommand pargs baseTracer sessionStore files =
             CheckCmd.handleCheck checkOpts pargs.apiKeysFile files
         CheckToolCall opts ->
             CheckToolCallCmd.handleCheckToolCall opts
+        ListToolCalls opts ->
+            ReplayToolCallCmd.handleListToolCalls opts
+        ReplayToolCall opts ->
+            ReplayToolCallCmd.handleReplayToolCall opts
         TerminalUI _ ->
             TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile files
         EchoPrompt opts ->
@@ -1696,3 +1778,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+

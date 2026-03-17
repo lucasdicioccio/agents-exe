@@ -76,6 +76,7 @@ library agents-lib
                     , System.Agents.CLI.OneShot
                     , System.Agents.CLI.Paths
                     , System.Agents.CLI.PromptScript
+                    , System.Agents.CLI.ReplayToolCall
                     , System.Agents.CLI.SelfDescribe
                     , System.Agents.CLI.SessionEdit
                     , System.Agents.CLI.Spec
