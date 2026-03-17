@@ -5,7 +5,6 @@ module System.Agents.Runtime.Runtime (
     Runtime (..),
     AgentTools,
     addTracer,
-    newRuntime,
     newRuntimeWithMultiBash,
     triggerRefreshTools,
 ) where
@@ -27,7 +26,6 @@ import System.Agents.Base (
     BashToolboxDescription (..),
     BuiltinToolboxDescription (..),
     DeveloperToolboxDescription (..),
-    FileSystemDirectoryDescription (..),
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
     newAgentId,
@@ -78,50 +76,9 @@ triggerRefreshTools :: Runtime -> IO Bool
 triggerRefreshTools rt = atomically $ rt.agentTriggerRefreshTools
 
 -- todo: directly ask for effects returning registrations
-type ToolboxDirectory = FilePath
 type IOToolBuilder = AgentSlug -> AgentId -> ToolRegistration
 type McpToolConfig = McpTools.Toolbox
 
-{- | Legacy runtime creation with a single tool directory.
-
-This function is kept for backward compatibility. It creates a runtime
-with a single bash toolbox directory.
-
-For new code, prefer 'newRuntimeWithMultiBash' which supports multiple
-bash tool sources.
--}
-newRuntime ::
-    Maybe FilePath ->
-    AgentSlug ->
-    AgentAnnounce ->
-    Tracer IO Trace ->
-    OpenAI.ApiKey ->
-    OpenAI.Model ->
-    ToolboxDirectory ->
-    [IOToolBuilder] ->
-    [McpToolConfig] ->
-    -- | OpenAPI tool registrations - initialized and ready to use
-    [ToolRegistration] ->
-    -- | Builtin toolbox descriptions - to be initialized
-    [BuiltinToolboxDescription] ->
-    -- | Skill sources - to be loaded
-    [SkillSource] ->
-    IO (Either String Runtime)
-newRuntime agentdir slug announce tracer apiKey model tooldir mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions skillSources = do
-    -- Convert single directory to multi-source format
-    let legacyDesc = FileSystemDirectory $ FileSystemDirectoryDescription agentdir tooldir Nothing
-    newRuntimeWithMultiBash
-        slug
-        announce
-        tracer
-        apiKey
-        model
-        [legacyDesc]
-        mkIoTools
-        mcpToolboxes
-        openApiToolRegs
-        builtinDescriptions
-        skillSources
 
 {- | Create a new runtime with multiple bash tool sources.
 
