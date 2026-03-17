@@ -43,7 +43,6 @@ module System.Agents.AgentTree (
     detectCycles,
 
     -- * Agent initialization
-    initAgentTreeAgent,
     initAgentTreeAgentDeferred,
     PromptModifier,
 
@@ -1200,71 +1199,6 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
                     -- extra agents (resolved via registry at call time)
-                    Runtime.newRuntimeWithMultiBash
-                        desc.slug
-                        desc.announce
-                        (contramap AgentTrace tracer)
-                        key
-                        ( OpenAI.Model
-                            flavor
-                            (OpenAI.ApiBaseUrl desc.modelUrl)
-                            desc.modelName
-                            ( OpenAI.SystemPrompt $
-                                modifyPrompt $
-                                    Text.unlines desc.systemPrompt
-                            )
-                        )
-                        bashSources
-                        [agentToTool' rt | rt <- helperAgents]
-                        mcpToolboxes
-                        (openApiToolRegs ++ postgrestToolRegs)
-                        builtinDescriptions
-                        skillSources
-  where
-    startMcp :: McpServerDescription -> IO McpTools.Toolbox
-    startMcp srv@(McpSimpleBinary cfg) =
-        McpTools.initializeMcpToolbox
-            (contramap (McpTrace srv) tracer)
-            cfg.name
-            (proc cfg.executable (map Text.unpack cfg.args))
-
-{- | Original initialization function - kept for backward compatibility.
-This function initializes a runtime without deferred resolution.
--}
-initAgentTreeAgent ::
-    Tracer IO Trace ->
-    [(Text, OpenAI.ApiKey)] ->
-    PromptModifier ->
-    (Runtime -> AgentSlug -> AgentId -> ToolRegistration) ->
-    [Runtime.Runtime] ->
-    FilePath ->
-    AgentDescription ->
-    IO (Either String Runtime.Runtime)
-initAgentTreeAgent tracer keys modifyPrompt agentToTool' helperAgents rootDir (AgentDescription desc) = do
-    case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
-        (_, Nothing) ->
-            pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
-        (Nothing, _) ->
-            pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
-        (Just key, Just flavor) -> do
-            mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            -- Initialize OpenAPI toolboxes (with on-disk config support)
-            openApiToolsResult <- initializeOpenAPIToolboxes tracer rootDir (Maybe.fromMaybe [] desc.openApiToolboxes)
-            -- Initialize PostgREST toolboxes (with on-disk config support)
-            postgrestToolsResult <- initializePostgRESToolboxes tracer rootDir (Maybe.fromMaybe [] desc.postgrestToolboxes)
-            case (openApiToolsResult, postgrestToolsResult) of
-                (Left err, _) -> pure $ Left (show err)
-                (_, Left err) -> pure $ Left (show err)
-                (Right openApiToolRegs, Right postgrestToolRegs) -> do
-                    -- Get builtin toolbox descriptions from agent config
-                    let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
-
-                    -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
-                    let bashSources = buildBashToolSources (Just rootDir) desc
-
-                    -- Get skill sources from agent config
-                    let skillSources = Maybe.fromMaybe [] desc.skillSources
-
                     Runtime.newRuntimeWithMultiBash
                         desc.slug
                         desc.announce
