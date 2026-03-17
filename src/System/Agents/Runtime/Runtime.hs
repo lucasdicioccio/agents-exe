@@ -5,7 +5,7 @@ module System.Agents.Runtime.Runtime (
     Runtime (..),
     AgentTools,
     addTracer,
-    newRuntimeWithMultiBash,
+    newRuntime,
     triggerRefreshTools,
 ) where
 
@@ -93,10 +93,10 @@ let bashSources =
         , FileSystemDirectory $ FileSystemDirectoryDescription Nothing "./extra" (Just ".sh")
         , SingleTool $ SingleToolDescription "/path/to/special.sh"
         ]
-result <- newRuntimeWithMultiBash slug announce tracer apiKey model bashSources ...
+result <- newRuntime slug announce tracer apiKey model bashSources ...
 @
 -}
-newRuntimeWithMultiBash ::
+newRuntime ::
     AgentSlug ->
     AgentAnnounce ->
     Tracer IO Trace ->
@@ -113,7 +113,7 @@ newRuntimeWithMultiBash ::
     -- | Skill sources - to be loaded
     [SkillSource] ->
     IO (Either String Runtime)
-newRuntimeWithMultiBash slug announce tracer apiKey model bashSources mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions skillSources = do
+newRuntime slug announce tracer apiKey model bashSources mkIoTools mcpToolboxes openApiToolRegs builtinDescriptions skillSources = do
     uid <- newAgentId
     let ioTools = [mk slug uid | mk <- mkIoTools]
 

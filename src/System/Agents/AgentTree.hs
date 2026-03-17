@@ -53,10 +53,6 @@ module System.Agents.AgentTree (
     readOpenApiKeysFile,
     augmentMainAgentPromptWithSubAgents,
 
-    -- * Traversal helpers
-    flattenAgentTree,
-    flattenAgentNode,
-
     -- * Configuration loading helpers
     loadOpenAPIToolboxDescription,
     loadPostgRESTToolboxDescription,
@@ -745,28 +741,6 @@ buildChild graph runtimes visited childSlug =
                     AgentSubTree <$> buildSubtree graph runtimes visited childSlug childNode
 
 -------------------------------------------------------------------------------
--- Tree Traversal Helpers
--------------------------------------------------------------------------------
-
-{- | Flatten an AgentTree into a list of all AgentTrees within it.
-
-This is useful for operations that need to process all nodes in the tree,
-regardless of whether they are references or subtrees. References are
-not followed (they would point to already-visited nodes).
--}
-flattenAgentTree :: AgentTree -> [AgentTree]
-flattenAgentTree tree = tree : concatMap flattenAgentNode (agentChildren tree)
-
-{- | Flatten an AgentNode into a list of AgentTrees.
-
-References are not followed (they would lead to cycles or already-included nodes).
-Only subtrees are expanded.
--}
-flattenAgentNode :: AgentNode -> [AgentTree]
-flattenAgentNode (AgentReference _) = []
-flattenAgentNode (AgentSubTree subtree) = flattenAgentTree subtree
-
--------------------------------------------------------------------------------
 -- Cycle Detection
 -------------------------------------------------------------------------------
 
@@ -1197,7 +1171,7 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
                     -- extra agents (resolved via registry at call time)
-                    Runtime.newRuntimeWithMultiBash
+                    Runtime.newRuntime
                         desc.slug
                         desc.announce
                         (contramap AgentTrace tracer)
