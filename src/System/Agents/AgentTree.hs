@@ -98,7 +98,7 @@ import System.Agents.Base (
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
-import System.Agents.FileNotification (initRuntime)
+import qualified System.Agents.FileNotification as FileNotification
 import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
@@ -559,15 +559,15 @@ createSingleRuntime ::
     AgentConfigGraph ->
     (AgentSlug, AgentConfigNode) ->
     IO (Either LoadingError Runtime)
-createSingleRuntime props _graph (_slug, node) = do
+createSingleRuntime props graph (_slug, node) = do
     -- Build the prompt modifier (we don't have children runtimes yet, so no prompt augmentation)
     -- Create the runtime shell
     -- Note: props.interactiveTracer is already Tracer IO Trace,
     -- initAgentTreeAgentDeferred will contramap AgentTrace internally
     rtResult <-
         initAgentTreeAgentDeferred
-            props.interactiveTracer
-            props.apiKeys
+            props
+            graph
             (FilePath.takeDirectory node.nodeFile)
             (AgentDescription node.nodeConfig)
 
@@ -650,6 +650,27 @@ wireAgentTools props _graph _runtimes (slug, node) = do
 
             -- Atomically append helper tools to the runtime's agentTools TVar
             atomically $ modifyTVar' rt.agentTools (\existingTools -> existingTools ++ helperTools)
+
+collectExtraAgentsAsTools ::
+    Props ->
+    (AgentSlug, [AgentSlug]) ->
+    IO [ToolRegistration]
+collectExtraAgentsAsTools props (slug, extraRefs) = do
+    mRt <- lookupRuntime props.runtimeRegistry slug
+    case mRt of
+        Nothing -> pure []
+        Just _ -> do
+            extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) extraRefs
+            let validExtras = Maybe.catMaybes extraRuntimes
+
+            -- Combine all helper runtimes
+            let allHelpers = validExtras
+
+            -- Create tool registrations for helper agents
+            let helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
+
+            pure helperTools
+
 
 -------------------------------------------------------------------------------
 -- Phase 4: Build AgentTree
@@ -801,16 +822,14 @@ loadAgentTreeConfig props = do
                 Nothing -> do
                     pure $ Right $ AgentConfigTree props.rootAgentFile agent oks
 
-loadAgentTree :: Props -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
-loadAgentTree props tree = do
+loadAgentTree :: Props -> AgentConfigGraph -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
+loadAgentTree props graph tree = do
     -- Phase 1: Load children first (existing behavior)
-    agentRuntimes <- traverse (loadAgentTree props) tree.agentConfigChildren
+    agentRuntimes <- traverse (loadAgentTree props graph) tree.agentConfigChildren
     let (kos, _) = Either.partitionEithers agentRuntimes
     case NonEmpty.nonEmpty kos of
         Just errs -> pure $ Left $ sconcat errs
         Nothing -> do
-            let tracer = props.interactiveTracer
-
             -- Get extra agent slugs from config
             let extraSlugs = maybe [] (fmap extraAgentSlug) tree.agentConfig.extraAgents
 
@@ -818,8 +837,8 @@ loadAgentTree props tree = do
             -- (tools will be wired up later, but we register the slug now)
             rt <-
                 initAgentTreeAgentDeferred
-                    tracer
-                    props.apiKeys
+                    props
+                    graph
                     (agentRootDir tree)
                     (AgentDescription tree.agentConfig)
 
@@ -842,7 +861,7 @@ loadAgentTree props tree = do
                     -- Set up notifications for all directories
                     mapM_
                         ( \dir ->
-                            initRuntime
+                            FileNotification.initRuntime
                                 reloadNotificationTracer
                                 [(ret, dir)]
                                 (\_ ev -> Notify.isAboutFileChange ev)
@@ -1087,22 +1106,21 @@ while extra agents (from extra-agents config) are resolved lazily via
 the registry lookup.
 -}
 initAgentTreeAgentDeferred ::
-    Tracer IO Trace ->
-    [(Text, OpenAI.ApiKey)] ->
+    Props ->
+    AgentConfigGraph ->
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgentTreeAgentDeferred tracer keys rootDir (AgentDescription desc) = do
-    case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
+initAgentTreeAgentDeferred props _graph rootDir (AgentDescription desc) = do
+    let tracer = props.interactiveTracer
+    case (lookup desc.apiKeyId props.apiKeys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
         (Nothing, _) ->
             pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
         (Just key, Just flavor) -> do
             mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            -- Initialize OpenAPI toolboxes (with on-disk config support)
             openApiToolsResult <- initializeOpenAPIToolboxes tracer rootDir (Maybe.fromMaybe [] desc.openApiToolboxes)
-            -- Initialize PostgREST toolboxes (with on-disk config support)
             postgrestToolsResult <- initializePostgRESToolboxes tracer rootDir (Maybe.fromMaybe [] desc.postgrestToolboxes)
             case (openApiToolsResult, postgrestToolsResult) of
                 (Left err, _) -> pure $ Left (show err)
@@ -1116,6 +1134,7 @@ initAgentTreeAgentDeferred tracer keys rootDir (AgentDescription desc) = do
 
                     -- Get skill sources from agent config
                     let skillSources = Maybe.fromMaybe [] desc.skillSources
+                    let extraRefs  = Maybe.maybe [] (fmap extraAgentSlug) desc.extraAgents :: [AgentSlug]
 
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
@@ -1138,11 +1157,12 @@ initAgentTreeAgentDeferred tracer keys rootDir (AgentDescription desc) = do
                         (openApiToolRegs ++ postgrestToolRegs)
                         builtinDescriptions
                         skillSources
+                        (collectExtraAgentsAsTools props (desc.slug, extraRefs))
   where
     startMcp :: McpServerDescription -> IO McpTools.Toolbox
     startMcp srv@(McpSimpleBinary cfg) =
         McpTools.initializeMcpToolbox
-            (contramap (McpTrace srv) tracer)
+            (contramap (McpTrace srv) props.interactiveTracer)
             cfg.name
             (proc cfg.executable (map Text.unpack cfg.args))
 

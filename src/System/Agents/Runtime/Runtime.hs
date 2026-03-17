@@ -58,10 +58,8 @@ data Runtime
     , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
     , agentModel :: OpenAI.Model
     , agentTools :: AgentTools
-    -- ^ Mutable tool registrations - allows dynamic updates for sub-agent tools
     , agentTriggerRefreshTools :: STM Bool
     , agentSkillsStore :: Maybe SkillsTypes.SkillsStore
-    -- ^ Loaded skills store (if skills are configured)
     }
 
 {- | Adds an extra tracer to the runtime, hence returning a modified Runtime.
@@ -106,8 +104,9 @@ newRuntime ::
     [ToolRegistration] ->
     [BuiltinToolboxDescription] ->
     [SkillSource] ->
+    (IO [ToolRegistration]) ->
     IO (Either String Runtime)
-newRuntime slug announce tracer apiKey model bashSources mcpToolboxes openApiToolRegs builtinDescriptions skillSources = do
+newRuntime slug announce tracer apiKey model bashSources mcpToolboxes openApiToolRegs builtinDescriptions skillSources baseIORegistrations = do
     uid <- newAgentId
     -- Initialize bash tools from multiple sources
     multiToolboxResult <- BashToolbox.initializeMultiSourceToolbox (contramap (AgentTrace_Loading slug uid) tracer) "." bashSources
@@ -146,12 +145,13 @@ newRuntime slug announce tracer apiKey model bashSources mcpToolboxes openApiToo
                     baseTools <- readAllTools multiToolbox sqliteToolboxes systemToolboxes developerToolboxes mcpToolboxes openApiToolRegs allSkillRegs
                     atomically $ writeTVar toolsTVar baseTools
 
+            let rt = Runtime slug uid announce tracer httpRt model toolsTVar (BashToolbox.triggerAllReloads multiToolbox) mSkillsStore
+
             doWriteTools
             _ <- async $ forever $ do
                 threadDelay 1000000
                 doWriteTools
 
-            let rt = Runtime slug uid announce tracer httpRt model toolsTVar (BashToolbox.triggerAllReloads multiToolbox) mSkillsStore
             pure $ Right rt
   where
     readAllTools ::
@@ -164,6 +164,7 @@ newRuntime slug announce tracer apiKey model bashSources mcpToolboxes openApiToo
         [ToolRegistration] ->
         IO [ToolRegistration]
     readAllTools multiToolbox sqliteToolboxes systemToolboxes developerToolboxes mcpToolConfigs openApiToolRegs' skillToolRegs = do
+        base <- baseIORegistrations
         -- Read bash tools from all sources
         bashScripts <- BashToolbox.readMultiSourceTools multiToolbox
         let bashTools = map registerBashToolInLLM bashScripts
@@ -179,9 +180,8 @@ newRuntime slug announce tracer apiKey model bashSources mcpToolboxes openApiToo
 
         -- Read Developer tools
         developerTools <- readDeveloperToolsRegistrations tracer developerToolboxes
-
         -- Combine all tools: bash + IO + MCP + OpenAPI + SQLite + System + Developer + Skills
-        pure $ bashTools ++ mcpTools ++ openApiToolRegs' ++ sqliteTools ++ systemTools ++ developerTools ++ skillToolRegs
+        pure $ base ++ bashTools ++ mcpTools ++ openApiToolRegs' ++ sqliteTools ++ systemTools ++ developerTools ++ skillToolRegs
 
     readMcpToolsRegistrations :: [McpToolConfig] -> IO [ToolRegistration]
     readMcpToolsRegistrations configs = do
