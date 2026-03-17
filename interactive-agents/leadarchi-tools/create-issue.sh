@@ -1,8 +1,8 @@
 #!/bin/bash
 # Required tools: gh (GitHub CLI)
 # This script creates GitHub issues with appropriate labels based on dependencies.
-# Issues with no dependencies are labeled 'agents/to-be-taken' (ready to work on).
-# Issues with dependencies are labeled 'agents/wait' (must wait for dependencies).
+# Issues with no dependencies are labeled 'agq/to-be-taken' (ready to work on).
+# Issues with dependencies are labeled 'agq/wait' (must wait for dependencies).
 
 case $1 in
   describe)
@@ -18,7 +18,7 @@ case $1 in
     , "mode": "positional"
     }
   ,{ "name": "dependencies"
-    , "description": "comma-separated list of issue dependencies (e.g., '#42,#43'). If empty, the issue will be labeled 'agents/to-be-taken'. If non-empty, it will be labeled 'agents/wait'."
+    , "description": "comma-separated list of issue dependencies (e.g., '#42,#43'). If empty, the issue will be labeled 'agq/to-be-taken'. If non-empty, it will be labeled 'agq/wait'."
     , "type": "string"
     , "backing_type": "string"
     , "arity": "single"
@@ -70,9 +70,9 @@ EOD
     # If dependencies is empty or whitespace-only -> to-be-taken (ready to work)
     # If dependencies has content -> wait (must wait for dependencies)
     if [[ -z "${dependencies}" ]] || [[ "${dependencies}" =~ ^[[:space:]]*$ ]]; then
-      agent_label="agents/to-be-taken"
+      agent_label="agq/to-be-taken"
     else
-      agent_label="agents/wait"
+      agent_label="agq/wait"
     fi
 
     labels="${agent_label},${scope}"

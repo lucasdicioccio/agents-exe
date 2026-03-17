@@ -148,7 +148,7 @@ handleClient act = do
             x <- act (ClientInfos srv)
             _ <- notifyInitialized
             pure x
-        z -> do
+        _ -> do
             pure ()
   where
     -- primitives
@@ -291,3 +291,4 @@ defaultLoop props clientInfos = do
                         runTracer props.tracer (EndToolCall tname obj r)
                         resp r
                 loopToolCalls
+
