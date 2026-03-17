@@ -72,11 +72,13 @@ handleCheck opts apiKeysFile agentFiles = do
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs
-                AgentTree.Initialized tree -> printAgentCheck opts tree
+                AgentTree.Initialized tree -> printAgentCheck opts (AgentTree.AgentSubTree tree)
 
 -- | Display agent check information
-printAgentCheck :: CheckOptions -> AgentTree.AgentTree -> IO ()
-printAgentCheck opts tree = do
+printAgentCheck :: CheckOptions -> AgentTree.AgentNode -> IO ()
+printAgentCheck _ (AgentTree.AgentReference slug) = do
+    Text.putStrLn $ " (@" <> slug <> " )"
+printAgentCheck opts (AgentTree.AgentSubTree tree) = do
     tools <- readTVarIO $ Runtime.agentTools tree.agentRuntime
     let toolCount = length tools
     Text.putStrLn $

@@ -180,7 +180,7 @@ data AgentNode
     -- ^ Reference to another agent by slug (used for cycles or shared subtrees)
     | AgentSubTree AgentTree
     -- ^ A full agent subtree
-    deriving (Show)
+    -- deriving (Show)
 
 data AgentTree = AgentTree
     { agentFile :: FilePath
@@ -191,7 +191,7 @@ data AgentTree = AgentTree
     , agentExtraRefs :: [AgentSlug]
     -- ^ Extra agents this agent references (for deferred wiring)
     }
-    deriving (Show)
+    -- deriving (Show)
 
 data AgentConfigTree = AgentConfigTree
     { agentConfigFile :: FilePath
