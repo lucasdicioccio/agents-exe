@@ -201,6 +201,138 @@ agents-exe session-print --n-turns 5 session.json
 agents-exe session-print --antichronological session.json
 ```
 
+### list-tool-calls
+
+Extract and list all tool calls from a session file.
+
+```bash
+agents-exe list-tool-calls [OPTIONS] SESSIONFILE
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format FORMAT` | Output format: human, json, brief (default: human) |
+
+**Description:**
+Parses a session file and extracts all tool calls made during the conversation.
+Useful for debugging, auditing, and replaying specific tool calls.
+
+**Output formats:**
+- `human` - Detailed human-readable format with indices, turn numbers, and arguments
+- `json` - JSON array for machine processing
+- `brief` - Compact tabular format (index, name, arguments preview)
+
+**Examples:**
+
+```bash
+# List tool calls in human-readable format
+agents-exe list-tool-calls session.json
+
+# Output as JSON
+agents-exe list-tool-calls session.json --format json
+
+# Brief format for quick overview
+agents-exe list-tool-calls session.json --format brief
+```
+
+**Example output (human format):**
+```
+Found 3 tool call(s):
+
+[0] bash_read-file
+  Turn: 1
+  Arguments: 
+    {"filepath":"./src/Main.hs"}
+
+[1] bash_grep-files
+  Turn: 2
+  Arguments: 
+    {"pattern":"TODO","filepath":"./src"}
+
+[2] bash_write-file
+  Turn: 2
+  Arguments: 
+    {"filepath":"./src/Main.hs","content":"..."}
+
+To replay a tool call:
+  agents-exe replay-tool-call --session <file> --tool-call <index> --tool <tool-path>
+```
+
+### replay-tool-call
+
+Replay a specific tool call from a session file, with validation.
+
+```bash
+agents-exe replay-tool-call --session FILE --tool-call INDEX --tool TOOLPATH [OPTIONS]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-s, --session FILE` | Path to the session file containing the tool call |
+| `-i, --tool-call INDEX` | Index of the tool call to replay (0-based) |
+| `-t, --tool TOOLPATH` | Path to the tool script to execute |
+| `--validate-only` | Only validate arguments, don't execute |
+| `--raw` | Show raw output instead of formatted |
+
+**Description:**
+Extracts a tool call from a session file, validates its arguments against the tool's schema,
+and optionally executes the tool with the same arguments. This is useful for:
+
+- Debugging failed tool calls
+- Reproducing tool execution for testing
+- Validating historical tool calls against updated schemas
+
+**Exit codes:**
+- `0` - Validation passed (and tool executed if not --validate-only)
+- `1` - Validation failed or tool execution failed
+
+**Examples:**
+
+```bash
+# First, list tool calls to find the index
+agents-exe list-tool-calls session.json
+
+# Validate and execute a tool call
+agents-exe replay-tool-call \
+  --session session.json \
+  --tool-call 0 \
+  --tool ./tools/bash/read-file.sh
+
+# Only validate without executing
+agents-exe replay-tool-call \
+  --session session.json \
+  --tool-call 1 \
+  --tool ./tools/bash/grep-files.sh \
+  --validate-only
+
+# Execute and show raw output
+agents-exe replay-tool-call \
+  --session session.json \
+  --tool-call 2 \
+  --tool ./tools/bash/write-file.sh \
+  --raw
+```
+
+**Example output:**
+```
+✓ Tool call validation passed
+Tool: read-file
+Arguments: {"filepath":"./src/Main.hs"}
+
+Executing tool...
+
+=== Tool Output ===
+module Main where
+
+main :: IO ()
+main = putStrLn "Hello, World!"
+===================
+```
+
 ### init
 
 Initialize a new agent configuration.
@@ -427,18 +559,45 @@ agents-exe describe-tool ./tools/my-tool.sh
 
 ### check-tool-call
 
-Validate and test a tool call.
+Validate a tool call payload against a tool schema (reads JSON from stdin).
 
 ```bash
-agents-exe check-tool-call TOOL_PATH [--arg name=value ...]
+cat payload.json | agents-exe check-tool-call --tool TOOLPATH
 ```
 
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-t, --tool TOOLPATH` | Path to the tool script to validate against |
+
 **Description:**
-Validates that a tool call matches the tool's declared schema.
+Validates that a JSON payload from stdin matches the tool's declared schema.
+Returns exit code 0 if valid, 1 if invalid with detailed error messages.
 
 **Example:**
 ```bash
-agents-exe check-tool-call ./tools/my-tool.sh --arg input="test"
+# Create a test payload
+echo '{"filepath": "/path/to/file"}' | agents-exe check-tool-call --tool ./tools/read-file.sh
+
+# Validate from file
+cat payload.json | agents-exe check-tool-call --tool ./tools/my-tool.sh
+```
+
+**Example output (valid):**
+```
+✓ Tool call payload is valid
+```
+
+**Example output (invalid):**
+```
+Tool call validation failed for './tools/my-tool.sh (my-tool)' with 2 errors:
+
+1. filepath: Required property missing
+
+2. content: Required property missing
+
+Please correct these issues and try again.
 ```
 
 ### export
@@ -761,5 +920,31 @@ agents-exe check-tool-call ./tools/my-validator --arg input="test"
 agents-exe new agent dev-assistant
 # (add DeveloperToolbox to builtinToolboxes)
 # Now the agent can validate tools and scaffold new ones!
+```
+
+### Debugging Tool Calls
+
+```bash
+# Run an agent session
+agents-exe run --agent-file ./my-agent.json --prompt "Read the README"
+
+# Later, inspect the session
+cat conv.*.json | tail -1 | jq .
+
+# List all tool calls from the session
+agents-exe list-tool-calls conv.*.json
+
+# Replay a specific tool call for debugging
+agents-exe replay-tool-call \
+  --session conv.*.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh \
+  --validate-only
+
+# Actually replay the tool call
+agents-exe replay-tool-call \
+  --session conv.*.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh
 ```
 
