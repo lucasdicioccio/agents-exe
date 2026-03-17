@@ -965,8 +965,6 @@ loadAgentTreeRuntime props = do
                         Right runtimes -> do
                             -- Phase 3: Wire tool references
                             wireToolReferences props graph runtimes
-                            print ("wire done" :: Text)
-                            print graph
 
                             -- Phase 4: Build final tree
                             case buildAgentTree graph runtimes of
@@ -975,7 +973,7 @@ loadAgentTreeRuntime props = do
 
 withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTreeRuntime props continue = do
-    loadAgentTreeRuntime props >>= \x -> print ("loaded" :: Text) >> continue x
+    loadAgentTreeRuntime props >>= continue
 
 {- | Convert OpenAPI toolbox description to toolbox configuration.
 
