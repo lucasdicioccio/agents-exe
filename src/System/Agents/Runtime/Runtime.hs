@@ -76,7 +76,6 @@ triggerRefreshTools rt = atomically $ rt.agentTriggerRefreshTools
 -- todo: directly ask for effects returning registrations
 type McpToolConfig = McpTools.Toolbox
 
-
 {- | Create a new runtime with multiple bash tool sources.
 
 This is the preferred way to create a runtime when you need to load

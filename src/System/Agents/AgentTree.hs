@@ -171,11 +171,12 @@ has already been visited in the current path), we create a reference instead
 of recursing infinitely.
 -}
 data AgentNode
-    = AgentReference AgentSlug
-    -- ^ Reference to another agent by slug (used for cycles or shared subtrees)
-    | AgentSubTree AgentTree
-    -- ^ A full agent subtree
-    -- deriving (Show)
+    = -- | Reference to another agent by slug (used for cycles or shared subtrees)
+      AgentReference AgentSlug
+    | {- | A full agent subtree
+      deriving (Show)
+      -}
+      AgentSubTree AgentTree
 
 data AgentTree = AgentTree
     { agentFile :: FilePath
@@ -184,7 +185,8 @@ data AgentTree = AgentTree
     , agentExtraRefs :: [AgentSlug]
     -- ^ Extra agents this agent references (for deferred wiring)
     }
-    -- deriving (Show)
+
+-- deriving (Show)
 
 data AgentConfigTree = AgentConfigTree
     { agentConfigFile :: FilePath
@@ -671,7 +673,6 @@ collectExtraAgentsAsTools props (slug, extraRefs) = do
 
             pure helperTools
 
-
 -------------------------------------------------------------------------------
 -- Phase 4: Build AgentTree
 -------------------------------------------------------------------------------
@@ -696,7 +697,6 @@ buildAgentTree graph runtimes = do
         ((rootSlug, rootNode) : _) ->
             buildSubtree graph runtimes Set.empty rootSlug rootNode
 
-
 {- | Recursively build a subtree with cycle detection.
 
 The 'visited' set tracks slugs in the current path. If we encounter a slug
@@ -706,8 +706,8 @@ recursing to avoid infinite loops.
 buildSubtree ::
     AgentConfigGraph ->
     Map.Map AgentSlug Runtime ->
+    -- | Slugs in the current path (for cycle detection)
     Set.Set AgentSlug ->
-    -- ^ Slugs in the current path (for cycle detection)
     AgentSlug ->
     AgentConfigNode ->
     Either (NonEmpty.NonEmpty LoadingError) AgentTree
@@ -1134,7 +1134,7 @@ initAgentTreeAgentDeferred props _graph rootDir (AgentDescription desc) = do
 
                     -- Get skill sources from agent config
                     let skillSources = Maybe.fromMaybe [] desc.skillSources
-                    let extraRefs  = Maybe.maybe [] (fmap extraAgentSlug) desc.extraAgents :: [AgentSlug]
+                    let extraRefs = Maybe.maybe [] (fmap extraAgentSlug) desc.extraAgents :: [AgentSlug]
 
                     -- Create the runtime with deferred tool resolution
                     -- The tools action will combine helper agents (immediate) with
@@ -1211,4 +1211,3 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
-
