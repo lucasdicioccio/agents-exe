@@ -560,11 +560,7 @@ createSingleRuntime ::
     (AgentSlug, AgentConfigNode) ->
     IO (Either LoadingError Runtime)
 createSingleRuntime props _graph (_slug, node) = do
-    let extraSlugs = node.nodeExtraRefs
-
     -- Build the prompt modifier (we don't have children runtimes yet, so no prompt augmentation)
-    let promptModifier = id
-
     -- Create the runtime shell
     -- Note: props.interactiveTracer is already Tracer IO Trace,
     -- initAgentTreeAgentDeferred will contramap AgentTrace internally
@@ -572,10 +568,6 @@ createSingleRuntime props _graph (_slug, node) = do
         initAgentTreeAgentDeferred
             props.interactiveTracer
             props.apiKeys
-            promptModifier
-            props.agentToTool
-            [] -- Helper agents - will be wired later
-            extraSlugs
             (FilePath.takeDirectory node.nodeFile)
             (AgentDescription node.nodeConfig)
 
@@ -682,6 +674,7 @@ buildAgentTree graph runtimes = do
         [] -> Left $ NonEmpty.singleton $ OtherError "No agents found in graph"
         ((rootSlug, rootNode) : _) ->
             buildSubtree graph runtimes Set.empty rootSlug rootNode
+
 
 {- | Recursively build a subtree with cycle detection.
 
@@ -812,12 +805,11 @@ loadAgentTree :: Props -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty Loadi
 loadAgentTree props tree = do
     -- Phase 1: Load children first (existing behavior)
     agentRuntimes <- traverse (loadAgentTree props) tree.agentConfigChildren
-    let (kos, oks) = Either.partitionEithers agentRuntimes
+    let (kos, _) = Either.partitionEithers agentRuntimes
     case NonEmpty.nonEmpty kos of
         Just errs -> pure $ Left $ sconcat errs
         Nothing -> do
             let tracer = props.interactiveTracer
-            let okRuntimes = fmap agentRuntime oks
 
             -- Get extra agent slugs from config
             let extraSlugs = maybe [] (fmap extraAgentSlug) tree.agentConfig.extraAgents
@@ -828,10 +820,6 @@ loadAgentTree props tree = do
                 initAgentTreeAgentDeferred
                     tracer
                     props.apiKeys
-                    (augmentMainAgentPromptWithSubAgents okRuntimes)
-                    props.agentToTool
-                    okRuntimes
-                    extraSlugs -- NEW: pass extra refs for later resolution
                     (agentRootDir tree)
                     (AgentDescription tree.agentConfig)
 
@@ -1101,15 +1089,10 @@ the registry lookup.
 initAgentTreeAgentDeferred ::
     Tracer IO Trace ->
     [(Text, OpenAI.ApiKey)] ->
-    PromptModifier ->
-    (Runtime -> AgentSlug -> AgentId -> ToolRegistration) ->
-    [Runtime.Runtime] ->
-    -- | Extra agent slugs to resolve later via registry
-    [AgentSlug] ->
     FilePath ->
     AgentDescription ->
     IO (Either String Runtime.Runtime)
-initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _extraSlugs rootDir (AgentDescription desc) = do
+initAgentTreeAgentDeferred tracer keys rootDir (AgentDescription desc) = do
     case (lookup desc.apiKeyId keys, OpenAI.parseFlavor desc.flavor) of
         (_, Nothing) ->
             pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
@@ -1147,12 +1130,10 @@ initAgentTreeAgentDeferred tracer keys modifyPrompt agentToTool' helperAgents _e
                             (OpenAI.ApiBaseUrl desc.modelUrl)
                             desc.modelName
                             ( OpenAI.SystemPrompt $
-                                modifyPrompt $
-                                    Text.unlines desc.systemPrompt
+                                Text.unlines desc.systemPrompt
                             )
                         )
                         bashSources
-                        [agentToTool' rt | rt <- helperAgents]
                         mcpToolboxes
                         (openApiToolRegs ++ postgrestToolRegs)
                         builtinDescriptions
