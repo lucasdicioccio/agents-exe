@@ -181,8 +181,6 @@ data AgentTree = AgentTree
     { agentFile :: FilePath
     , agentBase :: Agent
     , agentRuntime :: Runtime.Runtime
-    , agentChildren :: [AgentNode]
-    -- ^ Child agents, either as full subtrees or references
     , agentExtraRefs :: [AgentSlug]
     -- ^ Extra agents this agent references (for deferred wiring)
     }
@@ -351,7 +349,7 @@ discoverAgentConfigs props = do
         Left errs -> pure $ Left errs
         Right nodes -> do
             -- Build edges map from nodes
-            let edges = Map.map (\n -> n.nodeChildren ++ n.nodeExtraRefs) nodes
+            let edges = Map.map (\n -> n.nodeExtraRefs) nodes
             pure $ Right $ AgentConfigGraph nodes edges
 
 {- | BFS discovery state
@@ -699,46 +697,19 @@ buildSubtree ::
     AgentSlug ->
     AgentConfigNode ->
     Either (NonEmpty.NonEmpty LoadingError) AgentTree
-buildSubtree graph runtimes visited slug node = do
+buildSubtree _ runtimes _ slug node = do
     -- Get runtime for this node
     case Map.lookup slug runtimes of
         Nothing ->
             Left $ NonEmpty.singleton $ OtherError $ "Runtime not found for slug: " ++ Text.unpack slug
         Just rt -> do
-            -- Build children with cycle detection
-            childResults <- mapM (buildChild graph runtimes (Set.insert slug visited)) node.nodeChildren
-
             pure $
                 AgentTree
                     { agentFile = node.nodeFile
                     , agentBase = node.nodeConfig
                     , agentRuntime = rt
-                    , agentChildren = childResults
                     , agentExtraRefs = node.nodeExtraRefs
                     }
-
-{- | Build a child node, creating either a subtree or a reference.
-
-If the child slug is in the visited set (indicating a cycle), we create
-an 'AgentReference'. Otherwise, we recursively build the subtree.
--}
-buildChild ::
-    AgentConfigGraph ->
-    Map.Map AgentSlug Runtime ->
-    Set.Set AgentSlug ->
-    -- ^ Slugs in the current path (for cycle detection)
-    AgentSlug ->
-    Either (NonEmpty.NonEmpty LoadingError) AgentNode
-buildChild graph runtimes visited childSlug =
-    if Set.member childSlug visited
-        then -- Cycle detected: create a reference instead of recursing
-            pure $ AgentReference childSlug
-        else -- No cycle: look up the node and build subtree
-            case Map.lookup childSlug graph.graphNodes of
-                Nothing ->
-                    Left $ NonEmpty.singleton $ OtherError $ "Child node not found: " ++ Text.unpack childSlug
-                Just childNode ->
-                    AgentSubTree <$> buildSubtree graph runtimes visited childSlug childNode
 
 -------------------------------------------------------------------------------
 -- Cycle Detection
@@ -871,12 +842,7 @@ loadAgentTree props tree = do
                     -- Register this runtime in the shared registry
                     registerRuntime props.runtimeRegistry agentRt
 
-                    -- Note: In legacy mode, we don't track cycles through AgentNode
-                    -- We assume the legacy tree structure is acyclic (hierarchical)
-                    -- and convert children directly to AgentSubTree nodes
-                    let childNodes = map AgentSubTree oks
-
-                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt childNodes extraSlugs
+                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt extraSlugs
                     -- Set up file notification for hot-reloading
                     let legacyToolDir = fmap (\d -> agentRootDir tree </> d) tree.agentConfig.toolDirectory
                     let bashToolboxDirs =

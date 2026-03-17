@@ -96,9 +96,6 @@ printAgentCheck opts (AgentTree.AgentSubTree tree) = do
         ToolsAgentsExe -> printToolsAgentsExe tools
         ToolsOpenAI -> printToolsOpenAI tools
 
-    -- Recursively print child agents
-    forM_ tree.agentChildren (printAgentCheck opts)
-
 -- | Print tools as a simple list
 printToolsList :: [ToolRegistration] -> IO ()
 printToolsList tools = do
