@@ -38,6 +38,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Text.Read as Text
 import qualified Network.HTTP.Client as NetHttpClient
+import qualified Network.HTTP.Types.Status as HttpStatus
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import Text.Read (readMaybe)
 
@@ -60,6 +61,8 @@ data Trace
       GotChatCompletion !Aeson.Value !Int
     | -- | Trace from the underlying HTTP client
       HttpClientTrace !HttpClient.Trace
+    | -- | Moonshot/Kimi overloaded error backoff: retry attempt and delay in seconds
+      OverloadedBackoff !Int !Int
     deriving (Show)
 
 {- | Calculate byte size of a JSON Value for tracking purposes.
@@ -265,6 +268,43 @@ parseFlavor "claude-v1" = Just ClaudeV1
 parseFlavor "ClaudeV1" = Just ClaudeV1
 parseFlavor _ = Nothing
 
+-------------------------------------------------------------------------------
+-- Moonshot/Kimi overloaded error handling
+-------------------------------------------------------------------------------
+
+{- | Error response body from Moonshot/Kimi when overloaded.
+Example:
+  {"error":{"message":"The engine is currently overloaded, please try again later","type":"engine_overloaded_error"}}
+-}
+data OverloadedError = OverloadedError
+    { overloadedMessage :: Text
+    , overloadedType :: Text
+    }
+    deriving (Show)
+
+instance FromJSON OverloadedError where
+    parseJSON = Aeson.withObject "OverloadedError" $ \v -> do
+        err <- v .: "error"
+        OverloadedError
+            <$> err .: "message"
+            <*> err .: "type"
+
+-- | Check if an error response indicates the engine is overloaded
+isOverloadedError :: LByteString.ByteString -> Bool
+isOverloadedError body =
+    case Aeson.decode body of
+        Just (OverloadedError msg errType) ->
+            Text.isInfixOf "overloaded" (Text.toLower msg) || errType == "engine_overloaded_error"
+        Nothing -> False
+
+-- | Backoff delays in seconds for overloaded errors: 1min, 9min, 20min
+overloadedBackoffDelays :: [Int]
+overloadedBackoffDelays = [60, 540, 1200] -- 1min, 9min, 20min
+
+-------------------------------------------------------------------------------
+-- Retry logic for LLM calls with overloaded error handling
+-------------------------------------------------------------------------------
+
 callLLMPayload ::
     (ToJSON payload) =>
     Tracer IO Trace ->
@@ -272,21 +312,47 @@ callLLMPayload ::
     ApiBaseUrl ->
     payload ->
     IO (Either String Value)
-callLLMPayload tracer rt (ApiBaseUrl baseUrl) payload = do
-    let payloadVal = Aeson.toJSON payload
-    let requestBytes = calculatePayloadBytes payloadVal
-    runTracer tracer (CallChatCompletion payloadVal requestBytes)
-    httpRsp <- rt.post (contramap HttpClientTrace tracer) (baseUrl <> "/chat/completions") (Just payloadVal)
-    case httpRsp of
-        Left (HttpClient.SomeError err) -> do
-            pure $ Left err
-        Right rsp -> do
-            case HttpClient.decodeBody (HttpClient.J rsp) of
-                Nothing -> pure $ Left "json decode body error"
-                Just body -> do
-                    let responseBytes = calculatePayloadBytes body
-                    runTracer tracer (GotChatCompletion body responseBytes)
-                    pure $ Right body
+callLLMPayload tracer rt baseUrl payload =
+    callWithRetry 0
+  where
+    callWithRetry :: Int -> IO (Either String Value)
+    callWithRetry attempt = do
+        result <- makeRequest
+        case result of
+            Left err -> pure $ Left err
+            Right (status, bodyVal)
+                | status == HttpStatus.status429 && isOverloadedError (Aeson.encode bodyVal) ->
+                    handleOverloaded attempt
+                | HttpStatus.statusIsSuccessful status -> pure $ Right bodyVal
+                | otherwise -> pure $ Left $ "HTTP error: " ++ show status
+
+    makeRequest :: IO (Either String (HttpStatus.Status, Aeson.Value))
+    makeRequest = do
+        let payloadVal = Aeson.toJSON payload
+        let requestBytes = calculatePayloadBytes payloadVal
+        runTracer tracer (CallChatCompletion payloadVal requestBytes)
+        httpRsp <- rt.post (contramap HttpClientTrace tracer) (baseUrl.getBaseUrl <> "/chat/completions") (Just payloadVal)
+        case httpRsp of
+            Left (HttpClient.SomeError err) -> pure $ Left err
+            Right rsp -> do
+                let status = NetHttpClient.responseStatus rsp
+                case HttpClient.decodeBody (HttpClient.J rsp) of
+                    Nothing -> pure $ Left "json decode body error"
+                    Just body -> do
+                        let responseBytes = calculatePayloadBytes body
+                        runTracer tracer (GotChatCompletion body responseBytes)
+                        pure $ Right (status, body)
+
+    handleOverloaded :: Int -> IO (Either String Value)
+    handleOverloaded attempt =
+        case drop attempted overloadedBackoffDelays of
+            (delay : _) -> do
+                runTracer tracer (OverloadedBackoff (attempt + 1) delay)
+                threadDelay (delay * 1000000)
+                callWithRetry (attempt + 1)
+            [] -> pure $ Left "Moonshot/Kimi overloaded: max retry attempts exceeded"
+      where
+        attempted = attempt
 
 data ToolCallFunction
     = ToolCallFunction

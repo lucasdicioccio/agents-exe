@@ -70,6 +70,8 @@ tracePrintingTextResponses = Tracer f
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) =
         Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
+    g _ (Runtime.LLMTrace _ (OpenAI.OverloadedBackoff attempt delay)) =
+        Text.putStrLn $ "  [Moonshot/Kimi overloaded, retry " <> Text.pack (show attempt) <> " in " <> Text.pack (show delay) <> "s]"
     g _ (Runtime.NewConversation) = pure ()
     g _ (Runtime.WaitingForPrompt) = pure ()
     g _ (Runtime.RunToolTrace _ _) = pure ()
@@ -245,6 +247,8 @@ renderConversationAgentTrace tr = case tr of
         Text.unwords ["to: llm", "[" <> formatBytes bytes <> "]"]
     Runtime.LLMTrace _ (OpenAI.GotChatCompletion x bytes) ->
         Text.unwords ["from: llm", "[" <> formatBytes bytes <> "]", jsonTxt x]
+    Runtime.LLMTrace _ (OpenAI.OverloadedBackoff attempt delay) ->
+        Text.unwords ["moonshot/kimi overloaded:", "retry " <> Text.pack (show attempt), "in " <> Text.pack (show delay) <> "s"]
     Runtime.ChildrenTrace sub ->
         Text.unwords ["(", Runtime.traceAgentSlug sub, ")", renderAgentTrace sub]
   where

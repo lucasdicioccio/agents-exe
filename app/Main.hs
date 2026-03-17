@@ -1584,6 +1584,13 @@ toJsonTrace x = case x of
                         , "call-id" .= uuid
                         , "val" .= val
                         ]
+            (RuntimeTrace.LLMTrace _ (LLMTrace.OverloadedBackoff attempt delay)) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("llm-overloaded" :: Text)
+                        , "attempt" .= attempt
+                        , "delay-seconds" .= delay
+                        ]
             (RuntimeTrace.RunToolTrace uuid (ToolTrace.BashToolsTrace (Bash.RunCommandStart cmd targs))) ->
                 Just $
                     Aeson.object
