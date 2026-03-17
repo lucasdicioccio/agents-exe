@@ -14,6 +14,7 @@ module System.Agents.AgentTree (
 
     -- * Agent tree types
     AgentTree (..),
+    AgentNode (..),
     AgentConfigTree (..),
     agentRootDir,
 
@@ -52,6 +53,10 @@ module System.Agents.AgentTree (
     -- * Utility functions
     readOpenApiKeysFile,
     augmentMainAgentPromptWithSubAgents,
+
+    -- * Traversal helpers
+    flattenAgentTree,
+    flattenAgentNode,
 
     -- * Configuration loading helpers
     loadOpenAPIToolboxDescription,
@@ -125,7 +130,7 @@ data ReferenceValidationTrace
     = ValidationStarted (Set.Set AgentSlug)
     | ValidationComplete
     | DuplicateSlugDetected AgentSlug [FilePath]
-    | MissingReferenceDetected AgentSlug FilePath AgentSlug
+    | SelfReferenceDetected AgentSlug FilePath AgentSlug
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -163,14 +168,30 @@ data Props
     -- ^ Shared registry for deferred resolution
     }
 
+{- | A node in the agent tree, representing either a full subtree or a reference.
+
+This type allows the tree structure to represent arbitrary directed graphs
+with cycles. When building the tree, if we encounter a cycle (an agent that
+has already been visited in the current path), we create a reference instead
+of recursing infinitely.
+-}
+data AgentNode
+    = AgentReference AgentSlug
+    -- ^ Reference to another agent by slug (used for cycles or shared subtrees)
+    | AgentSubTree AgentTree
+    -- ^ A full agent subtree
+    deriving (Show)
+
 data AgentTree = AgentTree
     { agentFile :: FilePath
     , agentBase :: Agent
     , agentRuntime :: Runtime.Runtime
-    , agentChildren :: [AgentTree]
+    , agentChildren :: [AgentNode]
+    -- ^ Child agents, either as full subtrees or references
     , agentExtraRefs :: [AgentSlug]
     -- ^ Extra agents this agent references (for deferred wiring)
     }
+    deriving (Show)
 
 data AgentConfigTree = AgentConfigTree
     { agentConfigFile :: FilePath
@@ -631,7 +652,7 @@ wireAgentTools props _graph _runtimes (slug, node) = do
             unless (null selfRefs) $
                 runTracer props.interactiveTracer $
                     ReferenceValidationTrace $
-                        MissingReferenceDetected slug node.nodeFile slug
+                        SelfReferenceDetected slug node.nodeFile slug
 
             extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) otherExtraRefs
             let validExtras = Maybe.catMaybes extraRuntimes
@@ -653,6 +674,9 @@ wireAgentTools props _graph _runtimes (slug, node) = do
 
 Finds the root agent and recursively builds the tree structure using graphEdges.
 Attaches runtimes from the map.
+
+This function tracks visited slugs to detect cycles and converts cycles
+into 'AgentReference' nodes instead of recursing infinitely.
 -}
 buildAgentTree ::
     AgentConfigGraph ->
@@ -664,23 +688,30 @@ buildAgentTree graph runtimes = do
     case Map.toList graph.graphNodes of
         [] -> Left $ NonEmpty.singleton $ OtherError "No agents found in graph"
         ((rootSlug, rootNode) : _) ->
-            buildSubtree graph runtimes rootSlug rootNode
+            buildSubtree graph runtimes Set.empty rootSlug rootNode
 
--- | Recursively build a subtree
+{- | Recursively build a subtree with cycle detection.
+
+The 'visited' set tracks slugs in the current path. If we encounter a slug
+that's already in the visited set, we create an 'AgentReference' instead of
+recursing to avoid infinite loops.
+-}
 buildSubtree ::
     AgentConfigGraph ->
     Map.Map AgentSlug Runtime ->
+    Set.Set AgentSlug ->
+    -- ^ Slugs in the current path (for cycle detection)
     AgentSlug ->
     AgentConfigNode ->
     Either (NonEmpty.NonEmpty LoadingError) AgentTree
-buildSubtree graph runtimes slug node = do
+buildSubtree graph runtimes visited slug node = do
     -- Get runtime for this node
     case Map.lookup slug runtimes of
         Nothing ->
             Left $ NonEmpty.singleton $ OtherError $ "Runtime not found for slug: " ++ Text.unpack slug
         Just rt -> do
-            -- Build children recursively
-            childResults <- mapM (buildChild graph runtimes) node.nodeChildren
+            -- Build children with cycle detection
+            childResults <- mapM (buildChild graph runtimes (Set.insert slug visited)) node.nodeChildren
 
             pure $
                 AgentTree
@@ -691,17 +722,50 @@ buildSubtree graph runtimes slug node = do
                     , agentExtraRefs = node.nodeExtraRefs
                     }
 
--- | Build a child subtree by looking up the slug
+{- | Build a child node, creating either a subtree or a reference.
+
+If the child slug is in the visited set (indicating a cycle), we create
+an 'AgentReference'. Otherwise, we recursively build the subtree.
+-}
 buildChild ::
     AgentConfigGraph ->
     Map.Map AgentSlug Runtime ->
+    Set.Set AgentSlug ->
+    -- ^ Slugs in the current path (for cycle detection)
     AgentSlug ->
-    Either (NonEmpty.NonEmpty LoadingError) AgentTree
-buildChild graph runtimes childSlug =
-    case Map.lookup childSlug graph.graphNodes of
-        Nothing ->
-            Left $ NonEmpty.singleton $ OtherError $ "Child node not found: " ++ Text.unpack childSlug
-        Just childNode -> buildSubtree graph runtimes childSlug childNode
+    Either (NonEmpty.NonEmpty LoadingError) AgentNode
+buildChild graph runtimes visited childSlug =
+    if Set.member childSlug visited
+        then -- Cycle detected: create a reference instead of recursing
+            pure $ AgentReference childSlug
+        else -- No cycle: look up the node and build subtree
+            case Map.lookup childSlug graph.graphNodes of
+                Nothing ->
+                    Left $ NonEmpty.singleton $ OtherError $ "Child node not found: " ++ Text.unpack childSlug
+                Just childNode ->
+                    AgentSubTree <$> buildSubtree graph runtimes visited childSlug childNode
+
+-------------------------------------------------------------------------------
+-- Tree Traversal Helpers
+-------------------------------------------------------------------------------
+
+{- | Flatten an AgentTree into a list of all AgentTrees within it.
+
+This is useful for operations that need to process all nodes in the tree,
+regardless of whether they are references or subtrees. References are
+not followed (they would point to already-visited nodes).
+-}
+flattenAgentTree :: AgentTree -> [AgentTree]
+flattenAgentTree tree = tree : concatMap flattenAgentNode (agentChildren tree)
+
+{- | Flatten an AgentNode into a list of AgentTrees.
+
+References are not followed (they would lead to cycles or already-included nodes).
+Only subtrees are expanded.
+-}
+flattenAgentNode :: AgentNode -> [AgentTree]
+flattenAgentNode (AgentReference _) = []
+flattenAgentNode (AgentSubTree subtree) = flattenAgentTree subtree
 
 -------------------------------------------------------------------------------
 -- Cycle Detection
@@ -834,7 +898,12 @@ loadAgentTree props tree = do
                     -- Register this runtime in the shared registry
                     registerRuntime props.runtimeRegistry agentRt
 
-                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt oks extraSlugs
+                    -- Note: In legacy mode, we don't track cycles through AgentNode
+                    -- We assume the legacy tree structure is acyclic (hierarchical)
+                    -- and convert children directly to AgentSubTree nodes
+                    let childNodes = map AgentSubTree oks
+
+                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt childNodes extraSlugs
                     -- Set up file notification for hot-reloading
                     let legacyToolDir = fmap (\d -> agentRootDir tree </> d) tree.agentConfig.toolDirectory
                     let bashToolboxDirs =
@@ -897,6 +966,8 @@ loadAgentTreeRuntime props = do
                         Right runtimes -> do
                             -- Phase 3: Wire tool references
                             wireToolReferences props graph runtimes
+                            print ("wire done" :: Text)
+                            print graph
 
                             -- Phase 4: Build final tree
                             case buildAgentTree graph runtimes of
@@ -905,7 +976,7 @@ loadAgentTreeRuntime props = do
 
 withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTreeRuntime props continue = do
-    loadAgentTreeRuntime props >>= continue
+    loadAgentTreeRuntime props >>= \x -> print ("loaded" :: Text) >> continue x
 
 {- | Convert OpenAPI toolbox description to toolbox configuration.
 
@@ -1267,3 +1338,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+
