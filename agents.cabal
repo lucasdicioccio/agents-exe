@@ -95,6 +95,12 @@ library agents-lib
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.EndpointPredicate
                     , System.Agents.Tools.IO
+                    , System.Agents.Tools.LuaToolbox
+                    , System.Agents.Tools.LuaToolbox.Modules.Fs
+                    , System.Agents.Tools.LuaToolbox.Modules.Http
+                    , System.Agents.Tools.LuaToolbox.Modules.Json
+                    , System.Agents.Tools.LuaToolbox.Modules.Text
+                    , System.Agents.Tools.LuaToolbox.Modules.Time
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver
@@ -159,12 +165,15 @@ library agents-lib
                       formatting,
                       free,
                       haskeline,
+                      hslua,
+                      hslua-marshalling,
                       http-client,
                       http-client-tls,
                       http-types,
                       indexed-traversable,
                       json-rpc,
                       lens,
+                      network-uri,
                       monad-logger,
                       mtl,
                       process,
@@ -172,6 +181,7 @@ library agents-lib
                       prodapi,
                       fsnotify,
                       regex-tdfa,
+                      scientific,
                       sqlite-simple,
                       stm,
                       stm-chans,
