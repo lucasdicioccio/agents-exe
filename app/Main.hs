@@ -1351,6 +1351,18 @@ toJsonTrace x = case x of
                 [ "developer-toolbox" .= toolboxName
                 , "trace" .= show tr
                 ]
+    encodeBaseAgentTrace (RuntimeTrace.LuaToolboxTrace toolboxName tr) =
+        Just $
+            Aeson.object
+                [ "lua-toolbox" .= toolboxName
+                , "trace" .= show tr
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.LuaToolboxInitError toolboxName err) =
+        Just $
+            Aeson.object
+                [ "lua-toolbox-init-error" .= toolboxName
+                , "error" .= err
+                ]
     encodeBaseAgentTrace (RuntimeTrace.SkillsToolboxTrace toolboxName tr) =
         Just $
             Aeson.object
