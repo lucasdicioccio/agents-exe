@@ -454,6 +454,10 @@ callResultToUserToolResponse _ result =
             SessionBase.UserToolResponse $ Aeson.String specContent
         DeveloperToolError _ err ->
             SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
+        LuaToolResult _ toolResult ->
+            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
+        LuaToolError _ err ->
+            SessionBase.UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
 
 {- | Convert a ToolRegistration to a SystemTool for the Session agent.
 Based on toolRegistrationToSystemTool from OneShot.hs.

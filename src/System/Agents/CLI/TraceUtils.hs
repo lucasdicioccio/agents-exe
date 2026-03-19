@@ -152,6 +152,16 @@ renderAgentTrace (Runtime.DeveloperToolboxTrace name tr) =
         [ mconcat ["@developer/", name, ":"]
         , renderDeveloperToolboxTrace tr
         ]
+renderAgentTrace (Runtime.LuaToolboxTrace name tr) =
+    Text.unlines
+        [ mconcat ["@lua/", name, ":"]
+        , renderLuaToolboxTrace tr
+        ]
+renderAgentTrace (Runtime.LuaToolboxInitError name err) =
+    Text.unlines
+        [ mconcat ["@lua/", name, ":"]
+        , "Error: " <> Text.pack err
+        ]
 renderAgentTrace (Runtime.SkillsToolboxTrace name tr) =
     Text.unlines
         [ mconcat ["@skills/", name, ":"]
