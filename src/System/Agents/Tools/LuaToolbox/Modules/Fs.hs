@@ -18,6 +18,7 @@ resistant to traversal attacks through symlinks.
 module System.Agents.Tools.LuaToolbox.Modules.Fs (
     FsConfig (..),
     PathError (..),
+    FsTrace (..),
     registerFsModule,
     validatePath,
 ) where
@@ -25,13 +26,12 @@ module System.Agents.Tools.LuaToolbox.Modules.Fs (
 import Control.Exception (IOException, try)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as BS
-import Data.List (isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as TextIO
-import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
+import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (
     canonicalizePath,
     createDirectoryIfMissing,
@@ -39,13 +39,37 @@ import System.Directory (
     doesFileExist,
     listDirectory,
  )
-import System.FilePath (isAbsolute, isPathSeparator, normalise, takeDirectory, (</>))
+import System.FilePath (isAbsolute, takeDirectory)
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 
 getStackInt :: Lua.StackIndex -> Int
 getStackInt = stackIdxToInt
+
+{- | Trace events for filesystem operations.
+
+These events allow tracking of all filesystem operations for debugging,
+auditing, and monitoring purposes.
+-}
+data FsTrace
+    = -- | File read operation
+      FsReadTrace !FilePath !(Either PathError (Maybe BS.ByteString))
+    | -- | File write operation
+      FsWriteTrace !FilePath !Bool !(Maybe String)
+    | -- | Path existence check
+      FsExistsTrace !FilePath !Bool
+    | -- | Directory listing operation
+      FsListTrace !FilePath !(Either PathError [FilePath])
+    | -- | Directory creation operation
+      FsMkdirTrace !FilePath !Bool !(Maybe String)
+    | -- | Directory check operation
+      FsIsDirTrace !FilePath !Bool
+    | -- | File check operation
+      FsIsFileTrace !FilePath !Bool
+    | -- | File patch operation
+      FsPatchTrace !FilePath !Text !Text !Bool !Int !(Maybe String)
+    deriving (Show, Eq)
 
 {- | Path validation error types.
 
@@ -86,40 +110,40 @@ data FsConfig = FsConfig
     deriving (Show, Eq)
 
 -- | Register the fs module in the Lua state.
-registerFsModule :: Lua.State -> FsConfig -> IO ()
-registerFsModule lstate config = Lua.runWith lstate $ do
+registerFsModule :: Tracer IO FsTrace -> Lua.State -> FsConfig -> IO ()
+registerFsModule tracer lstate config = Lua.runWith lstate $ do
     Lua.newtable
 
     Lua.pushName "read"
-    Lua.pushHaskellFunction (luaRead config)
+    Lua.pushHaskellFunction (luaRead tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "write"
-    Lua.pushHaskellFunction (luaWrite config)
+    Lua.pushHaskellFunction (luaWrite tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "exists"
-    Lua.pushHaskellFunction (luaExists config)
+    Lua.pushHaskellFunction (luaExists tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "list"
-    Lua.pushHaskellFunction (luaList config)
+    Lua.pushHaskellFunction (luaList tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "mkdir"
-    Lua.pushHaskellFunction (luaMkdir config)
+    Lua.pushHaskellFunction (luaMkdir tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "isdir"
-    Lua.pushHaskellFunction (luaIsDir config)
+    Lua.pushHaskellFunction (luaIsDir tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "isfile"
-    Lua.pushHaskellFunction (luaIsFile config)
+    Lua.pushHaskellFunction (luaIsFile tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "patch"
-    Lua.pushHaskellFunction (luaPatch config)
+    Lua.pushHaskellFunction (luaPatch tracer config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.setglobal (Lua.Name "fs")
@@ -158,8 +182,8 @@ validatePath config path = do
          in child == parent || take (length parent') child == parent'
 
 -- | Read file contents with enhanced error handling.
-luaRead :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaRead config = do
+luaRead :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaRead tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
@@ -169,6 +193,7 @@ luaRead config = do
     validation <- liftIO $ validatePath config path
     case validation of
         Left err -> do
+            liftIO $ runTracer tracer (FsReadTrace path (Left err))
             Lua.pushnil
             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
@@ -176,16 +201,18 @@ luaRead config = do
             result <- liftIO $ try $ BS.readFile validPath
             case result of
                 Left (e :: IOException) -> do
+                    liftIO $ runTracer tracer (FsReadTrace path (Left $ PathIOError path (show e)))
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                     pure 2
                 Right content -> do
+                    liftIO $ runTracer tracer (FsReadTrace path (Right (Just content)))
                     Lua.pushstring content
                     pure 1
 
 -- | Write file contents with enhanced error handling.
-luaWrite :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaWrite config = do
+luaWrite :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaWrite tracer config = do
     top <- Lua.gettop
     let topInt = getStackInt top
     if topInt < 2
@@ -193,6 +220,7 @@ luaWrite config = do
             Lua.pop topInt
             Lua.pushboolean False
             Lua.pushstring "Usage: fs.write(path, content)"
+            liftIO $ runTracer tracer (FsWriteTrace "" False (Just "Usage: fs.write(path, content)"))
             pure 2
         else do
             let pathIdx = topInt - 1
@@ -205,6 +233,7 @@ luaWrite config = do
 
             case validation of
                 Left err -> do
+                    liftIO $ runTracer tracer (FsWriteTrace path False (Just $ show err))
                     Lua.pushboolean False
                     Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
                     pure 2
@@ -213,6 +242,7 @@ luaWrite config = do
                     parentResult <- liftIO $ try $ createDirectoryIfMissing True parentDir
                     case parentResult of
                         Left (e :: IOException) -> do
+                            liftIO $ runTracer tracer (FsWriteTrace path False (Just $ show e))
                             Lua.pushboolean False
                             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                             pure 2
@@ -220,16 +250,18 @@ luaWrite config = do
                             result <- liftIO $ try $ BS.writeFile validPath content
                             case result of
                                 Left (e :: IOException) -> do
+                                    liftIO $ runTracer tracer (FsWriteTrace path False (Just $ show e))
                                     Lua.pushboolean False
                                     Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                                     pure 2
                                 Right () -> do
+                                    liftIO $ runTracer tracer (FsWriteTrace path True Nothing)
                                     Lua.pushboolean True
                                     pure 1
 
 -- | Check if path exists.
-luaExists :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaExists config = do
+luaExists :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaExists tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
@@ -239,17 +271,20 @@ luaExists config = do
 
     case validation of
         Left _ -> do
+            liftIO $ runTracer tracer (FsExistsTrace path False)
             Lua.pushboolean False
             pure 1
         Right validPath -> do
             fileExists <- liftIO $ doesFileExist validPath
             dirExists <- liftIO $ doesDirectoryExist validPath
-            Lua.pushboolean (fileExists || dirExists)
+            let exists = fileExists || dirExists
+            liftIO $ runTracer tracer (FsExistsTrace path exists)
+            Lua.pushboolean exists
             pure 1
 
 -- | List directory contents.
-luaList :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaList config = do
+luaList :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaList tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
@@ -259,6 +294,7 @@ luaList config = do
 
     case validation of
         Left err -> do
+            liftIO $ runTracer tracer (FsListTrace path (Left err))
             Lua.pushnil
             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
@@ -266,6 +302,7 @@ luaList config = do
             isDir <- liftIO $ doesDirectoryExist validPath
             if not isDir
                 then do
+                    liftIO $ runTracer tracer (FsListTrace path (Left $ PathIOError path "Not a directory"))
                     Lua.pushnil
                     Lua.pushstring "Not a directory"
                     pure 2
@@ -273,16 +310,18 @@ luaList config = do
                     result <- liftIO $ try $ listDirectory validPath
                     case result of
                         Left (e :: IOException) -> do
+                            liftIO $ runTracer tracer (FsListTrace path (Left $ PathIOError path (show e)))
                             Lua.pushnil
                             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                             pure 2
                         Right entries -> do
+                            liftIO $ runTracer tracer (FsListTrace path (Right entries))
                             pushStringList entries
                             pure 1
 
 -- | Create directory.
-luaMkdir :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaMkdir config = do
+luaMkdir :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaMkdir tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
@@ -292,6 +331,7 @@ luaMkdir config = do
 
     case validation of
         Left err -> do
+            liftIO $ runTracer tracer (FsMkdirTrace path False (Just $ show err))
             Lua.pushboolean False
             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
@@ -299,16 +339,18 @@ luaMkdir config = do
             result <- liftIO $ try $ createDirectoryIfMissing True validPath
             case result of
                 Left (e :: IOException) -> do
+                    liftIO $ runTracer tracer (FsMkdirTrace path False (Just $ show e))
                     Lua.pushboolean False
                     Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                     pure 2
                 Right () -> do
+                    liftIO $ runTracer tracer (FsMkdirTrace path True Nothing)
                     Lua.pushboolean True
                     pure 1
 
 -- | Check if path is a directory.
-luaIsDir :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaIsDir config = do
+luaIsDir :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaIsDir tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
@@ -318,16 +360,18 @@ luaIsDir config = do
 
     case validation of
         Left _ -> do
+            liftIO $ runTracer tracer (FsIsDirTrace path False)
             Lua.pushboolean False
             pure 1
         Right validPath -> do
             isDir <- liftIO $ doesDirectoryExist validPath
+            liftIO $ runTracer tracer (FsIsDirTrace path isDir)
             Lua.pushboolean isDir
             pure 1
 
 -- | Check if path is a file.
-luaIsFile :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaIsFile config = do
+luaIsFile :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaIsFile tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
@@ -337,10 +381,12 @@ luaIsFile config = do
 
     case validation of
         Left _ -> do
+            liftIO $ runTracer tracer (FsIsFileTrace path False)
             Lua.pushboolean False
             pure 1
         Right validPath -> do
             isFile <- liftIO $ doesFileExist validPath
+            liftIO $ runTracer tracer (FsIsFileTrace path isFile)
             Lua.pushboolean isFile
             pure 1
 
@@ -353,8 +399,8 @@ Returns:
 * error: empty string on success, error message on failure
 * diff: unified diff of changes (or nil if no changes)
 -}
-luaPatch :: FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
-luaPatch config = do
+luaPatch :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaPatch tracer config = do
     top <- Lua.gettop
     let topInt = getStackInt top
 
@@ -364,6 +410,7 @@ luaPatch config = do
             Lua.pushboolean False
             Lua.pushstring "Usage: fs.patch(path, search, replace)"
             Lua.pushnil
+            liftIO $ runTracer tracer (FsPatchTrace "" "" "" False 0 (Just "Usage: fs.patch(path, search, replace)"))
             pure 3
         else do
             pathBytes <- Lua.tostring' (Lua.nthTop 3)
@@ -378,6 +425,7 @@ luaPatch config = do
             validation <- liftIO $ validatePath config path
             case validation of
                 Left err -> do
+                    liftIO $ runTracer tracer (FsPatchTrace path search replace False 0 (Just $ show err))
                     Lua.pushboolean False
                     Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
                     Lua.pushnil
@@ -396,11 +444,13 @@ luaPatch config = do
                                 pure (False, 0, Text.empty)
                     case result of
                         Left (e :: IOException) -> do
+                            liftIO $ runTracer tracer (FsPatchTrace path search replace False 0 (Just $ show e))
                             Lua.pushboolean False
                             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                             Lua.pushnil
                             pure 3
                         Right (success, count, diff) -> do
+                            liftIO $ runTracer tracer (FsPatchTrace path search replace success count Nothing)
                             Lua.pushboolean success
                             if success
                                 then do
@@ -443,8 +493,9 @@ pushStringList items = do
     mapM_
         ( \(i, s) -> do
             Lua.pushstring (Text.encodeUtf8 $ Text.pack s)
-            Lua.pushinteger (fromIntegral i)
+            Lua.pushinteger (fromIntegral (i :: Int))
             Lua.insert (Lua.nthTop 2)
             Lua.settable (Lua.nthTop 3)
         )
         (zip [1 ..] items)
+

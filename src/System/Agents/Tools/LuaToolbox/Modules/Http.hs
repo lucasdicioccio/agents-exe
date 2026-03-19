@@ -16,6 +16,7 @@ the whitelist before making any requests.
 -}
 module System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
+    HttpTrace (..),
     registerHttpModule,
     extractHost,
     validateHost,
@@ -44,12 +45,27 @@ import Network.HTTP.Client (
 import qualified Network.HTTP.Client.TLS as HTTPS
 import Network.HTTP.Types (statusCode)
 import Network.URI (URI (..), parseURI, uriAuthority, uriRegName)
+import Prod.Tracer (Tracer (..), runTracer)
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
 
 getStackInt :: Lua.StackIndex -> Int
 getStackInt = stackIdxToInt
+
+{- | Trace events for HTTP operations.
+
+These events allow tracking of all HTTP requests for debugging,
+auditing, and monitoring purposes.
+-}
+data HttpTrace
+    = -- | HTTP GET request
+      HttpGetTrace !Text !Int !(Maybe Text) !(Maybe Int)
+    | -- | HTTP POST request
+      HttpPostTrace !Text !Int !(Maybe Text) !(Maybe Int)
+    | -- | HTTP generic request
+      HttpRequestTrace !Text !Text !Int !(Maybe Text) !(Maybe Int)
+    deriving (Show, Eq)
 
 {- | HTTP module configuration.
 
@@ -71,22 +87,22 @@ data HttpConfig = HttpConfig
     deriving (Show, Eq)
 
 -- | Register the http module.
-registerHttpModule :: Lua.State -> HttpConfig -> IO ()
-registerHttpModule lstate config = do
+registerHttpModule :: Tracer IO HttpTrace -> Lua.State -> HttpConfig -> IO ()
+registerHttpModule tracer lstate config = do
     manager <- HTTPS.newTlsManager
     Lua.runWith lstate $ do
         Lua.newtable
 
         Lua.pushName "get"
-        Lua.pushHaskellFunction (luaGet config manager)
+        Lua.pushHaskellFunction (luaGet tracer config manager)
         Lua.settable (Lua.nthTop 3)
 
         Lua.pushName "post"
-        Lua.pushHaskellFunction (luaPost config manager)
+        Lua.pushHaskellFunction (luaPost tracer config manager)
         Lua.settable (Lua.nthTop 3)
 
         Lua.pushName "request"
-        Lua.pushHaskellFunction (luaRequest config manager)
+        Lua.pushHaskellFunction (luaRequest tracer config manager)
         Lua.settable (Lua.nthTop 3)
 
         Lua.setglobal (Lua.Name "http")
@@ -105,10 +121,10 @@ extractHost url =
         Just uri -> case uriAuthority uri of
             Nothing -> Left "No host in URL"
             Just auth ->
-                let host = Text.pack $ uriRegName auth
-                 in if Text.null host
+                let hostVal = Text.pack $ uriRegName auth
+                 in if Text.null hostVal
                         then Left "No host in URL"
-                        else Right host
+                        else Right hostVal
 
 {- | Validate host against whitelist.
 
@@ -116,14 +132,14 @@ An empty whitelist means no hosts are allowed (secure default).
 Returns Left with error message if host is not allowed.
 -}
 validateHost :: HttpConfig -> Text -> Either Text ()
-validateHost config host
+validateHost config hostVal
     | null (httpAllowedHosts config) = Left "No hosts allowed (empty whitelist)"
-    | host `elem` httpAllowedHosts config = Right ()
-    | otherwise = Left $ "Host not in allowed list: " <> host
+    | hostVal `elem` httpAllowedHosts config = Right ()
+    | otherwise = Left $ "Host not in allowed list: " <> hostVal
 
 -- | HTTP GET request with host validation.
-luaGet :: HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
-luaGet config manager = do
+luaGet :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
+luaGet tracer config manager = do
     top <- Lua.gettop
     let nargs = getStackInt top
     if nargs < 1
@@ -131,6 +147,7 @@ luaGet config manager = do
             Lua.pop (getStackInt top)
             Lua.pushnil
             Lua.pushstring "Usage: http.get(url, [options])"
+            liftIO $ runTracer tracer (HttpGetTrace "" 400 (Just "Usage: http.get(url, [options])") Nothing)
             pure 2
         else do
             urlBs <- Lua.tostring' (Lua.nthTop 1)
@@ -144,27 +161,29 @@ luaGet config manager = do
                     else pure (Just defaultOptions)
             Lua.pop (getStackInt top)
 
-            let url = Text.unpack $ Text.decodeUtf8 urlBs
+            let url = Text.pack $ Text.unpack $ Text.decodeUtf8 urlBs
 
             -- Validate host
-            case extractHost (Text.pack url) of
+            case extractHost url of
                 Left err -> do
+                    liftIO $ runTracer tracer (HttpGetTrace url 400 (Just err) Nothing)
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
                 Right hostVal ->
                     case validateHost config hostVal of
                         Left err -> do
+                            liftIO $ runTracer tracer (HttpGetTrace url 403 (Just err) Nothing)
                             Lua.pushnil
                             Lua.pushstring (Text.encodeUtf8 err)
                             pure 2
                         Right () -> do
                             let opts = fromMaybe defaultOptions mOptions
-                            performRequest manager "GET" url opts (RequestBodyLBS LBS.empty)
+                            performRequest tracer manager "GET" url opts (RequestBodyLBS LBS.empty)
 
 -- | HTTP POST request with host validation.
-luaPost :: HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
-luaPost config manager = do
+luaPost :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
+luaPost tracer config manager = do
     top <- Lua.gettop
     let nargs = getStackInt top
     if nargs < 2
@@ -172,6 +191,7 @@ luaPost config manager = do
             Lua.pop (getStackInt top)
             Lua.pushnil
             Lua.pushstring "Usage: http.post(url, body, [options])"
+            liftIO $ runTracer tracer (HttpPostTrace "" 400 (Just "Usage: http.post(url, body, [options])") Nothing)
             pure 2
         else do
             urlBs <- Lua.tostring' (Lua.nthTop 2)
@@ -186,27 +206,29 @@ luaPost config manager = do
                     else pure (Just defaultOptions)
             Lua.pop (getStackInt top)
 
-            let url = Text.unpack $ Text.decodeUtf8 urlBs
+            let url = Text.pack $ Text.unpack $ Text.decodeUtf8 urlBs
 
             -- Validate host
-            case extractHost (Text.pack url) of
+            case extractHost url of
                 Left err -> do
+                    liftIO $ runTracer tracer (HttpPostTrace url 400 (Just err) Nothing)
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
                 Right hostVal ->
                     case validateHost config hostVal of
                         Left err -> do
+                            liftIO $ runTracer tracer (HttpPostTrace url 403 (Just err) Nothing)
                             Lua.pushnil
                             Lua.pushstring (Text.encodeUtf8 err)
                             pure 2
                         Right () -> do
                             let opts = fromMaybe defaultOptions mOptions
-                            performRequest manager "POST" url opts (RequestBodyBS bodyBs)
+                            performRequest tracer manager "POST" url opts (RequestBodyBS bodyBs)
 
 -- | Generic HTTP request with host validation.
-luaRequest :: HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
-luaRequest config manager = do
+luaRequest :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
+luaRequest tracer config manager = do
     top <- Lua.gettop
     let nargs = getStackInt top
     if nargs < 1
@@ -214,6 +236,7 @@ luaRequest config manager = do
             Lua.pop (getStackInt top)
             Lua.pushnil
             Lua.pushstring "Usage: http.request(options)"
+            liftIO $ runTracer tracer (HttpRequestTrace "" "" 400 (Just "Usage: http.request(options)") Nothing)
             pure 2
         else do
             let optsIdx = Lua.nthTop 1
@@ -243,27 +266,29 @@ luaRequest config manager = do
 
             Lua.pop (getStackInt top)
 
-            let url = Text.unpack $ Text.decodeUtf8 urlBs
+            let url = Text.pack $ Text.unpack $ Text.decodeUtf8 urlBs
+            let reqMethod = if BS.null mMethodBs then "GET" else Text.decodeUtf8 mMethodBs
 
             -- Validate host
-            case extractHost (Text.pack url) of
+            case extractHost url of
                 Left err -> do
+                    liftIO $ runTracer tracer (HttpRequestTrace reqMethod url 400 (Just err) Nothing)
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
                 Right hostVal ->
                     case validateHost config hostVal of
                         Left err -> do
+                            liftIO $ runTracer tracer (HttpRequestTrace reqMethod url 403 (Just err) Nothing)
                             Lua.pushnil
                             Lua.pushstring (Text.encodeUtf8 err)
                             pure 2
                         Right () -> do
                             let opts = fromMaybe defaultOptions mOptions
-                            let reqMethod = if BS.null mMethodBs then "GET" else Text.decodeUtf8 mMethodBs
                             let reqBody = case mBodyBs of
                                     Just bs -> RequestBodyBS bs
                                     Nothing -> RequestBodyLBS LBS.empty
-                            performRequest manager (Text.unpack reqMethod) url opts reqBody
+                            performRequest tracer manager (Text.unpack reqMethod) url opts reqBody
 
 -- | Request options.
 data RequestOptions = RequestOptions
@@ -318,10 +343,10 @@ parseOptions idx = do
                     go ((keyBs, valBs) : acc)
 
 -- | Perform HTTP request.
-performRequest :: Manager -> String -> String -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
-performRequest manager reqMethod url opts reqBody = do
+performRequest :: Tracer IO HttpTrace -> Manager -> String -> Text -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
+performRequest tracer manager reqMethod url opts reqBody = do
     result <- liftIO $ try $ do
-        initReq <- parseRequest url
+        initReq <- parseRequest (Text.unpack url)
         let req =
                 initReq
                     { method = Text.encodeUtf8 $ Text.pack reqMethod
@@ -332,10 +357,21 @@ performRequest manager reqMethod url opts reqBody = do
 
     case result of
         Left (e :: SomeException) -> do
+            let errMsg = Text.pack $ show e
+            liftIO $ case reqMethod of
+                "GET" -> runTracer tracer (HttpGetTrace url 0 (Just errMsg) Nothing)
+                "POST" -> runTracer tracer (HttpPostTrace url 0 (Just errMsg) Nothing)
+                _ -> runTracer tracer (HttpRequestTrace (Text.pack reqMethod) url 0 (Just errMsg) Nothing)
             Lua.pushnil
-            Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
+            Lua.pushstring (Text.encodeUtf8 errMsg)
             pure 2
         Right response -> do
+            let status = statusCode $ responseStatus response
+            let bodySize = Just $ fromIntegral $ LBS.length $ responseBody response
+            liftIO $ case reqMethod of
+                "GET" -> runTracer tracer (HttpGetTrace url status Nothing bodySize)
+                "POST" -> runTracer tracer (HttpPostTrace url status Nothing bodySize)
+                _ -> runTracer tracer (HttpRequestTrace (Text.pack reqMethod) url status Nothing bodySize)
             pushResponse response
             pure 1
 
@@ -362,3 +398,4 @@ pushResponse response = do
     Lua.pushstring "body"
     Lua.pushstring (LBS.toStrict $ responseBody response)
     Lua.settable (Lua.nthTop 3)
+

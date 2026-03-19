@@ -98,8 +98,12 @@ module System.Agents.Tools.LuaToolbox (
     ScriptError (..),
     ExecutionResult (..),
 
+    -- * Module traces (union)
+    LuaModuleTrace (..),
+
     -- * Initialization
     initializeToolbox,
+    initializeToolboxWithModuleTracer,
     closeToolbox,
 
     -- * Script execution
@@ -113,6 +117,13 @@ module System.Agents.Tools.LuaToolbox (
 
     -- * Module registration
     registerStandardModules,
+
+    -- * Re-exported module traces for convenience
+    module System.Agents.Tools.LuaToolbox.Modules.Fs,
+    module System.Agents.Tools.LuaToolbox.Modules.Http,
+    module System.Agents.Tools.LuaToolbox.Modules.Json,
+    module System.Agents.Tools.LuaToolbox.Modules.Text,
+    module System.Agents.Tools.LuaToolbox.Modules.Time,
 ) where
 
 import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
@@ -140,6 +151,49 @@ import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Json as JsonMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Text as TextMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Time as TimeMod
+
+-- Re-export module traces
+import System.Agents.Tools.LuaToolbox.Modules.Fs (
+    FsConfig (..),
+    FsTrace (..),
+    PathError (..),
+ )
+import System.Agents.Tools.LuaToolbox.Modules.Http (
+    HttpConfig (..),
+    HttpTrace (..),
+ )
+import System.Agents.Tools.LuaToolbox.Modules.Json (JsonTrace (..))
+import System.Agents.Tools.LuaToolbox.Modules.Text (TextTrace (..))
+import System.Agents.Tools.LuaToolbox.Modules.Time (TimeTrace (..))
+
+-------------------------------------------------------------------------------
+-- Union of all module traces
+-------------------------------------------------------------------------------
+
+{- | Union of all possible Lua module traces.
+
+This type represents all possible trace events from the LuaToolbox modules.
+Calling modules can use this type to handle traces from any of the primitive
+functions across all modules.
+
+Example:
+@
+handleTrace :: LuaModuleTrace -> IO ()
+handleTrace (FsTrace (FsReadTrace path result)) = putStrLn $ "Read: " ++ path
+handleTrace (HttpTrace (HttpGetTrace url status _ _)) = putStrLn $ "GET: " ++ show url
+handleTrace _ = pure ()
+
+tracer :: Tracer IO LuaModuleTrace
+tracer = Tracer handleTrace
+@
+-}
+data LuaModuleTrace
+    = FsTrace !FsMod.FsTrace
+    | HttpTrace !HttpMod.HttpTrace
+    | TimeTrace !TimeMod.TimeTrace
+    | TextTrace !TextMod.TextTrace
+    | JsonTrace !JsonMod.JsonTrace
+    deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -254,7 +308,35 @@ initializeToolbox ::
     Tracer IO Trace ->
     LuaToolboxDescription ->
     IO (Either String Toolbox)
-initializeToolbox tracer desc = do
+initializeToolbox tracer desc =
+    initializeToolboxWithModuleTracer
+        tracer
+        (Tracer (const (pure ())))
+        desc
+
+{- | Initialize a Lua toolbox with module tracing support.
+
+This variant allows passing a tracer for module-level traces (fs, http, time, text, json).
+The tracer will receive 'LuaModuleTrace' events from all primitive functions
+registered in the modules.
+
+Example:
+@
+moduleTracer :: Tracer IO LuaModuleTrace
+moduleTracer = Tracer $ \trace -> case trace of
+    FsTrace t -> putStrLn $ "FS: " ++ show t
+    HttpTrace t -> putStrLn $ "HTTP: " ++ show t
+    _ -> pure ()
+
+result <- initializeToolboxWithModuleTracer tracer moduleTracer desc
+@
+-}
+initializeToolboxWithModuleTracer ::
+    Tracer IO Trace ->
+    Tracer IO LuaModuleTrace ->
+    LuaToolboxDescription ->
+    IO (Either String Toolbox)
+initializeToolboxWithModuleTracer tracer moduleTracer desc = do
     runTracer tracer (StateInitializedTrace desc.luaToolboxName)
 
     -- Create Lua state
@@ -272,8 +354,8 @@ initializeToolbox tracer desc = do
             when (desc.luaToolboxMaxMemoryMB > 0) $
                 applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
 
-            -- Register standard library modules with security settings
-            registerStandardModules lstate desc
+            -- Register standard library modules with security settings and tracers
+            registerStandardModulesWithTracer moduleTracer lstate desc
 
             -- Create lock for serializing access
             lock <- newEmptyMVar
@@ -300,21 +382,45 @@ This registers:
 Security:
 * Empty allowedPaths means NO filesystem access
 * Empty allowedHosts means NO network access
+
+Note: This function uses a silent tracer (no-op). Use 'registerStandardModulesWithTracer'
+for tracing support.
 -}
 registerStandardModules :: Lua.State -> LuaToolboxDescription -> IO ()
-registerStandardModules lstate desc = do
+registerStandardModules =
+    registerStandardModulesWithTracer (Tracer (const (pure ())))
+
+{- | Register all standard library modules with tracing support.
+
+This variant allows passing a 'LuaModuleTrace' tracer that will receive
+events from all primitive functions in the modules.
+-}
+registerStandardModulesWithTracer ::
+    Tracer IO LuaModuleTrace ->
+    Lua.State ->
+    LuaToolboxDescription ->
+    IO ()
+registerStandardModulesWithTracer moduleTracer lstate desc = do
+    -- Create individual module tracers that wrap the union tracer
+    let fsTracer = Tracer (runTracer moduleTracer . FsTrace)
+    let httpTracer = Tracer (runTracer moduleTracer . HttpTrace)
+    let timeTracer = Tracer (runTracer moduleTracer . TimeTrace)
+    let textTracer = Tracer (runTracer moduleTracer . TextTrace)
+    let jsonTracer = Tracer (runTracer moduleTracer . JsonTrace)
+
     -- Register json module
-    JsonMod.registerJsonModule lstate
+    JsonMod.registerJsonModule jsonTracer lstate
 
     -- Register text module
-    TextMod.registerTextModule lstate
+    TextMod.registerTextModule textTracer lstate
 
     -- Register time module
-    TimeMod.registerTimeModule lstate
+    TimeMod.registerTimeModule timeTracer lstate
 
     -- Register fs module with sandboxing
     -- Security: empty allowedPaths means NO filesystem access
     FsMod.registerFsModule
+        fsTracer
         lstate
         FsMod.FsConfig
             { FsMod.fsAllowedPaths = desc.luaToolboxAllowedPaths
@@ -323,6 +429,7 @@ registerStandardModules lstate desc = do
     -- Register http module with sandboxing
     -- Security: empty allowedHosts means NO network access
     HttpMod.registerHttpModule
+        httpTracer
         lstate
         HttpMod.HttpConfig
             { HttpMod.httpAllowedHosts = desc.luaToolboxAllowedHosts
