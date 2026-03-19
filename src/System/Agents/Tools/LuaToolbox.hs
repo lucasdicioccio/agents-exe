@@ -158,10 +158,14 @@ data Trace
       StateInitializedTrace !Text.Text
     | -- | Lua state closed
       StateClosedTrace
-    | -- | Script execution started
+    | -- | Script execution started (legacy, script name only)
       ScriptStartedTrace !Text.Text
+    | -- | Script execution started with full script content
+      ScriptExecutionStartTrace !Text.Text
     | -- | Script execution completed successfully
       ScriptCompletedTrace !NominalDiffTime
+    | -- | Script execution completed with full details (script, result values, execution time)
+      ScriptExecutionEndTrace !Text.Text ![Aeson.Value] !NominalDiffTime
     | -- | Script execution timed out
       ScriptTimeoutTrace !Int
     | -- | Memory limit exceeded
@@ -521,7 +525,7 @@ executeScript ::
     IO (Either ScriptError ExecutionResult)
 executeScript toolbox script =
     -- Without portal - just execute script with no tool access
-    executeScriptWithPortal toolbox script Nothing
+    executeScriptWithPortal (Tracer (const (pure ()))) toolbox script Nothing
 
 {- | Execute a Lua script with access to the tool portal.
 
@@ -536,16 +540,17 @@ The portal is exposed to Lua through the 'tools' module, which provides
 functions like tools.call(), tools.bash.run(), etc.
 -}
 executeScriptWithPortal ::
+    Tracer IO Trace ->
     Toolbox ->
     -- | Lua script source
     Text.Text ->
     -- | Optional tool portal for calling other tools
     Maybe ToolPortal ->
     IO (Either ScriptError ExecutionResult)
-executeScriptWithPortal toolbox script mPortal = do
+executeScriptWithPortal tracer toolbox script mPortal = do
     -- Acquire lock to serialize access within this toolbox instance
     withMVar (toolboxLock toolbox) $ \() ->
-        executeScriptInternal toolbox script mPortal
+        executeScriptInternal tracer toolbox script mPortal
 
 -- | Helper to run IO action with MVar lock
 withMVar :: MVar a -> (a -> IO b) -> IO b
@@ -556,14 +561,18 @@ withMVar mvar action = do
     pure result
 
 executeScriptInternal ::
+    Tracer IO Trace ->
     Toolbox ->
     Text.Text ->
     Maybe ToolPortal ->
     IO (Either ScriptError ExecutionResult)
-executeScriptInternal toolbox script _ = do
+executeScriptInternal tracer toolbox script _ = do
     startTime <- getCurrentTime
     let lstate = toolboxLuaState toolbox
     let maxTime = (toolboxConfig toolbox).luaToolboxMaxExecutionTimeSeconds
+
+    -- Trace script execution start with full script content
+    runTracer tracer (ScriptExecutionStartTrace script)
 
     -- Execute with timeout
     result <- applyTimeout maxTime $ do
@@ -596,12 +605,16 @@ executeScriptInternal toolbox script _ = do
     let execTime = diffUTCTime endTime startTime
 
     case result of
-        Nothing ->
+        Nothing -> do
             -- Timeout occurred
+            runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
-        Just (Left err) ->
+        Just (Left err) -> do
+            runTracer tracer (LuaErrorTrace (Text.pack $ show err))
             pure $ Left err
-        Just (Right val) ->
+        Just (Right val) -> do
+            -- Trace script execution end with script, result values, and execution time
+            runTracer tracer (ScriptExecutionEndTrace script val execTime)
             pure $
                 Right
                     ExecutionResult
@@ -754,3 +767,4 @@ collectObjectPairs = do
                 val <- luaToJsonValue -- This pops the value
                 -- Stack: table, key
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
+
