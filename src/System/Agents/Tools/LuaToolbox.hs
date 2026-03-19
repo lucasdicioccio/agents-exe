@@ -40,7 +40,6 @@ import Prod.Tracer (Tracer(..), runTracer)
 
 main :: IO ()
 main = do
-    let nullTracer = Tracer (const (pure ()))
     let desc = LuaToolboxDescription
             { luaToolboxName = "lua"
             , luaToolboxDescription = "Sandboxed Lua interpreter"
@@ -50,7 +49,7 @@ main = do
             , luaToolboxAllowedPaths = ["./scripts"]
             , luaToolboxAllowedHosts = ["localhost"]
             }
-    result <- Lua.initializeToolbox nullTracer desc
+    result <- Lua.initializeToolbox Tracer.silent desc
     case result of
         Right toolbox -> do
             result <- Lua.executeScript toolbox "return 1 + 1"
@@ -75,7 +74,6 @@ Example Lua script using modules:
 > local text = require("text")
 > local time = require("time")
 > local fs = require("fs")
-> local tools = require("tools")
 >
 > -- Read and parse a JSON file
 > local data = json.decode(fs.read("/allowed/path/config.json"))
@@ -115,9 +113,6 @@ module System.Agents.Tools.LuaToolbox (
 
     -- * Module registration
     registerStandardModules,
-
-    -- * Utilities
-    nullTracer,
 ) where
 
 import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
@@ -145,18 +140,6 @@ import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Json as JsonMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Text as TextMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Time as TimeMod
-
--------------------------------------------------------------------------------
--- Utilities
--------------------------------------------------------------------------------
-
-{- | A tracer that does nothing (discards all trace events).
-
-This is useful when you don't need tracing or when initializing
-the toolbox without a proper tracer.
--}
-nullTracer :: Tracer IO a
-nullTracer = Tracer (const (pure ()))
 
 -------------------------------------------------------------------------------
 -- Core Types

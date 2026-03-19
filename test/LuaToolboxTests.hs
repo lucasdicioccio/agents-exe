@@ -30,7 +30,7 @@ import System.IO.Temp (createTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Prod.Tracer (Tracer (..))
+import Prod.Tracer (Tracer (..), silent)
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolCall (..), ToolPortal, ToolResult (..))
@@ -67,26 +67,26 @@ testLuaToolbox =
 -- | Run an action with a test toolbox initialized
 withTestToolbox :: (LuaToolbox.Toolbox -> IO ()) -> IO ()
 withTestToolbox action = do
-    initResult <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer testLuaToolbox
+    initResult <- LuaToolbox.initializeToolbox silent testLuaToolbox
     case initResult of
         Left err -> assertFailure $ "Failed to initialize toolbox: " ++ err
         Right box -> do
             bracket
                 (pure box)
-                (\b -> LuaToolbox.closeToolbox LuaToolbox.nullTracer b)
+                (\b -> LuaToolbox.closeToolbox silent b)
                 action
 
 -- | Run an action with a test toolbox that has filesystem access
 withTestToolboxFs :: (LuaToolbox.Toolbox -> FilePath -> IO ()) -> IO ()
 withTestToolboxFs action = withTempSandbox $ \testDir -> do
     let desc = testLuaToolbox{luaToolboxAllowedPaths = [testDir]}
-    initResult <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer desc
+    initResult <- LuaToolbox.initializeToolbox silent desc
     case initResult of
         Left err -> assertFailure $ "Failed to initialize toolbox: " ++ err
         Right box -> do
             bracket
                 (pure (box, testDir))
-                (\(b, _) -> LuaToolbox.closeToolbox LuaToolbox.nullTracer b)
+                (\(b, _) -> LuaToolbox.closeToolbox silent b)
                 (\(b, d) -> action b d)
 
 -- | Create a temporary sandbox directory for testing
@@ -349,12 +349,12 @@ resourceLimitTests =
 testTimeout :: Assertion
 testTimeout = do
     let desc = testLuaToolbox{luaToolboxMaxExecutionTimeSeconds = 1}
-    initResult <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer desc
+    initResult <- LuaToolbox.initializeToolbox silent desc
     case initResult of
         Left err -> assertFailure $ "Failed to initialize: " ++ err
         Right box -> do
             result <- LuaToolbox.executeScript box "while true do end"
-            LuaToolbox.closeToolbox LuaToolbox.nullTracer box
+            LuaToolbox.closeToolbox silent box
             case result of
                 Left (TimeoutError _) -> pure () -- Expected
                 Left err -> assertFailure $ "Wrong error type: " ++ show err
@@ -442,7 +442,7 @@ testPortalToolCall = do
 
     let desc = testLuaToolbox{luaToolboxAllowedTools = ["test_tool"]}
 
-    initResult <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer desc
+    initResult <- LuaToolbox.initializeToolbox silent desc
     case initResult of
         Left err -> assertFailure $ "Failed to initialize: " ++ err
         Right box -> do
@@ -456,7 +456,7 @@ testPortalToolCall = do
                     )
                     (Just mockPortal)
 
-            LuaToolbox.closeToolbox LuaToolbox.nullTracer box
+            LuaToolbox.closeToolbox silent box
 
             case result of
                 Left err -> assertFailure $ show err
@@ -504,7 +504,7 @@ testToolWhitelist = do
 
     let desc = testLuaToolbox{luaToolboxAllowedTools = ["allowed_tool"]}
 
-    initResult <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer desc
+    initResult <- LuaToolbox.initializeToolbox silent desc
     case initResult of
         Left err -> assertFailure $ "Failed to initialize: " ++ err
         Right box -> do
@@ -518,7 +518,7 @@ testToolWhitelist = do
                     )
                     (Just mockPortal)
 
-            LuaToolbox.closeToolbox LuaToolbox.nullTracer box
+            LuaToolbox.closeToolbox silent box
 
             case result of
                 Left err -> assertFailure $ show err

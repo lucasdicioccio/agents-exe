@@ -22,6 +22,7 @@ import System.IO (writeFile)
 import System.IO.Temp (createTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
+import Prod.Tracer (silent)
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolResult (..))
@@ -193,7 +194,7 @@ securityDefaultsTests =
                             , luaToolboxAllowedHosts = []
                             }
 
-                result <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer desc
+                result <- LuaToolbox.initializeToolbox silent desc
                 case result of
                     Left err -> assertFailure $ "Failed to initialize: " ++ err
                     Right toolbox -> do
@@ -208,7 +209,7 @@ securityDefaultsTests =
                                 let value = LuaToolbox.resultValues result
                                 assertBool ("Expected blocked access, got: " ++ show value) (isAccessBlocked value)
 
-                        LuaToolbox.closeToolbox LuaToolbox.nullTracer toolbox
+                        LuaToolbox.closeToolbox silent toolbox
         , testCase "LuaToolbox http module blocks access with empty allowedHosts" $ do
             let desc =
                     LuaToolboxDescription
@@ -221,7 +222,7 @@ securityDefaultsTests =
                         , luaToolboxAllowedHosts = []
                         }
 
-            result <- LuaToolbox.initializeToolbox LuaToolbox.nullTracer desc
+            result <- LuaToolbox.initializeToolbox silent desc
             case result of
                 Left err -> assertFailure $ "Failed to initialize: " ++ err
                 Right toolbox -> do
@@ -236,7 +237,7 @@ securityDefaultsTests =
                             let values = LuaToolbox.resultValues result
                             assertBool ("Expected blocked access, got: " ++ show values) (isAccessBlocked values)
 
-                    LuaToolbox.closeToolbox LuaToolbox.nullTracer toolbox
+                    LuaToolbox.closeToolbox silent toolbox
         ]
 
 -------------------------------------------------------------------------------
