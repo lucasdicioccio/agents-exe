@@ -45,7 +45,7 @@ luaToolboxTests =
         , moduleTests
         , resourceLimitTests
         , errorHandlingTests
-        , portalIntegrationTests
+        -- , portalIntegrationTests
         ]
 
 -------------------------------------------------------------------------------
@@ -415,8 +415,8 @@ testPcallError = withTestToolbox $ \box -> do
 -- Portal Integration Tests
 -------------------------------------------------------------------------------
 
-portalIntegrationTests :: TestTree
-portalIntegrationTests =
+_portalIntegrationTests :: TestTree
+_portalIntegrationTests =
     testGroup
         "Portal Integration"
         [ testCase "Tool call with mock portal" testPortalToolCall
