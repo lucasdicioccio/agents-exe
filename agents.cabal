@@ -270,6 +270,8 @@ test-suite agents-tests
     hs-source-dirs: test
     main-is: Main.hs
     other-modules: EndpointPredicateTests
+                   , LuaToolboxSecurityTests
+                   , LuaToolboxTests
                    , McpImplementationTests
                    , OpenAPIToolboxTests
                    , PostgRESTParseTest
@@ -284,9 +286,13 @@ test-suite agents-tests
                       aeson,
                       bytestring,
                       containers,
+                      directory,
+                      filepath,
                       prodapi,
                       text,
                       tasty,
-                      tasty-hunit
+                      tasty-hunit,
+                      temporary,
+                      vector
 
 

@@ -40,6 +40,10 @@ import qualified SkillsTests
 import qualified McpImplementationTests
 -- Import ToolPortal tests
 import qualified ToolPortalTests
+-- Import LuaToolbox security tests
+import qualified LuaToolboxSecurityTests
+-- Import LuaToolbox comprehensive tests
+import qualified LuaToolboxTests
 
 main :: IO ()
 main = defaultMain tests
@@ -69,6 +73,8 @@ tests =
         , SkillsTests.skillsTestSuite
         , McpImplementationTests.mcpImplementationTestSuite
         , ToolPortalTests.toolPortalTestSuite
+        , LuaToolboxSecurityTests.tests
+        , LuaToolboxTests.luaToolboxTests
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         ]
@@ -316,6 +322,38 @@ agentSerializationTests =
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            mAgent @?= Just agent
+        , testCase "round-trip with LuaToolbox" $ do
+            let luaDesc = Base.LuaToolboxDescription
+                    { Base.luaToolboxName = "lua"
+                    , Base.luaToolboxDescription = "Lua interpreter"
+                    , Base.luaToolboxMaxMemoryMB = 256
+                    , Base.luaToolboxMaxExecutionTimeSeconds = 300
+                    , Base.luaToolboxAllowedTools = ["bash", "sqlite"]
+                    , Base.luaToolboxAllowedPaths = ["./scripts"]
+                    , Base.luaToolboxAllowedHosts = ["localhost"]
+                    }
+            let builtinToolbox = Base.LuaToolbox luaDesc
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = Just "tools"
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Just [builtinToolbox]
+                    , Base.bashToolboxes = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
+                    , Base.extraAgents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
