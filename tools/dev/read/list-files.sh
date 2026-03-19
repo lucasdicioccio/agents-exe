@@ -25,6 +25,7 @@ if [[ "$1" == "run" ]]; then
     find ./docs -name '*.md'
     find ./docs -name '*.png'
     find ./tools/
+    find ./agents/ 2>/dev/null || true
     exit 0
 fi
 
