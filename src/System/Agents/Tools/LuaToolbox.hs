@@ -140,7 +140,7 @@ import qualified HsLua as Lua
 import Control.Concurrent.Async (race)
 import Control.Concurrent (threadDelay)
 
-import Prod.Tracer (Tracer (..), runTracer)
+import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolPortal)
@@ -183,8 +183,12 @@ handleTrace (FsTrace (FsReadTrace path result)) = putStrLn $ "Read: " ++ path
 handleTrace (HttpTrace (HttpGetTrace url status _ _)) = putStrLn $ "GET: " ++ show url
 handleTrace _ = pure ()
 
-tracer :: Tracer IO LuaModuleTrace
-tracer = Tracer handleTrace
+moduleTracer :: Tracer IO LuaModuleTrace
+moduleTracer = Tracer handleTrace
+
+-- Use contramap to create sub-tracers:
+let fsTracer = contramap FsTrace moduleTracer
+    httpTracer = contramap HttpTrace moduleTracer
 @
 -}
 data LuaModuleTrace
@@ -394,6 +398,16 @@ registerStandardModules =
 
 This variant allows passing a 'LuaModuleTrace' tracer that will receive
 events from all primitive functions in the modules.
+
+Uses 'contramap' to create sub-tracers for each module from the union tracer:
+
+@
+let fsTracer = contramap FsTrace moduleTracer
+    httpTracer = contramap HttpTrace moduleTracer
+    timeTracer = contramap TimeTrace moduleTracer
+    textTracer = contramap TextTrace moduleTracer
+    jsonTracer = contramap JsonTrace moduleTracer
+@
 -}
 registerStandardModulesWithTracer ::
     Tracer IO LuaModuleTrace ->
@@ -401,12 +415,12 @@ registerStandardModulesWithTracer ::
     LuaToolboxDescription ->
     IO ()
 registerStandardModulesWithTracer moduleTracer lstate desc = do
-    -- Create individual module tracers that wrap the union tracer
-    let fsTracer = Tracer (runTracer moduleTracer . FsTrace)
-    let httpTracer = Tracer (runTracer moduleTracer . HttpTrace)
-    let timeTracer = Tracer (runTracer moduleTracer . TimeTrace)
-    let textTracer = Tracer (runTracer moduleTracer . TextTrace)
-    let jsonTracer = Tracer (runTracer moduleTracer . JsonTrace)
+    -- Create individual module tracers using contramap
+    let fsTracer = contramap FsTrace moduleTracer
+    let httpTracer = contramap HttpTrace moduleTracer
+    let timeTracer = contramap TimeTrace moduleTracer
+    let textTracer = contramap TextTrace moduleTracer
+    let jsonTracer = contramap JsonTrace moduleTracer
 
     -- Register json module
     JsonMod.registerJsonModule jsonTracer lstate
