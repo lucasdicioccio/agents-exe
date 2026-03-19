@@ -52,7 +52,7 @@ import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8)
 import Data.Time (diffUTCTime, getCurrentTime)
 
-import Prod.Tracer (Tracer (..))
+import Prod.Tracer (Tracer (..), contramap)
 
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -66,6 +66,9 @@ import System.Agents.Tools.Context (
 import System.Agents.Tools.Trace (ToolTrace (..))
 import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.Base (newConversationId)
+
+data Trace = PortalCall !ToolCall !ToolTrace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Portal Error Type
@@ -113,7 +116,7 @@ This variant allows tracing portal invocations for debugging and monitoring.
 -}
 makeToolPortal ::
     -- | Tracer for tool execution events
-    Tracer IO ToolTrace ->
+    Tracer IO Trace ->
     -- | Registered tools available through the portal
     [ToolRegistration] ->
     ToolPortal
@@ -158,7 +161,7 @@ Note: The portal executes tools with a minimal context that does NOT include
 a nested portal. This prevents infinite recursion through the portal.
 -}
 callToolViaPortal ::
-    Tracer IO ToolTrace ->
+    Tracer IO Trace ->
     [ToolRegistration] ->
     ToolCall ->
     IO (Either PortalError (CallResult ()))
@@ -177,7 +180,7 @@ callToolViaPortal tracer registrations toolCall = do
                     pure $ Left $ PortalToolNotFound (callToolName toolCall)
                 Just matchedTool -> do
                     -- Execute with minimal context (no nested portal)
-                    execResult <- executeTool tracer matchedTool (callArgs toolCall)
+                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) matchedTool (callArgs toolCall)
                     pure $ first PortalExecutionError execResult
 
 {- | Find a tool registration by tool name.

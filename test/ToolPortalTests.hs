@@ -16,7 +16,7 @@ import qualified Data.Text as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Prod.Tracer (Tracer(..))
+import Prod.Tracer (Tracer(..), silent)
 
 import System.Agents.ToolPortal
 import System.Agents.ToolRegistration (ToolRegistration(..))
@@ -86,7 +86,7 @@ portalExecutionTests =
                     , callCallerId = "test-caller"
                     }
             
-            result <- callToolViaPortal nullTracer [] toolCall
+            result <- callToolViaPortal silent [] toolCall
             
             case result of
                 Left (PortalToolNotFound name) -> name @?= "nonexistent-tool"
@@ -102,7 +102,7 @@ portalExecutionTests =
             
             let mockReg = makeMockRegistration "mock-tool"
             
-            result <- callToolViaPortal nullTracer [mockReg] toolCall
+            result <- callToolViaPortal silent [mockReg] toolCall
             
             case result of
                 Left err -> assertFailure $ "Expected success, got error: " ++ show err
@@ -122,7 +122,7 @@ makeToolPortalTests =
         "makeToolPortal"
         [ testCase "creates a portal that returns ToolResult on success" $ do
             let mockReg = makeMockRegistration "test-tool"
-            let portal = makeToolPortal nullTracer [mockReg]
+            let portal = makeToolPortal silent [mockReg]
             
             let toolCall = ToolCall
                     { callToolName = "io_test-tool"
@@ -151,7 +151,7 @@ makeToolPortalTests =
                     assertBool "TraceId should be non-empty" (not $ Text.null traceId)
         
         , testCase "creates a portal that returns error for unknown tool" $ do
-            let portal = makeToolPortal nullTracer []
+            let portal = makeToolPortal silent []
             
             let toolCall = ToolCall
                     { callToolName = "unknown-tool"
@@ -173,7 +173,7 @@ makeToolPortalTests =
         , testCase "portal executes multiple different tools" $ do
             let reg1 = makeMockRegistration "tool-a"
             let reg2 = makeMockRegistration "tool-b"
-            let portal = makeToolPortal nullTracer [reg1, reg2]
+            let portal = makeToolPortal silent [reg1, reg2]
             
             -- Call first tool
             let call1 = ToolCall
@@ -205,10 +205,6 @@ makeToolPortalTests =
 -------------------------------------------------------------------------------
 -- Helper Functions
 -------------------------------------------------------------------------------
-
--- | A null tracer that discards all traces
-nullTracer :: Tracer IO ToolTrace
-nullTracer = Tracer $ \_ -> pure ()
 
 -- | Create a mock tool registration for testing
 makeMockRegistration :: Text -> ToolRegistration
