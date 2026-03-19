@@ -710,6 +710,70 @@ instance FromJSON SystemToolboxDescription where
     parseJSON = Aeson.genericParseJSON systemToolboxOptions
 
 -------------------------------------------------------------------------------
+-- Lua Toolbox Configuration
+-------------------------------------------------------------------------------
+
+{- | Configuration for a Lua builtin toolbox.
+
+This describes a sandboxed Lua interpreter that can orchestrate other tools
+through the tool portal mechanism.
+
+Example configuration:
+
+@
+{
+  "tag": "LuaToolbox",
+  "contents": {
+    "name": "lua",
+    "description": "Sandboxed Lua interpreter for tool orchestration",
+    "maxMemoryMB": 256,
+    "maxExecutionTimeSeconds": 300,
+    "allowedTools": ["bash", "sqlite", "io"],
+    "allowedPaths": ["./repro", "./logs"],
+    "allowedHosts": ["localhost", "127.0.0.1"]
+  }
+}
+@
+-}
+data LuaToolboxDescription = LuaToolboxDescription
+    { luaToolboxName :: Text
+    -- ^ Unique name for this toolbox instance (used as tool prefix)
+    , luaToolboxDescription :: Text
+    -- ^ Human-readable description of the toolbox purpose
+    , luaToolboxMaxMemoryMB :: Int
+    -- ^ Maximum Lua heap memory in megabytes
+    , luaToolboxMaxExecutionTimeSeconds :: Int
+    -- ^ Maximum script execution time in seconds
+    , luaToolboxAllowedTools :: [Text]
+    -- ^ Whitelist of tool names that Lua scripts can call via the portal
+    , luaToolboxAllowedPaths :: [FilePath]
+    -- ^ Whitelist of filesystem paths accessible to Lua scripts
+    , luaToolboxAllowedHosts :: [Text]
+    -- ^ Whitelist of network hosts accessible to Lua HTTP module
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for LuaToolboxDescription to use camelCase field names
+luaToolboxOptions :: Aeson.Options
+luaToolboxOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "luaToolbox"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON LuaToolboxDescription where
+    toJSON = Aeson.genericToJSON luaToolboxOptions
+    toEncoding = Aeson.genericToEncoding luaToolboxOptions
+
+instance FromJSON LuaToolboxDescription where
+    parseJSON = Aeson.genericParseJSON luaToolboxOptions
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 -- Developer Toolbox Configuration
 -------------------------------------------------------------------------------
 
@@ -808,7 +872,8 @@ Example configuration:
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
     {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
-    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent"]}}
+    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent"]}},
+    {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "allowedPaths": [], "allowedHosts": []}}
   ]
 }
 @
@@ -817,6 +882,7 @@ data BuiltinToolboxDescription
     = SqliteToolbox SqliteToolboxDescription
     | SystemToolbox SystemToolboxDescription
     | DeveloperToolbox DeveloperToolboxDescription
+    | LuaToolbox LuaToolboxDescription
     deriving (Show, Ord, Eq, Generic)
 
 instance ToJSON BuiltinToolboxDescription where
@@ -835,6 +901,11 @@ instance ToJSON BuiltinToolboxDescription where
             [ "tag" .= ("DeveloperToolbox" :: Text)
             , "contents" .= val
             ]
+    toJSON (LuaToolbox val) =
+        Aeson.object
+            [ "tag" .= ("LuaToolbox" :: Text)
+            , "contents" .= val
+            ]
 
 instance FromJSON BuiltinToolboxDescription where
     parseJSON = Aeson.withObject "BuiltinToolboxDescription" $ \v -> do
@@ -846,7 +917,9 @@ instance FromJSON BuiltinToolboxDescription where
                 SystemToolbox <$> v .: "contents"
             "DeveloperToolbox" ->
                 DeveloperToolbox <$> v .: "contents"
-            _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', or 'DeveloperToolbox' tag"
+            "LuaToolbox" ->
+                LuaToolbox <$> v .: "contents"
+            _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', 'LuaToolbox', or 'DeveloperToolbox' tag"
 
 -------------------------------------------------------------------------------
 -- Skills Toolbox Configuration
