@@ -38,6 +38,8 @@ import qualified EndpointPredicateTests
 import qualified SkillsTests
 -- Import MCP Implementation tests
 import qualified McpImplementationTests
+-- Import ToolPortal tests
+import qualified ToolPortalTests
 
 main :: IO ()
 main = defaultMain tests
@@ -66,6 +68,7 @@ tests =
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite
         , McpImplementationTests.mcpImplementationTestSuite
+        , ToolPortalTests.toolPortalTestSuite
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         ]
@@ -1715,5 +1718,4 @@ cycleDetectionTests =
         , Base.skillSources = Nothing
         , Base.autoEnableSkills = Nothing
         }
-
 

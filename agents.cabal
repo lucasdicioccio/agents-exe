@@ -78,11 +78,13 @@ library agents-lib
                     , System.Agents.CLI.SelfDescribe
                     , System.Agents.CLI.SessionEdit
                     , System.Agents.CLI.Spec
+                    , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
+                    , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Context
@@ -264,6 +266,7 @@ test-suite agents-tests
                    , SessionEditTests
                    , SessionPrintTests
                    , SkillsTests
+                   , ToolPortalTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
@@ -271,7 +274,9 @@ test-suite agents-tests
                       aeson,
                       bytestring,
                       containers,
+                      prodapi,
                       text,
                       tasty,
                       tasty-hunit
+
 
