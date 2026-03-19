@@ -198,8 +198,17 @@ renderLuaToolboxTrace tr = case tr of
         "lua state closed"
     LuaTools.ScriptStartedTrace script ->
         Text.unwords ["lua script started:", Text.take 50 script <> "..."]
+    LuaTools.ScriptExecutionStartTrace script ->
+        Text.unwords ["lua script execution start:", Text.take 100 script <> "..."]
     LuaTools.ScriptCompletedTrace duration ->
         Text.unwords ["lua script completed:", Text.pack (show duration)]
+    LuaTools.ScriptExecutionEndTrace script results duration ->
+        Text.unlines
+            [ "lua script execution end:"
+            , "  script: " <> Text.take 100 script <> "..."
+            , "  results: " <> Text.pack (show $ length results) <> " value(s)"
+            , "  duration: " <> Text.pack (show duration)
+            ]
     LuaTools.ScriptTimeoutTrace timeout ->
         Text.unwords ["lua script timeout:", Text.pack (show timeout)]
     LuaTools.MemoryLimitExceededTrace limit ->
@@ -294,3 +303,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

@@ -1085,7 +1085,7 @@ luaTool box =
         }
   where
     call = ()
-    run _tracer ctx (Aeson.Object v) = do
+    run tracer ctx (Aeson.Object v) = do
         -- Extract script from arguments
         case KeyMap.lookup (AesonKey.fromText "script") v of
             Just (Aeson.String script) -> do
@@ -1093,9 +1093,10 @@ luaTool box =
                 let mPortal = Context.ctxToolPortal ctx
                 -- let allowedTools = Context.ctxAllowedTools ctx
 
-                -- Execute script with portal
+                -- Execute script with portal, passing the tracer for detailed logging
                 result <-
                     LuaTools.executeScriptWithPortal
+                        (contramap LuaToolsTrace tracer)
                         box
                         script
                         mPortal
@@ -1344,3 +1345,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

@@ -448,6 +448,7 @@ testPortalToolCall = do
         Right box -> do
             result <-
                 LuaToolbox.executeScriptWithPortal
+                    silent
                     box
                     ( Text.unlines
                         [ "local result = tools.call('test_tool', {x = 1})"
@@ -510,6 +511,7 @@ testToolWhitelist = do
         Right box -> do
             result <-
                 LuaToolbox.executeScriptWithPortal
+                    silent
                     box
                     ( Text.unlines
                         [ "local result, err = tools.call('blocked_tool', {})"
