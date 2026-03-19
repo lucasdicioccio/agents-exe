@@ -54,7 +54,9 @@ import Data.Time (diffUTCTime, getCurrentTime)
 
 import Prod.Tracer (Tracer (..), contramap)
 
+import System.Agents.Base (newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
 import System.Agents.Tools.Context (
@@ -64,8 +66,6 @@ import System.Agents.Tools.Context (
     mkMinimalContext,
  )
 import System.Agents.Tools.Trace (ToolTrace (..))
-import System.Agents.Session.Types (newSessionId, newTurnId)
-import System.Agents.Base (newConversationId)
 
 data Trace = PortalCall !ToolCall !ToolTrace
     deriving (Show)
@@ -379,6 +379,7 @@ callResultToJson (DeveloperToolError _ err) =
         , "error" .= show err
         , "toolType" .= ("devtool-err" :: Text)
         ]
+
 {-
 callResultToJson (LuaToolResult _ result) =
     Aeson.object

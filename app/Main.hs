@@ -49,8 +49,8 @@ import qualified System.Agents.CLI.ReplayToolCall as ReplayToolCallCmd
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
-import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.CLI.TUI as TUICmd
+import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -1511,4 +1511,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-
