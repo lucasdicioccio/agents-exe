@@ -72,7 +72,7 @@ import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import Prod.Tracer (Tracer, contramap, silent)
+import Prod.Tracer (Tracer, contramap)
 import System.Agents.Base (DeveloperToolCapability (..), LuaToolboxDescription(..), SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
@@ -1091,9 +1091,7 @@ luaTool box =
             Just (Aeson.String script) -> do
                 -- Get portal and allowed tools from context
                 let mPortal = Context.ctxToolPortal ctx
-                let allowedTools = Context.ctxAllowedTools ctx
-
-                let luaToolsTracer = silent -- TODO: decorate properly
+                -- let allowedTools = Context.ctxAllowedTools ctx
 
                 -- Execute script with portal
                 result <-
