@@ -1101,8 +1101,6 @@ luaTool box =
                         box
                         script
                         mPortal
-                        allowedTools
-                        luaToolsTracer
 
                 case result of
                     Left err -> pure $ LuaToolError call (Text.pack $ show err)
