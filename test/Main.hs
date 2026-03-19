@@ -40,6 +40,8 @@ import qualified SkillsTests
 import qualified McpImplementationTests
 -- Import ToolPortal tests
 import qualified ToolPortalTests
+-- Import LuaToolbox tests
+import qualified LuaToolboxTests
 
 main :: IO ()
 main = defaultMain tests
@@ -69,6 +71,7 @@ tests =
         , SkillsTests.skillsTestSuite
         , McpImplementationTests.mcpImplementationTestSuite
         , ToolPortalTests.toolPortalTestSuite
+        , LuaToolboxTests.luaToolboxTestSuite
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         ]
