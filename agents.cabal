@@ -3,8 +3,8 @@ cabal-version:      3.0
 -- and can be different from the cabal-install (the tool) version and the
 -- Cabal (the library) version you are using. As such, the Cabal (the library)
 -- version used must be equal or greater than the version stated in this field.
--- Starting from the specification version 2.2, the cabal-version field must be
--- the first thing in the .cabal specification.
+-- Starting from the specification version 2.2, the cabal-version field must
+-- be the first thing in the .cabal specification.
 
 -- The name of the package.
 name:               agents
@@ -67,8 +67,6 @@ library agents-lib
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
-                    , System.Agents.CLI.Export
-                    , System.Agents.CLI.Import
                     , System.Agents.CLI.Initialize
                     , System.Agents.CLI.InitProject
                     , System.Agents.CLI.McpServer
@@ -82,11 +80,6 @@ library agents-lib
                     , System.Agents.CLI.Spec
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
-                    , System.Agents.ExportImport.Types
-                    , System.Agents.ExportImport.Namespace
-                    , System.Agents.ExportImport.Archive
-                    , System.Agents.ExportImport.Git
-                    , System.Agents.ExportImport.ToolInstall
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
@@ -181,7 +174,6 @@ library agents-lib
                       stm,
                       stm-chans,
                       stm-conduit,
-                      tar,
                       temporary,
                       text,
                       text-zipper,
@@ -192,8 +184,7 @@ library agents-lib
                       uuid,
                       vector,
                       vty,
-                      yaml,
-                      zlib
+                      yaml
                       
 
 executable agents-exe
