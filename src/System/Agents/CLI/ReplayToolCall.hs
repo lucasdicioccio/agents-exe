@@ -50,9 +50,9 @@ import System.Agents.Session.Types (
     Session (..),
     Turn (..),
  )
+import qualified System.Agents.ToolRegistration as ToolReg
 import System.Agents.Tools.Bash (ScriptDescription (..), ScriptInfo (..), loadScript, runValue)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
-import qualified System.Agents.ToolRegistration as ToolReg
 
 -- | Information about a tool call extracted from a session
 data ToolCallInfo = ToolCallInfo
@@ -78,12 +78,12 @@ data ListToolCallsOptions = ListToolCallsOptions
 
 -- | Output format for listing tool calls
 data ListFormat
-    = ListFormatHuman
-    -- ^ Human-readable format with details
-    | ListFormatJson
-    -- ^ JSON format for machine processing
-    | ListFormatBrief
-    -- ^ Brief format: index name args-preview
+    = -- | Human-readable format with details
+      ListFormatHuman
+    | -- | JSON format for machine processing
+      ListFormatJson
+    | -- | Brief format: index name args-preview
+      ListFormatBrief
     deriving (Show, Eq)
 
 -- | Options for the replay-tool-call command
@@ -296,4 +296,3 @@ handleReplayToolCall opts = do
                                                 <> ")"
                                     Text.putStrLn $ formatValidationErrors toolName errors
                                     exitFailure
-

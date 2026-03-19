@@ -807,13 +807,12 @@ parseSessionPrintOptions =
             ( long "repeat-tools"
                 <> help "Repeat the available tools at each turn (default: False, always shown in first turn)"
             )
-        <*>
-            flag
-                SessionPrint.Chronological
-                SessionPrint.Antichronological
-                ( long "antichronological"
-                    <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
-                )
+        <*> flag
+            SessionPrint.Chronological
+            SessionPrint.Antichronological
+            ( long "antichronological"
+                <> help "Display session steps in antichronological order (newest first). Default is chronological (oldest first)."
+            )
         <*> switch
             ( long "no-funny-stamp"
                 <> help "Skip the ASCII art logo stamp in the header (default: show logo)"
@@ -1481,4 +1480,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-
