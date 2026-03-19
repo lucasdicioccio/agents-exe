@@ -39,8 +39,6 @@ import qualified System.Agents.CLI.CheckToolCall as CheckToolCallCmd
 import qualified System.Agents.CLI.Cowsay as CowsayCmd
 import qualified System.Agents.CLI.DescribeTool as DescribeToolCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
-import qualified System.Agents.CLI.Export as ExportCmd
-import qualified System.Agents.CLI.Import as ImportCmd
 import qualified System.Agents.CLI.Initialize as InitializeCmd
 import qualified System.Agents.CLI.McpServer as McpServerCmd
 import qualified System.Agents.CLI.New as NewCmd
@@ -52,8 +50,6 @@ import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
-import qualified System.Agents.ExportImport.ToolInstall as ExportInstall
-import System.Agents.ExportImport.Types (ArchiveFormat (..), GitExportOptions (..))
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -421,8 +417,6 @@ data Command
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
     | SessionEdit SessionEditCmd.SessionEditOptions
-    | Export ExportCmd.ExportOptions
-    | Import ImportCmd.ImportOptions
     | Paths PathsCmd.PathsOptions
     | Cowsay CowsayCmd.CowsayOptions
     | Spec SpecCmd.SpecOptions
@@ -442,8 +436,6 @@ instance Show Command where
     show McpServer = "McpServer"
     show (SessionPrint _) = "SessionPrint"
     show (SessionEdit _) = "SessionEdit"
-    show (Export _) = "Export"
-    show (Import _) = "Import"
     show (Paths _) = "Paths"
     show (Cowsay _) = "Cowsay"
     show (Spec _) = "Spec"
@@ -915,280 +907,6 @@ parseSessionEditOp = asum [parseTake, parseTakeTail, parseDrop, parseDropTail, p
     parseCensorThinking = flag' SessionEditCmd.SessionEditCensorThinking (long "censor-thinking" <> help "Remove all thinking content from the session")
     parseCountOption = option auto (long "count" <> short 'n' <> metavar "N" <> help "Number of turns" <> value 1 <> showDefault)
 
-parseExportCommand :: Parser Command
-parseExportCommand = Export <$> parseExportOptions
-
-parseExportOptions :: Parser ExportCmd.ExportOptions
-parseExportOptions =
-    ExportCmd.ExportOptions
-        <$> parseExportSource
-        <*> parseExportDestination
-        <*> optional parseArchiveFormat
-        <*> optional parseNamespace
-        <*> parseIncludeTools
-        <*> parseIncludeMcp
-        <*> optional parseGitExportOptions
-
-parseExportSource :: Parser ExportCmd.ExportSource
-parseExportSource =
-    asum
-        [ flag'
-            ExportCmd.ExportCurrentTools
-            ( long "tools-only"
-                <> help "Export only tools, not the agent configuration"
-            )
-        , ExportCmd.ExportToolByName
-            <$> strOption
-                ( long "tool"
-                    <> metavar "TOOLNAME"
-                    <> help "Export a specific tool by name"
-                )
-        , flag'
-            ExportCmd.ExportAllAgents
-            ( long "all"
-                <> help "Export all loaded agents"
-            )
-        , ExportCmd.ExportAgentBySlug
-            <$> strOption
-                ( long "agent-slug"
-                    <> metavar "SLUG"
-                    <> help "Export agent by slug"
-                )
-        , pure ExportCmd.ExportCurrentAgent
-        ]
-
-parseExportDestination :: Parser ExportCmd.ExportDestination
-parseExportDestination =
-    asum
-        [ ExportCmd.ExportToGit <$> parseGitExportDest
-        , ExportCmd.ExportToFile
-            <$> strOption
-                ( long "output"
-                    <> short 'o'
-                    <> metavar "OUTPUT"
-                    <> help "Output file path"
-                )
-        ]
-
-parseGitExportDest :: Parser ExportCmd.GitExportDest
-parseGitExportDest =
-    ExportCmd.GitExportDest
-        <$> strOption
-            ( long "git-url"
-                <> metavar "URL"
-                <> help "Git remote URL"
-            )
-        <*> optional
-            ( strOption
-                ( long "git-branch"
-                    <> metavar "BRANCH"
-                    <> help "Git branch"
-                )
-            )
-        <*> optional
-            ( strOption
-                ( long "git-message"
-                    <> metavar "MESSAGE"
-                    <> help "Git commit message"
-                )
-            )
-        <*> switch
-            ( long "git-push"
-                <> help "Push to remote after commit"
-            )
-        <*> optional
-            ( strOption
-                ( long "git-tag"
-                    <> metavar "TAG"
-                    <> help "Git tag to create"
-                )
-            )
-
-parseGitExportOptions :: Parser GitExportOptions
-parseGitExportOptions =
-    GitExportOptions
-        <$> ( fromMaybe "Update agent configurations"
-                <$> optional
-                    ( strOption
-                        ( long "git-message"
-                            <> metavar "MESSAGE"
-                            <> help "Git commit message"
-                            <> value "Update agent configurations"
-                        )
-                    )
-            )
-        <*> optional
-            ( strOption
-                ( long "git-tag"
-                    <> metavar "TAG"
-                    <> help "Git tag to create"
-                )
-            )
-        <*> switch
-            ( long "git-push"
-                <> help "Push to remote after commit"
-            )
-
-parseArchiveFormat :: Parser ArchiveFormat
-parseArchiveFormat =
-    option
-        (maybeReader parseFormat)
-        ( long "format"
-            <> metavar "FORMAT"
-            <> help "Archive format: tar, tar.gz, zip (auto-detected from output if not specified)"
-        )
-  where
-    parseFormat :: String -> Maybe ArchiveFormat
-    parseFormat "tar" = Just TarFormat
-    parseFormat "tar.gz" = Just TarGzFormat
-    parseFormat "zip" = Just ZipFormat
-    parseFormat _ = Nothing
-
-parseNamespace :: Parser Text
-parseNamespace =
-    strOption
-        ( long "namespace"
-            <> metavar "NAMESPACE"
-            <> help "Namespace for export (e.g., 'team-a.project')"
-        )
-
-parseIncludeTools :: Parser Bool
-parseIncludeTools =
-    not
-        <$> switch
-            ( long "no-tools"
-                <> help "Exclude tools from export"
-            )
-
-parseIncludeMcp :: Parser Bool
-parseIncludeMcp =
-    not
-        <$> switch
-            ( long "no-mcp"
-                <> help "Exclude MCP servers from export"
-            )
-
-parseImportCommand :: Parser Command
-parseImportCommand = Import <$> parseImportOptions
-
-parseImportOptions :: Parser ImportCmd.ImportOptions
-parseImportOptions =
-    ImportCmd.ImportOptions
-        <$> parseImportSource
-        <*> parseImportDestination
-        <*> optional parseNamespace
-        <*> parseImportMode
-        <*> parseImportToolsOnly
-        <*> parseListNamespaces
-        <*> parseListTools
-
-parseImportSource :: Parser ImportCmd.ImportSource
-parseImportSource =
-    asum
-        [ ImportCmd.ImportFromGit <$> parseGitImportSource
-        , ImportCmd.ImportFromFile
-            <$> strOption
-                ( long "from-file"
-                    <> short 'f'
-                    <> metavar "FILE"
-                    <> help "Import from archive file"
-                )
-        ]
-
-parseGitImportSource :: Parser ImportCmd.GitImportSource
-parseGitImportSource =
-    ImportCmd.GitImportSource
-        <$> strOption
-            ( long "git-url"
-                <> metavar "URL"
-                <> help "Git remote URL"
-            )
-        <*> optional
-            ( strOption
-                ( long "git-ref"
-                    <> metavar "REF"
-                    <> help "Git ref (branch, tag, or commit)"
-                )
-            )
-        <*> optional
-            ( strOption
-                ( long "namespace"
-                    <> metavar "NAMESPACE"
-                    <> help "Namespace to import from"
-                )
-            )
-
-parseImportDestination :: Parser ExportInstall.ImportDestination
-parseImportDestination =
-    asum
-        [ flag'
-            ExportInstall.ImportToCurrentDir
-            ( long "to-current"
-                <> help "Import to current directory"
-            )
-        , ExportInstall.ImportToPath
-            <$> strOption
-                ( long "to"
-                    <> metavar "PATH"
-                    <> help "Import to specific path"
-                )
-        , flag'
-            ExportInstall.ImportToConfigDir
-            ( long "to-config-dir"
-                <> help "Import to config directory"
-            )
-        , ExportInstall.ImportToAgent
-            <$> strOption
-                ( long "install-to-agent"
-                    <> metavar "AGENTFILE"
-                    <> help "Install tools to agent's tool directory"
-                )
-        , ExportInstall.ImportToToolDir
-            <$> strOption
-                ( long "install-to-tooldir"
-                    <> metavar "TOOLDIR"
-                    <> help "Install tools to specific tool directory"
-                )
-        , pure ExportInstall.ImportToCurrentDir
-        ]
-
-parseImportMode :: Parser ImportCmd.ImportMode
-parseImportMode =
-    asum
-        [ flag'
-            ImportCmd.ImportOverwrite
-            ( long "overwrite"
-                <> help "Overwrite existing files on conflict"
-            )
-        , flag'
-            ImportCmd.ImportMerge
-            ( long "merge"
-                <> help "Merge with existing files"
-            )
-        , pure ImportCmd.ImportFailOnConflict
-        ]
-
-parseImportToolsOnly :: Parser Bool
-parseImportToolsOnly =
-    switch
-        ( long "tools-only"
-            <> help "Import only tools"
-        )
-
-parseListNamespaces :: Parser Bool
-parseListNamespaces =
-    switch
-        ( long "list-namespaces"
-            <> help "List available namespaces in git repo"
-        )
-
-parseListTools :: Parser Bool
-parseListTools =
-    switch
-        ( long "list-tools"
-            <> help "List available tools in git repo"
-        )
-
 parseCowsayCommand :: Parser Command
 parseCowsayCommand = Cowsay <$> parseCowsayOptions
 
@@ -1385,18 +1103,6 @@ parseProgOptions argparserargs =
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
                 <> command "session-edit" (info parseSessionEditCommand (progDesc "Edit a session file (reads JSON from STDIN, writes JSON to STDOUT)"))
                 <> command
-                    "export"
-                    ( info
-                        parseExportCommand
-                        (progDesc "Export agent/tool configurations")
-                    )
-                <> command
-                    "import"
-                    ( info
-                        parseImportCommand
-                        (progDesc "Import agent/tool configurations")
-                    )
-                <> command
                     "paths"
                     ( info
                         parsePathsCommand
@@ -1533,10 +1239,6 @@ runCommand pargs baseTracer sessionStore files =
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
             SessionEditCmd.handleSessionEdit opts
-        Export opts ->
-            ExportCmd.handleExport opts files pargs.configDir
-        Import opts ->
-            ImportCmd.handleImport opts
         Paths opts ->
             PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile pargs.sessionsJsonPrefix
         Cowsay opts ->
@@ -1778,4 +1480,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-
