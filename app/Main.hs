@@ -49,6 +49,7 @@ import qualified System.Agents.CLI.ReplayToolCall as ReplayToolCallCmd
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
+import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
@@ -421,6 +422,7 @@ data Command
     | Cowsay CowsayCmd.CowsayOptions
     | Spec SpecCmd.SpecOptions
     | New NewCmd.NewOptions
+    | ToolCall ToolCallCmd.ToolCallOptions
 
 instance Show Command where
     show (Check _) = "Check"
@@ -440,6 +442,7 @@ instance Show Command where
     show (Cowsay _) = "Cowsay"
     show (Spec _) = "Spec"
     show (New _) = "New"
+    show (ToolCall _) = "ToolCall"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -1026,6 +1029,26 @@ parseNewToolOptions =
             Just l -> Right l
             Nothing -> Left $ "Unknown language: " <> lang <> ". Supported: bash, python, haskell, node"
 
+-- | Parse the tool-call command
+parseToolCallCommand :: Parser Command
+parseToolCallCommand = ToolCall <$> parseToolCallOptions
+
+parseToolCallOptions :: Parser ToolCallCmd.ToolCallOptions
+parseToolCallOptions =
+    ToolCallCmd.ToolCallOptions
+        <$> strArgument
+            ( metavar "TOOLNAME"
+                <> help "Name of the tool to call"
+            )
+        <*> optional
+            ( strOption
+                ( long "log-file"
+                    <> short 'l'
+                    <> metavar "LOGFILE"
+                    <> help "Optional log file for tracing tool execution"
+                )
+            )
+
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
@@ -1125,6 +1148,12 @@ parseProgOptions argparserargs =
                     ( info
                         parseNewCommand
                         (progDesc "Create new agent or tool scaffolding")
+                    )
+                <> command
+                    "tool-call"
+                    ( info
+                        parseToolCallCommand
+                        (progDesc "Call a tool from the first loaded agent with JSON payload from stdin")
                     )
             )
 
@@ -1247,6 +1276,8 @@ runCommand pargs baseTracer sessionStore files =
             SpecCmd.handleSpec opts
         New opts ->
             NewCmd.handleNew opts
+        ToolCall opts ->
+            ToolCallCmd.handleToolCall opts pargs.apiKeysFile files
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)
@@ -1480,3 +1511,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
