@@ -364,7 +364,7 @@ httpPostTests =
         -- NOTE: http.post with options is currently broken due to argument parsing bug
         -- See: luaPost function in src/System/Agents/Tools/LuaToolbox/Modules/Http.hs
         -- The bug: when 3 arguments are passed, nthTop indices are wrong
-        -- , testCase "http.post with options table" testHttpPostWithOptions
+        , testCase "http.post with options table" testHttpPostWithOptions
         , testCase "http.post blocks non-whitelisted hosts" testHttpPostBlocksNonWhitelisted
         ]
 

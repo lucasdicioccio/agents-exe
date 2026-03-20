@@ -184,6 +184,15 @@ luaGet tracer config manager = do
                             performRequest tracer manager "GET" url opts (RequestBodyLBS LBS.empty)
 
 -- | HTTP POST request with host validation.
+-- 
+-- Arguments on the stack (from bottom to top):
+--   nargs == 2: [url, body]
+--   nargs >= 3: [url, body, options, ...]
+-- 
+-- When accessing from the top using nthTop:
+--   - url is always at nthTop nargs (bottom of arguments)
+--   - body is always at nthTop (nargs - 1)
+--   - options (if present) is at nthTop 1
 luaPost :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
 luaPost tracer config manager = do
     top <- Lua.gettop
@@ -196,14 +205,17 @@ luaPost tracer config manager = do
             liftIO $ runTracer tracer (HttpPostTrace "" 400 (Just "Usage: http.post(url, body, [options])") Nothing)
             pure 2
         else do
-            urlBs <- Lua.tostring' (Lua.nthTop 2)
-            bodyBs <- Lua.tostring' (Lua.nthTop 1)
+            -- url is at the bottom of the arguments, which is nthTop nargs
+            urlBs <- Lua.tostring' (Lua.nthTop (fromIntegral nargs))
+            -- body is second from bottom, which is nthTop (nargs - 1)
+            bodyBs <- Lua.tostring' (Lua.nthTop (fromIntegral (nargs - 1)))
             mOptions <-
                 if nargs >= 3
                     then do
-                        ltype <- Lua.ltype (Lua.nthTop 3)
+                        -- options is at the top, which is nthTop 1
+                        ltype <- Lua.ltype (Lua.nthTop 1)
                         if ltype == Lua.TypeTable
-                            then parseOptions (Lua.nthTop 3)
+                            then parseOptions (Lua.nthTop 1)
                             else pure (Just defaultOptions)
                     else pure (Just defaultOptions)
             Lua.pop (getStackInt top)
@@ -315,29 +327,31 @@ parseOptions idx = do
     if ltype /= Lua.TypeTable
         then pure Nothing
         else do
+            -- Convert to absolute index before we start modifying the stack
+            absIdx <- Lua.absindex idx
             -- Iterate through the table to find the "headers" key
-            headers <- findAndParseHeaders idx
+            headers <- findAndParseHeaders absIdx
             pure $ Just $ RequestOptions headers
   where
-    -- Find and parse the headers subtable from the options table
+    -- Find and parse the headers subtable from the options table.
+    -- The tableIdx is an ABSOLUTE index, so it remains valid as we push/pop.
     findAndParseHeaders :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
     findAndParseHeaders tableIdx = do
         -- Push nil to start iteration
         Lua.pushnil
-        go tableIdx []
+        go []
       where
-        go :: Lua.StackIndex -> [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
-        go tblIdx acc = do
-            -- Calculate the offset for the table (accounting for the pushed nil and our accumulator)
-            -- The table is at index -2 from top (nil is at -1)
-            let offset = Lua.nthTop 2
-            hasNext <- Lua.next offset
+        go :: [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+        go acc = do
+            -- tableIdx is absolute, so it's stable regardless of stack changes
+            hasNext <- Lua.next tableIdx
             if not hasNext
                 then do
-                    -- Pop the nil key
+                    -- Pop the nil key that was pushed before iteration started
+                    Lua.pop 1
                     pure acc
                 else do
-                    -- Stack: table, key, value
+                    -- Stack: ..., key, value
                     keyBs <- Lua.tostring' (Lua.nthTop 2)
                     if keyBs == "headers"
                         then do
@@ -346,37 +360,43 @@ parseOptions idx = do
                             if valType == Lua.TypeTable
                                 then do
                                     -- Parse the headers table
+                                    -- nthTop 1 is the headers table value
                                     hdrs <- parseHeadersTable (Lua.nthTop 1)
                                     -- Pop the value (keep key for next iteration)
                                     Lua.pop 1
-                                    go tblIdx (hdrs ++ acc)
+                                    go (hdrs ++ acc)
                                 else do
                                     -- Not a table, skip
                                     Lua.pop 1
-                                    go tblIdx acc
+                                    go acc
                         else do
                             -- Not the headers key, skip
                             Lua.pop 1
-                            go tblIdx acc
+                            go acc
 
-    -- Parse a headers table (key-value pairs of header names and values)
+    -- Parse a headers table (key-value pairs of header names and values).
+    -- The headersIdx is a relative index (nthTop), valid at the time of call.
     parseHeadersTable :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
     parseHeadersTable headersIdx = do
+        -- Convert to absolute index before pushing nil
+        absHdrIdx <- Lua.absindex headersIdx
         Lua.pushnil
-        go headersIdx []
+        go absHdrIdx []
       where
         go :: Lua.StackIndex -> [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
-        go hdrIdx acc = do
-            let offset = Lua.nthTop 2
-            hasNext <- Lua.next offset
+        go absHdrIdx acc = do
+            hasNext <- Lua.next absHdrIdx
             if not hasNext
-                then pure acc
+                then do
+                    -- Pop the nil key that was pushed before iteration started
+                    Lua.pop 1
+                    pure acc
                 else do
-                    -- Stack: headers table, key, value
+                    -- Stack: ..., key, value
                     keyBs <- Lua.tostring' (Lua.nthTop 2)
                     valBs <- Lua.tostring' (Lua.nthTop 1)
                     Lua.pop 1
-                    go hdrIdx ((keyBs, valBs) : acc)
+                    go absHdrIdx ((keyBs, valBs) : acc)
 
 -- | Perform HTTP request.
 performRequest :: Tracer IO HttpTrace -> Manager -> String -> Text -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
@@ -434,5 +454,4 @@ pushResponse response = do
     Lua.pushstring "body"
     Lua.pushstring (LBS.toStrict $ responseBody response)
     Lua.settable (Lua.nthTop 3)
-
 
