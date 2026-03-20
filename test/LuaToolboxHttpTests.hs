@@ -361,9 +361,6 @@ httpPostTests =
         "HTTP POST"
         [ testCase "http.post argument order - url first, body second" testHttpPostArgumentOrder
         , testCase "http.post validates host before request" testHttpPostHostValidation
-        -- NOTE: http.post with options is currently broken due to argument parsing bug
-        -- See: luaPost function in src/System/Agents/Tools/LuaToolbox/Modules/Http.hs
-        -- The bug: when 3 arguments are passed, nthTop indices are wrong
         , testCase "http.post with options table" testHttpPostWithOptions
         , testCase "http.post blocks non-whitelisted hosts" testHttpPostBlocksNonWhitelisted
         ]
