@@ -321,82 +321,64 @@ defaultOptions = RequestOptions []
 --
 -- Returns 'Nothing' if the value at the given index is not a table.
 -- Returns 'Just RequestOptions' with parsed headers otherwise.
+--
+-- Note: This function does NOT pop the input table from the stack.
+-- The caller is responsible for stack cleanup.
 parseOptions :: Lua.StackIndex -> Lua.LuaE Lua.Exception (Maybe RequestOptions)
 parseOptions idx = do
     ltype <- Lua.ltype idx
     if ltype /= Lua.TypeTable
         then pure Nothing
         else do
-            -- Convert to absolute index before we start modifying the stack
+            -- Convert to absolute index immediately, before any stack modifications
             absIdx <- Lua.absindex idx
-            -- Iterate through the table to find the "headers" key
-            headers <- findAndParseHeaders absIdx
+            -- Try to get the "headers" field directly
+            Lua.pushstring "headers"
+            _ <- Lua.gettable absIdx
+            -- Check if the result is a table
+            headersType <- Lua.ltype (Lua.nthTop 1)
+            headers <- if headersType == Lua.TypeTable
+                then do
+                    -- Parse the headers table
+                    hdrs <- parseHeadersTable (Lua.nthTop 1)
+                    Lua.pop 1  -- pop the headers table
+                    pure hdrs
+                else do
+                    Lua.pop 1  -- pop the non-table value (likely nil)
+                    pure []
             pure $ Just $ RequestOptions headers
-  where
-    -- Find and parse the headers subtable from the options table.
-    -- The tableIdx is an ABSOLUTE index, so it remains valid as we push/pop.
-    findAndParseHeaders :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
-    findAndParseHeaders tableIdx = do
-        -- Push nil to start iteration
-        Lua.pushnil
-        go []
-      where
-        go :: [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
-        go acc = do
-            -- tableIdx is absolute, so it's stable regardless of stack changes
-            hasNext <- Lua.next tableIdx
-            if not hasNext
-                then do
-                    -- Pop the nil key that was pushed before iteration started
-                    Lua.pop 1
-                    pure acc
-                else do
-                    -- Stack: ..., key, value
-                    keyBs <- Lua.tostring' (Lua.nthTop 2)
-                    if keyBs == "headers"
-                        then do
-                            -- Check if value is a table
-                            valType <- Lua.ltype (Lua.nthTop 1)
-                            if valType == Lua.TypeTable
-                                then do
-                                    -- Parse the headers table
-                                    -- nthTop 1 is the headers table value
-                                    hdrs <- parseHeadersTable (Lua.nthTop 1)
-                                    -- Pop the value (keep key for next iteration)
-                                    Lua.pop 1
-                                    go (hdrs ++ acc)
-                                else do
-                                    -- Not a table, skip
-                                    Lua.pop 1
-                                    go acc
-                        else do
-                            -- Not the headers key, skip
-                            Lua.pop 1
-                            go acc
 
-    -- Parse a headers table (key-value pairs of header names and values).
-    -- The headersIdx is a relative index (nthTop), valid at the time of call.
-    parseHeadersTable :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
-    parseHeadersTable headersIdx = do
-        -- Convert to absolute index before pushing nil
-        absHdrIdx <- Lua.absindex headersIdx
-        Lua.pushnil
-        go absHdrIdx []
-      where
-        go :: Lua.StackIndex -> [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
-        go absHdrIdx acc = do
-            hasNext <- Lua.next absHdrIdx
-            if not hasNext
-                then do
-                    -- Pop the nil key that was pushed before iteration started
-                    Lua.pop 1
-                    pure acc
-                else do
-                    -- Stack: ..., key, value
-                    keyBs <- Lua.tostring' (Lua.nthTop 2)
-                    valBs <- Lua.tostring' (Lua.nthTop 1)
-                    Lua.pop 1
-                    go absHdrIdx ((keyBs, valBs) : acc)
+-- | Parse a headers table into a list of key-value pairs.
+-- The headers table is at the given index (relative to current top).
+-- This function does NOT pop the headers table.
+parseHeadersTable :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+parseHeadersTable _idx = do
+    -- Use Lua.next to iterate over the table.
+    -- Push nil as the first key.
+    Lua.pushnil
+    go []
+  where
+    -- Note: We use nthTop 2 to reference the table because:
+    -- - After pushing nil, the table is at nthTop 2
+    -- - The nil key is at nthTop 1
+    tableIdx = Lua.nthTop 2
+    
+    go :: [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+    go acc = do
+        hasNext <- Lua.next tableIdx
+        if not hasNext
+            then do
+                -- Lua.next popped the nil when returning False
+                pure acc
+            else do
+                -- After successful Lua.next:
+                -- - The table is at nthTop 3 (below key and value)
+                -- - The key is at nthTop 2
+                -- - The value is at nthTop 1 (top of stack)
+                keyBs <- Lua.tostring' (Lua.nthTop 2)
+                valBs <- Lua.tostring' (Lua.nthTop 1)
+                Lua.pop 1  -- pop value, keep key for next iteration
+                go ((keyBs, valBs) : acc)
 
 -- | Perform HTTP request.
 performRequest :: Tracer IO HttpTrace -> Manager -> String -> Text -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
