@@ -44,6 +44,8 @@ import qualified ToolPortalTests
 import qualified LuaToolboxSecurityTests
 -- Import LuaToolbox comprehensive tests
 import qualified LuaToolboxTests
+-- Import luaToJsonValue specific tests
+import qualified LuaToolboxJsonValueTests
 
 main :: IO ()
 main = defaultMain tests
@@ -75,6 +77,7 @@ tests =
         , ToolPortalTests.toolPortalTestSuite
         , LuaToolboxSecurityTests.tests
         , LuaToolboxTests.luaToolboxTests
+        , LuaToolboxJsonValueTests.luaToJsonValueTests
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         ]

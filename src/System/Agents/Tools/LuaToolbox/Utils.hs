@@ -83,32 +83,50 @@ convertTable = do
         else convertObject
 
 -- | Check if the table at top of stack is an array
+--
+-- An array is defined as a table with sequential integer keys starting at 1.
+-- The table is at position 1 (top of stack when this function is called).
+-- We push nil as the first key, then iterate using Lua.next.
+--
+-- Stack layout during iteration:
+--   - nthTop 3: the table (original)
+--   - nthTop 2: the current key
+--   - nthTop 1: the current value
+--
+-- We must check the KEY (nthTop 2) to determine if it's an array index.
 isArray :: Lua.Lua Bool
 isArray = do
-    Lua.pushnil -- first key
+    Lua.pushnil -- first key (pushed onto stack, now at position 1)
     isSequential 1
   where
     isSequential :: Int -> Lua.Lua Bool
     isSequential expectedIdx = do
+        -- Lua.next expects the table at the given index (nthTop 2 includes the nil we pushed)
+        -- After a successful call, it pops the key and pushes the next key-value pair.
         hasNext <- Lua.next (Lua.nthTop 2)
         if not hasNext
-            then pure True
+            then pure True  -- No more keys, all were sequential integers starting at 1
             else do
-                -- Check if key is the expected integer
-                isNum <- Lua.isnumber (Lua.nthTop 1)
+                -- After Lua.next succeeds:
+                -- Stack: table (nthTop 3), key (nthTop 2), value (nthTop 1)
+                -- Check if the KEY is the expected integer index
+                isNum <- Lua.isnumber (Lua.nthTop 2)  -- Check the KEY, not the value
                 if isNum
                     then do
-                        mIdx <- Lua.tointeger (Lua.nthTop 1)
+                        mIdx <- Lua.tointeger (Lua.nthTop 2)  -- Read the KEY
                         case mIdx of
                             Just idx
                                 | idx == fromIntegral expectedIdx -> do
-                                    Lua.pop 1 -- pop value
+                                    -- Key matches expected index, pop value and continue
+                                    Lua.pop 1  -- pop value, keep key for next iteration
                                     isSequential (expectedIdx + 1)
                             _ -> do
-                              Lua.pop 2 -- pop key and value
-                              pure False
+                                -- Key is not the expected sequential integer, not an array
+                                Lua.pop 2  -- pop key and value
+                                pure False
                     else do
-                        Lua.pop 2 -- pop key and value
+                        -- Key is not a number, not an array
+                        Lua.pop 2  -- pop key and value
                         pure False
 
 -- | Convert array table to JSON Array
