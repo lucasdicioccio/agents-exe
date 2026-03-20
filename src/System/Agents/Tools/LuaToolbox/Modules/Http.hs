@@ -17,9 +17,11 @@ the whitelist before making any requests.
 module System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     HttpTrace (..),
+    RequestOptions (..),
     registerHttpModule,
     extractHost,
     validateHost,
+    parseOptions,
 ) where
 
 import Control.Exception (SomeException, try)
@@ -32,7 +34,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Foreign.C.Types (CInt (..))
+-- import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
 import Network.HTTP.Client (
     Manager,
@@ -294,53 +296,87 @@ luaRequest tracer config manager = do
 data RequestOptions = RequestOptions
     { optHeaders :: [(ByteString, ByteString)]
     }
+    deriving (Show, Eq)
 
 defaultOptions :: RequestOptions
 defaultOptions = RequestOptions []
 
--- | Parse options table.
+-- | Parse options table from Lua.
+--
+-- This function extracts HTTP request options from a Lua table.
+-- Currently supports parsing the "headers" key which should contain
+-- a table of header name-value pairs.
+--
+-- Returns 'Nothing' if the value at the given index is not a table.
+-- Returns 'Just RequestOptions' with parsed headers otherwise.
 parseOptions :: Lua.StackIndex -> Lua.LuaE Lua.Exception (Maybe RequestOptions)
 parseOptions idx = do
     ltype <- Lua.ltype idx
     if ltype /= Lua.TypeTable
         then pure Nothing
         else do
-            Lua.pushnil
-            headers <- parseHeaders idx []
+            -- Iterate through the table to find the "headers" key
+            headers <- findAndParseHeaders idx
             pure $ Just $ RequestOptions headers
   where
-    parseHeaders tableIdx acc = do
-        let offset = fromIntegral (stackIdxToInt tableIdx + 1) :: CInt
-        hasNext <- Lua.next (Lua.nthTop offset)
-        if not hasNext
-            then pure acc
-            else do
-                keyBs <- Lua.tostring' (Lua.nthTop 2)
-                Lua.pop 1
-                if keyBs == "headers"
-                    then do
-                        ltype <- Lua.ltype (Lua.nthTop 1)
-                        if ltype == Lua.TypeTable
-                            then do
-                                hdrs <- parseHeadersTable (Lua.nthTop 1)
-                                parseHeaders tableIdx (hdrs ++ acc)
-                            else parseHeaders tableIdx acc
-                    else parseHeaders tableIdx acc
-
-    parseHeadersTable idx' = do
+    -- Find and parse the headers subtable from the options table
+    findAndParseHeaders :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+    findAndParseHeaders tableIdx = do
+        -- Push nil to start iteration
         Lua.pushnil
-        go []
+        go tableIdx []
       where
-        go acc = do
-            let offset = fromIntegral (stackIdxToInt idx' + 1) :: CInt
-            hasNext <- Lua.next (Lua.nthTop offset)
+        go :: Lua.StackIndex -> [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+        go tblIdx acc = do
+            -- Calculate the offset for the table (accounting for the pushed nil and our accumulator)
+            -- The table is at index -2 from top (nil is at -1)
+            let offset = Lua.nthTop 2
+            hasNext <- Lua.next offset
+            if not hasNext
+                then do
+                    -- Pop the nil key
+                    pure acc
+                else do
+                    -- Stack: table, key, value
+                    keyBs <- Lua.tostring' (Lua.nthTop 2)
+                    if keyBs == "headers"
+                        then do
+                            -- Check if value is a table
+                            valType <- Lua.ltype (Lua.nthTop 1)
+                            if valType == Lua.TypeTable
+                                then do
+                                    -- Parse the headers table
+                                    hdrs <- parseHeadersTable (Lua.nthTop 1)
+                                    -- Pop the value (keep key for next iteration)
+                                    Lua.pop 1
+                                    go tblIdx (hdrs ++ acc)
+                                else do
+                                    -- Not a table, skip
+                                    Lua.pop 1
+                                    go tblIdx acc
+                        else do
+                            -- Not the headers key, skip
+                            Lua.pop 1
+                            go tblIdx acc
+
+    -- Parse a headers table (key-value pairs of header names and values)
+    parseHeadersTable :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+    parseHeadersTable headersIdx = do
+        Lua.pushnil
+        go headersIdx []
+      where
+        go :: Lua.StackIndex -> [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
+        go hdrIdx acc = do
+            let offset = Lua.nthTop 2
+            hasNext <- Lua.next offset
             if not hasNext
                 then pure acc
                 else do
+                    -- Stack: headers table, key, value
                     keyBs <- Lua.tostring' (Lua.nthTop 2)
                     valBs <- Lua.tostring' (Lua.nthTop 1)
                     Lua.pop 1
-                    go ((keyBs, valBs) : acc)
+                    go hdrIdx ((keyBs, valBs) : acc)
 
 -- | Perform HTTP request.
 performRequest :: Tracer IO HttpTrace -> Manager -> String -> Text -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
@@ -398,4 +434,5 @@ pushResponse response = do
     Lua.pushstring "body"
     Lua.pushstring (LBS.toStrict $ responseBody response)
     Lua.settable (Lua.nthTop 3)
+
 

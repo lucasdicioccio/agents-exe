@@ -9,6 +9,7 @@
 -- * HTTP request function with options
 -- * Error handling for blocked hosts
 -- * Error handling for invalid URLs
+-- * parseOptions function for parsing request options
 --
 -- NOTE: These tests use a mock HTTP server approach where possible,
 -- but primarily focus on the Lua-to-Haskell interface correctness.
@@ -18,15 +19,24 @@ import Control.Exception (bracket)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), silent)
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.LuaToolbox as LuaToolbox
+import System.Agents.Tools.LuaToolbox.Modules.Http (
+    HttpConfig (..),
+    RequestOptions (..),
+    parseOptions,
+ )
 
 luaToolboxHttpTests :: TestTree
 luaToolboxHttpTests =
@@ -36,6 +46,7 @@ luaToolboxHttpTests =
         , httpPostTests
         , httpRequestTests
         , hostValidationErrorTests
+        , parseOptionsTests
         ]
 
 -------------------------------------------------------------------------------
@@ -89,6 +100,208 @@ withTestToolboxNoHttp action = do
                 (pure box)
                 (\b -> LuaToolbox.closeToolbox silent b)
                 action
+
+-- | Helper to run a Lua operation in an isolated state
+withLuaState :: (Lua.State -> IO a) -> IO a
+withLuaState action = bracket Lua.newstate Lua.close action
+
+-------------------------------------------------------------------------------
+-- parseOptions Tests
+-------------------------------------------------------------------------------
+
+parseOptionsTests :: TestTree
+parseOptionsTests =
+    testGroup
+        "parseOptions"
+        [ testCase "parseOptions returns Nothing for non-table value" testParseOptionsNonTable
+        , testCase "parseOptions returns empty headers for empty table" testParseOptionsEmptyTable
+        , testCase "parseOptions parses headers from options table" testParseOptionsWithHeaders
+        , testCase "parseOptions parses multiple headers" testParseOptionsMultipleHeaders
+        , testCase "parseOptions ignores non-headers keys" testParseOptionsIgnoresOtherKeys
+        , testCase "parseOptions handles headers table with non-string values" testParseOptionsNonStringHeaders
+        , testCase "parseOptions handles nested headers correctly" testParseOptionsNestedHeaders
+        ]
+
+-- | Test that parseOptions returns Nothing when given a non-table value
+testParseOptionsNonTable :: Assertion
+testParseOptionsNonTable = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        -- Push a string instead of a table
+        Lua.pushstring "not a table"
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    result @?= Nothing
+
+-- | Test that parseOptions returns empty headers for an empty table
+testParseOptionsEmptyTable :: Assertion
+testParseOptionsEmptyTable = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        Lua.newtable
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    case result of
+        Nothing -> assertFailure "Expected Just RequestOptions, got Nothing"
+        Just opts -> optHeaders opts @?= []
+
+-- | Test that parseOptions correctly parses headers from an options table
+testParseOptionsWithHeaders :: Assertion
+testParseOptionsWithHeaders = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        Lua.newtable
+        
+        -- Create headers subtable
+        Lua.pushstring "headers"
+        Lua.newtable
+        Lua.pushstring "Content-Type"
+        Lua.pushstring "application/json"
+        Lua.settable (Lua.nthTop 3)
+        -- Set headers in options table
+        Lua.settable (Lua.nthTop 3)
+        
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    
+    case result of
+        Nothing -> assertFailure "Expected Just RequestOptions, got Nothing"
+        Just opts -> do
+            length (optHeaders opts) @?= 1
+            case optHeaders opts of
+                [(key, val)] -> do
+                    key @?= "Content-Type"
+                    val @?= "application/json"
+                _ -> assertFailure "Expected exactly one header"
+
+-- | Test that parseOptions correctly parses multiple headers
+testParseOptionsMultipleHeaders :: Assertion
+testParseOptionsMultipleHeaders = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        Lua.newtable
+        
+        -- Create headers subtable with multiple headers
+        Lua.pushstring "headers"
+        Lua.newtable
+        
+        Lua.pushstring "Content-Type"
+        Lua.pushstring "application/json"
+        Lua.settable (Lua.nthTop 3)
+        
+        Lua.pushstring "Authorization"
+        Lua.pushstring "Bearer token123"
+        Lua.settable (Lua.nthTop 3)
+        
+        Lua.pushstring "X-Custom-Header"
+        Lua.pushstring "custom-value"
+        Lua.settable (Lua.nthTop 3)
+        
+        -- Set headers in options table
+        Lua.settable (Lua.nthTop 3)
+        
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    
+    case result of
+        Nothing -> assertFailure "Expected Just RequestOptions, got Nothing"
+        Just opts -> do
+            length (optHeaders opts) @?= 3
+            -- Check that all headers are present
+            let headerMap = foldr (\(k, v) acc -> (k, v) : acc) [] (optHeaders opts)
+            lookup "Content-Type" headerMap @?= Just "application/json"
+            lookup "Authorization" headerMap @?= Just "Bearer token123"
+            lookup "X-Custom-Header" headerMap @?= Just "custom-value"
+
+-- | Test that parseOptions ignores keys other than "headers"
+testParseOptionsIgnoresOtherKeys :: Assertion
+testParseOptionsIgnoresOtherKeys = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        Lua.newtable
+        
+        -- Add some non-headers keys
+        Lua.pushstring "timeout"
+        Lua.pushinteger 30
+        Lua.settable (Lua.nthTop 3)
+        
+        Lua.pushstring "method"
+        Lua.pushstring "POST"
+        Lua.settable (Lua.nthTop 3)
+        
+        -- Add headers
+        Lua.pushstring "headers"
+        Lua.newtable
+        Lua.pushstring "Accept"
+        Lua.pushstring "application/json"
+        Lua.settable (Lua.nthTop 3)
+        Lua.settable (Lua.nthTop 3)
+        
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    
+    case result of
+        Nothing -> assertFailure "Expected Just RequestOptions, got Nothing"
+        Just opts -> do
+            length (optHeaders opts) @?= 1
+            case optHeaders opts of
+                [(key, val)] -> do
+                    key @?= "Accept"
+                    val @?= "application/json"
+                _ -> assertFailure "Expected exactly one header"
+
+-- | Test that parseOptions handles non-string values in headers table gracefully
+testParseOptionsNonStringHeaders :: Assertion
+testParseOptionsNonStringHeaders = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        Lua.newtable
+        
+        -- Create headers subtable with mixed types
+        Lua.pushstring "headers"
+        Lua.newtable
+        
+        Lua.pushstring "Valid-Header"
+        Lua.pushstring "valid-value"
+        Lua.settable (Lua.nthTop 3)
+        
+        Lua.pushstring "Numeric-Header"
+        Lua.pushinteger 42
+        Lua.settable (Lua.nthTop 3)
+        
+        -- Set headers in options table
+        Lua.settable (Lua.nthTop 3)
+        
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    
+    -- Should parse successfully, non-string values may be converted or skipped
+    case result of
+        Nothing -> assertFailure "Expected Just RequestOptions, got Nothing"
+        Just opts -> do
+            -- At least the valid header should be present
+            length (optHeaders opts) @?= 2
+
+-- | Test that parseOptions handles nested headers table correctly
+testParseOptionsNestedHeaders :: Assertion
+testParseOptionsNestedHeaders = withLuaState $ \lstate -> do
+    result <- Lua.runWith lstate $ do
+        Lua.newtable
+        
+        -- Create headers subtable
+        Lua.pushstring "headers"
+        Lua.newtable
+        
+        -- Nested table structure in headers (should be handled gracefully)
+        Lua.pushstring "X-Nested"
+        Lua.newtable
+        Lua.pushstring "nested-key"
+        Lua.pushstring "nested-value"
+        Lua.settable (Lua.nthTop 3)
+        Lua.settable (Lua.nthTop 3)
+        
+        Lua.pushstring "X-Simple"
+        Lua.pushstring "simple-value"
+        Lua.settable (Lua.nthTop 3)
+        
+        -- Set headers in options table
+        Lua.settable (Lua.nthTop 3)
+        
+        parseOptions (Lua.nthTop 1) <* Lua.pop 1
+    
+    case result of
+        Nothing -> assertFailure "Expected Just RequestOptions, got Nothing"
+        Just opts -> do
+            -- Should have at least the simple header
+            length (optHeaders opts) @?= 2
 
 -------------------------------------------------------------------------------
 -- HTTP GET Tests

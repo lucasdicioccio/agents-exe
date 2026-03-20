@@ -274,6 +274,7 @@ test-suite agents-tests
                    , LuaToolboxSecurityTests
                    , LuaToolboxTests
                    , LuaToolboxJsonValueTests
+                   , LuaToolboxHttpTests
                    , McpImplementationTests
                    , OpenAPIToolboxTests
                    , PostgRESTParseTest
@@ -290,6 +291,7 @@ test-suite agents-tests
                       containers,
                       directory,
                       filepath,
+                      hslua,
                       prodapi,
                       text,
                       tasty,
