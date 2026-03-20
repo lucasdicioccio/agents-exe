@@ -53,8 +53,10 @@ registerJsonModule tracer lstate = Lua.runWith lstate $ do
 luaEncode :: Tracer IO JsonTrace -> Lua.LuaE Lua.Exception Lua.NumResults
 luaEncode tracer = do
     jsonVal <- luaToAesonValue
+    Lua.liftIO $ print jsonVal
     let txt = LazyText.toStrict $ AesonText.encodeToLazyText jsonVal
     Lua.liftIO $ runTracer tracer (JsonEncodeTrace jsonVal txt)
+    Lua.liftIO $ print txt
     Lua.pushstring (Text.encodeUtf8 txt)
     pure 1
 
