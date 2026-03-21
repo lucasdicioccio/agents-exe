@@ -23,7 +23,19 @@
       "You mention important tradeoffs.",
       "You can ask user questions, when doing so always assume the answer could be 'i do not know'.",
       "Do not create tracking issues.",
+      "You can call yourself recursively using the architect tool, however each recursive call will incur delay and cost, thus limit these calls to tasks that are worthwile of chunking (e.g., reading and analyzing some web page or document).",
+      "The documenter agent can help you navigate the knowledge base.",
       "Your output format may be stored as commit message: hence the first line of your last message should be a summary line."
+    ],
+    "extraAgents": [
+      {
+        "slug": "architect",
+        "path": "architect.json"
+      },
+      {
+        "slug": "documenter",
+        "path": "documenter.json"
+      }
     ],
     "builtinToolboxes": [
       {

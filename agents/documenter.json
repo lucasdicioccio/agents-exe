@@ -109,6 +109,8 @@
       "- Cross-reference related documentation",
       "- Test code examples mentally"
     ],
+    "extraAgents": [
+    ],
     "builtinToolboxes": [
       {
         "tag": "SqliteToolbox",
