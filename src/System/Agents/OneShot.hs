@@ -96,10 +96,22 @@ runOneShotWithConfig store config convId rt query = do
                 agentWithSessionProgress (config.onSessionProgress convId) $
                     agent0
 
-    -- Create or use initial session with all required fields including sessionConversationId
+    -- Create or use initial session with all required fields including parent tracking
     session0 <- case config.initialSession of
         Just s -> pure s
-        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+        Nothing -> do
+            sessId <- newSessionId
+            tId <- newTurnId
+            pure $
+                Session
+                    { turns = []
+                    , sessionId = sessId
+                    , forkedFromSessionId = Nothing
+                    , turnId = tId
+                    , parentSessionId = Nothing
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Nothing
+                    }
 
     config.onSessionProgress convId (SessionStarted session0)
     (llmTurn, _) <- run convId agent session0

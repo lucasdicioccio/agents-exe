@@ -67,6 +67,22 @@ instance Aeson.FromJSON PromptOtherAgent where
 
 -------------------------------------------------------------------------------
 
+-- | Create a new root session with no parent.
+mkRootSession :: IO Session
+mkRootSession = do
+    sessId <- newSessionId
+    tId <- newTurnId
+    pure $
+        Session
+            { turns = []
+            , sessionId = sessId
+            , forkedFromSessionId = Nothing
+            , turnId = tId
+            , parentSessionId = Nothing
+            , parentConversationId = Nothing
+            , parentAgentSlug = Nothing
+            }
+
 {- | Converts a Runtime into an IO Tool using the OneShot session-based approach.
 
 This version uses the LLM session calls from OneShot.hs instead of
@@ -112,16 +128,16 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
     runSubAgent :: ToolExecutionContext -> PromptOtherAgent -> IO CByteString.ByteString
     runSubAgent ctx (PromptOtherAgent query) = do
         -- Extract the conversation ID from the execution context for tracing
-        let parentConversationId = ctx.ctxConversationId
+        let callerConvId = ctx.ctxConversationId
 
         -- Create the agent from the runtime with the OneShot configuration
-        agent <- runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConversationId
+        agent <- runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId callerConvId
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) agent
 
         -- Create a fresh session
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+        session0 <- mkRootSession
 
         -- Generate a conversation ID for this execution
         convId <- newConversationId
