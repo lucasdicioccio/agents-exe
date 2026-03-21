@@ -478,13 +478,28 @@ handleRefreshTools = do
 -- Conversation Management
 -------------------------------------------------------------------------------
 
+-- | Create a new root session with no parent.
+mkRootSession :: IO Session
+mkRootSession = do
+    sessId <- newSessionId
+    tId <- newTurnId
+    pure $ Session
+        { turns = []
+        , sessionId = sessId
+        , forkedFromSessionId = Nothing
+        , turnId = tId
+        , parentSessionId = Nothing
+        , parentConversationId = Nothing
+        , parentAgentSlug = Nothing
+        }
+
 -- | Create a new conversation from the selected agent.
 handleNewConversationFromEditor :: EventM N TuiState ()
 handleNewConversationFromEditor = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
+            session <- liftIO mkRootSession
             runConversation baseTuiAgent session
         _ ->
             pure ()
@@ -690,3 +705,4 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+

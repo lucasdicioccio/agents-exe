@@ -41,13 +41,14 @@ module System.Agents.Session.Types (
 ) where
 
 import Control.Applicative ((<|>))
-import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=), (.!=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.Base (ConversationId)
 import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
@@ -271,13 +272,92 @@ instance FromJSON Turn where
                 UserTurn_v0 content -> pure $ UserTurn content Nothing
                 LlmTurn_v0 content -> pure $ LlmTurn content Nothing
 
-data Session
-    = Session
-    { turns :: [Turn]
-    , sessionId :: SessionId
-    , forkedFromSessionId :: Maybe SessionId
-    , turnId :: TurnId
+{- | Legacy Session structure without parent tracking fields.
+Used for backward compatibility when parsing old sessions.
+-}
+data Session_v0 = Session_v0
+    { v0_turns :: [Turn]
+    , v0_sessionId :: SessionId
+    , v0_forkedFromSessionId :: Maybe SessionId
+    , v0_turnId :: TurnId
     }
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON Session
-instance ToJSON Session
+
+instance FromJSON Session_v0 where
+    parseJSON = Aeson.withObject "Session_v0" $ \obj -> do
+        Session_v0
+            <$> obj .: "turns"
+            <*> obj .: "sessionId"
+            <*> obj .: "forkedFromSessionId"
+            <*> obj .: "turnId"
+
+{- | Session data type representing a conversation with an agent.
+
+A session tracks the turns of conversation, identifiers, and now
+parent-child relationships for nested agent calls.
+-}
+data Session = Session
+    { turns :: [Turn]
+    -- ^ The conversation turns (user queries and LLM responses)
+    , sessionId :: SessionId
+    -- ^ Unique identifier for this session
+    , forkedFromSessionId :: Maybe SessionId
+    -- ^ If this session was forked from another, the source session ID
+    , turnId :: TurnId
+    -- ^ Current turn identifier
+    , parentSessionId :: Maybe SessionId
+    -- ^ The session ID of the parent session (if this is a sub-agent call)
+    , parentConversationId :: Maybe ConversationId
+    -- ^ The conversation ID of the parent (for tracking call hierarchy)
+    , parentAgentSlug :: Maybe Text
+    -- ^ The slug of the agent that initiated this sub-agent call
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+{- | Custom ToJSON instance for Session.
+Serializes all fields including the new parent tracking fields.
+-}
+instance ToJSON Session where
+    toJSON sess =
+        Aeson.object
+            [ "turns" .= sess.turns
+            , "sessionId" .= sess.sessionId
+            , "forkedFromSessionId" .= sess.forkedFromSessionId
+            , "turnId" .= sess.turnId
+            , "parentSessionId" .= sess.parentSessionId
+            , "parentConversationId" .= sess.parentConversationId
+            , "parentAgentSlug" .= sess.parentAgentSlug
+            ]
+
+{- | Custom FromJSON instance for Session with backward compatibility.
+
+First tries to parse as the new format (with parent tracking fields),
+then falls back to the old Session_v0 format (without parent tracking).
+Missing parent fields default to Nothing.
+-}
+instance FromJSON Session where
+    parseJSON v = parseNew v <|> parseOld v
+      where
+        parseNew = Aeson.withObject "Session" $ \obj -> do
+            Session
+                <$> obj .: "turns"
+                <*> obj .: "sessionId"
+                <*> obj .: "forkedFromSessionId"
+                <*> obj .: "turnId"
+                <*> obj .:? "parentSessionId" .!= Nothing
+                <*> obj .:? "parentConversationId" .!= Nothing
+                <*> obj .:? "parentAgentSlug" .!= Nothing
+
+        parseOld = Aeson.withObject "Session" $ \obj -> do
+            -- Try parsing as old format (v0)
+            old <- Aeson.parseJSON (Aeson.Object obj)
+            pure $ Session
+                { turns = v0_turns old
+                , sessionId = v0_sessionId old
+                , forkedFromSessionId = v0_forkedFromSessionId old
+                , turnId = v0_turnId old
+                , parentSessionId = Nothing
+                , parentConversationId = Nothing
+                , parentAgentSlug = Nothing
+                }
+

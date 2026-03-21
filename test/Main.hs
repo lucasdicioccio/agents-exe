@@ -83,6 +83,7 @@ tests =
         , LuaToolboxHttpTests.luaToolboxHttpTests
         , turnRetroCompatibilityTests
         , turnRoundTripTests
+        , sessionParentTrackingTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -631,6 +632,9 @@ turnRoundTripTests =
                     , sessionId = sessionId
                     , forkedFromSessionId = Nothing
                     , turnId = turnId'
+                    , parentSessionId = Nothing
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Nothing
                     }
             
             let json = encode session
@@ -646,6 +650,9 @@ turnRoundTripTests =
                     , sessionId = origSessionId
                     , forkedFromSessionId = Just forkedFromId
                     , turnId = turnId'
+                    , parentSessionId = Nothing
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Nothing
                     }
             
             let json = encode session
@@ -704,6 +711,131 @@ turnRoundTripTests =
                     stepReasoningBytes usage @?= 10
                     stepToolBytes usage @?= 10
                 Just _ -> assertFailure "Expected LlmTurn with Just byteUsage"
+        ]
+
+-------------------------------------------------------------------------------
+-- Session Parent Tracking Tests
+-------------------------------------------------------------------------------
+
+sessionParentTrackingTests :: TestTree
+sessionParentTrackingTests =
+    testGroup
+        "Session Parent Tracking"
+        [ testCase "root session has no parent fields" $ do
+            sessionId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            
+            let session = Session
+                    { turns = []
+                    , sessionId = sessionId
+                    , forkedFromSessionId = Nothing
+                    , turnId = turnId'
+                    , parentSessionId = Nothing
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Nothing
+                    }
+            
+            SessionBase.isChildSession session @?= False
+        , testCase "child session has parent fields" $ do
+            sessionId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            
+            let session = Session
+                    { turns = []
+                    , sessionId = sessionId
+                    , forkedFromSessionId = Nothing
+                    , turnId = turnId'
+                    , parentSessionId = Just sessionId  -- Use same ID for simplicity
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Just "parent-agent"
+                    }
+            
+            SessionBase.isChildSession session @?= True
+        , testCase "mkChildSession creates session with parent info" $ do
+            parentSessId <- SessionBase.newSessionId
+            parentConvId <- Base.newConversationId
+            let parentSlug = "parent-agent"
+            
+            childSess <- SessionBase.mkChildSession parentSessId parentConvId parentSlug
+            
+            SessionBase.isChildSession childSess @?= True
+            SessionBase.parentSessionId childSess @?= Just parentSessId
+            SessionBase.parentConversationId childSess @?= Just parentConvId
+            SessionBase.parentAgentSlug childSess @?= Just parentSlug
+            turns childSess @?= []
+        , testCase "getRootConversationId returns parent conv ID for child" $ do
+            parentSessId <- SessionBase.newSessionId
+            parentConvId <- Base.newConversationId
+            childConvId <- Base.newConversationId
+            let parentSlug = "parent-agent"
+            
+            childSess <- SessionBase.mkChildSession parentSessId parentConvId parentSlug
+            rootConvId <- SessionBase.getRootConversationId childConvId childSess
+            
+            rootConvId @?= parentConvId
+        , testCase "getRootConversationId returns root conv ID for root session" $ do
+            sessionId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            rootConvId <- Base.newConversationId
+            
+            let session = Session
+                    { turns = []
+                    , sessionId = sessionId
+                    , forkedFromSessionId = Nothing
+                    , turnId = turnId'
+                    , parentSessionId = Nothing
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Nothing
+                    }
+            
+            resultConvId <- SessionBase.getRootConversationId rootConvId session
+            resultConvId @?= rootConvId
+        , testCase "Session round-trip with parent tracking fields" $ do
+            sessionId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            parentSessId <- SessionBase.newSessionId
+            parentConvId <- Base.newConversationId
+            
+            let session = Session
+                    { turns = []
+                    , sessionId = sessionId
+                    , forkedFromSessionId = Nothing
+                    , turnId = turnId'
+                    , parentSessionId = Just parentSessId
+                    , parentConversationId = Just parentConvId
+                    , parentAgentSlug = Just "parent-agent"
+                    }
+            
+            let json = encode session
+            let mDecoded = decode json :: Maybe Session
+            
+            case mDecoded of
+                Nothing -> assertFailure "Failed to decode session with parent tracking"
+                Just decoded -> do
+                    parentSessionId decoded @?= Just parentSessId
+                    parentConversationId decoded @?= Just parentConvId
+                    parentAgentSlug decoded @?= Just "parent-agent"
+        , testCase "backward compatibility - old session without parent fields" $ do
+            -- Simulate an old session JSON without parent fields
+            sessionId <- SessionBase.newSessionId
+            turnId' <- SessionBase.newTurnId
+            
+            let json = object
+                    [ "turns" .= ([] :: [Turn])
+                    , "sessionId" .= sessionId
+                    , "forkedFromSessionId" .= (Nothing :: Maybe SessionBase.SessionId)
+                    , "turnId" .= turnId'
+                    ]
+            
+            let mDecoded = decode (encode json) :: Maybe Session
+            
+            case mDecoded of
+                Nothing -> assertFailure "Failed to decode old session format"
+                Just decoded -> do
+                    parentSessionId decoded @?= Nothing
+                    parentConversationId decoded @?= Nothing
+                    parentAgentSlug decoded @?= Nothing
+                    SessionBase.isChildSession decoded @?= False
         ]
 
 -------------------------------------------------------------------------------

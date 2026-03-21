@@ -234,6 +234,21 @@ handleMsg req (CallToolRequestMsg callTool) = do
                 (Mcp.CallToolResult [toolCallContent res] Nothing)
     Rpc.sendResponse rsp
 
+-- | Create a new root session with no parent.
+mkRootSession :: IO SessionBase.Session
+mkRootSession = do
+    sessId <- SessionBase.newSessionId
+    tId <- SessionBase.newTurnId
+    pure $ SessionBase.Session
+        { SessionBase.turns = []
+        , SessionBase.sessionId = sessId
+        , SessionBase.forkedFromSessionId = Nothing
+        , SessionBase.turnId = tId
+        , SessionBase.parentSessionId = Nothing
+        , SessionBase.parentConversationId = Nothing
+        , SessionBase.parentAgentSlug = Nothing
+        }
+
 {- | Run an agent with a query using the LLM session-based approach.
 Based on the implementation in OneShot.hs and OneShotTool.hs.
 -}
@@ -250,12 +265,8 @@ runAgentWithQuery onProgress agentTree query = do
     -- Create a fresh conversation ID for this execution
     convId <- newConversationId
 
-    -- Create a fresh session with all required fields including sessionConversationId
-    session0 <-
-        SessionBase.Session []
-            <$> SessionBase.newSessionId
-            <*> pure Nothing
-            <*> SessionBase.newTurnId
+    -- Create a fresh session with all required fields including parent tracking
+    session0 <- mkRootSession
 
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)
@@ -578,3 +589,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+
