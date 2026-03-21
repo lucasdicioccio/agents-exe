@@ -72,15 +72,16 @@ mkRootSession :: IO Session
 mkRootSession = do
     sessId <- newSessionId
     tId <- newTurnId
-    pure $ Session
-        { turns = []
-        , sessionId = sessId
-        , forkedFromSessionId = Nothing
-        , turnId = tId
-        , parentSessionId = Nothing
-        , parentConversationId = Nothing
-        , parentAgentSlug = Nothing
-        }
+    pure $
+        Session
+            { turns = []
+            , sessionId = sessId
+            , forkedFromSessionId = Nothing
+            , turnId = tId
+            , parentSessionId = Nothing
+            , parentConversationId = Nothing
+            , parentAgentSlug = Nothing
+            }
 
 {- | Converts a Runtime into an IO Tool using the OneShot session-based approach.
 
@@ -299,4 +300,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
-

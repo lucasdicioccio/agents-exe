@@ -236,4 +236,3 @@ getRootConversationId rootConvId sess =
     case parentConversationId sess of
         Nothing -> pure rootConvId
         Just parentConvId -> pure parentConvId
-

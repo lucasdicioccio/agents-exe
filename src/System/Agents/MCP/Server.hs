@@ -239,15 +239,16 @@ mkRootSession :: IO SessionBase.Session
 mkRootSession = do
     sessId <- SessionBase.newSessionId
     tId <- SessionBase.newTurnId
-    pure $ SessionBase.Session
-        { SessionBase.turns = []
-        , SessionBase.sessionId = sessId
-        , SessionBase.forkedFromSessionId = Nothing
-        , SessionBase.turnId = tId
-        , SessionBase.parentSessionId = Nothing
-        , SessionBase.parentConversationId = Nothing
-        , SessionBase.parentAgentSlug = Nothing
-        }
+    pure $
+        SessionBase.Session
+            { SessionBase.turns = []
+            , SessionBase.sessionId = sessId
+            , SessionBase.forkedFromSessionId = Nothing
+            , SessionBase.turnId = tId
+            , SessionBase.parentSessionId = Nothing
+            , SessionBase.parentConversationId = Nothing
+            , SessionBase.parentAgentSlug = Nothing
+            }
 
 {- | Run an agent with a query using the LLM session-based approach.
 Based on the implementation in OneShot.hs and OneShotTool.hs.
@@ -589,4 +590,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-

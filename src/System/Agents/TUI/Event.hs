@@ -483,15 +483,16 @@ mkRootSession :: IO Session
 mkRootSession = do
     sessId <- newSessionId
     tId <- newTurnId
-    pure $ Session
-        { turns = []
-        , sessionId = sessId
-        , forkedFromSessionId = Nothing
-        , turnId = tId
-        , parentSessionId = Nothing
-        , parentConversationId = Nothing
-        , parentAgentSlug = Nothing
-        }
+    pure $
+        Session
+            { turns = []
+            , sessionId = sessId
+            , forkedFromSessionId = Nothing
+            , turnId = tId
+            , parentSessionId = Nothing
+            , parentConversationId = Nothing
+            , parentAgentSlug = Nothing
+            }
 
 -- | Create a new conversation from the selected agent.
 handleNewConversationFromEditor :: EventM N TuiState ()
@@ -705,4 +706,3 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-

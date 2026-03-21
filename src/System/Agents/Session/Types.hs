@@ -41,7 +41,7 @@ module System.Agents.Session.Types (
 ) where
 
 import Control.Applicative ((<|>))
-import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=), (.!=))
+import Data.Aeson (FromJSON, ToJSON, (.!=), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -351,13 +351,13 @@ instance FromJSON Session where
         parseOld = Aeson.withObject "Session" $ \obj -> do
             -- Try parsing as old format (v0)
             old <- Aeson.parseJSON (Aeson.Object obj)
-            pure $ Session
-                { turns = v0_turns old
-                , sessionId = v0_sessionId old
-                , forkedFromSessionId = v0_forkedFromSessionId old
-                , turnId = v0_turnId old
-                , parentSessionId = Nothing
-                , parentConversationId = Nothing
-                , parentAgentSlug = Nothing
-                }
-
+            pure $
+                Session
+                    { turns = v0_turns old
+                    , sessionId = v0_sessionId old
+                    , forkedFromSessionId = v0_forkedFromSessionId old
+                    , turnId = v0_turnId old
+                    , parentSessionId = Nothing
+                    , parentConversationId = Nothing
+                    , parentAgentSlug = Nothing
+                    }
