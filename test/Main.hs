@@ -48,6 +48,8 @@ import qualified LuaToolboxTests
 import qualified LuaToolboxJsonValueTests
 -- Import LuaToolbox HTTP module tests
 import qualified LuaToolboxHttpTests
+-- Import OS Core ECS tests
+import qualified OS.CoreTests
 
 main :: IO ()
 main = defaultMain tests
@@ -83,6 +85,7 @@ tests =
         , LuaToolboxHttpTests.luaToolboxHttpTests
         , turnRetroCompatibilityTests
         , turnRoundTripTests
+        , OS.CoreTests.coreTests
         ]
 
 openAIRateLimitTests :: TestTree
