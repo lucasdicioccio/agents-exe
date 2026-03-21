@@ -110,4 +110,3 @@ aesonToLuaValue (Aeson.Object obj) = do
             Lua.settable (Lua.nthTop 3)
         )
         (KeyMap.toList obj)
-

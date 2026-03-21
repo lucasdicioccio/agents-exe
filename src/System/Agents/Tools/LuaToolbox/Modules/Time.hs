@@ -145,4 +145,3 @@ luaDiff tracer = do
                     Lua.pushnil
                     Lua.pushstring "Invalid timestamp arguments"
                     pure 2
-

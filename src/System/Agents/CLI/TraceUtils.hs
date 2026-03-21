@@ -26,8 +26,8 @@ import qualified System.Agents.Tools as Tools
 import qualified System.Agents.Tools.Bash as Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
-import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import qualified System.Agents.Tools.IO as Tools
+import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.Skills.Types as SkillsTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
@@ -189,7 +189,6 @@ renderBuiltinToolboxTrace tr = case tr of
     SqliteTools.QueryErrorTrace _ _ -> "(query error)"
     SqliteTools.WaitingForLockTrace _ -> "(waiting for lock)"
 
-
 renderLuaToolboxTrace :: LuaTools.Trace -> Text
 renderLuaToolboxTrace tr = case tr of
     LuaTools.StateInitializedTrace name ->
@@ -217,9 +216,9 @@ renderLuaToolboxTrace tr = case tr of
         Text.unwords ["lua error:", err]
     LuaTools.SandboxViolationTrace msg ->
         Text.unwords ["lua sandbox violation:", msg]
-    -- LuaTools.ToolInvocationTrace toolTrace ->
-    --    Text.unwords ["lua tool invocation:", Text.pack (show toolTrace)]
 
+-- LuaTools.ToolInvocationTrace toolTrace ->
+--    Text.unwords ["lua tool invocation:", Text.pack (show toolTrace)]
 
 renderSystemToolboxTrace :: SystemTools.Trace -> Text
 renderSystemToolboxTrace tr = case tr of
@@ -303,4 +302,3 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
-

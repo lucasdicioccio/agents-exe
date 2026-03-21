@@ -34,6 +34,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+
 -- import Foreign.C.Types (CInt (..))
 import qualified HsLua as Lua
 import Network.HTTP.Client (
@@ -183,16 +184,17 @@ luaGet tracer config manager = do
                             let opts = fromMaybe defaultOptions mOptions
                             performRequest tracer manager "GET" url opts (RequestBodyLBS LBS.empty)
 
--- | HTTP POST request with host validation.
--- 
--- Arguments on the stack (from bottom to top):
---   nargs == 2: [url, body]
---   nargs >= 3: [url, body, options, ...]
--- 
--- When accessing from the top using nthTop:
---   - url is always at nthTop nargs (bottom of arguments)
---   - body is always at nthTop (nargs - 1)
---   - options (if present) is at nthTop 1
+{- | HTTP POST request with host validation.
+
+Arguments on the stack (from bottom to top):
+  nargs == 2: [url, body]
+  nargs >= 3: [url, body, options, ...]
+
+When accessing from the top using nthTop:
+  - url is always at nthTop nargs (bottom of arguments)
+  - body is always at nthTop (nargs - 1)
+  - options (if present) is at nthTop 1
+-}
 luaPost :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
 luaPost tracer config manager = do
     top <- Lua.gettop
@@ -313,17 +315,18 @@ data RequestOptions = RequestOptions
 defaultOptions :: RequestOptions
 defaultOptions = RequestOptions []
 
--- | Parse options table from Lua.
---
--- This function extracts HTTP request options from a Lua table.
--- Currently supports parsing the "headers" key which should contain
--- a table of header name-value pairs.
---
--- Returns 'Nothing' if the value at the given index is not a table.
--- Returns 'Just RequestOptions' with parsed headers otherwise.
---
--- Note: This function does NOT pop the input table from the stack.
--- The caller is responsible for stack cleanup.
+{- | Parse options table from Lua.
+
+This function extracts HTTP request options from a Lua table.
+Currently supports parsing the "headers" key which should contain
+a table of header name-value pairs.
+
+Returns 'Nothing' if the value at the given index is not a table.
+Returns 'Just RequestOptions' with parsed headers otherwise.
+
+Note: This function does NOT pop the input table from the stack.
+The caller is responsible for stack cleanup.
+-}
 parseOptions :: Lua.StackIndex -> Lua.LuaE Lua.Exception (Maybe RequestOptions)
 parseOptions idx = do
     ltype <- Lua.ltype idx
@@ -337,20 +340,22 @@ parseOptions idx = do
             _ <- Lua.gettable absIdx
             -- Check if the result is a table
             headersType <- Lua.ltype (Lua.nthTop 1)
-            headers <- if headersType == Lua.TypeTable
-                then do
-                    -- Parse the headers table
-                    hdrs <- parseHeadersTable (Lua.nthTop 1)
-                    Lua.pop 1  -- pop the headers table
-                    pure hdrs
-                else do
-                    Lua.pop 1  -- pop the non-table value (likely nil)
-                    pure []
+            headers <-
+                if headersType == Lua.TypeTable
+                    then do
+                        -- Parse the headers table
+                        hdrs <- parseHeadersTable (Lua.nthTop 1)
+                        Lua.pop 1 -- pop the headers table
+                        pure hdrs
+                    else do
+                        Lua.pop 1 -- pop the non-table value (likely nil)
+                        pure []
             pure $ Just $ RequestOptions headers
 
--- | Parse a headers table into a list of key-value pairs.
--- The headers table is at the given index (relative to current top).
--- This function does NOT pop the headers table.
+{- | Parse a headers table into a list of key-value pairs.
+The headers table is at the given index (relative to current top).
+This function does NOT pop the headers table.
+-}
 parseHeadersTable :: Lua.StackIndex -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
 parseHeadersTable _idx = do
     -- Use Lua.next to iterate over the table.
@@ -362,7 +367,7 @@ parseHeadersTable _idx = do
     -- - After pushing nil, the table is at nthTop 2
     -- - The nil key is at nthTop 1
     tableIdx = Lua.nthTop 2
-    
+
     go :: [(ByteString, ByteString)] -> Lua.LuaE Lua.Exception [(ByteString, ByteString)]
     go acc = do
         hasNext <- Lua.next tableIdx
@@ -377,7 +382,7 @@ parseHeadersTable _idx = do
                 -- - The value is at nthTop 1 (top of stack)
                 keyBs <- Lua.tostring' (Lua.nthTop 2)
                 valBs <- Lua.tostring' (Lua.nthTop 1)
-                Lua.pop 1  -- pop value, keep key for next iteration
+                Lua.pop 1 -- pop value, keep key for next iteration
                 go ((keyBs, valBs) : acc)
 
 -- | Perform HTTP request.
@@ -436,4 +441,3 @@ pushResponse response = do
     Lua.pushstring "body"
     Lua.pushstring (LBS.toStrict $ responseBody response)
     Lua.settable (Lua.nthTop 3)
-
