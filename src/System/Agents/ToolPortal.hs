@@ -379,8 +379,6 @@ callResultToJson (DeveloperToolError _ err) =
         , "error" .= show err
         , "toolType" .= ("devtool-err" :: Text)
         ]
-
-{-
 callResultToJson (LuaToolResult _ result) =
     Aeson.object
         [ "type" .= ("success" :: Text)
@@ -393,4 +391,3 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
--}

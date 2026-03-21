@@ -14,6 +14,7 @@ It supports registration of various tool types:
 * SQLite tools - Tools for executing SQL queries against SQLite databases
 * System tools - Tools for gathering system information
 * Developer tools - Tools for writing/validating agents and tools
+* Lua tools - Sandboxed Lua scripts for tool orchestration
 
 For OpenAPI tools, special handling is done for name normalization:
 OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
@@ -40,6 +41,8 @@ module System.Agents.ToolRegistration (
     registerSystemTools,
     registerDeveloperTool,
     registerDeveloperTools,
+    registerLuaTool,
+    registerLuaTools,
 
     -- * Naming policies
     io2LLMName,
@@ -50,6 +53,10 @@ module System.Agents.ToolRegistration (
     sqlite2LLMName,
     system2LLMName,
     developer2LLMName,
+    lua2LLMName,
+
+    -- * Tool builders
+    luaTool,
 
     -- * Schema helpers
     mapArg,
@@ -66,7 +73,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import Prod.Tracer (Tracer, contramap)
-import System.Agents.Base (DeveloperToolCapability (..), SystemToolCapability (..))
+import System.Agents.Base (DeveloperToolCapability (..), LuaToolboxDescription(..), SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.MCP.Client as McpClient
@@ -80,9 +87,11 @@ import System.Agents.Tools.Base (
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
+import qualified System.Agents.Tools.Context as Context
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import System.Agents.Tools.McpToolbox (callTool)
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (
@@ -177,6 +186,14 @@ Generates an LLM-safe tool name in the format: @developer_{toolboxName}_{toolNam
 developer2LLMName :: DeveloperTools.Toolbox -> Text -> OpenAI.ToolName
 developer2LLMName box tName =
     OpenAI.ToolName (mconcat ["developer_", box.toolboxName, "_", tName])
+
+{- | Naming policy for Lua tools.
+
+Generates an LLM-safe tool name in the format: @lua_{toolboxName}_{toolName}@
+-}
+lua2LLMName :: LuaTools.Toolbox -> Text -> OpenAI.ToolName
+lua2LLMName box toolName =
+    OpenAI.ToolName (mconcat ["lua_", box.toolboxName, "_", toolName])
 
 -------------------------------------------------------------------------------
 
@@ -973,6 +990,126 @@ registerDeveloperTools box =
         Right reg -> Right [reg]
 
 -------------------------------------------------------------------------------
+-- Lua Tool Registration
+-------------------------------------------------------------------------------
+
+{- | Register a Lua toolbox with the LLM system.
+
+Lua toolboxes expose:
+* execute: Execute arbitrary Lua code
+
+The 'execute' tool is always available.
+
+Returns 'Left' if the tool cannot be registered.
+-}
+registerLuaTool ::
+    LuaTools.Toolbox ->
+    Either String ToolRegistration
+registerLuaTool box =
+    let
+        toolName = "execute"
+        llmName = lua2LLMName box toolName
+
+        paramProps =
+            [ ParamProperty
+                { propertyKey = "script"
+                , propertyType = StringParamType
+                , propertyDescription = "Lua script source code to execute"
+                , propertyRequired = True
+                }
+            , ParamProperty
+                { propertyKey = "timeout"
+                , propertyType = NumberParamType
+                , propertyDescription = "Optional timeout override in seconds (default: toolbox configured timeout)"
+                , propertyRequired = False
+                }
+            ]
+
+        -- Extract the description from the toolbox config
+        toolDescription = luaToolboxDescription (LuaTools.toolboxConfig box)
+
+        openaiTool =
+            OpenAI.Tool
+                { OpenAI.toolName = llmName
+                , OpenAI.toolDescription = toolDescription
+                , OpenAI.toolParamProperties = paramProps
+                }
+
+        -- Create the tool
+        tool' = luaTool box
+
+        -- Find function - matches on the LLM name
+        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find call =
+            if call.toolCallFunction.toolCallFunctionName == llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+     in
+        Right $
+            ToolRegistration
+                { innerTool = mapToolResult (const ()) tool'
+                , declareTool = openaiTool
+                , findTool = find
+                }
+
+{- | Register all tools from a Lua toolbox.
+
+Lua toolboxes expose a single execute tool.
+-}
+registerLuaTools ::
+    LuaTools.Toolbox ->
+    IO (Either String [ToolRegistration])
+registerLuaTools box =
+    pure $ case registerLuaTool box of
+        Left err -> Left err
+        Right reg -> Right [reg]
+
+{- | Builder for a Lua toolbox tool.
+
+This creates a tool that executes Lua scripts in a sandboxed environment.
+The tool accepts a 'script' parameter containing the Lua source code.
+
+The tool execution:
+1. Extracts the script from the arguments
+2. Gets the tool portal and allowed tools from the execution context
+3. Executes the script with portal access (if available)
+4. Returns the result as JSON
+
+Errors are properly caught and returned as LuaToolError.
+-}
+luaTool :: LuaTools.Toolbox -> Tool ()
+luaTool box =
+    Tool
+        { toolDef = LuaTool box.toolboxName
+        , toolRun = run
+        }
+  where
+    call = ()
+    run tracer ctx (Aeson.Object v) = do
+        -- Extract script from arguments
+        case KeyMap.lookup (AesonKey.fromText "script") v of
+            Just (Aeson.String script) -> do
+                -- Get portal and allowed tools from context
+                let mPortal = Context.ctxToolPortal ctx
+                -- let allowedTools = Context.ctxAllowedTools ctx
+
+                -- Execute script with portal, passing the tracer for detailed logging
+                result <-
+                    LuaTools.executeScriptWithPortal
+                        (contramap LuaToolsTrace tracer)
+                        box
+                        script
+                        mPortal
+
+                case result of
+                    Left err -> pure $ LuaToolError call (Text.pack $ show err)
+                    Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
+            _ ->
+                pure $ LuaToolError call "Missing 'script' parameter or invalid type"
+    run _tracer _ctx _ =
+        pure $ LuaToolError call "Arguments must be a JSON object"
+
+-------------------------------------------------------------------------------
 -- Internal tool builders (copied from Tools to avoid import cycle)
 -------------------------------------------------------------------------------
 
@@ -1208,3 +1345,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

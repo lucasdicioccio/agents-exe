@@ -55,6 +55,8 @@ data ToolDef
       SystemTool !SystemTools.ToolDescription
     | -- | Developer tool description
       DeveloperTool !DeveloperTools.ToolDescription
+    | -- | Lua tool: toolbox name (Lua scripts are anonymous)
+      LuaTool !Text
     | -- | Skill tool: skill name and action (describe, enable, disable)
       SkillTool !SkillTypes.SkillName !Text
     | -- | Skill script tool: skill name and script name
@@ -108,6 +110,10 @@ data CallResult call
       DeveloperToolSpecResult call Text
     | -- | Developer tool execution failed
       DeveloperToolError call DeveloperTools.DeveloperToolError
+    | -- | Lua tool executed successfully with result
+      LuaToolResult call Aeson.Value  -- NOTE: the Aeson.Value is an array of results
+    | -- | Lua tool execution failed
+      LuaToolError call Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -134,6 +140,8 @@ mapCallResult f c =
         (DeveloperToolScaffoldResult v r) -> DeveloperToolScaffoldResult (f v) r
         (DeveloperToolSpecResult v r) -> DeveloperToolSpecResult (f v) r
         (DeveloperToolError v e) -> DeveloperToolError (f v) e
+        (LuaToolResult v r) -> LuaToolResult (f v) r
+        (LuaToolError v e) -> LuaToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
 mapToolResult :: (a -> b) -> Tool a -> Tool b
@@ -164,6 +172,8 @@ extractCall (DeveloperToolResult c _) = c
 extractCall (DeveloperToolScaffoldResult c _) = c
 extractCall (DeveloperToolSpecResult c _) = c
 extractCall (DeveloperToolError c _) = c
+extractCall (LuaToolResult c _) = c
+extractCall (LuaToolError c _) = c
 
 -------------------------------------------------------------------------------
 -- Byte Counting Helpers
@@ -218,6 +228,10 @@ callResultByteSize (DeveloperToolSpecResult _ content) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String content)))
 callResultByteSize (DeveloperToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
+callResultByteSize (LuaToolResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (LuaToolError _ err) =
+    fromIntegral (LByteString.length (Aeson.encode (Aeson.String err)))
 
 {- | Calculate total bytes for a list of tool responses.
 
