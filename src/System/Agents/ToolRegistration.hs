@@ -73,7 +73,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import Prod.Tracer (Tracer, contramap)
-import System.Agents.Base (DeveloperToolCapability (..), LuaToolboxDescription(..), SystemToolCapability (..))
+import System.Agents.Base (DeveloperToolCapability (..), LuaToolboxDescription (..), SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.MCP.Client as McpClient
@@ -1345,4 +1345,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-

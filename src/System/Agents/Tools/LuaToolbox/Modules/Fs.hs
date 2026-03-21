@@ -498,4 +498,3 @@ pushStringList items = do
             Lua.settable (Lua.nthTop 3)
         )
         (zip [1 ..] items)
-

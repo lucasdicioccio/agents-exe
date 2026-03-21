@@ -4,8 +4,8 @@
 {-# LANGUAGE TypeApplications #-}
 
 module System.Agents.Tools.LuaToolbox.Utils (
-  luaToJsonValue,
-  toName
+    luaToJsonValue,
+    toName,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -82,18 +82,19 @@ convertTable = do
         then convertArray
         else convertObject
 
--- | Check if the table at top of stack is an array
---
--- An array is defined as a table with sequential integer keys starting at 1.
--- The table is at position 1 (top of stack when this function is called).
--- We push nil as the first key, then iterate using Lua.next.
---
--- Stack layout during iteration:
---   - nthTop 3: the table (original)
---   - nthTop 2: the current key
---   - nthTop 1: the current value
---
--- We must check the KEY (nthTop 2) to determine if it's an array index.
+{- | Check if the table at top of stack is an array
+
+An array is defined as a table with sequential integer keys starting at 1.
+The table is at position 1 (top of stack when this function is called).
+We push nil as the first key, then iterate using Lua.next.
+
+Stack layout during iteration:
+  - nthTop 3: the table (original)
+  - nthTop 2: the current key
+  - nthTop 1: the current value
+
+We must check the KEY (nthTop 2) to determine if it's an array index.
+-}
 isArray :: Lua.Lua Bool
 isArray = do
     Lua.pushnil -- first key (pushed onto stack, now at position 1)
@@ -105,28 +106,28 @@ isArray = do
         -- After a successful call, it pops the key and pushes the next key-value pair.
         hasNext <- Lua.next (Lua.nthTop 2)
         if not hasNext
-            then pure True  -- No more keys, all were sequential integers starting at 1
+            then pure True -- No more keys, all were sequential integers starting at 1
             else do
                 -- After Lua.next succeeds:
                 -- Stack: table (nthTop 3), key (nthTop 2), value (nthTop 1)
                 -- Check if the KEY is the expected integer index
-                isNum <- Lua.isnumber (Lua.nthTop 2)  -- Check the KEY, not the value
+                isNum <- Lua.isnumber (Lua.nthTop 2) -- Check the KEY, not the value
                 if isNum
                     then do
-                        mIdx <- Lua.tointeger (Lua.nthTop 2)  -- Read the KEY
+                        mIdx <- Lua.tointeger (Lua.nthTop 2) -- Read the KEY
                         case mIdx of
                             Just idx
                                 | idx == fromIntegral expectedIdx -> do
                                     -- Key matches expected index, pop value and continue
-                                    Lua.pop 1  -- pop value, keep key for next iteration
+                                    Lua.pop 1 -- pop value, keep key for next iteration
                                     isSequential (expectedIdx + 1)
                             _ -> do
                                 -- Key is not the expected sequential integer, not an array
-                                Lua.pop 2  -- pop key and value
+                                Lua.pop 2 -- pop key and value
                                 pure False
                     else do
                         -- Key is not a number, not an array
-                        Lua.pop 2  -- pop key and value
+                        Lua.pop 2 -- pop key and value
                         pure False
 
 -- | Convert array table to JSON Array
@@ -183,4 +184,3 @@ collectObjectPairs = do
                 val <- luaToJsonValue -- This pops the value
                 -- Stack: table, key
                 go ((Aeson.Key.fromText (Text.decodeUtf8 key), val) : acc)
-
