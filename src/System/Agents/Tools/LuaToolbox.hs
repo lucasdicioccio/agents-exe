@@ -126,16 +126,15 @@ module System.Agents.Tools.LuaToolbox (
     module System.Agents.Tools.LuaToolbox.Modules.Time,
 ) where
 
-import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar, threadDelay)
+import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, try)
-import Control.Monad (void, when, replicateM)
+import Control.Monad (replicateM, void, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
 import qualified HsLua as Lua
-import Control.Concurrent.Async (race)
-import Control.Concurrent (threadDelay)
 
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
@@ -605,11 +604,11 @@ async and timeout mechanisms, not within Lua itself.
 -}
 applyTimeout :: Int -> IO a -> IO (Maybe a)
 applyTimeout seconds go =
-  fmap eitherToMaybe $ race (threadDelay (seconds * 1000000)) (go)
-  where 
+    fmap eitherToMaybe $ race (threadDelay (seconds * 1000000)) (go)
+  where
     eitherToMaybe :: Either a b -> Maybe b
     eitherToMaybe (Right v) = Just v
-    eitherToMaybe _  = Nothing
+    eitherToMaybe _ = Nothing
 
 -------------------------------------------------------------------------------
 -- Script Execution
@@ -736,4 +735,3 @@ executeScriptInternal tracer toolbox script _ = do
                         { resultValues = val
                         , resultExecutionTime = execTime
                         }
-

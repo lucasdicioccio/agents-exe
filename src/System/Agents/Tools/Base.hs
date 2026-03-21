@@ -111,7 +111,7 @@ data CallResult call
     | -- | Developer tool execution failed
       DeveloperToolError call DeveloperTools.DeveloperToolError
     | -- | Lua tool executed successfully with result
-      LuaToolResult call Aeson.Value  -- NOTE: the Aeson.Value is an array of results
+      LuaToolResult call Aeson.Value -- NOTE: the Aeson.Value is an array of results
     | -- | Lua tool execution failed
       LuaToolError call Text
     deriving (Show)
