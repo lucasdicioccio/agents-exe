@@ -78,22 +78,23 @@ import System.Agents.OS.Core.Types (
     ComponentStore (..),
     ComponentTypeId,
     EntityId,
-    newEntityId,
+    deleteComponent,
     emptyComponentStore,
     insertComponent,
     lookupComponent,
-    deleteComponent,
+    newEntityId,
  )
 
 -------------------------------------------------------------------------------
 -- World
 -------------------------------------------------------------------------------
 
--- | The world contains all component stores.
---
--- Each component type is stored in its own TVar, allowing for
--- fine-grained concurrency control. Components are stored as @Any@
--- to allow heterogeneous storage.
+{- | The world contains all component stores.
+
+Each component type is stored in its own TVar, allowing for
+fine-grained concurrency control. Components are stored as @Any@
+to allow heterogeneous storage.
+-}
 newtype World = World
     { componentStores :: HashMap ComponentTypeId (TVar Any)
     }
@@ -106,10 +107,11 @@ newWorld = pure $ World HashMap.empty
 -- Component Store Management
 -------------------------------------------------------------------------------
 
--- | Register a new component store for a component type.
---
--- This creates an empty 'ComponentStore' wrapped in a 'TVar'.
--- If a store already exists for this component type, it is replaced.
+{- | Register a new component store for a component type.
+
+This creates an empty 'ComponentStore' wrapped in a 'TVar'.
+If a store already exists for this component type, it is replaced.
+-}
 registerComponentStore ::
     forall a.
     (Component a, Typeable a) =>
@@ -134,8 +136,9 @@ getComponentStoreVar ::
 getComponentStoreVar (World stores) _proxy =
     HashMap.lookup (componentId (Proxy @a)) stores
 
--- | Get the component store for a specific component type.
--- Returns Nothing if the store hasn't been registered.
+{- | Get the component store for a specific component type.
+Returns Nothing if the store hasn't been registered.
+-}
 getComponentStore ::
     forall a.
     (Component a, Typeable a) =>
@@ -158,16 +161,18 @@ getComponentStore world proxy =
 -- Entity Operations
 -------------------------------------------------------------------------------
 
--- | Create a new entity by generating a fresh EntityId.
---
--- Note: This just generates the ID. Use 'setComponent' to attach
--- components to the entity.
+{- | Create a new entity by generating a fresh EntityId.
+
+Note: This just generates the ID. Use 'setComponent' to attach
+components to the entity.
+-}
 createEntity :: IO EntityId
 createEntity = newEntityId
 
--- | Check if an entity has at least one component in the world.
---
--- This is a potentially expensive operation as it checks all component stores.
+{- | Check if an entity has at least one component in the world.
+
+This is a potentially expensive operation as it checks all component stores.
+-}
 entityExists :: World -> EntityId -> STM Bool
 entityExists (World stores) eid = do
     anyHasComponent <- mapM (checkStore eid) (HashMap.elems stores)
@@ -186,9 +191,10 @@ entityExists (World stores) eid = do
 -- Component Operations
 -------------------------------------------------------------------------------
 
--- | Get a component for an entity.
--- Returns Nothing if the entity doesn't have this component
--- or if the component store isn't registered.
+{- | Get a component for an entity.
+Returns Nothing if the entity doesn't have this component
+or if the component store isn't registered.
+-}
 getComponent ::
     forall a.
     (Component a, Typeable a) =>
@@ -203,9 +209,10 @@ getComponent world eid =
             let compStore = unsafeCoerce anyVal :: ComponentStore a
             pure $ lookupComponent eid compStore
 
--- | Set a component for an entity.
--- Creates the component if it doesn't exist, updates it otherwise.
--- Does nothing if the component store isn't registered.
+{- | Set a component for an entity.
+Creates the component if it doesn't exist, updates it otherwise.
+Does nothing if the component store isn't registered.
+-}
 setComponent ::
     forall a.
     (Component a, Typeable a) =>
@@ -222,9 +229,10 @@ setComponent world eid comp =
             let newStore = insertComponent eid comp compStore
             writeTVar tvar (unsafeCoerce newStore)
 
--- | Modify a component for an entity.
--- Does nothing if the entity doesn't have this component
--- or if the component store isn't registered.
+{- | Modify a component for an entity.
+Does nothing if the entity doesn't have this component
+or if the component store isn't registered.
+-}
 modifyComponent ::
     forall a.
     (Component a, Typeable a) =>
@@ -244,10 +252,11 @@ modifyComponent world eid f =
                     let newStore = insertComponent eid (f comp) compStore
                     writeTVar tvar (unsafeCoerce newStore)
 
--- | Remove a component from an entity.
--- Does nothing if the entity doesn't have this component.
---
--- Use with TypeApplications: @removeComponent @MyComponent world entityId@
+{- | Remove a component from an entity.
+Does nothing if the entity doesn't have this component.
+
+Use with TypeApplications: @removeComponent @MyComponent world entityId@
+-}
 removeComponent ::
     forall a.
     (Component a, Typeable a) =>
@@ -263,9 +272,10 @@ removeComponent world eid =
             let newStore = deleteComponent eid compStore
             writeTVar tvar (unsafeCoerce newStore)
 
--- | Check if an entity has a specific component.
---
--- Use with TypeApplications: @hasComponent @MyComponent world entityId@
+{- | Check if an entity has a specific component.
+
+Use with TypeApplications: @hasComponent @MyComponent world entityId@
+-}
 hasComponent ::
     forall a.
     (Component a, Typeable a) =>
@@ -280,9 +290,10 @@ hasComponent world eid = do
 -- Query Operations
 -------------------------------------------------------------------------------
 
--- | Get all entities that have a specific component.
---
--- Use with TypeApplications: @allEntitiesWithComponent @MyComponent world@
+{- | Get all entities that have a specific component.
+
+Use with TypeApplications: @allEntitiesWithComponent @MyComponent world@
+-}
 allEntitiesWithComponent ::
     forall a.
     (Component a, Typeable a) =>
@@ -295,4 +306,3 @@ allEntitiesWithComponent world =
             anyVal <- readTVar tvar
             let ComponentStore storeMap = unsafeCoerce anyVal :: ComponentStore a
             pure $ HashMap.keys storeMap
-

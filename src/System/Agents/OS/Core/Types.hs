@@ -63,9 +63,9 @@ module System.Agents.OS.Core.Types (
 ) where
 
 import Data.Aeson (FromJSON, ToJSON)
-import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import Data.Hashable (Hashable)
 import Data.Proxy (Proxy)
 import Data.Text (Text)
 import Data.UUID (UUID)
@@ -89,9 +89,10 @@ newEntityId = EntityId <$> UUID.nextRandom
 -- Phantom-typed Entity IDs
 -------------------------------------------------------------------------------
 
--- | Phantom-typed entity ID for agents.
---
--- The phantom type ensures type safety when working with agent entities.
+{- | Phantom-typed entity ID for agents.
+
+The phantom type ensures type safety when working with agent entities.
+-}
 newtype AgentId = AgentId {unAgentId :: EntityId}
     deriving stock (Eq, Ord, Show, Generic)
     deriving newtype (Hashable, FromJSON, ToJSON)
@@ -125,32 +126,36 @@ newtype ResourceId = ResourceId {unResourceId :: EntityId}
 -- Component System
 -------------------------------------------------------------------------------
 
--- | Type-level identifier for component types.
---
--- Each component type must have a unique ID to prevent collisions
--- in the heterogeneous storage. These IDs are assigned manually for now.
+{- | Type-level identifier for component types.
+
+Each component type must have a unique ID to prevent collisions
+in the heterogeneous storage. These IDs are assigned manually for now.
+-}
 newtype ComponentTypeId = ComponentTypeId {unComponentTypeId :: Int}
     deriving stock (Eq, Ord, Show, Generic)
     deriving newtype (Hashable, FromJSON, ToJSON)
 
--- | A component is any data type that can be attached to an entity.
---
--- The 'componentId' function provides a type-level identifier used
--- for routing components to their appropriate storage.
+{- | A component is any data type that can be attached to an entity.
+
+The 'componentId' function provides a type-level identifier used
+for routing components to their appropriate storage.
+-}
 class Component a where
     componentId :: Proxy a -> ComponentTypeId
 
--- | Type alias for toolbox binding specifications.
--- Placeholder for the full binding spec type.
+{- | Type alias for toolbox binding specifications.
+Placeholder for the full binding spec type.
+-}
 type ToolboxBindingSpec = Text
 
 -------------------------------------------------------------------------------
 -- Component Storage
 -------------------------------------------------------------------------------
 
--- | Storage for all components of a specific type.
---
--- Uses a HashMap for O(1) lookups by EntityId.
+{- | Storage for all components of a specific type.
+
+Uses a HashMap for O(1) lookups by EntityId.
+-}
 newtype ComponentStore a = ComponentStore
     { store :: HashMap EntityId a
     }
@@ -173,4 +178,3 @@ lookupComponent eid (ComponentStore s) = HashMap.lookup eid s
 deleteComponent :: EntityId -> ComponentStore a -> ComponentStore a
 deleteComponent eid (ComponentStore s) =
     ComponentStore $ HashMap.delete eid s
-

@@ -41,8 +41,9 @@ import System.Agents.OS.Core.World
 -- Agent Components
 -------------------------------------------------------------------------------
 
--- | Configuration component for agents.
--- This is static configuration that doesn't change during agent execution.
+{- | Configuration component for agents.
+This is static configuration that doesn't change during agent execution.
+-}
 data AgentConfig = AgentConfig
     { agentName :: Text
     , agentModel :: ModelConfig
@@ -57,8 +58,9 @@ instance ToJSON AgentConfig
 instance Component AgentConfig where
     componentId _ = ComponentTypeId 1
 
--- | Runtime state component for agents.
--- This changes during agent execution and tracks the current status.
+{- | Runtime state component for agents.
+This changes during agent execution and tracks the current status.
+-}
 data AgentState = AgentState
     { agentStatus :: AgentStatus
     , agentCurrentConversation :: Maybe ConversationId
@@ -102,8 +104,9 @@ instance ToJSON ModelConfig
 -- Toolbox Components
 -------------------------------------------------------------------------------
 
--- | Configuration component for toolboxes.
--- This is static configuration that doesn't change during toolbox lifetime.
+{- | Configuration component for toolboxes.
+This is static configuration that doesn't change during toolbox lifetime.
+-}
 data ToolboxConfig = ToolboxConfig
     { toolboxName :: Text
     , toolboxType :: ToolboxType
@@ -117,8 +120,9 @@ instance ToJSON ToolboxConfig
 instance Component ToolboxConfig where
     componentId _ = ComponentTypeId 3
 
--- | Runtime state component for toolboxes.
--- This tracks the current state of a toolbox.
+{- | Runtime state component for toolboxes.
+This tracks the current state of a toolbox.
+-}
 data ToolboxState = ToolboxState
     { toolboxScope :: ResourceScope
     , toolboxStatus :: ToolboxStatus
@@ -186,4 +190,3 @@ data ToolboxStatus
 
 instance FromJSON ToolboxStatus
 instance ToJSON ToolboxStatus
-
