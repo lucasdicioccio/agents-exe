@@ -56,6 +56,11 @@ library agents-lib
                     , System.Agents.OS.Core
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
+                    , System.Agents.OS.Resources
+                    , System.Agents.OS.Resources.Types
+                    , System.Agents.OS.Resources.Sqlite
+                    , System.Agents.OS.Resources.Lua
+                    , System.Agents.OS.Resources.Http
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
@@ -235,6 +240,7 @@ test-suite agents-tests
                     , McpImplementationTests
                     , OpenAPIToolboxTests
                     , OS.CoreTests
+                    , OS.ResourcesTests
                     , PostgRESTParseTest
                     , SessionEditTests
                     , SessionPrintTests
@@ -258,5 +264,6 @@ test-suite agents-tests
                       tasty-hunit,
                       temporary,
                       time,
+                      unordered-containers,
                       vector
 
