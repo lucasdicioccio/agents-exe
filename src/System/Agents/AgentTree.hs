@@ -56,6 +56,12 @@ module System.Agents.AgentTree (
     -- * Configuration loading helpers
     loadOpenAPIToolboxDescription,
     loadPostgRESTToolboxDescription,
+
+    -- * Sub-agent session configuration (re-exported from OneShotTool)
+    SubAgentSessionConfig (..),
+    defaultSubAgentConfig,
+    turnAgentRuntimeIntoIOTool,
+    turnAgentRuntimeIntoIOToolWithCallbacks,
 ) where
 
 import Control.Concurrent.STM (atomically, modifyTVar')
@@ -78,6 +84,12 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import System.Process (proc)
 
+import System.Agents.AgentTree.OneShotTool (
+    SubAgentSessionConfig (..),
+    defaultSubAgentConfig,
+    turnAgentRuntimeIntoIOTool,
+    turnAgentRuntimeIntoIOToolWithCallbacks,
+ )
 import System.Agents.ApiKeys
 import System.Agents.Base (
     Agent,
@@ -1211,3 +1223,4 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
+
