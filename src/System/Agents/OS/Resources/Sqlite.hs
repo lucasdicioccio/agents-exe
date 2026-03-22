@@ -123,4 +123,3 @@ withSqliteAccessor config action = do
     close data_ = do
         SQLite.close (sqliteResourceConnection data_)
         Direct.close (sqliteResourceDirectDb data_)
-

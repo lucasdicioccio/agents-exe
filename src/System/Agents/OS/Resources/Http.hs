@@ -144,4 +144,3 @@ withHttpAccessor config action = do
         -- HTTP managers don't require explicit cleanup
         -- Connections are closed when the manager is garbage collected
         pure ()
-

@@ -143,8 +143,8 @@ createResource ::
     ResourceContext ->
     ResourceType ->
     (ResourceId -> IO ResourceHandle) ->
+    -- | Returns the ResourceId of the created resource
     IO ResourceId
-    -- ^ Returns the ResourceId of the created resource
 createResource ctx resType factory = do
     -- Generate a new entity ID for this resource
     eid <- newEntityId
@@ -239,8 +239,7 @@ cleanupScope registry scopeLevel = do
                 -- Remove from registry regardless of cleanup success
                 atomically $ removeResourceHandleSTM registry (resourceId info)
 
-{- | Remove a resource handle from the registry (internal).
--}
+-- | Remove a resource handle from the registry (internal).
 removeResourceHandleSTM :: ResourceRegistry -> ResourceId -> STM ()
 removeResourceHandleSTM registry rid = do
     modifyTVar' (registryHandles registry) $ HashMap.delete rid
@@ -261,8 +260,7 @@ findResourcesInScope _registry _scopeLevel = do
     -- This would require integrating with the World component storage.
     pure []
 
-{- | Look up a resource handle by ID.
--}
+-- | Look up a resource handle by ID.
 lookupResourceHandle :: ResourceRegistry -> ResourceId -> IO (Maybe ResourceHandle)
 lookupResourceHandle registry rid =
     atomically $ lookupResourceHandleSTM registry rid
@@ -328,11 +326,9 @@ isResourceValid = isScopeValid
 -- Registry Queries
 -------------------------------------------------------------------------------
 
-{- | Get the total number of resources in the registry.
--}
+-- | Get the total number of resources in the registry.
 getResourceCount :: ResourceRegistry -> IO Int
 getResourceCount registry = do
     atomically $ do
         handles <- readTVar (registryHandles registry)
         pure $ HashMap.size handles
-

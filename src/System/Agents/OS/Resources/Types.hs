@@ -284,17 +284,20 @@ data ResourceHandle = ResourceHandle
     , handleCleanup :: IO ()
     -- ^ Action to clean up the resource. Must be idempotent.
     , handleAccess :: forall a. (ResourceAccessor -> IO a) -> IO a
-    -- ^ Function to access the resource. The accessor is only valid
-    -- during the execution of the provided function.
+    {- ^ Function to access the resource. The accessor is only valid
+    during the execution of the provided function.
+    -}
     }
 
--- | Opaque type for accessing a resource.
--- The actual type is determined by the resource type.
+{- | Opaque type for accessing a resource.
+The actual type is determined by the resource type.
+-}
 newtype ResourceAccessor = ResourceAccessor
     { unResourceAccessor :: ()
     }
-    -- This is a placeholder. In practice, specific resource modules
-    -- will define their own accessor types (e.g., SqliteAccessor).
+
+-- This is a placeholder. In practice, specific resource modules
+-- will define their own accessor types (e.g., SqliteAccessor).
 
 {- | Registry for tracking all resources.
 
@@ -339,4 +342,3 @@ data ResourceContext = ResourceContext
     { contextScope :: [ScopeLevel]
     , contextRegistry :: ResourceRegistry
     }
-

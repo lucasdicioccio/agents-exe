@@ -128,4 +128,3 @@ withLuaAccessor config action = do
                 }
     close data_ = do
         Lua.close (luaResourceState data_)
-
