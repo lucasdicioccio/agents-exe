@@ -110,14 +110,15 @@ Determines the concurrency semantics for accessing a resource:
 * 'StatelessAccess': No synchronization needed (e.g., immutable data)
 -}
 data AccessPattern
-    = ExclusiveAccess
-    | -- ^ Only one accessor at a time
+    = -- | Only one accessor at a time
+      ExclusiveAccess
+    | -- | Multiple readers or single writer
       ReadWriteAccess
-    | -- ^ Multiple readers or single writer
+    | -- | Connection pool with max size
       PoolAccess Int
-    | -- ^ Connection pool with max size
-      StatelessAccess
-    deriving -- ^ No synchronization needed
+    | StatelessAccess
+    deriving
+        -- \^ No synchronization needed
         (Show, Eq, Generic)
 
 instance FromJSON AccessPattern
@@ -215,14 +216,14 @@ Each variant provides different concurrency semantics:
 Note: This is runtime-only and cannot be serialized.
 -}
 data SyncPrimitive
-    = ExclusiveLock (TMVar ())
-    | -- ^ Exclusive access via TMVar
+    = -- | Exclusive access via TMVar
+      ExclusiveLock (TMVar ())
+    | -- | Reader-writer lock
       ReadWriteLock RWLock
-    | -- ^ Reader-writer lock
+    | -- | Bounded resource pool
       PoolLock (TBQueue ResourceToken)
-    | -- ^ Bounded resource pool
+    | -- | No synchronization needed
       NoLock
-    -- ^ No synchronization needed
 
 instance Show SyncPrimitive where
     show (ExclusiveLock _) = "ExclusiveLock{..}"
@@ -272,16 +273,17 @@ These errors can occur when attempting to access or manipulate resources:
 * 'ResourceBusy': Resource is in use and unavailable
 -}
 data ResourceError
-    = ResourceNotFound ResourceId
-    | -- ^ Resource not found in registry
+    = -- | Resource not found in registry
+      ResourceNotFound ResourceId
+    | -- | Acquisition timed out
       ResourceAccessTimeout ResourceId NominalDiffTime
-    | -- ^ Acquisition timed out
+    | -- | Resource scope not valid in current context
       ResourceScopeInvalid ResourceId [ScopeLevel]
-    | -- ^ Resource scope not valid in current context
+    | -- | Resource has been closed
       ResourceClosed ResourceId
-    | -- ^ Resource has been closed
-      ResourceBusy ResourceId
-    deriving -- ^ Resource is busy
+    | ResourceBusy ResourceId
+    deriving
+        -- \^ Resource is busy
         (Show, Eq, Generic)
 
 instance FromJSON ResourceError
@@ -428,4 +430,3 @@ instance Component HttpAccess where
 -- | Component ID for HttpAccess (allocated as ComponentTypeId 24 per spec)
 httpAccessComponentId :: ComponentTypeId
 httpAccessComponentId = ComponentTypeId 24
-

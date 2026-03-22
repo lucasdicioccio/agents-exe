@@ -78,19 +78,19 @@ import Control.Concurrent.STM (
     newTBQueue,
     newTVar,
     putTMVar,
-    readTVar,
     readTBQueue,
+    readTVar,
     takeTMVar,
-    writeTVar,
     writeTBQueue,
+    writeTVar,
  )
 import Control.Exception (bracket_, onException)
 import Control.Monad (void, when)
 import Numeric.Natural (Natural)
 
 import System.Agents.OS.Concurrent.Types (
-    ResourceToken (..),
     RWLock (..),
+    ResourceToken (..),
  )
 import System.Agents.OS.Core.Types (ResourceId)
 
@@ -362,10 +362,12 @@ newPoolLock :: Int -> [ResourceId] -> STM (TBQueue ResourceToken)
 newPoolLock maxSize resourceIds = do
     pool <- newTBQueue (fromIntegral maxSize :: Natural)
     -- Create tokens for each resource
-    mapM_ (\rid -> do
-        let releaseAction = writeTBQueue pool (ResourceToken rid releaseAction)
-        writeTBQueue pool (ResourceToken rid releaseAction)
-        ) resourceIds
+    mapM_
+        ( \rid -> do
+            let releaseAction = writeTBQueue pool (ResourceToken rid releaseAction)
+            writeTBQueue pool (ResourceToken rid releaseAction)
+        )
+        resourceIds
     pure pool
 
 {- | Execute an action with a pool token.
@@ -426,4 +428,3 @@ tryTakeTMVar var = do
     if empty
         then pure Nothing
         else Just <$> takeTMVar var
-

@@ -279,12 +279,13 @@ withExclusive rid action = do
         ExclusiveLock lock -> do
             timeout <- getResourceTimeout rid
             ctx <- ResourceM ask
-            withMaybeTimeout timeout rid $ liftIO $
-                withExclusiveLock lock $ do
-                    result <- runResourceM ctx action
-                    case result of
-                        Left err -> throwIO $ ResourceException err
-                        Right val -> pure val
+            withMaybeTimeout timeout rid $
+                liftIO $
+                    withExclusiveLock lock $ do
+                        result <- runResourceM ctx action
+                        case result of
+                            Left err -> throwIO $ ResourceException err
+                            Right val -> pure val
         _ ->
             throwError $ ResourceBusy rid
 
@@ -319,12 +320,13 @@ withRead rid action = do
         ReadWriteLock rwlock -> do
             timeout <- getResourceTimeout rid
             ctx <- ResourceM ask
-            withMaybeTimeout timeout rid $ liftIO $
-                withReadLock rwlock $ do
-                    result <- runResourceM ctx action
-                    case result of
-                        Left err -> throwIO $ ResourceException err
-                        Right val -> pure val
+            withMaybeTimeout timeout rid $
+                liftIO $
+                    withReadLock rwlock $ do
+                        result <- runResourceM ctx action
+                        case result of
+                            Left err -> throwIO $ ResourceException err
+                            Right val -> pure val
         _ ->
             throwError $ ResourceBusy rid
 
@@ -359,12 +361,13 @@ withWrite rid action = do
         ReadWriteLock rwlock -> do
             timeout <- getResourceTimeout rid
             ctx <- ResourceM ask
-            withMaybeTimeout timeout rid $ liftIO $
-                withWriteLock rwlock $ do
-                    result <- runResourceM ctx action
-                    case result of
-                        Left err -> throwIO $ ResourceException err
-                        Right val -> pure val
+            withMaybeTimeout timeout rid $
+                liftIO $
+                    withWriteLock rwlock $ do
+                        result <- runResourceM ctx action
+                        case result of
+                            Left err -> throwIO $ ResourceException err
+                            Right val -> pure val
         _ ->
             throwError $ ResourceBusy rid
 
@@ -403,9 +406,10 @@ withPooled rid action = do
             withMaybeTimeout timeout rid $ liftIO $ do
                 token <- atomically $ readTBQueue pool
                 let cleanup = atomically $ tokenRelease token
-                result <- runResourceM ctx action `catch` \(_ :: ResourceException) -> do
-                    cleanup
-                    throwIO $ ResourceException $ ResourceClosed rid
+                result <-
+                    runResourceM ctx action `catch` \(_ :: ResourceException) -> do
+                        cleanup
+                        throwIO $ ResourceException $ ResourceClosed rid
                 cleanup
                 case result of
                     Left err -> throwIO $ ResourceException err
@@ -529,4 +533,3 @@ raceWithTimeout timeoutMicros action = do
     -- to avoid leaking threads. This simplified version doesn't do that.
 
     pure result
-
