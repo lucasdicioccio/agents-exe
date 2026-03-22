@@ -53,6 +53,9 @@ library agents-lib
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
+                    , System.Agents.OS.Concurrent
+                    , System.Agents.OS.Concurrent.Locks
+                    , System.Agents.OS.Concurrent.Types
                     , System.Agents.OS.Core
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
@@ -239,6 +242,7 @@ test-suite agents-tests
                     , LuaToolboxHttpTests
                     , McpImplementationTests
                     , OpenAPIToolboxTests
+                    , OS.ConcurrentTests
                     , OS.CoreTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
@@ -266,4 +270,5 @@ test-suite agents-tests
                       time,
                       unordered-containers,
                       vector
+
 

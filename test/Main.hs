@@ -52,6 +52,8 @@ import qualified LuaToolboxHttpTests
 import qualified OS.CoreTests
 -- Import OS Resources tests
 import qualified OS.ResourcesTests
+-- Import OS Concurrent tests
+import qualified OS.ConcurrentTests
 
 main :: IO ()
 main = defaultMain tests
@@ -64,15 +66,11 @@ tests =
         , extraAgentRefTests
         , agentSerializationTests
         , bashToolboxTests
-        , callStackEntryTests
-        , toolExecutionContextTests
-        , recursionTrackingTests
-        , agentConfigGraphTests
-        , referenceValidationTests
-        , cycleDetectionTests
-        , openAPITypesTests
-        , openAPIResolverTests
-        , openAPIConverterTests
+        , turnRetroCompatibilityTests
+        , turnRoundTripTests
+        , OS.CoreTests.coreTests
+        , OS.ResourcesTests.resourcesTests
+        , OS.ConcurrentTests.concurrentTests
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests
@@ -85,10 +83,6 @@ tests =
         , LuaToolboxTests.luaToolboxTests
         , LuaToolboxJsonValueTests.luaToJsonValueTests
         , LuaToolboxHttpTests.luaToolboxHttpTests
-        , turnRetroCompatibilityTests
-        , turnRoundTripTests
-        , OS.CoreTests.coreTests
-        , OS.ResourcesTests.resourcesTests
         ]
 
 openAIRateLimitTests :: TestTree
