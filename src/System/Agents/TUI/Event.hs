@@ -20,7 +20,7 @@ import qualified Data.CircularList as CList
 import Data.List (find, findIndex)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
@@ -41,7 +41,8 @@ import System.Agents.Base (ConversationId (..), newConversationId)
 import System.Agents.OneShot (runtimeToAgent)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
-import qualified System.Agents.Session.Loop as Loop
+import qualified System.Agents.Session.Loop as SessionLoop
+import System.Agents.Session.Types (SessionId (..))
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
@@ -655,25 +656,116 @@ handleRefreshTools = do
 -- Sub-Agent Session Event Handlers
 -------------------------------------------------------------------------------
 
--- | Handle sub-agent session started event.
+{- | Convert a SessionId to a ConversationId.
+
+Both are wrappers around UUID, so we can safely convert by extracting
+the underlying UUID.
+-}
+sessionIdToConversationId :: SessionId -> ConversationId
+sessionIdToConversationId (SessionId uuid) = ConversationId uuid
+
+{- | Handle sub-agent session started event.
+
+Creates a new Conversation entry for the sub-agent in the Core so that
+users can view and interact with sub-agent sessions. The sub-agent
+conversation is linked to its parent via the parentConversationId field
+in the session.
+-}
 handleSubAgentSessionStarted :: ConversationId -> Session -> EventM N TuiState ()
-handleSubAgentSessionStarted parentConvId _childSession = do
-    showStatus StatusInfo $ "Sub-agent started under conversation " <> Text.pack (show parentConvId)
-    -- Auto-expand the parent conversation so the child is visible
-    tuiUI . conversationTreeExpanded %= Set.insert parentConvId
-    -- Refresh the conversation list to show the new session
-    handleHeartbeat
+handleSubAgentSessionStarted parentConvId childSession = do
+    -- Get the core reference
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+
+    -- Find the parent conversation to get its agent
+    case find ((== parentConvId) . conversationId) (coreConversations core) of
+        Nothing -> do
+            -- Parent conversation not found - this shouldn't happen normally
+            showStatus StatusWarning $ "Sub-agent started but parent conversation not found: " <> Text.pack (show parentConvId)
+        Just parentConv -> do
+            -- Create a channel for the sub-agent conversation (not used for synchronous sub-agents, but needed for Conversation type)
+            -- Use a small buffer since we don't expect actual messages
+            chan <- liftIO $ newBChan 1
+
+            -- Build the progress callback for this sub-agent conversation
+            outChan <- use eventChan
+            let onProgress = makeSubAgentCallback outChan parentConvId
+
+            -- Get the sub-agent slug from the session (the agent that initiated the sub-agent call)
+            let subAgentSlug = fromMaybe "unknown" childSession.parentAgentSlug
+
+            -- Create the sub-agent conversation
+            -- Use the child session's ID as the conversation ID for uniqueness
+            let childConvId = sessionIdToConversationId childSession.sessionId
+            let subAgentConv = Conversation
+                    { conversationId = childConvId
+                    , conversationAgent = conversationAgent parentConv  -- Use parent's agent
+                    , conversationThreadId = Nothing  -- Sub-agents run synchronously, no separate thread
+                    , conversationSession = Just childSession  -- Store the child session
+                    , conversationName = conversationName parentConv <> " > " <> subAgentSlug
+                    , conversationChan = chan
+                    , conversationStatus = ConversationStatus_Active  -- Sub-agents start active
+                    , conversationOnProgress = onProgress
+                    }
+
+            -- Add the sub-agent conversation to the core
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                c{coreConversations = subAgentConv : coreConversations c}
+
+            -- Auto-expand the parent conversation so the child is visible in the tree
+            tuiUI . conversationTreeExpanded %= Set.insert parentConvId
+
+            -- Show status and refresh
+            showStatus StatusInfo $ "Sub-agent started: " <> subAgentSlug
+            handleHeartbeat
 
 -- | Handle sub-agent session updated event.
 handleSubAgentSessionUpdated :: ConversationId -> Session -> EventM N TuiState ()
-handleSubAgentSessionUpdated _parentConvId _childSession = do
-    -- The session is stored in core, just refresh to show updates
-    handleHeartbeat
+handleSubAgentSessionUpdated _parentConvId childSession = do
+    -- Find and update the sub-agent conversation in the core
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+
+    -- Use the child session's ID as the conversation ID
+    let childConvId = sessionIdToConversationId childSession.sessionId
+
+    case find ((== childConvId) . conversationId) (coreConversations core) of
+        Nothing -> pure ()  -- Sub-agent conversation not found, ignore
+        Just _conv -> do
+            -- Update the session in the conversation
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                c{coreConversations = updateConversationSession childConvId childSession (coreConversations c)}
+            -- Refresh to show updates
+            handleHeartbeat
 
 -- | Handle sub-agent session completed event.
 handleSubAgentSessionCompleted :: ConversationId -> Session -> EventM N TuiState ()
-handleSubAgentSessionCompleted parentConvId _childSession = do
-    showStatus StatusInfo $ "Sub-agent completed under conversation " <> Text.pack (show parentConvId)
+handleSubAgentSessionCompleted _ childSession = do
+    -- Find and update the sub-agent conversation in the core
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+
+    -- Use the child session's ID as the conversation ID
+    let childConvId = sessionIdToConversationId childSession.sessionId
+
+    case find ((== childConvId) . conversationId) (coreConversations core) of
+        Nothing -> do
+            -- Sub-agent conversation not found - show status anyway
+            let subAgentSlug = fromMaybe "unknown" childSession.parentAgentSlug
+            showStatus StatusInfo $ "Sub-agent completed: " <> subAgentSlug
+        Just conv -> do
+            -- Update the session and mark as completed
+            let updatedConv = conv
+                    { conversationSession = Just childSession
+                    , conversationStatus = ConversationStatus_WaitingForInput  -- Completed sub-agents wait for potential continuation
+                    }
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                c{coreConversations = updateConversation updatedConv (coreConversations c)}
+
+            -- Show completion status
+            showStatus StatusInfo $ "Sub-agent completed: " <> conversationName updatedConv
+
+    -- Refresh to show completion
     handleHeartbeat
 
 -------------------------------------------------------------------------------
@@ -846,7 +938,7 @@ runConversation baseTuiAgent session = do
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
         -- Loop.run now requires convId as first parameter
-        void $ Loop.run convId a session
+        void $ SessionLoop.run convId a session
         notifyProgress (SessionCompleted session)
     let conv =
             Conversation
@@ -913,3 +1005,4 @@ handleSendMessage = do
                         tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
                     Nothing -> pure ()
             Nothing -> pure ()
+
