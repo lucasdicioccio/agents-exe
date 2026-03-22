@@ -10,6 +10,7 @@ Sessions represent complete conversations between users and agents, including:
 - **Turn history**: Complete conversation turns
 - **Tool calls**: Records of tool invocations and results
 - **Context**: Full conversation state for resumption
+- **Parent-child relationships**: For tracking nested agent calls (new in this version)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -18,6 +19,11 @@ Sessions represent complete conversations between users and agents, including:
 │  SessionId: "uuid"                                          │
 │  ConversationId: "uuid"                                     │
 │  AgentSlug: "my-agent"                                      │
+├─────────────────────────────────────────────────────────────┤
+│  Parent Links (for sub-agent calls):                        │
+│  - parentSessionId: Maybe SessionId                         │
+│  - parentConversationId: Maybe ConversationId               │
+│  - parentAgentSlug: Maybe Text                              │
 ├─────────────────────────────────────────────────────────────┤
 │  Turns:                                                      │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -34,6 +40,122 @@ Sessions represent complete conversations between users and agents, including:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Nested Sessions (Sub-Agent Calls)
+
+When an agent calls another agent as a tool, a child session is created with links to the parent. This enables:
+
+- **Conversation hierarchy**: Track which agent called which sub-agent
+- **Correlation tracing**: Link sub-agent traces to parent conversations
+- **TUI tree view**: Display conversations hierarchically
+- **Audit trail**: Full call chain reconstruction
+
+### Creating Child Sessions
+
+```haskell
+import System.Agents.Session.Base
+
+-- Create a child session linked to parent
+childSess <- mkChildSession
+    parentSessionId      -- Parent's session ID
+    parentConversationId -- Parent's conversation ID
+    "parent-agent"       -- Slug of agent initiating the call
+
+-- Check if a session is a child session
+if isChildSession childSess
+    then putStrLn "This is a sub-agent session"
+    else putStrLn "This is a root session"
+```
+
+### Session Type with Parent Links
+
+```haskell
+data Session = Session
+    { turns :: [Turn]
+    , sessionId :: SessionId
+    , forkedFromSessionId :: Maybe SessionId
+    , turnId :: TurnId
+    -- NEW: Parent tracking fields for sub-agent calls
+    , parentSessionId :: Maybe SessionId
+    , parentConversationId :: Maybe ConversationId
+    , parentAgentSlug :: Maybe Text
+    }
+```
+
+### Sub-Agent Session Configuration
+
+```haskell
+import System.Agents.AgentTree.OneShotTool
+
+-- Configuration for sub-agent callbacks and storage
+data SubAgentSessionConfig = SubAgentSessionConfig
+    { subAgentOnProgress :: Maybe OnSessionProgress
+    -- ^ Optional callback for session progress events
+    , subAgentStore :: Maybe SessionStore
+    -- ^ Optional session store for persistence
+    }
+
+-- Default configuration (no callbacks, no storage)
+defaultSubAgentConfig :: SubAgentSessionConfig
+defaultSubAgentConfig = SubAgentSessionConfig Nothing Nothing
+
+-- Create config with callbacks
+let config = defaultSubAgentConfig
+        { subAgentOnProgress = Just myCallback
+        , subAgentStore = Just sessionStore
+        }
+```
+
+### Converting Runtimes to Tools with Callbacks
+
+```haskell
+import System.Agents.AgentTree.OneShotTool
+
+-- Legacy function (backward compatible)
+turnAgentRuntimeIntoIOTool
+    :: SessionStore -> Runtime -> AgentSlug -> AgentId -> ToolRegistration
+
+-- New function with callback support
+turnAgentRuntimeIntoIOToolWithCallbacks
+    :: SubAgentSessionConfig
+    -> Tracer IO Trace      -- Parent tracer for correlation
+    -> Runtime              -- Sub-agent runtime
+    -> AgentSlug            -- Parent agent slug
+    -> AgentId              -- Parent agent ID
+    -> ToolRegistration
+
+-- Example usage
+let toolReg = turnAgentRuntimeIntoIOToolWithCallbacks
+        (SubAgentSessionConfig (Just onProgress) (Just store))
+        parentTracer
+        subAgentRuntime
+        parentSlug
+        parentAgentId
+```
+
+### Session Progress Callbacks
+
+```haskell
+data SessionProgress
+    = SessionStarted Session
+    | SessionUpdated Session
+    | SessionCompleted Session
+    | SessionFailed Session Text
+
+type OnSessionProgress = SessionProgress -> IO ()
+
+-- Example callback
+myCallback :: OnSessionProgress
+myCallback progress = case progress of
+    SessionStarted sess ->
+        putStrLn $ "Sub-agent started: " ++ show (sessionId sess)
+    SessionUpdated sess ->
+        putStrLn $ "Sub-agent progress: " ++ show (length (turns sess)) ++ " turns"
+    SessionCompleted sess ->
+        putStrLn $ "Sub-agent completed: " ++ show (sessionId sess)
+    SessionFailed sess err ->
+        putStrLn $ "Sub-agent failed: " ++ err
+```
+
 ## Core Types
 
 ### Session Types (`System.Agents.Session.Types`)
@@ -47,6 +169,10 @@ data Session = Session
     , conversationId :: ConversationId
     , agentSlug :: AgentSlug
     , turns :: [Turn]
+    -- NEW: Parent tracking fields
+    , parentSessionId :: Maybe SessionId
+    , parentConversationId :: Maybe ConversationId
+    , parentAgentSlug :: Maybe Text
     }
 
 data Turn = Turn
@@ -125,6 +251,31 @@ newSession slug = do
         , conversationId = cid
         , agentSlug = slug
         , turns = []
+        -- NEW: Parent fields default to Nothing for root sessions
+        , parentSessionId = Nothing
+        , parentConversationId = Nothing
+        , parentAgentSlug = Nothing
+        }
+```
+
+### Creating a Child Session (Sub-Agent Call)
+
+```haskell
+import System.Agents.Session.Base
+
+createChildSession :: SessionId -> ConversationId -> Text -> IO Session
+createChildSession parentSessId parentConvId parentSlug = do
+    sessId <- newSessionId
+    tId <- newTurnId
+    pure $ Session
+        { turns = []
+        , sessionId = sessId
+        , forkedFromSessionId = Nothing
+        , turnId = tId
+        -- NEW: Link to parent
+        , parentSessionId = Just parentSessId
+        , parentConversationId = Just parentConvId
+        , parentAgentSlug = Just parentSlug
         }
 ```
 
@@ -208,8 +359,23 @@ conversationLoop store runtime session = do
       ],
       "timestamp": "2024-01-15T10:30:00Z"
     }
-  ]
+  ],
+  "parentSessionId": null,
+  "parentConversationId": null,
+  "parentAgentSlug": null
 }
+```
+
+### Backward Compatibility
+
+Sessions created before the parent tracking feature will load correctly:
+
+```haskell
+instance FromJSON Session where
+    parseJSON v = parseNew v <|> parseOld v
+      where
+        parseNew = -- Parse with parent fields
+        parseOld = -- Parse old format, default parent fields to Nothing
 ```
 
 ## Session Operations
@@ -224,8 +390,8 @@ agents-exe run --agent-file agent.json --session-file session-xxx.json
 ```haskell
 mainOneShot :: 
     SessionStore ->
-    Maybe FilePath ->  -- Session file path
-    Maybe Session ->   -- Pre-loaded session
+    Maybe FilePath,  -- Session file path
+    Maybe Session,   -- Pre-loaded session
     Props -> 
     Text ->            -- Prompt
     IO ()
@@ -320,6 +486,7 @@ This allows tools to:
 - Access conversation history
 - Store tool-specific state
 - Make context-aware decisions
+- Create child sessions for sub-agent calls
 
 ## Session Store Backends
 
@@ -358,6 +525,13 @@ memorySessionStore = do
 2. **Sensitive data**: Be careful with sessions containing secrets
 3. **Backup**: Sessions are JSON files - back them up
 4. **Versioning**: Handle schema migrations for old sessions
+
+### Nested Session Design
+
+1. **Clear parent links**: Always set parent fields for sub-agent sessions
+2. **Progress callbacks**: Use callbacks to track sub-agent lifecycle
+3. **Trace correlation**: Pass parent tracer for correlation IDs
+4. **Tree visualization**: Use parent links for hierarchical display
 
 ### Conversation Design
 
@@ -409,5 +583,12 @@ errorTurns :: Session -> [Turn]
 errorTurns session =
     [turn | turn <- turns session
           , any (isLeft . toolOutput) (toolCalls turn)]
+
+-- Get conversation hierarchy
+getRootConversationId :: Session -> Maybe ConversationId
+getRootConversationId session =
+    case parentConversationId session of
+        Nothing -> Just (conversationId session)  -- Root
+        Just parentId -> Just parentId            -- Return parent
 ```
 

@@ -1,6 +1,6 @@
 # Terminal UI (TUI)
 
-The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, and visual feedback.
+The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, and **conversation tree navigation** for nested agent calls.
 
 ## Overview
 
@@ -30,6 +30,53 @@ The Terminal UI provides an interactive, real-time interface for agent conversat
 │ [Tab] Switch  [Enter] Send  [Ctrl+C] Quit  [Ctrl+[r|t]] View MD │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Conversation Tree Navigation
+
+The TUI now supports hierarchical display of conversations when agents call sub-agents. Conversations are displayed in a tree structure where:
+
+- Root conversations appear at the top level
+- Sub-agent conversations appear as children of their parent
+- Expand/collapse functionality allows focusing on specific branches
+
+```
+Conversation Tree Example:
+┌─────────────────────────────────┐
+│ 📁 main-agent (expanded)        │
+│   └── 📁 helper-1 (collapsed)   │
+│   └── 📄 helper-2               │
+│ 📄 standalone-agent             │
+└─────────────────────────────────┘
+```
+
+### Tree Navigation Keys
+
+When focused on the conversation list:
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Toggle expansion of selected conversation |
+| `→` (Right Arrow) | Expand selected conversation |
+| `←` (Left Arrow) | Collapse selected conversation |
+| `↑` (Up Arrow) | Navigate to previous conversation in tree |
+| `↓` (Down Arrow) | Navigate to next conversation in tree |
+
+### Sub-Agent Session Events
+
+The TUI receives events for sub-agent lifecycle:
+
+```haskell
+data AppEvent
+    = ...
+    | AppEvent_SubAgentSessionStarted ConversationId Session
+    | AppEvent_SubAgentSessionUpdated ConversationId Session
+    | AppEvent_SubAgentSessionCompleted ConversationId Session
+```
+
+These events:
+1. **Started**: Auto-expand parent to show the new sub-agent
+2. **Updated**: Refresh the conversation display
+3. **Completed**: Show status message, refresh display
 
 ## Architecture
 
@@ -62,6 +109,9 @@ data TUIState = TUIState
     , messages :: [Message]
     , scrollOffset :: Int
     , status :: Status
+    -- NEW: Conversation tree state
+    , conversationTreeExpanded :: Set ConversationId
+    , selectedConversationPath :: [ConversationId]
     }
 
 data AgentState = AgentState
@@ -77,6 +127,33 @@ data ConversationItem
     | ToolCallStart Text
     | ToolCallEnd Text Value
     | SystemMessage Text
+    | SubAgentStarted Text       -- NEW: Sub-agent call started
+    | SubAgentCompleted Text     -- NEW: Sub-agent call completed
+```
+
+### Conversation Tree Types
+
+```haskell
+-- A node in the conversation tree
+data ConversationNode = ConversationNode
+    { nodeConversation :: Conversation
+    , nodeChildren :: [ConversationNode]
+    , nodeExpanded :: Bool
+    }
+
+-- Build tree from flat conversation list
+buildConversationTree :: [Conversation] -> [ConversationNode]
+
+-- Helper for creating sub-agent callbacks
+makeSubAgentCallback :: BChan AppEvent -> ConversationId -> OnSessionProgress
+makeSubAgentCallback chan parentConvId progress =
+    case progress of
+        SessionStarted sess ->
+            writeBChan chan (AppEvent_SubAgentSessionStarted parentConvId sess)
+        SessionUpdated sess ->
+            writeBChan chan (AppEvent_SubAgentSessionUpdated parentConvId sess)
+        SessionCompleted sess ->
+            writeBChan chan (AppEvent_SubAgentSessionCompleted parentConvId sess)
 ```
 
 ## Rendering
@@ -90,7 +167,7 @@ render state =
     vBox
         [ renderHeader state
         , renderAgentTabs state
-        , renderConversation state
+        , renderConversationTree state  -- Updated for tree view
         , renderInput state
         , renderFooter state
         ]
@@ -115,6 +192,24 @@ renderAgentTabs state =
             else str $ agentName agent
 ```
 
+### Conversation Tree Rendering
+
+```haskell
+renderConversationTree :: TUIState -> Widget ()
+renderConversationTree state =
+    viewport ScrollVertical $ 
+        vBox $ renderTreeNodes 0 (conversationTree state)
+
+renderTreeNode :: Int -> ConversationNode -> Widget ()
+renderTreeNode depth node =
+    let indent = replicate (depth * 2) ' '
+        expander = if nodeExpanded node then "▼ " else "▶ "
+        prefix = if null (nodeChildren node) then "  " else expander
+    in
+    withAttr (conversationAttr node) $
+        str indent <+> str prefix <+> renderConversation (nodeConversation node)
+```
+
 ### Message Rendering
 
 ```haskell
@@ -134,6 +229,10 @@ renderConversation state =
         withAttr toolAttr $ str $ "[Calling tool: " ++ unpack name ++ "]"
     renderItem (ToolCallEnd name result) =
         withAttr toolSuccessAttr $ str $ "✓ " ++ unpack name ++ " completed"
+    renderItem (SubAgentStarted slug) =
+        withAttr subAgentAttr $ str $ "[Sub-agent started: " ++ unpack slug ++ "]"
+    renderItem (SubAgentCompleted slug) =
+        withAttr subAgentAttr $ str $ "[Sub-agent completed: " ++ unpack slug ++ "]"
 ```
 
 ## Event Handling
@@ -150,6 +249,10 @@ handleEvent state (VtyEvent ev) = case ev of
     -- Switch agents
     EvKey KTab [] -> continue $ nextAgent state
     EvKey KBackTab [] -> continue $ prevAgent state
+    
+    -- Tree navigation
+    EvKey KRight [] -> continue $ expandSelected state
+    EvKey KLeft [] -> continue $ collapseSelected state
     
     -- Scroll
     EvKey KUp [] -> continue $ scrollUp state
@@ -175,6 +278,38 @@ handleEvent state (VtyEvent ev) = case ev of
     _ -> continue state
 ```
 
+### Tree Navigation Event Handlers
+
+```haskell
+-- Toggle expansion of selected conversation
+toggleSelectedConversation :: EventM N TuiState ()
+toggleSelectedConversation = do
+    mSelectedId <- getSelectedConversationId
+    case mSelectedId of
+        Nothing -> pure ()
+        Just convId -> do
+            expanded <- use (tuiUI . conversationTreeExpanded)
+            if Set.member convId expanded
+                then tuiUI . conversationTreeExpanded .= Set.delete convId expanded
+                else tuiUI . conversationTreeExpanded .= Set.insert convId expanded
+
+-- Navigate to previous conversation in tree
+navigateConversationUp :: EventM N TuiState ()
+navigateConversationUp = do
+    visibleConvIds <- getVisibleConversationsInOrder
+    currentPath <- use (tuiUI . selectedConversationPath)
+    case currentPath of
+        [] -> pure ()
+        (currentId : _) ->
+            case findIndex (== currentId) visibleConvIds of
+                Nothing -> pure ()
+                Just 0 -> pure ()
+                Just idx -> do
+                    let prevId = visibleConvIds !! (idx - 1)
+                    tuiUI . selectedConversationPath .= [prevId]
+                    updateListSelectionToConversation prevId
+```
+
 ### Custom Events
 
 ```haskell
@@ -185,9 +320,38 @@ data CustomEvent
     | AgentError AgentIndex Text
     | StreamChunk AgentIndex Text
     | StreamComplete AgentIndex
+    -- NEW: Sub-agent events
+    | SubAgentSessionStarted ConversationId Session
+    | SubAgentSessionUpdated ConversationId Session
+    | SubAgentSessionCompleted ConversationId Session
 
 eventChannel :: BChan CustomEvent
 eventChannel = newBChan 100
+```
+
+### Sub-Agent Event Handlers
+
+```haskell
+-- Handle sub-agent session started
+handleSubAgentSessionStarted :: ConversationId -> Session -> EventM N TuiState ()
+handleSubAgentSessionStarted parentConvId childSession = do
+    showStatus StatusInfo $ "Sub-agent started under conversation " <> Text.pack (show parentConvId)
+    -- Auto-expand the parent conversation so the child is visible
+    tuiUI . conversationTreeExpanded %= Set.insert parentConvId
+    -- Refresh the conversation list to show the new session
+    handleHeartbeat
+
+-- Handle sub-agent session updated
+handleSubAgentSessionUpdated :: ConversationId -> Session -> EventM N TuiState ()
+handleSubAgentSessionUpdated _parentConvId _childSession = do
+    -- The session is stored in core, just refresh to show updates
+    handleHeartbeat
+
+-- Handle sub-agent session completed
+handleSubAgentSessionCompleted :: ConversationId -> Session -> EventM N TuiState ()
+handleSubAgentSessionCompleted parentConvId _childSession = do
+    showStatus StatusInfo $ "Sub-agent completed under conversation " <> Text.pack (show parentConvId)
+    handleHeartbeat
 ```
 
 ## Streaming Responses
@@ -231,6 +395,13 @@ handleCustomEvent state (ToolStarted idx name) =
 
 handleCustomEvent state (ToolCompleted idx name result) =
     continue $ updateAgent idx (addConversationItem $ ToolCallEnd name result) state
+
+-- NEW: Handle sub-agent events
+handleCustomEvent state (SubAgentSessionStarted parentId childSess) =
+    continue $ addSubAgentConversation parentId childSess state
+
+handleCustomEvent state (SubAgentSessionCompleted _parentId childSess) =
+    continue $ markSubAgentCompleted (sessionId childSess) state
 ```
 
 ## Multi-Agent Support
@@ -253,7 +424,7 @@ sendToAgent state text = do
     streamAgentResponse agent text eventChannel
 ```
 
-### Agent Initialization
+### Agent Initialization with Sub-Agent Support
 
 ```haskell
 initializeAgents :: [AgentTree.Props] -> IO [AgentState]
@@ -365,6 +536,8 @@ runTUI store propsList = do
             , inputBuffer = ""
             , scrollOffset = 0
             , status = Ready
+            , conversationTreeExpanded = Set.empty  -- NEW
+            , selectedConversationPath = []         -- NEW
             }
     
     -- Create event channel
@@ -404,6 +577,7 @@ attributeMap = attrMap V.defAttr
     , (toolErrorAttr, fg red)
     , (systemAttr, fg magenta)
     , (inputAttr, fg white)
+    , (subAgentAttr, fg blue)  -- NEW: For sub-agent messages
     ]
 ```
 
@@ -411,7 +585,7 @@ attributeMap = attrMap V.defAttr
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Switch to next agent |
+| `Tab` | Switch to next agent (global) / Toggle expansion (conversation list) |
 | `Shift+Tab` | Switch to previous agent |
 | `Enter` | Send message |
 | `Ctrl+C` | Quit |
@@ -423,6 +597,8 @@ attributeMap = attrMap V.defAttr
 | `PageUp/PageDown` | Scroll by page |
 | `Home` | Scroll to top |
 | `End` | Scroll to bottom |
+| `→` (Right Arrow) | Expand conversation tree node |
+| `←` (Left Arrow) | Collapse conversation tree node |
 
 ## Status Bar
 
@@ -436,12 +612,13 @@ renderFooter state =
             , str "[Tab] Switch  [Enter] Send  [Ctrl+C] Quit"
             ]
 
-data Status = Ready | Streaming | ToolRunning Text | Error Text
+data Status = Ready | Streaming | ToolRunning Text | Error Text | SubAgentRunning Text
 
 instance Show Status where
     show Ready = "Ready"
     show Streaming = "Streaming..."
     show (ToolRunning name) = "Running: " ++ unpack name
+    show (SubAgentRunning name) = "Sub-agent: " ++ unpack name  -- NEW
     show (Error msg) = "Error: " ++ unpack msg
 ```
 
@@ -452,18 +629,28 @@ instance Show Status where
 1. **Limit scrollback**: Keep only last N messages in memory
 2. **Lazy rendering**: Don't render off-screen content
 3. **Rate limiting**: Throttle UI updates during streaming
+4. **Tree pruning**: Limit tree depth for deeply nested calls
 
 ### User Experience
 
 1. **Visual feedback**: Show typing indicators and tool calls
 2. **Error handling**: Display errors without crashing
 3. **Help text**: Always show keyboard shortcuts
+4. **Tree indicators**: Use clear visual cues for parent/child relationships
 
 ### Multi-Agent UI
 
 1. **Clear indicators**: Show which agent is active
 2. **Separate contexts**: Each agent maintains its own conversation
 3. **Easy switching**: Tab between agents quickly
+4. **Hierarchical view**: Show conversation tree structure clearly
+
+### Sub-Agent Display
+
+1. **Auto-expand on start**: When sub-agent starts, expand parent
+2. **Status updates**: Show sub-agent lifecycle in status bar
+3. **Error propagation**: Display sub-agent errors in parent context
+4. **Collapse completed**: Optionally collapse completed sub-agents
 
 ## Customization
 
@@ -481,6 +668,12 @@ customHandleEvent state ev = case ev of
         newState <- liftIO $ loadSession state
         continue newState
     
+    -- Tree navigation
+    VtyEvent (EvKey (KChar 'e') []) ->
+        continue $ expandAll state
+    VtyEvent (EvKey (KChar 'c') []) ->
+        continue $ collapseAll state
+    
     _ -> handleEvent state ev  -- Fall through to default
 ```
 
@@ -493,5 +686,10 @@ customProgressBar progress =
         filled = round (progress * fromIntegral width)
         bar = replicate filled '█' ++ replicate (width - filled) '░'
     in withAttr progressAttr $ str $ "[" ++ bar ++ "]"
+
+-- Tree depth indicator
+treeDepthIndicator :: Int -> Widget ()
+treeDepthIndicator depth =
+    withAttr treeDepthAttr $ str $ replicate depth '│' ++ "─"
 ```
 
