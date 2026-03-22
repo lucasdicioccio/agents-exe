@@ -93,26 +93,34 @@ sessions, allowing parent agents to track sub-agent progress without
 tightly coupling the parent and sub-agent implementations.
 
 Use 'defaultSubAgentConfig' for a config with no callbacks or storage.
+
+The 'subAgentOnProgressFactory' is a function that creates an 'OnSessionProgress'
+callback for a given parent conversation ID. This factory pattern allows
+the callback to be created dynamically at tool execution time when the
+parent conversation ID is known, rather than at tool configuration time.
 -}
 data SubAgentSessionConfig = SubAgentSessionConfig
-    { subAgentOnProgress :: Maybe OnSessionProgress
-    {- ^ Optional callback for receiving sub-agent session progress updates.
-    The callback receives 'SessionStarted', 'SessionUpdated', and
-    'SessionCompleted' events throughout the sub-agent's lifecycle.
-    -}
-    , subAgentStore :: Maybe SessionStore
+    { subAgentStore :: Maybe SessionStore
     {- ^ Optional session store for persisting sub-agent sessions to disk.
     If provided, sessions will be saved at each progress update.
     -}
-    }
+    , subAgentOnProgressFactory :: ConversationId -> OnSessionProgress
+    {- ^ Factory function that creates a progress callback for a given parent
+    conversation ID. This allows the callback to be created dynamically at
+    tool execution time when the parent conversation context is available.
 
-{- | Default configuration with no callbacks or storage.
+    The default (from 'defaultSubAgentConfig') returns a no-op callback.
+    -}
+ }
+
+{- | Default configuration with no storage and no-op callbacks.
 
 This is useful when you don't need to track sub-agent progress or persist
-sub-agent sessions.
+sub-agent sessions. The progress callback factory returns a no-op handler
+that ignores all progress events.
 -}
 defaultSubAgentConfig :: SubAgentSessionConfig
-defaultSubAgentConfig = SubAgentSessionConfig Nothing Nothing
+defaultSubAgentConfig = SubAgentSessionConfig Nothing (\_ -> const $ pure ())
 
 -------------------------------------------------------------------------------
 
@@ -140,7 +148,7 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
     -- New code should use turnAgentRuntimeIntoIOToolWithCallbacks directly
     -- to pass a properly configured parent tracer.
     turnAgentRuntimeIntoIOToolWithCallbacks
-        (SubAgentSessionConfig Nothing (Just store))
+        (SubAgentSessionConfig (Just store) (\_ -> const $ pure ()))
         rt.agentTracer
         rt
         callerSlug
@@ -154,7 +162,8 @@ runs it with a session, and returns the result.
 
 The 'SubAgentSessionConfig' parameter allows the parent agent to:
 
-1. Receive progress callbacks via 'subAgentOnProgress'
+1. Receive progress callbacks via 'subAgentOnProgressFactory' - the factory
+   is called with the parent conversation ID to create the callback
 2. Persist sessions via 'subAgentStore'
 
 The sub-agent session is properly linked to the parent session via
@@ -206,6 +215,9 @@ This function emits correlation traces at key lifecycle points:
 1. SubAgentStarted - when the sub-agent session begins
 2. SubAgentCompleted - when the sub-agent finishes successfully
 3. SubAgentFailed - when the sub-agent encounters an error
+
+The progress callback is created dynamically using the factory from the
+config, passing the parent conversation ID from the execution context.
 -}
 runSubAgent ::
     SubAgentSessionConfig ->
@@ -220,23 +232,26 @@ runSubAgent ::
 runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query) = do
     -- Extract parent context information for linking child session
     let pSessionId = ctx.ctxSessionId
-    let pConversationId = ctx.ctxConversationId
+    let parentConvId = ctx.ctxConversationId
     let pAgentSlug = case ctx.ctxCallStack of
             (entry : _) -> callAgentSlug entry
             [] -> "unknown"
 
     -- Create child session linked to parent
-    session0 <- mkChildSession pSessionId pConversationId pAgentSlug
+    session0 <- mkChildSession pSessionId parentConvId pAgentSlug
+
+    -- Create the progress callback using the factory with the parent conversation ID
+    let onProgress = cfg.subAgentOnProgressFactory parentConvId
 
     -- Create the agent with the parent's callback
     agent <-
         runtimeToAgentForToolInIOScriptExecution
             cfg.subAgentStore
-            cfg.subAgentOnProgress
+            onProgress
             rt
             callerSlug
             callerId
-            pConversationId
+            parentConvId
 
     -- Generate conversation ID for this sub-agent
     convId <- newConversationId
@@ -246,7 +261,7 @@ runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query)
         AgentTrace_SubAgentStarted
             pAgentSlug
             callerId
-            pConversationId
+            parentConvId
             rt.agentSlug
             convId
             session0.sessionId
@@ -256,16 +271,14 @@ runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query)
         AgentTrace_Conversation
             callerSlug
             callerId
-            pConversationId
+            parentConvId
             (SubAgentCallTrace rt.agentSlug convId session0.sessionId)
 
     -- Set the query on the agent
     let agentWithQuery = agentSetQuery (UserQuery query) agent
 
     -- Notify parent that sub-agent session started
-    case cfg.subAgentOnProgress of
-        Just onProgress -> onProgress (SessionStarted session0)
-        Nothing -> pure ()
+    onProgress (SessionStarted session0)
 
     -- Run the agent with exception handling for trace emission
     result <- try $ run convId agentWithQuery session0
@@ -277,7 +290,7 @@ runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query)
                 AgentTrace_SubAgentFailed
                     pAgentSlug
                     callerId
-                    pConversationId
+                    parentConvId
                     rt.agentSlug
                     convId
                     session0.sessionId
@@ -289,7 +302,7 @@ runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query)
                 AgentTrace_SubAgentCompleted
                     pAgentSlug
                     callerId
-                    pConversationId
+                    parentConvId
                     rt.agentSlug
                     convId
                     session0.sessionId
@@ -299,13 +312,11 @@ runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query)
                 AgentTrace_Conversation
                     callerSlug
                     callerId
-                    pConversationId
+                    parentConvId
                     (SubAgentReturnTrace rt.agentSlug convId)
 
             -- Notify parent that sub-agent session completed
-            case cfg.subAgentOnProgress of
-                Just onProgress -> onProgress (SessionCompleted finalSession)
-                Nothing -> pure ()
+            onProgress (SessionCompleted finalSession)
 
             -- Persist to store if configured
             case cfg.subAgentStore of
@@ -325,8 +336,8 @@ allowing the parent agent to track sub-agent execution progress.
 runtimeToAgentForToolInIOScriptExecution ::
     -- | Optional session store for persisting sessions
     Maybe SessionStore ->
-    -- | Optional callback for session progress updates
-    Maybe OnSessionProgress ->
+    -- | Callback for session progress updates
+    OnSessionProgress ->
     -- | The runtime to convert
     Runtime ->
     -- | The slug of the calling agent (for tracing)
@@ -336,7 +347,7 @@ runtimeToAgentForToolInIOScriptExecution ::
     -- | The parent conversation ID for tracing
     ConversationId ->
     IO (Agent (LlmTurnContent, Session))
-runtimeToAgentForToolInIOScriptExecution mStore mOnProgress rt callerSlug callerId parentConvId = do
+runtimeToAgentForToolInIOScriptExecution mStore onProgress rt callerSlug callerId parentConvId = do
     let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
     stepId <- newStepId
@@ -366,10 +377,8 @@ runtimeToAgentForToolInIOScriptExecution mStore mOnProgress rt callerSlug caller
                 , contextConfig = defaultContextConfig
                 }
 
-    -- Apply progress callback if provided
-    let agentWithProgress = case mOnProgress of
-            Just onProgress -> agentWithSessionProgress onProgress baseAgent
-            Nothing -> baseAgent
+    -- Apply progress callback
+    let agentWithProgress = agentWithSessionProgress onProgress baseAgent
 
     -- Apply session storage if provided
     let agentWithStorage = case mStore of
@@ -550,3 +559,4 @@ agentStoreSession store mPath convId agent =
     handleProgress x = do
         sessionStoreCallback store convId x
         filepathStoreCallback mPath x
+

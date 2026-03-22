@@ -65,23 +65,28 @@ module System.Agents.TUI.Core (
     -- * Main entry point
     runTUI,
     runTUIWithConfig,
+    runTUIWithCallback,
     fileSessionConfig,
 ) where
 
 import Brick hiding (Down)
-import Brick.BChan (newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
+import Prod.Tracer (Tracer)
 
-import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props, agentRuntime, loadAgentTreeRuntime)
-import System.Agents.Base (newConversationId)
+import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props (..), agentRuntime, loadAgentTreeRuntime, agentToTool)
+import System.Agents.Base (AgentId, AgentSlug, newConversationId)
 import System.Agents.OneShot (runtimeToAgent)
+import System.Agents.Runtime (Runtime)
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
 
@@ -136,7 +141,7 @@ fileSessionConfig store =
 
 {- | Initialize the TUI with props and optional conversation prefix (legacy API).
 
-For more control, use 'runTUIWithConfig' instead.
+For more control, use 'runTUIWithConfig' or 'runTUIWithCallback' instead.
 -}
 runTUI :: SessionStore -> [Props] -> IO ()
 runTUI store props =
@@ -188,3 +193,77 @@ runTUIWithConfig config props = do
     createAgentForTree itree = do
         convId <- newConversationId
         runtimeToAgent config.sessionStore Nothing convId (agentRuntime itree)
+
+{- | Initialize the TUI with a callback for creating the agentToTool function.
+
+This version allows the agentToTool function to be created with access to the
+event channel, enabling sub-agent progress callbacks that emit TUI events.
+
+The callback receives the event channel and returns the agentToTool function
+that will be used when wiring up tool references for sub-agents.
+-}
+runTUIWithCallback ::
+    -- | Session store for persistence
+    SessionStore ->
+    -- | Callback that receives the event channel and returns the agentToTool function
+    (BChan AppEvent -> Tracer IO Trace -> Runtime -> AgentSlug -> AgentId -> ToolRegistration) ->
+    -- | List of agent props (will be modified with the callback-based agentToTool)
+    [Props] ->
+    IO ()
+runTUIWithCallback store mkAgentToTool props = do
+    -- Create event channel first so we can pass it to the callback
+    evChan <- newBChan 100
+
+    -- Create the agentToTool function using the callback
+    let newAgentToTool = mkAgentToTool evChan
+
+    -- Modify props to use the callback-based agentToTool
+    let propsWithCallback = map (setAgentToTool newAgentToTool) props
+
+    -- Load agent trees and create TuiAgents
+    trees <- traverse loadAgentTreeRuntime propsWithCallback
+    let itrees = [rt | Initialized rt <- trees]
+    -- Generate a conversation ID for each agent and create session agents
+    sessionAgents <- traverse createAgentForTree itrees
+    let tuiAgents = zipWith TuiAgent sessionAgents itrees
+
+    -- Load existing session files
+    loadedSessions <- loadSessionFiles store
+
+    -- Create core state with loaded conversations
+    core0 <- initCore tuiAgents
+    coreTVar <- newTVarIO core0
+
+    -- Create UI state
+    let ui0 = initUIState tuiAgents [s | (_, Just s) <- loadedSessions]
+
+    -- Create session config
+    let config = fileSessionConfig store
+
+    -- Create TUI state with session configuration
+    let st = TuiState coreTVar ui0 evChan config
+
+    -- Build and run the app
+    let app =
+            App
+                { appDraw = tui_appDraw
+                , appChooseCursor = tui_appChooseCursor
+                , appHandleEvent = tui_appHandleEvent
+                , appStartEvent = tui_appStartEvent
+                , appAttrMap = tui_appAttrMap
+                }
+
+    void $ forkIO $ forever $ do
+        writeBChan evChan AppEvent_Heartbeat
+        threadDelay 1000000
+    void $ customMainWithDefaultVty (Just evChan) app st
+  where
+    -- Create an agent for a given tree with a fresh conversation ID
+    createAgentForTree itree = do
+        convId <- newConversationId
+        runtimeToAgent store Nothing convId (agentRuntime itree)
+
+    -- Update the agentToTool field in Props
+    setAgentToTool :: (Tracer IO Trace -> Runtime -> AgentSlug -> AgentId -> ToolRegistration) -> Props -> Props
+    setAgentToTool f p = p{agentToTool = f}
+
