@@ -15,6 +15,9 @@ module System.Agents.TUI.Core (
     TuiAgent (..),
     Conversation (..),
     ConversationStatus (..),
+    ConversationNode (..),
+    buildConversationTree,
+    makeSubAgentCallback,
     AuxiliaryTask (..),
     Core,
     UIState (..),
@@ -39,6 +42,9 @@ module System.Agents.TUI.Core (
     coreConversations,
     corePausedConversations,
     coreBufferedMessages,
+    coreSubAgentCallbacks,
+    conversationTreeExpanded,
+    selectedConversationPath,
     tuiCore,
     tuiUI,
     eventChan,
@@ -182,3 +188,4 @@ runTUIWithConfig config props = do
     createAgentForTree itree = do
         convId <- newConversationId
         runtimeToAgent config.sessionStore Nothing convId (agentRuntime itree)
+
