@@ -10,7 +10,7 @@ import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
 import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
-import Control.Lens ((^.), to)
+import Control.Lens (to, (^.))
 import Data.List (find)
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -312,8 +312,7 @@ renderNode expanded selectedPath depth node =
             if isExpanded
                 then map (renderNode expanded selectedPath (depth + 1)) (nodeChildren node)
                 else []
-     in
-        vBox (styledWidget : childrenWidgets)
+     in vBox (styledWidget : childrenWidgets)
 
 -- | Render conversation status indicator.
 renderConversationStatus :: ConversationStatus -> Widget N
@@ -332,8 +331,9 @@ render_sessionList st =
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
--- | Render a single session item.
--- The Bool parameter indicates if the item is selected.
+{- | Render a single session item.
+The Bool parameter indicates if the item is selected.
+-}
 render_sessionItem :: Bool -> Session -> Widget N
 render_sessionItem _isSelected sess = txt $ " " <> Text.pack (show sess.sessionId)
 
@@ -567,4 +567,3 @@ tui_appAttrMap _ =
         , (waitingStatusAttr, Vty.defAttr `Vty.withForeColor` Vty.yellow)
         , (pausedStatusAttr, Vty.defAttr `Vty.withForeColor` Vty.red)
         ]
-

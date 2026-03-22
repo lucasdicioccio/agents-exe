@@ -209,12 +209,12 @@ navigateConversationUp = do
     currentPath <- use (tuiUI . selectedConversationPath)
 
     case currentPath of
-        [] -> pure ()  -- No selection
+        [] -> pure () -- No selection
         (currentId : _) ->
             -- Find the current ID in the visible list and move to previous
             case findIndex (== currentId) visibleConvIds of
                 Nothing -> pure ()
-                Just 0 -> pure ()  -- Already at the top
+                Just 0 -> pure () -- Already at the top
                 Just idx -> do
                     let prevId = visibleConvIds !! (idx - 1)
                     tuiUI . selectedConversationPath .= [prevId]
@@ -244,7 +244,7 @@ navigateConversationDown = do
                 Nothing -> pure ()
                 Just idx ->
                     if idx >= length visibleConvIds - 1
-                        then pure ()  -- Already at the bottom
+                        then pure () -- Already at the bottom
                         else do
                             let nextId = visibleConvIds !! (idx + 1)
                             tuiUI . selectedConversationPath .= [nextId]
@@ -265,7 +265,7 @@ navigateToParent = do
             case find ((== convId) . conversationId) (coreConversations core) of
                 Nothing -> pure ()
                 Just conv -> case conversationSession conv >>= parentConversationId of
-                    Nothing -> pure ()  -- No parent
+                    Nothing -> pure () -- No parent
                     Just parentId -> do
                         -- Update selected path to parent
                         tuiUI . selectedConversationPath .= [parentId]
@@ -287,10 +287,11 @@ collectVisibleConversations expanded nodes = concatMap collectFromNode nodes
   where
     collectFromNode node =
         let convId = conversationId (nodeConversation node)
-            children = if Set.member convId expanded
-                       then collectVisibleConversations expanded (nodeChildren node)
-                       else []
-        in convId : children
+            children =
+                if Set.member convId expanded
+                    then collectVisibleConversations expanded (nodeChildren node)
+                    else []
+         in convId : children
 
 -- | Update the list selection to match a specific conversation ID.
 updateListSelectionToConversation :: ConversationId -> EventM N TuiState ()
@@ -912,4 +913,3 @@ handleSendMessage = do
                         tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
                     Nothing -> pure ()
             Nothing -> pure ()
-
