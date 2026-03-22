@@ -33,10 +33,17 @@ module System.Agents.Session.Base (
     SessionProgress (..),
     OnSessionProgress,
     ignoreSessionProgress,
+
+    -- * Session construction helpers
+    mkChildSession,
+    isChildSession,
+    getRootConversationId,
 ) where
 
+import Data.Maybe (isJust)
 import Data.Text (Text)
 
+import System.Agents.Base (ConversationId)
 import System.Agents.Tools.Context (ToolExecutionContext)
 
 -- Re-export all session types from Session.Types for backward compatibility
@@ -142,3 +149,90 @@ type OnSessionProgress = SessionProgress -> IO ()
 -- | A no-op session progress handler for when tracking is not needed.
 ignoreSessionProgress :: OnSessionProgress
 ignoreSessionProgress = const (pure ())
+
+-------------------------------------------------------------------------------
+-- Session Construction Helpers
+-------------------------------------------------------------------------------
+
+{- | Create a child session linked to a parent session.
+
+This is used when a parent agent calls a sub-agent, creating a new
+session that tracks its relationship to the parent. The child session
+stores references to the parent's session ID, conversation ID, and
+the agent slug that initiated the call.
+
+Example:
+
+@
+childSess <- mkChildSession parentSessId parentConvId "helper-agent"
+-- Use childSess for the sub-agent call
+@
+-}
+mkChildSession ::
+    -- | Parent session ID
+    SessionId ->
+    -- | Parent conversation ID
+    ConversationId ->
+    -- | Parent agent slug (the agent that initiated this sub-agent call)
+    Text ->
+    IO Session
+mkChildSession parentSessId parentConvId parentSlug = do
+    sessId <- newSessionId
+    tId <- newTurnId
+    pure $
+        Session
+            { turns = []
+            , sessionId = sessId
+            , forkedFromSessionId = Nothing
+            , turnId = tId
+            , parentSessionId = Just parentSessId
+            , parentConversationId = Just parentConvId
+            , parentAgentSlug = Just parentSlug
+            }
+
+{- | Check if a session is a child session (was created by a parent agent).
+
+Returns True if the session has a 'parentSessionId', indicating it was
+created as part of a nested agent call.
+
+Example:
+
+@
+if isChildSession sess
+    then displayInHierarchy sess
+    else displayAsRoot sess
+@
+-}
+isChildSession :: Session -> Bool
+isChildSession = isJust . parentSessionId
+
+{- | Get the root conversation ID for a session.
+
+For child sessions, this returns the parent's conversation ID (the conversation
+that initiated the nested call chain). For root sessions (those without a parent),
+this returns the provided conversation ID.
+
+This function is useful for tracing the full call chain back to its origin,
+enabling features like conversation hierarchy display in the TUI.
+
+Note: Currently this returns the immediate parent's conversation ID. In the
+future, this could recursively follow the parent chain if deeper ancestry
+tracking is needed.
+
+Example:
+
+@
+rootConvId <- getRootConversationId store sess
+-- Use rootConvId to group related sessions in the UI
+@
+-}
+getRootConversationId ::
+    -- | The conversation ID to use if this is a root session (no parent)
+    ConversationId ->
+    -- | The session to get the root conversation ID for
+    Session ->
+    IO ConversationId
+getRootConversationId rootConvId sess =
+    case parentConversationId sess of
+        Nothing -> pure rootConvId
+        Just parentConvId -> pure parentConvId

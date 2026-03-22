@@ -47,6 +47,13 @@ tracePrintingTextResponses = Tracer f
     f (AgentTrace (Runtime.LuaToolboxInitError _ _)) = pure ()
     f (AgentTrace (Runtime.SkillsToolboxTrace _ _)) = pure ()
     f (AgentTrace (Runtime.SkillsToolboxInitError _ _)) = pure ()
+    -- New sub-agent trace events
+    f (AgentTrace (Runtime.AgentTrace_SubAgentStarted pSlug _ _ subSlug subConv _)) =
+        Text.putStrLn $ Text.intercalate "/" [pSlug, subSlug] <> ": sub-agent started (" <> Text.pack (show subConv) <> ")"
+    f (AgentTrace (Runtime.AgentTrace_SubAgentCompleted pSlug _ _ subSlug subConv _)) =
+        Text.putStrLn $ Text.intercalate "/" [pSlug, subSlug] <> ": sub-agent completed (" <> Text.pack (show subConv) <> ")"
+    f (AgentTrace (Runtime.AgentTrace_SubAgentFailed pSlug _ _ subSlug _ _ err)) =
+        Text.putStrLn $ Text.intercalate "/" [pSlug, subSlug] <> ": sub-agent failed: " <> err
     f (McpTrace _ _) = pure ()
     f (OpenAPITrace _ _) = pure ()
     f (PostgRESTrace _ _) = pure ()
@@ -72,6 +79,13 @@ tracePrintingTextResponses = Tracer f
     g _ (Runtime.ChildrenTrace (Runtime.LuaToolboxInitError _ _)) = pure ()
     g _ (Runtime.ChildrenTrace (Runtime.SkillsToolboxTrace _ _)) = pure ()
     g _ (Runtime.ChildrenTrace (Runtime.SkillsToolboxInitError _ _)) = pure ()
+    -- New sub-agent trace events in ChildrenTrace
+    g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_SubAgentStarted _ _ _ subSlug _ _)) =
+        Text.putStrLn $ Text.intercalate "/" (subSlug : pfx) <> ": sub-agent session started"
+    g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_SubAgentCompleted _ _ _ subSlug _ _)) =
+        Text.putStrLn $ Text.intercalate "/" (subSlug : pfx) <> ": sub-agent session completed"
+    g pfx (Runtime.ChildrenTrace (Runtime.AgentTrace_SubAgentFailed _ _ _ subSlug _ _ err)) =
+        Text.putStrLn $ Text.intercalate "/" (subSlug : pfx) <> ": sub-agent session failed: " <> err
     g _ (Runtime.LLMTrace _ (OpenAI.HttpClientTrace _)) = pure ()
     g _ (Runtime.LLMTrace _ (OpenAI.CallChatCompletion _ bytes)) =
         Text.putStrLn $ "  [LLM request: " <> formatBytes bytes <> "]"
@@ -80,6 +94,11 @@ tracePrintingTextResponses = Tracer f
     g _ (Runtime.NewConversation) = pure ()
     g _ (Runtime.WaitingForPrompt) = pure ()
     g _ (Runtime.RunToolTrace _ _) = pure ()
+    -- New ConversationTrace events
+    g _ (Runtime.SubAgentCallTrace subSlug subConv _) =
+        Text.putStrLn $ "  [Sub-agent call: " <> subSlug <> " conv=" <> Text.pack (show subConv) <> "]"
+    g _ (Runtime.SubAgentReturnTrace subSlug subConv) =
+        Text.putStrLn $ "  [Sub-agent return: " <> subSlug <> " conv=" <> Text.pack (show subConv) <> "]"
 
 traceUsefulPromptStdout :: Tracer IO Trace
 traceUsefulPromptStdout = traceUsefulPromptHandle stdout
@@ -171,6 +190,27 @@ renderAgentTrace (Runtime.SkillsToolboxInitError name err) =
     Text.unlines
         [ mconcat ["@skills/", name, ":"]
         , "Error: " <> Text.pack err
+        ]
+-- New sub-agent trace renderers
+renderAgentTrace (Runtime.AgentTrace_SubAgentStarted pSlug _ pConv subSlug subConv sessId) =
+    Text.unlines
+        [ mconcat ["@", pSlug, " (sub-agent):"]
+        , Text.unwords ["Sub-agent started:", subSlug]
+        , Text.unwords ["  Parent conversation:", Text.pack (show pConv)]
+        , Text.unwords ["  Sub-agent conversation:", Text.pack (show subConv)]
+        , Text.unwords ["  Session ID:", Text.pack (show sessId)]
+        ]
+renderAgentTrace (Runtime.AgentTrace_SubAgentCompleted pSlug _ _ subSlug subConv _) =
+    Text.unlines
+        [ mconcat ["@", pSlug, " (sub-agent):"]
+        , Text.unwords ["Sub-agent completed:", subSlug]
+        , Text.unwords ["  Sub-agent conversation:", Text.pack (show subConv)]
+        ]
+renderAgentTrace (Runtime.AgentTrace_SubAgentFailed pSlug _ _ subSlug _ _ err) =
+    Text.unlines
+        [ mconcat ["@", pSlug, " (sub-agent):"]
+        , Text.unwords ["Sub-agent failed:", subSlug]
+        , Text.unwords ["  Error:", err]
         ]
 
 renderLoadingAgentTrace :: BashToolbox.Trace -> Text
@@ -299,6 +339,15 @@ renderConversationAgentTrace tr = case tr of
         Text.unwords ["moonshot/kimi overloaded:", "retry " <> Text.pack (show attempt), "in " <> Text.pack (show delay) <> "s"]
     Runtime.ChildrenTrace sub ->
         Text.unwords ["(", Runtime.traceAgentSlug sub, ")", renderAgentTrace sub]
+    -- New ConversationTrace events
+    Runtime.SubAgentCallTrace subSlug subConv sessId ->
+        Text.unlines
+            [ Text.unwords ["sub-agent call:", subSlug]
+            , Text.unwords ["  conversation:", Text.pack (show subConv)]
+            , Text.unwords ["  session:", Text.pack (show sessId)]
+            ]
+    Runtime.SubAgentReturnTrace subSlug subConv ->
+        Text.unwords ["sub-agent return:", subSlug, "conv=", Text.pack (show subConv)]
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode

@@ -5,6 +5,15 @@
 
 The tui command launches an interactive terminal user interface for
 chatting with agents.
+
+This module integrates with the recursive conversation capture feature
+by using the callback-based sub-agent tool creation, enabling:
+
+1. Parent-child session tracking - sub-agents are linked to their parents
+2. Progress callbacks - TUI receives updates about sub-agent lifecycle
+3. Correlation tracing - traces include sub-agent correlation IDs
+
+See System.Agents.AgentTree.OneShotTool for details on the callback mechanism.
 -}
 module System.Agents.CLI.TUI (
     -- * Types
@@ -28,7 +37,25 @@ data TuiOptions = TuiOptions
     }
     deriving (Show)
 
--- | Handle the TUI command: launch interactive terminal interface
+{- | Handle the TUI command: launch interactive terminal interface.
+
+This function sets up the TUI with support for recursive agent calls.
+Each agent's runtime is wrapped with callback support using
+'turnAgentRuntimeIntoIOToolWithCallbacks', enabling:
+
+* Sub-agent sessions are linked to parent sessions via parent IDs
+* Session progress is tracked and emitted as TUI events
+* Traces include correlation IDs for sub-agent calls
+
+The tracer passed to 'agentToTool' is the parent agent's tracer,
+which is used to emit correlation traces linking sub-agent execution
+to the parent conversation.
+
+The sub-agent configuration includes:
+* A session store for persisting sub-agent sessions to disk
+* A progress callback factory that creates TUI events for sub-agent
+  lifecycle (SessionStarted, SessionUpdated, SessionCompleted)
+-}
 handleTUI ::
     -- | Base tracer for logging
     Prod.Tracer IO AgentTree.Trace ->
@@ -51,9 +78,33 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
                         Prod.traceBoth
                             baseTracer
                             (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                    , -- Use the callback-based tool creation for recursive agent support.
+                      -- The tracer argument is the parent agent's tracer for correlation.
+                      -- The progress callback factory is provided by runTUIWithCallback when
+                      -- the event channel is available.
+                      AgentTree.agentToTool = \parentTracer rt slug agentId ->
+                        OneShotTool.turnAgentRuntimeIntoIOToolWithCallbacks
+                            OneShotTool.defaultSubAgentConfig
+                            parentTracer
+                            rt
+                            slug
+                            agentId
                     , AgentTree.runtimeRegistry = registry
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUI sessionStore agentPropsList
+    -- Pass a callback factory that creates the agentToTool function with access to the event channel
+    let mkAgentToTool eventChan = \parentTracer rt slug agentId ->
+            OneShotTool.turnAgentRuntimeIntoIOToolWithCallbacks
+                ( OneShotTool.SubAgentSessionConfig
+                    { OneShotTool.subAgentStore = Just sessionStore
+                    , OneShotTool.subAgentOnProgressFactory = \parentConvId ->
+                        TUI.makeSubAgentCallback eventChan parentConvId
+                    }
+                )
+                parentTracer
+                rt
+                slug
+                agentId
+    TUI.runTUIWithCallback sessionStore mkAgentToTool agentPropsList
+

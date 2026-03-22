@@ -62,6 +62,8 @@ handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
+                , -- Wrap the function to match the new signature (ignoring the tracer argument)
+                  -- The turnAgentRuntimeIntoIOTool function handles the tracer internally
+                  AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool sessionStore rt slug aid
                 , AgentTree.runtimeRegistry = registry
                 }
