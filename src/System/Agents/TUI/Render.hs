@@ -9,12 +9,14 @@ import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
-import Control.Lens ((^.))
+import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
+import Control.Lens ((^.), to)
+import Data.List (find)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (AgentTree (..))
@@ -66,6 +68,22 @@ byteUsageAttr = attrName "byteUsage"
 pausedAttr :: AttrName
 pausedAttr = attrName "paused"
 
+-- | Attribute for selected conversation in tree view.
+selectedConversationAttr :: AttrName
+selectedConversationAttr = attrName "selectedConversation"
+
+-- | Attribute for active status indicator.
+activeStatusAttr :: AttrName
+activeStatusAttr = attrName "activeStatus"
+
+-- | Attribute for waiting status indicator.
+waitingStatusAttr :: AttrName
+waitingStatusAttr = attrName "waitingStatus"
+
+-- | Attribute for paused status indicator.
+pausedStatusAttr :: AttrName
+pausedStatusAttr = attrName "pausedStatus"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -104,7 +122,7 @@ render_mainLayout st =
 -- | Sidebar with agent and conversation lists.
 render_sidebar :: TuiState -> Widget N
 render_sidebar st =
-    hLimit 25 $
+    hLimit 30 $
         vBox
             [ render_agentList st
             , render_conversationList st
@@ -134,7 +152,7 @@ render_agentDetail st =
 -- | Conversation area with message input and conversation history.
 render_conversationArea :: TuiState -> Widget N
 render_conversationArea st =
-    case listSelectedElement (st ^. tuiUI . conversationList) of
+    case getSelectedConversationId st of
         Nothing ->
             vBox
                 [ txt "Select or create a conversation (Ctrl+n)"
@@ -206,55 +224,118 @@ render_agentItem _ agent =
     agentSlug0 = agent.agentTree.agentRuntime.agentSlug
 
 -------------------------------------------------------------------------------
--- Conversation List Rendering
+-- Conversation Tree Rendering
 -------------------------------------------------------------------------------
 
--- | Render the conversation list.
+-- | Render the conversation list using tree structure.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
     borderWithFocus st ConversationListWidget "Conversations" $
-        renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList)
+        viewport ConversationListWidget Vertical $
+            if null tree
+                then txt "  No conversations"
+                else renderConversationTree expanded selectedPath tree
   where
-    hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+    -- Get conversations from the core (using the UI list for now)
+    convs = st ^. tuiUI . conversationList . to listElements
+    -- Build the conversation tree
+    tree = buildConversationTree (Vector.toList convs)
+    -- Get expanded state from UI
+    expanded = st ^. tuiUI . conversationTreeExpanded
+    -- Get selected path from UI
+    selectedPath = st ^. tuiUI . selectedConversationPath
 
--- | Render a single conversation item.
-render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
-render_conversationItem st _ conv =
-    let indicator = case conversationStatus conv of
-            ConversationStatus_Active -> "⟳ "
-            ConversationStatus_WaitingForInput ->
-                if isUnread then "● " else "  "
-            ConversationStatus_Paused -> "⏸ "
-        baseText = indicator <> Text.take 18 (conversationName conv)
-        -- Add turn count next to conversation name
-        turnCount = case conversationSession conv of
-            Nothing -> 0
-            Just session -> length session.turns
-        turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        fullText = baseText <> turnSuffix
-        widget = case conversationStatus conv of
-            ConversationStatus_Paused ->
-                withAttr pausedAttr $ txt $ " " <> fullText
-            _ -> txt $ " " <> fullText
-     in widget
-  where
-    isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
+-- | Get the currently selected conversation ID from the state.
+getSelectedConversationId :: TuiState -> Maybe ConversationId
+getSelectedConversationId st =
+    case st ^. tuiUI . selectedConversationPath of
+        [] -> Nothing
+        (convId : _) -> Just convId
+
+-- | Render a conversation tree as a nested list.
+renderConversationTree ::
+    -- | Expanded conversation IDs
+    Set ConversationId ->
+    -- | Currently selected path
+    [ConversationId] ->
+    -- | Tree nodes
+    [ConversationNode] ->
+    Widget N
+renderConversationTree expanded selectedPath nodes =
+    vBox $ map (renderNode expanded selectedPath 0) nodes
+
+-- | Render a single conversation node at a given depth.
+renderNode ::
+    -- | Expanded conversation IDs
+    Set ConversationId ->
+    -- | Currently selected path
+    [ConversationId] ->
+    -- | Indentation depth
+    Int ->
+    -- | Node to render
+    ConversationNode ->
+    Widget N
+renderNode expanded selectedPath depth node =
+    let conv = nodeConversation node
+        convId = conversationId conv
+        isExpanded = Set.member convId expanded
+        hasChildren = not (null $ nodeChildren node)
+        isSelected = convId `elem` selectedPath
+
+        -- Indentation based on depth (2 spaces per level)
+        indent = hBox $ replicate depth (str "  ")
+
+        -- Expand/collapse indicator
+        expander =
+            if hasChildren
+                then
+                    if isExpanded
+                        then withAttr activeStatusAttr (str "[-] ")
+                        else withAttr waitingStatusAttr (str "[+] ")
+                else str "    "
+
+        -- Conversation name with visual indicators
+        nameWidget = str $ Text.unpack $ conversationName conv
+        statusWidget = renderConversationStatus (conversationStatus conv)
+
+        -- Build the base widget
+        baseWidget = hBox [indent, expander, nameWidget, str " ", statusWidget]
+
+        -- Apply styles if selected
+        styledWidget =
+            if isSelected
+                then withAttr selectedConversationAttr baseWidget
+                else baseWidget
+
+        -- Render children if expanded
+        childrenWidgets =
+            if isExpanded
+                then map (renderNode expanded selectedPath (depth + 1)) (nodeChildren node)
+                else []
+     in
+        vBox (styledWidget : childrenWidgets)
+
+-- | Render conversation status indicator.
+renderConversationStatus :: ConversationStatus -> Widget N
+renderConversationStatus ConversationStatus_Active =
+    withAttr activeStatusAttr (str "●")
+renderConversationStatus ConversationStatus_WaitingForInput =
+    withAttr waitingStatusAttr (str "◐")
+renderConversationStatus ConversationStatus_Paused =
+    withAttr pausedStatusAttr (str "◑")
 
 -- | Render the sessions list.
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
     borderWithFocus st SessionsListWidget "Sessions" $
-        renderList (render_sessionItem st) hasFocus (st ^. tuiUI . sessionList)
+        renderList render_sessionItem hasFocus (st ^. tuiUI . sessionList)
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
--- | Render a single conversation item.
-render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem _st _ sess =
-    let
-        widget = txt $ Text.pack $ " " <> show sess.sessionId
-     in
-        widget
+-- | Render a single session item.
+-- The Bool parameter indicates if the item is selected.
+render_sessionItem :: Bool -> Session -> Widget N
+render_sessionItem _isSelected sess = txt $ " " <> Text.pack (show sess.sessionId)
 
 -------------------------------------------------------------------------------
 -- Agent Info Rendering
@@ -318,10 +399,19 @@ render_conversationView st =
     borderWithFocus st ConversationViewWidget "Conversation" content
   where
     content =
-        case listSelectedElement (st ^. tuiUI . conversationList) of
+        case getSelectedConversation st of
             Nothing -> txt "No conversation selected"
-            Just (_, conv) ->
+            Just conv ->
                 viewport ConversationViewWidget Both $ render_session (conversationSession conv) (st ^. tuiUI . ongoingConversations)
+
+-- | Get the currently selected conversation from the state.
+getSelectedConversation :: TuiState -> Maybe Conversation
+getSelectedConversation st =
+    case st ^. tuiUI . selectedConversationPath of
+        [] -> Nothing
+        (selectedId : _) ->
+            let convs = st ^. tuiUI . conversationList . to listElements
+             in find ((== selectedId) . conversationId) (Vector.toList convs)
 
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
@@ -472,4 +562,9 @@ tui_appAttrMap _ =
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
+        , (selectedConversationAttr, Vty.defAttr `Vty.withStyle` Vty.bold `Vty.withBackColor` Vty.blue)
+        , (activeStatusAttr, Vty.defAttr `Vty.withForeColor` Vty.green)
+        , (waitingStatusAttr, Vty.defAttr `Vty.withForeColor` Vty.yellow)
+        , (pausedStatusAttr, Vty.defAttr `Vty.withForeColor` Vty.red)
         ]
+

@@ -17,8 +17,11 @@ import Control.Lens (to, use, (%=), (.=))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
+import Data.List (find, findIndex)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (listToMaybe)
+import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
@@ -64,6 +67,13 @@ tui_appHandleEvent ev = do
             handleShowStatus severity text
         AppEvent AppEvent_ClearStatus ->
             handleClearStatus
+        -- Sub-agent session events
+        AppEvent (AppEvent_SubAgentSessionStarted parentConvId childSession) ->
+            handleSubAgentSessionStarted parentConvId childSession
+        AppEvent (AppEvent_SubAgentSessionUpdated parentConvId childSession) ->
+            handleSubAgentSessionUpdated parentConvId childSession
+        AppEvent (AppEvent_SubAgentSessionCompleted parentConvId childSession) ->
+            handleSubAgentSessionCompleted parentConvId childSession
         -- VTY events
         VtyEvent (Vty.EvKey Vty.KEsc _) ->
             halt
@@ -128,16 +138,178 @@ handleAgentListEvent ev = do
             tuiUI . selectedAgentInfo .= Just agent
         Nothing -> pure ()
 
--- | Handle conversation list navigation.
+-- | Handle conversation list navigation with tree support.
 handleConversationListEvent :: Vty.Event -> EventM N TuiState ()
-handleConversationListEvent ev = do
-    zoom (tuiUI . conversationList) $ handleListEvent ev
-    -- Mark conversation as read when selected
-    selected <- use (tuiUI . conversationList . to listSelectedElement)
-    case selected of
-        Just (_, conv) ->
-            tuiUI . unreadConversations %= Set.delete (conversationId conv)
+handleConversationListEvent ev =
+    case ev of
+        -- Tab to toggle expansion of selected conversation
+        Vty.EvKey (Vty.KChar '\t') [] ->
+            toggleSelectedConversation
+        -- Enter to view selected conversation (focus conversation view)
+        Vty.EvKey Vty.KEnter [] ->
+            viewSelectedConversation
+        -- Right arrow to expand
+        Vty.EvKey Vty.KRight [] ->
+            expandSelectedConversation
+        -- Left arrow to collapse
+        Vty.EvKey Vty.KLeft [] ->
+            collapseSelectedConversation
+        -- Up arrow to navigate up in the tree
+        Vty.EvKey Vty.KUp [] ->
+            navigateConversationUp
+        -- Down arrow to navigate down in the tree
+        Vty.EvKey Vty.KDown [] ->
+            navigateConversationDown
+        -- Regular list navigation (for backward compatibility)
+        _ -> do
+            zoom (tuiUI . conversationList) $ handleListEvent ev
+            -- Update selected path when list selection changes
+            selected <- use (tuiUI . conversationList . to listSelectedElement)
+            case selected of
+                Just (_, conv) -> do
+                    tuiUI . selectedConversationPath .= [conversationId conv]
+                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                Nothing -> pure ()
+
+-- | Toggle expansion state of the selected conversation.
+toggleSelectedConversation :: EventM N TuiState ()
+toggleSelectedConversation = do
+    mSelectedId <- getSelectedConversationId
+    case mSelectedId of
         Nothing -> pure ()
+        Just convId -> do
+            expanded <- use (tuiUI . conversationTreeExpanded)
+            if Set.member convId expanded
+                then tuiUI . conversationTreeExpanded .= Set.delete convId expanded
+                else tuiUI . conversationTreeExpanded .= Set.insert convId expanded
+
+-- | Expand the selected conversation.
+expandSelectedConversation :: EventM N TuiState ()
+expandSelectedConversation = do
+    mSelectedId <- getSelectedConversationId
+    case mSelectedId of
+        Nothing -> pure ()
+        Just convId -> do
+            tuiUI . conversationTreeExpanded %= Set.insert convId
+
+-- | Collapse the selected conversation.
+collapseSelectedConversation :: EventM N TuiState ()
+collapseSelectedConversation = do
+    mSelectedId <- getSelectedConversationId
+    case mSelectedId of
+        Nothing -> pure ()
+        Just convId -> do
+            tuiUI . conversationTreeExpanded %= Set.delete convId
+
+-- | Navigate to the previous conversation in the tree.
+navigateConversationUp :: EventM N TuiState ()
+navigateConversationUp = do
+    -- Get all visible conversations in tree order
+    visibleConvIds <- getVisibleConversationsInOrder
+    currentPath <- use (tuiUI . selectedConversationPath)
+
+    case currentPath of
+        [] -> pure ()  -- No selection
+        (currentId : _) ->
+            -- Find the current ID in the visible list and move to previous
+            case findIndex (== currentId) visibleConvIds of
+                Nothing -> pure ()
+                Just 0 -> pure ()  -- Already at the top
+                Just idx -> do
+                    let prevId = visibleConvIds !! (idx - 1)
+                    tuiUI . selectedConversationPath .= [prevId]
+                    tuiUI . unreadConversations %= Set.delete prevId
+                    -- Also update the list selection for consistency
+                    updateListSelectionToConversation prevId
+
+-- | Navigate to the next conversation in the tree.
+navigateConversationDown :: EventM N TuiState ()
+navigateConversationDown = do
+    -- Get all visible conversations in tree order
+    visibleConvIds <- getVisibleConversationsInOrder
+    currentPath <- use (tuiUI . selectedConversationPath)
+
+    case currentPath of
+        [] ->
+            -- No selection, select first if available
+            case visibleConvIds of
+                (firstId : _) -> do
+                    tuiUI . selectedConversationPath .= [firstId]
+                    tuiUI . unreadConversations %= Set.delete firstId
+                    updateListSelectionToConversation firstId
+                [] -> pure ()
+        (currentId : _) ->
+            -- Find the current ID in the visible list and move to next
+            case findIndex (== currentId) visibleConvIds of
+                Nothing -> pure ()
+                Just idx ->
+                    if idx >= length visibleConvIds - 1
+                        then pure ()  -- Already at the bottom
+                        else do
+                            let nextId = visibleConvIds !! (idx + 1)
+                            tuiUI . selectedConversationPath .= [nextId]
+                            tuiUI . unreadConversations %= Set.delete nextId
+                            updateListSelectionToConversation nextId
+
+-- | Navigate to parent conversation.
+navigateToParent :: EventM N TuiState ()
+navigateToParent = do
+    mSelectedId <- getSelectedConversationId
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+
+    case mSelectedId of
+        Nothing -> pure ()
+        Just convId -> do
+            -- Find the conversation and check if it has a parent
+            case find ((== convId) . conversationId) (coreConversations core) of
+                Nothing -> pure ()
+                Just conv -> case conversationSession conv >>= parentConversationId of
+                    Nothing -> pure ()  -- No parent
+                    Just parentId -> do
+                        -- Update selected path to parent
+                        tuiUI . selectedConversationPath .= [parentId]
+                        tuiUI . unreadConversations %= Set.delete parentId
+                        updateListSelectionToConversation parentId
+
+-- | Get all visible conversations in tree order (respecting expanded state).
+getVisibleConversationsInOrder :: EventM N TuiState [ConversationId]
+getVisibleConversationsInOrder = do
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+    expanded <- use (tuiUI . conversationTreeExpanded)
+    let tree = buildConversationTree (coreConversations core)
+    pure $ collectVisibleConversations expanded tree
+
+-- | Collect visible conversation IDs from the tree.
+collectVisibleConversations :: Set ConversationId -> [ConversationNode] -> [ConversationId]
+collectVisibleConversations expanded nodes = concatMap collectFromNode nodes
+  where
+    collectFromNode node =
+        let convId = conversationId (nodeConversation node)
+            children = if Set.member convId expanded
+                       then collectVisibleConversations expanded (nodeChildren node)
+                       else []
+        in convId : children
+
+-- | Update the list selection to match a specific conversation ID.
+updateListSelectionToConversation :: ConversationId -> EventM N TuiState ()
+updateListSelectionToConversation convId = do
+    convs <- use (tuiUI . conversationList . to listElements)
+    case Vector.findIndex (\c -> conversationId c == convId) convs of
+        Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
+        Nothing -> pure ()
+
+-- | Focus the conversation view widget.
+viewSelectedConversation :: EventM N TuiState ()
+viewSelectedConversation = do
+    tuiUI . uiFocusRing %= focusSetCurrent ConversationViewWidget
+
+-- | Get the currently selected conversation ID.
+getSelectedConversationId :: EventM N TuiState (Maybe ConversationId)
+getSelectedConversationId = do
+    currentPath <- use (tuiUI . selectedConversationPath)
+    pure $ listToMaybe currentPath
 
 -- | Handle sessions list navigation.
 handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
@@ -221,23 +393,26 @@ showStatus severity text = do
 -- | Get the currently focused session, if any.
 getFocusedSession :: EventM N TuiState (Maybe Session)
 getFocusedSession = do
-    mConv <- use (tuiUI . conversationList . to listSelectedElement)
-    case mConv of
-        Just (_, conv) -> do
+    mConvId <- getSelectedConversationId
+    case mConvId of
+        Just convId -> do
             -- First try to get the session from the conversation's cached session
-            case conversationSession conv of
-                Just sess -> pure (Just sess)
-                Nothing -> do
-                    -- If not cached, try to read from session store
-                    config <- use sessionConfig
-                    liftIO $ SessionStore.readSession config.sessionStore (conversationId conv)
+            coreRef <- use tuiCore
+            core <- liftIO $ readTVarIO coreRef
+            case find ((== convId) . conversationId) (coreConversations core) of
+                Just conv -> case conversationSession conv of
+                    Just sess -> pure (Just sess)
+                    Nothing -> do
+                        -- If not cached, try to read from session store
+                        config <- use sessionConfig
+                        liftIO $ SessionStore.readSession config.sessionStore convId
+                Nothing -> pure Nothing
         Nothing -> pure Nothing
 
 -- | Get the conversation ID of the currently focused conversation.
 getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
 getFocusedConversationId = do
-    mConv <- use (tuiUI . conversationList . to listSelectedElement)
-    pure $ fmap (conversationId . snd) mConv
+    getSelectedConversationId
 
 -- | Format a session as markdown with the specified order preference.
 formatSessionMarkdown :: OrderPreference -> Session -> Text.Text
@@ -343,7 +518,7 @@ Preserves the currently selected conversation when refreshing the list.
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
     -- Save the currently selected conversation ID before refreshing
-    mSelectedConvId <- getFocusedConversationId
+    mSelectedConvId <- getSelectedConversationId
 
     -- Refresh conversations from core
     coreRef <- use tuiCore
@@ -413,6 +588,7 @@ handleNewConversation convId = do
         Just idx -> do
             tuiUI . conversationList . listSelectedL .= Just idx
             tuiUI . unreadConversations %= Set.delete convId
+            tuiUI . selectedConversationPath .= [convId]
         Nothing -> pure ()
 
 -- | Handle needs input update event.
@@ -448,10 +624,10 @@ handleConversationUpdated convId sess = do
         c{coreConversations = updateConversationSession convId sess (coreConversations c)}
 
     -- Mark as unread if not currently selected
-    selected <- use (tuiUI . conversationList . to listSelectedElement)
+    selected <- getSelectedConversationId
     case selected of
-        Just (_, conv)
-            | conversationId conv /= convId ->
+        Just selId
+            | selId /= convId ->
                 tuiUI . unreadConversations %= Set.insert convId
         _ -> pure ()
     -- Refresh from core
@@ -473,6 +649,31 @@ handleRefreshTools = do
         Just agent ->
             liftIO $ void $ atomically $ agent.agentTree.agentRuntime.agentTriggerRefreshTools
         Nothing -> pure ()
+
+-------------------------------------------------------------------------------
+-- Sub-Agent Session Event Handlers
+-------------------------------------------------------------------------------
+
+-- | Handle sub-agent session started event.
+handleSubAgentSessionStarted :: ConversationId -> Session -> EventM N TuiState ()
+handleSubAgentSessionStarted parentConvId _childSession = do
+    showStatus StatusInfo $ "Sub-agent started under conversation " <> Text.pack (show parentConvId)
+    -- Auto-expand the parent conversation so the child is visible
+    tuiUI . conversationTreeExpanded %= Set.insert parentConvId
+    -- Refresh the conversation list to show the new session
+    handleHeartbeat
+
+-- | Handle sub-agent session updated event.
+handleSubAgentSessionUpdated :: ConversationId -> Session -> EventM N TuiState ()
+handleSubAgentSessionUpdated _parentConvId _childSession = do
+    -- The session is stored in core, just refresh to show updates
+    handleHeartbeat
+
+-- | Handle sub-agent session completed event.
+handleSubAgentSessionCompleted :: ConversationId -> Session -> EventM N TuiState ()
+handleSubAgentSessionCompleted parentConvId _childSession = do
+    showStatus StatusInfo $ "Sub-agent completed under conversation " <> Text.pack (show parentConvId)
+    handleHeartbeat
 
 -------------------------------------------------------------------------------
 -- Conversation Management
@@ -523,11 +724,10 @@ Ctrl+E pauses/unpauses the conversation, blocking the step iteration.
 -}
 handleTogglePauseConversation :: EventM N TuiState ()
 handleTogglePauseConversation = do
-    mSelectedConv <- use (tuiUI . conversationList . to listSelectedElement)
-    case mSelectedConv of
+    mSelectedConvId <- getSelectedConversationId
+    case mSelectedConvId of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just (_, conv) -> do
-            let convId = conversationId conv
+        Just convId -> do
             coreRef <- use tuiCore
             isPaused <- Set.member convId . corePausedConversations <$> liftIO (readTVarIO coreRef)
             if isPaused
@@ -536,13 +736,13 @@ handleTogglePauseConversation = do
                     liftIO $ atomically $ modifyTVar coreRef $ \c ->
                         c{corePausedConversations = Set.delete convId (corePausedConversations c)}
                     updateConversationStatus convId ConversationStatus_WaitingForInput
-                    showStatus StatusInfo $ "Unpaused: " <> conversationName conv
+                    showStatus StatusInfo "Conversation unpaused"
                 else do
                     -- Pause: add to paused set and update status
                     liftIO $ atomically $ modifyTVar coreRef $ \c ->
                         c{corePausedConversations = Set.insert convId (corePausedConversations c)}
                     updateConversationStatus convId ConversationStatus_Paused
-                    showStatus StatusInfo $ "Paused: " <> conversationName conv
+                    showStatus StatusInfo "Conversation paused"
 
 -- | Check if a conversation is currently paused.
 isConversationPaused :: ConversationId -> Core -> Bool
@@ -665,6 +865,7 @@ runConversation baseTuiAgent session = do
     -- Update UI
     tuiUI . conversationList %= listInsert 0 conv
     tuiUI . conversationList . listSelectedL .= Just 0
+    tuiUI . selectedConversationPath .= [convId]
     tuiUI . uiFocusRing %= focusRingModify (CList.insertR ConversationViewWidget)
     tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
 
@@ -681,28 +882,34 @@ handleSendMessage = do
 
     -- Only send non-empty messages
     when (not $ Text.null msgText) $ do
-        selected <- use (tuiUI . conversationList . to listSelectedElement)
-        case selected of
-            Just (_idx, conv) -> do
+        mConvId <- getSelectedConversationId
+        case mConvId of
+            Just convId -> do
                 -- Get core reference for message buffering
                 coreRef <- use tuiCore
                 core <- liftIO $ readTVarIO coreRef
 
-                -- Check if conversation is already being processed
-                ongoing <- use (tuiUI . ongoingConversations)
-                let isOngoing = Set.member (conversationId conv) ongoing
+                -- Find the conversation
+                let mConv = find ((== convId) . conversationId) (coreConversations core)
+                case mConv of
+                    Just conv -> do
+                        -- Check if conversation is already being processed
+                        ongoing <- use (tuiUI . ongoingConversations)
+                        let isOngoing = Set.member convId ongoing
 
-                if isOngoing
-                    then do
-                        -- Buffer the message - agent will pick it up when collecting tool responses
-                        liftIO $ addBufferedMessage (conversationId conv) core msgText
-                        showStatus StatusInfo "Message buffered - will be sent with tool responses"
-                    else do
-                        -- Conversation is waiting for input - send directly via channel
-                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText)
-                        -- Mark as ongoing since we're starting agent processing
-                        tuiUI . ongoingConversations %= Set.insert (conversationId conv)
+                        if isOngoing
+                            then do
+                                -- Buffer the message - agent will pick it up when collecting tool responses
+                                liftIO $ addBufferedMessage convId core msgText
+                                showStatus StatusInfo "Message buffered - will be sent with tool responses"
+                            else do
+                                -- Conversation is waiting for input - send directly via channel
+                                liftIO $ writeBChan (conversationChan conv) (Just $ UserQuery msgText)
+                                -- Mark as ongoing since we're starting agent processing
+                                tuiUI . ongoingConversations %= Set.insert convId
 
-                -- Always clear the editor - user can type more messages
-                tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                        -- Always clear the editor - user can type more messages
+                        tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                    Nothing -> pure ()
             Nothing -> pure ()
+
