@@ -115,6 +115,7 @@ import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime (Runtime (..))
 import qualified System.Agents.Runtime as Runtime
+import qualified System.Agents.Runtime.Trace as RuntimeTrace
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
@@ -122,7 +123,7 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
 
 -------------------------------------------------------------------------------
 data Trace
-    = AgentTrace Runtime.Trace
+    = AgentTrace RuntimeTrace.Trace
     | McpTrace McpServerDescription McpTools.Trace
     | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
     | PostgRESTrace PostgRESTToolboxDescription PostgREST.Trace
@@ -170,7 +171,10 @@ data Props
     { apiKeys :: LoadedApiKeys
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO Trace
-    , agentToTool :: Runtime -> AgentSlug -> AgentId -> ToolRegistration
+    , agentToTool :: Tracer IO RuntimeTrace.Trace -> Runtime -> AgentSlug -> AgentId -> ToolRegistration
+    {- ^ Function to convert a Runtime into a ToolRegistration.
+    The tracer argument is the parent agent's tracer for correlation.
+    -}
     , runtimeRegistry :: RuntimeRegistry
     -- ^ Shared registry for deferred resolution
     }
@@ -624,6 +628,9 @@ The logic:
 - Child agents (from toolDirectory) are always wired
 - Extra agents are wired only if they differ from the current agent's slug
   (prevents self-reference loops during wiring phase)
+
+The parent tracer is passed to agentToTool so that sub-agent traces can be
+correlated with the parent conversation.
 -}
 wireAgentTools ::
     Props ->
@@ -659,8 +666,9 @@ wireAgentTools props _graph _runtimes (slug, node) = do
             -- Combine all helper runtimes
             let allHelpers = validChildren ++ validExtras
 
-            -- Create tool registrations for helper agents
-            let helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
+            -- Create tool registrations for helper agents, passing the parent tracer
+            -- for correlation. The runtime's tracer is the parent tracer for sub-agent calls.
+            let helperTools = [props.agentToTool rt.agentTracer helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
 
             -- Atomically append helper tools to the runtime's agentTools TVar
             atomically $ modifyTVar' rt.agentTools (\existingTools -> existingTools ++ helperTools)
@@ -673,15 +681,16 @@ collectExtraAgentsAsTools props (slug, extraRefs) = do
     mRt <- lookupRuntime props.runtimeRegistry slug
     case mRt of
         Nothing -> pure []
-        Just _ -> do
+        Just rt -> do
             extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) extraRefs
             let validExtras = Maybe.catMaybes extraRuntimes
 
             -- Combine all helper runtimes
             let allHelpers = validExtras
 
-            -- Create tool registrations for helper agents
-            let helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
+            -- Create tool registrations for helper agents, passing the parent tracer
+            -- for correlation (the runtime's tracer is the parent tracer)
+            let helperTools = [props.agentToTool rt.agentTracer helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
 
             pure helperTools
 
