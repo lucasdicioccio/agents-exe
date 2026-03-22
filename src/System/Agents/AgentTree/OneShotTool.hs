@@ -24,7 +24,7 @@ module System.Agents.AgentTree.OneShotTool (
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
-import Control.Exception (SomeException, try, throwIO)
+import Control.Exception (SomeException, throwIO, try)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -40,7 +40,7 @@ import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newConver
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
-import System.Agents.Runtime.Trace (Trace (..), ConversationTrace (..))
+import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base (
     Action (..),
     Agent (..),
@@ -550,4 +550,3 @@ agentStoreSession store mPath convId agent =
     handleProgress x = do
         sessionStoreCallback store convId x
         filepathStoreCallback mPath x
-

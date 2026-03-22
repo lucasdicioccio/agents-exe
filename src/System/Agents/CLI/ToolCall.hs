@@ -77,8 +77,8 @@ handleToolCall opts apiKeysFile agentFiles = do
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = baseTracer
-                    -- Wrap the function to match the new signature (ignoring the tracer argument)
-                    , AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore rt slug aid
+                    , -- Wrap the function to match the new signature (ignoring the tracer argument)
+                      AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore rt slug aid
                     , AgentTree.runtimeRegistry = registry
                     }
                 $ \result -> case result of
@@ -107,4 +107,3 @@ handleToolCall opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
-

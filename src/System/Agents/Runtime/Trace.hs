@@ -25,29 +25,48 @@ data Trace
     | LuaToolboxTrace !Text !LuaToolbox.Trace
     | SkillsToolboxTrace !Text !SkillsToolbox.Trace
     | SkillsToolboxInitError !Text !String
-    -- NEW TRACE EVENTS for sub-agent correlation:
-    | AgentTrace_SubAgentStarted
-        !AgentSlug -- ^ Parent agent slug
-        !AgentId -- ^ Parent agent ID
-        !ConversationId -- ^ Parent conversation ID
-        !AgentSlug -- ^ Sub-agent slug
-        !ConversationId -- ^ Sub-agent conversation ID
-        !SessionId -- ^ Sub-agent session ID
+    | -- NEW TRACE EVENTS for sub-agent correlation:
+      AgentTrace_SubAgentStarted
+        -- | Parent agent slug
+        !AgentSlug
+        -- | Parent agent ID
+        !AgentId
+        -- | Parent conversation ID
+        !ConversationId
+        -- | Sub-agent slug
+        !AgentSlug
+        -- | Sub-agent conversation ID
+        !ConversationId
+        -- | Sub-agent session ID
+        !SessionId
     | AgentTrace_SubAgentCompleted
-        !AgentSlug -- ^ Parent agent slug
-        !AgentId -- ^ Parent agent ID
-        !ConversationId -- ^ Parent conversation ID
-        !AgentSlug -- ^ Sub-agent slug
-        !ConversationId -- ^ Sub-agent conversation ID
-        !SessionId -- ^ Sub-agent session ID
+        -- | Parent agent slug
+        !AgentSlug
+        -- | Parent agent ID
+        !AgentId
+        -- | Parent conversation ID
+        !ConversationId
+        -- | Sub-agent slug
+        !AgentSlug
+        -- | Sub-agent conversation ID
+        !ConversationId
+        -- | Sub-agent session ID
+        !SessionId
     | AgentTrace_SubAgentFailed
-        !AgentSlug -- ^ Parent agent slug
-        !AgentId -- ^ Parent agent ID
-        !ConversationId -- ^ Parent conversation ID
-        !AgentSlug -- ^ Sub-agent slug
-        !ConversationId -- ^ Sub-agent conversation ID
-        !SessionId -- ^ Sub-agent session ID
-        !Text -- ^ Error message
+        -- | Parent agent slug
+        !AgentSlug
+        -- | Parent agent ID
+        !AgentId
+        -- | Parent conversation ID
+        !ConversationId
+        -- | Sub-agent slug
+        !AgentSlug
+        -- | Sub-agent conversation ID
+        !ConversationId
+        -- | Sub-agent session ID
+        !SessionId
+        -- | Error message
+        !Text
     deriving (Show)
 
 traceAgentSlug :: Trace -> AgentSlug
@@ -95,9 +114,10 @@ traceConversationId (AgentTrace_SubAgentStarted _ _ pConvId _ _ _) = Just pConvI
 traceConversationId (AgentTrace_SubAgentCompleted _ _ pConvId _ _ _) = Just pConvId
 traceConversationId (AgentTrace_SubAgentFailed _ _ pConvId _ _ _ _) = Just pConvId
 
--- | Get the parent conversation ID from a trace, if applicable.
--- This returns the conversation ID of the parent agent that initiated
--- a sub-agent call.
+{- | Get the parent conversation ID from a trace, if applicable.
+This returns the conversation ID of the parent agent that initiated
+a sub-agent call.
+-}
 traceParentConversationId :: Trace -> Maybe ConversationId
 traceParentConversationId (AgentTrace_SubAgentStarted _ _ parentConvId _ _ _) =
     Just parentConvId
@@ -107,8 +127,9 @@ traceParentConversationId (AgentTrace_SubAgentFailed _ _ parentConvId _ _ _ _) =
     Just parentConvId
 traceParentConversationId _ = Nothing
 
--- | Get the sub-agent conversation ID from a trace, if applicable.
--- This returns the conversation ID of the sub-agent being called.
+{- | Get the sub-agent conversation ID from a trace, if applicable.
+This returns the conversation ID of the sub-agent being called.
+-}
 traceSubAgentConversationId :: Trace -> Maybe ConversationId
 traceSubAgentConversationId (AgentTrace_SubAgentStarted _ _ _ _ subConvId _) =
     Just subConvId
@@ -118,12 +139,13 @@ traceSubAgentConversationId (AgentTrace_SubAgentFailed _ _ _ _ subConvId _ _) =
     Just subConvId
 traceSubAgentConversationId _ = Nothing
 
--- | Check if a trace represents a sub-agent lifecycle event.
--- Returns True for SubAgentStarted, SubAgentCompleted, and SubAgentFailed events.
+{- | Check if a trace represents a sub-agent lifecycle event.
+Returns True for SubAgentStarted, SubAgentCompleted, and SubAgentFailed events.
+-}
 isSubAgentTrace :: Trace -> Bool
-isSubAgentTrace (AgentTrace_SubAgentStarted {}) = True
-isSubAgentTrace (AgentTrace_SubAgentCompleted {}) = True
-isSubAgentTrace (AgentTrace_SubAgentFailed {}) = True
+isSubAgentTrace (AgentTrace_SubAgentStarted{}) = True
+isSubAgentTrace (AgentTrace_SubAgentCompleted{}) = True
+isSubAgentTrace (AgentTrace_SubAgentFailed{}) = True
 isSubAgentTrace _ = False
 
 data ConversationTrace
@@ -132,13 +154,17 @@ data ConversationTrace
     | LLMTrace !StepId !OpenAI.Trace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
-    -- NEW: Sub-agent call correlation traces
-    | SubAgentCallTrace
-        !Text -- ^ Sub-agent slug
-        !ConversationId -- ^ Sub-agent conversation ID
-        !SessionId -- ^ Sub-agent session ID
+    | -- NEW: Sub-agent call correlation traces
+      SubAgentCallTrace
+        -- | Sub-agent slug
+        !Text
+        -- | Sub-agent conversation ID
+        !ConversationId
+        -- | Sub-agent session ID
+        !SessionId
     | SubAgentReturnTrace
-        !Text -- ^ Sub-agent slug
-        !ConversationId -- ^ Sub-agent conversation ID
+        -- | Sub-agent slug
+        !Text
+        -- | Sub-agent conversation ID
+        !ConversationId
     deriving (Show)
-

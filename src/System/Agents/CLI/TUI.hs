@@ -51,11 +51,10 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
                         Prod.traceBoth
                             baseTracer
                             (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                    -- Wrap the function to match the new signature (ignoring the tracer argument)
-                    , AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool sessionStore rt slug aid
+                    , -- Wrap the function to match the new signature (ignoring the tracer argument)
+                      AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool sessionStore rt slug aid
                     , AgentTree.runtimeRegistry = registry
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUI sessionStore agentPropsList
-

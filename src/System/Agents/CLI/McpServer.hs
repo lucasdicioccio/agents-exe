@@ -45,11 +45,10 @@ handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
                                 traceUsefulPromptStderr
                                 (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) (\_ -> pure ()))
                             )
-                    -- Wrap the function to match the new signature (ignoring the tracer argument)
-                    , AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool sessionStore rt slug aid
+                    , -- Wrap the function to match the new signature (ignoring the tracer argument)
+                      AgentTree.agentToTool = \_tracer rt slug aid -> OneShotTool.turnAgentRuntimeIntoIOTool sessionStore rt slug aid
                     , AgentTree.runtimeRegistry = registry
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
-

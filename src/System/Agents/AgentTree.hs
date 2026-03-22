@@ -172,8 +172,9 @@ data Props
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO Trace
     , agentToTool :: Tracer IO RuntimeTrace.Trace -> Runtime -> AgentSlug -> AgentId -> ToolRegistration
-    -- ^ Function to convert a Runtime into a ToolRegistration.
-    -- The tracer argument is the parent agent's tracer for correlation.
+    {- ^ Function to convert a Runtime into a ToolRegistration.
+    The tracer argument is the parent agent's tracer for correlation.
+    -}
     , runtimeRegistry :: RuntimeRegistry
     -- ^ Shared registry for deferred resolution
     }
@@ -1231,4 +1232,3 @@ readOpenApiKeysFile keysPath =
 reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
 reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
     void $ Runtime.triggerRefreshTools tree.agentRuntime
-
