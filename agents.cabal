@@ -56,6 +56,9 @@ library agents-lib
                     , System.Agents.OS.Concurrent
                     , System.Agents.OS.Concurrent.Locks
                     , System.Agents.OS.Concurrent.Types
+                    , System.Agents.OS.Conversation
+                    , System.Agents.OS.Conversation.Types
+                    , System.Agents.OS.Conversation.Lineage
                     , System.Agents.OS.Core
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
@@ -243,6 +246,7 @@ test-suite agents-tests
                     , McpImplementationTests
                     , OpenAPIToolboxTests
                     , OS.ConcurrentTests
+                    , OS.ConversationTests
                     , OS.CoreTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
@@ -270,5 +274,4 @@ test-suite agents-tests
                       time,
                       unordered-containers,
                       vector
-
 

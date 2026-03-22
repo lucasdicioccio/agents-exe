@@ -50,6 +50,8 @@ import qualified LuaToolboxJsonValueTests
 import qualified LuaToolboxHttpTests
 -- Import OS Core ECS tests
 import qualified OS.CoreTests
+-- Import OS Conversation tests
+import qualified OS.ConversationTests
 -- Import OS Resources tests
 import qualified OS.ResourcesTests
 -- Import OS Concurrent tests
@@ -69,6 +71,7 @@ tests =
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         , OS.CoreTests.coreTests
+        , OS.ConversationTests.conversationTests
         , OS.ResourcesTests.resourcesTests
         , OS.ConcurrentTests.concurrentTests
         , OpenAPIToolboxTests.tests
