@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Provides a version of turnAgentRuntimeIntoIOTool based on OneShot.hs
 implementation of LLM session calls.
@@ -23,6 +24,7 @@ module System.Agents.AgentTree.OneShotTool (
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
+import Control.Exception (SomeException, try, throwIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -32,12 +34,13 @@ import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Prod.Tracer (contramap)
+import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newConversationId, newStepId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Runtime.Runtime (Runtime (..))
+import System.Agents.Runtime.Trace (Trace (..), ConversationTrace (..))
 import System.Agents.Session.Base (
     Action (..),
     Agent (..),
@@ -133,8 +136,12 @@ turnAgentRuntimeIntoIOTool ::
     -- | The resulting tool registration
     ToolRegistration
 turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
+    -- For backward compatibility, we use the runtime's tracer directly.
+    -- New code should use turnAgentRuntimeIntoIOToolWithCallbacks directly
+    -- to pass a properly configured parent tracer.
     turnAgentRuntimeIntoIOToolWithCallbacks
         (SubAgentSessionConfig Nothing (Just store))
+        rt.agentTracer
         rt
         callerSlug
         callerId
@@ -152,10 +159,15 @@ The 'SubAgentSessionConfig' parameter allows the parent agent to:
 
 The sub-agent session is properly linked to the parent session via
 'mkChildSession', enabling conversation hierarchy tracking.
+
+The 'Tracer' parameter is the parent agent's tracer, which is used to emit
+correlation traces linking the sub-agent's execution to the parent conversation.
 -}
 turnAgentRuntimeIntoIOToolWithCallbacks ::
     -- | Configuration for sub-agent session callbacks and storage
     SubAgentSessionConfig ->
+    -- | Parent tracer for emitting correlation traces
+    Tracer IO Trace ->
     -- | The runtime of the agent to convert into a tool
     Runtime ->
     -- | The slug of the calling agent (for tracing)
@@ -164,7 +176,7 @@ turnAgentRuntimeIntoIOToolWithCallbacks ::
     AgentId ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOToolWithCallbacks config rt callerSlug callerId =
+turnAgentRuntimeIntoIOToolWithCallbacks config parentTracer rt callerSlug callerId =
     registerIOScriptInLLM io props
   where
     -- Define the parameter properties for the LLM tool schema
@@ -184,21 +196,28 @@ turnAgentRuntimeIntoIOToolWithCallbacks config rt callerSlug callerId =
                 ("prompt_agent_" <> rt.agentSlug)
                 ("asks a prompt to the expert agent: " <> rt.agentSlug)
             )
-            (runSubAgent config rt callerSlug callerId)
+            (runSubAgent config parentTracer rt callerSlug callerId)
 
 {- | Run the sub-agent with the given prompt and execution context.
 The ToolExecutionContext provides access to session metadata including
 the conversation ID for tracing and session management.
+
+This function emits correlation traces at key lifecycle points:
+1. SubAgentStarted - when the sub-agent session begins
+2. SubAgentCompleted - when the sub-agent finishes successfully
+3. SubAgentFailed - when the sub-agent encounters an error
 -}
 runSubAgent ::
     SubAgentSessionConfig ->
+    -- | Parent tracer for emitting correlation traces
+    Tracer IO Trace ->
     Runtime ->
     AgentSlug ->
     AgentId ->
     ToolExecutionContext ->
     PromptOtherAgent ->
     IO CByteString.ByteString
-runSubAgent cfg rt callerSlug callerId ctx (PromptOtherAgent query) = do
+runSubAgent cfg parentTracer rt callerSlug callerId ctx (PromptOtherAgent query) = do
     -- Extract parent context information for linking child session
     let pSessionId = ctx.ctxSessionId
     let pConversationId = ctx.ctxConversationId
@@ -222,6 +241,24 @@ runSubAgent cfg rt callerSlug callerId ctx (PromptOtherAgent query) = do
     -- Generate conversation ID for this sub-agent
     convId <- newConversationId
 
+    -- Emit SubAgentStarted trace for correlation
+    runTracer parentTracer $
+        AgentTrace_SubAgentStarted
+            pAgentSlug
+            callerId
+            pConversationId
+            rt.agentSlug
+            convId
+            session0.sessionId
+
+    -- Also emit a SubAgentCallTrace within the conversation
+    runTracer parentTracer $
+        AgentTrace_Conversation
+            callerSlug
+            callerId
+            pConversationId
+            (SubAgentCallTrace rt.agentSlug convId session0.sessionId)
+
     -- Set the query on the agent
     let agentWithQuery = agentSetQuery (UserQuery query) agent
 
@@ -230,20 +267,52 @@ runSubAgent cfg rt callerSlug callerId ctx (PromptOtherAgent query) = do
         Just onProgress -> onProgress (SessionStarted session0)
         Nothing -> pure ()
 
-    -- Run the agent
-    (finalTurnContent, finalSession) <- run convId agentWithQuery session0
+    -- Run the agent with exception handling for trace emission
+    result <- try $ run convId agentWithQuery session0
 
-    -- Notify parent that sub-agent session completed
-    case cfg.subAgentOnProgress of
-        Just onProgress -> onProgress (SessionCompleted finalSession)
-        Nothing -> pure ()
+    case result of
+        Left (e :: SomeException) -> do
+            -- Emit SubAgentFailed trace for correlation
+            runTracer parentTracer $
+                AgentTrace_SubAgentFailed
+                    pAgentSlug
+                    callerId
+                    pConversationId
+                    rt.agentSlug
+                    convId
+                    session0.sessionId
+                    (Text.pack $ show e)
+            throwIO e
+        Right (finalTurnContent, finalSession) -> do
+            -- Emit SubAgentCompleted trace for correlation
+            runTracer parentTracer $
+                AgentTrace_SubAgentCompleted
+                    pAgentSlug
+                    callerId
+                    pConversationId
+                    rt.agentSlug
+                    convId
+                    session0.sessionId
 
-    -- Persist to store if configured
-    case cfg.subAgentStore of
-        Just store -> SessionStore.storeSession store convId finalSession
-        Nothing -> pure ()
+            -- Emit SubAgentReturnTrace within the conversation
+            runTracer parentTracer $
+                AgentTrace_Conversation
+                    callerSlug
+                    callerId
+                    pConversationId
+                    (SubAgentReturnTrace rt.agentSlug convId)
 
-    pure $ Text.encodeUtf8 $ extractResponseText finalTurnContent.llmResponse
+            -- Notify parent that sub-agent session completed
+            case cfg.subAgentOnProgress of
+                Just onProgress -> onProgress (SessionCompleted finalSession)
+                Nothing -> pure ()
+
+            -- Persist to store if configured
+            case cfg.subAgentStore of
+                Just store -> SessionStore.storeSession store convId finalSession
+                Nothing -> pure ()
+
+            pure $ Text.encodeUtf8 $ extractResponseText finalTurnContent.llmResponse
 
 -------------------------------------------------------------------------------
 
@@ -481,3 +550,4 @@ agentStoreSession store mPath convId agent =
     handleProgress x = do
         sessionStoreCallback store convId x
         filepathStoreCallback mPath x
+

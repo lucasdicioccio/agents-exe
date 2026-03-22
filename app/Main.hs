@@ -1375,6 +1375,35 @@ toJsonTrace x = case x of
                 [ "skills-toolbox-init-error" .= toolboxName
                 , "error" .= err
                 ]
+    -- New sub-agent trace events
+    encodeBaseAgentTrace (RuntimeTrace.AgentTrace_SubAgentStarted pSlug _ pConv subSlug subConv sessId) =
+        Just $
+            Aeson.object
+                [ "sub-agent-started" .= subSlug
+                , "parent-slug" .= pSlug
+                , "parent-conversation" .= pConv
+                , "sub-conversation" .= subConv
+                , "session-id" .= sessId
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.AgentTrace_SubAgentCompleted pSlug _ pConv subSlug subConv sessId) =
+        Just $
+            Aeson.object
+                [ "sub-agent-completed" .= subSlug
+                , "parent-slug" .= pSlug
+                , "parent-conversation" .= pConv
+                , "sub-conversation" .= subConv
+                , "session-id" .= sessId
+                ]
+    encodeBaseAgentTrace (RuntimeTrace.AgentTrace_SubAgentFailed pSlug _ pConv subSlug subConv sessId err) =
+        Just $
+            Aeson.object
+                [ "sub-agent-failed" .= subSlug
+                , "parent-slug" .= pSlug
+                , "parent-conversation" .= pConv
+                , "sub-conversation" .= subConv
+                , "session-id" .= sessId
+                , "error" .= err
+                ]
 
     encodeBaseTrace_Loading :: BashToolbox.Trace -> Maybe Aeson.Value
     encodeBaseTrace_Loading bt =
@@ -1468,6 +1497,22 @@ toJsonTrace x = case x of
             (RuntimeTrace.ChildrenTrace sub) -> do
                 subVal <- encodeAgentTrace sub
                 Just $ Aeson.object ["x" .= ("child" :: Text), "sub" .= subVal]
+            -- New ConversationTrace events
+            (RuntimeTrace.SubAgentCallTrace subSlug subConv sessId) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("sub-agent-call" :: Text)
+                        , "sub-agent" .= subSlug
+                        , "conversation" .= subConv
+                        , "session-id" .= sessId
+                        ]
+            (RuntimeTrace.SubAgentReturnTrace subSlug subConv) ->
+                Just $
+                    Aeson.object
+                        [ "x" .= ("sub-agent-return" :: Text)
+                        , "sub-agent" .= subSlug
+                        , "conversation" .= subConv
+                        ]
 
     encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
     encodeMcpTrace (McpSimpleBinary cfg) tr = do
@@ -1525,3 +1570,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
