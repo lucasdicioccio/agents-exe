@@ -191,4 +191,3 @@ lineageComponentId = componentId (Proxy @Lineage)
 -- | ComponentTypeId for Message (38)
 messageComponentId :: ComponentTypeId
 messageComponentId = componentId (Proxy @Message)
-

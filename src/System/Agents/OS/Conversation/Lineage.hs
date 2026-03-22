@@ -129,14 +129,14 @@ instance ToJSON LineageFrame
 
 -- | Type of entity in a lineage frame.
 data FrameType
-    = ConversationFrame
-    -- ^ A conversation frame
-    | TurnFrame
-    -- ^ A turn frame
-    | ToolCallFrame
-    -- ^ A tool call frame
-    | SystemFrame
-    -- ^ A system-level frame (not tied to conversation)
+    = -- | A conversation frame
+      ConversationFrame
+    | -- | A turn frame
+      TurnFrame
+    | -- | A tool call frame
+      ToolCallFrame
+    | -- | A system-level frame (not tied to conversation)
+      SystemFrame
     deriving (Show, Eq, Generic)
 
 instance FromJSON FrameType
@@ -343,4 +343,3 @@ lineageToJson (Lineage frames) =
     frameTypeToText TurnFrame = "turn"
     frameTypeToText ToolCallFrame = "tool_call"
     frameTypeToText SystemFrame = "system"
-

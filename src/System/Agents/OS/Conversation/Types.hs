@@ -141,14 +141,14 @@ instance Component ConversationState where
 
 -- | Status of a conversation.
 data ConversationStatus
-    = ConversationActive
-    -- ^ Conversation is ongoing and accepting turns
-    | ConversationPaused
-    -- ^ Conversation is temporarily paused
-    | ConversationArchived
-    -- ^ Conversation has ended and is archived
-    | ConversationError Text
-    -- ^ Conversation encountered an error with message
+    = -- | Conversation is ongoing and accepting turns
+      ConversationActive
+    | -- | Conversation is temporarily paused
+      ConversationPaused
+    | -- | Conversation has ended and is archived
+      ConversationArchived
+    | -- | Conversation encountered an error with message
+      ConversationError Text
     deriving (Show, Eq, Generic)
 
 instance FromJSON ConversationStatus
@@ -177,12 +177,12 @@ instance Component AgentConversation where
 
 -- | Role of an agent in a conversation.
 data AgentRole
-    = PrimaryAgent
-    -- ^ Main agent responsible for the conversation
-    | AssistantAgent
-    -- ^ Supporting agent that assists the primary
-    | ObserverAgent
-    -- ^ Agent that observes but doesn't actively participate
+    = -- | Main agent responsible for the conversation
+      PrimaryAgent
+    | -- | Supporting agent that assists the primary
+      AssistantAgent
+    | -- | Agent that observes but doesn't actively participate
+      ObserverAgent
     deriving (Show, Eq, Generic)
 
 instance FromJSON AgentRole
@@ -234,16 +234,16 @@ instance Component TurnState where
 
 -- | Status of a turn.
 data TurnStatus
-    = TurnStarting
-    -- ^ Turn is being initialized
-    | TurnRunning
-    -- ^ Turn is actively processing
-    | TurnToolCallsPending [ToolCallId]
-    -- ^ Waiting for tool calls to complete (with IDs of pending calls)
-    | TurnCompleted Text
-    -- ^ Turn completed successfully with final response
-    | TurnFailed Text
-    -- ^ Turn failed with error message
+    = -- | Turn is being initialized
+      TurnStarting
+    | -- | Turn is actively processing
+      TurnRunning
+    | -- | Waiting for tool calls to complete (with IDs of pending calls)
+      TurnToolCallsPending [ToolCallId]
+    | -- | Turn completed successfully with final response
+      TurnCompleted Text
+    | -- | Turn failed with error message
+      TurnFailed Text
     deriving (Show, Eq, Generic)
 
 instance FromJSON TurnStatus
@@ -300,16 +300,16 @@ instance Component ToolCallState where
 
 -- | Status of a tool call.
 data ToolCallStatus
-    = TcPending
-    -- ^ Tool call is queued but not started
-    | TcExecuting
-    -- ^ Tool call is currently executing
-    | TcCompleted Value
-    -- ^ Tool call completed with result
-    | TcFailed Text
-    -- ^ Tool call failed with error message
-    | TcCancelled
-    -- ^ Tool call was cancelled before completion
+    = -- | Tool call is queued but not started
+      TcPending
+    | -- | Tool call is currently executing
+      TcExecuting
+    | -- | Tool call completed with result
+      TcCompleted Value
+    | -- | Tool call failed with error message
+      TcFailed Text
+    | -- | Tool call was cancelled before completion
+      TcCancelled
     deriving (Show, Eq, Generic)
 
 instance FromJSON ToolCallStatus
@@ -348,14 +348,14 @@ instance Component Message where
 
 -- | Role of a message sender.
 data MessageRole
-    = UserRole
-    -- ^ Message from the user
-    | AssistantRole
-    -- ^ Message from the AI assistant
-    | SystemRole
-    -- ^ System message (instructions, etc.)
-    | ToolRole
-    -- ^ Message from a tool (results, etc.)
+    = -- | Message from the user
+      UserRole
+    | -- | Message from the AI assistant
+      AssistantRole
+    | -- | System message (instructions, etc.)
+      SystemRole
+    | -- | Message from a tool (results, etc.)
+      ToolRole
     deriving (Show, Eq, Generic)
 
 instance FromJSON MessageRole
@@ -395,4 +395,3 @@ getToolCallResult tcs = case tcs.tcStatus of
 -- | Default maximum depth for nested tool calls.
 defaultMaxToolCallDepth :: Int
 defaultMaxToolCallDepth = 10
-
