@@ -78,17 +78,20 @@ module System.Agents (
     module System.Agents.ToolSchema,
 
     -- * Recursive agent calls (sub-agent sessions)
-    -- | These types and functions enable agents to call other agents as tools,
-    -- with support for parent-child session tracking, progress callbacks,
-    -- and correlation tracing.
-    --
-    -- See "System.Agents.AgentTree.OneShotTool" for detailed documentation.
+
+    {- | These types and functions enable agents to call other agents as tools,
+    with support for parent-child session tracking, progress callbacks,
+    and correlation tracing.
+
+    See "System.Agents.AgentTree.OneShotTool" for detailed documentation.
+    -}
     SubAgentSessionConfig (..),
     defaultSubAgentConfig,
     turnAgentRuntimeIntoIOTool,
     turnAgentRuntimeIntoIOToolWithCallbacks,
 
     -- * Session construction helpers
+
     -- | Functions for creating and inspecting sessions with parent-child relationships.
     mkChildSession,
     isChildSession,
@@ -105,4 +108,3 @@ import System.Agents.ToolRegistration
 import System.Agents.ToolSchema
 import System.Agents.Tools
 import System.Agents.Tools.OpenAPIToolbox
-

@@ -87,4 +87,3 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUI sessionStore agentPropsList
-
