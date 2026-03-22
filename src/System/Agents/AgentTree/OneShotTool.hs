@@ -83,27 +83,31 @@ instance Aeson.FromJSON PromptOtherAgent where
 
 -------------------------------------------------------------------------------
 
--- | Configuration for sub-agent session callbacks.
---
--- This type encapsulates the optional callbacks and storage for sub-agent
--- sessions, allowing parent agents to track sub-agent progress without
--- tightly coupling the parent and sub-agent implementations.
---
--- Use 'defaultSubAgentConfig' for a config with no callbacks or storage.
+{- | Configuration for sub-agent session callbacks.
+
+This type encapsulates the optional callbacks and storage for sub-agent
+sessions, allowing parent agents to track sub-agent progress without
+tightly coupling the parent and sub-agent implementations.
+
+Use 'defaultSubAgentConfig' for a config with no callbacks or storage.
+-}
 data SubAgentSessionConfig = SubAgentSessionConfig
     { subAgentOnProgress :: Maybe OnSessionProgress
-    -- ^ Optional callback for receiving sub-agent session progress updates.
-    -- The callback receives 'SessionStarted', 'SessionUpdated', and
-    -- 'SessionCompleted' events throughout the sub-agent's lifecycle.
+    {- ^ Optional callback for receiving sub-agent session progress updates.
+    The callback receives 'SessionStarted', 'SessionUpdated', and
+    'SessionCompleted' events throughout the sub-agent's lifecycle.
+    -}
     , subAgentStore :: Maybe SessionStore
-    -- ^ Optional session store for persisting sub-agent sessions to disk.
-    -- If provided, sessions will be saved at each progress update.
+    {- ^ Optional session store for persisting sub-agent sessions to disk.
+    If provided, sessions will be saved at each progress update.
+    -}
     }
 
--- | Default configuration with no callbacks or storage.
---
--- This is useful when you don't need to track sub-agent progress or persist
--- sub-agent sessions.
+{- | Default configuration with no callbacks or storage.
+
+This is useful when you don't need to track sub-agent progress or persist
+sub-agent sessions.
+-}
 defaultSubAgentConfig :: SubAgentSessionConfig
 defaultSubAgentConfig = SubAgentSessionConfig Nothing Nothing
 
@@ -182,9 +186,10 @@ turnAgentRuntimeIntoIOToolWithCallbacks config rt callerSlug callerId =
             )
             (runSubAgent config rt callerSlug callerId)
 
--- | Run the sub-agent with the given prompt and execution context.
--- The ToolExecutionContext provides access to session metadata including
--- the conversation ID for tracing and session management.
+{- | Run the sub-agent with the given prompt and execution context.
+The ToolExecutionContext provides access to session metadata including
+the conversation ID for tracing and session management.
+-}
 runSubAgent ::
     SubAgentSessionConfig ->
     Runtime ->
@@ -476,4 +481,3 @@ agentStoreSession store mPath convId agent =
     handleProgress x = do
         sessionStoreCallback store convId x
         filepathStoreCallback mPath x
-
