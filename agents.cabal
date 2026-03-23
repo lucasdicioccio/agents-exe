@@ -67,6 +67,11 @@ library agents-lib
                     , System.Agents.OS.Interfaces
                     , System.Agents.OS.Interfaces.TUI
                     , System.Agents.OS.Interfaces.OneShot
+                    , System.Agents.OS.Persistence
+                    , System.Agents.OS.Persistence.File
+                    , System.Agents.OS.Persistence.Schema
+                    , System.Agents.OS.Persistence.Sqlite
+                    , System.Agents.OS.Persistence.Types
                     , System.Agents.OS.Resources
                     , System.Agents.OS.Resources.Types
                     , System.Agents.OS.Resources.Sqlite
@@ -169,6 +174,7 @@ library agents-lib
                       process,
                       process-extras,
                       prodapi,
+                      resource-pool,
                       fsnotify,
                       regex-tdfa,
                       scientific,
@@ -255,6 +261,7 @@ test-suite agents-tests
                     , OS.CoreTests
                     , OS.CompatTests
                     , OS.InterfaceTests
+                    , OS.PersistenceTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
                     , SessionEditTests
