@@ -35,8 +35,9 @@ import Database.SQLite.Simple.QQ (sql)
 -- Schema Version
 -------------------------------------------------------------------------------
 
--- | Current schema version number.
--- Increment this when schema changes require migrations.
+{- | Current schema version number.
+Increment this when schema changes require migrations.
+-}
 currentSchemaVersion :: Int
 currentSchemaVersion = 1
 
@@ -46,7 +47,8 @@ currentSchemaVersion = 1
 
 -- | Complete SQLite schema creation script.
 sqliteCreateSchema :: Query
-sqliteCreateSchema = [sql|
+sqliteCreateSchema =
+    [sql|
 -- OS Persistence Schema v1
 
 -- Schema version tracking
@@ -128,7 +130,8 @@ CREATE INDEX IF NOT EXISTS idx_entities_updated ON entities(updated_at);
 
 -- | SQLite schema destruction script.
 sqliteDropSchema :: Query
-sqliteDropSchema = [sql|
+sqliteDropSchema =
+    [sql|
 DROP INDEX IF EXISTS idx_entities_updated;
 DROP INDEX IF EXISTS idx_entities_type;
 DROP INDEX IF EXISTS idx_tool_calls_status;
@@ -162,7 +165,8 @@ sqliteMigrationScript fromVer toVer
 
 -- | Complete PostgreSQL schema creation script.
 postgresCreateSchema :: Query
-postgresCreateSchema = [sql|
+postgresCreateSchema =
+    [sql|
 -- OS Persistence Schema v1
 
 -- Enable UUID extension if not already enabled
@@ -248,7 +252,8 @@ CREATE INDEX IF NOT EXISTS idx_entities_updated ON entities(updated_at);
 
 -- | PostgreSQL schema destruction script.
 postgresDropSchema :: Query
-postgresDropSchema = [sql|
+postgresDropSchema =
+    [sql|
 DROP INDEX IF EXISTS idx_entities_updated;
 DROP INDEX IF EXISTS idx_entities_type;
 DROP INDEX IF EXISTS idx_tool_calls_status;
@@ -331,4 +336,3 @@ applyMigrations conn fromVer toVer getMigration
                 -- Update schema version
                 execute conn "INSERT OR REPLACE INTO schema_version (version) VALUES (?)" (Only toVer)
                 pure $ Right toVer
-

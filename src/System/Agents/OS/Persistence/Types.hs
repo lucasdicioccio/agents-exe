@@ -1,9 +1,9 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- |
 Core types for the OS persistence layer.
@@ -63,8 +63,9 @@ import System.Agents.OS.Core.Types (
 -- Component Type Mapping
 -------------------------------------------------------------------------------
 
--- | Enumeration of known component types for database storage.
--- This provides a stable mapping between ComponentTypeId and database values.
+{- | Enumeration of known component types for database storage.
+This provides a stable mapping between ComponentTypeId and database values.
+-}
 data ComponentType
     = ComponentTypeAgentConfig
     | ComponentTypeAgentState
@@ -212,10 +213,10 @@ data FilePersistence = FilePersistence
 
 -- | Supported file formats.
 data FileFormat
-    = JsonFormat
-    -- ^ Human-readable JSON
-    | BinaryFormat
-    -- ^ Compact binary format
+    = -- | Human-readable JSON
+      JsonFormat
+    | -- | Compact binary format
+      BinaryFormat
     deriving (Show, Eq, Generic)
 
 instance FromJSON FileFormat
@@ -282,21 +283,21 @@ textToEntityId txt = EntityId <$> UUID.fromString (Text.unpack txt)
 
 -- | Events emitted by the persistence layer.
 data PersistenceEvent
-    = EntityPersisted EntityId ComponentType
-    | -- ^ An entity component was persisted
+    = -- | An entity component was persisted
+      EntityPersisted EntityId ComponentType
+    | -- | An entity component was loaded
       EntityLoaded EntityId (Maybe ComponentType)
-    | -- ^ An entity component was loaded
+    | -- | An entity was deleted
       EntityDeleted EntityId
-    | -- ^ An entity was deleted
+    | -- | A batch persist operation completed (count)
       BatchPersistCompleted Int
-    | -- ^ A batch persist operation completed (count)
+    | -- | A persistence error occurred
       PersistenceError Text
-    | -- ^ A persistence error occurred
+    | -- | Migration started (from, to)
       MigrationStarted Int Int
-    | -- ^ Migration started (from, to)
+    | -- | Migration completed (new version)
       MigrationCompleted Int
-    | -- ^ Migration completed (new version)
-      MigrationFailed Text
+    | MigrationFailed Text
     deriving (Show, Eq, Generic)
 
 instance FromJSON PersistenceEvent
@@ -321,14 +322,14 @@ data PersistenceConfig = PersistenceConfig
 
 -- | Backend type selection.
 data PersistenceBackendType
-    = InMemory
-    | -- ^ No persistence (volatile)
+    = -- | No persistence (volatile)
+      InMemory
+    | -- | File-based storage
       FileBackendType FilePath FileFormat
-    | -- ^ File-based storage
+    | -- | SQLite database
       SqliteBackendType FilePath
-    | -- ^ SQLite database
+    | -- | PostgreSQL connection string
       PostgresBackendType Text
-    -- ^ PostgreSQL connection string
     deriving (Show, Eq, Generic)
 
 instance FromJSON PersistenceBackendType
@@ -343,4 +344,3 @@ defaultPersistenceConfig =
         , persistenceBatchSize = 100
         , persistenceEnableEvents = True
         }
-

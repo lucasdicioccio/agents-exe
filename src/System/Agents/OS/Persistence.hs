@@ -1,10 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-
+{-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- |
 Persistence layer for the OS model.
@@ -91,8 +90,9 @@ module System.Agents.OS.Persistence (
     isHealthy,
 
     -- * Persistable Instances
-    -- These are exported to ensure they're available
 ) where
+
+-- These are exported to ensure they're available
 
 import Control.Exception (bracket, try)
 import Control.Monad (forM, forM_, unless, void)
@@ -105,13 +105,6 @@ import qualified Data.Text as Text
 import Data.Time (UTCTime, getCurrentTime)
 import System.Directory (createDirectoryIfMissing)
 
-import System.Agents.OS.Core (
-    AgentConfig (..),
-    AgentState (..),
-    ToolboxBinding (..),
-    ToolboxConfig (..),
-    ToolboxState (..),
- )
 import System.Agents.OS.Conversation.Types (
     AgentConversation (..),
     ConversationConfig (..),
@@ -121,14 +114,21 @@ import System.Agents.OS.Conversation.Types (
     TurnConfig (..),
     TurnState (..),
  )
-import System.Agents.OS.Core.Types (EntityId (..), ComponentTypeId(..))
+import System.Agents.OS.Core (
+    AgentConfig (..),
+    AgentState (..),
+    ToolboxBinding (..),
+    ToolboxConfig (..),
+    ToolboxState (..),
+ )
+import System.Agents.OS.Core.Types (ComponentTypeId (..), EntityId (..))
 import System.Agents.OS.Persistence.File (
     FilePersistenceBackend,
-    newFileBackend,
     closeFileBackend,
+    deleteEntityFile,
+    newFileBackend,
     readEntityFile,
     writeEntityFile,
-    deleteEntityFile,
  )
 import System.Agents.OS.Persistence.Schema (
     currentSchemaVersion,
@@ -137,18 +137,18 @@ import System.Agents.OS.Persistence.Schema (
  )
 import System.Agents.OS.Persistence.Sqlite (
     SqliteBackend,
-    newSqliteBackend,
     closeSqliteBackend,
-    loadComponent,
-    persistComponent,
-    queryComponents,
     deleteEntityWithComponents,
-    persistEvent',
+    getChildToolCalls,
     getEventsForEntity,
-    withTransaction',
     getMessagesForConversation,
     getToolCallsForTurn,
-    getChildToolCalls,
+    loadComponent,
+    newSqliteBackend,
+    persistComponent,
+    persistEvent',
+    queryComponents,
+    withTransaction',
  )
 import System.Agents.OS.Persistence.Types
 
@@ -198,7 +198,8 @@ Writes the component to the persistence backend, creating or updating
 as necessary. The operation is atomic.
 -}
 persist ::
-    forall a. (Persistable a, ToJSON a) =>
+    forall a.
+    (Persistable a, ToJSON a) =>
     PersistenceHandle ->
     EntityId ->
     a ->
@@ -217,7 +218,8 @@ Returns 'Nothing' if the entity doesn't have this component or
 if the entity doesn't exist.
 -}
 load ::
-    forall a. (Persistable a, FromJSON a) =>
+    forall a.
+    (Persistable a, FromJSON a) =>
     PersistenceHandle ->
     EntityId ->
     IO (Maybe a)
@@ -240,7 +242,8 @@ Note: Filter and order functions only work for in-memory backends;
 SQL backends will ignore these parameters.
 -}
 query ::
-    forall a. (Persistable a) =>
+    forall a.
+    (Persistable a) =>
     PersistenceHandle ->
     EntityQuery a ->
     IO [EntityId]
@@ -300,7 +303,8 @@ getEvents (SqliteHandle sb) eid = do
 
 -- | Batch persist multiple components.
 persistBatch ::
-    forall a. (Persistable a, ToJSON a) =>
+    forall a.
+    (Persistable a, ToJSON a) =>
     PersistenceHandle ->
     [(EntityId, a)] ->
     IO ()
@@ -459,4 +463,3 @@ instance Persistable Message where
     persistenceTable _ = "messages"
     persistenceKey _ eid = "msg:" <> entityIdToText eid
     persistenceComponentType _ = componentTypeIdToType (ComponentTypeId 38)
-

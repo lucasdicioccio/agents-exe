@@ -1,11 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-
+{-# OPTIONS_GHC -Wno-deprecations #-}
 {-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
-{-# OPTIONS_GHC -Wno-deprecations #-}
 
 {- |
 SQLite persistence backend for the OS persistence layer.
@@ -48,19 +47,19 @@ module System.Agents.OS.Persistence.Sqlite (
     -- * Utility
     withTransaction',
     withSavepoint,
-    
+
     -- * Query Operations
     getMessagesForConversation,
     getToolCallsForTurn,
     getChildToolCalls,
 ) where
 
-import Control.Concurrent (MVar, newMVar, modifyMVar_, withMVar)
-import Control.Exception (throwIO, try, SomeException)
+import Control.Concurrent (MVar, modifyMVar_, newMVar, withMVar)
+import Control.Exception (SomeException, throwIO, try)
 import Control.Monad (forM_, unless, void, when)
 import Data.Aeson (FromJSON, ToJSON, Value, decode, encode)
 import qualified Data.Aeson as Aeson
-import Data.ByteString.Lazy (toStrict, fromStrict)
+import Data.ByteString.Lazy (fromStrict, toStrict)
 import Data.Data (Proxy (..))
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Pool (Pool, createPool, destroyAllResources, withResource)
@@ -71,21 +70,21 @@ import Database.SQLite.Simple (
     Connection,
     Only (..),
     Query (..),
+    close,
     execute,
     execute_,
+    open,
     query,
     query_,
     withTransaction,
-    open,
-    close,
  )
 import Database.SQLite.Simple.FromField (FromField (..))
-import Database.SQLite.Simple.ToField (ToField (..))
 import Database.SQLite.Simple.QQ (sql)
+import Database.SQLite.Simple.ToField (ToField (..))
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeDirectory)
 
-import System.Agents.OS.Core.Types (EntityId (..), ComponentTypeId (..), newEntityId)
+import System.Agents.OS.Core.Types (ComponentTypeId (..), EntityId (..), newEntityId)
 import System.Agents.OS.Persistence.Schema (
     currentSchemaVersion,
     migrateSchema,
@@ -551,4 +550,3 @@ getChildToolCalls backend parentId = do
                     )
                 )
                 results
-

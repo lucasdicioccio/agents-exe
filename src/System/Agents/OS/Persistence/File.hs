@@ -1,8 +1,7 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE FlexibleContexts #-}
-
 {-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
@@ -44,7 +43,7 @@ module System.Agents.OS.Persistence.File (
     -- * Migration support
     migrateFromSessionStore,
     SessionStoreInfo (..),
-    
+
     -- * Event operations
     writeEventFile,
     readEventFiles,
@@ -189,7 +188,8 @@ readEntityFile config eid = do
 
 -- | Write an entity file.
 writeEntityFile ::
-    forall a. (Persistable a) =>
+    forall a.
+    (Persistable a) =>
     FilePersistence ->
     EntityId ->
     a ->
@@ -367,4 +367,3 @@ migrateFromSessionStore _config sessions = do
 entityTypeFromComponentType :: ComponentType -> Text
 entityTypeFromComponentType ct = case ct of
     _ -> "unknown"
-
