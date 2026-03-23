@@ -56,6 +56,8 @@ import qualified OS.ConversationTests
 import qualified OS.ResourcesTests
 -- Import OS Concurrent tests
 import qualified OS.ConcurrentTests
+-- Import OS Compatibility tests
+import qualified OS.CompatTests
 
 main :: IO ()
 main = defaultMain tests
@@ -74,6 +76,7 @@ tests =
         , OS.ConversationTests.conversationTests
         , OS.ResourcesTests.resourcesTests
         , OS.ConcurrentTests.concurrentTests
+        , OS.CompatTests.tests
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests
