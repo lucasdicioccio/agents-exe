@@ -58,8 +58,9 @@ import System.Agents.Runtime.Trace
 
 -------------------------------------------------------------------------------
 
--- | Type alias for the mutable tool registrations storage
--- DEPRECATED: Use OS-level toolbox bindings instead
+{- | Type alias for the mutable tool registrations storage
+DEPRECATED: Use OS-level toolbox bindings instead
+-}
 type AgentTools = TVar [ToolRegistration]
 
 -- DEPRECATED: Use System.Agents.OS.Core.AgentConfig and AgentState instead
@@ -402,4 +403,3 @@ registerLuaToolsWithTracing tracer toolbox = do
             runTracer tracer (LuaToolboxInitError (LuaToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
-

@@ -42,25 +42,25 @@ import Control.Monad.Reader (ReaderT, ask, runReaderT)
 import Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy as LBS
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.Encoding as Text
-import qualified Data.ByteString.Lazy as LBS
+import Data.Text.Encoding.Error (lenientDecode)
 import Prod.Tracer (Tracer (..))
-import System.Agents.OS.Core.World (World, newWorld)
+import qualified System.Agents.Base as Base
 import System.Agents.OS.Conversation.Types (
     defaultMaxToolCallDepth,
  )
+import System.Agents.OS.Core.World (World, newWorld)
 import System.Agents.Runtime.Runtime (Runtime)
 import System.Agents.Runtime.Trace (Trace)
-import System.Agents.ToolRegistration (ToolRegistration)
-import System.Agents.Tools.Base (CallResult (..))
-import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext, CallStackEntry (..))
 import System.Agents.Session.Base (UserToolResponse (..))
 import qualified System.Agents.Session.Base as Session
-import qualified System.Agents.Base as Base
+import System.Agents.ToolRegistration (ToolRegistration)
+import System.Agents.Tools.Base (CallResult (..))
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
 
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
@@ -79,7 +79,7 @@ newtype OS = OS
     }
 
 -- | Monad for OS operations.
-newtype OSM a = OSM { unOSM :: IO a }
+newtype OSM a = OSM {unOSM :: IO a}
     deriving (Functor, Applicative, Monad, MonadIO)
 
 -- | Run an OSM computation.
@@ -121,12 +121,12 @@ defaultMigrationConfig =
 Tracks which runtime systems are active.
 -}
 data MigrationPhase
-    = PhaseOldOnly
-    -- ^ Only old Runtime is used
-    | PhaseDual
-    -- ^ Both Runtime and OS are available
-    | PhaseNewOnly
-    -- ^ Only OS is used, Runtime is deprecated
+    = -- | Only old Runtime is used
+      PhaseOldOnly
+    | -- | Both Runtime and OS are available
+      PhaseDual
+    | -- | Only OS is used, Runtime is deprecated
+      PhaseNewOnly
     deriving (Show, Eq, Ord, Enum, Bounded)
 
 {- | State tracking for the migration process.
@@ -175,8 +175,9 @@ initializeWithMigration config
         os <- initializeOS
         pure $ Right $ Right os
 
--- | Initialize a minimal OS instance.
--- This is a placeholder until the full OS initialization is implemented.
+{- | Initialize a minimal OS instance.
+This is a placeholder until the full OS initialization is implemented.
+-}
 initializeOS :: IO OS
 initializeOS = do
     -- This would be replaced with actual OS initialization
@@ -213,7 +214,7 @@ runWithBridge bridge action = runReaderT action bridge
 
 Provides the old Runtime interface for compatibility.
 -}
-class Monad m => AgentRuntime m where
+class (Monad m) => AgentRuntime m where
     -- | List all available tools for the agent.
     listTools :: m [ToolRegistration]
 
@@ -274,8 +275,9 @@ mockToolCall name input =
                 }
         }
 
--- | Execute a tool call through the OS backend.
--- This is a placeholder implementation.
+{- | Execute a tool call through the OS backend.
+This is a placeholder implementation.
+-}
 executeToolCallInOS ::
     RuntimeBridge ->
     Text ->
@@ -342,4 +344,3 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         LuaToolError _ err ->
             UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
-
