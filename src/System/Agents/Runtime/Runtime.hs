@@ -1,9 +1,19 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+{- |
+DEPRECATED: This module is part of the old Runtime-per-agent architecture.
+Use System.Agents.OS.Compat.Runtime for migration compatibility
+or System.Agents.OS directly for new code.
+
+See docs/MIGRATION-GUIDE.md for migration instructions.
+-}
 module System.Agents.Runtime.Runtime (
+    -- * Types
     Runtime (..),
     AgentTools,
+
+    -- * Functions
     addTracer,
     newRuntime,
     triggerRefreshTools,
@@ -49,8 +59,10 @@ import System.Agents.Runtime.Trace
 -------------------------------------------------------------------------------
 
 -- | Type alias for the mutable tool registrations storage
+-- DEPRECATED: Use OS-level toolbox bindings instead
 type AgentTools = TVar [ToolRegistration]
 
+-- DEPRECATED: Use System.Agents.OS.Core.AgentConfig and AgentState instead
 data Runtime
     = Runtime
     { agentSlug :: AgentSlug
@@ -80,19 +92,19 @@ type McpToolConfig = McpTools.Toolbox
 
 {- | Create a new runtime with multiple bash tool sources.
 
+DEPRECATED: Use System.Agents.OS.Compat.initializeWithMigration instead.
+
 This is the preferred way to create a runtime when you need to load
 tools from multiple directories or single executables.
 
 Example:
 
-@
 let bashSources =
         [ FileSystemDirectory $ FileSystemDirectoryDescription (Just "agents/" "./tools" Nothing
         , FileSystemDirectory $ FileSystemDirectoryDescription Nothing "./extra" (Just ".sh")
         , SingleTool $ SingleToolDescription "/path/to/special.sh"
         ]
 result <- newRuntime slug announce tracer apiKey model bashSources ...
-@
 -}
 newRuntime ::
     AgentSlug ->
@@ -390,3 +402,4 @@ registerLuaToolsWithTracing tracer toolbox = do
             runTracer tracer (LuaToolboxInitError (LuaToolbox.toolboxName toolbox) err)
             pure $ Left err
         Right regs -> pure $ Right regs
+
