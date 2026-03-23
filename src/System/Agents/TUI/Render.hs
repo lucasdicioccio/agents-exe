@@ -203,7 +203,8 @@ render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
     txt $ " " <> agentSlug0
   where
-    agentSlug0 = agent.agentTree.agentRuntime.agentSlug
+    -- Access the agent slug from the tree's runtime
+    agentSlug0 = (tuiTree agent).agentRuntime.agentSlug
 
 -------------------------------------------------------------------------------
 -- Conversation List Rendering
@@ -267,8 +268,9 @@ render_agentInfo st =
         case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
-                let mtools = lookup agent.agentTree.agentRuntime.agentId (st ^. tuiUI . coreAgentTools)
-                    rt = agent.agentTree.agentRuntime
+                let tree = tuiTree agent
+                    rt = tree.agentRuntime
+                    mtools = lookup rt.agentId (st ^. tuiUI . coreAgentTools)
                  in viewport AgentInfoWidget Both $
                         vBox $
                             mconcat [agentHeader rt, renderToolsSection mtools, agentPrompt rt]

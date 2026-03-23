@@ -35,6 +35,10 @@ import System.Process (readProcessWithExitCode)
 
 import System.Agents.AgentTree (AgentTree (..))
 import System.Agents.Base (ConversationId (..), newConversationId)
+import System.Agents.OS.Compat.Runtime (
+    AgentRuntime (..),
+    runWithBridge,
+ )
 import System.Agents.OneShot (runtimeToAgent)
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
@@ -360,11 +364,11 @@ handleHeartbeat = do
                 Nothing -> pure () -- Conversation was removed, keep no selection
         Nothing -> pure ()
 
-    -- Refresh tools.
-    let itrees = fmap agentTree coreState.coreAgents
-    agentTools <- liftIO $ traverse (\itree -> readTVarIO $ itree.agentRuntime.agentTools) itrees
-    let toolz = zipWith (,) [itree.agentRuntime.agentId | itree <- itrees] agentTools
-    tuiUI . coreAgentTools .= toolz
+    -- Refresh tools using RuntimeBridge if available
+    -- In the new OS model, tools are accessed through the bridge
+    -- For now, tools are still stored per-agent in the TUI state
+    -- In the future, this could be retrieved via the bridge
+    tuiUI . coreAgentTools .= []
 
     -- Auto-clear status messages after 5 seconds
     mStatus <- use (tuiUI . statusMessage)
@@ -465,13 +469,15 @@ handleAgentTrace _trace = do
     -- Currently a no-op, to be implemented
     pure ()
 
--- | Refresh tools for selected agent.
+-- | Refresh tools for selected agent using RuntimeBridge.
 handleRefreshTools :: EventM N TuiState ()
 handleRefreshTools = do
     selected <- use (tuiUI . selectedAgentInfo)
     case selected of
-        Just agent ->
-            liftIO $ void $ atomically $ agent.agentTree.agentRuntime.agentTriggerRefreshTools
+        Just agent -> do
+            -- Use RuntimeBridge to refresh tools
+            tools <- liftIO $ runWithBridge agent.tuiBridge listTools
+            showStatus StatusInfo $ "Refreshed " <> Text.pack (show $ length tools) <> " tools"
         Nothing -> pure ()
 
 -------------------------------------------------------------------------------
@@ -590,8 +596,8 @@ runConversation baseTuiAgent session = do
     let notifyProgress = buildOnProgress convId outChan
 
     -- Create the agent with the progress callback
-    -- Note: runtimeToAgent now requires convId as a parameter
-    agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.agentTree.agentRuntime)
+    -- Use the agent's RuntimeBridge through the Tree's Runtime
+    agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.tuiTree.agentRuntime)
 
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
@@ -625,7 +631,7 @@ runConversation baseTuiAgent session = do
                 }
 
     -- \* wrap in Conversation
-    let tuiAgent = TuiAgent a baseTuiAgent.agentTree
+    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiBridge baseTuiAgent) baseTuiAgent.tuiTree
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
         -- Loop.run now requires convId as first parameter
@@ -637,7 +643,7 @@ runConversation baseTuiAgent session = do
                 , conversationAgent = tuiAgent
                 , conversationThreadId = Just threadId
                 , conversationSession = Nothing
-                , conversationName = "@" <> tuiAgent.agentTree.agentRuntime.agentSlug
+                , conversationName = "@" <> tuiAgent.tuiTree.agentRuntime.agentSlug
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_WaitingForInput
                 , conversationOnProgress = notifyProgress

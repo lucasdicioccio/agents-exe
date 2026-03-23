@@ -2,21 +2,34 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+{- | One-shot execution of agents with OS compatibility layer.
+
+This module provides single-conversation execution (batch mode) with support
+for both the legacy Runtime interface and the new OS model via RuntimeBridge.
+
+The primary functions ('mainOneShotText', 'runtimeToAgent') continue to work
+with the traditional Runtime for backward compatibility. Future versions will
+add native OS support via 'mainOneShotTextOS'.
+-}
 module System.Agents.OneShot (
     -- * Types
     ThinkingOutput (..),
 
-    -- * Main functions
+    -- * Main functions (Runtime-based, backward compatible)
     runtimeToAgent,
     agentStoreSession,
     fileStoringCallback,
     mainPrintAgent,
     mainOneShotText,
     mainOneShotTextWithThinking,
+
+    -- * Future OS-native functions
+    mainOneShotTextOS,
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
 import Control.Exception (Exception)
+import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -33,6 +46,7 @@ import System.IO (stderr)
 import System.Agents.AgentTree
 import System.Agents.Base (AgentId, ConversationId, newConversationId, newStepId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.OS.Compat.Runtime as OSCompat
 import qualified System.Agents.Runtime as Runtime
 import System.Agents.Session.Base
 import System.Agents.Session.Loop
@@ -106,7 +120,11 @@ runOneShotWithConfig store config convId rt query = do
     config.onSessionProgress convId (SessionCompleted session0)
     pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
 
--- | Legacy function: Run a one-shot agent with optional file-based session storage.
+{- | Legacy function: Run a one-shot agent with optional file-based session storage.
+
+This function uses the traditional Runtime interface for backward compatibility.
+For new code targeting the OS model, see 'mainOneShotTextOS'.
+-}
 mainOneShotText :: SessionStore -> Maybe FilePath -> Maybe Session -> Props -> Text -> IO ()
 mainOneShotText store mPath mSession props query = do
     mainOneShotTextWithThinking store mPath mSession ThinkingNone props query
@@ -139,6 +157,9 @@ extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
 The agent is configured with the runtime's agent ID and the provided conversation ID.
 These identifiers are used to construct the 'ToolExecutionContext' passed to tools
 during execution, allowing tools to access session metadata.
+
+This function maintains backward compatibility with the existing Runtime interface.
+For OS-native agents, see future implementations.
 -}
 runtimeToAgent :: SessionStore -> Maybe FilePath -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
 runtimeToAgent store mPath convId rt =
@@ -444,3 +465,40 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+
+-------------------------------------------------------------------------------
+-- Future OS-Native Functions
+-------------------------------------------------------------------------------
+
+{- | Future: Run a one-shot agent using the native OS interface.
+
+This function is a placeholder for the future OS-native implementation.
+When fully implemented, it will:
+
+1. Create an agent entity in the OS
+2. Execute the conversation using OS primitives
+3. Return the result directly in the OSM monad
+
+Currently returns a placeholder error indicating this is not yet implemented.
+-}
+mainOneShotTextOS ::
+    -- | OS instance
+    OSCompat.OS ->
+    -- | Optional file path for session storage
+    Maybe FilePath ->
+    -- | Optional initial session
+    Maybe Session ->
+    -- | Agent ID to use
+    AgentId ->
+    -- | User query text
+    Text ->
+    -- | Result in the OS monad
+    OSCompat.OSM Text
+mainOneShotTextOS _os _mPath _mSession _agentId _query = do
+    -- Placeholder: This will be implemented when full OS support is ready
+    -- The implementation will:
+    -- 1. Create a conversation in the OS
+    -- 2. Run the agent using OS primitives
+    -- 3. Collect the result
+    liftIO $ Text.putStrLn "OS-native one-shot not yet implemented, use mainOneShotText instead"
+    pure "OS-native one-shot not yet implemented"

@@ -6,6 +6,9 @@
 {- | Main entry point for the TUI application.
 This module re-exports functionality from the submodules and provides
 the main initialization and application runner.
+
+This version uses the RuntimeBridge from the OS compatibility layer
+to work with the new OS model while maintaining backward compatibility.
 -}
 module System.Agents.TUI.Core (
     -- * Re-exports from Types
@@ -60,6 +63,9 @@ module System.Agents.TUI.Core (
     runTUI,
     runTUIWithConfig,
     fileSessionConfig,
+
+    -- * OS Bridge helpers
+    createTuiAgentWithBridge,
 ) where
 
 import Brick hiding (Down)
@@ -70,9 +76,12 @@ import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
 
-import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props, agentRuntime, loadAgentTreeRuntime)
-import System.Agents.Base (newConversationId)
-import System.Agents.OneShot (runtimeToAgent)
+import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props, loadAgentTreeRuntime)
+import System.Agents.Base (newAgentId)
+import System.Agents.OS.Compat.Runtime (
+    initializeOS,
+    newRuntimeBridge,
+ )
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
@@ -125,6 +134,35 @@ fileSessionConfig store =
         }
 
 -------------------------------------------------------------------------------
+-- OS Bridge Integration
+-------------------------------------------------------------------------------
+
+{- | Create a TuiAgent with a RuntimeBridge for OS compatibility.
+
+This function initializes the OS compatibility layer and creates
+a RuntimeBridge that allows the TUI to work with the new OS model
+while maintaining backward compatibility with existing code.
+-}
+createTuiAgentWithBridge :: AgentTree -> IO TuiAgent
+createTuiAgentWithBridge tree = do
+    -- Initialize a minimal OS instance
+    os <- initializeOS
+
+    -- Create a new agent ID
+    agentId <- newAgentId
+
+    -- Create the RuntimeBridge
+    let bridge = newRuntimeBridge agentId os
+
+    -- Return the TUI agent
+    pure $
+        TuiAgent
+            { tuiAgentId = agentId
+            , tuiBridge = bridge
+            , tuiTree = tree
+            }
+
+-------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
@@ -140,12 +178,12 @@ runTUI store props =
 -- | Initialize the TUI with a custom session configuration.
 runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
 runTUIWithConfig config props = do
-    -- Load agent trees and create TuiAgents
+    -- Load agent trees and create TuiAgents with RuntimeBridge
     trees <- traverse loadAgentTreeRuntime props
     let itrees = [rt | Initialized rt <- trees]
-    -- Generate a conversation ID for each agent and create session agents
-    sessionAgents <- traverse createAgentForTree itrees
-    let tuiAgents = zipWith TuiAgent sessionAgents itrees
+
+    -- Create TUI agents with OS bridges
+    tuiAgents <- traverse createTuiAgentWithBridge itrees
 
     -- Load existing session files (only if file prefix is provided)
     loadedSessions <- loadSessionFiles config.sessionStore
@@ -177,8 +215,3 @@ runTUIWithConfig config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-  where
-    -- Create an agent for a given tree with a fresh conversation ID
-    createAgentForTree itree = do
-        convId <- newConversationId
-        runtimeToAgent config.sessionStore Nothing convId (agentRuntime itree)
