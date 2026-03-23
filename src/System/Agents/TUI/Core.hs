@@ -155,11 +155,12 @@ createTuiAgentWithBridge tree = do
     let bridge = newRuntimeBridge agentId os
 
     -- Return the TUI agent
-    pure $ TuiAgent
-        { tuiAgentId = agentId
-        , tuiBridge = bridge
-        , tuiTree = tree
-        }
+    pure $
+        TuiAgent
+            { tuiAgentId = agentId
+            , tuiBridge = bridge
+            , tuiTree = tree
+            }
 
 -------------------------------------------------------------------------------
 -- Initialization
@@ -214,4 +215,3 @@ runTUIWithConfig config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-

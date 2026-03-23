@@ -502,4 +502,3 @@ mainOneShotTextOS _os _mPath _mSession _agentId _query = do
     -- 3. Collect the result
     liftIO $ Text.putStrLn "OS-native one-shot not yet implemented, use mainOneShotText instead"
     pure "OS-native one-shot not yet implemented"
-

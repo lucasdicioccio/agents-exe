@@ -70,10 +70,10 @@ import System.Agents.Session.Base (Session, SessionProgress)
 
 -- | Operating mode for the interface.
 data InterfaceMode
-    = ModeTUI
-    -- ^ Interactive TUI mode with multi-agent support
-    | ModeOneShot
-    -- ^ Batch OneShot mode with single agent
+    = -- | Interactive TUI mode with multi-agent support
+      ModeTUI
+    | -- | Batch OneShot mode with single agent
+      ModeOneShot
     deriving (Show, Eq)
 
 -- | Configuration for initializing an interface.
@@ -180,12 +180,17 @@ data AgentHandle = AgentHandle
 -- | Manual Show instance for AgentHandle (Async doesn't have Show).
 instance Show AgentHandle where
     show ah =
-        "AgentHandle {ahAgentId = " ++ show ah.ahAgentId ++
-        ", ahBridge = " ++ show ah.ahBridge ++
-        ", ahThreadId = " ++ show ah.ahThreadId ++
-        ", ahStatus = " ++ show ah.ahStatus ++
-        ", ahCreatedAt = " ++ show ah.ahCreatedAt ++
-        "}"
+        "AgentHandle {ahAgentId = "
+            ++ show ah.ahAgentId
+            ++ ", ahBridge = "
+            ++ show ah.ahBridge
+            ++ ", ahThreadId = "
+            ++ show ah.ahThreadId
+            ++ ", ahStatus = "
+            ++ show ah.ahStatus
+            ++ ", ahCreatedAt = "
+            ++ show ah.ahCreatedAt
+            ++ "}"
 
 -- | Create a new agent in the interface.
 createAgent :: InterfaceHandle -> Text -> IO AgentHandle
@@ -241,11 +246,15 @@ data ConversationHandle = ConversationHandle
 -- | Manual Show instance for ConversationHandle (Async doesn't have Show).
 instance Show ConversationHandle where
     show ch =
-        "ConversationHandle {chConversationId = " ++ show ch.chConversationId ++
-        ", chAgentId = " ++ show ch.chAgentId ++
-        ", chSession = " ++ show ch.chSession ++
-        ", chAsync = <Async>, chStatus = " ++ show ch.chStatus ++
-        "}"
+        "ConversationHandle {chConversationId = "
+            ++ show ch.chConversationId
+            ++ ", chAgentId = "
+            ++ show ch.chAgentId
+            ++ ", chSession = "
+            ++ show ch.chSession
+            ++ ", chAsync = <Async>, chStatus = "
+            ++ show ch.chStatus
+            ++ "}"
 
 -- | Start a new conversation with an agent.
 startConversation :: InterfaceHandle -> AgentId -> Text -> IO ConversationHandle
@@ -294,4 +303,3 @@ unsubscribeFromEvents :: InterfaceHandle -> IO ()
 unsubscribeFromEvents _handle = do
     -- In a full implementation, this would remove the subscriber
     pure ()
-

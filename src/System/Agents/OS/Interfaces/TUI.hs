@@ -67,7 +67,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 
 import System.Agents.Base (AgentId, ConversationId, newAgentId, newConversationId)
-import System.Agents.OS.Compat.Runtime (RuntimeBridge, newRuntimeBridge, initializeOS)
+import System.Agents.OS.Compat.Runtime (RuntimeBridge, initializeOS, newRuntimeBridge)
 import System.Agents.OS.Interfaces (
     InterfaceConfig (..),
     InterfaceHandle (..),
@@ -150,11 +150,15 @@ data TUIConversationHandle = TUIConversationHandle
 -- | Manual Show instance for TUIConversationHandle (Async doesn't have Show).
 instance Show TUIConversationHandle where
     show ch =
-        "TUIConversationHandle {tchConversationId = " ++ show ch.tchConversationId ++
-        ", tchAgentId = " ++ show ch.tchAgentId ++
-        ", tchSession = " ++ show ch.tchSession ++
-        ", tchStatus = " ++ show ch.tchStatus ++
-        ", tchAsync = <Async>}"
+        "TUIConversationHandle {tchConversationId = "
+            ++ show ch.tchConversationId
+            ++ ", tchAgentId = "
+            ++ show ch.tchAgentId
+            ++ ", tchSession = "
+            ++ show ch.tchSession
+            ++ ", tchStatus = "
+            ++ show ch.tchStatus
+            ++ ", tchAsync = <Async>}"
 
 -- | Conversation status for TUI.
 data ConversationStatus
@@ -211,7 +215,7 @@ initTUIInterface config = do
             , tuiMultiAgentConfig = Nothing
             , tuiRegisteredAgents = registeredAgentsVar
             , tuiConversations = tuiConversationsVar
-                }
+            }
 
 -- | Run the TUI interface event loop.
 runTUIInterface :: TUIInterfaceHandle -> IO ()
@@ -387,4 +391,3 @@ pauseConversation handle convId = do
 resumeConversation :: TUIInterfaceHandle -> ConversationId -> IO ()
 resumeConversation handle convId = do
     atomically $ modifyTVar (tuiConversations handle) $ Map.adjust (\ch -> ch{tchStatus = ConversationStatus_Active}) convId
-

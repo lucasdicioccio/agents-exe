@@ -362,4 +362,3 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         LuaToolError _ err ->
             UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
-

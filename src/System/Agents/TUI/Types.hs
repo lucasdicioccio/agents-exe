@@ -115,14 +115,14 @@ agentTree = tuiTree
 
 -- | Role definition for agents in multi-agent conversations.
 data AgentRole
-    = AgentRole_Orchestrator
-    -- ^ Coordinates other agents
-    | AgentRole_Specialist Text
-    -- ^ Specialized agent with a specific role description
-    | AgentRole_Worker
-    -- ^ General worker agent
-    | AgentRole_Observer
-    -- ^ Observes but doesn't initiate
+    = -- | Coordinates other agents
+      AgentRole_Orchestrator
+    | -- | Specialized agent with a specific role description
+      AgentRole_Specialist Text
+    | -- | General worker agent
+      AgentRole_Worker
+    | -- | Observes but doesn't initiate
+      AgentRole_Observer
     deriving (Show, Eq)
 
 -- | Configuration for an agent's role in multi-agent mode.
@@ -138,12 +138,12 @@ data AgentRoleConfig = AgentRoleConfig
 
 -- | Strategy for coordinating multiple agents.
 data CoordinationStrategy
-    = CoordinationStrategy_RoundRobin
-    -- ^ Each agent takes turns
-    | CoordinationStrategy_Hierarchical AgentId
-    -- ^ One agent orchestrates others
-    | CoordinationStrategy_Collaborative
-    -- ^ Agents collaborate freely
+    = -- | Each agent takes turns
+      CoordinationStrategy_RoundRobin
+    | -- | One agent orchestrates others
+      CoordinationStrategy_Hierarchical AgentId
+    | -- | Agents collaborate freely
+      CoordinationStrategy_Collaborative
     deriving (Show, Eq)
 
 -- | Configuration for multi-agent conversations.
@@ -155,14 +155,14 @@ data MultiAgentConfig = MultiAgentConfig
 
 -- | Message type for inter-agent communication.
 data MessageType
-    = MessageType_Direct
-    -- ^ Direct message to specific agent
-    | MessageType_Broadcast
-    -- ^ Message to all subscribed agents
-    | MessageType_Response
-    -- ^ Response to a previous message
-    | MessageType_Request
-    -- ^ Request for action from another agent
+    = -- | Direct message to specific agent
+      MessageType_Direct
+    | -- | Message to all subscribed agents
+      MessageType_Broadcast
+    | -- | Response to a previous message
+      MessageType_Response
+    | -- | Request for action from another agent
+      MessageType_Request
     deriving (Show, Eq)
 
 -- | Message sent between agents.
@@ -185,16 +185,16 @@ newtype AgentBus = AgentBus
 
 -- | Layout modes for the TUI display.
 data LayoutMode
-    = SingleAgent
-    -- ^ Single agent view (default)
-    | SplitVertical
-    -- ^ Split screen vertically
-    | SplitHorizontal
-    -- ^ Split screen horizontally
-    | GridLayout Int Int
-    -- ^ Grid with rows and columns
-    | Tabbed
-    -- ^ Tabbed interface for switching between agents
+    = -- | Single agent view (default)
+      SingleAgent
+    | -- | Split screen vertically
+      SplitVertical
+    | -- | Split screen horizontally
+      SplitHorizontal
+    | -- | Grid with rows and columns
+      GridLayout Int Int
+    | -- | Tabbed interface for switching between agents
+      Tabbed
     deriving (Show, Eq)
 
 -- | TUI configuration including layout and theme.
@@ -206,7 +206,7 @@ data TUIConfig = TUIConfig
     deriving (Show)
 
 -- | Theme configuration (placeholder - to be expanded).
-newtype Theme = Theme { themeName :: Text }
+newtype Theme = Theme {themeName :: Text}
     deriving (Show, Eq)
 
 -- | Key type for keybindings.
@@ -379,4 +379,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-

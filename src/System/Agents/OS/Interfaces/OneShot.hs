@@ -48,7 +48,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 
 import System.Agents.Base (AgentId, newAgentId, newConversationId)
-import System.Agents.OS.Compat.Runtime (RuntimeBridge, newRuntimeBridge, initializeOS)
+import System.Agents.OS.Compat.Runtime (RuntimeBridge, initializeOS, newRuntimeBridge)
 import System.Agents.OS.Interfaces (
     InterfaceConfig (..),
     InterfaceHandle (..),
@@ -64,14 +64,14 @@ import System.Agents.SessionStore (SessionStore)
 
 -- | Persistence configuration for OneShot execution.
 data OneShotPersistence
-    = Persistence_None
-    -- ^ No session persistence
-    | Persistence_SessionStore SessionStore
-    -- ^ Persist to SessionStore
-    | Persistence_FilePath FilePath
-    -- ^ Persist to file path
-    | Persistence_Both SessionStore FilePath
-    -- ^ Persist to both SessionStore and file
+    = -- | No session persistence
+      Persistence_None
+    | -- | Persist to SessionStore
+      Persistence_SessionStore SessionStore
+    | -- | Persist to file path
+      Persistence_FilePath FilePath
+    | -- | Persist to both SessionStore and file
+      Persistence_Both SessionStore FilePath
     deriving (Show)
 
 -- | Manual Eq instance for OneShotPersistence (SessionStore doesn't have Eq).
@@ -172,7 +172,7 @@ initOneShotInterface config = do
             , oscConfig = config
             , oscAgentBridge = Nothing
             , oscExecutionAsync = executionVar
-                }
+            }
 
 -- | Run the OneShot interface (minimal for batch mode).
 runOneShotInterface :: OneShotInterfaceHandle -> IO ()
@@ -271,4 +271,3 @@ executeOneShotWithSession handle mAgentId session = do
 -- | Extract just the result text from a OneShotResult.
 extractResultText :: OneShotResult -> Text
 extractResultText = osrText
-

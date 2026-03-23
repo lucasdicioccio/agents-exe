@@ -475,4 +475,3 @@ tui_appAttrMap _ =
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
         ]
-
