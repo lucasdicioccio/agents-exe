@@ -60,6 +60,10 @@ import qualified OS.ConcurrentTests
 import qualified OS.CompatTests
 -- Import OS Interface tests
 import qualified OS.InterfaceTests
+-- Import OS Integration tests (NEW)
+import qualified OS.IntegrationTests
+-- Import OS Compatibility tests (NEW)
+import qualified OS.CompatibilityTests
 
 main :: IO ()
 main = defaultMain tests
@@ -80,6 +84,8 @@ tests =
         , OS.ConcurrentTests.concurrentTests
         , OS.CompatTests.tests
         , OS.InterfaceTests.tests
+        , OS.IntegrationTests.integrationTests
+        , OS.CompatibilityTests.tests
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests

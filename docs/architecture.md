@@ -13,15 +13,359 @@ The framework is built around a layered architecture that separates concerns bet
 │                    Interface Layer                              │
 │  (CLI commands, TUI, MCP server, HTTP endpoints)                │
 ├────────────────────────────────────────────────────────────────┤
+│                    OS Model Layer                               │
+│  (Entity-Component-System, Resource Management,                 │
+│   Conversation Tracking, Concurrent Access)                     │
+├────────────────────────────────────────────────────────────────┤
 │                    Agent Tree Layer                             │
 │  (multi-agent hierarchy, reference validation, cycle detection) │
-├────────────────────────────────────────────────────────────────┤
-│                    Runtime Layer                                │
-│  (agent execution, tool registration, conversation loop)        │
 ├────────────────────────────────────────────────────────────────┤
 │                    Foundation Layer                             │
 │  (sessions, tools, LLM integration, file loading)               │
 └────────────────────────────────────────────────────────────────┘
+```
+
+## OS Model Architecture
+
+The OS Model provides a centralized, ECS-based architecture for managing agents, toolboxes, and resources. It replaces the previous Runtime-per-agent model.
+
+### Entity-Component-System (ECS) Pattern
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         World                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │  Component  │  │  Component  │  │  Component  │             │
+│  │   Store 1   │  │   Store 2   │  │   Store N   │             │
+│  │ (TVar Any)  │  │ (TVar Any)  │  │ (TVar Any)  │             │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
+│         │                │                │                     │
+│         └────────────────┼────────────────┘                     │
+│                          │                                      │
+│                   HashMap ComponentTypeId                        │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         │                 │                 │
+         ▼                 ▼                 ▼
+    ┌─────────┐      ┌─────────┐      ┌─────────┐
+    │ Entity  │      │ Entity  │      │ Entity  │
+    │   1     │      │   2     │      │   N     │
+    └────┬────┘      └────┬────┘      └────┬────┘
+         │                │                │
+    ┌────┴────┐      ┌────┴────┐      ┌────┴────┐
+    │ Agent   │      │Toolbox  │      │ Conv    │
+    │ Config  │      │ Config  │      │ Config  │
+    │ Agent   │      │Toolbox  │      │ Conv    │
+    │ State   │      │ State   │      │ State   │
+    └─────────┘      └─────────┘      └─────────┘
+```
+
+**Key Design Principles:**
+
+1. **Entities are just IDs**: Lightweight identifiers with phantom types for type safety
+2. **Components are pure data**: Serializable, immutable data structures
+3. **Systems are functions**: Operate on entities with specific component combinations
+4. **Storage is heterogeneous**: Uses `TVar Any` for type erasure with safe casting
+
+### Component Types
+
+#### Agent Components
+
+| Component | ID | Purpose |
+|-----------|-----|---------|
+| `AgentConfig` | 1 | Static agent configuration (name, model, system prompt) |
+| `AgentState` | 2 | Runtime state (status, current conversation) |
+
+#### Toolbox Components
+
+| Component | ID | Purpose |
+|-----------|-----|---------|
+| `ToolboxConfig` | 3 | Toolbox type and settings |
+| `ToolboxState` | 4 | Runtime state and resource reference |
+| `ToolboxBinding` | 5 | Agent-to-toolbox relationship |
+
+#### Conversation Components
+
+| Component | ID | Purpose |
+|-----------|-----|---------|
+| `ConversationConfig` | 30 | Conversation metadata |
+| `ConversationState` | 31 | Runtime status and timestamps |
+| `AgentConversation` | 32 | Agent-conversation relationship |
+| `TurnConfig` | 33 | Turn structure (parent, conversation) |
+| `TurnState` | 34 | Turn execution state |
+| `ToolCallConfig` | 35 | Tool call specification |
+| `ToolCallState` | 36 | Tool call execution state |
+| `Message` | 38 | Chat messages |
+
+### Resource Lifecycle Flow
+
+```
+Program Startup
+      │
+      ▼
+┌─────────────┐
+│  Initialize │
+│    World    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     ┌─────────────┐
+│   Create    │────>│  Register   │
+│   Agents    │     │  Component  │
+└──────┬──────┘     │   Stores    │
+       │            └─────────────┘
+       ▼
+┌─────────────┐     ┌─────────────┐
+│   Create    │────>│  Register   │
+│  Toolboxes  │     │  Resources  │
+└──────┬──────┘     └─────────────┘
+       │
+       ▼
+┌─────────────┐
+│    Bind     │
+│   Agents    │
+│  to Toolboxes│
+└──────┬──────┘
+       │
+       ▼
+    ┌────────┐
+    │ RUNTIME │
+    └────┬───┘
+         │
+    ┌────┴────┬──────────┬──────────┐
+    │         │          │          │
+    ▼         ▼          ▼          ▼
+┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐
+│ Agent │ │ Agent │ │Shared │ │ Shared│
+│   1   │ │   2   │ │SQLite │ │  HTTP │
+│       │ │       │ │  DB   │ │ Pool  │
+└───┬───┘ └───┬───┘ └───┬───┘ └───┬───┘
+    │         │         │         │
+    └─────────┴─────────┴─────────┘
+              │
+              ▼
+       ┌─────────────┐
+       │  Cleanup    │
+       │   Scope     │
+       │ (on destroy)│
+       └─────────────┘
+```
+
+**Resource Scopes:**
+
+1. **Program Scope**: Global resources (HTTP connection pools, shared caches)
+2. **Agent Scope**: Per-agent resources (sandbox directories, agent-specific state)
+3. **Toolbox Scope**: Per-toolbox resources (SQLite connections, MCP clients)
+4. **Conversation Scope**: Per-conversation resources (isolated Lua states, temp files)
+5. **Turn Scope**: Temporary resources (single turn execution context)
+6. **ToolCall Scope**: Single-use resources (tool call arguments, results)
+
+### Concurrent Access Patterns
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Access Patterns                            │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Exclusive Access (TMVar)                                     │
+│  ┌─────────┐     ┌─────────┐     ┌─────────┐                 │
+│  │  Lock   │────>│ Execute │────>│ Release │                 │
+│  └─────────┘     └─────────┘     └─────────┘                 │
+│  Use: Lua interpreters, process handles                      │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Read-Write Access (RWLock)                                   │
+│  ┌─────┐ ┌─────┐       ┌─────────┐      ┌─────┐ ┌─────┐      │
+│  │Read │ │Read │──────>│  Data   │<─────│Write│     │      │
+│  │  1  │ │  2  │       │         │      │     │     │      │
+│  └─────┘ └─────┘       └─────────┘      └─────┘     │      │
+│  Use: SQLite databases (especially WAL mode)                 │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Pool Access (TBQueue)                                        │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │  Pool: [Token] [Token] [Token] ... [Token]          │     │
+│  └─────────────────────────────────────────────────────┘     │
+│       ▲    │         ▲    │                                  │
+│       │    └─────────┘    │                                  │
+│    Acquire             Release                               │
+│  Use: HTTP connection pools, DB connection pools             │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Stateless Access (No Lock)                                   │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐                        │
+│  │ Access  │ │ Access  │ │ Access  │  (Concurrent, no sync) │
+│  └─────────┘ └─────────┘ └─────────┘                        │
+│  Use: Immutable data, thread-safe resources                  │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Conversation and Lineage Tracking
+
+```
+Conversation Tree Structure
+
+┌─────────────────┐
+│ Conversation 1  │
+│   (Entity)      │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌───────┐ ┌───────┐
+│ Turn 1│ │ Turn 2│
+│(Entity)│ │(Fork) │
+└───┬───┘ └───┬───┘
+    │         │
+    ▼         ▼
+┌───────┐ ┌───────┐
+│ Call 1│ │ Call 1│
+│       │ │       │
+└───┬───┘ └───┬───┘
+    │         │
+    ▼         ▼
+┌───────┐ ┌───────┐
+│ Call 2│ │ Call 2│
+│(Nested)│ │(Nested)│
+└───────┘ └───────┘
+
+Lineage Stack
+┌─────────────────────────────────────┐
+│ LineageFrame                        │
+│ ├─ frameType: ToolCallFrame         │
+│ ├─ frameEntityId: <tool-call-id>    │
+│ └─ frameTimestamp: <time>           │
+├─────────────────────────────────────┤
+│ LineageFrame                        │
+│ ├─ frameType: TurnFrame             │
+│ ├─ frameEntityId: <turn-id>         │
+│ └─ frameTimestamp: <time>           │
+├─────────────────────────────────────┤
+│ LineageFrame                        │
+│ ├─ frameType: ConversationFrame     │
+│ ├─ frameEntityId: <conversation-id> │
+│ └─ frameTimestamp: <time>           │
+└─────────────────────────────────────┘
+```
+
+**Lineage provides:**
+- Complete call chain for debugging
+- Recursion depth tracking
+- Audit trail for accounting
+- Context for subagent calls
+
+### Persistence Layer
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Persistence Backends                       │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│  │ In-Memory│  │   File   │  │  SQLite  │  │PostgreSQL│     │
+│  │ (Dev/Test)│  │(Compat) │  │ (Local)  │  │(Production)    │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘     │
+│       │             │             │             │            │
+│       └─────────────┴──────┬──────┴─────────────┘            │
+│                            │                                 │
+│                            ▼                                 │
+│                   ┌─────────────────┐                        │
+│                   │  Unified API    │                        │
+│                   │ (persist, load) │                        │
+│                   └─────────────────┘                        │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+
+SQLite Schema (simplified)
+┌──────────────────────────────────────────────────────────────┐
+│  entities (id, entity_type, created_at)                      │
+│  components (entity_id, component_type, data)                │
+│  events (id, timestamp, type, data, entity_id)               │
+│  messages (conversation_id, timestamp, role, content)        │
+│  tool_calls (turn_id, timestamp, name, input, output)        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Migration Path from Old Runtime
+
+### Architecture Comparison
+
+```
+OLD: Runtime-per-Agent                    NEW: Centralized OS
+┌─────────────────────┐                  ┌─────────────────────┐
+│ ┌─────────────────┐ │                  │                     │
+│ │   Runtime A     │ │                  │ ┌─────────────────┐ │
+│ │ ┌─────┐┌─────┐  │ │                  │ │      World      │ │
+│ │ │Tools││HTTP │  │ │                  │ │  ┌───┐┌───┐┌───┐ │ │
+│ │ │     ││Pool │  │ │                  │ │  │ C ││ C ││ C │ │ │
+│ │ └─────┘└─────┘  │ │                  │ │  └───┘└───┘└───┘ │ │
+│ └─────────────────┘ │                  │ └─────────────────┘ │
+│ ┌─────────────────┐ │                  │                     │
+│ │   Runtime B     │ │                  │ ┌─────────────────┐ │
+│ │ ┌─────┐┌─────┐  │ │                  │ │ Resource Registry│ │
+│ │ │Tools││HTTP │  │ │                  │ │  ┌───┐┌───┐┌───┐ │ │
+│ │ │     ││Pool │  │ │                  │ │  │ R ││ R ││ R │ │ │
+│ │ └─────┘└─────┘  │ │                  │ │  └───┘└───┘└───┘ │ │
+│ └─────────────────┘ │                  │ └─────────────────┘ │
+│ ┌─────────────────┐ │                  │                     │
+│ │   Runtime C     │ │                  │ ┌─────────────────┐ │
+│ │ ┌─────┐┌─────┐  │ │                  │ │  Persistence    │ │
+│ │ │Tools││HTTP │  │ │                  │ │  ┌───┐┌───┐┌───┐ │ │
+│ │ │     ││Pool │  │ │                  │ │  │ P ││ P ││ P │ │ │
+│ │ └─────┘└─────┘  │ │                  │ │  └───┘└───┘└───┘ │ │
+│ └─────────────────┘ │                  │ └─────────────────┘ │
+└─────────────────────┘                  └─────────────────────┘
+                                                         │
+                              ┌──────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+         ▼                    ▼                    ▼
+    ┌─────────┐          ┌─────────┐          ┌─────────┐
+    │ Agent A │          │ Agent B │          │ Agent C │
+    └─────────┘          └─────────┘          └─────────┘
+         │                    │                    │
+         └────────────────────┴────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  Shared HTTP    │
+                    │  Connection Pool│
+                    └─────────────────┘
+```
+
+### Benefits of the New Architecture
+
+1. **Shared Resources**: Multiple agents can share toolboxes (e.g., same SQLite database)
+2. **Resource Pooling**: HTTP connections pooled across all agents
+3. **Better Lifecycle Management**: Explicit scopes with predictable cleanup
+4. **Foundation for Web API**: Centralized state enables HTTP server interface
+5. **Durable Persistence**: Built-in persistence layer with multiple backends
+6. **Thorough Lineage Tracking**: Complete call chains for debugging
+
+### Compatibility Layer
+
+The `System.Agents.OS.Compat` module provides a bridge from the old Runtime interface to the new OS backend:
+
+```haskell
+-- Old code continues to work
+runtime <- newRuntime config
+result <- runWithRuntime runtime $ do
+    tools <- listTools
+    callTool "my-tool" args
+
+-- New OS interface (when ready)
+os <- initializeOS defaultConfig
+result <- runOSM os $ do
+    agent <- createAgent agentConfig
+    conv <- startConversation agent convConfig
+    turn <- startTurn conv
+    executeToolCall turn "my-tool" args
 ```
 
 ## Core Types
@@ -46,54 +390,36 @@ data Agent = Agent
     , toolDirectory :: FilePath       -- Path to tools
     , mcpServers :: Maybe [McpServerDescription]
     , extraAgents :: Maybe [ExtraAgentRef]
-    , builtinToolboxes :: Maybe [BuiltinToolboxDescription]  -- SQLite, System toolboxes
+    , builtinToolboxes :: Maybe [BuiltinToolboxDescription]
     }
 ```
 
-### Agent Reference Types
+### OS Types (`System.Agents.OS.Core`)
 
 ```haskell
--- Reference to an external agent
-data ExtraAgentRef = ExtraAgentRef
-    { extraAgentSlug :: AgentSlug     -- How to refer to this agent
-    , extraAgentPath :: FilePath      -- Path to agent JSON file
+-- Phantom-typed entity IDs
+newtype AgentId = AgentId EntityId
+newtype ToolboxId = ToolboxId EntityId
+newtype ConversationId = ConversationId EntityId
+
+-- Agent components
+data AgentConfig = AgentConfig
+    { agentName :: Text
+    , agentModel :: ModelConfig
+    , agentSystemPrompt :: Text
+    , agentToolboxBindings :: [ToolboxBindingSpec]
     }
 
--- MCP server configuration
-data McpServerDescription 
-    = McpSimpleBinary McpSimpleBinaryConfiguration
-    
-data McpSimpleBinaryConfiguration = McpSimpleBinaryConfiguration
-    { name :: Text
-    , executable :: FilePath
-    , args :: [Text]
+data AgentState = AgentState
+    { agentStatus :: AgentStatus
+    , agentCurrentConversation :: Maybe ConversationId
+    , agentCreatedAt :: UTCTime
     }
-
--- Builtin toolbox types
-data BuiltinToolboxDescription
-    = SqliteToolbox SqliteToolboxDescription
-    | SystemToolbox SystemToolboxDescription
 ```
 
 ## Agent Tree System
 
 The `AgentTree` module manages multi-agent hierarchies and handles agent discovery, reference validation, and cycle detection.
-
-### Agent Config Graph
-
-```haskell
-data AgentConfigGraph = AgentConfigGraph
-    { graphNodes :: Map AgentSlug AgentConfigNode
-    , graphEdges :: Map AgentSlug [AgentSlug]
-    }
-
-data AgentConfigNode = AgentConfigNode
-    { nodeFile :: FilePath
-    , nodeConfig :: Agent
-    , nodeChildren :: [AgentSlug]    -- From toolDirectory
-    , nodeExtraRefs :: [AgentSlug]   -- From extraAgents
-    }
-```
 
 ### Tree Structure
 
@@ -118,130 +444,16 @@ Agents form a directed graph where:
 └──────┘
 ```
 
-### Validation
+### Subagent Wiring
 
-The tree system performs:
-
-1. **Reference Validation**: Ensures all referenced agents exist
-2. **Cycle Detection**: Prevents circular agent dependencies
-3. **Duplicate Detection**: Identifies agents with the same slug
-
-### Subagent Wiring (Dynamic Tool Registration)
-
-The Agent Tree system supports dynamic tool registration via STM TVars. This enables:
-
-- **Subagent tools**: Parent agents can call child agents as tools
-- **Cross-agent references**: Agents can reference agents outside their tool directory
-- **Runtime tool updates**: Tools can be added after runtime initialization
+The Agent Tree system supports dynamic tool registration via STM TVars:
 
 ```haskell
 -- Runtime now uses STM TVar for mutable tool storage
 type AgentTools = TVar [ToolRegistration]
 
-data Runtime = Runtime
-    { agentTools :: AgentTools  -- Mutable tool registrations
-    , ...
-    }
-
 -- Wiring process appends helper agent tools to parent
 tireAgentTools :: Props -> AgentConfigGraph -> (AgentSlug, AgentConfigNode) -> IO ()
-wireAgentTools props _graph _runtimes (slug, node) = do
-    -- Look up this agent's runtime from registry
-    mRt <- lookupRuntime props.runtimeRegistry slug
-    case mRt of
-        Nothing -> pure ()
-        Just rt -> do
-            -- Look up child and extra agent runtimes
-            childRuntimes <- mapM (lookupRuntime props.runtimeRegistry) node.nodeChildren
-            extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) node.nodeExtraRefs
-            
-            let allHelpers = Maybe.catMaybes (childRuntimes ++ extraRuntimes)
-            let helperTools = [props.agentToTool helperRt ... | helperRt <- allHelpers]
-            
-            -- Atomically append helper tools to runtime's agentTools TVar
-            atomically $ modifyTVar' rt.agentTools (\existing -> existing ++ helperTools)
-```
-
-This design allows:
-- Circular agent references (A calls B, B calls A)
-- Self-referential agents (agent calls itself)
-- Late binding of agent tools (resolved after all runtimes are created)
-
-## Runtime System
-
-The `Runtime` module provides the execution environment for agents.
-
-### Runtime Structure
-
-```haskell
--- Type alias for mutable tool storage
-type AgentTools = TVar [ToolRegistration]
-
-data Runtime = Runtime
-    { agentSlug :: AgentSlug
-    , agentId :: AgentId
-    , agentAnnounce :: AgentAnnounce
-    , agentTracer :: Tracer IO Trace
-    , agentAuthenticatedHttpClientRuntime :: HttpClient.Runtime
-    , agentModel :: OpenAI.Model
-    , agentTools :: AgentTools      -- STM TVar for dynamic updates
-    , agentTriggerRefreshTools :: STM Bool
-    }
-```
-
-The use of `TVar` for `agentTools` enables:
-- **Dynamic tool registration**: Subagent tools added after initialization
-- **Thread-safe updates**: STM ensures consistency across threads
-- **Hot reloading**: Tools can be refreshed without restarting
-
-### Runtime Lifecycle
-
-```
-1. Initialize
-   └─> Load agent configuration
-       └─> Discover child agents from toolDirectory
-       └─> Load extra agent references
-           └─> Build agent config graph
-           └─> Validate references
-           └─> Detect cycles
-
-2. Create Runtime
-   └─> Generate AgentId
-   └─> Initialize HTTP client with API key
-   └─> Initialize bash toolbox (background thread)
-   └─> Initialize MCP toolboxes
-   └─> Initialize builtin toolboxes (SQLite, System)
-   └─> Create TVar for tools and populate with initial set
-   └─> Combine all tool registrations
-
-3. Wire Subagent Tools
-   └─> For each agent, look up helper runtimes in registry
-   └─> Create tool registrations for helpers
-   └─> Atomically append to agent's TVar
-
-4. Execute
-   └─> Run conversation loop
-       └─> Collect user input
-       └─> Call LLM with tools
-       └─> Execute tool calls
-       └─> Stream responses
-```
-
-### Tracing
-
-The runtime uses the `Prod.Tracer` library for observability:
-
-```haskell
-data Trace
-    = AgentTrace_Loading AgentSlug AgentId BashToolbox.Trace
-    | AgentTrace_Conversation AgentSlug AgentId ConversationId ConversationTrace
-    | ConfigLoadedTrace AgentDescription
-    | DataLoadingTrace FileLoader.Trace
-    | ReferenceValidationTrace (Either [ReferenceError] ())
-    | CyclicReferencesWarning [[AgentSlug]]
-    | BuiltinToolboxTrace Text SqliteToolbox.Trace
-    | BuiltinToolboxInitError Text String
-    | SystemToolboxTrace Text SystemToolbox.Trace
 ```
 
 ## Conversation Flow
@@ -262,24 +474,6 @@ data Trace
                     ┌─────────────┐        ┌─────────────┐
                     │  Bash Tool  │        │  MCP Tool   │
                     └─────────────┘        └─────────────┘
-```
-
-### Session Types
-
-```haskell
-data Session = Session
-    { sessionId :: SessionId
-    , conversationId :: ConversationId
-    , agentSlug :: AgentSlug
-    , turns :: [Turn]
-    }
-
-data Turn = Turn
-    { turnId :: TurnId
-    , userMessage :: Message
-    , assistantResponse :: Message
-    , toolCalls :: [ToolCall]
-    }
 ```
 
 ## Tool Registration
@@ -304,47 +498,6 @@ data ToolRegistration = ToolRegistration
 5. **SystemToolbox**: Builtin system information tools
 6. **Subagent Tools**: Other agents exposed as callable tools
 
-## HTTP Client
-
-The framework uses a custom HTTP client with authentication:
-
-```haskell
-data Runtime = Runtime
-    { manager :: Manager
-    , baseUrl :: Text
-    , auth :: Auth
-    }
-
-data Auth
-    = NoToken
-    | BearerToken Text
-```
-
-The client supports:
-- Bearer token authentication
-- Request/response logging
-- JSON serialization via Aeson
-
-## Recursion Control
-
-The framework includes recursion depth limiting to prevent infinite loops:
-
-```haskell
-data ToolExecutionContext = ToolExecutionContext
-    { ctxCallStack :: [CallStackEntry]
-    , ctxMaxDepth :: Maybe Int
-    , ...
-    }
-
-data CallStackEntry = CallStackEntry
-    { callAgentSlug :: AgentSlug
-    , callConversationId :: ConversationId
-    , callDepth :: Int
-    }
-```
-
-When an agent calls another agent as a tool, the depth increases. If `maxDepth` is exceeded, the call fails with `MaxRecursionDepthExceeded`.
-
 ## Module Dependencies
 
 ```
@@ -361,15 +514,46 @@ Main
   ├── MCP.Server
   │     └── AgentTree
   └── ExportImport.*
+  
+OS Layer
+  ├── OS.Core
+  │     ├── OS.Core.Types
+  │     └── OS.Core.World
+  ├── OS.Resources
+  │     ├── OS.Resources.Types
+  │     ├── OS.Resources.Sqlite
+  │     ├── OS.Resources.Lua
+  │     └── OS.Resources.Http
+  ├── OS.Concurrent
+  │     ├── OS.Concurrent.Types
+  │     └── OS.Concurrent.Locks
+  ├── OS.Conversation
+  │     ├── OS.Conversation.Types
+  │     └── OS.Conversation.Lineage
+  ├── OS.Persistence
+  │     ├── OS.Persistence.Types
+  │     ├── OS.Persistence.Sqlite
+  │     └── OS.Persistence.File
+  └── OS.Compat
+        └── OS.Compat.Runtime
 ```
 
 ## Key Design Decisions
 
 1. **STM for Concurrency**: Tool reloading and subagent wiring use STM for thread-safe updates
-2. **TVar for Dynamic Tools**: Runtime tools are stored in a TVar to support late-binding of subagent tools
-3. **Tracer Pattern**: All side effects are traced for observability
-4. **Background Thread**: File watching for hot-reloading of bash tools
-5. **JSON Configuration**: Human-readable agent definitions
-6. **Type Safety**: Heavy use of newtypes for IDs prevents mixing up identifiers
+2. **ECS Pattern**: Enables flexible composition and powerful queries
+3. **Explicit Resource Management**: Predictable cleanup with explicit scopes
+4. **Phantom Types**: Type safety for entity IDs without runtime overhead
+5. **Type Erasure**: `Any` for heterogeneous storage with safe casting via Component typeclass
+6. **Tracer Pattern**: All side effects are traced for observability
 7. **Two-Phase Initialization**: Runtime shells created first, then wired together to support cycles
+8. **Migration Compatibility**: Full compatibility layer for gradual migration
+
+## Tradeoffs
+
+1. **ECS Complexity**: Adds indirection but enables powerful queries and flexible composition
+2. **STM Overhead**: Slight performance cost for composability
+3. **Migration Duration**: Dual-mode operation adds maintenance burden but ensures smooth transition
+4. **Storage Overhead**: Component storage uses more memory than direct fields but enables dynamic extension
+5. **Type Erasure**: Using `Any` requires careful casting but enables heterogeneous storage
 

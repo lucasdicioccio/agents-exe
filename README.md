@@ -5,6 +5,37 @@
 A handy LLM-agent tool, with a variety of calling and configuration modes so
 that the LLM adapts to your workflow rather than the opposite.
 
+## Architecture Overview
+
+Agents-exe uses a layered architecture with a modern Entity-Component-System (ECS) based OS model at its core:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    Interface Layer                              │
+│  (CLI commands, TUI, MCP server, HTTP endpoints)                │
+├────────────────────────────────────────────────────────────────┤
+│                    OS Model Layer                               │
+│  (Entity-Component-System, Resource Management,                 │
+│   Conversation Tracking, Concurrent Access)                     │
+├────────────────────────────────────────────────────────────────┤
+│                    Agent Tree Layer                             │
+│  (multi-agent hierarchy, reference validation, cycle detection) │
+├────────────────────────────────────────────────────────────────┤
+│                    Foundation Layer                             │
+│  (sessions, tools, LLM integration, file loading)               │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### OS Model Benefits
+
+- **Shared Toolboxes**: Multiple agents can share the same SQLite database, HTTP connection pool, or other resources
+- **Better Resource Management**: Explicit lifecycle scopes with predictable cleanup
+- **Concurrent Access**: STM-based synchronization for safe multi-agent operations
+- **Durable Persistence**: Pluggable persistence layer (SQLite, PostgreSQL, file-based)
+- **Complete Lineage Tracking**: Full call chains for debugging and accounting
+
+See [docs/architecture.md](docs/architecture.md) for detailed architecture documentation and [docs/MIGRATION-OS.md](docs/MIGRATION-OS.md) for migration guidance.
+
 ## Quick Start
 
 Getting started:
@@ -307,7 +338,46 @@ Tool names are deterministic across runs when using the same `--agent-file` argu
 
 The code is designed to be usable as a Haskell library.
 
-Coding style guidelines:
+### Example: Using the OS Model
+
+```haskell
+import System.Agents.OS
+import System.Agents.OS.Core
+import System.Agents.OS.Persistence
+
+main :: IO ()
+main = do
+    -- Initialize the OS with SQLite persistence
+    os <- initializeOS defaultConfig
+    backend <- createPersistenceBackend (SqliteBackendType "./agents.db")
+    
+    -- Create a shared SQLite toolbox
+    tbConfig <- createToolboxConfig SqliteToolboxType "shared-db" 
+        (object ["path" .= "./data.db"])
+    tbId <- createToolbox os tbConfig
+    
+    -- Create agents that share the toolbox
+    agent1 <- createAgent os (testAgentConfig 
+        { agentToolboxBindings = [tbId] })
+    agent2 <- createAgent os (testAgentConfig 
+        { agentToolboxBindings = [tbId] })
+    
+    -- Run conversations
+    runOSM os $ do
+        conv1 <- startConversation agent1 defaultConvConfig
+        result1 <- runConversationTurn conv1 "Hello, agent 1!"
+        
+        conv2 <- startConversation agent2 defaultConvConfig
+        result2 <- runConversationTurn conv2 "Hello, agent 2!"
+        
+        -- Both agents can access the same database!
+        pure (result1, result2)
+```
+
+See [docs/OS-API.md](docs/OS-API.md) for the complete API reference.
+
+### Coding Style Guidelines
+
 - Prefer qualified imports over prefixed/suffixed functions
 - Keep prefixed/suffixed function names for helper variations
 - Prefer passing multiple arguments
@@ -362,6 +432,17 @@ cabal run -- agents-exe --help
 cabal run -- agents-exe init
 ```
 
+## Running Tests
+
+```console
+cabal test
+```
+
+For OS-specific tests:
+```console
+cabal test --test-option=--pattern="OS"
+```
+
 ## Container Build
 
 With [Podman](https://podman.io) (for [Docker](https://docker.com), replace with `docker`):
@@ -410,6 +491,15 @@ Create an `agents-exe.cfg.json` in your project root (searched upward from curre
 
 Absent this file, agents load from `~/.config/agents-exe/default`.
 
+# Documentation
+
+- [Architecture Overview](docs/architecture.md) - Detailed architecture documentation
+- [OS API Reference](docs/OS-API.md) - Complete API documentation for the OS model
+- [Migration Guide](docs/MIGRATION-OS.md) - Guide for migrating from old Runtime to new OS model
+- [CLI Commands](docs/cli-commands.md) - Detailed CLI documentation
+- [TUI Guide](docs/tui.md) - Terminal UI documentation
+- [MCP Documentation](docs/mcp.md) - Model Context Protocol integration
+
 # Roadmap
 
 ## LLM Providers
@@ -434,4 +524,16 @@ Absent this file, agents load from `~/.config/agents-exe/default`.
 - [ ] Better async-linking
 - [ ] CLI tooling to directly inspect/call tools
 - [ ] Improve TUI mode
+
+## OS Model
+
+- [x] Core ECS types and world management
+- [x] Resource management with lifecycle scopes
+- [x] Concurrent access patterns (exclusive, read-write, pool)
+- [x] Conversation and lineage tracking
+- [x] Persistence layer (SQLite, file-based)
+- [x] Runtime compatibility layer
+- [ ] Full TUI/OneShot OS integration
+- [ ] Web API foundation
+- [ ] Distributed OS (multi-node support)
 

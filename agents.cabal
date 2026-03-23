@@ -151,6 +151,7 @@ library agents-lib
                       containers,
                       contravariant,
                       data-clist,
+                      deepseq,
                       direct-sqlite,
                       directory,
                       extra,
@@ -260,7 +261,9 @@ test-suite agents-tests
                     , OS.ConversationTests
                     , OS.CoreTests
                     , OS.CompatTests
+                    , OS.CompatibilityTests
                     , OS.InterfaceTests
+                    , OS.IntegrationTests
                     , OS.PersistenceTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
@@ -273,12 +276,14 @@ test-suite agents-tests
     build-depends:    base >=4.18.3.0,
                       agents-lib,
                       aeson,
+                      async,
                       bytestring,
                       containers,
                       directory,
                       filepath,
                       hashable,
                       hslua,
+                      mtl,
                       prodapi,
                       stm,
                       text,
@@ -288,4 +293,27 @@ test-suite agents-tests
                       time,
                       unordered-containers,
                       vector
+
+benchmark os-benchmarks
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   bench
+    main-is:          OSBenchmarks.hs
+    ghc-options:      -O2 -threaded -rtsopts
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      async,
+                      bytestring,
+                      containers,
+                      criterion,
+                      deepseq,
+                      directory,
+                      filepath,
+                      stm,
+                      temporary,
+                      text,
+                      time,
+                      unordered-containers
 
