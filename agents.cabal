@@ -64,6 +64,9 @@ library agents-lib
                     , System.Agents.OS.Core.World
                     , System.Agents.OS.Compat
                     , System.Agents.OS.Compat.Runtime
+                    , System.Agents.OS.Interfaces
+                    , System.Agents.OS.Interfaces.TUI
+                    , System.Agents.OS.Interfaces.OneShot
                     , System.Agents.OS.Resources
                     , System.Agents.OS.Resources.Types
                     , System.Agents.OS.Resources.Sqlite
@@ -251,6 +254,7 @@ test-suite agents-tests
                     , OS.ConversationTests
                     , OS.CoreTests
                     , OS.CompatTests
+                    , OS.InterfaceTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
                     , SessionEditTests

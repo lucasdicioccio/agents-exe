@@ -34,6 +34,7 @@ module System.Agents.OS.Compat.Runtime (
     OS,
     OSM,
     runOSM,
+    initializeOS,
 ) where
 
 import Control.Concurrent.STM (atomically)
@@ -77,6 +78,14 @@ resource registry.
 newtype OS = OS
     { _osWorld :: World
     }
+
+-- | Manual Show instance for OS (World doesn't have Show).
+instance Show OS where
+    show _ = "OS {<world>}"
+
+-- | Manual Eq instance for OS.
+instance Eq OS where
+    _ == _ = True -- All OS instances are considered equal for now
 
 -- | Monad for OS operations.
 newtype OSM a = OSM {unOSM :: IO a}
@@ -197,6 +206,15 @@ data RuntimeBridge = RuntimeBridge
     { bridgeAgentId :: Base.AgentId
     , bridgeOS :: OS
     }
+
+-- | Show instance for RuntimeBridge.
+instance Show RuntimeBridge where
+    show bridge =
+        "RuntimeBridge {bridgeAgentId = " ++ show bridge.bridgeAgentId ++ ", bridgeOS = <OS>}"
+
+-- | Eq instance for RuntimeBridge (compares agent IDs only).
+instance Eq RuntimeBridge where
+    a == b = bridgeAgentId a == bridgeAgentId b
 
 -- | Create a new runtime bridge for an agent.
 newRuntimeBridge :: Base.AgentId -> OS -> RuntimeBridge
@@ -344,3 +362,4 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON toolResult
         LuaToolError _ err ->
             UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
+
