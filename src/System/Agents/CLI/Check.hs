@@ -5,6 +5,8 @@
 
 The check command validates agent configuration files and displays
 information about loaded agents including their tools.
+
+This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.Check (
     handleCheck,
@@ -25,7 +27,6 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 
@@ -58,33 +59,37 @@ handleCheck ::
     IO ()
 handleCheck opts apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
+
     forM_ agentFiles $ \agentFile -> do
-        -- Create a new runtime registry for this agent tree
-        registry <- AgentTree.newRuntimeRegistry
         -- Use silent tracer to suppress diagnostic output during agent loading
-        AgentTree.withAgentTreeRuntime
+        AgentTree.withAgentTree
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = Prod.silent
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore
-                , AgentTree.runtimeRegistry = registry
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs
-                AgentTree.Initialized tree -> printAgentCheck opts (AgentTree.AgentSubTree tree)
+                AgentTree.Initialized tree -> do
+                    -- Print agent check information
+                    printAgentCheckOS opts tree
 
--- | Display agent check information
-printAgentCheck :: CheckOptions -> AgentTree.AgentNode -> IO ()
-printAgentCheck _ (AgentTree.AgentReference slug) = do
-    Text.putStrLn $ " (@" <> slug <> " )"
-printAgentCheck opts (AgentTree.AgentSubTree tree) = do
-    tools <- readTVarIO $ Runtime.agentTools tree.agentRuntime
+-- | Print agent check information using OS-native structures
+printAgentCheckOS :: CheckOptions -> AgentTree.OSAgentTree -> IO ()
+printAgentCheckOS opts tree = do
+    let rootNode = AgentTree.osTreeRoot tree
+
+    -- Get tools from OS-native TVar
+    tools <- readTVarIO (AgentTree.osNodeTools rootNode)
     let toolCount = length tools
+
+    -- Access agent info from the node
+    let agent = rootNode.osNodeConfig
     Text.putStrLn $
-        Runtime.agentSlug tree.agentRuntime
+        agent.slug
             <> ": "
-            <> Runtime.agentAnnounce tree.agentRuntime
+            <> agent.announce
             <> " ("
             <> Text.pack (show toolCount)
             <> " tools)"
@@ -95,6 +100,17 @@ printAgentCheck opts (AgentTree.AgentSubTree tree) = do
         ToolsList -> printToolsList tools
         ToolsAgentsExe -> printToolsAgentsExe tools
         ToolsOpenAI -> printToolsOpenAI tools
+
+-- | Display agent check information (public API preserved for compatibility)
+printAgentCheck :: CheckOptions -> AgentTree.AgentConfigTree -> IO ()
+printAgentCheck opts configTree = do
+    -- For backward compatibility, use a minimal display
+    let agent = configTree.agentConfig
+    Text.putStrLn $ agent.slug <> ": " <> agent.announce
+
+    case opts.toolsOutputMode of
+        ToolsNone -> pure ()
+        _ -> Text.putStrLn "(Tool details require full agent loading)"
 
 -- | Print tools as a simple list
 printToolsList :: [ToolRegistration] -> IO ()
@@ -142,3 +158,4 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
+

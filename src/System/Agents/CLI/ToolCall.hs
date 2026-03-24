@@ -9,25 +9,33 @@ for testing and invoking tools directly without going through the LLM.
 
 Example usage:
     echo '{"cmd": "echo hello"}' | agents-exe tool-call bash
+
+This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.ToolCall (
     handleToolCall,
     ToolCallOptions (..),
+    ToolCallAgent (..),
+    createToolCallAgent,
+    listToolCallAgentTools,
 ) where
 
-import Control.Concurrent.STM (readTVarIO)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
+import Control.Concurrent.STM (readTVarIO)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import qualified System.Agents.Runtime as Runtime
 import qualified System.Agents.SessionStore as SessionStore
+
+import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
+import System.Agents.Base (AgentId)
 import System.Agents.ToolPortal (makeToolPortal)
+import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Tools.Context (ToolCall (..))
 
 -- | Options for the tool-call command
@@ -38,6 +46,47 @@ data ToolCallOptions = ToolCallOptions
     -- ^ Optional log file for tracing
     }
     deriving (Show, Eq)
+
+{- | ToolCall agent using OS-native structures.
+
+This structure wraps an OSAgentNode for direct tool execution.
+-}
+data ToolCallAgent = ToolCallAgent
+    { toolCallAgentId :: AgentId
+    -- ^ Unique identifier for this agent
+    , toolCallTree :: OSAgentTree
+    -- ^ The agent's tree structure
+    , toolCallNode :: OSAgentNode
+    -- ^ The specific node for this agent
+    }
+
+-- | Manual Show instance for ToolCallAgent.
+instance Show ToolCallAgent where
+    show agent =
+        "ToolCallAgent {toolCallAgentId = "
+            ++ show agent.toolCallAgentId
+            ++ ", toolCallTree = <OSAgentTree>, toolCallNode = <OSAgentNode>}"
+
+{- | Create a ToolCallAgent from an OSAgentTree.
+
+This function extracts the root agent from the tree for tool execution.
+-}
+createToolCallAgent :: OSAgentTree -> ToolCallAgent
+createToolCallAgent tree =
+    let rootNode = osTreeRoot tree
+     in ToolCallAgent
+            { toolCallAgentId = rootNode.osNodeAgentId
+            , toolCallTree = tree
+            , toolCallNode = rootNode
+            }
+
+{- | List tools for a ToolCallAgent.
+
+Reads tools directly from the OS-native TVar.
+-}
+listToolCallAgentTools :: ToolCallAgent -> IO [ToolRegistration]
+listToolCallAgentTools agent =
+    readTVarIO (osNodeTools agent.toolCallNode)
 
 -- | Handle the tool-call command
 handleToolCall ::
@@ -64,21 +113,17 @@ handleToolCall opts apiKeysFile agentFiles = do
         [] -> do
             Text.hPutStrLn stderr "Error: No agent file specified"
             error "No agent file specified"
-        (agentFile : _) -> do
-            -- Create runtime registry
-            registry <- AgentTree.newRuntimeRegistry
-
+        (agentFilePath : _) -> do
             -- Use silent tracer (tool portal handles its own output)
             let baseTracer = Prod.silent
 
-            -- Load the agent tree runtime
-            AgentTree.withAgentTreeRuntime
+            -- Load the agent tree
+            AgentTree.withAgentTree
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
-                    , AgentTree.rootAgentFile = agentFile
+                    , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore
-                    , AgentTree.runtimeRegistry = registry
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore apiKeys
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do
@@ -86,8 +131,11 @@ handleToolCall opts apiKeysFile agentFiles = do
                         mapM_ (Text.hPutStrLn stderr . Text.pack . show) errs
                         error "Failed to load agent"
                     AgentTree.Initialized tree -> do
-                        -- Get registered tools from the runtime
-                        registrations <- readTVarIO $ Runtime.agentTools tree.agentRuntime
+                        -- Create ToolCallAgent
+                        let agent = createToolCallAgent tree
+
+                        -- Get registered tools
+                        registrations <- listToolCallAgentTools agent
 
                         -- Create tool portal with silent tracer
                         let portal = makeToolPortal Prod.silent registrations
@@ -106,3 +154,4 @@ handleToolCall opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
+

@@ -6,7 +6,6 @@
     "modelUrl": "https://api.moonshot.ai/v1",
     "apiKeyId": "kimi",
     "modelName": "kimi-k2.5",
-    "toolDirectory": "notools",
     "extraAgents": [
     ],
     "announce": "A children demo agent.",

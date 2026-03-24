@@ -180,9 +180,11 @@ registerResourceHandle registry handle info =
 
 -- | STM version of registerResourceHandle
 registerResourceHandleSTM :: ResourceRegistry -> ResourceHandle -> ResourceInfo -> STM ()
-registerResourceHandleSTM registry handle _info = do
+registerResourceHandleSTM registry handle info = do
     modifyTVar' (registryHandles registry) $ \handles ->
         HashMap.insert (handleId handle) handle handles
+    modifyTVar' (registryInfo registry) $ \infos ->
+        HashMap.insert (handleId handle) info infos
 
 -------------------------------------------------------------------------------
 -- Resource Cleanup
@@ -243,6 +245,7 @@ cleanupScope registry scopeLevel = do
 removeResourceHandleSTM :: ResourceRegistry -> ResourceId -> STM ()
 removeResourceHandleSTM registry rid = do
     modifyTVar' (registryHandles registry) $ HashMap.delete rid
+    modifyTVar' (registryInfo registry) $ HashMap.delete rid
 
 -------------------------------------------------------------------------------
 -- Resource Lookup and Access
@@ -254,11 +257,13 @@ This returns ResourceInfo for all resources whose scope path contains
 the given scope level at the appropriate position.
 -}
 findResourcesInScope :: ResourceRegistry -> ScopeLevel -> STM [ResourceInfo]
-findResourcesInScope _registry _scopeLevel = do
-    -- Note: In a real implementation, we'd also store ResourceInfo in the
-    -- registry or look it up from the ECS World. For now, we return an empty list.
-    -- This would require integrating with the World component storage.
-    pure []
+findResourcesInScope registry scopeLevel = do
+    infos <- readTVar (registryInfo registry)
+    pure $ filter (scopeMatches scopeLevel . resourceScope) (HashMap.elems infos)
+  where
+    -- Check if a resource scope contains the given scope level
+    scopeMatches :: ScopeLevel -> ResourceScope -> Bool
+    scopeMatches level (ResourceScope levels) = level `elem` levels
 
 -- | Look up a resource handle by ID.
 lookupResourceHandle :: ResourceRegistry -> ResourceId -> IO (Maybe ResourceHandle)
@@ -332,3 +337,4 @@ getResourceCount registry = do
     atomically $ do
         handles <- readTVar (registryHandles registry)
         pure $ HashMap.size handles
+

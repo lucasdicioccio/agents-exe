@@ -309,6 +309,7 @@ allowing for:
 -}
 data ResourceRegistry = ResourceRegistry
     { registryHandles :: TVar (HashMap ResourceId ResourceHandle)
+    , registryInfo :: TVar (HashMap ResourceId ResourceInfo)
     , registryCounter :: TVar Int
     }
 
@@ -316,8 +317,9 @@ data ResourceRegistry = ResourceRegistry
 newResourceRegistry :: STM ResourceRegistry
 newResourceRegistry = do
     handles <- newTVar HashMap.empty
+    info <- newTVar HashMap.empty
     counter <- newTVar 0
-    pure ResourceRegistry{registryHandles = handles, registryCounter = counter}
+    pure ResourceRegistry{registryHandles = handles, registryInfo = info, registryCounter = counter}
 
 {- | Generate a new unique ResourceId.
 
@@ -342,3 +344,4 @@ data ResourceContext = ResourceContext
     { contextScope :: [ScopeLevel]
     , contextRegistry :: ResourceRegistry
     }
+

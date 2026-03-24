@@ -1,20 +1,27 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
+-- | OS-native agent tree management.
+--
+-- This module provides agent discovery, configuration loading, and tree
+-- building using the OS-native ECS architecture. It replaces the legacy
+-- Runtime-per-agent model with pure OS-native operations.
 module System.Agents.AgentTree (
     -- * Registry types and operations
-    RuntimeRegistry,
-    newRuntimeRegistry,
-    registerRuntime,
-    lookupRuntime,
+    AgentRegistry,
+    newAgentRegistry,
+    registerAgent,
+    lookupAgent,
+    lookupAgentBySlug,
 
     -- * Props and configuration
     Props (..),
     LoadedApiKeys,
 
     -- * Agent tree types
-    AgentTree (..),
-    AgentNode (..),
+    OSAgentTree (..),
+    OSAgentNode (..),
     AgentConfigTree (..),
     agentRootDir,
 
@@ -28,26 +35,21 @@ module System.Agents.AgentTree (
     -- * Loading and initialization
     loadAgentTreeConfig,
     loadAgentTree,
-    loadAgentTreeRuntime,
     LoadAgentResult (..),
-    withAgentTreeRuntime,
+    withAgentTree,
     LoadingError (..),
     formatLoadingError,
 
     -- * Two-phase loading algorithm
     discoverAgentConfigs,
     validateReferences,
-    createRuntimeShells,
+    createAgents,
     wireToolReferences,
     buildAgentTree,
     detectCycles,
 
-    -- * Agent initialization
-    initAgentTreeAgentDeferred,
-    PromptModifier,
-
     -- * Tracing
-    Trace (..),
+    TreeTrace (..),
 
     -- * Utility functions
     readOpenApiKeysFile,
@@ -56,18 +58,41 @@ module System.Agents.AgentTree (
     -- * Configuration loading helpers
     loadOpenAPIToolboxDescription,
     loadPostgRESTToolboxDescription,
+
+    -- * Re-export Agent type for field access (without constructor to avoid name shadowing)
+    Agent,
+    -- Re-export field accessors individually (avoiding those that conflict with ApiKey)
+    slug,
+    announce,
+    systemPrompt,
+    flavor,
+    modelUrl,
+    modelName,
+    -- apiKeyId is excluded due to conflict with ApiKey.apiKeyId - use .apiKeyId instead
+    toolDirectory,
+    bashToolboxes,
+    mcpServers,
+    openApiToolboxes,
+    postgrestToolboxes,
+    builtinToolboxes,
+    extraAgents,
+    skillSources,
+    autoEnableSkills,
 ) where
 
-import Control.Concurrent.STM (atomically, modifyTVar')
-import Control.Monad (unless, void)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, writeTVar)
+import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Either as Either
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Data.List as List
 import qualified Data.List.NonEmpty as NonEmpty
-import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
+import Data.Proxy (Proxy (..))
 import Data.Semigroup (sconcat)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -76,42 +101,63 @@ import qualified Data.Text.Encoding as TextEncoding
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
-import System.Process (proc)
 
+-- Import ToolLoader qualified to avoid name collisions with LoadingError
+import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import System.Agents.ApiKeys
 import System.Agents.Base (
     Agent,
     AgentDescription (..),
-    AgentId,
+    AgentId (..),
     AgentSlug,
-    BashToolboxDescription (..),
     ExtraAgentRef (..),
     FileSystemDirectoryDescription (..),
-    McpServerDescription (..),
-    McpSimpleBinaryConfiguration (..),
+    McpServerDescription,
     OpenAPIServerDescription (..),
     OpenAPIServerOnDisk (..),
     OpenAPIToolboxDescription (..),
     PostgRESTServerDescription (..),
     PostgRESTServerOnDisk (..),
     PostgRESTToolboxDescription (..),
+    -- Export field accessors (except apiKeyId which conflicts)
+    slug,
+    announce,
+    systemPrompt,
+    flavor,
+    modelUrl,
+    modelName,
+    toolDirectory,
+    bashToolboxes,
+    mcpServers,
+    openApiToolboxes,
+    postgrestToolboxes,
+    builtinToolboxes,
+    extraAgents,
+    skillSources,
+    autoEnableSkills,
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.FileNotification as FileNotification
-import qualified System.Agents.FileNotification as Notify
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Runtime (Runtime (..))
-import qualified System.Agents.Runtime as Runtime
+
+-- OS Core imports
+import System.Agents.OS.Core.Types (EntityId (..))
+import qualified System.Agents.OS.Core as OS
+import qualified System.Agents.OS.Core.Types as OSTypes
+import qualified System.Agents.OS.Core.World as OSWorld
+
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
 
 -------------------------------------------------------------------------------
-data Trace
-    = AgentTrace Runtime.Trace
-    | McpTrace McpServerDescription McpTools.Trace
+-- Trace Types
+-------------------------------------------------------------------------------
+
+-- | Trace events for agent tree operations.
+data TreeTrace
+    = McpTrace McpServerDescription McpTools.Trace
     | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
     | PostgRESTrace PostgRESTToolboxDescription PostgREST.Trace
     | DataLoadingTrace FileLoader.Trace
@@ -129,65 +175,111 @@ data ReferenceValidationTrace
     deriving (Show)
 
 -------------------------------------------------------------------------------
+-- API Keys Type
+-------------------------------------------------------------------------------
+
 type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
 
-{- | Registry for looking up runtimes by slug during and after initialization
+-------------------------------------------------------------------------------
+-- Agent Registry (OS-Native)
+-------------------------------------------------------------------------------
 
-The registry enables two-phase initialization of agent trees, allowing agents
-to reference each other recursively. Phase 1 creates runtime shells and
-registers them; Phase 2 wires up references via registry lookup.
+{- | Agent registry using the OS ECS model.
+
+This registry uses the Entity-Component-System architecture for
+agent management, providing thread-safe STM operations and efficient lookups.
 -}
-type RuntimeRegistry = IORef (Map.Map AgentSlug Runtime)
-
--- | Create a new empty registry
-newRuntimeRegistry :: IO RuntimeRegistry
-newRuntimeRegistry = newIORef Map.empty
-
--- | Register a runtime in the registry
-registerRuntime :: RuntimeRegistry -> Runtime -> IO ()
-registerRuntime registry rt =
-    modifyIORef' registry (Map.insert rt.agentSlug rt)
-
--- | Lookup a runtime by slug from the registry
-lookupRuntime :: RuntimeRegistry -> AgentSlug -> IO (Maybe Runtime)
-lookupRuntime registry slug =
-    Map.lookup slug <$> readIORef registry
-
-data Props
-    = Props
-    { apiKeys :: LoadedApiKeys
-    , rootAgentFile :: FilePath
-    , interactiveTracer :: Tracer IO Trace
-    , agentToTool :: Runtime -> AgentSlug -> AgentId -> ToolRegistration
-    , runtimeRegistry :: RuntimeRegistry
-    -- ^ Shared registry for deferred resolution
+data AgentRegistry = AgentRegistry
+    { registryWorld :: TVar OS.World
+    -- ^ The ECS world containing agent components
+    , registrySlugIndex :: TVar (HashMap AgentSlug OSTypes.EntityId)
+    -- ^ Index mapping slugs to entity IDs for O(1) lookups
     }
 
-{- | A node in the agent tree, representing either a full subtree or a reference.
+-- | Create a new empty OS-based agent registry.
+--
+-- This initializes a new ECS world with the required component stores
+-- registered for agent configuration and state.
+newAgentRegistry :: IO AgentRegistry
+newAgentRegistry = do
+    world <- atomically $ do
+        w <- OS.newWorld
+        w' <- OSWorld.registerComponentStore w (Proxy @OS.AgentConfig)
+        OSWorld.registerComponentStore w' (Proxy @OS.AgentState)
+    worldTVar <- newTVarIO world
+    slugIndex <- newTVarIO HashMap.empty
+    pure $ AgentRegistry worldTVar slugIndex
 
-This type allows the tree structure to represent arbitrary directed graphs
-with cycles. When building the tree, if we encounter a cycle (an agent that
-has already been visited in the current path), we create a reference instead
-of recursing infinitely.
--}
-data AgentNode
-    = -- | Reference to another agent by slug (used for cycles or shared subtrees)
-      AgentReference AgentSlug
-    | {- | A full agent subtree
-      deriving (Show)
-      -}
-      AgentSubTree AgentTree
+-- | Register an agent in the OS registry.
+--
+-- Creates a new entity for the agent, attaches the AgentConfig component,
+-- and updates the slug index.
+registerAgent :: AgentRegistry -> AgentSlug -> OS.AgentConfig -> IO AgentId
+registerAgent registry agentSlug config = do
+    -- Generate a new agent ID
+    entityId <- OSTypes.newEntityId
+    let theNewAgentId = AgentId (unEntityId entityId)
 
-data AgentTree = AgentTree
-    { agentFile :: FilePath
-    , agentBase :: Agent
-    , agentRuntime :: Runtime.Runtime
-    , agentExtraRefs :: [AgentSlug]
-    -- ^ Extra agents this agent references (for deferred wiring)
+    -- Update the world with the agent's config
+    atomically $ do
+        world <- readTVar (registryWorld registry)
+        OSWorld.setComponent world entityId config
+        writeTVar (registryWorld registry) world
+
+        -- Update the slug index
+        modifyTVar' (registrySlugIndex registry) (HashMap.insert agentSlug entityId)
+
+    pure theNewAgentId
+
+-- | Lookup an agent by its EntityId in the OS registry.
+--
+-- Returns the AgentConfig if found.
+lookupAgent :: AgentRegistry -> AgentId -> IO (Maybe OS.AgentConfig)
+lookupAgent registry (AgentId uuid) = do
+    let entityId = EntityId uuid
+    world <- readTVarIO (registryWorld registry)
+    atomically $ OSWorld.getComponent world entityId
+
+-- | Lookup an agent by its slug in the OS registry.
+--
+-- This uses the slug index for O(1) lookup.
+lookupAgentBySlug :: AgentRegistry -> AgentSlug -> IO (Maybe (AgentId, OS.AgentConfig))
+lookupAgentBySlug registry agentSlug = do
+    mEntityId <- HashMap.lookup agentSlug <$> readTVarIO (registrySlugIndex registry)
+    case mEntityId of
+        Nothing -> pure Nothing
+        Just entityId -> do
+            mConfig <- lookupAgent registry (AgentId (unEntityId entityId))
+            case mConfig of
+                Nothing -> pure Nothing
+                Just config -> pure $ Just (AgentId (unEntityId entityId), config)
+
+-------------------------------------------------------------------------------
+-- OS Agent Tree Types
+-------------------------------------------------------------------------------
+
+-- | An agent node in the OS-native tree.
+-- Contains references to OS entities and their associated data.
+data OSAgentNode = OSAgentNode
+    { osNodeFile :: FilePath
+    , osNodeConfig :: Agent
+    , osNodeAgentId :: AgentId
+    , osNodeChildren :: [OSAgentNode]
+    , osNodeTools :: TVar [ToolRegistration]
+    -- ^ Mutable tools for this agent (OS-native via STM)
     }
 
--- deriving (Show)
+-- | The OS-native agent tree.
+-- Contains the world, registry, and tree structure for OS-native agent management.
+data OSAgentTree = OSAgentTree
+    { osTreeWorld :: OS.World
+    , osTreeRegistry :: AgentRegistry
+    , osTreeNodes :: Map AgentSlug OSAgentNode
+    , osTreeRoot :: OSAgentNode
+    , osTreeRootDir :: FilePath
+    }
 
+-- | Configuration tree from file loading (intermediate structure)
 data AgentConfigTree = AgentConfigTree
     { agentConfigFile :: FilePath
     , agentConfig :: Agent
@@ -199,6 +291,8 @@ agentRootDir :: AgentConfigTree -> FilePath
 agentRootDir agent = FilePath.takeDirectory agent.agentConfigFile
 
 -------------------------------------------------------------------------------
+-- Configuration Graph Types
+-------------------------------------------------------------------------------
 
 -- | Result of the discovery phase - represents the agent reference graph
 data AgentConfigGraph = AgentConfigGraph
@@ -209,7 +303,7 @@ data AgentConfigGraph = AgentConfigGraph
     }
     deriving (Show)
 
--- | A node in the agent configuration graph
+-- | A node in the configuration graph
 data AgentConfigNode = AgentConfigNode
     { nodeFile :: FilePath
     , nodeConfig :: Agent
@@ -232,9 +326,9 @@ data ReferenceError
 
 -- | Format a ReferenceError into a helpful user-facing message
 formatReferenceError :: ReferenceError -> Map.Map AgentSlug AgentConfigNode -> Text
-formatReferenceError (DuplicateAgentSlug slug files) _ =
+formatReferenceError (DuplicateAgentSlug dupSlug files) _ =
     Text.unlines
-        [ "ReferenceError: Duplicate agent slug '" <> slug <> "'"
+        [ "ReferenceError: Duplicate agent slug '" <> dupSlug <> "'"
         , "  This slug is defined in multiple files:"
         , Text.unlines ["    - " <> Text.pack f | f <- files]
         , "  Solution: Use unique slugs for each agent configuration."
@@ -309,8 +403,13 @@ data LoadingError
       PostgRESTInitError Text String
     | -- | Path and error message
       ConfigFileError FilePath String
+    | ToolLoaderError ToolLoader.LoadingError
     | OtherError String
     deriving (Show)
+
+-- | Convert ToolLoader error to LoadingError
+convertToolLoaderError :: ToolLoader.LoadingError -> LoadingError
+convertToolLoaderError = ToolLoaderError
 
 -- | Format a LoadingError into a user-facing message
 formatLoadingError :: LoadingError -> Map.Map AgentSlug AgentConfigNode -> Text
@@ -322,11 +421,37 @@ formatLoadingError (PostgRESTInitError desc msg) _ =
     "PostgREST Initialization Error for " <> desc <> ": " <> Text.pack msg
 formatLoadingError (ConfigFileError path msg) _ =
     "Configuration File Error in " <> Text.pack path <> ": " <> Text.pack msg
+formatLoadingError (ToolLoaderError toolErr) _ = formatToolLoaderError toolErr
 formatLoadingError (OtherError msg) _ = Text.pack msg
+
+-- | Format ToolLoader errors
+formatToolLoaderError :: ToolLoader.LoadingError -> Text
+formatToolLoaderError (ToolLoader.OtherError msg) = Text.pack msg
+formatToolLoaderError (ToolLoader.BashLoadingError msg) = "Bash Tool Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.McpLoadingError msg) = "MCP Server Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.OpenAPILoadingError msg) = "OpenAPI Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.PostgRESTLoadingError msg) = "PostgREST Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.SqliteLoadingError msg) = "SQLite Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.SystemLoadingError msg) = "System Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.DeveloperLoadingError msg) = "Developer Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.LuaLoadingError msg) = "Lua Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.SkillsLoadingError msg) = "Skills Toolbox Loading Error: " <> Text.pack msg
 
 data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
-    | Initialized AgentTree
+    | Initialized OSAgentTree
+
+-------------------------------------------------------------------------------
+-- Props Configuration
+-------------------------------------------------------------------------------
+
+data Props = Props
+    { apiKeys :: LoadedApiKeys
+    , rootAgentFile :: FilePath
+    , interactiveTracer :: Tracer IO TreeTrace
+    , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> ToolRegistration
+    -- ^ Function to create a tool registration from an agent node
+    }
 
 -------------------------------------------------------------------------------
 -- Phase 0: Configuration Discovery
@@ -376,13 +501,13 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
     let normalizedFilePath = FilePath.normalise filePath
     -- Check if we've already loaded this file
     case findNodeByFile normalizedFilePath visited of
-        Just (slug, _) -> do
+        Just (foundSlug, _) -> do
             -- File already loaded, check for parent reference
             let visited' = case mParent of
                     Just parentSlug ->
                         -- Add this slug to parent's children if not already there
                         Map.adjust
-                            (\n -> n{nodeChildren = List.nub (slug : n.nodeChildren)})
+                            (\n -> n{nodeChildren = List.nub (foundSlug : n.nodeChildren)})
                             parentSlug
                             visited
                     Nothing -> visited
@@ -393,15 +518,15 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
             case loadResult of
                 Left err -> pure $ Left (NonEmpty.singleton $ AgentLoadingError err)
                 Right (AgentDescription agent) -> do
-                    let slug = agent.slug
+                    let agentSlug = slug agent
 
                     -- Check for duplicate slug
-                    case Map.lookup slug visited of
+                    case Map.lookup agentSlug visited of
                         Just existingNode ->
                             -- Duplicate slug detected
                             let err =
                                     DuplicateAgentSlug
-                                        slug
+                                        agentSlug
                                         [existingNode.nodeFile, filePath]
                              in pure $ Left (NonEmpty.singleton $ RefLoadingError err)
                         Nothing -> do
@@ -410,8 +535,8 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                             childFiles <- discoverChildFiles rootDir agent
 
                             -- Get extra agent refs
-                            let extraRefs = maybe [] (fmap extraAgentSlug) agent.extraAgents
-                            let extraPaths = maybe [] (fmap extraAgentPath) agent.extraAgents
+                            let extraRefs = maybe [] (fmap extraAgentSlug) (extraAgents agent)
+                            let extraPaths = maybe [] (fmap extraAgentPath) (extraAgents agent)
 
                             -- Resolve extra agent paths to absolute/normalized paths
                             let resolvedExtraPaths = map (\p -> FilePath.normalise (rootDir </> p)) extraPaths
@@ -425,14 +550,14 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                                         , nodeExtraRefs = extraRefs
                                         }
 
-                            let visited' = Map.insert slug node visited
+                            let visited' = Map.insert agentSlug node visited
 
                             -- Add children to queue (with this slug as parent)
-                            let childQueue = [(f, Just slug) | f <- childFiles]
+                            let childQueue = [(f, Just agentSlug) | f <- childFiles]
 
                             -- Add extra agents to queue (with this slug as parent for tracking)
                             -- Pass the resolved absolute paths for proper file matching
-                            let extraQueue = [(f, Just slug) | f <- resolvedExtraPaths]
+                            let extraQueue = [(f, Just agentSlug) | f <- resolvedExtraPaths]
 
                             bfsDiscovery props (queue ++ childQueue ++ extraQueue) visited'
   where
@@ -445,10 +570,10 @@ entries in 'bashToolboxes' to find sub-agent JSON files.
 discoverChildFiles :: FilePath -> Agent -> IO [FilePath]
 discoverChildFiles rootDir agent = do
     -- Collect all directories to scan for sub-agents
-    let legacyDir = fmap (rootDir </>) agent.toolDirectory
+    let legacyDir = fmap (rootDir </>) (toolDirectory agent)
     let bashToolboxDirs =
             [ rootDir </> desc.fsDirPath
-            | FileSystemDirectory desc <- Maybe.fromMaybe [] agent.bashToolboxes
+            | AgentsBase.FileSystemDirectory desc <- Maybe.fromMaybe [] (bashToolboxes agent)
             ]
 
     -- Also look in bashToolboxes directories for sub-agents
@@ -507,7 +632,7 @@ checkMissingReferences graph fromSlug refs =
     case Map.lookup fromSlug graph.graphNodes of
         Nothing -> [] -- Should not happen if graph is consistent
         Just node ->
-            catMaybes $
+            Maybe.catMaybes $
                 map
                     ( \ref ->
                         if Map.member ref graph.graphNodes
@@ -518,212 +643,230 @@ checkMissingReferences graph fromSlug refs =
                                         MissingAgentReference fromSlug node.nodeFile ref
                     )
                     refs
-  where
-    catMaybes = Maybe.mapMaybe id
 
 -------------------------------------------------------------------------------
--- Phase 2: Runtime Shell Creation
+-- Phase 2: Agent Creation
 -------------------------------------------------------------------------------
 
-{- | Create runtime shells for all agents.
+{- | Create OS agents for all configurations.
 
 For each agent in the graph:
-1. Create runtime with empty/mutable tool list
-2. Register in RuntimeRegistry
+1. Create OS agent entity
+2. Register in AgentRegistry
 3. Store in result map
-
-Note: Helper agents (from toolDirectory hierarchy) are resolved immediately.
-Extra agents will be wired up in phase 3.
 -}
-createRuntimeShells ::
+createAgents ::
     Props ->
     AgentConfigGraph ->
-    IO (Either (NonEmpty.NonEmpty LoadingError) (Map.Map AgentSlug Runtime))
-createRuntimeShells props graph = do
-    -- Process nodes in dependency order (children before parents)
-    -- For simplicity, we process in Map order since runtime shells don't need tools yet
-    results <- mapM (createSingleRuntime props graph) (Map.toList graph.graphNodes)
+    AgentRegistry ->
+    IO (Either (NonEmpty.NonEmpty LoadingError) (Map.Map AgentSlug OSAgentNode))
+createAgents props graph registry = do
+    -- Process nodes in dependency order
+    results <- mapM (createSingleAgent props graph registry) (Map.toList graph.graphNodes)
 
-    let (errs, runtimes) = Either.partitionEithers results
+    let (errs, nodes) = Either.partitionEithers results
     case NonEmpty.nonEmpty errs of
         Just someErrs -> pure $ Left someErrs
         Nothing -> do
-            -- Register all runtimes in the registry
-            mapM_ (registerRuntime props.runtimeRegistry) runtimes
+            -- Build slug -> node map
+            let nodeMap = Map.fromList [(slug (osNodeConfig node), node) | node <- nodes]
+            pure $ Right nodeMap
 
-            -- Build slug -> runtime map
-            let runtimeMap = Map.fromList [(rt.agentSlug, rt) | rt <- runtimes]
-            pure $ Right runtimeMap
-
--- | Create a single runtime shell for an agent
-createSingleRuntime ::
+-- | Create a single OS agent from a config node
+createSingleAgent ::
     Props ->
     AgentConfigGraph ->
+    AgentRegistry ->
     (AgentSlug, AgentConfigNode) ->
-    IO (Either LoadingError Runtime)
-createSingleRuntime props graph (_slug, node) = do
-    -- Build the prompt modifier (we don't have children runtimes yet, so no prompt augmentation)
-    -- Create the runtime shell
-    -- Note: props.interactiveTracer is already Tracer IO Trace,
-    -- initAgentTreeAgentDeferred will contramap AgentTrace internally
-    rtResult <-
-        initAgentTreeAgentDeferred
-            props
-            graph
-            (FilePath.takeDirectory node.nodeFile)
-            (AgentDescription node.nodeConfig)
+    IO (Either LoadingError OSAgentNode)
+createSingleAgent _props _graph registry (_agentSlug, node) = do
+    let agent = node.nodeConfig
+    let _rootDir = FilePath.takeDirectory node.nodeFile
 
-    case rtResult of
-        Left err -> pure $ Left $ OtherError err
-        Right rt -> pure $ Right rt
+    -- Create OS AgentConfig
+    let osConfig = OS.AgentConfig
+            { OS.agentName = slug agent
+            , OS.agentModel = OS.ModelConfig
+                { OS.modelFlavor = flavor agent
+                , OS.modelUrl = modelUrl agent
+                , OS.modelName = modelName agent
+                , OS.modelApiKeyId = agent.apiKeyId  -- use record dot syntax to avoid ambiguity
+                }
+            , OS.agentSystemPrompt = Text.unlines (systemPrompt agent)
+            , OS.agentToolboxBindings = [] -- To be set up separately
+            }
+
+    -- Create OS agent entity and register
+    agentId <- registerAgent registry (slug agent) osConfig
+
+    -- Create mutable tools TVar for this agent
+    toolsTVar <- newTVarIO []
+
+    -- Create node
+    let osNode = OSAgentNode
+            { osNodeFile = node.nodeFile
+            , osNodeConfig = agent
+            , osNodeAgentId = agentId
+            , osNodeChildren = [] -- Populated separately
+            , osNodeTools = toolsTVar
+            }
+
+    pure $ Right osNode
 
 -------------------------------------------------------------------------------
 -- Phase 3: Tool Wiring
 -------------------------------------------------------------------------------
 
-{- | Wire up tool references for all runtimes.
+{- | Wire up tool references for all agents.
 
-For each agent:
-1. Get its runtime from the map
-2. Collect all referenced agent runtimes (children + extra-agents)
-3. Use registry to look up each referenced runtime
-4. Create tool registrations via agentToTool
-5. Atomically update runtime's agentTools TVar with the new tools
+This function:
+1. Loads configured toolboxes (bash, builtin, MCP, OpenAPI, PostgREST, Skills) for all agents
+2. Wires helper agent tools (child agents and extra-agents references)
 
-This function modifies the existing runtimes in place by appending the
-sub-agent tools to their agentTools TVar.
+Returns a list of loading errors from toolbox loading (empty if all succeeded).
 -}
 wireToolReferences ::
     Props ->
     AgentConfigGraph ->
-    Map.Map AgentSlug Runtime ->
-    IO ()
-wireToolReferences props graph runtimes = do
-    mapM_ (wireAgentTools props graph runtimes) (Map.toList graph.graphNodes)
+    Map.Map AgentSlug OSAgentNode ->
+    IO [LoadingError]
+wireToolReferences props graph nodeMap = do
+    -- First load configured toolboxes for all agents
+    toolboxErrors <- mapM (loadAgentToolboxes nodeMap) (Map.toList graph.graphNodes)
+    -- Then wire helper agent tools
+    mapM_ (wireAgentTools props graph nodeMap) (Map.toList graph.graphNodes)
+    pure (concat toolboxErrors)
+
+{- | Load toolboxes for a single agent.
+
+Loads bash tools, builtin toolboxes, MCP servers, OpenAPI, PostgREST,
+and Skills toolboxes configured in the agent's configuration.
+-}
+loadAgentToolboxes ::
+    Map.Map AgentSlug OSAgentNode ->
+    (AgentSlug, AgentConfigNode) ->
+    IO [LoadingError]
+loadAgentToolboxes nodeMap (nodeSlug, node) =
+    case Map.lookup nodeSlug nodeMap of
+        Nothing -> pure []
+        Just osNode -> do
+            let baseDir = FilePath.takeDirectory node.nodeFile
+            let agent = node.nodeConfig
+            let silentTracer = Tracer $ \_ -> pure ()
+            toolLoaderErrors <- ToolLoader.loadAgentTools silentTracer baseDir agent (osNodeTools osNode)
+            pure $ map convertToolLoaderError toolLoaderErrors
 
 {- | Wire tools for a single agent by appending sub-agent tools to the TVar.
 
 This function partitions extra agents to prevent infinite loops during tool
 wiring. Specifically, if an agent references itself in extraAgents (self-reference),
-we skip wiring it as a tool to avoid redundant registration. However, the agent
-is still available in the registry and can be looked up at runtime if needed.
-
-The logic:
-- Child agents (from toolDirectory) are always wired
-- Extra agents are wired only if they differ from the current agent's slug
-  (prevents self-reference loops during wiring phase)
+we skip wiring it as a tool to avoid redundant registration.
 -}
 wireAgentTools ::
     Props ->
     AgentConfigGraph ->
-    Map.Map AgentSlug Runtime ->
+    Map.Map AgentSlug OSAgentNode ->
     (AgentSlug, AgentConfigNode) ->
     IO ()
-wireAgentTools props _graph _runtimes (slug, node) = do
-    -- Get this agent's runtime from the registry
-    mRt <- lookupRuntime props.runtimeRegistry slug
-    case mRt of
+wireAgentTools props _graph nodeMap (nodeSlug, node) =
+    case Map.lookup nodeSlug nodeMap of
         Nothing -> pure () -- Should not happen
-        Just rt -> do
-            -- Look up child runtimes from registry
-            childRuntimes <- mapM (lookupRuntime props.runtimeRegistry) node.nodeChildren
-            let validChildren = Maybe.catMaybes childRuntimes
+        Just osNode -> do
+            -- Look up child nodes
+            let validChildren = Maybe.catMaybes [Map.lookup childSlug nodeMap | childSlug <- node.nodeChildren]
 
-            -- Look up extra agent runtimes from registry
+            -- Look up extra agent nodes
             -- Partition extra refs to skip self-references during wiring
-            -- This prevents infinite loops while still allowing self-reference
-            -- to work at runtime (the agent is registered, just not wired as its own tool here)
-            let (selfRefs, otherExtraRefs) = List.partition (== slug) node.nodeExtraRefs
+            let (selfRefs, otherExtraRefs) = List.partition (== nodeSlug) node.nodeExtraRefs
 
-            -- Log self-references for debugging (they're valid but skipped during wiring)
+            -- Log self-references for debugging
             unless (null selfRefs) $
                 runTracer props.interactiveTracer $
                     ReferenceValidationTrace $
-                        SelfReferenceDetected slug node.nodeFile slug
+                        SelfReferenceDetected nodeSlug node.nodeFile nodeSlug
 
-            extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) otherExtraRefs
-            let validExtras = Maybe.catMaybes extraRuntimes
+            let validExtras = Maybe.catMaybes [Map.lookup refSlug nodeMap | refSlug <- otherExtraRefs]
 
-            -- Combine all helper runtimes
+            -- Combine all helper nodes
             let allHelpers = validChildren ++ validExtras
 
             -- Create tool registrations for helper agents
-            let helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
+            let helperTools = [props.agentToTool helperNode (slug (osNodeConfig helperNode)) (osNodeAgentId helperNode) | helperNode <- allHelpers]
 
-            -- Atomically append helper tools to the runtime's agentTools TVar
-            atomically $ modifyTVar' rt.agentTools (\existingTools -> existingTools ++ helperTools)
-
-collectExtraAgentsAsTools ::
-    Props ->
-    (AgentSlug, [AgentSlug]) ->
-    IO [ToolRegistration]
-collectExtraAgentsAsTools props (slug, extraRefs) = do
-    mRt <- lookupRuntime props.runtimeRegistry slug
-    case mRt of
-        Nothing -> pure []
-        Just _ -> do
-            extraRuntimes <- mapM (lookupRuntime props.runtimeRegistry) extraRefs
-            let validExtras = Maybe.catMaybes extraRuntimes
-
-            -- Combine all helper runtimes
-            let allHelpers = validExtras
-
-            -- Create tool registrations for helper agents
-            let helperTools = [props.agentToTool helperRt helperRt.agentSlug helperRt.agentId | helperRt <- allHelpers]
-
-            pure helperTools
+            -- Atomically append helper tools to the node's tools TVar
+            atomically $ modifyTVar' (osNodeTools osNode) (\existingTools -> existingTools ++ helperTools)
 
 -------------------------------------------------------------------------------
--- Phase 4: Build AgentTree
+-- Phase 4: Build Agent Tree
 -------------------------------------------------------------------------------
 
-{- | Build the tree from the graph and initialized runtimes.
+{- | Build the tree from the graph and initialized nodes.
 
 Finds the root agent and recursively builds the tree structure using graphEdges.
-Attaches runtimes from the map.
-
-This function tracks visited slugs to detect cycles and converts cycles
-into 'AgentReference' nodes instead of recursing infinitely.
 -}
 buildAgentTree ::
     AgentConfigGraph ->
-    Map.Map AgentSlug Runtime ->
-    Either (NonEmpty.NonEmpty LoadingError) AgentTree
-buildAgentTree graph runtimes = do
-    -- Find root agent (the one without any incoming edges that isn't a child)
-    -- For now, we use the first node as root (the one from rootAgentFile)
+    Map.Map AgentSlug OSAgentNode ->
+    Either (NonEmpty.NonEmpty LoadingError) OSAgentTree
+buildAgentTree graph nodeMap =
+    -- Find root agent (the one from rootAgentFile, which is the first node)
     case Map.toList graph.graphNodes of
         [] -> Left $ NonEmpty.singleton $ OtherError "No agents found in graph"
-        ((rootSlug, rootNode) : _) ->
-            buildSubtree graph runtimes Set.empty rootSlug rootNode
+        ((_rootSlug, rootNode) : _) ->
+            case buildSubtree graph nodeMap Set.empty (slug (nodeConfig rootNode)) rootNode of
+                Left errs -> Left errs
+                Right (rootOSNode, _) ->
+                    let rootDir = FilePath.takeDirectory rootNode.nodeFile
+                     in Right $ OSAgentTree
+                        { osTreeWorld = error "World not yet initialized" -- Will be populated from registry
+                        , osTreeRegistry = error "Registry not yet stored" -- Caller must set this
+                        , osTreeNodes = nodeMap
+                        , osTreeRoot = rootOSNode
+                        , osTreeRootDir = rootDir
+                        }
 
 {- | Recursively build a subtree with cycle detection.
 
-The 'visited' set tracks slugs in the current path. If we encounter a slug
-that's already in the visited set, we create an 'AgentReference' instead of
-recursing to avoid infinite loops.
+The 'visited' set tracks slugs in the current path.
 -}
 buildSubtree ::
     AgentConfigGraph ->
-    Map.Map AgentSlug Runtime ->
+    Map.Map AgentSlug OSAgentNode ->
     -- | Slugs in the current path (for cycle detection)
     Set.Set AgentSlug ->
     AgentSlug ->
     AgentConfigNode ->
-    Either (NonEmpty.NonEmpty LoadingError) AgentTree
-buildSubtree _ runtimes _ slug node = do
-    -- Get runtime for this node
-    case Map.lookup slug runtimes of
-        Nothing ->
-            Left $ NonEmpty.singleton $ OtherError $ "Runtime not found for slug: " ++ Text.unpack slug
-        Just rt -> do
-            pure $
-                AgentTree
-                    { agentFile = node.nodeFile
-                    , agentBase = node.nodeConfig
-                    , agentRuntime = rt
-                    , agentExtraRefs = node.nodeExtraRefs
-                    }
+    Either (NonEmpty.NonEmpty LoadingError) (OSAgentNode, Set.Set AgentSlug)
+buildSubtree graph nodeMap visited nodeSlug node =
+    if Set.member nodeSlug visited
+        then -- Cycle detected - return node without children
+            case Map.lookup nodeSlug nodeMap of
+                Nothing -> Left $ NonEmpty.singleton $ OtherError $ "Node not found for slug: " ++ Text.unpack nodeSlug
+                Just osNode -> Right (osNode{osNodeChildren = []}, visited)
+        else case Map.lookup nodeSlug nodeMap of
+            Nothing -> Left $ NonEmpty.singleton $ OtherError $ "Node not found for slug: " ++ Text.unpack nodeSlug
+            Just osNode -> do
+                let newVisited = Set.insert nodeSlug visited
+                -- Build children
+                let childSlugs = node.nodeChildren ++ node.nodeExtraRefs
+                (children, finalVisited) <- foldlM
+                    (\(acc, v) childSlug ->
+                        case Map.lookup childSlug graph.graphNodes of
+                            Nothing -> pure (acc, v) -- Skip missing children
+                            Just childNode ->
+                                case buildSubtree graph nodeMap v childSlug childNode of
+                                    Left errs -> Left errs
+                                    Right (childOSNode, v') -> pure (childOSNode : acc, v'))
+                    ([], newVisited)
+                    childSlugs
+                Right (osNode{osNodeChildren = reverse children}, finalVisited)
+
+-- Helper for Either with accumulator
+foldlM :: (b -> a -> Either e b) -> b -> [a] -> Either e b
+foldlM _ acc [] = Right acc
+foldlM f acc (x:xs) = case f acc x of
+    Left e -> Left e
+    Right acc' -> foldlM f acc' xs
 
 -------------------------------------------------------------------------------
 -- Cycle Detection
@@ -750,11 +893,11 @@ dfsFromNode ::
     (Set.Set AgentSlug, [[AgentSlug]]) ->
     AgentSlug ->
     (Set.Set AgentSlug, [[AgentSlug]])
-dfsFromNode graph (visited, cycles) slug
-    | Set.member slug visited = (visited, cycles)
+dfsFromNode graph (visited, cycles) nodeSlug
+    | Set.member nodeSlug visited = (visited, cycles)
     | otherwise =
-        let (_, _, newCycles) = dfsVisit graph (visited, Set.empty, cycles) slug
-         in (Set.insert slug visited, newCycles)
+        let (_, _, newCycles) = dfsVisit graph (visited, Set.empty, cycles) nodeSlug
+         in (Set.insert nodeSlug visited, newCycles)
 
 -- | DFS visit a node
 dfsVisit ::
@@ -762,37 +905,37 @@ dfsVisit ::
     DFSState ->
     AgentSlug ->
     DFSState
-dfsVisit graph (visited, recStack, cycles) slug
-    | Set.member slug recStack =
+dfsVisit graph (visited, recStack, cycles) nodeSlug
+    | Set.member nodeSlug recStack =
         -- Cycle detected! Extract the cycle
-        let cyclePath = extractCycle slug recStack
+        let cyclePath = extractCycle nodeSlug recStack
          in (visited, recStack, cyclePath : cycles)
-    | Set.member slug visited = (visited, recStack, cycles)
+    | Set.member nodeSlug visited = (visited, recStack, cycles)
     | otherwise =
-        case Map.lookup slug graph.graphEdges of
-            Nothing -> (Set.insert slug visited, recStack, cycles)
+        case Map.lookup nodeSlug graph.graphEdges of
+            Nothing -> (Set.insert nodeSlug visited, recStack, cycles)
             Just neighbors ->
-                let newRecStack = Set.insert slug recStack
+                let newRecStack = Set.insert nodeSlug recStack
                     (visited', recStack', cycles') =
                         foldl
                             (dfsVisit graph)
                             (visited, newRecStack, cycles)
                             neighbors
-                 in (Set.insert slug visited', Set.delete slug recStack', cycles')
+                 in (Set.insert nodeSlug visited', Set.delete nodeSlug recStack', cycles')
 
 -- | Extract the cycle from the recursion stack
-type RecStack = Set.Set AgentSlug
-
-extractCycle :: AgentSlug -> RecStack -> [AgentSlug]
-extractCycle slug recStack =
+extractCycle :: AgentSlug -> Set.Set AgentSlug -> [AgentSlug]
+extractCycle nodeSlug recStack =
     -- The cycle contains the slug and all nodes in the recursion stack
-    -- We return them in a simple format - the slug and the stack contents
-    slug : Set.toList recStack
+    nodeSlug : Set.toList recStack
 
 -------------------------------------------------------------------------------
--- Legacy Loading Functions (maintained for backward compatibility)
+-- Loading Functions
 -------------------------------------------------------------------------------
 
+-- | Load agent configuration tree from file.
+-- This is a legacy compatibility function that loads the tree structure
+-- without creating OS entities.
 loadAgentTreeConfig ::
     Props ->
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
@@ -804,10 +947,10 @@ loadAgentTreeConfig props = do
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
         Right (AgentDescription agent) -> do
             let rootdir = FilePath.takeDirectory props.rootAgentFile
-            let legacyToolDirs = maybeToList $ fmap (rootdir </>) agent.toolDirectory
+            let legacyToolDirs = maybeToList $ fmap (rootdir </>) (toolDirectory agent)
             let bashToolboxDirs =
                     [ rootdir </> desc.fsDirPath
-                    | FileSystemDirectory desc <- Maybe.fromMaybe [] agent.bashToolboxes
+                    | AgentsBase.FileSystemDirectory desc <- Maybe.fromMaybe [] (bashToolboxes agent)
                     ]
             let allDirs = legacyToolDirs ++ bashToolboxDirs
 
@@ -822,68 +965,18 @@ loadAgentTreeConfig props = do
                 Nothing -> do
                     pure $ Right $ AgentConfigTree props.rootAgentFile agent oks
 
-loadAgentTree :: Props -> AgentConfigGraph -> AgentConfigTree -> IO (Either (NonEmpty.NonEmpty LoadingError) AgentTree)
-loadAgentTree props graph tree = do
-    -- Phase 1: Load children first (existing behavior)
-    agentRuntimes <- traverse (loadAgentTree props graph) tree.agentConfigChildren
-    let (kos, _) = Either.partitionEithers agentRuntimes
-    case NonEmpty.nonEmpty kos of
-        Just errs -> pure $ Left $ sconcat errs
-        Nothing -> do
-            -- Get extra agent slugs from config
-            let extraSlugs = maybe [] (fmap extraAgentSlug) tree.agentConfig.extraAgents
+-- | Main entry point for loading agent trees (OS-native).
+--
+-- Phase 0: Discover all configs via BFS traversal
+-- Phase 1: Validate all references
+-- Phase 2: Create OS agents
+-- Phase 3: Wire tool references (includes loading toolboxes + helper agents)
+-- Phase 4: Build final tree
+loadAgentTree :: Props -> IO LoadAgentResult
+loadAgentTree props = do
+    -- Create the agent registry
+    registry <- newAgentRegistry
 
-            -- Phase 1.5: Create this agent's runtime shell
-            -- (tools will be wired up later, but we register the slug now)
-            rt <-
-                initAgentTreeAgentDeferred
-                    props
-                    graph
-                    (agentRootDir tree)
-                    (AgentDescription tree.agentConfig)
-
-            case rt of
-                Left err ->
-                    pure $ Left $ NonEmpty.singleton $ OtherError err
-                Right agentRt -> do
-                    -- Register this runtime in the shared registry
-                    registerRuntime props.runtimeRegistry agentRt
-
-                    let ret = AgentTree props.rootAgentFile tree.agentConfig agentRt extraSlugs
-                    -- Set up file notification for hot-reloading
-                    let legacyToolDir = fmap (\d -> agentRootDir tree </> d) tree.agentConfig.toolDirectory
-                    let bashToolboxDirs =
-                            [ agentRootDir tree </> desc.fsDirPath
-                            | FileSystemDirectory desc <- Maybe.fromMaybe [] tree.agentConfig.bashToolboxes
-                            ]
-                    let allDirs = maybeToList legacyToolDir ++ bashToolboxDirs
-
-                    -- Set up notifications for all directories
-                    mapM_
-                        ( \dir ->
-                            FileNotification.initRuntime
-                                reloadNotificationTracer
-                                [(ret, dir)]
-                                (\_ ev -> Notify.isAboutFileChange ev)
-                        )
-                        allDirs
-
-                    pure $ Right $ ret
-
--------------------------------------------------------------------------------
--- New Two-Phase Entry Point
--------------------------------------------------------------------------------
-
-{- | Load agent tree using the new two-phase algorithm.
-
-Phase 0: Discover all configs via BFS traversal
-Phase 1: Validate all references
-Phase 2: Create runtime shells
-Phase 3: Wire tool references
-Phase 4: Build final tree
--}
-loadAgentTreeRuntime :: Props -> IO LoadAgentResult
-loadAgentTreeRuntime props = do
     -- Phase 0: Discover all configs
     graphResult <- discoverAgentConfigs props
     case graphResult of
@@ -905,53 +998,32 @@ loadAgentTreeRuntime props = do
                     unless (null cycles) $
                         runTracer props.interactiveTracer (CyclicReferencesWarning cycles)
 
-                    -- Phase 2: Create runtime shells
-                    shellsResult <- createRuntimeShells props graph
-                    case shellsResult of
+                    -- Phase 2: Create OS agents
+                    agentsResult <- createAgents props graph registry
+                    case agentsResult of
                         Left errs -> pure $ Errors errs
-                        Right runtimes -> do
-                            -- Phase 3: Wire tool references
-                            wireToolReferences props graph runtimes
+                        Right nodeMap -> do
+                            -- Phase 3: Wire tool references (now includes loading toolboxes)
+                            toolErrors <- wireToolReferences props graph nodeMap
+                            case NonEmpty.nonEmpty toolErrors of
+                                Just errs -> pure $ Errors errs
+                                Nothing -> do
+                                    -- Phase 4: Build final tree
+                                    case buildAgentTree graph nodeMap of
+                                        Left errs -> pure $ Errors errs
+                                        Right tree -> do
+                                            -- Store registry in tree
+                                            let finalTree = tree{osTreeRegistry = registry}
+                                            pure $ Initialized finalTree
 
-                            -- Phase 4: Build final tree
-                            case buildAgentTree graph runtimes of
-                                Left errs -> pure $ Errors errs
-                                Right tree -> pure $ Initialized tree
+-- | Run an action with a loaded agent tree.
+withAgentTree :: Props -> (LoadAgentResult -> IO a) -> IO a
+withAgentTree props continue = do
+    loadAgentTree props >>= continue
 
-withAgentTreeRuntime :: Props -> (LoadAgentResult -> IO a) -> IO a
-withAgentTreeRuntime props continue = do
-    loadAgentTreeRuntime props >>= continue
-
-{- | Convert OpenAPI toolbox description to toolbox configuration.
-
-Handles both inline configurations and on-disk configurations.
--}
-openApiDescToConfig :: OpenAPIServerDescription -> OpenAPIToolbox.Config
-openApiDescToConfig desc =
-    OpenAPIToolbox.Config
-        { OpenAPIToolbox.configUrl = openApiSpecUrl desc
-        , OpenAPIToolbox.configBaseUrl = openApiBaseUrl desc
-        , OpenAPIToolbox.configHeaders = Maybe.fromMaybe Map.empty (openApiHeaders desc)
-        , OpenAPIToolbox.configToken = openApiToken desc
-        , OpenAPIToolbox.configFilter = openApiFilter desc
-        }
-
-{- | Convert PostgREST toolbox description to toolbox configuration.
-
-Handles both inline configurations and on-disk configurations.
-The 'allowedMethods' field controls which HTTP verbs are exposed as tools.
-By default, only read-only methods are enabled for safety.
--}
-postgrestDescToConfig :: PostgRESTServerDescription -> PostgREST.Config
-postgrestDescToConfig desc =
-    PostgREST.Config
-        { PostgREST.configUrl = postgrestSpecUrl desc
-        , PostgREST.configBaseUrl = postgrestBaseUrl desc
-        , PostgREST.configHeaders = Maybe.fromMaybe Map.empty (postgrestHeaders desc)
-        , PostgREST.configToken = postgrestToken desc
-        , PostgREST.configAllowedMethods = Maybe.fromMaybe PostgREST.defaultAllowedMethods (postgrestAllowedMethods desc)
-        , PostgREST.configFilter = postgrestFilter desc
-        }
+-------------------------------------------------------------------------------
+-- Toolbox Loading Helpers
+-------------------------------------------------------------------------------
 
 {- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
 
@@ -963,9 +1035,9 @@ loadOpenAPIToolboxDescription ::
     FilePath ->
     OpenAPIToolboxDescription ->
     IO (Either LoadingError OpenAPIServerDescription)
-loadOpenAPIToolboxDescription _baseDir (OpenAPIServer desc) =
+loadOpenAPIToolboxDescription _baseDir (AgentsBase.OpenAPIServer desc) =
     pure $ Right desc
-loadOpenAPIToolboxDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
+loadOpenAPIToolboxDescription baseDir (AgentsBase.OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
     result <- Aeson.eitherDecodeFileStrict' fullPath
     case result of
@@ -982,191 +1054,20 @@ loadPostgRESTToolboxDescription ::
     FilePath ->
     PostgRESTToolboxDescription ->
     IO (Either LoadingError PostgRESTServerDescription)
-loadPostgRESTToolboxDescription _baseDir (PostgRESTServer desc) =
+loadPostgRESTToolboxDescription _baseDir (AgentsBase.PostgRESTServer desc) =
     pure $ Right desc
-loadPostgRESTToolboxDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
+loadPostgRESTToolboxDescription baseDir (AgentsBase.PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
     result <- Aeson.eitherDecodeFileStrict' fullPath
     case result of
         Left err -> pure $ Left $ ConfigFileError fullPath err
         Right desc -> pure $ Right desc
 
-{- | Initialize OpenAPI toolboxes and return their tool registrations.
+-------------------------------------------------------------------------------
+-- Utility Functions
+-------------------------------------------------------------------------------
 
-This function takes OpenAPI toolbox descriptions, initializes each toolbox,
-and registers all tools. If any toolbox fails to initialize, an error is returned.
-
-Supports both inline configurations and on-disk configurations.
--}
-initializeOpenAPIToolboxes ::
-    Tracer IO Trace ->
-    -- | Base directory for resolving relative config paths
-    FilePath ->
-    [OpenAPIToolboxDescription] ->
-    IO (Either LoadingError [ToolRegistration])
-initializeOpenAPIToolboxes tracer baseDir descriptions = do
-    results <- mapM initializeOne descriptions
-    case concatEithers results of
-        Left [] -> pure $ Left $ OtherError "Unknown OpenAPI initialization error"
-        Left (err : _) -> pure $ Left err -- Return first error
-        Right allTools -> pure $ Right $ concat allTools
-  where
-    initializeOne :: OpenAPIToolboxDescription -> IO (Either LoadingError [ToolRegistration])
-    initializeOne desc = do
-        -- Load the configuration (from disk if needed)
-        loadResult <- loadOpenAPIToolboxDescription baseDir desc
-        case loadResult of
-            Left err -> pure $ Left err
-            Right srvDesc -> do
-                let config = openApiDescToConfig srvDesc
-                initResult <- OpenAPIToolbox.initializeToolbox (contramap (OpenAPITrace desc) tracer) config
-                case initResult of
-                    Left err ->
-                        pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) (show err)
-                    Right toolbox -> do
-                        regResult <- registerOpenAPITools toolbox
-                        case regResult of
-                            Left err ->
-                                pure $ Left $ OpenAPIInitError (openApiSpecUrl srvDesc) err
-                            Right tools ->
-                                pure $ Right tools
-
-    concatEithers :: [Either a b] -> Either [a] [b]
-    concatEithers eithers =
-        let (lefts, rights) = Either.partitionEithers eithers
-         in if null lefts then Right rights else Left lefts
-
-{- | Initialize PostgREST toolboxes and return their tool registrations.
-
-This function takes PostgREST toolbox descriptions, initializes each toolbox,
-and registers all tools. If any toolbox fails to initialize, an error is returned.
-
-Supports both inline configurations and on-disk configurations.
--}
-initializePostgRESToolboxes ::
-    Tracer IO Trace ->
-    -- | Base directory for resolving relative config paths
-    FilePath ->
-    [PostgRESTToolboxDescription] ->
-    IO (Either LoadingError [ToolRegistration])
-initializePostgRESToolboxes tracer baseDir descriptions = do
-    results <- mapM initializeOne descriptions
-    case concatEithers results of
-        Left [] -> pure $ Left $ OtherError "Unknown PostgREST initialization error"
-        Left (err : _) -> pure $ Left err -- Return first error
-        Right allTools -> pure $ Right $ concat allTools
-  where
-    initializeOne :: PostgRESTToolboxDescription -> IO (Either LoadingError [ToolRegistration])
-    initializeOne desc = do
-        -- Load the configuration (from disk if needed)
-        loadResult <- loadPostgRESTToolboxDescription baseDir desc
-        case loadResult of
-            Left err -> pure $ Left err
-            Right srvDesc -> do
-                let config = postgrestDescToConfig srvDesc
-                initResult <- PostgREST.initializeToolbox (contramap (PostgRESTrace desc) tracer) config
-                case initResult of
-                    Left err ->
-                        pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) (show err)
-                    Right toolbox -> do
-                        regResult <- registerPostgRESTools toolbox
-                        case regResult of
-                            Left err ->
-                                pure $ Left $ PostgRESTInitError (postgrestSpecUrl srvDesc) err
-                            Right tools ->
-                                pure $ Right tools
-
-    concatEithers :: [Either a b] -> Either [a] [b]
-    concatEithers eithers =
-        let (lefts, rights) = Either.partitionEithers eithers
-         in if null lefts then Right rights else Left lefts
-
--- | Type alias for prompt modification functions.
-type PromptModifier = Text -> Text
-
-{- | Build the list of bash tool sources from an agent configuration.
-
-This combines:
-1. The legacy 'toolDirectory' field (if present)
-2. The new 'bashToolboxes' field (if present)
-
-If both are specified, both will be used.
--}
-buildBashToolSources :: Maybe FilePath -> Agent -> [BashToolboxDescription]
-buildBashToolSources agentroot agent =
-    let legacySource = fmap (\dir -> FileSystemDirectory $ FileSystemDirectoryDescription agentroot dir Nothing) agent.toolDirectory
-        toolboxSources = Maybe.fromMaybe [] agent.bashToolboxes
-     in maybeToList legacySource ++ toolboxSources
-
-{- | Initialize a runtime with deferred tool resolution for extra agents.
-
-This function creates a runtime where the tool list is built dynamically.
-Helper agents (from toolDirectory hierarchy) are resolved immediately,
-while extra agents (from extra-agents config) are resolved lazily via
-the registry lookup.
--}
-initAgentTreeAgentDeferred ::
-    Props ->
-    AgentConfigGraph ->
-    FilePath ->
-    AgentDescription ->
-    IO (Either String Runtime.Runtime)
-initAgentTreeAgentDeferred props _graph rootDir (AgentDescription desc) = do
-    let tracer = props.interactiveTracer
-    case (lookup desc.apiKeyId props.apiKeys, OpenAI.parseFlavor desc.flavor) of
-        (_, Nothing) ->
-            pure $ Left ("could not parse flavor " <> Text.unpack desc.flavor)
-        (Nothing, _) ->
-            pure $ Left ("could not find key " <> Text.unpack desc.apiKeyId)
-        (Just key, Just flavor) -> do
-            mcpToolboxes <- traverse startMcp (Maybe.fromMaybe [] desc.mcpServers)
-            openApiToolsResult <- initializeOpenAPIToolboxes tracer rootDir (Maybe.fromMaybe [] desc.openApiToolboxes)
-            postgrestToolsResult <- initializePostgRESToolboxes tracer rootDir (Maybe.fromMaybe [] desc.postgrestToolboxes)
-            case (openApiToolsResult, postgrestToolsResult) of
-                (Left err, _) -> pure $ Left (show err)
-                (_, Left err) -> pure $ Left (show err)
-                (Right openApiToolRegs, Right postgrestToolRegs) -> do
-                    -- Get builtin toolbox descriptions from agent config
-                    let builtinDescriptions = Maybe.fromMaybe [] desc.builtinToolboxes
-
-                    -- Build bash tool sources from legacy toolDirectory and new bashToolboxes
-                    let bashSources = buildBashToolSources (Just rootDir) desc
-
-                    -- Get skill sources from agent config
-                    let skillSources = Maybe.fromMaybe [] desc.skillSources
-                    let extraRefs = Maybe.maybe [] (fmap extraAgentSlug) desc.extraAgents :: [AgentSlug]
-
-                    -- Create the runtime with deferred tool resolution
-                    -- The tools action will combine helper agents (immediate) with
-                    -- extra agents (resolved via registry at call time)
-                    Runtime.newRuntime
-                        desc.slug
-                        desc.announce
-                        (contramap AgentTrace tracer)
-                        key
-                        ( OpenAI.Model
-                            flavor
-                            (OpenAI.ApiBaseUrl desc.modelUrl)
-                            desc.modelName
-                            ( OpenAI.SystemPrompt $
-                                Text.unlines desc.systemPrompt
-                            )
-                        )
-                        bashSources
-                        mcpToolboxes
-                        (openApiToolRegs ++ postgrestToolRegs)
-                        builtinDescriptions
-                        skillSources
-                        (collectExtraAgentsAsTools props (desc.slug, extraRefs))
-  where
-    startMcp :: McpServerDescription -> IO McpTools.Toolbox
-    startMcp srv@(McpSimpleBinary cfg) =
-        McpTools.initializeMcpToolbox
-            (contramap (McpTrace srv) props.interactiveTracer)
-            cfg.name
-            (proc cfg.executable (map Text.unpack cfg.args))
-
-augmentMainAgentPromptWithSubAgents :: [Runtime.Runtime] -> Text -> Text
+augmentMainAgentPromptWithSubAgents :: [OSAgentNode] -> Text -> Text
 augmentMainAgentPromptWithSubAgents [] base = base
 augmentMainAgentPromptWithSubAgents agents base =
     Text.unlines
@@ -1180,34 +1081,19 @@ augmentMainAgentPromptWithSubAgents agents base =
         , "If an helper agent fails, do not retry and abdicate"
         ]
   where
-    declareAgent :: Runtime.Runtime -> Maybe Text
-    declareAgent desc =
-        Just $ Text.unwords ["*", desc.agentSlug, ":", desc.agentAnnounce]
+    declareAgent :: OSAgentNode -> Maybe Text
+    declareAgent node =
+        Just $ Text.unwords ["*", slug (osNodeConfig node), ":", announce (osNodeConfig node)]
 
--------------------------------------------------------------------------------
-data PromptOtherAgent
-    = PromptOtherAgent Text
-
-instance Aeson.FromJSON PromptOtherAgent where
-    parseJSON = Aeson.withObject "PromptOtherAgent" $ \v -> do
-        PromptOtherAgent
-            <$> v Aeson..: "what"
-
--------------------------------------------------------------------------------
 readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
 readOpenApiKeysFile keysPath =
     maybe [] flattenOpenAIKeys <$> readApiKeys keysPath
   where
     flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
     flattenOpenAIKeys (ApiKeys keys) =
-        [(k.apiKeyId, OpenAI.ApiKey $ TextEncoding.encodeUtf8 k.apiKeyValue) | k <- keys]
+        [(k.apiKeyId, OpenAI.ApiKey $ TextEncoding.encodeUtf8 (k.apiKeyValue)) | k <- keys]
 
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
 
--------------------------------------------------------------------------------
-
-reloadNotificationTracer :: Tracer IO (Notify.Trace AgentTree)
-reloadNotificationTracer = Tracer $ \(Notify.NotifyEvent tree _) -> do
-    void $ Runtime.triggerRefreshTools tree.agentRuntime

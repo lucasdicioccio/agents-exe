@@ -226,7 +226,7 @@ resourceLifecycleTests =
             let agentId = AgentId eid
             let ctx = ResourceContext [ProgramScope, AgentScope agentId] registry
 
-            -- Track cleanup order
+            -- Track cleanup order (using append instead of prepend to observe order)
             cleanupOrder <- atomically $ newTVar []
 
             -- Create multiple resources
@@ -235,7 +235,7 @@ resourceLifecycleTests =
                     pure
                         ResourceHandle
                             { handleId = rid
-                            , handleCleanup = atomically $ modifyTVar' cleanupOrder (1 :)
+                            , handleCleanup = atomically $ modifyTVar' cleanupOrder (++ [1])
                             , handleAccess = \f -> f (ResourceAccessor ())
                             }
 
@@ -244,7 +244,7 @@ resourceLifecycleTests =
                     pure
                         ResourceHandle
                             { handleId = rid
-                            , handleCleanup = atomically $ modifyTVar' cleanupOrder (2 :)
+                            , handleCleanup = atomically $ modifyTVar' cleanupOrder (++ [2])
                             , handleAccess = \f -> f (ResourceAccessor ())
                             }
 
@@ -253,7 +253,7 @@ resourceLifecycleTests =
                     pure
                         ResourceHandle
                             { handleId = rid
-                            , handleCleanup = atomically $ modifyTVar' cleanupOrder (3 :)
+                            , handleCleanup = atomically $ modifyTVar' cleanupOrder (++ [3])
                             , handleAccess = \f -> f (ResourceAccessor ())
                             }
 

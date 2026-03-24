@@ -347,10 +347,13 @@ main = do
             info
                 (liftA2 (,) parseCfgPath parseCommand <**> helper)
                 (fullDesc <> progDesc "agq — Agent Queue scheduler")
-    -- 'init' and 'describe' need no config file or DB connection
+    -- 'init', 'describe', and 'clean' need no DB connection
     case cmd of
         Init -> cmdInit cfgPath
         Describe -> cmdDescribe
+        Clean d f -> do
+            cfg <- loadConfig cfgPath
+            cmdClean cfg d f
         _ -> do
             cfg <- loadConfig cfgPath
             withConnection (queueDb cfg) $ \conn -> do

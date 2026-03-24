@@ -2,52 +2,79 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module System.Agents.MCP.Server where
 
 import Conduit (stdinC)
-import Control.Concurrent.STM (readTVarIO)
+import Control.Concurrent.STM (TVar, readTVarIO)
+import Control.Exception (SomeException, catch)
 import Control.Monad (void)
 import Control.Monad.Logger (LoggingT (..), defaultOutput, logDebugN)
 import Control.Monad.Reader (runReaderT)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.Aeson.Types as AesonTypes
-import Data.Conduit.Combinators (sinkHandleFlush)
+import qualified Data.Aeson.Types as Aeson (parseMaybe)
+import qualified Data.Conduit.Combinators (sinkHandleFlush)
 import Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
-import Data.Text.Encoding.Error (lenientDecode)
+import qualified Data.Text.Encoding as Text
+import qualified Data.Text.Encoding.Error as Text
 import qualified Data.Text.Lazy as LText
 import Formatting ((%))
 import qualified Formatting as Format
 import qualified Network.JSONRPC as Rpc
-import Prod.Tracer (Tracer (..), contramap)
+import Prod.Tracer (Tracer (..))
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (AgentId, announce, newConversationId, newStepId, slug)
-import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Base (
+    AgentId,
+    ConversationId,
+    announce,
+    apiKeyId,
+    newConversationId,
+    newStepId,
+    slug,
+ )
 import System.Agents.MCP.Base as Mcp
-import qualified System.Agents.Runtime as Runtime
-import System.Agents.Runtime.Runtime (Runtime (..))
-import System.Agents.Tools (mapCallResult, toolRun)
-import System.Agents.Tools.Base (CallResult (..))
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
-
 import System.Agents.MCP.Server.Runtime
 
--- Imports for LLM session-based approach (from OneShot.hs)
+-- OneShot integration imports
+import qualified System.Agents.HttpClient as HttpClient
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.Session.Base as SessionBase
+import System.Agents.Session.Base (
+    Agent (..),
+    LlmResponse (..),
+    LlmToolCall (..),
+    LlmTurnContent (..),
+    Session (..),
+    SystemPrompt (..),
+    UserQuery (..),
+    UserToolResponse (..),
+    defaultContextConfig,
+ )
 import System.Agents.Session.Loop (run)
-import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
+import System.Agents.Session.OpenAI (
+    OpenAICompletionConfig (..),
+    mkOpenAICompletion,
+ )
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
+import qualified System.Agents.Session.Types as SessionTypes
+import System.Agents.Session.Types (
+    newSessionId,
+    newTurnId,
+ )
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
+import System.Agents.Tools.Context (CallStackEntry (..), mkToolExecutionContext)
+import qualified System.Agents.Tools.Context as ToolsContext
+import System.Agents.Tools.Trace (ToolTrace)
+import qualified System.Agents.ToolSchema as ToolSchema
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -87,12 +114,14 @@ multiAgentsServer' config _ [] mtools = do
     logTrace =
         defaultOutput stderr
 multiAgentsServer' config idx (props : xs) mtools = do
-    AgentTree.withAgentTreeRuntime props go
+    -- Use OS-native agent loading
+    AgentTree.withAgentTree props go
   where
-    go (AgentTree.Initialized ai) = do
-        let oai = ai.agentBase
+    go (AgentTree.Initialized tree) = do
+        let oai = AgentTree.osNodeConfig (AgentTree.osTreeRoot tree)
         let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
-        let tool = ExpertAgentAsPrompt (LText.toStrict toolname) ai
+        -- Store the tree along with the API keys from props
+        let tool = ExpertAgentAsPrompt (LText.toStrict toolname) tree (AgentTree.apiKeys props)
         multiAgentsServer' config (succ idx) xs (tool : mtools)
     go _ = do
         print ("failed to initialize" :: Text)
@@ -102,7 +131,7 @@ mainMcp = do
     runJSONRPCT'
         Rpc.V2
         False
-        (sinkHandleFlush stdout)
+        (Data.Conduit.Combinators.sinkHandleFlush stdout)
         stdinC
         handlerLoop
 
@@ -221,11 +250,12 @@ handleMsg req (CallToolRequestMsg callTool) = do
     rt <- askRuntime
     let onProgress = Maybe.fromMaybe SessionBase.ignoreSessionProgress (mcpSessionProgress rt)
     res <- case lookupMappedTools mappedTool callTool.name of
-        Just (ExpertAgentAsPrompt _ ai) -> do
+        Just (ExpertAgentAsPrompt _ tree apiKeys) -> do
             case extractPrompt callTool of
                 Nothing -> pure $ Left "no prompt given"
                 (Just query) -> do
-                    liftIO $ runAgentWithQuery onProgress ai query
+                    -- Use OS-native agent execution via one-shot integration
+                    liftIO $ runAgentWithQuery onProgress apiKeys tree query
         Nothing -> do
             pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =
@@ -235,298 +265,270 @@ handleMsg req (CallToolRequestMsg callTool) = do
     Rpc.sendResponse rsp
 
 {- | Run an agent with a query using the LLM session-based approach.
-Based on the implementation in OneShot.hs and OneShotTool.hs.
+
+This implementation follows the same pattern as 'runOneShotWithConfig' from
+System.Agents.OneShot, adapted for use within the MCP server context.
+
+The function:
+1. Creates a minimal in-memory session store
+2. Converts the OSAgentNode to an Agent using the node's configuration
+3. Sets up the OpenAI completion function with proper API key resolution
+4. Executes the agent loop until completion
+5. Returns the response text or an error
 -}
-runAgentWithQuery :: SessionBase.OnSessionProgress -> AgentTree.AgentTree -> Text -> IO (Either String Text)
-runAgentWithQuery onProgress agentTree query = do
-    -- Create the agent from the runtime
-    agent <- runtimeToAgent agentTree.agentRuntime
-
-    -- Set the query on the agent with progress tracking
-    let agentWithQuery =
-            agentSetQuery (SessionBase.UserQuery query) $
-                agentWithSessionProgress onProgress agent
-
-    -- Create a fresh conversation ID for this execution
+runAgentWithQuery :: SessionBase.OnSessionProgress -> AgentTree.LoadedApiKeys -> AgentTree.OSAgentTree -> Text -> IO (Either String Text)
+runAgentWithQuery onProgress apiKeys tree query = do
+    -- Generate unique identifiers for this conversation
     convId <- newConversationId
+    _stepId <- newStepId
 
-    -- Create a fresh session with all required fields including sessionConversationId
-    session0 <-
-        SessionBase.Session []
-            <$> SessionBase.newSessionId
-            <*> pure Nothing
-            <*> SessionBase.newTurnId
+    let node = AgentTree.osTreeRoot tree
+    let agentCfg = AgentTree.osNodeConfig node
+
+    -- Create a no-op tracer (MCP server doesn't need tracing)
+    let tracer = Tracer $ const $ pure ()
+
+    -- Get the API key for this agent
+    let apiKeyIdentifier = apiKeyId agentCfg
+    let mApiKey = lookupApiKey apiKeyIdentifier apiKeys
+
+    -- Create HTTP runtime with the API key
+    httpRuntime <- case mApiKey of
+        Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
+        Nothing -> HttpClient.newRuntime HttpClient.NoToken
+
+    -- Create OpenAI completion config
+    let completionConfig =
+            OpenAICompletionConfig
+                { cfgTracer = tracer
+                , cfgRuntime = httpRuntime
+                , cfgBaseUrl = OpenAI.ApiBaseUrl $ AgentTree.modelUrl agentCfg
+                , cfgModelName = AgentTree.modelName agentCfg
+                , cfgModelFlavor = parseModelFlavor $ AgentTree.flavor agentCfg
+                }
+    let completeF = mkOpenAICompletion completionConfig
+
+    -- Build the system prompt from the agent configuration
+    let sPrompt = SystemPrompt $ Text.unlines $ AgentTree.systemPrompt agentCfg
+
+    -- Read tools from the OS-native TVar
+    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (AgentTree.osNodeTools node)
+
+    -- Create the agent with the naive step function that stops when no tool calls remain
+    let agent =
+            Agent
+                { step = naiveTilNoToolCallStep
+                , sysPrompt = pure sPrompt
+                , sysTools = pure sTools
+                , usrQuery = pure (Just $ UserQuery query)
+                , toolCall = executeToolCall (AgentTree.osNodeAgentId node) convId (AgentTree.osNodeTools node)
+                , complete = completeF
+                , contextConfig = defaultContextConfig
+                }
+
+    -- Create initial session
+    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
 
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)
 
-    -- Run the agent and get the result
-    (finalTurnContent, finalSession) <- run convId agentWithQuery session0
+    -- Run the agent loop with exception handling
+    result <-
+        (Right <$> run convId agent session0)
+            `catch` (\e -> pure $ Left $ show (e :: SomeException))
 
-    -- Notify session completion
-    onProgress (SessionBase.SessionCompleted finalSession)
-
-    -- Extract and return the response text
-    pure $ Right $ extractResponseText finalTurnContent.llmResponse
-
--- | Wrap an agent to emit session progress events after each step.
-agentWithSessionProgress :: SessionBase.OnSessionProgress -> SessionBase.Agent r -> SessionBase.Agent r
-agentWithSessionProgress onProgress agent =
-    agent{SessionBase.step = decorate (SessionBase.step agent)}
-  where
-    decorate :: (SessionBase.Session -> IO (SessionBase.Action r)) -> (SessionBase.Session -> IO (SessionBase.Action r))
-    decorate f = \sess -> do
-        onProgress (SessionBase.SessionUpdated sess)
-        f sess
-
--- | Set the user query on an agent.
-agentSetQuery :: SessionBase.UserQuery -> SessionBase.Agent r -> SessionBase.Agent r
-agentSetQuery query agent =
-    agent{SessionBase.usrQuery = pure (Just query)}
-
-{- | Creates an Agent from a Runtime.
-Based on runtimeToAgent from OneShot.hs.
-
-The agent is configured with the runtime's agent ID and will receive
-a conversation ID at execution time. These identifiers are used to
-construct the 'ToolExecutionContext' passed to tools.
--}
-runtimeToAgent :: Runtime.Runtime -> IO (SessionBase.Agent (SessionBase.LlmTurnContent, SessionBase.Session))
-runtimeToAgent rt = do
-    let sPrompt = SessionBase.SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
-    stepId <- newStepId
-
-    -- Create a conversation ID for tracer setup
-    -- Note: This tracer setup will be called for each new conversation
-    convId <- newConversationId
-
-    -- Create OpenAI completion config from runtime
-    let completionConfig =
-            OpenAICompletionConfig
-                { cfgTracer = contramap (Runtime.AgentTrace_Conversation rt.agentSlug rt.agentId convId . (Runtime.LLMTrace stepId)) rt.agentTracer
-                , cfgRuntime = rt.agentAuthenticatedHttpClientRuntime
-                , cfgBaseUrl = rt.agentModel.modelBaseUrl
-                , cfgModelName = rt.agentModel.modelName
-                , cfgModelFlavor = rt.agentModel.modelFlavor
-                }
-    let completeF = mkOpenAICompletion completionConfig
-
-    pure $
-        SessionBase.Agent
-            { SessionBase.step = naiveTilNoToolCallStep
-            , SessionBase.sysPrompt = pure sPrompt
-            , SessionBase.sysTools = pure sTools
-            , SessionBase.usrQuery = pure Nothing
-            , SessionBase.toolCall = executeToolCall rt.agentId rt.agentTools
-            , SessionBase.complete = completeF
-            , SessionBase.contextConfig = SessionBase.defaultContextConfig
-            }
-
-{- | Execute a tool call using the runtime's registered tools.
-Based on executeToolCall from OneShot.hs.
-
-Constructs a 'ToolExecutionContext' with the agent's ID and the identifiers
-available at the point of execution. The context gives tools access to session
-metadata.
--}
-executeToolCall ::
-    -- | Agent ID for context
-    AgentId ->
-    -- | Tool registrations
-    Runtime.AgentTools ->
-    -- | Context from runStepM
-    ToolExecutionContext ->
-    -- | Tool call from LLM
-    SessionBase.LlmToolCall ->
-    IO SessionBase.UserToolResponse
-executeToolCall agentId0 toolsTVar _ctx (SessionBase.LlmToolCall callVal) =
-    -- Extract the tool call ID and function info from the LlmToolCall
-    case parseLlmToolCall callVal of
-        Nothing -> pure $ SessionBase.UserToolResponse $ Aeson.String "Failed to parse tool call"
-        Just tc -> do
-            regs <- readTVarIO toolsTVar
-            -- Construct context for this tool execution
-            -- We generate a minimal context here since we don't have direct access
-            -- to the session from this point. The AgentId is included.
-            sessId <- SessionBase.newSessionId
-            convId <- newConversationId
-            tId <- SessionBase.newTurnId
-            let toolCtx =
-                    mkToolExecutionContext
-                        sessId
-                        convId
-                        tId
-                        (Just agentId0)
-                        Nothing -- No full session available at this point
-                        [CallStackEntry "root" convId 0] -- Root call stack entry
-                        Nothing -- No max recursion depth by default
-            result <- llmCallTool regs toolCtx tc
-            pure $ callResultToUserToolResponse tc result
-
-{- | Parse an LlmToolCall into OpenAI's ToolCall format.
-Based on parseLlmToolCall from OneShot.hs.
--}
-parseLlmToolCall :: Aeson.Value -> Maybe OpenAI.ToolCall
-parseLlmToolCall val =
-    case AesonTypes.parseMaybe Aeson.parseJSON val of
-        Just tc -> Just tc
-        Nothing ->
-            -- Try to extract from our LlmToolCall format
-            case val of
-                Aeson.Object obj ->
-                    case (KeyMap.lookup "id" obj, KeyMap.lookup "function" obj) of
-                        (Just (Aeson.String tid), Just funcVal) ->
-                            Just $
-                                OpenAI.ToolCall
-                                    { OpenAI.rawToolCall = obj
-                                    , OpenAI.toolCallId = tid
-                                    , OpenAI.toolCallType = KeyMap.lookup "type" obj >>= \v -> case v of Aeson.String t -> Just t; _ -> Nothing
-                                    , OpenAI.toolCallFunction = case AesonTypes.parseMaybe Aeson.parseJSON funcVal of
-                                        Just f -> f
-                                        Nothing -> OpenAI.ToolCallFunction (OpenAI.ToolName "") "" Nothing
-                                    }
-                        _ -> Nothing
-                _ -> Nothing
-
-{- | Execute a single tool call against registered tools.
-Based on llmCallTool from OneShot.hs.
-
-The 'ToolExecutionContext' is passed directly to the tool's 'toolRun' function,
-providing tools with access to session metadata.
--}
-llmCallTool :: [ToolRegistration] -> ToolExecutionContext -> OpenAI.ToolCall -> IO (CallResult OpenAI.ToolCall)
-llmCallTool registrations ctx call =
-    let
-        script =
-            Maybe.listToMaybe $
-                Maybe.mapMaybe (\r -> r.findTool call) registrations
-        args = call.toolCallFunction.toolCallFunctionArgs
-        spec = (,) <$> script <*> args
-     in
-        case spec of
-            Nothing -> pure $ ToolNotFound call
-            Just (t, v) -> do
-                ret <- t.toolRun (Tracer $ const $ pure ()) ctx v
-                pure $ mapCallResult (const call) ret
-
-{- | Convert a CallResult to UserToolResponse.
-Based on callResultToUserToolResponse from OneShot.hs.
--}
-callResultToUserToolResponse :: OpenAI.ToolCall -> CallResult OpenAI.ToolCall -> SessionBase.UserToolResponse
-callResultToUserToolResponse _ result =
     case result of
-        ToolNotFound _ ->
-            SessionBase.UserToolResponse $ Aeson.String "Tool not found"
-        BashToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ show err
-        IOToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ show err
-        McpToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.unlines ["tool-error", Text.pack $ show err]
-        McpToolResult _ res ->
-            SessionBase.UserToolResponse $ Aeson.toJSON res
-        BlobToolSuccess _ v ->
-            -- Use lenient UTF-8 decoding to handle binary data safely.
-            -- Invalid bytes are replaced with U+FFFD (replacement character).
-            SessionBase.UserToolResponse $ Aeson.String (TextEncoding.decodeUtf8With lenientDecode v)
-        OpenAPIToolResult _ toolResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
-        OpenAPIToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "OpenAPI tool error: " <> err
-        PostgRESToolResult _ toolResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
-        PostgRESToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "PostgREST tool error: " <> err
-        SqliteToolResult _ toolResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
-        SqliteToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "SQLite tool error: " <> show err
-        SystemToolResult _ toolResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
-        SystemToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
-        DeveloperToolResult _ valResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON valResult
-        DeveloperToolScaffoldResult _ scaffoldResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON scaffoldResult
-        DeveloperToolSpecResult _ specContent ->
-            SessionBase.UserToolResponse $ Aeson.String specContent
-        DeveloperToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
-        LuaToolResult _ toolResult ->
-            SessionBase.UserToolResponse $ Aeson.toJSON toolResult
-        LuaToolError _ err ->
-            SessionBase.UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
+        Left err -> do
+            onProgress (SessionBase.SessionFailed session0 $ Text.pack err)
+            pure $ Left err
+        Right (llmTurn, _) -> do
+            onProgress (SessionBase.SessionCompleted session0)
+            pure $ Right $ extractResponseText llmTurn.llmResponse
+  where
+    -- Extract response text from LLM response, handling Nothing case
+    extractResponseText :: LlmResponse -> Text
+    extractResponseText (LlmResponse mtxt _thinking _) = Maybe.fromMaybe "" mtxt
 
-{- | Convert a ToolRegistration to a SystemTool for the Session agent.
-Based on toolRegistrationToSystemTool from OneShot.hs.
--}
-toolRegistrationToSystemTool :: ToolRegistration -> SessionBase.SystemTool
-toolRegistrationToSystemTool reg =
-    let llmTool = reg.declareTool
-        toolDefv1 =
-            SessionBase.SystemToolDefinitionV1
-                { SessionBase.name = llmTool.toolName.getToolName
-                , SessionBase.llmName = llmTool.toolName.getToolName
-                , SessionBase.description = llmTool.toolDescription
-                , SessionBase.properties = llmTool.toolParamProperties
-                , SessionBase.raw =
-                    Aeson.object
+    -- Parse model flavor from text, defaulting to OpenAIv1
+    parseModelFlavor :: Text -> OpenAI.ModelFlavor
+    parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
+
+    -- Look up an API key by its ID from the loaded API keys
+    lookupApiKey :: Text -> AgentTree.LoadedApiKeys -> Maybe OpenAI.ApiKey
+    lookupApiKey keyId keys = fmap snd $ List.find ((== keyId) . fst) keys
+
+    -- Convert ToolRegistration to SystemTool for the Session agent
+    toolRegistrationToSystemTool :: ToolRegistration -> SessionTypes.SystemTool
+    toolRegistrationToSystemTool reg =
+        let llmTool = reg.declareTool
+            toolNameText = llmTool.toolName.getToolName
+            toolDesc = llmTool.toolDescription
+            toolProps = llmTool.toolParamProperties
+            toolDefv1 =
+                SessionTypes.SystemToolDefinitionV1
+                    toolNameText
+                    toolNameText
+                    toolDesc
+                    toolProps
+                    ( Aeson.object
                         [ "type" Aeson..= ("function" :: Text)
                         , "function"
                             Aeson..= Aeson.object
-                                [ "name" Aeson..= llmTool.toolName.getToolName
-                                , "description" Aeson..= llmTool.toolDescription
-                                , "parameters" Aeson..= toolParamsToJson llmTool.toolParamProperties
+                                [ "name" Aeson..= toolNameText
+                                , "description" Aeson..= toolDesc
+                                , "parameters" Aeson..= toolParamsToJson toolProps
                                 ]
                         ]
-                }
-     in SessionBase.SystemTool $ SessionBase.V1 toolDefv1
+                    )
+         in SessionTypes.SystemTool $ SessionTypes.V1 toolDefv1
 
-{- | Convert tool parameters to JSON schema.
-Based on toolParamsToJson from OneShot.hs.
-
-Only properties with 'propertyRequired = True' are included in the 'required' array.
--}
-toolParamsToJson :: [ParamProperty] -> Aeson.Value
-toolParamsToJson props =
-    Aeson.object
-        [ "type" Aeson..= ("object" :: Text)
-        , "properties" Aeson..= KeyMap.fromList (map paramPropertyToJson props)
-        , "required" Aeson..= map propertyKey (filter propertyRequired props)
-        , "additionalProperties" Aeson..= False
-        ]
-  where
-    paramPropertyToJson :: ParamProperty -> (Aeson.Key, Aeson.Value)
-    paramPropertyToJson p = (AesonKey.fromText p.propertyKey, paramTypeToJson p)
-
-    paramTypeToJson :: ParamProperty -> Aeson.Value
-    paramTypeToJson p =
-        Aeson.object $
-            [ "type" Aeson..= paramTypeToString p.propertyType
-            , "description" Aeson..= p.propertyDescription
+    -- Convert tool parameters to JSON schema
+    toolParamsToJson :: [ToolSchema.ParamProperty] -> Aeson.Value
+    toolParamsToJson props =
+        Aeson.object
+            [ "type" Aeson..= ("object" :: Text)
+            , "properties"
+                Aeson..= Aeson.fromList (map paramPropertyToJson props)
+            , "required" Aeson..= map ToolSchema.propertyKey (filter ToolSchema.propertyRequired props)
+            , "additionalProperties" Aeson..= False
             ]
-                ++ case p.propertyType of
-                    EnumParamType xs -> ["enum" Aeson..= xs]
-                    _ -> []
+      where
+        paramPropertyToJson p =
+            ( AesonKey.fromText $ ToolSchema.propertyKey p
+            , paramTypeToJson p
+            )
+        paramTypeToJson p =
+            Aeson.object $
+                [ "type" Aeson..= paramTypeToString (ToolSchema.propertyType p)
+                , "description" Aeson..= ToolSchema.propertyDescription p
+                ]
+                    ++ case ToolSchema.propertyType p of
+                        ToolSchema.EnumParamType enumVals -> ["enum" Aeson..= enumVals]
+                        _ -> []
 
-    paramTypeToString :: ParamType -> Text
-    paramTypeToString NullParamType = "null"
-    paramTypeToString StringParamType = "string"
-    paramTypeToString BoolParamType = "boolean"
-    paramTypeToString NumberParamType = "number"
-    paramTypeToString (EnumParamType _) = "string"
-    paramTypeToString (OpaqueParamType t) = t
-    paramTypeToString (MultipleParamType t) = t
-    paramTypeToString (ObjectParamType _) = "object"
+        paramTypeToString :: ToolSchema.ParamType -> Text
+        paramTypeToString ToolSchema.NullParamType = "null"
+        paramTypeToString ToolSchema.StringParamType = "string"
+        paramTypeToString ToolSchema.BoolParamType = "boolean"
+        paramTypeToString ToolSchema.NumberParamType = "number"
+        paramTypeToString (ToolSchema.EnumParamType _) = "string"
+        paramTypeToString (ToolSchema.OpaqueParamType t) = t
+        paramTypeToString (ToolSchema.MultipleParamType t) = t
+        paramTypeToString (ToolSchema.ObjectParamType _) = "object"
 
-{- | Extract text content from an LLM response.
-Based on extractResponseText from OneShot.hs.
--}
-extractResponseText :: SessionBase.LlmResponse -> Text
-extractResponseText (SessionBase.LlmResponse txt _thinking _) =
-    Maybe.fromMaybe "" txt
+    -- Execute a tool call using the node's registered tools
+    executeToolCall ::
+        AgentId ->
+        ConversationId ->
+        TVar [ToolRegistration] ->
+        ToolsContext.ToolExecutionContext ->
+        LlmToolCall ->
+        IO UserToolResponse
+    executeToolCall agentId convId toolsTVar _ctx (LlmToolCall callVal) =
+        case parseLlmToolCall callVal of
+            Nothing -> pure $ UserToolResponse $ Aeson.String "Failed to parse tool call"
+            Just tc -> do
+                regs <- readTVarIO toolsTVar
+                -- Construct context for this tool execution
+                sessId <- newSessionId
+                tId <- newTurnId
+                let toolCtx =
+                        mkToolExecutionContext
+                            sessId
+                            convId
+                            tId
+                            (Just agentId)
+                            Nothing -- No full session available at this point
+                            [CallStackEntry "root" convId 0] -- Root call stack entry
+                            Nothing -- No max recursion depth by default
+                result <- llmCallTool regs toolCtx tc
+                pure $ callResultToUserToolResponse tc result
+
+    -- Parse an LlmToolCall into OpenAI's ToolCall format
+    parseLlmToolCall :: Aeson.Value -> Maybe OpenAI.ToolCall
+    parseLlmToolCall val =
+        case Aeson.parseMaybe Aeson.parseJSON val of
+            Just tc -> Just tc
+            Nothing ->
+                case val of
+                    Aeson.Object obj ->
+                        case (Aeson.lookup "id" obj, Aeson.lookup "function" obj) of
+                            (Just (Aeson.String tid), Just funcVal) ->
+                                Just $
+                                    OpenAI.ToolCall
+                                        { OpenAI.rawToolCall = obj
+                                        , OpenAI.toolCallId = tid
+                                        , OpenAI.toolCallType = Aeson.lookup "type" obj >>= \v -> case v of Aeson.String t -> Just t; _ -> Nothing
+                                        , OpenAI.toolCallFunction = case Aeson.parseMaybe Aeson.parseJSON funcVal of
+                                            Just f -> f
+                                            Nothing -> OpenAI.ToolCallFunction (OpenAI.ToolName "") "" Nothing
+                                        }
+                            _ -> Nothing
+                    _ -> Nothing
+
+    -- Execute a single tool call against registered tools
+    llmCallTool ::
+        [ToolRegistration] ->
+        ToolsContext.ToolExecutionContext ->
+        OpenAI.ToolCall ->
+        IO (CallResult OpenAI.ToolCall)
+    llmCallTool registrations ctx call =
+        let script =
+                Maybe.listToMaybe $
+                    Maybe.mapMaybe (\r -> r.findTool call) registrations
+            args = call.toolCallFunction.toolCallFunctionArgs
+            spec = (,) <$> script <*> args
+         in case spec of
+                Nothing -> pure $ ToolNotFound call
+                Just (t, v) -> do
+                    let noopTracer = Tracer $ \(_ :: ToolTrace) -> pure ()
+                    ret <- t.toolRun noopTracer ctx v
+                    pure $ mapCallResult (const call) ret
+
+    -- Convert a CallResult to UserToolResponse
+    callResultToUserToolResponse :: OpenAI.ToolCall -> CallResult OpenAI.ToolCall -> UserToolResponse
+    callResultToUserToolResponse _ result =
+        case result of
+            ToolNotFound _ ->
+                UserToolResponse $ Aeson.String "Tool not found"
+            BashToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ show err
+            IOToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ show err
+            McpToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.unlines ["tool-error", Text.pack $ show err]
+            McpToolResult _ res ->
+                UserToolResponse $ Aeson.toJSON res
+            BlobToolSuccess _ v ->
+                UserToolResponse $ Aeson.String $ Text.decodeUtf8With Text.lenientDecode v
+            OpenAPIToolResult _ toolResult ->
+                UserToolResponse $ Aeson.toJSON toolResult
+            OpenAPIToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ "OpenAPI tool error: " <> err
+            PostgRESToolResult _ toolResult ->
+                UserToolResponse $ Aeson.toJSON toolResult
+            PostgRESToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ "PostgREST tool error: " <> err
+            SqliteToolResult _ toolResult ->
+                UserToolResponse $ Aeson.toJSON toolResult
+            SqliteToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ "SQLite tool error: " <> show err
+            SystemToolResult _ toolResult ->
+                UserToolResponse $ Aeson.toJSON toolResult
+            SystemToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ "System tool error: " <> show err
+            DeveloperToolResult _ valResult ->
+                UserToolResponse $ Aeson.toJSON valResult
+            DeveloperToolScaffoldResult _ scaffoldResult ->
+                UserToolResponse $ Aeson.toJSON scaffoldResult
+            DeveloperToolSpecResult _ specContent ->
+                UserToolResponse $ Aeson.String specContent
+            DeveloperToolError _ err ->
+                UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
+            LuaToolResult _ toolResult ->
+                UserToolResponse $ Aeson.toJSON toolResult
+            LuaToolError _ err ->
+                UserToolResponse $ Aeson.String $ "Lua tool error: " <> err
 
 -------------------------------------------------------------------------------
 
@@ -535,7 +537,7 @@ lookupMappedTools xs mcpName =
     List.find f xs
   where
     f :: MappedTool -> Bool
-    f (ExpertAgentAsPrompt n _) = n == mcpName
+    f (ExpertAgentAsPrompt n _ _) = n == mcpName
 
 -------------------------------------------------------------------------------
 
@@ -543,11 +545,11 @@ makeMappedTools :: MappedTools -> [Mcp.Tool]
 makeMappedTools = Maybe.catMaybes . fmap adapt
   where
     adapt :: MappedTool -> Maybe Mcp.Tool
-    adapt (ExpertAgentAsPrompt n ai) = callExpertTool n ai
+    adapt (ExpertAgentAsPrompt n tree _) = callExpertTool n tree
 
-callExpertTool :: Mcp.Name -> AgentTree.AgentTree -> Maybe Mcp.Tool
-callExpertTool mcpName ai =
-    let oai = ai.agentBase
+callExpertTool :: Mcp.Name -> AgentTree.OSAgentTree -> Maybe Mcp.Tool
+callExpertTool mcpName tree =
+    let oai = AgentTree.osNodeConfig (AgentTree.osTreeRoot tree)
      in Just $
             Mcp.Tool
                 mcpName
@@ -578,3 +580,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+

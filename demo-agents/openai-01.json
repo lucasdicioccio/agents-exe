@@ -6,7 +6,6 @@
     "modelUrl": "https://api.openai.com/v1",
     "apiKeyId": "openai",
     "modelName": "gpt-4.1-mini",
-    "toolDirectory": "tools",
     "announce": "The main agent, capable of reasoning.",
     "systemPrompt":
             [ "You are a helpful software agent trying to solve user requests"

@@ -137,9 +137,9 @@ newSqliteBackend dbPath poolSize = do
             60 -- keep alive time
             poolSize -- max connections
 
-    -- Initialize schema
+    -- Initialize schema through migration mechanism only
+    -- This ensures proper schema version tracking and creation
     withResource pool $ \conn -> do
-        execute_ conn sqliteCreateSchema
         migrateResult <- migrateSchema conn sqliteMigrationScript
         case migrateResult of
             Left err -> error $ "Migration failed: " ++ Text.unpack err
@@ -270,9 +270,9 @@ queryComponents backend compType mLimit = do
 
         let baseQuery =
                 [sql|
-                    SELECT DISTINCT entity_id FROM components
-                    WHERE component_type = ?
-                    ORDER BY entity_id
+                    SELECT DISTINCT c.entity_id FROM components c
+                    WHERE c.component_type = ?
+                    ORDER BY c.entity_id
                 |]
 
         case mLimit of
@@ -550,3 +550,4 @@ getChildToolCalls backend parentId = do
                     )
                 )
                 results
+

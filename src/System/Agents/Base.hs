@@ -108,7 +108,7 @@ Example configuration:
   "tag": "FileSystemDirectory",
   "contents": {
     "path": "./tools",
-    "basenameFilter": ".sh"
+    "basenameFilter": null
   }
 }
 @
@@ -116,6 +116,9 @@ Example configuration:
 The optional 'basenameFilter' field allows filtering tools by their
 filename. If specified, only executables whose names contain the
 filter string will be loaded.
+
+Note: Relative paths are resolved relative to the execution's current
+working directory.
 -}
 data FileSystemDirectoryDescription
     = FileSystemDirectoryDescription
@@ -163,6 +166,9 @@ Example configuration:
   }
 }
 @
+
+Note: Relative paths are resolved relative to the execution's current
+working directory.
 -}
 newtype SingleToolDescription = SingleToolDescription
     { singleToolPath :: FilePath
@@ -189,7 +195,7 @@ Example configuration:
   "bashToolboxes": [
     {"tag": "FileSystemDirectory", "contents": {"path": "./tools", "basenameFilter": null}},
     {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools", "basenameFilter": ".sh"}},
-    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
+    {"tag": "SingleTool", "contents": "/path/to/special-tool.sh"}
   ]
 }
 @
@@ -197,6 +203,9 @@ Example configuration:
 The old 'tools' key (singular directory path) is still supported for
 backward compatibility. If both 'tools' and 'bashToolboxes' are specified,
 both will be used.
+
+Note: Relative paths are resolved relative to the execution's current
+working directory.
 -}
 data BashToolboxDescription
     = FileSystemDirectory FileSystemDirectoryDescription
@@ -983,13 +992,16 @@ Example configuration:
   "tools": "tools",
   "bashToolboxes": [
     {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools"}},
-    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
+    {"tag": "SingleTool", "contents": "/path/to/special-tool.sh"}
   ],
   "mcpServers": [...],
   "openApiToolboxes": [...],
   "builtinToolboxes": [...]
 }
 @
+
+Note: Relative paths in bashToolboxes are resolved relative to the execution's
+current working directory.
 -}
 data Agent
     = Agent
@@ -1082,3 +1094,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+

@@ -27,6 +27,7 @@ library agents-lib
     exposed-modules:  System.Agents
                     , System.Agents.AgentTree
                     , System.Agents.AgentTree.OneShotTool
+                    , System.Agents.AgentTree.ToolLoader
                     , System.Agents.ApiKeys
                     , System.Agents.Base
                     , System.Agents.CLI.Aliases
@@ -36,8 +37,10 @@ library agents-lib
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
+                    , System.Agents.CLI.Export
                     , System.Agents.CLI.Initialize
                     , System.Agents.CLI.InitProject
+                    , System.Agents.CLI.Import
                     , System.Agents.CLI.McpServer
                     , System.Agents.CLI.New
                     , System.Agents.CLI.OneShot
@@ -53,6 +56,11 @@ library agents-lib
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
+                    , System.Agents.OS
+                    , System.Agents.OS.Agents
+                    , System.Agents.OS.AgentTree
+                    , System.Agents.OS.Compat
+                    , System.Agents.OS.Compat.Runtime
                     , System.Agents.OS.Concurrent
                     , System.Agents.OS.Concurrent.Locks
                     , System.Agents.OS.Concurrent.Types
@@ -62,8 +70,6 @@ library agents-lib
                     , System.Agents.OS.Core
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
-                    , System.Agents.OS.Compat
-                    , System.Agents.OS.Compat.Runtime
                     , System.Agents.OS.Interfaces
                     , System.Agents.OS.Interfaces.TUI
                     , System.Agents.OS.Interfaces.OneShot
@@ -260,8 +266,6 @@ test-suite agents-tests
                     , OS.ConcurrentTests
                     , OS.ConversationTests
                     , OS.CoreTests
-                    , OS.CompatTests
-                    , OS.CompatibilityTests
                     , OS.InterfaceTests
                     , OS.IntegrationTests
                     , OS.PersistenceTests
@@ -271,6 +275,8 @@ test-suite agents-tests
                     , SessionPrintTests
                     , SkillsTests
                     , ToolPortalTests
+                    , OS.CompatTests
+                    , OS.CompatibilityTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
@@ -316,4 +322,5 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
+
 

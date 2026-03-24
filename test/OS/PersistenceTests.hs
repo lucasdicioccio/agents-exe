@@ -27,6 +27,7 @@ import qualified Data.Aeson as Aeson
 import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Time (UTCTime (..), fromGregorian)
 import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
@@ -91,6 +92,10 @@ withTempDir action = do
     action tmpDir
     removeDirectoryRecursive tmpDir
 
+-- | Get a fixed test timestamp for reproducible tests.
+testTimestamp :: UTCTime
+testTimestamp = UTCTime (fromGregorian 2024 1 1) 0
+
 -- | Create a test agent configuration.
 mkTestAgentConfig :: Text -> AgentConfig
 mkTestAgentConfig name = AgentConfig
@@ -98,6 +103,14 @@ mkTestAgentConfig name = AgentConfig
     , agentModel = ModelConfig "openai" "https://api.openai.com/v1" "gpt-4" "key1"
     , agentSystemPrompt = "You are a helpful test agent"
     , agentToolboxBindings = []
+    }
+
+-- | Create a test agent state.
+mkTestAgentState :: AgentState
+mkTestAgentState = AgentState
+    { agentStatus = AgentIdle
+    , agentCurrentConversation = Nothing
+    , agentCreatedAt = testTimestamp
     }
 
 -- | Create a test conversation configuration.
@@ -115,7 +128,7 @@ mkTestMessage convId turnId content = Message
     , msgRole = AssistantRole
     , msgContent = content
     , msgToolCalls = []
-    , msgTimestamp = undefined -- Will be set by persistence layer
+    , msgTimestamp = testTimestamp
     }
 
 -------------------------------------------------------------------------------
@@ -240,15 +253,10 @@ componentSerializationTests = testGroup "Component Serialization"
         mDecoded @?= Just config
     
     , testCase "AgentState round-trips through JSON" $ do
-        eid <- newEntityId
-        let state = AgentState
-                { agentStatus = AgentIdle
-                , agentCurrentConversation = Nothing
-                , agentCreatedAt = undefined -- Would need actual time
-                }
+        let state = mkTestAgentState
         let json = Aeson.encode state
         let mDecoded = Aeson.decode json :: Maybe AgentState
-        isJust mDecoded @?= True
+        mDecoded @?= Just state
     
     , testCase "ConversationConfig round-trips through JSON" $ do
         let config = mkTestConversationConfig "Serialization Test"
@@ -262,7 +270,7 @@ componentSerializationTests = testGroup "Component Serialization"
         let msg = mkTestMessage convId turnId "Test message content"
         let json = Aeson.encode msg
         let mDecoded = Aeson.decode json :: Maybe Message
-        isJust mDecoded @?= True
+        mDecoded @?= Just msg
     ]
 
 -------------------------------------------------------------------------------
@@ -304,6 +312,10 @@ eventLogTests = testGroup "Event Logging"
         let backendType = SqliteBackendType dbPath
         handle <- createPersistenceBackend backendType
         eid <- newEntityId
+        -- First persist the entity (to satisfy foreign key constraint)
+        let config = mkTestAgentConfig "event-test-agent"
+        persist handle eid config
+        -- Now persist the event with the entity
         let eventData = object ["action" .= ("test" :: Text), "value" .= (42 :: Int)]
         persistOSEvent handle "test.event" eventData (Just eid)
         events <- getEvents handle eid

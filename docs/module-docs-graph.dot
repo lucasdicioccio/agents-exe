@@ -1,0 +1,231 @@
+digraph AgentsFramework {
+  rankdir=TB;
+  bgcolor="#f8f9fa";
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+  edge [color="#666666", fontname="Helvetica", fontsize=9];
+  
+  // Documentation nodes - main hubs
+  node [width=2.5, height=0.6, penwidth=2];
+  
+  doc_readme [label="README.md\nProject Overview", fillcolor="#e3f2fd", color="#1565c0"];
+  doc_arch [label="architecture.md\nSystem Design", fillcolor="#e8f5e9", color="#2e7d32"];
+  doc_tools [label="tools.md\nTool System", fillcolor="#fff3e0", color="#ef6c00"];
+  doc_mcp [label="mcp.md\nMCP Protocol", fillcolor="#e0f7fa", color="#00838f"];
+  doc_sessions [label="sessions.md\nSession Mgmt", fillcolor="#f3e5f5", color="#6a1b9a"];
+  doc_tui [label="tui.md\nTerminal UI", fillcolor="#fce4ec", color="#c2185b"];
+  doc_cli [label="cli-commands.md\nCLI Reference", fillcolor="#ffebee", color="#c62828"];
+  doc_export [label="export-import.md\nExport/Import", fillcolor="#efebe9", color="#4e342e"];
+  doc_fileload [label="file-loader.md\nFile Loader", fillcolor="#fffde7", color="#f9a825"];
+  doc_aicontext [label="AI-CONTEXT.md\nAI Guidelines", fillcolor="#e8eaf6", color="#3949ab"];
+  
+  // Rank documentation at top
+  { rank=same; doc_readme; doc_arch; doc_tools; doc_mcp; doc_sessions; }
+  { rank=same; doc_tui; doc_cli; doc_export; doc_fileload; doc_aicontext; }
+  
+  // Subgraph: Base Types
+  subgraph cluster_base {
+    label="Base Types";
+    style=filled;
+    fillcolor="#e3f2fd";
+    color="#1565c0";
+    
+    mod_base [label="System.Agents.Base", fillcolor="#bbdefb"];
+    mod_apikeys [label="System.Agents.ApiKeys", fillcolor="#bbdefb"];
+    mod_clibase [label="System.Agents.CLI.Base", fillcolor="#bbdefb"];
+    mod_mcpbase [label="System.Agents.MCP.Base", fillcolor="#bbdefb"];
+    mod_toolsbase [label="System.Agents.Tools.Base", fillcolor="#bbdefb"];
+    mod_sessionbase [label="System.Agents.Session.Base", fillcolor="#bbdefb"];
+  }
+  
+  // Subgraph: Runtime & AgentTree
+  subgraph cluster_runtime {
+    label="Runtime & AgentTree";
+    style=filled;
+    fillcolor="#e8f5e9";
+    color="#2e7d32";
+    
+    mod_runtime [label="System.Agents.Runtime", fillcolor="#c8e6c9"];
+    mod_runtimeruntime [label="Runtime.Runtime", fillcolor="#c8e6c9"];
+    mod_runtimetrace [label="Runtime.Trace", fillcolor="#c8e6c9"];
+    mod_agenttree [label="System.Agents.AgentTree", fillcolor="#c8e6c9"];
+    mod_agenttree_os [label="AgentTree.OneShotTool", fillcolor="#c8e6c9"];
+    mod_mcpclientrt [label="MCP.Client.Runtime", fillcolor="#c8e6c9"];
+    mod_mcpserverrt [label="MCP.Server.Runtime", fillcolor="#c8e6c9"];
+  }
+  
+  // Subgraph: Tools
+  subgraph cluster_tools {
+    label="Tools System (20+ modules)";
+    style=filled;
+    fillcolor="#fff3e0";
+    color="#ef6c00";
+    
+    mod_toolreg [label="ToolRegistration", fillcolor="#ffe0b2"];
+    mod_toolschema [label="ToolSchema", fillcolor="#ffe0b2"];
+    mod_tools [label="Tools", fillcolor="#ffe0b2"];
+    mod_bash [label="Tools.Bash", fillcolor="#ffe0b2"];
+    mod_bashtb [label="BashToolbox", fillcolor="#ffe0b2"];
+    mod_mcptb [label="McpToolbox", fillcolor="#ffe0b2"];
+    mod_openapitb [label="OpenAPIToolbox", fillcolor="#ffe0b2"];
+    mod_postgrestb [label="PostgRESToolbox", fillcolor="#ffe0b2"];
+    mod_sqlitetb [label="SqliteToolbox", fillcolor="#ffe0b2"];
+    mod_systemtb [label="SystemToolbox", fillcolor="#ffe0b2"];
+    mod_developertb [label="DeveloperToolbox", fillcolor="#ffe0b2"];
+    mod_toolcontext [label="Tools.Context", fillcolor="#ffe0b2"];
+    mod_toolio [label="Tools.IO", fillcolor="#ffe0b2"];
+    mod_tooltrace [label="Tools.Trace", fillcolor="#ffe0b2"];
+    mod_openapi_conv [label="OpenAPI.Converter", fillcolor="#ffe0b2"];
+    mod_openapi_res [label="OpenAPI.Resolver", fillcolor="#ffe0b2"];
+    mod_openapi_types [label="OpenAPI.Types", fillcolor="#ffe0b2"];
+    mod_postgrest_conv [label="PostgREST.Converter", fillcolor="#ffe0b2"];
+    mod_postgrest_types [label="PostgREST.Types", fillcolor="#ffe0b2"];
+    mod_endpoint [label="EndpointPredicate", fillcolor="#ffe0b2"];
+  }
+  
+  // Subgraph: MCP
+  subgraph cluster_mcp {
+    label="MCP Protocol";
+    style=filled;
+    fillcolor="#e0f7fa";
+    color="#00838f";
+    
+    mod_mcpclient [label="MCP.Client", fillcolor="#b2ebf2"];
+    mod_mcpserver [label="MCP.Server", fillcolor="#b2ebf2"];
+  }
+  
+  // Subgraph: Sessions
+  subgraph cluster_sessions {
+    label="Session Management";
+    style=filled;
+    fillcolor="#f3e5f5";
+    color="#6a1b9a";
+    
+    mod_sessionedit [label="Session.Edit", fillcolor="#e1bee7"];
+    mod_sessionloop [label="Session.Loop", fillcolor="#e1bee7"];
+    mod_sessionopenai [label="Session.OpenAI", fillcolor="#e1bee7"];
+    mod_sessionstep [label="Session.Step", fillcolor="#e1bee7"];
+    mod_sessiontypes [label="Session.Types", fillcolor="#e1bee7"];
+    mod_sessionstore [label="SessionStore", fillcolor="#e1bee7"];
+  }
+  
+  // Subgraph: TUI
+  subgraph cluster_tui {
+    label="Terminal UI";
+    style=filled;
+    fillcolor="#fce4ec";
+    color="#c2185b";
+    
+    mod_tuicore [label="TUI.Core", fillcolor="#f8bbd9"];
+    mod_tuievent [label="TUI.Event", fillcolor="#f8bbd9"];
+    mod_tuirender [label="TUI.Render", fillcolor="#f8bbd9"];
+    mod_tuitypes [label="TUI.Types", fillcolor="#f8bbd9"];
+  }
+  
+  // Subgraph: CLI
+  subgraph cluster_cli {
+    label="CLI Commands (21 modules)";
+    style=filled;
+    fillcolor="#ffebee";
+    color="#c62828";
+    
+    mod_main [label="Main (app)", fillcolor="#ffcdd2", penwidth=2];
+    mod_clinew [label="CLI.New", fillcolor="#ffcdd2"];
+    mod_clioneshot [label="CLI.OneShot", fillcolor="#ffcdd2"];
+    mod_clitui [label="CLI.TUI", fillcolor="#ffcdd2"];
+    mod_clicheck [label="CLI.Check", fillcolor="#ffcdd2"];
+    mod_clichecktc [label="CLI.CheckToolCall", fillcolor="#ffcdd2"];
+    mod_clidescribe [label="CLI.DescribeTool", fillcolor="#ffcdd2"];
+    mod_cliecho [label="CLI.EchoPrompt", fillcolor="#ffcdd2"];
+    mod_cliexport [label="CLI.Export", fillcolor="#ffcdd2"];
+    mod_cliimport [label="CLI.Import", fillcolor="#ffcdd2"];
+    mod_cliinit [label="CLI.Initialize", fillcolor="#ffcdd2"];
+    mod_cliinitproj [label="CLI.InitProject", fillcolor="#ffcdd2"];
+    mod_climcpserver [label="CLI.McpServer", fillcolor="#ffcdd2"];
+    mod_clipaths [label="CLI.Paths", fillcolor="#ffcdd2"];
+    mod_cliprompt [label="CLI.PromptScript", fillcolor="#ffcdd2"];
+    mod_cliself [label="CLI.SelfDescribe", fillcolor="#ffcdd2"];
+    mod_clisessionedit [label="CLI.SessionEdit", fillcolor="#ffcdd2"];
+    mod_clispec [label="CLI.Spec", fillcolor="#ffcdd2"];
+    mod_clitrace [label="CLI.TraceUtils", fillcolor="#ffcdd2"];
+    mod_clialiases [label="CLI.Aliases", fillcolor="#ffcdd2"];
+    mod_clicowsay [label="CLI.Cowsay", fillcolor="#ffcdd2"];
+  }
+  
+  // Subgraph: Export/Import
+  subgraph cluster_export {
+    label="Export/Import";
+    style=filled;
+    fillcolor="#efebe9";
+    color="#4e342e";
+    
+    mod_expar [label="ExportImport.Archive", fillcolor="#d7ccc8"];
+    mod_expgit [label="ExportImport.Git", fillcolor="#d7ccc8"];
+    mod_expns [label="ExportImport.Namespace", fillcolor="#d7ccc8"];
+    mod_exptypes [label="ExportImport.Types", fillcolor="#d7ccc8"];
+    mod_expti [label="ExportImport.ToolInstall", fillcolor="#d7ccc8"];
+  }
+  
+  // Subgraph: File Loader
+  subgraph cluster_fileload {
+    label="File Loader";
+    style=filled;
+    fillcolor="#fffde7";
+    color="#f9a825";
+    
+    mod_fl [label="FileLoader", fillcolor="#fff9c4"];
+    mod_fljson [label="FileLoader.JSON", fillcolor="#fff9c4"];
+    mod_flsec [label="FileLoader.Section", fillcolor="#fff9c4"];
+  }
+  
+  // Subgraph: Undocumented
+  subgraph cluster_undoc {
+    label="Undocumented Modules (10)";
+    style=filled;
+    fillcolor="#fafafa";
+    color="#616161";
+    
+    mod_agents [label="Agents", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_agentsstore [label="AgentsStore", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_filenotif [label="FileNotification", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_httpclient [label="HttpClient", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_httplogger [label="HttpLogger", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_llmopenai [label="LLMs.OpenAI", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_oneshot [label="OneShot", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_traceutils [label="TraceUtils", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_sessionprint [label="SessionPrint", fillcolor="#eeeeee", color="#9e9e9e"];
+    mod_sessionprintinj [label="SessionPrint.Inject", fillcolor="#eeeeee", color="#9e9e9e"];
+  }
+  
+  // Edges: Documentation to Base modules
+  doc_readme -> { mod_base; mod_clibase; mod_mcpbase; mod_toolsbase; mod_sessionbase } [color="#1565c0"];
+  doc_arch -> { mod_runtime; mod_runtimeruntime; mod_runtimetrace; mod_agenttree; mod_apikeys; mod_mcpclientrt; mod_mcpserverrt } [color="#2e7d32"];
+  doc_tools -> { mod_toolreg; mod_toolschema; mod_tools; mod_bash; mod_bashtb; mod_mcptb; mod_openapitb; mod_postgrestb; mod_sqlitetb; mod_systemtb; mod_developertb; mod_toolcontext; mod_toolio; mod_tooltrace; mod_openapi_conv; mod_openapi_res; mod_openapi_types; mod_postgrest_conv; mod_postgrest_types; mod_endpoint } [color="#ef6c00"];
+  doc_mcp -> { mod_mcpclient; mod_mcpserver } [color="#00838f"];
+  doc_sessions -> { mod_sessionedit; mod_sessionloop; mod_sessionopenai; mod_sessionstep; mod_sessiontypes; mod_sessionstore } [color="#6a1b9a"];
+  doc_tui -> { mod_tuicore; mod_tuievent; mod_tuirender; mod_tuitypes } [color="#c2185b"];
+  doc_cli -> { mod_main; mod_clinew; mod_clioneshot; mod_clitui; mod_clicheck; mod_clichecktc; mod_clidescribe; mod_cliecho; mod_cliexport; mod_cliimport; mod_cliinit; mod_cliinitproj; mod_climcpserver; mod_clipaths; mod_cliprompt; mod_cliself; mod_clisessionedit; mod_clispec; mod_clitrace; mod_clialiases; mod_clicowsay } [color="#c62828"];
+  doc_export -> { mod_expar; mod_expgit; mod_expns; mod_exptypes; mod_expti } [color="#4e342e"];
+  doc_fileload -> { mod_fl; mod_fljson; mod_flsec } [color="#f9a825"];
+  doc_aicontext -> { doc_readme; doc_arch; doc_tools; doc_mcp; doc_sessions; doc_tui; doc_cli; doc_export; doc_fileload } [style=dashed, color="#3949ab", constraint=false];
+  
+  // Cross-references between subsystems
+  mod_runtime -> mod_toolsbase [style=dotted, color="#666666"];
+  mod_agenttree -> mod_toolsbase [style=dotted, color="#666666"];
+  mod_sessionloop -> mod_runtime [style=dotted, color="#666666"];
+  mod_clitui -> mod_tuicore [style=dotted, color="#666666"];
+  mod_mcptb -> mod_mcpclient [style=dotted, color="#666666"];
+  mod_toolreg -> mod_toolsbase [style=dotted, color="#666666"];
+  
+  // Legend
+  subgraph cluster_legend {
+    label="Legend";
+    color=gray;
+    style=filled;
+    fillcolor=white;
+    fontsize=9;
+    
+    legend_doc [label="Documentation", fillcolor="#e3f2fd", width=1.5];
+    legend_docmod [label="Documented Module", fillcolor="#c8e6c9", width=1.5];
+    legend_undoc [label="Undocumented", fillcolor="#eeeeee", color="#9e9e9e", width=1.5];
+  }
+}

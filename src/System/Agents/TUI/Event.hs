@@ -2,6 +2,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Event handling for the TUI application.
+--
+-- This module handles all user input and application events for the TUI.
+-- During migration to the OS model, tool operations use the RuntimeBridge
+-- which synchronizes tools between the legacy Runtime and OS Core.
 module System.Agents.TUI.Event where
 
 import Brick
@@ -33,19 +37,18 @@ import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
 
-import System.Agents.AgentTree (AgentTree (..))
-import System.Agents.Base (ConversationId (..), newConversationId)
-import System.Agents.OS.Compat.Runtime (
-    AgentRuntime (..),
-    runWithBridge,
- )
-import System.Agents.OneShot (runtimeToAgent)
-import qualified System.Agents.Runtime as Runtime
+import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
+import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
+import System.Agents.OneShot (nodeToAgent)
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
+
+-- Import Tracer for creating a no-op tracer
+import Prod.Tracer (Tracer (..))
 
 -------------------------------------------------------------------------------
 -- Main Event Handler
@@ -130,6 +133,8 @@ handleAgentListEvent ev = do
     case selected of
         Just (_, agent) -> do
             tuiUI . selectedAgentInfo .= Just agent
+            -- Refresh tools for the newly selected agent
+            refreshToolsForAgent agent
         Nothing -> pure ()
 
 -- | Handle conversation list navigation.
@@ -343,6 +348,10 @@ toggleZoom = tuiUI . zoomed %= not
 
 {- | Handle heartbeat - refresh UI state and auto-clear expired status messages.
 Preserves the currently selected conversation when refreshing the list.
+
+During migration, this also:
+1. Refreshes tools for the selected agent via RuntimeBridge
+2. Synchronizes tool state between legacy Runtime and OS Core
 -}
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
@@ -364,11 +373,11 @@ handleHeartbeat = do
                 Nothing -> pure () -- Conversation was removed, keep no selection
         Nothing -> pure ()
 
-    -- Refresh tools using RuntimeBridge if available
-    -- In the new OS model, tools are accessed through the bridge
-    -- For now, tools are still stored per-agent in the TUI state
-    -- In the future, this could be retrieved via the bridge
-    tuiUI . coreAgentTools .= []
+    -- Refresh tools for the currently selected agent
+    selectedAgent <- use (tuiUI . selectedAgentInfo)
+    case selectedAgent of
+        Just agent -> refreshToolsForAgent agent
+        Nothing -> pure ()
 
     -- Auto-clear status messages after 5 seconds
     mStatus <- use (tuiUI . statusMessage)
@@ -397,13 +406,13 @@ cleanupAuxiliaryTasks = do
             Nothing -> True -- Still running
             Just _ -> False -- Completed (success or failure)
 
--- | Handle show status event.
+-- | Show a status message with the given severity.
 handleShowStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
 handleShowStatus severity text = do
     now <- liftIO getCurrentTime
     tuiUI . statusMessage .= Just (StatusMessage text severity now)
 
--- | Handle clear status event.
+-- | Clear the current status message.
 handleClearStatus :: EventM N TuiState ()
 handleClearStatus =
     tuiUI . statusMessage .= Nothing
@@ -464,21 +473,41 @@ handleConversationUpdated convId sess = do
 {- | Handle agent trace events.
 TODO: remove
 -}
-handleAgentTrace :: Runtime.Trace -> EventM N TuiState ()
+handleAgentTrace :: Trace -> EventM N TuiState ()
 handleAgentTrace _trace = do
     -- Currently a no-op, to be implemented
     pure ()
 
--- | Refresh tools for selected agent using RuntimeBridge.
+{- | Refresh tools for the given agent.
+
+This function reads tools from the OS-native TVar and updates the UI state.
+-}
+refreshToolsForAgent :: TuiAgent -> EventM N TuiState ()
+refreshToolsForAgent agent = do
+    -- Read tools from the OS-native TVar
+    tools <- liftIO $ readTVarIO (osNodeTools $ tuiNode agent)
+    tuiUI . coreAgentTools %= updateAgentTools (tuiAgentId agent) tools
+  where
+    updateAgentTools :: AgentId -> [a] -> [(AgentId, [a])] -> [(AgentId, [a])]
+    updateAgentTools aid newTools = 
+        ((aid, newTools) :) . filter ((/= aid) . fst)
+
+{- | Handle F5 key: Refresh tools for selected agent.
+-}
 handleRefreshTools :: EventM N TuiState ()
 handleRefreshTools = do
     selected <- use (tuiUI . selectedAgentInfo)
     case selected of
         Just agent -> do
-            -- Use RuntimeBridge to refresh tools
-            tools <- liftIO $ runWithBridge agent.tuiBridge listTools
+            -- Read tools from the OS-native TVar
+            tools <- liftIO $ readTVarIO (osNodeTools $ tuiNode agent)
+            tuiUI . coreAgentTools %= updateAgentTools (tuiAgentId agent) tools
             showStatus StatusInfo $ "Refreshed " <> Text.pack (show $ length tools) <> " tools"
-        Nothing -> pure ()
+        Nothing -> showStatus StatusWarning "No agent selected"
+  where
+    updateAgentTools :: AgentId -> [a] -> [(AgentId, [a])] -> [(AgentId, [a])]
+    updateAgentTools aid newTools = 
+        ((aid, newTools) :) . filter ((/= aid) . fst)
 
 -------------------------------------------------------------------------------
 -- Conversation Management
@@ -583,7 +612,7 @@ addBufferedMessage convId core msg =
 
 runConversation :: TuiAgent -> Session -> EventM N TuiState ()
 runConversation baseTuiAgent session = do
-    -- Get session configuration
+    -- Get session configuration (includes API keys)
     config <- use sessionConfig
 
     -- Generate conversation ID
@@ -595,9 +624,13 @@ runConversation baseTuiAgent session = do
     -- Build the progress callback
     let notifyProgress = buildOnProgress convId outChan
 
+    -- Create a no-op tracer
+    let tracer = Tracer $ const $ pure ()
+
     -- Create the agent with the progress callback
-    -- Use the agent's RuntimeBridge through the Tree's Runtime
-    agent0 <- liftIO $ runtimeToAgent config.sessionStore Nothing convId (baseTuiAgent.tuiTree.agentRuntime)
+    -- Use the agent's OSAgentNode through the TuiAgent
+    -- Pass API keys from the session config
+    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId tracer config.sessionApiKeys (tuiNode baseTuiAgent)
 
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
@@ -618,7 +651,7 @@ runConversation baseTuiAgent session = do
                     ret <- agent0.step sess
                     case ret of
                         Stop _r ->
-                            -- smoll hack to reuse the naive step from runtimeToAgent
+                            -- smoll hack to reuse the naive step from nodeToAgent
                             pure $ AskUserPrompt (MissingUserPrompt True [])
                         _ -> pure ret
                 , usrQuery = do
@@ -631,7 +664,7 @@ runConversation baseTuiAgent session = do
                 }
 
     -- \* wrap in Conversation
-    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiBridge baseTuiAgent) baseTuiAgent.tuiTree
+    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiTree baseTuiAgent) (tuiNode baseTuiAgent) (tuiSlug baseTuiAgent)
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
         -- Loop.run now requires convId as first parameter
@@ -643,7 +676,7 @@ runConversation baseTuiAgent session = do
                 , conversationAgent = tuiAgent
                 , conversationThreadId = Just threadId
                 , conversationSession = Nothing
-                , conversationName = "@" <> tuiAgent.tuiTree.agentRuntime.agentSlug
+                , conversationName = "@" <> tuiSlug baseTuiAgent
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_WaitingForInput
                 , conversationOnProgress = notifyProgress
@@ -696,3 +729,4 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+

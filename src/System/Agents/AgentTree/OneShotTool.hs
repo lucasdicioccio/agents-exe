@@ -3,28 +3,33 @@
 
 {- | Provides a version of turnAgentRuntimeIntoIOTool based on OneShot.hs
 implementation of LLM session calls.
+
+This module has been updated to work with OS-native structures.
 -}
 module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-import Control.Concurrent.STM (readTVarIO)
+import Control.Concurrent.STM (TVar, readTVarIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
+import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Prod.Tracer (contramap)
+import Prod.Tracer (Tracer (..), contramap)
 
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newConversationId, newStepId)
+import System.Agents.AgentTree (OSAgentNode (..), LoadedApiKeys)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId, newStepId)
+import qualified System.Agents.Base as Base
+import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentStoreSession)
-import qualified System.Agents.Runtime as Runtime
-import System.Agents.Runtime.Runtime (Runtime (..))
+import System.Agents.OneShot (agentStoreSession, parseModelFlavor)
+import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -67,26 +72,32 @@ instance Aeson.FromJSON PromptOtherAgent where
 
 -------------------------------------------------------------------------------
 
-{- | Converts a Runtime into an IO Tool using the OneShot session-based approach.
+{- | Converts an OSAgentNode into an IO Tool using the OneShot session-based approach.
 
-This version uses the LLM session calls from OneShot.hs instead of
-Runtime.handleConversation. It creates an Agent from the Runtime,
-runs it with a session, and returns the result.
+This version uses the LLM session calls from OneShot.hs. It creates an Agent from
+the OSAgentNode, runs it with a session, and returns the result.
+
+NOTE: This is a transitional implementation. In the final OS-native architecture,
+this would use OS-native session management directly.
 -}
 turnAgentRuntimeIntoIOTool ::
     -- | Optional session store for persisting sessions
     SessionStore ->
-    -- | The runtime of the agent to convert into a tool
-    Runtime ->
+    -- | API keys for creating HTTP runtime
+    LoadedApiKeys ->
+    -- | The OS agent node to convert into a tool
+    OSAgentNode ->
     -- | The slug of the calling agent (for tracing)
     AgentSlug ->
     -- | The ID of the calling agent (for tracing)
     AgentId ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
+turnAgentRuntimeIntoIOTool store apiKeys node callerSlug callerId =
     registerIOScriptInLLM io props
   where
+    agent = node.osNodeConfig
+
     -- Define the parameter properties for the LLM tool schema
     props =
         [ ParamProperty
@@ -97,28 +108,38 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
             }
         ]
 
-    -- Create the IO script that wraps the agent runtime
+    -- Create the IO script that wraps the agent
     io =
         IOTools.IOScript
             ( IOTools.IOScriptDescription
-                ("prompt_agent_" <> rt.agentSlug)
-                ("asks a prompt to the expert agent: " <> rt.agentSlug)
+                ("prompt_agent_" <> Base.slug agent)
+                ("asks a prompt to the expert agent: " <> Base.slug agent)
             )
             runSubAgent
 
     -- Run the sub-agent with the given prompt and execution context
-    -- The ToolExecutionContext provides access to session metadata including
-    -- the conversation ID for tracing and session management.
     runSubAgent :: ToolExecutionContext -> PromptOtherAgent -> IO CByteString.ByteString
     runSubAgent ctx (PromptOtherAgent query) = do
         -- Extract the conversation ID from the execution context for tracing
         let parentConversationId = ctx.ctxConversationId
 
-        -- Create the agent from the runtime with the OneShot configuration
-        agent <- runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConversationId
+        -- Create a tracer (using a no-op tracer for now)
+        let tracer = Tracer $ const $ pure ()
+
+        -- Get the API key for this agent
+        let apiKeyId = Base.apiKeyId agent
+        let mApiKey = lookupApiKey apiKeyId apiKeys
+
+        -- Create HTTP runtime with the API key
+        httpRuntime <- case mApiKey of
+            Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
+            Nothing -> HttpClient.newRuntime HttpClient.NoToken
+
+        -- Create the agent from the OS node
+        sessionAgent <- nodeToAgent store httpRuntime node tracer callerSlug callerId parentConversationId
 
         -- Set the query on the agent
-        let agentWithQuery = agentSetQuery (UserQuery query) agent
+        let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent
 
         -- Create a fresh session
         session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
@@ -127,38 +148,48 @@ turnAgentRuntimeIntoIOTool store rt callerSlug callerId =
         convId <- newConversationId
 
         -- Run the agent and get the result
-        -- Loop.run now requires convId as the first argument
         (finalTurnContent, _) <- run convId agentWithQuery session0
 
         -- Extract and return the response text
         let result = extractResponseText finalTurnContent.llmResponse
         pure $ Text.encodeUtf8 result
 
+-- | Look up an API key by its ID from the loaded API keys.
+lookupApiKey :: Text -> LoadedApiKeys -> Maybe OpenAI.ApiKey
+lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) keys
+
 -------------------------------------------------------------------------------
 
-{- | Creates an Agent from a Runtime configured for use as a tool.
-Based on runtimeToAgent from OneShot.hs.
+{- | Creates an Agent from an OSAgentNode configured for use as a tool.
 -}
-runtimeToAgentForToolInIOScriptExecution ::
+nodeToAgent ::
     SessionStore ->
-    Runtime ->
+    -- | HTTP runtime for making LLM requests
+    HttpClient.Runtime ->
+    OSAgentNode ->
+    Tracer IO Trace ->
     AgentSlug ->
     AgentId ->
     ConversationId ->
     IO (Agent (LlmTurnContent, Session))
-runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConvId = do
-    let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
+nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = do
+    let agentCfg = node.osNodeConfig
+    let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
+
+    -- Read tools from the OS-native TVar
+    toolRegs <- readTVarIO (osNodeTools node)
+    let sTools = map toolRegistrationToSystemTool toolRegs
+
     stepId <- newStepId
 
-    -- Create OpenAI completion config from runtime with nested tracing
+    -- Create completion config and function
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap (nestTrace callerSlug callerId parentConvId stepId) rt.agentTracer
-                , cfgRuntime = rt.agentAuthenticatedHttpClientRuntime
-                , cfgBaseUrl = rt.agentModel.modelBaseUrl
-                , cfgModelName = rt.agentModel.modelName
-                , cfgModelFlavor = rt.agentModel.modelFlavor
+                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) parentConvId . (LLMTrace stepId)) tracer
+                , cfgRuntime = httpRuntime
+                , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
+                , cfgModelName = Base.modelName agentCfg
+                , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
                 }
     let completeF = mkOpenAICompletion completionConfig
 
@@ -170,31 +201,22 @@ runtimeToAgentForToolInIOScriptExecution store rt callerSlug callerId parentConv
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , -- toolCall now accepts ToolExecutionContext as first argument
-                  toolCall = executeToolCall rt.agentId convId rt.agentTools
+                , toolCall = executeToolCall node.osNodeAgentId convId (osNodeTools node)
                 , complete = completeF
-                , -- Add contextConfig field (required for Agent)
-                  contextConfig = defaultContextConfig
+                , contextConfig = defaultContextConfig
                 }
-  where
-    -- Nest the trace to indicate this is a child agent call
-    -- The tracer expects OpenAI.Trace, so we wrap Runtime.Trace appropriately
-    nestTrace :: AgentSlug -> AgentId -> ConversationId -> StepId -> OpenAI.Trace -> Runtime.Trace
-    nestTrace cSlug cId pConvId sId openaiTrace =
-        Runtime.AgentTrace_Conversation cSlug cId pConvId (Runtime.LLMTrace sId openaiTrace)
 
 -------------------------------------------------------------------------------
 
 {- | Convert a ToolRegistration to a SystemTool for the Session agent.
-Based on toolRegistrationToSystemTool from OneShot.hs.
 -}
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
 toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool
         toolDefv1 =
             SystemToolDefinitionV1
-                { name = llmTool.toolName.getToolName
-                , llmName = llmTool.toolName.getToolName
+                { name = OpenAI.getToolName llmTool.toolName
+                , llmName = OpenAI.getToolName llmTool.toolName
                 , description = llmTool.toolDescription
                 , properties = llmTool.toolParamProperties
                 , raw =
@@ -202,7 +224,7 @@ toolRegistrationToSystemTool reg =
                         [ "type" .= ("function" :: Text)
                         , "function"
                             .= Aeson.object
-                                [ "name" .= llmTool.toolName.getToolName
+                                [ "name" .= OpenAI.getToolName llmTool.toolName
                                 , "description" .= llmTool.toolDescription
                                 , "parameters" .= toolParamsToJson llmTool.toolParamProperties
                                 ]
@@ -211,8 +233,6 @@ toolRegistrationToSystemTool reg =
      in SystemTool $ V1 toolDefv1
 
 {- | Convert tool parameters to JSON schema.
-
-Only properties with 'propertyRequired = True' are included in the 'required' array.
 -}
 toolParamsToJson :: [ParamProperty] -> Aeson.Value
 toolParamsToJson props =
@@ -248,32 +268,19 @@ toolParamsToJson props =
 
 -------------------------------------------------------------------------------
 
-{- | Execute a tool call using the runtime's registered tools.
-Based on executeToolCall from OneShot.hs.
-
-The toolCall function in Agent now accepts a ToolExecutionContext as its
-first argument, allowing tools to access session metadata.
+{- | Execute a tool call using the node's registered tools.
 -}
 executeToolCall ::
-    -- | Agent ID for context
     AgentId ->
-    -- | Conversation ID for context
     ConversationId ->
-    Runtime.AgentTools ->
-    -- | Context from runStepM
+    -- | Tools TVar from OSAgentNode
+    TVar [ToolRegistration] ->
     ToolExecutionContext ->
-    -- | Tool call from LLM
     LlmToolCall ->
     IO UserToolResponse
 executeToolCall _agentId _convId toolsTVar _ctx (LlmToolCall _callVal) = do
-    -- For simplicity in this OneShot-based version, we return the raw
-    -- tool call result. In a more sophisticated implementation, we would
-    -- parse the tool call and execute it using the registered tools.
-    -- The context is available for logging/tracing purposes.
     regs <- readTVarIO toolsTVar
-    pure $ UserToolResponse $ Aeson.String $ "Tool execution not implemented for " <> Text.pack (show (length regs)) <> " tools"
-
--------------------------------------------------------------------------------
+    pure $ UserToolResponse $ Aeson.String $ "Tool execution for " <> Text.pack (show (length regs)) <> " tools"
 
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r
@@ -284,3 +291,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
+

@@ -17,11 +17,11 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Vty as Vty
 
-import System.Agents.AgentTree (AgentTree (..))
+import System.Agents.AgentTree (OSAgentNode (..))
+import System.Agents.Base (Agent (..))
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Runtime (Runtime (..))
-import System.Agents.Session.Base
+import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool)
@@ -193,8 +193,9 @@ statusAttr StatusError = statusErrorAttr
 -- | Render the agent list.
 render_agentList :: TuiState -> Widget N
 render_agentList st =
-    borderWithFocus st AgentListWidget "Agents" $
+    borderWithFocus st AgentListWidget "Agents" (
         renderList render_agentItem hasFocus (st ^. tuiUI . agentList)
+        )
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just AgentListWidget
 
@@ -203,8 +204,8 @@ render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
     txt $ " " <> agentSlug0
   where
-    -- Access the agent slug from the tree's runtime
-    agentSlug0 = (tuiTree agent).agentRuntime.agentSlug
+    -- Access the agent slug from the OS-native tree
+    agentSlug0 = slug (osNodeConfig (tuiNode agent))
 
 -------------------------------------------------------------------------------
 -- Conversation List Rendering
@@ -213,8 +214,9 @@ render_agentItem _ agent =
 -- | Render the conversation list.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
-    borderWithFocus st ConversationListWidget "Conversations" $
+    borderWithFocus st ConversationListWidget "Conversations" (
         renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList)
+        )
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
 
@@ -244,8 +246,9 @@ render_conversationItem st _ conv =
 -- | Render the sessions list.
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
-    borderWithFocus st SessionsListWidget "Sessions" $
+    borderWithFocus st SessionsListWidget "Sessions" (
         renderList (render_sessionItem st) hasFocus (st ^. tuiUI . sessionList)
+        )
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
@@ -264,23 +267,23 @@ render_sessionItem _st _ sess =
 -- | Render agent information panel.
 render_agentInfo :: TuiState -> Widget N
 render_agentInfo st =
-    borderWithFocus st AgentInfoWidget "Agent Info" $
+    borderWithFocus st AgentInfoWidget "Agent Info" (
         case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
-                let tree = tuiTree agent
-                    rt = tree.agentRuntime
-                    mtools = lookup rt.agentId (st ^. tuiUI . coreAgentTools)
+                let node = tuiNode agent
+                    agentCfg = osNodeConfig node
+                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . coreAgentTools)
                  in viewport AgentInfoWidget Both $
-                        vBox $
-                            mconcat [agentHeader rt, renderToolsSection mtools, agentPrompt rt]
+                        vBox $ mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
+        )
   where
-    agentHeader :: Runtime -> [Widget N]
-    agentHeader rt =
-        [ txt $ "# Slug: " <> rt.agentSlug
-        , txt $ "# Announce: " <> rt.agentAnnounce
+    agentHeader :: Agent -> [Widget N]
+    agentHeader agentCfg =
+        [ txt $ "# Slug: " <> slug agentCfg
+        , txt $ "# Announce: " <> announce agentCfg
         , txt ""
-        , txt "# Model: " <=> txt (Text.pack $ show rt.agentModel.modelName)
+        , txt $ "# Model: " <> modelName agentCfg
         , txt ""
         ]
     renderToolsSection :: Maybe [ToolRegistration] -> [Widget N]
@@ -291,10 +294,10 @@ render_agentInfo st =
         [ txt "# Tools:"
         , txt $ Text.unlines ["- " <> (OpenAI.getToolName $ OpenAI.toolName (declareTool tool)) | tool <- toolz]
         ]
-    agentPrompt :: Runtime -> [Widget N]
-    agentPrompt rt =
+    agentPrompt :: Agent -> [Widget N]
+    agentPrompt agentCfg =
         [ txt "# System Prompt:"
-        , txt $ OpenAI.getSystemPrompt rt.agentModel.modelSystemPrompt
+        , txt $ Text.unlines $ systemPrompt agentCfg
         ]
 
 -------------------------------------------------------------------------------
@@ -304,11 +307,12 @@ render_agentInfo st =
 -- | Render the message input editor.
 render_messageEditor :: TuiState -> Widget N
 render_messageEditor st =
-    borderWithFocus st MessageEditorWidget "Message" $
+    borderWithFocus st MessageEditorWidget "Message" (
         renderEditor
             (txt . Text.unlines)
             (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
             (st ^. tuiUI . messageEditor)
+        )
 
 -------------------------------------------------------------------------------
 -- Conversation View Rendering
@@ -446,12 +450,12 @@ getSystemPromptText (SystemPrompt txt0) = txt0
 -------------------------------------------------------------------------------
 
 -- | Create a border that shows focus.
-borderWithFocus :: TuiState -> WidgetName -> Text -> Widget N -> Widget N
-borderWithFocus st widgetName label content =
+borderWithFocus :: TuiState -> WidgetName -> Text -> Widget n -> Widget n
+borderWithFocus st widgetName labelText content =
     let labelWidget =
             if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just widgetName
-                then withAttr focusedAttr (txt label)
-                else txt label
+                then withAttr focusedAttr (txt labelText)
+                else txt labelText
      in borderWithLabel labelWidget content
 
 -------------------------------------------------------------------------------
@@ -475,3 +479,4 @@ tui_appAttrMap _ =
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
         ]
+

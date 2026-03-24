@@ -9,6 +9,9 @@ This module supports loading tools from:
 - Single executable files
 
 Note that reloads are asynchronous.
+
+Note: Relative paths are always resolved relative to the execution's current
+working directory.
 -}
 module System.Agents.Tools.BashToolbox where
 
@@ -21,6 +24,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Prod.Background as Background
 import Prod.Tracer (Tracer, contramap)
+import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName, (</>))
 
 import System.Agents.Base (BashToolboxDescription (..), FileSystemDirectoryDescription (..), SingleToolDescription (..))
@@ -75,16 +79,26 @@ data MultiSourceBashTools = MultiSourceBashTools
 -------------------------------------------------------------------------------
 
 {- | Convert a BashToolboxDescription to a ToolSource.
-The FilePath parameter is the base directory for resolving relative paths.
+
+Relative paths are always resolved relative to the execution's current
+working directory.
 -}
-descriptionToSource :: FilePath -> BashToolboxDescription -> ToolSource
-descriptionToSource baseDir (FileSystemDirectory desc) =
+descriptionToSource :: BashToolboxDescription -> IO ToolSource
+descriptionToSource (FileSystemDirectory desc) = do
+    cwd <- getCurrentDirectory
+
+    -- Build the full path (respecting the legacy fsDirRoot field if present)
     let fsDir = fromMaybe "" desc.fsDirRoot </> desc.fsDirPath
-        resolved = if isRelative fsDir then baseDir ++ "/" ++ fsDir else desc.fsDirPath
-     in DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved
-descriptionToSource baseDir (SingleTool desc) =
-    let resolved = if isRelative desc.singleToolPath then baseDir ++ "/" ++ desc.singleToolPath else desc.singleToolPath
-     in SingleSource resolved
+        resolved = if isRelative fsDir then cwd </> fsDir else desc.fsDirPath
+
+    pure $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved
+descriptionToSource (SingleTool desc) = do
+    cwd <- getCurrentDirectory
+
+    -- Build the full path
+    let resolved = if isRelative desc.singleToolPath then cwd </> desc.singleToolPath else desc.singleToolPath
+
+    pure $ SingleSource resolved
 
 -- | Check if a path is relative (simple heuristic).
 isRelative :: FilePath -> Bool
@@ -100,15 +114,16 @@ data LoadingError
 {- | Initialize multiple bash tool sources.
 
 This creates background loaders for each source, allowing async reloading.
+
+Note: Relative paths are resolved relative to the execution's current
+working directory at the time of initialization.
 -}
 initializeMultiSourceToolbox ::
     Tracer IO Trace ->
-    -- | Base directory for resolving relative paths
-    FilePath ->
     [BashToolboxDescription] ->
     IO (Either LoadingError MultiSourceBashTools)
-initializeMultiSourceToolbox tracer baseDir descriptions = do
-    let toolSources = map (descriptionToSource baseDir) descriptions
+initializeMultiSourceToolbox tracer descriptions = do
+    toolSources <- mapM descriptionToSource descriptions
     results <- mapM (initializeSource tracer) toolSources
     let (errors, bgTools) = partitionEithers results
     if null errors
@@ -212,10 +227,10 @@ filterScriptsByBasename filt scripts =
 
 -------------------------------------------------------------------------------
 
-{- | Legacy compatibility: Initialize a single directory toolbox.
-
-This is kept for backward compatibility with existing code.
--}
+-- | Legacy compatibility: Initialize a single directory toolbox.
+--
+-- This is kept for backward compatibility with existing code.
+-- Note: The path is resolved relative to the current working directory.
 initializeBackroundToolbox ::
     Tracer IO Trace ->
     FilePath ->
@@ -229,3 +244,4 @@ readMultiSourceTools :: MultiSourceBashTools -> IO [BashTools.ScriptDescription]
 readMultiSourceTools multi = do
     allTools <- mapM (Background.readBackgroundVal . tools) multi.sources
     pure $ concat allTools
+
