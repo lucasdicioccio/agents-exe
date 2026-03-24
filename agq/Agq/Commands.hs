@@ -29,7 +29,7 @@ import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS
-import Data.Char (isDigit)
+import Data.Char (isDigit, isHexDigit)
 import Data.List (partition, sortOn)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -959,8 +959,19 @@ cmdClean cfg doIt force = do
         myFilterM
             ( \wt -> do
                 let nm = takeBaseName (Text.unpack (wtPath wt))
-                    md = sessionsDir cfg </> nm <> ".session.md"
-                doesFileExist md
+                    baseName = stripBranchSuffix nm
+                    wtDir = Text.unpack (wtPath wt)
+                    -- All candidate session file paths:
+                    --   1. In the main repo sessionsDir (present after PR merged + pulled)
+                    --   2. Inside the worktree (present while worktree still exists)
+                    -- Both are tried with the full worktree basename and the
+                    -- suffix-stripped base name (handles worktrees named after branch).
+                    candidates =
+                        [sessionsDir cfg </> n <> ".session.md" | n <- names]
+                            ++ [wtDir </> sessionsDir cfg </> n <> ".session.md" | n <- names]
+                      where
+                        names = if baseName == nm then [nm] else [nm, baseName]
+                anyM doesFileExist candidates
             )
             nonMain
     if null toClean
@@ -1039,6 +1050,25 @@ parseWorktrees txt =
          in if "refs/heads/" `Text.isPrefixOf` ref
                 then Just (Text.drop (Text.length "refs/heads/") ref)
                 else Nothing
+
+-- | Strip the "-<sha>.<tries>" suffix that execTask appends to create branch names.
+-- e.g. "gh-355-092bb89.1" -> "gh-355"; returns original if suffix not found.
+stripBranchSuffix :: String -> String
+stripBranchSuffix nm =
+    let rev = reverse nm
+     in case span isDigit rev of
+            ("", _) -> nm
+            (_, '.' : rest2) ->
+                case span isHexDigit rest2 of
+                    (revSha, '-' : revBase) | length revSha >= 7 -> reverse revBase
+                    _ -> nm
+            _ -> nm
+
+anyM :: (Monad m) => (a -> m Bool) -> [a] -> m Bool
+anyM _ [] = return False
+anyM p (x : xs) = do
+    b <- p x
+    if b then return True else anyM p xs
 
 myFilterM :: (Monad m) => (a -> m Bool) -> [a] -> m [a]
 myFilterM _ [] = return []

@@ -5,6 +5,8 @@
 
 The tui command launches an interactive terminal user interface for
 chatting with agents.
+
+This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.TUI (
     -- * Types
@@ -17,10 +19,8 @@ module System.Agents.CLI.TUI (
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
-import System.Agents.TraceUtils (traceWaitingOpenAIRateLimits)
 
 -- | Options for the TUI command
 data TuiOptions = TuiOptions
@@ -31,7 +31,7 @@ data TuiOptions = TuiOptions
 -- | Handle the TUI command: launch interactive terminal interface
 handleTUI ::
     -- | Base tracer for logging
-    Prod.Tracer IO AgentTree.Trace ->
+    Prod.Tracer IO AgentTree.TreeTrace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -42,18 +42,14 @@ handleTUI ::
 handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let oneAgent agentFile = do
-            registry <- AgentTree.newRuntimeRegistry
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFile
-                    , AgentTree.interactiveTracer =
-                        Prod.traceBoth
-                            baseTracer
-                            (traceWaitingOpenAIRateLimits (OpenAI.ApiLimits 100 10000) print)
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore
-                    , AgentTree.runtimeRegistry = registry
+                    , AgentTree.interactiveTracer = baseTracer
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUI sessionStore agentPropsList
+    TUI.runTUI sessionStore apiKeys agentPropsList
+

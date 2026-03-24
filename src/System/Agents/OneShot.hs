@@ -7,60 +7,67 @@
 This module provides single-conversation execution (batch mode) with support
 for both the legacy Runtime interface and the new OS model via RuntimeBridge.
 
-The primary functions ('mainOneShotText', 'runtimeToAgent') continue to work
-with the traditional Runtime for backward compatibility. Future versions will
-add native OS support via 'mainOneShotTextOS'.
+The primary functions ('mainOneShotText', 'runtimeToAgent') have been updated
+to use OS-native types. 'mainOneShotText' now works directly with 'OSAgentTree'.
 -}
 module System.Agents.OneShot (
     -- * Types
     ThinkingOutput (..),
 
-    -- * Main functions (Runtime-based, backward compatible)
-    runtimeToAgent,
+    -- * Main functions (OS-native)
+    nodeToAgent,
     agentStoreSession,
     fileStoringCallback,
     mainPrintAgent,
     mainOneShotText,
     mainOneShotTextWithThinking,
-
-    -- * Future OS-native functions
-    mainOneShotTextOS,
+    
+    -- * Utility functions
+    parseModelFlavor,
 ) where
 
-import Control.Concurrent.STM (readTVarIO)
+import Control.Concurrent.STM (TVar, readTVarIO)
 import Control.Exception (Exception)
-import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.Foldable (traverse_)
+import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
 import qualified Data.Text.IO as Text
+import Prod.Tracer (Tracer (..), contramap)
 import System.IO (stderr)
 
-import System.Agents.AgentTree
+import System.Agents.AgentTree (
+    LoadAgentResult (..),
+    LoadedApiKeys,
+    OSAgentNode (..),
+    OSAgentTree (..),
+    Props (..),
+    withAgentTree,
+ )
+import qualified System.Agents.Base as Base
 import System.Agents.Base (AgentId, ConversationId, newConversationId, newStepId)
+import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.OS.Compat.Runtime as OSCompat
-import qualified System.Agents.Runtime as Runtime
+import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Loop
 import System.Agents.Session.OpenAI
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.ToolRegistration
+import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import System.Agents.Tools hiding (SystemTool)
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
 
 import qualified Data.Aeson.Key as AesonKey
-import Prod.Tracer (Tracer (..), contramap)
 
 -- | Controls where thinking content should be output.
 data ThinkingOutput
@@ -74,7 +81,7 @@ data ThinkingOutput
 
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
-    withAgentTreeRuntime props $ \x -> do
+    withAgentTree props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized _ -> pure ()
@@ -102,9 +109,20 @@ fileStoringConfig store mSession mPath =
         }
 
 -- | Run a one-shot agent with the given configuration.
-runOneShotWithConfig :: SessionStore -> OneShotConfig -> ConversationId -> Runtime.Runtime -> Text -> IO OneShotResult
-runOneShotWithConfig store config convId rt query = do
-    agent0 <- runtimeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId rt
+runOneShotWithConfig ::
+    SessionStore ->
+    OneShotConfig ->
+    ConversationId ->
+    -- | The tracer for logging
+    Tracer IO Trace ->
+    -- | API keys for creating HTTP runtime
+    LoadedApiKeys ->
+    -- | The agent node to execute
+    OSAgentNode ->
+    Text ->
+    IO OneShotResult
+runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
+    agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId tracer loadedApiKeys node
     let agent =
             agentSetQuery (UserQuery query) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
@@ -120,25 +138,40 @@ runOneShotWithConfig store config convId rt query = do
     config.onSessionProgress convId (SessionCompleted session0)
     pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
 
-{- | Legacy function: Run a one-shot agent with optional file-based session storage.
+{- | Run a one-shot agent with optional file-based session storage.
 
-This function uses the traditional Runtime interface for backward compatibility.
-For new code targeting the OS model, see 'mainOneShotTextOS'.
+This function uses OS-native types for agent execution.
 -}
-mainOneShotText :: SessionStore -> Maybe FilePath -> Maybe Session -> Props -> Text -> IO ()
+mainOneShotText ::
+    SessionStore ->
+    Maybe FilePath ->
+    Maybe Session ->
+    Props ->
+    Text ->
+    IO ()
 mainOneShotText store mPath mSession props query = do
     mainOneShotTextWithThinking store mPath mSession ThinkingNone props query
 
 -- | Run a one-shot agent with configurable thinking output.
-mainOneShotTextWithThinking :: SessionStore -> Maybe FilePath -> Maybe Session -> ThinkingOutput -> Props -> Text -> IO ()
+mainOneShotTextWithThinking ::
+    SessionStore ->
+    Maybe FilePath ->
+    Maybe Session ->
+    ThinkingOutput ->
+    Props ->
+    Text ->
+    IO ()
 mainOneShotTextWithThinking store mPath mSession thinkingOut props query = do
     convId <- newConversationId
-    withAgentTreeRuntime props $ \x -> do
+    -- Create a no-op tracer
+    let tracer = Tracer $ const $ pure ()
+    withAgentTree props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
-            Initialized ai -> do
+            Initialized tree -> do
                 let config = (fileStoringConfig store mSession mPath){thinkingOutput = thinkingOut}
-                OneShotResult result <- runOneShotWithConfig store config convId ai.agentRuntime query
+                let node = osTreeRoot tree
+                OneShotResult result <- runOneShotWithConfig store config convId tracer (apiKeys props) node query
                 Text.putStrLn result
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
@@ -152,34 +185,72 @@ newtype OneShotResult = OneShotResult Text
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
 
-{- | Converts a Runtime into an Agent that stops when no tool calls are present.
+-- | Parse flavor from text, defaulting to OpenAIv1 if not recognized.
+parseModelFlavor :: Text -> OpenAI.ModelFlavor
+parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
 
-The agent is configured with the runtime's agent ID and the provided conversation ID.
+-- | Look up an API key by its ID from the loaded API keys.
+lookupApiKey :: Text -> LoadedApiKeys -> Maybe OpenAI.ApiKey
+lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) keys
+
+{- | Converts an OSAgentNode into an Agent that stops when no tool calls are present.
+
+The agent is configured with the node's agent ID and the provided conversation ID.
 These identifiers are used to construct the 'ToolExecutionContext' passed to tools
 during execution, allowing tools to access session metadata.
 
-This function maintains backward compatibility with the existing Runtime interface.
-For OS-native agents, see future implementations.
+This function uses OS-native types for agent execution.
 -}
-runtimeToAgent :: SessionStore -> Maybe FilePath -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
-runtimeToAgent store mPath convId rt =
-    runtimeToAgentWithThinking store mPath ThinkingNone convId rt
+nodeToAgent ::
+    SessionStore ->
+    Maybe FilePath ->
+    ConversationId ->
+    -- | The tracer for logging
+    Tracer IO Trace ->
+    -- | API keys for creating HTTP runtime
+    LoadedApiKeys ->
+    OSAgentNode ->
+    IO (Agent (LlmTurnContent, Session))
+nodeToAgent store mPath convId tracer loadedApiKeys node =
+    nodeToAgentWithThinking store mPath ThinkingNone convId tracer loadedApiKeys node
 
--- | Converts a Runtime into an Agent with configurable thinking output.
-runtimeToAgentWithThinking :: SessionStore -> Maybe FilePath -> ThinkingOutput -> ConversationId -> Runtime.Runtime -> IO (Agent (LlmTurnContent, Session))
-runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
-    let sPrompt = SystemPrompt rt.agentModel.modelSystemPrompt.getSystemPrompt
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO rt.agentTools
+-- | Converts an OSAgentNode into an Agent with configurable thinking output.
+nodeToAgentWithThinking ::
+    SessionStore ->
+    Maybe FilePath ->
+    ThinkingOutput ->
+    ConversationId ->
+    -- | The tracer for logging
+    Tracer IO Trace ->
+    -- | API keys for creating HTTP runtime
+    LoadedApiKeys ->
+    OSAgentNode ->
+    IO (Agent (LlmTurnContent, Session))
+nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node = do
+    let agentCfg = osNodeConfig node
+    let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
+
+    -- Read tools from the OS-native TVar
+    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
+
     stepId <- newStepId
 
-    -- Create OpenAI completion config from runtime
+    -- Get the API key for this agent and create HTTP runtime
+    let apiKeyId = Base.apiKeyId agentCfg
+    let mApiKey = lookupApiKey apiKeyId loadedApiKeys
+    httpRuntime <- case mApiKey of
+        Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
+        Nothing -> HttpClient.newRuntime HttpClient.NoToken
+
+    -- Create OpenAI completion config from node config
+    -- Use node's agent slug and id for tracing
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap (Runtime.AgentTrace_Conversation rt.agentSlug rt.agentId convId . (Runtime.LLMTrace stepId)) rt.agentTracer
-                , cfgRuntime = rt.agentAuthenticatedHttpClientRuntime
-                , cfgBaseUrl = rt.agentModel.modelBaseUrl
-                , cfgModelName = rt.agentModel.modelName
-                , cfgModelFlavor = rt.agentModel.modelFlavor
+                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) convId . (LLMTrace stepId)) tracer
+                , cfgRuntime = httpRuntime
+                , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
+                , cfgModelName = Base.modelName agentCfg
+                , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
                 }
     let completeF = mkOpenAICompletion completionConfig
 
@@ -200,12 +271,12 @@ runtimeToAgentWithThinking store mPath thinkingOut convId rt = do
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeToolCall rt.agentId convId rt.agentTools
+                , toolCall = executeToolCall (osNodeAgentId node) convId (osNodeTools node)
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }
 
-{- | Execute a tool call using the runtime's registered tools.
+{- | Execute a tool call using the node's registered tools.
 
 Constructs a 'ToolExecutionContext' with the provided agent and session identifiers,
 then executes the tool with this context. The context gives tools access to:
@@ -213,7 +284,7 @@ then executes the tool with this context. The context gives tools access to:
 * 'ctxSessionId' - From the current session
 * 'ctxConversationId' - The conversation ID passed from the runtime
 * 'ctxTurnId' - From the current session
-* 'ctxAgentId' - The agent ID from the runtime configuration
+* 'ctxAgentId' - The agent ID from the node
 * 'ctxFullSession' - Populated according to 'ContextConfig' (not directly available here)
 -}
 executeToolCall ::
@@ -221,7 +292,8 @@ executeToolCall ::
     AgentId ->
     -- | Conversation ID for context
     ConversationId ->
-    Runtime.AgentTools ->
+    -- | Tools TVar from OSAgentNode
+    TVar [ToolRegistration] ->
     -- | Context passed from runStepM (ignored, we construct fresh)
     ToolExecutionContext ->
     LlmToolCall ->
@@ -466,39 +538,3 @@ agentWithSessionProgress onProgress agent =
         onProgress (SessionUpdated sess)
         f sess
 
--------------------------------------------------------------------------------
--- Future OS-Native Functions
--------------------------------------------------------------------------------
-
-{- | Future: Run a one-shot agent using the native OS interface.
-
-This function is a placeholder for the future OS-native implementation.
-When fully implemented, it will:
-
-1. Create an agent entity in the OS
-2. Execute the conversation using OS primitives
-3. Return the result directly in the OSM monad
-
-Currently returns a placeholder error indicating this is not yet implemented.
--}
-mainOneShotTextOS ::
-    -- | OS instance
-    OSCompat.OS ->
-    -- | Optional file path for session storage
-    Maybe FilePath ->
-    -- | Optional initial session
-    Maybe Session ->
-    -- | Agent ID to use
-    AgentId ->
-    -- | User query text
-    Text ->
-    -- | Result in the OS monad
-    OSCompat.OSM Text
-mainOneShotTextOS _os _mPath _mSession _agentId _query = do
-    -- Placeholder: This will be implemented when full OS support is ready
-    -- The implementation will:
-    -- 1. Create a conversation in the OS
-    -- 2. Run the agent using OS primitives
-    -- 3. Collect the result
-    liftIO $ Text.putStrLn "OS-native one-shot not yet implemented, use mainOneShotText instead"
-    pure "OS-native one-shot not yet implemented"

@@ -12,7 +12,6 @@ Complete API reference for the Entity-Component-System (ECS) based OS architectu
 6. [Concurrent Access](#concurrent-access)
 7. [Conversation Tracking](#conversation-tracking)
 8. [Persistence Layer](#persistence-layer)
-9. [Compatibility Layer](#compatibility-layer)
 
 ---
 
@@ -829,109 +828,6 @@ closePersistenceBackend backend
 
 ---
 
-## Compatibility Layer
-
-### Migration Types
-
-```haskell
-data MigrationConfig = MigrationConfig
-    { migrationEnableOS :: Bool
-    , migrationEnableCompat :: Bool
-    , migrationLogPath :: Maybe FilePath
-    } deriving (Show, Eq)
-
-data MigrationPhase
-    = PhaseOldOnly      -- ^ Only old Runtime
-    | PhaseDual         -- ^ Both Runtime and OS
-    | PhaseNewOnly      -- ^ Only new OS
-    deriving (Show, Eq, Ord, Enum, Bounded)
-
-data MigrationState = MigrationState
-    { migrationPhase :: MigrationPhase
-    , migrationCompatRuntimes :: Map Base.AgentId RuntimeBridge
-    }
-```
-
-### Initialization
-
-```haskell
--- | Default migration config (old-only for compatibility).
-defaultMigrationConfig :: MigrationConfig
-defaultMigrationConfig = MigrationConfig
-    { migrationEnableOS = False
-    , migrationEnableCompat = True
-    , migrationLogPath = Nothing
-    }
-
--- | Initialize with migration support.
-initializeWithMigration :: MigrationConfig -> IO (Either String (Either Runtime OS))
-```
-
-### Runtime Bridge
-
-```haskell
--- | Bridge from old Runtime to new OS.
-data RuntimeBridge = RuntimeBridge
-    { bridgeAgentId :: Base.AgentId
-    , bridgeOS :: OS
-    }
-
--- | Create a new runtime bridge.
-newRuntimeBridge :: Base.AgentId -> OS -> RuntimeBridge
-
--- | Run an operation with the bridge.
-runWithBridge :: RuntimeBridge -> ReaderT RuntimeBridge IO a -> IO a
-```
-
-### AgentRuntime Typeclass
-
-```haskell
-class (Monad m) => AgentRuntime m where
-    listTools :: m [ToolRegistration]
-    callTool :: Text -> Value -> m UserToolResponse
-    getTracer :: m (Tracer IO Trace)
-
--- Instance for compatibility
-instance AgentRuntime (ReaderT RuntimeBridge IO) where
-    listTools = ...
-    callTool = ...
-    getTracer = ...
-```
-
-**Example: Using the Compatibility Layer**
-```haskell
-import System.Agents.OS.Compat
-
-main :: IO ()
-main = do
-    -- Initialize with dual-mode support
-    let config = defaultMigrationConfig
-        { migrationEnableOS = True
-        , migrationEnableCompat = True
-        }
-    
-    result <- initializeWithMigration config
-    case result of
-        Left err -> error err
-        Right (Left runtime) -> do
-            -- Old Runtime path
-            putStrLn "Using legacy Runtime"
-            runWithRuntime runtime $ do
-                tools <- listTools
-                callTool "my-tool" args
-                
-        Right (Right os) -> do
-            -- New OS path with compatibility
-            putStrLn "Using new OS with compatibility"
-            bridge <- newRuntimeBridge agentId os
-            runWithBridge bridge $ do
-                -- Same interface as old Runtime!
-                tools <- listTools
-                callTool "my-tool" args
-```
-
----
-
 ## Common Patterns
 
 ### Pattern 1: Agent with Multiple Toolboxes
@@ -1050,6 +946,4 @@ atomically $ updateAgentAndToolbox world agentId toolboxId newAgentConfig newToo
 - `PersistenceHandle`, `PersistenceBackendType` - Backend types
 - `Persistable` - Persistence typeclass
 - `EntityQuery` - Query specification
-- `MigrationConfig`, `MigrationPhase`, `MigrationState` - Migration types
-- `RuntimeBridge` - Compatibility bridge
 

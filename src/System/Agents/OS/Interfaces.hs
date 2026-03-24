@@ -4,19 +4,7 @@
 {- | Common interface abstraction for TUI and OneShot interfaces.
 
 This module provides a unified interface that both TUI and OneShot can use
-to interact with the OS. The interface abstracts away the differences between
-interactive multi-agent mode and batch single-agent mode.
-
-== Design Goals
-
-1. Unification: Provide a single interface for both TUI and OneShot
-2. Flexibility: Support both interactive and batch modes
-3. Future-proof: Allow migration from RuntimeBridge to native OS
-
-== Migration Path
-
-The interface is designed to work with the RuntimeBridge during the migration
-phase, and will eventually support native OS operations when fully migrated.
+to interact with the OS. The interface uses OS-native structures.
 -}
 module System.Agents.OS.Interfaces (
     -- * Interface Handle
@@ -49,6 +37,9 @@ module System.Agents.OS.Interfaces (
     -- * Utility Functions
     defaultInterfaceConfig,
     InterfaceMode (..),
+    
+    -- * Re-exports from Compat.Runtime (deprecated)
+    OS (..),
 ) where
 
 import Control.Concurrent (ThreadId)
@@ -61,7 +52,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 
 import System.Agents.Base (AgentId, ConversationId)
-import System.Agents.OS.Compat.Runtime (OS, RuntimeBridge)
+import System.Agents.OS.Compat.Runtime (OS (..))
 import System.Agents.Session.Base (Session, SessionProgress)
 
 -------------------------------------------------------------------------------
@@ -142,13 +133,13 @@ class OSInterface m where
 -- | Concrete IO implementation of OSInterface.
 instance OSInterface IO where
     initInterface _os _config = do
-        error "initInterface: Not yet implemented - use legacy RuntimeBridge interface"
+        error "initInterface: Not yet implemented - use OS-native interface"
 
     runInterface _handle = do
-        error "runInterface: Not yet implemented - use legacy RuntimeBridge interface"
+        error "runInterface: Not yet implemented - use OS-native interface"
 
     shutdownInterface _handle = do
-        error "shutdownInterface: Not yet implemented - use legacy RuntimeBridge interface"
+        error "shutdownInterface: Not yet implemented - use OS-native interface"
 
 -------------------------------------------------------------------------------
 -- Agent Handle
@@ -167,8 +158,6 @@ data AgentStatus
 data AgentHandle = AgentHandle
     { ahAgentId :: AgentId
     -- ^ Unique agent identifier
-    , ahBridge :: Maybe RuntimeBridge
-    -- ^ RuntimeBridge if using compatibility mode
     , ahThreadId :: Maybe ThreadId
     -- ^ Thread ID if agent is running
     , ahStatus :: AgentStatus
@@ -182,8 +171,6 @@ instance Show AgentHandle where
     show ah =
         "AgentHandle {ahAgentId = "
             ++ show ah.ahAgentId
-            ++ ", ahBridge = "
-            ++ show ah.ahBridge
             ++ ", ahThreadId = "
             ++ show ah.ahThreadId
             ++ ", ahStatus = "
@@ -196,25 +183,25 @@ instance Show AgentHandle where
 createAgent :: InterfaceHandle -> Text -> IO AgentHandle
 createAgent _handle _agentName = do
     -- Placeholder implementation
-    error "createAgent: Not yet implemented - use legacy RuntimeBridge interface"
+    error "createAgent: Not yet implemented - use OS-native interface"
 
 -- | Destroy an agent and clean up resources.
 destroyAgent :: InterfaceHandle -> AgentId -> IO ()
 destroyAgent _handle _agentId = do
     -- Placeholder implementation
-    error "destroyAgent: Not yet implemented - use legacy RuntimeBridge interface"
+    error "destroyAgent: Not yet implemented - use OS-native interface"
 
 -- | Send a message to an agent.
 sendMessage :: InterfaceHandle -> AgentId -> Text -> IO ()
 sendMessage _handle _agentId _message = do
     -- Placeholder implementation
-    error "sendMessage: Not yet implemented - use legacy RuntimeBridge interface"
+    error "sendMessage: Not yet implemented - use OS-native interface"
 
 -- | Receive a message from an agent (blocking).
 receiveMessage :: InterfaceHandle -> AgentId -> IO Text
 receiveMessage _handle _agentId = do
     -- Placeholder implementation
-    error "receiveMessage: Not yet implemented - use legacy RuntimeBridge interface"
+    error "receiveMessage: Not yet implemented - use OS-native interface"
 
 -------------------------------------------------------------------------------
 -- Conversation Handle
@@ -260,13 +247,13 @@ instance Show ConversationHandle where
 startConversation :: InterfaceHandle -> AgentId -> Text -> IO ConversationHandle
 startConversation _handle _agentId _initialMessage = do
     -- Placeholder implementation
-    error "startConversation: Not yet implemented - use legacy RuntimeBridge interface"
+    error "startConversation: Not yet implemented - use OS-native interface"
 
 -- | End a conversation.
 endConversation :: InterfaceHandle -> ConversationId -> IO ()
 endConversation _handle _convId = do
     -- Placeholder implementation
-    error "endConversation: Not yet implemented - use legacy RuntimeBridge interface"
+    error "endConversation: Not yet implemented - use OS-native interface"
 
 -- | Get the current status of a conversation.
 getConversationStatus :: InterfaceHandle -> ConversationId -> IO ConversationStatus
@@ -303,3 +290,4 @@ unsubscribeFromEvents :: InterfaceHandle -> IO ()
 unsubscribeFromEvents _handle = do
     -- In a full implementation, this would remove the subscriber
     pure ()
+

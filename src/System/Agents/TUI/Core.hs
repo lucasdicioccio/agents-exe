@@ -4,11 +4,9 @@
 {-# LANGUAGE TupleSections #-}
 
 {- | Main entry point for the TUI application.
-This module re-exports functionality from the submodules and provides
-the main initialization and application runner.
 
-This version uses the RuntimeBridge from the OS compatibility layer
-to work with the new OS model while maintaining backward compatibility.
+This module re-exports functionality from the submodules and provides
+the main initialization and application runner using OS-native structures.
 -}
 module System.Agents.TUI.Core (
     -- * Re-exports from Types
@@ -64,30 +62,36 @@ module System.Agents.TUI.Core (
     runTUIWithConfig,
     fileSessionConfig,
 
-    -- * OS Bridge helpers
-    createTuiAgentWithBridge,
+    -- * OS-native helpers
+    createTuiAgent,
+    refreshAgentTools,
+    getAgentTools,
 ) where
 
 import Brick hiding (Down)
 import Brick.BChan (newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (newTVarIO)
+import Control.Concurrent.STM (newTVarIO, readTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
 
-import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props, loadAgentTreeRuntime)
-import System.Agents.Base (newAgentId)
-import System.Agents.OS.Compat.Runtime (
-    initializeOS,
-    newRuntimeBridge,
+import System.Agents.AgentTree (
+    LoadAgentResult (..),
+    LoadedApiKeys,
+    OSAgentNode (..),
+    OSAgentTree (..),
+    Props,
+    loadAgentTree,
  )
+import qualified System.Agents.AgentTree as AgentTree
+import System.Agents.Base (AgentId (..))
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
-
 import System.Agents.TUI.Event
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
@@ -127,40 +131,52 @@ loadSessionFiles store = do
 -------------------------------------------------------------------------------
 
 -- | Create a session configuration with file-based persistence.
-fileSessionConfig :: SessionStore -> SessionConfig
-fileSessionConfig store =
+fileSessionConfig :: SessionStore -> LoadedApiKeys -> SessionConfig
+fileSessionConfig store apiKeys =
     SessionConfig
         { sessionStore = store
+        , sessionApiKeys = apiKeys
         }
 
 -------------------------------------------------------------------------------
--- OS Bridge Integration
+-- OS-Native Agent Creation
 -------------------------------------------------------------------------------
 
-{- | Create a TuiAgent with a RuntimeBridge for OS compatibility.
+{- | Create a TuiAgent from an OSAgentTree.
 
-This function initializes the OS compatibility layer and creates
-a RuntimeBridge that allows the TUI to work with the new OS model
-while maintaining backward compatibility with existing code.
+This function extracts the root agent from the tree and creates
+a TuiAgent that provides direct access to OS-native structures.
 -}
-createTuiAgentWithBridge :: AgentTree -> IO TuiAgent
-createTuiAgentWithBridge tree = do
-    -- Initialize a minimal OS instance
-    os <- initializeOS
-
-    -- Create a new agent ID
-    agentId <- newAgentId
-
-    -- Create the RuntimeBridge
-    let bridge = newRuntimeBridge agentId os
-
-    -- Return the TUI agent
-    pure $
-        TuiAgent
-            { tuiAgentId = agentId
-            , tuiBridge = bridge
+createTuiAgent :: OSAgentTree -> TuiAgent
+createTuiAgent tree =
+    let rootNode = osTreeRoot tree
+     in TuiAgent
+            { tuiAgentId = rootNode.osNodeAgentId
             , tuiTree = tree
+            , tuiNode = rootNode
+            , tuiSlug = rootNode.osNodeConfig.slug
             }
+
+{- | Refresh tools for a TuiAgent.
+
+This function reads the current tools from the OS-native TVar.
+-}
+refreshAgentTools :: TuiAgent -> IO [ToolRegistration]
+refreshAgentTools agent =
+    readTVarIO (osNodeTools agent.tuiNode)
+
+{- | Get tools for a TuiAgent from the OS-native TVar.
+-}
+getAgentTools :: TuiAgent -> IO [ToolRegistration]
+getAgentTools = refreshAgentTools
+
+-- | Collect tools from all TuiAgents.
+collectAgentTools :: [TuiAgent] -> IO [(AgentId, [ToolRegistration])]
+collectAgentTools agents = mapM collectTools agents
+  where
+    collectTools agent = do
+        tools <- getAgentTools agent
+        pure (tuiAgentId agent, tools)
 
 -------------------------------------------------------------------------------
 -- Initialization
@@ -169,24 +185,32 @@ createTuiAgentWithBridge tree = do
 {- | Initialize the TUI with props and optional conversation prefix (legacy API).
 
 For more control, use 'runTUIWithConfig' instead.
+
+This function:
+1. Loads agent trees from the provided props
+2. Creates TuiAgents with OS-native structures
+3. Initializes the TUI with the agents and loaded sessions
 -}
-runTUI :: SessionStore -> [Props] -> IO ()
-runTUI store props =
-    let config = fileSessionConfig store
-     in runTUIWithConfig config props
+runTUI :: SessionStore -> LoadedApiKeys -> [Props] -> IO ()
+runTUI store apiKeys props = do
+    let config = fileSessionConfig store apiKeys
+    runTUIWithConfig config props
 
 -- | Initialize the TUI with a custom session configuration.
 runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
 runTUIWithConfig config props = do
-    -- Load agent trees and create TuiAgents with RuntimeBridge
-    trees <- traverse loadAgentTreeRuntime props
-    let itrees = [rt | Initialized rt <- trees]
+    -- Load agent trees and create TuiAgents
+    trees <- traverse loadAgentTree props
+    let itrees = [tree | Initialized tree <- trees]
 
-    -- Create TUI agents with OS bridges
-    tuiAgents <- traverse createTuiAgentWithBridge itrees
+    -- Create TUI agents from OS-native trees
+    let tuiAgents = map createTuiAgent itrees
 
-    -- Load existing session files (only if file prefix is provided)
+    -- Load existing session files
     loadedSessions <- loadSessionFiles config.sessionStore
+
+    -- Collect tools from all agents (read from their TVars)
+    agentTools <- collectAgentTools tuiAgents
 
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
@@ -195,8 +219,10 @@ runTUIWithConfig config props = do
     core0 <- initCore tuiAgents
     coreTVar <- newTVarIO core0
 
-    -- Create UI state
-    let ui0 = initUIState tuiAgents [s | (_, Just s) <- loadedSessions]
+    -- Create UI state with loaded sessions and collected tools
+    let ui0 = (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
+            { _coreAgentTools = agentTools
+            }
 
     -- Create TUI state with session configuration
     let st = TuiState coreTVar ui0 evChan config
@@ -215,3 +241,4 @@ runTUIWithConfig config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+

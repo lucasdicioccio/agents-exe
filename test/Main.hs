@@ -56,14 +56,12 @@ import qualified OS.ConversationTests
 import qualified OS.ResourcesTests
 -- Import OS Concurrent tests
 import qualified OS.ConcurrentTests
--- Import OS Compatibility tests
-import qualified OS.CompatTests
 -- Import OS Interface tests
 import qualified OS.InterfaceTests
--- Import OS Integration tests (NEW)
+-- Import OS Integration tests
 import qualified OS.IntegrationTests
--- Import OS Compatibility tests (NEW)
-import qualified OS.CompatibilityTests
+-- Import OS Persistence tests
+import qualified OS.PersistenceTests
 
 main :: IO ()
 main = defaultMain tests
@@ -82,10 +80,9 @@ tests =
         , OS.ConversationTests.conversationTests
         , OS.ResourcesTests.resourcesTests
         , OS.ConcurrentTests.concurrentTests
-        , OS.CompatTests.tests
         , OS.InterfaceTests.tests
         , OS.IntegrationTests.integrationTests
-        , OS.CompatibilityTests.tests
+        , OS.PersistenceTests.persistenceTests
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests

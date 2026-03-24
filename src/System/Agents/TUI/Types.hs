@@ -23,10 +23,9 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import qualified Data.Vector as Vector
 
-import System.Agents.AgentTree (AgentTree)
+import System.Agents.AgentTree (OSAgentTree, OSAgentNode, LoadedApiKeys)
 import System.Agents.Base (AgentId, ConversationId (..))
-import System.Agents.OS.Compat.Runtime (RuntimeBridge)
-import qualified System.Agents.Runtime as Runtime
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
 import System.Agents.ToolRegistration (ToolRegistration)
@@ -77,36 +76,42 @@ data AppEvent
     = AppEvent_Heartbeat
     | AppEvent_AgentStepProgrress ConversationId Session
     | AppEvent_AgentNeedsInput ConversationId
-    | AppEvent_AgentTrace Runtime.Trace
+    | AppEvent_AgentTrace Trace
     | AppEvent_ShowStatus StatusSeverity Text
     | AppEvent_ClearStatus
     deriving (Show)
 
 -------------------------------------------------------------------------------
--- Agent Types (OS-Compatible)
+-- Agent Types (OS-Native)
 -------------------------------------------------------------------------------
 
-{- | TUI Agent using RuntimeBridge for OS compatibility.
+{- | TUI Agent using OS-native structures.
 
-This structure replaces the old direct Agent usage with a RuntimeBridge
-that connects to the new OS model. The bridge provides the same interface
-while using the OS backend.
+This structure wraps an OSAgentNode for use in the TUI.
+Tools are accessed directly from the node's tools TVar.
 -}
 data TuiAgent = TuiAgent
     { tuiAgentId :: AgentId
     -- ^ Unique identifier for this agent
-    , tuiBridge :: RuntimeBridge
-    -- ^ Bridge to the OS for runtime operations
-    , tuiTree :: AgentTree
-    -- ^ The agent's tree structure (kept for metadata access)
+    , tuiTree :: OSAgentTree
+    -- ^ The agent's tree structure
+    , tuiNode :: OSAgentNode
+    -- ^ The specific node for this agent
+    , tuiSlug :: Text
+    -- ^ The agent's slug
     }
 
--- | Legacy accessor for backward compatibility during migration.
-sessionAgent :: TuiAgent -> Agent (LlmTurnContent, Session)
-sessionAgent _ = error "sessionAgent: Deprecated, use RuntimeBridge interface"
+-- | Manual Show instance for TuiAgent.
+instance Show TuiAgent where
+    show agent =
+        "TuiAgent {tuiAgentId = "
+            ++ show agent.tuiAgentId
+            ++ ", tuiSlug = "
+            ++ show agent.tuiSlug
+            ++ ", tuiTree = <OSAgentTree>, tuiNode = <OSAgentNode>}"
 
--- | Legacy accessor for backward compatibility during migration.
-agentTree :: TuiAgent -> AgentTree
+-- | Legacy accessor for backward compatibility.
+agentTree :: TuiAgent -> OSAgentTree
 agentTree = tuiTree
 
 -------------------------------------------------------------------------------
@@ -268,6 +273,8 @@ instance Show AuxiliaryTask where
 -- | Configuration for session handling in the TUI.
 data SessionConfig = SessionConfig
     { sessionStore :: SessionStore
+    , sessionApiKeys :: LoadedApiKeys
+    -- ^ API keys for creating HTTP runtime for LLM calls
     }
 
 -------------------------------------------------------------------------------
@@ -379,3 +386,4 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+

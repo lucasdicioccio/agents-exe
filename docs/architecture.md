@@ -27,7 +27,7 @@ The framework is built around a layered architecture that separates concerns bet
 
 ## OS Model Architecture
 
-The OS Model provides a centralized, ECS-based architecture for managing agents, toolboxes, and resources. It replaces the previous Runtime-per-agent model.
+The OS Model provides a centralized, ECS-based architecture for managing agents, toolboxes, and resources.
 
 ### Entity-Component-System (ECS) Pattern
 
@@ -291,55 +291,7 @@ SQLite Schema (simplified)
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## Migration Path from Old Runtime
-
-### Architecture Comparison
-
-```
-OLD: Runtime-per-Agent                    NEW: Centralized OS
-┌─────────────────────┐                  ┌─────────────────────┐
-│ ┌─────────────────┐ │                  │                     │
-│ │   Runtime A     │ │                  │ ┌─────────────────┐ │
-│ │ ┌─────┐┌─────┐  │ │                  │ │      World      │ │
-│ │ │Tools││HTTP │  │ │                  │ │  ┌───┐┌───┐┌───┐ │ │
-│ │ │     ││Pool │  │ │                  │ │  │ C ││ C ││ C │ │ │
-│ │ └─────┘└─────┘  │ │                  │ │  └───┘└───┘└───┘ │ │
-│ └─────────────────┘ │                  │ └─────────────────┘ │
-│ ┌─────────────────┐ │                  │                     │
-│ │   Runtime B     │ │                  │ ┌─────────────────┐ │
-│ │ ┌─────┐┌─────┐  │ │                  │ │ Resource Registry│ │
-│ │ │Tools││HTTP │  │ │                  │ │  ┌───┐┌───┐┌───┐ │ │
-│ │ │     ││Pool │  │ │                  │ │  │ R ││ R ││ R │ │ │
-│ │ └─────┘└─────┘  │ │                  │ │  └───┘└───┘└───┘ │ │
-│ └─────────────────┘ │                  │ └─────────────────┘ │
-│ ┌─────────────────┐ │                  │                     │
-│ │   Runtime C     │ │                  │ ┌─────────────────┐ │
-│ │ ┌─────┐┌─────┐  │ │                  │ │  Persistence    │ │
-│ │ │Tools││HTTP │  │ │                  │ │  ┌───┐┌───┐┌───┐ │ │
-│ │ │     ││Pool │  │ │                  │ │  │ P ││ P ││ P │ │ │
-│ │ └─────┘└─────┘  │ │                  │ │  └───┘└───┘└───┘ │ │
-│ └─────────────────┘ │                  │ └─────────────────┘ │
-└─────────────────────┘                  └─────────────────────┘
-                                                         │
-                              ┌──────────────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-         ▼                    ▼                    ▼
-    ┌─────────┐          ┌─────────┐          ┌─────────┐
-    │ Agent A │          │ Agent B │          │ Agent C │
-    └─────────┘          └─────────┘          └─────────┘
-         │                    │                    │
-         └────────────────────┴────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │  Shared HTTP    │
-                    │  Connection Pool│
-                    └─────────────────┘
-```
-
-### Benefits of the New Architecture
+### Architecture Benefits
 
 1. **Shared Resources**: Multiple agents can share toolboxes (e.g., same SQLite database)
 2. **Resource Pooling**: HTTP connections pooled across all agents
@@ -347,26 +299,6 @@ OLD: Runtime-per-Agent                    NEW: Centralized OS
 4. **Foundation for Web API**: Centralized state enables HTTP server interface
 5. **Durable Persistence**: Built-in persistence layer with multiple backends
 6. **Thorough Lineage Tracking**: Complete call chains for debugging
-
-### Compatibility Layer
-
-The `System.Agents.OS.Compat` module provides a bridge from the old Runtime interface to the new OS backend:
-
-```haskell
--- Old code continues to work
-runtime <- newRuntime config
-result <- runWithRuntime runtime $ do
-    tools <- listTools
-    callTool "my-tool" args
-
--- New OS interface (when ready)
-os <- initializeOS defaultConfig
-result <- runOSM os $ do
-    agent <- createAgent agentConfig
-    conv <- startConversation agent convConfig
-    turn <- startTurn conv
-    executeToolCall turn "my-tool" args
-```
 
 ## Core Types
 
@@ -449,11 +381,8 @@ Agents form a directed graph where:
 The Agent Tree system supports dynamic tool registration via STM TVars:
 
 ```haskell
--- Runtime now uses STM TVar for mutable tool storage
-type AgentTools = TVar [ToolRegistration]
-
--- Wiring process appends helper agent tools to parent
-tireAgentTools :: Props -> AgentConfigGraph -> (AgentSlug, AgentConfigNode) -> IO ()
+-- OS-native agents use STM TVar for mutable tool storage
+wireAgentTools :: Props -> AgentConfigGraph -> Map AgentSlug OSAgentNode -> IO ()
 ```
 
 ## Conversation Flow
@@ -505,7 +434,7 @@ Main
   ├── AgentTree
   │     ├── Base
   │     ├── FileLoader
-  │     └── Runtime
+  │     └── OS.Core
   ├── CLI.*
   │     └── AgentTree
   ├── TUI
@@ -534,8 +463,7 @@ OS Layer
   │     ├── OS.Persistence.Types
   │     ├── OS.Persistence.Sqlite
   │     └── OS.Persistence.File
-  └── OS.Compat
-        └── OS.Compat.Runtime
+  └── OS.Agents
 ```
 
 ## Key Design Decisions
@@ -546,14 +474,12 @@ OS Layer
 4. **Phantom Types**: Type safety for entity IDs without runtime overhead
 5. **Type Erasure**: `Any` for heterogeneous storage with safe casting via Component typeclass
 6. **Tracer Pattern**: All side effects are traced for observability
-7. **Two-Phase Initialization**: Runtime shells created first, then wired together to support cycles
-8. **Migration Compatibility**: Full compatibility layer for gradual migration
+7. **Two-Phase Initialization**: Agent shells created first, then wired together to support cycles
 
 ## Tradeoffs
 
 1. **ECS Complexity**: Adds indirection but enables powerful queries and flexible composition
 2. **STM Overhead**: Slight performance cost for composability
-3. **Migration Duration**: Dual-mode operation adds maintenance burden but ensures smooth transition
-4. **Storage Overhead**: Component storage uses more memory than direct fields but enables dynamic extension
-5. **Type Erasure**: Using `Any` requires careful casting but enables heterogeneous storage
+3. **Storage Overhead**: Component storage uses more memory than direct fields but enables dynamic extension
+4. **Type Erasure**: Using `Any` requires careful casting but enables heterogeneous storage
 

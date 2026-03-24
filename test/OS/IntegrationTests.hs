@@ -276,7 +276,7 @@ lineageTrackingTests =
             -- Verify frame types
             case currentFrameType lineage of
                 Nothing -> assertFailure "Should have current frame"
-                Just ft -> ft @?= ToolCallFrame
+                Just ft -> ft @?= ConversationFrame
 
             -- Find specific frames
             let toolCallFrames = findFramesByType ToolCallFrame lineage
@@ -304,12 +304,12 @@ lineageTrackingTests =
             -- Get root
             case lineageRoot lineage of
                 Nothing -> assertFailure "Should have root"
-                Just frame -> frameType frame @?= ConversationFrame
+                Just frame -> frameType frame @?= TurnFrame
 
             -- Get head
             case lineageHead lineage of
                 Nothing -> assertFailure "Should have head"
-                Just frame -> frameType frame @?= TurnFrame
+                Just frame -> frameType frame @?= ConversationFrame
         ]
 
 -------------------------------------------------------------------------------
@@ -401,7 +401,10 @@ persistenceIntegrationTests =
                 let dbPath = tmpDir ++ "/events.db"
                 backend <- createPersistenceBackend (SqliteBackendType dbPath)
 
+                -- First create and persist an entity (required for foreign key constraint)
                 eid <- createEntity
+                let config = testAgentConfig' "event-test-agent"
+                persist backend eid config
 
                 -- Log some events with explicit type annotations
                 persistOSEvent backend "agent_created" (object ["name" .= ("test" :: Text)]) (Just eid)

@@ -2,9 +2,8 @@ module System.Agents.TraceUtils where
 
 import Prod.Tracer (Tracer (..))
 
-import System.Agents.AgentTree (Trace (..))
+import System.Agents.Runtime.Trace (Trace (..), ConversationTrace (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Runtime as Runtime
 
 -------------------------------------------------------------------------------
 traceWaitingOpenAIRateLimits ::
@@ -13,6 +12,7 @@ traceWaitingOpenAIRateLimits ::
     Tracer IO Trace
 traceWaitingOpenAIRateLimits lims onWait = Tracer f
   where
-    f (AgentTrace (Runtime.AgentTrace_Conversation _ _ _ (Runtime.LLMTrace _ tr))) =
+    f (AgentTrace_Conversation _ _ _ (LLMTrace _ tr)) =
         runTracer (OpenAI.waitRateLimit lims onWait) tr
     f _ = pure ()
+

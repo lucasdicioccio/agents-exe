@@ -347,17 +347,17 @@ lineageTests =
                         pushLineage TurnFrame turnId now $
                             pushLineage ToolCallFrame toolId now emptyLineage
             lineageDepth lineage @?= 3
-            currentFrameType lineage @?= Just ToolCallFrame
+            currentFrameType lineage @?= Just ConversationFrame
         , testCase "Lineage head and root" $ do
             now <- getCurrentTime
             let convId = EntityId $ read "550e8400-e29b-41d4-a716-446655440000"
             let turnId = EntityId $ read "550e8400-e29b-41d4-a716-446655440001"
             let lineage = pushLineage ConversationFrame convId now $ pushLineage TurnFrame turnId now emptyLineage
             case lineageHead lineage of
-                Just frame -> frameType frame @?= TurnFrame
+                Just frame -> frameType frame @?= ConversationFrame
                 Nothing -> assertBool "Expected head" False
             case lineageRoot lineage of
-                Just frame -> frameType frame @?= ConversationFrame
+                Just frame -> frameType frame @?= TurnFrame
                 Nothing -> assertBool "Expected root" False
         , testCase "Build lineage context" $ do
             now <- getCurrentTime

@@ -15,6 +15,7 @@ module System.Agents.OS.Persistence.Schema (
     sqliteCreateSchema,
     sqliteDropSchema,
     sqliteMigrationScript,
+    executeSqliteSchema,
 
     -- * PostgreSQL Schema
     postgresCreateSchema,
@@ -26,9 +27,10 @@ module System.Agents.OS.Persistence.Schema (
     migrateSchema,
 ) where
 
+import Control.Monad (forM_)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query_)
+import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query, query_, withTransaction)
 import Database.SQLite.Simple.QQ (sql)
 
 -------------------------------------------------------------------------------
@@ -45,7 +47,80 @@ currentSchemaVersion = 1
 -- SQLite Schema
 -------------------------------------------------------------------------------
 
--- | Complete SQLite schema creation script.
+-- | Individual SQLite schema statements for proper execution.
+sqliteSchemaStatements :: [Query]
+sqliteSchemaStatements =
+    [ [sql| CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) |]
+    , [sql| INSERT INTO schema_version (version) VALUES (1) 
+            ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP |]
+    , [sql| CREATE TABLE IF NOT EXISTS entities (
+            entity_id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) |]
+    , [sql| CREATE TABLE IF NOT EXISTS components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_id TEXT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
+            component_type INTEGER NOT NULL,
+            component_data TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(entity_id, component_type)
+        ) |]
+    , [sql| CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            event_data TEXT NOT NULL,
+            entity_id TEXT REFERENCES entities(entity_id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) |]
+    , [sql| CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tool_calls TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) |]
+    , [sql| CREATE TABLE IF NOT EXISTS tool_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tool_call_id TEXT NOT NULL UNIQUE,
+            turn_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            tool_input TEXT NOT NULL,
+            tool_result TEXT,
+            parent_call_id TEXT,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            status TEXT NOT NULL
+        ) |]
+    -- Indexes
+    , [sql| CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(turn_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_tool_calls_turn ON tool_calls(turn_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_tool_calls_parent ON tool_calls(parent_call_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_tool_calls_status ON tool_calls(status) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_entities_updated ON entities(updated_at) |]
+    ]
+
+-- | Execute SQLite schema statements individually.
+executeSqliteSchema :: Connection -> IO ()
+executeSqliteSchema conn = do
+    forM_ sqliteSchemaStatements $ \stmt ->
+        execute_ conn stmt
+
+-- | Complete SQLite schema creation script (for reference/documentation).
 sqliteCreateSchema :: Query
 sqliteCreateSchema =
     [sql|
@@ -57,8 +132,8 @@ CREATE TABLE IF NOT EXISTS schema_version (
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert initial version
-INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+-- Insert initial version (only if not exists)
+INSERT INTO schema_version (version) VALUES (1) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 
 -- Entities table (sparse representation)
 CREATE TABLE IF NOT EXISTS entities (
@@ -153,9 +228,9 @@ DROP TABLE IF EXISTS schema_version;
 |]
 
 -- | SQLite migration script (version 0 -> 1).
-sqliteMigrationScript :: Int -> Int -> Maybe Query
+sqliteMigrationScript :: Int -> Int -> Maybe (Connection -> IO ())
 sqliteMigrationScript fromVer toVer
-    | fromVer == 0 && toVer == 1 = Just sqliteCreateSchema
+    | fromVer == 0 && toVer == 1 = Just executeSqliteSchema
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
 
@@ -179,7 +254,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 -- Insert initial version
-INSERT INTO schema_version (version) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO schema_version (version) VALUES (1) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 
 -- Entities table (sparse representation)
 CREATE TABLE IF NOT EXISTS entities (
@@ -296,20 +371,32 @@ data Migration = Migration
     deriving (Show, Eq)
 
 -- | Get the current schema version from the database.
+-- Returns 0 if the schema_version table doesn't exist (fresh database).
 getSchemaVersion :: Connection -> IO Int
 getSchemaVersion conn = do
-    -- Ensure schema_version table exists
-    execute_ conn "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)"
-    -- Get current version
-    result <- query_ conn "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
-    case result of
-        [Only v] -> pure v
-        _ -> pure 0
+    -- Check if schema_version table exists
+    tableExists <-
+        query
+            conn
+            [sql|
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='schema_version'
+            |]
+            () :: IO [Only Text]
+
+    case tableExists of
+        [] -> pure 0 -- Table doesn't exist, return version 0
+        _ -> do
+            -- Get current version from the table
+            result <- query_ conn "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+            case result of
+                [Only v] -> pure v
+                _ -> pure 0
 
 -- | Apply migrations to reach the target schema version.
 migrateSchema ::
     Connection ->
-    (Int -> Int -> Maybe Query) -> -- Migration script lookup
+    (Int -> Int -> Maybe (Connection -> IO ())) -> -- Migration script lookup
     IO (Either Text Int)
 migrateSchema conn getMigration = do
     currentVer <- getSchemaVersion conn
@@ -322,7 +409,7 @@ applyMigrations ::
     Connection ->
     Int ->
     Int ->
-    (Int -> Int -> Maybe Query) ->
+    (Int -> Int -> Maybe (Connection -> IO ())) ->
     IO (Either Text Int)
 applyMigrations conn fromVer toVer getMigration
     | fromVer >= toVer = pure $ Right fromVer
@@ -330,9 +417,11 @@ applyMigrations conn fromVer toVer getMigration
         case getMigration fromVer toVer of
             Nothing ->
                 pure $ Left $ Text.pack $ "No migration path from " ++ show fromVer ++ " to " ++ show toVer
-            Just migrationQuery -> do
-                -- Execute migration
-                execute_ conn migrationQuery
-                -- Update schema version
-                execute conn "INSERT OR REPLACE INTO schema_version (version) VALUES (?)" (Only toVer)
+            Just migrationAction -> do
+                -- Execute migration within a transaction
+                withTransaction conn $ do
+                    migrationAction conn
+                    -- Update schema version
+                    execute conn "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP" (Only toVer)
                 pure $ Right toVer
+

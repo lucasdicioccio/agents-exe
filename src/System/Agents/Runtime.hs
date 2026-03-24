@@ -1,10 +1,15 @@
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
+-- | System.Agents.Runtime - Runtime module
+--
+-- This module is deprecated. Use System.Agents.OS.Agents for OS-native agent operations.
 module System.Agents.Runtime (
-    module System.Agents.Runtime.Runtime,
-    module System.Agents.Runtime.Trace,
+    -- * Deprecated - Use System.Agents.OS.Agents instead
+    RuntimeDeprecated (..),
 ) where
 
-import System.Agents.Runtime.Runtime
-import System.Agents.Runtime.Trace
+-- | Placeholder type indicating Runtime is deprecated.
+-- Use System.Agents.OS.Agents for new code.
+data RuntimeDeprecated = RuntimeDeprecated
+    { deprecatedMessage :: String
+    }
+    deriving (Show, Eq)
+

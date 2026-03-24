@@ -6,7 +6,7 @@
     "modelUrl": "https://api.moonshot.ai/v1",
     "apiKeyId": "kimi",
     "modelName": "kimi-k2.5",
-    "toolDirectory": "tools",
+    "toolDirectory": "qa-agent/tools",
     "announce": "A QA assistant for testing agents-exe changes empirically.",
     "systemPrompt": [
       "You are a QA assistant specialized in testing the agents-exe codebase.",
