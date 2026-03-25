@@ -107,4 +107,3 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
                 slug
                 agentId
     TUI.runTUIWithCallback sessionStore mkAgentToTool agentPropsList
-

@@ -532,10 +532,11 @@ data SqliteAccessMode
       SqliteReadOnly
     | -- | Open database in read-write mode. Both reads and writes allowed.
       SqliteReadWrite
-    | -- | Create a snapshot copy of the database and open it in read-write mode.
-      -- The original database is copied to a new file with the given suffix appended.
-      -- All modifications happen on the copy, leaving the original intact.
-      SqliteSnapshot { snapshotSuffix :: Text }
+    | {- | Create a snapshot copy of the database and open it in read-write mode.
+      The original database is copied to a new file with the given suffix appended.
+      All modifications happen on the copy, leaving the original intact.
+      -}
+      SqliteSnapshot {snapshotSuffix :: Text}
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SqliteAccessMode as kebab-case strings or object for snapshot.
@@ -1111,4 +1112,3 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting 'McpSimpleBinary' tag"
-

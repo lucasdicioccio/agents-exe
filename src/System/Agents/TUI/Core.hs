@@ -78,7 +78,7 @@ import Control.Lens ((^.))
 import Control.Monad (forever, void)
 import Prod.Tracer (Tracer)
 
-import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props (..), agentRuntime, loadAgentTreeRuntime, agentToTool)
+import System.Agents.AgentTree (AgentTree (..), LoadAgentResult (..), Props (..), agentRuntime, agentToTool, loadAgentTreeRuntime)
 import System.Agents.Base (AgentId, AgentSlug, newConversationId)
 import System.Agents.OneShot (runtimeToAgent)
 import System.Agents.Runtime (Runtime)
@@ -266,4 +266,3 @@ runTUIWithCallback store mkAgentToTool props = do
     -- Update the agentToTool field in Props
     setAgentToTool :: (Tracer IO Trace -> Runtime -> AgentSlug -> AgentId -> ToolRegistration) -> Props -> Props
     setAgentToTool f p = p{agentToTool = f}
-

@@ -111,7 +111,7 @@ data SubAgentSessionConfig = SubAgentSessionConfig
 
     The default (from 'defaultSubAgentConfig') returns a no-op callback.
     -}
- }
+    }
 
 {- | Default configuration with no storage and no-op callbacks.
 
@@ -559,4 +559,3 @@ agentStoreSession store mPath convId agent =
     handleProgress x = do
         sessionStoreCallback store convId x
         filepathStoreCallback mPath x
-

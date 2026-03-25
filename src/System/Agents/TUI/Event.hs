@@ -697,16 +697,17 @@ handleSubAgentSessionStarted parentConvId childSession = do
             -- Create the sub-agent conversation
             -- Use the child session's ID as the conversation ID for uniqueness
             let childConvId = sessionIdToConversationId childSession.sessionId
-            let subAgentConv = Conversation
-                    { conversationId = childConvId
-                    , conversationAgent = conversationAgent parentConv  -- Use parent's agent
-                    , conversationThreadId = Nothing  -- Sub-agents run synchronously, no separate thread
-                    , conversationSession = Just childSession  -- Store the child session
-                    , conversationName = conversationName parentConv <> " > " <> subAgentSlug
-                    , conversationChan = chan
-                    , conversationStatus = ConversationStatus_Active  -- Sub-agents start active
-                    , conversationOnProgress = onProgress
-                    }
+            let subAgentConv =
+                    Conversation
+                        { conversationId = childConvId
+                        , conversationAgent = conversationAgent parentConv -- Use parent's agent
+                        , conversationThreadId = Nothing -- Sub-agents run synchronously, no separate thread
+                        , conversationSession = Just childSession -- Store the child session
+                        , conversationName = conversationName parentConv <> " > " <> subAgentSlug
+                        , conversationChan = chan
+                        , conversationStatus = ConversationStatus_Active -- Sub-agents start active
+                        , conversationOnProgress = onProgress
+                        }
 
             -- Add the sub-agent conversation to the core
             liftIO $ atomically $ modifyTVar coreRef $ \c ->
@@ -730,7 +731,7 @@ handleSubAgentSessionUpdated _parentConvId childSession = do
     let childConvId = sessionIdToConversationId childSession.sessionId
 
     case find ((== childConvId) . conversationId) (coreConversations core) of
-        Nothing -> pure ()  -- Sub-agent conversation not found, ignore
+        Nothing -> pure () -- Sub-agent conversation not found, ignore
         Just _conv -> do
             -- Update the session in the conversation
             liftIO $ atomically $ modifyTVar coreRef $ \c ->
@@ -755,10 +756,11 @@ handleSubAgentSessionCompleted _ childSession = do
             showStatus StatusInfo $ "Sub-agent completed: " <> subAgentSlug
         Just conv -> do
             -- Update the session and mark as completed
-            let updatedConv = conv
-                    { conversationSession = Just childSession
-                    , conversationStatus = ConversationStatus_WaitingForInput  -- Completed sub-agents wait for potential continuation
-                    }
+            let updatedConv =
+                    conv
+                        { conversationSession = Just childSession
+                        , conversationStatus = ConversationStatus_WaitingForInput -- Completed sub-agents wait for potential continuation
+                        }
             liftIO $ atomically $ modifyTVar coreRef $ \c ->
                 c{coreConversations = updateConversation updatedConv (coreConversations c)}
 
@@ -1005,4 +1007,3 @@ handleSendMessage = do
                         tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
                     Nothing -> pure ()
             Nothing -> pure ()
-
