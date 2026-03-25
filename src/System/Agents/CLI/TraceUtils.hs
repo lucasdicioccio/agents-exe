@@ -228,6 +228,8 @@ renderBuiltinToolboxTrace tr = case tr of
     SqliteTools.AccessViolationTrace _ _ _ -> "(access violation)"
     SqliteTools.QueryErrorTrace _ _ -> "(query error)"
     SqliteTools.WaitingForLockTrace _ -> "(waiting for lock)"
+    SqliteTools.SnapshotCreatedTrace original snapshot ->
+        Text.unwords ["(snapshot created: ", Text.pack original, " -> ", Text.pack snapshot, ")"]
 
 renderLuaToolboxTrace :: LuaTools.Trace -> Text
 renderLuaToolboxTrace tr = case tr of
@@ -351,3 +353,4 @@ renderConversationAgentTrace tr = case tr of
   where
     jsonTxt :: (Aeson.ToJSON a) => a -> Text
     jsonTxt = Text.decodeUtf8 . LByteString.toStrict . Aeson.encode
+

@@ -8,12 +8,16 @@ This module implements the SQLite toolbox functionality, including:
 
 * Database connection management
 * Query execution with access control (read-only vs read-write)
+* Snapshot mode for working on a copy of the database
 * Concurrent access protection (within-agent serialization, cross-agent busy handling)
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
 
-The toolbox can be configured to run in either read-only or read-write mode,
-providing safety when the agent should only query data.
+The toolbox can be configured to run in read-only, read-write, or snapshot mode:
+* 'ReadOnly': Only SELECT queries are allowed
+* 'ReadWrite': All SQL operations are allowed on the original database
+* 'Snapshot': The original database is copied with a suffix, and all operations
+   are performed on the copy in read-write mode, leaving the original intact.
 
 Concurrent Access:
 
@@ -31,21 +35,21 @@ import System.Agents.Base (SqliteAccessMode(..))
 
 main :: IO ()
 main = do
-    let desc = SqliteToolboxDescription
+    -- Read-only mode
+    let readOnlyDesc = SqliteToolboxDescription
             { sqliteToolboxName = "analytics"
-            , sqliteToolboxDescription = "Analytics database"
+            , sqliteToolboxDescription = "Analytics database (read-only)"
             , sqliteToolboxPath = "/path/to/analytics.db"
-            , sqliteToolboxAccess = SqliteReadWrite
+            , sqliteToolboxAccess = SqliteReadOnly
             }
-    result <- SQLite.initializeToolbox tracer desc
-    case result of
-        Right toolbox -> do
-            -- Execute a read-only query
-            result <- SQLite.executeReadOnlyQuery toolbox "SELECT * FROM users LIMIT 10"
-            case result of
-                Right queryResult -> print queryResult
-                Left err -> print err
-        Left err -> putStrLn $ "Failed to initialize: " ++ err
+
+    -- Snapshot mode - work on a copy
+    let snapshotDesc = SqliteToolboxDescription
+            { sqliteToolboxName = "analytics-snapshot"
+            , sqliteToolboxDescription = "Analytics database (snapshot)"
+            , sqliteToolboxPath = "/path/to/analytics.db"
+            , sqliteToolboxAccess = SqliteSnapshot "-working-copy"
+            }
 @
 -}
 module System.Agents.Tools.SqliteToolbox (
@@ -92,6 +96,7 @@ import Database.SQLite.Simple (Connection)
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite3 as Direct
 import Prod.Tracer (Tracer (..), runTracer)
+import System.Directory (copyFile, doesFileExist)
 
 import System.Agents.Base (SqliteAccessMode (..), SqliteToolboxDescription (..))
 
@@ -107,6 +112,7 @@ These events allow tracking of:
 * Database errors
 * Connection lifecycle
 * Concurrent access contention
+* Snapshot creation
 -}
 data Trace
     = -- | Database connection opened
@@ -121,8 +127,10 @@ data Trace
       AccessViolationTrace !Text !SqlOperation !AccessMode
     | -- | Query execution error
       QueryErrorTrace !Text !Text
-    | -- | Database busy, waiting for lock
+    | -- | Database is locked/busy (timeout exceeded waiting for lock)
       WaitingForLockTrace !Text
+    | -- | Snapshot created from original database
+      SnapshotCreatedTrace !FilePath !FilePath
     deriving (Show)
 
 {- | Runtime state for a SQLite toolbox.
@@ -131,8 +139,9 @@ The toolbox maintains:
 * A database connection (from sqlite-simple)
 * A direct database handle for metadata access
 * An MVar lock for serializing access within this toolbox instance
-* The configured access mode (read-only or read-write)
+* The configured access mode (read-only, read-write, or snapshot)
 * Toolbox metadata (name, description)
+* The actual database path being used (may differ from original in snapshot mode)
 
 The MVar ensures that even if multiple tool calls are made concurrently
 from the same agent, they execute sequentially. Combined with SQLite's
@@ -146,7 +155,10 @@ data Toolbox = Toolbox
     -- ^ Lock for serializing access within this toolbox instance
     , toolboxName :: Text
     , toolboxDescription :: Text
-    , toolboxPath :: FilePath
+    , toolboxOriginalPath :: FilePath
+    -- ^ Original database path (as specified in configuration)
+    , toolboxWorkingPath :: FilePath
+    -- ^ Actual database path being used (differs in snapshot mode)
     , toolboxAccessMode :: AccessMode
     }
 
@@ -203,6 +215,8 @@ data QueryError
       ConnectionError !Text
     | -- | Database is locked/busy (timeout exceeded waiting for lock)
       DatabaseLockedError !Text
+    | -- | Snapshot creation failed
+      SnapshotError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -213,9 +227,10 @@ data QueryError
 
 Controls what operations are allowed:
 * 'ReadOnly': Only SELECT queries are allowed
-* 'ReadWrite': All SQL operations are allowed
+* 'ReadWrite': All SQL operations are allowed on the original database
+* 'Snapshot': All SQL operations are allowed on a copy of the database
 -}
-data AccessMode = ReadOnly | ReadWrite
+data AccessMode = ReadOnly | ReadWrite | Snapshot
     deriving (Show, Eq)
 
 {- | SQL operation types for classification.
@@ -238,6 +253,7 @@ data SqlOperation
 fromBaseAccessMode :: SqliteAccessMode -> AccessMode
 fromBaseAccessMode SqliteReadOnly = ReadOnly
 fromBaseAccessMode SqliteReadWrite = ReadWrite
+fromBaseAccessMode (SqliteSnapshot _) = Snapshot
 
 {- | Classify a SQL query by examining its first keyword.
 
@@ -300,7 +316,7 @@ classifyQuery query =
 {- | Check if an operation is allowed given an access mode.
 
 * 'ReadOnly' mode allows only 'Select' operations
-* 'ReadWrite' mode allows all operations
+* 'ReadWrite' and 'Snapshot' modes allow all operations
 
 Examples:
 
@@ -312,11 +328,15 @@ False
 
 >>> allowsOperation ReadWrite Delete
 True
+
+>>> allowsOperation Snapshot Insert
+True
 -}
 allowsOperation :: AccessMode -> SqlOperation -> Bool
 allowsOperation ReadOnly Select = True
 allowsOperation ReadOnly _ = False
 allowsOperation ReadWrite _ = True
+allowsOperation Snapshot _ = True
 
 {- | Validate that a query is allowed given an access mode.
 
@@ -341,15 +361,17 @@ defaultBusyTimeoutMs = 5000
 {- | Initialize a SQLite toolbox from a description.
 
 This function:
-1. Opens a connection to the SQLite database using both sqlite-simple and direct-sqlite
-2. Configures the database for efficient writes (WAL mode, foreign keys, busy timeout)
-3. Sets up the connection based on the access mode
-4. Creates an MVar lock for serializing access within this toolbox
-5. Returns a 'Toolbox' ready for query execution
+1. For snapshot mode: Creates a copy of the database with the given suffix
+2. Opens a connection to the SQLite database using both sqlite-simple and direct-sqlite
+3. Configures the database for efficient writes (WAL mode, foreign keys, busy timeout)
+4. Sets up the connection based on the access mode
+5. Creates an MVar lock for serializing access within this toolbox
+6. Returns a 'Toolbox' ready for query execution
 
 The access mode determines:
 * Whether the database is opened in read-only mode
 * What SQL operations will be allowed
+* Whether operations happen on the original or a copy (snapshot mode)
 
 Concurrent Access Protection:
 
@@ -360,7 +382,15 @@ Concurrent Access Protection:
   agent (with a different connection) is writing to the same database, this
   agent will wait up to 5 seconds for the lock instead of failing immediately.
 
-Returns an error if the database cannot be opened.
+Snapshot Mode:
+
+* In snapshot mode, the original database is copied to a new file with the
+  given suffix before opening. All operations are performed on this copy,
+  leaving the original database completely untouched.
+* The snapshot file is created at initialization time and persists after
+  the toolbox is closed.
+
+Returns an error if the database cannot be opened or snapshot creation fails.
 -}
 initializeToolbox ::
     Tracer IO Trace ->
@@ -369,55 +399,94 @@ initializeToolbox ::
 initializeToolbox tracer desc = do
     runTracer tracer (ConnectionOpenedTrace desc.sqliteToolboxPath)
 
-    let dbPath = desc.sqliteToolboxPath
+    let originalPath = desc.sqliteToolboxPath
     let accessMode = fromBaseAccessMode desc.sqliteToolboxAccess
 
-    -- Open connections (both sqlite-simple and direct)
-    result <- try $ do
-        -- Open sqlite-simple connection
-        conn <- SQLite.open dbPath
+    -- Determine the actual database path to use
+    -- For snapshot mode, we need to create a copy first
+    dbPathResult <- case desc.sqliteToolboxAccess of
+        SqliteSnapshot suffix -> createSnapshot tracer originalPath suffix
+        _ -> pure $ Right originalPath
 
-        -- Open direct connection for metadata access
-        directDb <- Direct.open (Text.pack dbPath)
-
-        -- Configure database for efficient writes and data integrity
-        -- Enable foreign keys for better data integrity
-        _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
-
-        -- Enable Write-Ahead Logging (WAL) mode for better write performance
-        -- WAL mode reduces file churn and allows concurrent readers during writes
-        _ <- SQLite.execute_ conn "PRAGMA journal_mode = WAL"
-
-        -- Set synchronous to NORMAL for a good balance between durability and performance
-        -- This ensures data is safe while still being efficient
-        _ <- SQLite.execute_ conn "PRAGMA synchronous = NORMAL"
-
-        -- Set busy timeout to prevent SQLITE_BUSY errors when another connection is writing
-        -- This connection will wait up to 5 seconds for the lock before failing
-        _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
-
-        -- Create the lock for serializing access within this toolbox
-        lock <- newMVar ()
-
-        pure (conn, directDb, lock)
-
-    case result of
-        Left (e :: SomeException) -> do
-            let errMsg = "Failed to open database: " <> show e
+    case dbPathResult of
+        Left err -> do
+            let errMsg = "Failed to create snapshot: " <> err
             runTracer tracer (QueryErrorTrace "initialization" (Text.pack errMsg))
             pure $ Left errMsg
-        Right (conn, directDb, lock) -> do
-            pure $
-                Right
-                    Toolbox
-                        { toolboxConnection = conn
-                        , toolboxDirectDb = directDb
-                        , toolboxLock = lock
-                        , toolboxName = desc.sqliteToolboxName
-                        , toolboxDescription = desc.sqliteToolboxDescription
-                        , toolboxPath = dbPath
-                        , toolboxAccessMode = accessMode
-                        }
+        Right dbPath -> do
+            -- Open connections (both sqlite-simple and direct)
+            result <- try $ do
+                -- Open sqlite-simple connection
+                conn <- SQLite.open dbPath
+
+                -- Open direct connection for metadata access
+                directDb <- Direct.open (Text.pack dbPath)
+
+                -- Configure database for efficient writes and data integrity
+                -- Enable foreign keys for better data integrity
+                _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
+
+                -- Enable Write-Ahead Logging (WAL) mode for better write performance
+                -- WAL mode reduces file churn and allows concurrent readers during writes
+                _ <- SQLite.execute_ conn "PRAGMA journal_mode = WAL"
+
+                -- Set synchronous to NORMAL for a good balance between durability and performance
+                -- This ensures data is safe while still being efficient
+                _ <- SQLite.execute_ conn "PRAGMA synchronous = NORMAL"
+
+                -- Set busy timeout to prevent SQLITE_BUSY errors when another connection is writing
+                -- This connection will wait up to 5 seconds for the lock before failing
+                _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
+
+                -- Create the lock for serializing access within this toolbox
+                lock <- newMVar ()
+
+                pure (conn, directDb, lock)
+
+            case result of
+                Left (e :: SomeException) -> do
+                    let errMsg = "Failed to open database: " <> show e
+                    runTracer tracer (QueryErrorTrace "initialization" (Text.pack errMsg))
+                    pure $ Left errMsg
+                Right (conn, directDb, lock) -> do
+                    pure $
+                        Right
+                            Toolbox
+                                { toolboxConnection = conn
+                                , toolboxDirectDb = directDb
+                                , toolboxLock = lock
+                                , toolboxName = desc.sqliteToolboxName
+                                , toolboxDescription = desc.sqliteToolboxDescription
+                                , toolboxOriginalPath = originalPath
+                                , toolboxWorkingPath = dbPath
+                                , toolboxAccessMode = accessMode
+                                }
+
+{- | Create a snapshot copy of the database.
+
+Copies the original database file to a new file with the given suffix.
+Returns the path to the new file, or an error if the copy fails.
+-}
+createSnapshot :: Tracer IO Trace -> FilePath -> Text -> IO (Either String FilePath)
+createSnapshot tracer originalPath suffix = do
+    let snapshotPath = originalPath <> Text.unpack suffix
+
+    -- Check if original file exists
+    originalExists <- doesFileExist originalPath
+    if not originalExists
+        then pure $ Left $ "Original database does not exist: " <> originalPath
+        else do
+            -- Copy the database file
+            copyResult <- tryIO $ copyFile originalPath snapshotPath
+            case copyResult of
+                Left (e :: SomeException) -> do
+                    pure $ Left $ "Failed to copy database: " <> show e
+                Right () -> do
+                    runTracer tracer (SnapshotCreatedTrace originalPath snapshotPath)
+                    pure $ Right snapshotPath
+  where
+    tryIO :: IO a -> IO (Either SomeException a)
+    tryIO = try
 
 {- | Close a toolbox and release its resources.
 
@@ -486,7 +555,7 @@ executeReadOnlyQuery toolbox query =
 
 {- | Execute a write query (INSERT, UPDATE, DELETE, etc.).
 
-This function ensures that the toolbox is in read-write mode
+This function ensures that the toolbox is in read-write or snapshot mode
 before executing the query. Use this for explicit write operations.
 
 Like 'executeQuery', this function acquires the toolbox lock before
@@ -504,6 +573,10 @@ executeWriteQuery toolbox query =
             pure $ Left err
         ReadWrite ->
             -- Acquire lock to serialize access within this toolbox instance
+            withMVar (toolboxLock toolbox) $ \() -> do
+                executeQueryInternal toolbox query
+        Snapshot ->
+            -- Snapshot mode allows writes (they go to the copy)
             withMVar (toolboxLock toolbox) $ \() -> do
                 executeQueryInternal toolbox query
 
@@ -675,3 +748,4 @@ _formatResultsAsObjects result =
 _rowToObject :: [Text] -> [Value] -> Value
 _rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
+

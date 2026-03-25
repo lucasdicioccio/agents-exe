@@ -1190,7 +1190,7 @@ sqliteTool box =
             { SqliteTools.toolDescriptionName = "query"
             , SqliteTools.toolDescriptionDescription = box.toolboxDescription
             , SqliteTools.toolDescriptionToolboxName = box.toolboxName
-            , SqliteTools.toolDescriptionDatabasePath = box.toolboxPath
+            , SqliteTools.toolDescriptionDatabasePath = box.toolboxOriginalPath
             }
 
     run _tracer _ctx (Aeson.Object v) = do
@@ -1345,3 +1345,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

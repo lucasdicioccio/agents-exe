@@ -5,6 +5,7 @@
 
 module System.Agents.Base where
 
+import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
@@ -531,20 +532,36 @@ data SqliteAccessMode
       SqliteReadOnly
     | -- | Open database in read-write mode. Both reads and writes allowed.
       SqliteReadWrite
+    | -- | Create a snapshot copy of the database and open it in read-write mode.
+      -- The original database is copied to a new file with the given suffix appended.
+      -- All modifications happen on the copy, leaving the original intact.
+      SqliteSnapshot { snapshotSuffix :: Text }
     deriving (Show, Ord, Eq, Generic)
 
--- | Serialize SqliteAccessMode as kebab-case strings.
+-- | Serialize SqliteAccessMode as kebab-case strings or object for snapshot.
 instance ToJSON SqliteAccessMode where
     toJSON SqliteReadOnly = Aeson.String "read-only"
     toJSON SqliteReadWrite = Aeson.String "read-write"
+    toJSON (SqliteSnapshot suffix) =
+        Aeson.object
+            [ "tag" .= ("snapshot" :: Text)
+            , "suffix" .= suffix
+            ]
 
--- | Parse SqliteAccessMode from kebab-case strings.
+-- | Parse SqliteAccessMode from kebab-case strings or object for snapshot.
 instance FromJSON SqliteAccessMode where
-    parseJSON = Aeson.withText "SqliteAccessMode" $ \txt ->
-        case txt of
-            "read-only" -> return SqliteReadOnly
-            "read-write" -> return SqliteReadWrite
-            other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only' or 'read-write'."
+    parseJSON v = parseAsString v <|> parseAsObject v
+      where
+        parseAsString = Aeson.withText "SqliteAccessMode" $ \txt ->
+            case txt of
+                "read-only" -> return SqliteReadOnly
+                "read-write" -> return SqliteReadWrite
+                other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only', 'read-write', or a snapshot object with 'tag' and 'suffix' fields."
+        parseAsObject = Aeson.withObject "SqliteAccessMode" $ \obj -> do
+            tag <- obj .: "tag"
+            case (tag :: Text) of
+                "snapshot" -> SqliteSnapshot <$> obj .: "suffix"
+                _ -> fail "Invalid SqliteAccessMode tag. Expected 'snapshot'."
 
 {- | Configuration for a SQLite builtin toolbox.
 
@@ -564,9 +581,20 @@ Example configuration:
 @
 
 The 'access' field controls whether the database is opened in
-read-only or read-write mode. Use 'read-only' for safety when
-the agent should only query data, and 'read-write' when the agent
-needs to modify the database.
+read-only, read-write, or snapshot mode. Use 'read-only' for safety when
+the agent should only query data, 'read-write' when the agent
+needs to modify the database, or 'snapshot' to work on a copy.
+
+For snapshot mode, use an object:
+
+@
+{
+  "name": "memory",
+  "description": "a set of memories",
+  "path": "/path/to/memories.sqlite",
+  "access": {"tag": "snapshot", "suffix": "-working-copy"}
+}
+@
 -}
 data SqliteToolboxDescription
     = SqliteToolboxDescription
@@ -577,7 +605,7 @@ data SqliteToolboxDescription
     , sqliteToolboxPath :: FilePath
     -- ^ Path to the SQLite database file
     , sqliteToolboxAccess :: SqliteAccessMode
-    -- ^ Access mode: read-only or read-write
+    -- ^ Access mode: read-only, read-write, or snapshot
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -871,6 +899,7 @@ Example configuration:
   "builtinToolboxes": [
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
+    {"tag": "SqliteToolbox", "contents": {"name": "snapshot-db", "description": "Working copy of data", "path": "/path/to/data.sqlite", "access": {"tag": "snapshot", "suffix": "-working-copy"}}},
     {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
     {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent"]}},
     {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "allowedPaths": [], "allowedHosts": []}}
@@ -982,7 +1011,7 @@ Example configuration:
   "systemPrompt": ["You are a helpful assistant."],
   "tools": "tools",
   "bashToolboxes": [
-    {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools"}},
+    {"tag": "FileSystemDirectory", "contents": {"path": "./tools", "basenameFilter": null}},
     {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
   ],
   "mcpServers": [...],
@@ -1081,4 +1110,5 @@ instance FromJSON McpServerDescription where
         case (tag :: Text) of
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
-            _ -> fail "expecting McpSimpleBinary 'tag'"
+            _ -> fail "expecting 'McpSimpleBinary' tag"
+

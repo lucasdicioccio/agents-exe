@@ -84,6 +84,7 @@ tests =
         , turnRetroCompatibilityTests
         , turnRoundTripTests
         , sessionParentTrackingTests
+        , sqliteSnapshotModeTests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -380,6 +381,124 @@ agentSerializationTests =
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- SQLite Snapshot Mode Tests
+-------------------------------------------------------------------------------
+
+sqliteSnapshotModeTests :: TestTree
+sqliteSnapshotModeTests =
+    testGroup
+        "SQLite Snapshot Mode"
+        [ testCase "SqliteSnapshot round-trip serialization" $ do
+            -- Test snapshot mode round-trip
+            let snapshot = Base.SqliteSnapshot "-working-copy"
+            let jsonSnap = encode snapshot
+            let mSnapshot = decode jsonSnap :: Maybe Base.SqliteAccessMode
+            mSnapshot @?= Just (Base.SqliteSnapshot "-working-copy")
+        , testCase "SqliteSnapshot preserves suffix" $ do
+            let suffixes = ["-copy", "-working", "-snapshot", "_backup"]
+            mapM_ (\sfx -> do
+                let snap = Base.SqliteSnapshot sfx
+                let json = encode snap
+                let mDecoded = decode json :: Maybe Base.SqliteAccessMode
+                case mDecoded of
+                    Just (Base.SqliteSnapshot decodedSuffix) -> decodedSuffix @?= sfx
+                    _ -> assertFailure $ "Failed to round-trip suffix: " ++ Text.unpack sfx
+                ) suffixes
+        , testCase "agent with snapshot SqliteToolbox round-trip" $ do
+            let sqliteDesc = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "data-snapshot"
+                    , Base.sqliteToolboxDescription = "Working copy of data"
+                    , Base.sqliteToolboxPath = "/path/to/data.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteSnapshot "-working"
+                    }
+            let builtinToolbox = Base.SqliteToolbox sqliteDesc
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Just [builtinToolbox]
+                    , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            case mAgent of
+                Nothing -> assertFailure "Failed to decode agent with snapshot mode"
+                Just decoded -> do
+                    Base.slug decoded @?= "test-agent"
+                    case Base.builtinToolboxes decoded of
+                        Just [Base.SqliteToolbox decodedDesc] -> do
+                            Base.sqliteToolboxName decodedDesc @?= "data-snapshot"
+                            case Base.sqliteToolboxAccess decodedDesc of
+                                Base.SqliteSnapshot sfx -> sfx @?= "-working"
+                                other -> assertFailure $ "Expected SqliteSnapshot, got: " ++ show other
+                        other -> assertFailure $ "Expected SqliteToolbox, got: " ++ show other
+        , testCase "mixed access modes in agent round-trip" $ do
+            let readOnlyDesc = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "readonly-db"
+                    , Base.sqliteToolboxDescription = "Read-only database"
+                    , Base.sqliteToolboxPath = "/path/to/readonly.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteReadOnly
+                    }
+            let readWriteDesc = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "readwrite-db"
+                    , Base.sqliteToolboxDescription = "Read-write database"
+                    , Base.sqliteToolboxPath = "/path/to/readwrite.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    }
+            let snapshotDesc = Base.SqliteToolboxDescription
+                    { Base.sqliteToolboxName = "snapshot-db"
+                    , Base.sqliteToolboxDescription = "Snapshot database"
+                    , Base.sqliteToolboxPath = "/path/to/snapshot.sqlite"
+                    , Base.sqliteToolboxAccess = Base.SqliteSnapshot "-copy"
+                    }
+            let builtinToolboxes = 
+                    [ Base.SqliteToolbox readOnlyDesc
+                    , Base.SqliteToolbox readWriteDesc
+                    , Base.SqliteToolbox snapshotDesc
+                    ]
+            let agent = Base.Agent
+                    { Base.slug = "test-agent"
+                    , Base.apiKeyId = "openai"
+                    , Base.flavor = "openai"
+                    , Base.modelUrl = "https://api.openai.com/v1"
+                    , Base.modelName = "gpt-4"
+                    , Base.announce = "A test agent"
+                    , Base.systemPrompt = ["You are helpful"]
+                    , Base.toolDirectory = Just "tools"
+                    , Base.bashToolboxes = Nothing
+                    , Base.mcpServers = Nothing
+                    , Base.openApiToolboxes = Nothing
+                    , Base.postgrestToolboxes = Nothing
+                    , Base.builtinToolboxes = Just builtinToolboxes
+                    , Base.extraAgents = Nothing
+                    , Base.skillSources = Nothing
+                    , Base.autoEnableSkills = Nothing
+                    }
+            let json = encode agent
+            let mAgent = decode json :: Maybe Base.Agent
+            case mAgent of
+                Nothing -> assertFailure "Failed to decode agent with mixed modes"
+                Just decoded -> do
+                    case Base.builtinToolboxes decoded of
+                        Just [Base.SqliteToolbox d1, Base.SqliteToolbox d2, Base.SqliteToolbox d3] -> do
+                            Base.sqliteToolboxAccess d1 @?= Base.SqliteReadOnly
+                            Base.sqliteToolboxAccess d2 @?= Base.SqliteReadWrite
+                            Base.sqliteToolboxAccess d3 @?= Base.SqliteSnapshot "-copy"
+                        other -> assertFailure $ "Unexpected toolbox structure: " ++ show other
+        ]
 
 -------------------------------------------------------------------------------
 -- Bash Toolbox Tests
@@ -1894,4 +2013,5 @@ cycleDetectionTests =
         , Base.skillSources = Nothing
         , Base.autoEnableSkills = Nothing
         }
+
 
