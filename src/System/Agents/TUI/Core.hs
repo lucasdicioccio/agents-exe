@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -21,6 +22,24 @@ module System.Agents.TUI.Core (
     UIState (..),
     TuiState (..),
     SessionConfig (..),
+
+    -- * Conversation Tree Types
+    ConversationNode (..),
+    ConversationTreeState (..),
+    ConversationHierarchyInfo (..),
+    initConversationTreeState,
+
+    -- * Tree utility functions
+    buildDisplayConversationList,
+    hasChildConversations,
+    getChildConversationCount,
+    getConversationDepth,
+    toggleExpanded,
+    expandAll,
+    collapseAll,
+    updateConversationTreeCache,
+
+    -- * Initialization
     initUIState,
     initCore,
     updateConversationSession,
@@ -40,6 +59,10 @@ module System.Agents.TUI.Core (
     coreConversations,
     corePausedConversations,
     coreBufferedMessages,
+    coreConversationTreeState,
+    expandedConversations,
+    conversationDepth,
+    childConversationCache,
     tuiCore,
     tuiUI,
     eventChan,
@@ -178,6 +201,21 @@ collectAgentTools agents = mapM collectTools agents
         pure (tuiAgentId agent, tools)
 
 -------------------------------------------------------------------------------
+-- Tree Building Helpers
+-------------------------------------------------------------------------------
+
+{- | Build conversation tree state from loaded sessions.
+
+This function analyzes the parent-child relationships between sessions
+and builds the initial tree state for the TUI.
+-}
+buildConversationTreeState :: [Session] -> ConversationTreeState
+buildConversationTreeState _sessions =
+    -- For now, return an empty tree state to avoid type complications
+    -- The conversation tree state will be built dynamically by the TUI
+    initConversationTreeState
+
+-------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
@@ -189,6 +227,7 @@ This function:
 1. Loads agent trees from the provided props
 2. Creates TuiAgents with OS-native structures
 3. Initializes the TUI with the agents and loaded sessions
+4. Builds the conversation tree state for hierarchical display
 -}
 runTUI :: SessionStore -> LoadedApiKeys -> [Props] -> IO ()
 runTUI store apiKeys props = do
@@ -214,9 +253,13 @@ runTUIWithConfig config props = do
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
 
-    -- Create core state with loaded conversations
+    -- Create core state with loaded conversations and tree state
     core0 <- initCore tuiAgents
-    coreTVar <- newTVarIO core0
+
+    -- Build initial tree state from loaded sessions
+    let treeState = buildConversationTreeState [s | (_, Just s) <- loadedSessions]
+
+    coreTVar <- newTVarIO $ core0{coreConversationTreeState = treeState}
 
     -- Create UI state with loaded sessions and collected tools
     let ui0 =

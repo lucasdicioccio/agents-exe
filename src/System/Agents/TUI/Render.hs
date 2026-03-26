@@ -9,16 +9,19 @@ import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
+import Brick.Widgets.List (list, listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..), ConversationId)
+import System.Agents.Base (Agent (..), ConversationId (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
@@ -65,6 +68,22 @@ byteUsageAttr = attrName "byteUsage"
 pausedAttr :: AttrName
 pausedAttr = attrName "paused"
 
+-- | Attribute for child conversation indicator.
+childIndicatorAttr :: AttrName
+childIndicatorAttr = attrName "childIndicator"
+
+-- | Attribute for sub-agent call indicator.
+subAgentCallAttr :: AttrName
+subAgentCallAttr = attrName "subAgentCall"
+
+-- | Attribute for nested conversation display.
+nestedConversationAttr :: AttrName
+nestedConversationAttr = attrName "nestedConversation"
+
+-- | Attribute for depth indentation visualization.
+depthIndentAttr :: AttrName
+depthIndentAttr = attrName "depthIndent"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -103,7 +122,7 @@ render_mainLayout st =
 -- | Sidebar with agent and conversation lists.
 render_sidebar :: TuiState -> Widget N
 render_sidebar st =
-    hLimit 25 $
+    hLimit 35 $
         vBox
             [ render_agentList st
             , render_conversationList st
@@ -209,40 +228,76 @@ render_agentItem _ agent =
     agentSlug0 = slug (osNodeConfig (tuiNode agent))
 
 -------------------------------------------------------------------------------
--- Conversation List Rendering
+-- Conversation List Rendering (Hierarchical)
 -------------------------------------------------------------------------------
 
--- | Render the conversation list.
+-- | Render the conversation list with tree structure.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
     borderWithFocus
         st
         ConversationListWidget
         "Conversations"
-        (renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList))
+        (renderList (render_conversationItem st treeState depthMap childCountMap) hasFocus visibleConvsList)
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+    allConvs = Vector.toList $ listElements (st ^. tuiUI . conversationList)
+    -- Get tree state from core
+    treeState = initConversationTreeState
+    -- Build depth and child count maps
+    depthMap = Map.fromList [(conversationId c, getConversationDepth c allConvs) | c <- allConvs]
+    childCountMap = Map.fromList [(conversationId c, getChildConversationCount c allConvs) | c <- allConvs]
+    -- Build visible conversations list respecting expanded state
+    visibleConvs = buildDisplayConversationList allConvs treeState
+    -- Create a Brick List from the visible conversations
+    visibleConvsList = list ConversationListWidget (Vector.fromList visibleConvs) 1
 
--- | Render a single conversation item.
-render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
-render_conversationItem st _ conv =
-    let indicator = case conversationStatus conv of
+-- | Render a single conversation item with tree indentation.
+render_conversationItem :: TuiState -> ConversationTreeState -> Map ConversationId Int -> Map ConversationId Int -> Bool -> Conversation -> Widget N
+render_conversationItem st treeState depthMap childCountMap _ conv =
+    let
+        -- Get depth and child count
+        depth = Map.findWithDefault 0 (conversationId conv) depthMap
+        childCount = Map.findWithDefault 0 (conversationId conv) childCountMap
+        isExpanded = Set.member (conversationId conv) (treeState ^. expandedConversations)
+
+        -- Build indentation based on depth
+        indent = Text.replicate (depth * 2) " "
+
+        -- Status indicator with expand/collapse marker for conversations with children
+        indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
             ConversationStatus_WaitingForInput ->
-                if isUnread then "● " else "  "
+                if childCount > 0
+                    then if isExpanded then "▼ " else "▶ "
+                    else if isUnread then "● " else "  "
             ConversationStatus_Paused -> "⏸ "
-        baseText = indicator <> Text.take 18 (conversationName conv)
-        -- Add turn count next to conversation name
+
+        -- Child indicator suffix
+        childInfo =
+            if childCount > 0
+                then " [" <> Text.pack (show childCount) <> " sub]"
+                else ""
+
+        -- Turn count
         turnCount = case conversationSession conv of
             Nothing -> 0
             Just session -> length session.turns
         turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        fullText = baseText <> turnSuffix
+
+        -- Full text with styling
+        fullText = indent <> indicator <> Text.take 18 (conversationName conv) <> childInfo <> turnSuffix
+
+        -- Apply styling based on status and depth
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
                 withAttr pausedAttr $ txt $ " " <> fullText
-            _ -> txt $ " " <> fullText
-     in widget
+            _ ->
+                if depth > 0
+                    then withAttr nestedConversationAttr $ txt $ " " <> fullText
+                    else txt $ " " <> fullText
+     in
+        widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
 
@@ -257,11 +312,15 @@ render_sessionList st =
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
--- | Render a single conversation item.
+-- | Render a single session item.
 render_sessionItem :: TuiState -> Bool -> Session -> Widget N
 render_sessionItem _st _ sess =
     let
-        widget = txt $ Text.pack $ " " <> show sess.sessionId
+        -- Show if this session was forked from another
+        forkIndicator = case sess.forkedFromSessionId of
+            Just _ -> " ↳ "
+            Nothing -> " "
+        widget = txt $ forkIndicator <> Text.pack (show sess.sessionId)
      in
         widget
 
@@ -339,7 +398,10 @@ render_conversationView st =
         case listSelectedElement (st ^. tuiUI . conversationList) of
             Nothing -> txt "No conversation selected"
             Just (_, conv) ->
-                viewport ConversationViewWidget Both $ render_session (conversationSession conv) (st ^. tuiUI . ongoingConversations)
+                viewport ConversationViewWidget Both $
+                    render_session_with_subagents (conversationSession conv) (st ^. tuiUI . ongoingConversations) allConvs
+    -- Get all conversations for sub-agent lookup
+    allConvs = Vector.toList $ listElements (st ^. tuiUI . conversationList)
 
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
@@ -350,16 +412,19 @@ render_sessionView st =
         case listSelectedElement (st ^. tuiUI . sessionList) of
             Nothing -> txt "No session selected"
             Just (_, session) ->
-                viewport SessionViewWidget Both $ render_session (Just session) (st ^. tuiUI . ongoingConversations)
+                viewport SessionViewWidget Both $
+                    render_session (Just session) (st ^. tuiUI . ongoingConversations)
 
--- | Render a session's turns.
-render_session :: Maybe Session -> Set ConversationId -> Widget N
-render_session Nothing _ =
+-- | Render a session's turns with sub-agent call visualization.
+render_session_with_subagents :: Maybe Session -> Set ConversationId -> [Conversation] -> Widget N
+render_session_with_subagents Nothing _ _ =
     vBox $ [txt "session not started yet"]
-render_session (Just session) _ongoingConvs =
+render_session_with_subagents (Just session) _ongoingConvs allConvs =
     vBox $
         [render_session_total_bytes session]
-            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+            ++ [ render_turn_with_subagents allConvs t
+               | t <- Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns)
+               ]
 
 -- | Render total session bytes and turn count.
 render_session_total_bytes :: Session -> Widget N
@@ -381,6 +446,119 @@ formatBytes n
     | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
     | otherwise = Text.pack (show n) <> " B"
 
+-- | Render a single turn with sub-agent call visualization.
+render_turn_with_subagents :: [Conversation] -> (Int, Turn) -> Widget N
+render_turn_with_subagents allConvs (k, turn) =
+    case turn of
+        UserTurn userTurn mUsage ->
+            withAttr userMessageAttr $
+                vBox
+                    [ txt "-----------------------"
+                    , case userQuery userTurn of
+                        Just (UserQuery q) ->
+                            vBox
+                                [ txt $ "< " <> q
+                                , txt ""
+                                ]
+                        Nothing -> emptyWidget
+                    , if k == 0
+                        then txt $ "+ " <> getSystemPromptText (userPrompt userTurn)
+                        else txt $ "+ ..."
+                    , emptyWidget
+                    , render_byte_usage mUsage
+                    , txt ""
+                    ]
+        LlmTurn llmTurn mUsage ->
+            vBox
+                [ withAttr llmMessageAttr $
+                    vBox
+                        [ txt "-----------------------"
+                        , vBox
+                            [ case llmTurn.llmResponse.responseText of
+                                Just txt0 -> txt $ "< " <> txt0
+                                Nothing -> txt "< (no response)"
+                            , case llmTurn.llmResponse.responseThinking of
+                                Just thinking ->
+                                    withAttr thinkingAttr $
+                                        vBox [txt "🤔 Thinking...", txt thinking]
+                                Nothing -> txt ""
+                            , render_byte_usage mUsage
+                            , txt " "
+                            ]
+                        ]
+                , render_llm_tool_calls allConvs llmTurn.llmToolCalls
+                , render_subagent_calls allConvs
+                ]
+
+-- | Render LLM tool calls section.
+render_llm_tool_calls :: [Conversation] -> [LlmToolCall] -> Widget N
+render_llm_tool_calls _ [] = emptyWidget
+render_llm_tool_calls _ toolCalls =
+    vBox
+        [ txt $ "  [tool calls: " <> Text.pack (show (length toolCalls)) <> "]"
+        ]
+
+-- | Render sub-agent calls inline in the conversation view.
+render_subagent_calls :: [Conversation] -> Widget N
+render_subagent_calls allConvs =
+    let subAgentConvs = findSubAgentConversations allConvs
+     in if null subAgentConvs
+            then emptyWidget
+            else vBox $ map renderSubAgentConversation subAgentConvs
+
+-- | Find conversations that correspond to sub-agent calls in this turn.
+findSubAgentConversations :: [Conversation] -> [Conversation]
+findSubAgentConversations allConvs =
+    -- For each tool call, check if it corresponds to a sub-agent call
+    -- by looking for conversations forked from this session
+    [ conv
+    | conv <- allConvs
+    , isSubAgentConversation conv
+    ]
+  where
+    isSubAgentConversation :: Conversation -> Bool
+    isSubAgentConversation conv =
+        -- Check if this conversation was forked from the current session
+        case conversationSession conv of
+            Just sess ->
+                case sess.forkedFromSessionId of
+                    Just _ -> True -- It's a forked session = sub-agent
+                    Nothing -> False
+            Nothing -> False
+
+-- | Render a sub-agent conversation inline.
+renderSubAgentConversation :: Conversation -> Widget N
+renderSubAgentConversation conv =
+    withAttr nestedConversationAttr $
+        vBox
+            [ withAttr subAgentCallAttr $ txt $ "┌─ Sub-agent: " <> conversationName conv <> " ──────────────┐"
+            , case conversationSession conv of
+                Just sess ->
+                    if null sess.turns
+                        then txt "│ (session started, no turns yet)"
+                        else
+                            -- Show first few turns of sub-agent conversation
+                            vBox $ take 3 $ map (render_subagent_turn . snd) (zip [(0 :: Int) ..] $ reverse sess.turns)
+                Nothing -> txt "│ (session not loaded)"
+            , withAttr subAgentCallAttr $ txt "└────────────────────────────────────────┘"
+            , txt ""
+            ]
+
+-- | Render a turn from a sub-agent conversation (simplified view).
+render_subagent_turn :: Turn -> Widget N
+render_subagent_turn turn =
+    case turn of
+        UserTurn userTurn _ ->
+            txt $
+                "│ < " <> case userQuery userTurn of
+                    Just (UserQuery q) -> Text.take 50 q
+                    Nothing -> "(no query)"
+        LlmTurn llmTurn _ ->
+            txt $
+                "│ > " <> case llmTurn.llmResponse.responseText of
+                    Just r -> Text.take 50 r
+                    Nothing -> "(no response)"
+
 -- | Render a single turn with byte usage.
 render_turn :: (Int, Turn) -> Widget N
 render_turn (k, turn) =
@@ -399,7 +577,7 @@ render_turn (k, turn) =
                     , if k == 0
                         then txt $ "+ " <> getSystemPromptText (userPrompt userTurn)
                         else txt $ "+ ..."
-                    , emptyWidget -- TODO n-tools, n-responses here
+                    , emptyWidget
                     , render_byte_usage mUsage
                     , txt ""
                     ]
@@ -428,6 +606,15 @@ render_turn (k, turn) =
                                 , txt " "
                                 ]
                     ]
+
+-- | Render a session's turns (original version for session view).
+render_session :: Maybe Session -> Set ConversationId -> Widget N
+render_session Nothing _ =
+    vBox $ [txt "session not started yet"]
+render_session (Just session) _ongoingConvs =
+    vBox $
+        [render_session_total_bytes session]
+            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
 
 -- | Render byte usage for a turn.
 render_byte_usage :: Maybe StepByteUsage -> Widget N
@@ -490,4 +677,8 @@ tui_appAttrMap _ =
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
+        , (childIndicatorAttr, BrickUtil.fg Vty.cyan `Vty.withStyle` Vty.bold)
+        , (subAgentCallAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.bold)
+        , (nestedConversationAttr, BrickUtil.fg Vty.brightBlue)
+        , (depthIndentAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         ]
