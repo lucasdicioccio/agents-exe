@@ -976,6 +976,9 @@ devCapabilityToText DevToolValidateTool = "validate-tool"
 devCapabilityToText DevToolScaffoldAgent = "scaffold-agent"
 devCapabilityToText DevToolScaffoldTool = "scaffold-tool"
 devCapabilityToText DevToolShowSpec = "show-spec"
+devCapabilityToText DevToolValidateAgent = "validate-agent"
+devCapabilityToText DevToolCreateAgent = "create-agent"
+devCapabilityToText DevToolCreateTool = "create-tool"
 
 {- | Register all tools from a Developer toolbox.
 
@@ -1347,3 +1350,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

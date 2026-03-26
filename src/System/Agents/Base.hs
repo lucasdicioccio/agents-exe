@@ -812,6 +812,12 @@ data DeveloperToolCapability
       DevToolScaffoldTool
     | -- | Show bash-tools specification
       DevToolShowSpec
+    | -- | Validate an agent JSON file
+      DevToolValidateAgent
+    | -- | Create a new agent configuration
+      DevToolCreateAgent
+    | -- | Create a new tool script
+      DevToolCreateTool
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
@@ -820,6 +826,9 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolScaffoldAgent = Aeson.String "scaffold-agent"
     toJSON DevToolScaffoldTool = Aeson.String "scaffold-tool"
     toJSON DevToolShowSpec = Aeson.String "show-spec"
+    toJSON DevToolValidateAgent = Aeson.String "validate-agent"
+    toJSON DevToolCreateAgent = Aeson.String "create-agent"
+    toJSON DevToolCreateTool = Aeson.String "create-tool"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -829,7 +838,10 @@ instance FromJSON DeveloperToolCapability where
             "scaffold-agent" -> return DevToolScaffoldAgent
             "scaffold-tool" -> return DevToolScaffoldTool
             "show-spec" -> return DevToolShowSpec
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec."
+            "validate-agent" -> return DevToolValidateAgent
+            "create-agent" -> return DevToolCreateAgent
+            "create-tool" -> return DevToolCreateTool
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool."
 
 {- | Configuration for the developer toolbox.
 
@@ -1106,3 +1118,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+

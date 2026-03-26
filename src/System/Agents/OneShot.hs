@@ -410,6 +410,10 @@ callResultToUserToolResponse _ result =
             UserToolResponse $ Aeson.toJSON scaffoldResult
         DeveloperToolSpecResult _ content ->
             UserToolResponse $ Aeson.String content
+        DeveloperToolAgentValidationResult _ validationResult ->
+            UserToolResponse $ Aeson.toJSON validationResult
+        DeveloperToolCreateResult _ createResult ->
+            UserToolResponse $ Aeson.toJSON createResult
         DeveloperToolError _ err ->
             UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
         LuaToolResult _ toolResult ->
@@ -537,3 +541,4 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+
