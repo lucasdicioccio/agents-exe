@@ -8,4 +8,3 @@
 --
 -- For tool registration, use System.Agents.ToolRegistration directly.
 module System.Agents.Runtime.Runtime () where
-

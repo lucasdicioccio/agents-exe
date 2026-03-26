@@ -46,7 +46,6 @@ import System.Agents.MCP.Server.Runtime
 -- OneShot integration imports
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import qualified System.Agents.Session.Base as SessionBase
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -58,23 +57,24 @@ import System.Agents.Session.Base (
     UserToolResponse (..),
     defaultContextConfig,
  )
+import qualified System.Agents.Session.Base as SessionBase
 import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (
     OpenAICompletionConfig (..),
     mkOpenAICompletion,
  )
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
-import qualified System.Agents.Session.Types as SessionTypes
 import System.Agents.Session.Types (
     newSessionId,
     newTurnId,
  )
+import qualified System.Agents.Session.Types as SessionTypes
 import System.Agents.ToolRegistration (ToolRegistration (..))
+import qualified System.Agents.ToolSchema as ToolSchema
 import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
 import System.Agents.Tools.Context (CallStackEntry (..), mkToolExecutionContext)
 import qualified System.Agents.Tools.Context as ToolsContext
 import System.Agents.Tools.Trace (ToolTrace)
-import qualified System.Agents.ToolSchema as ToolSchema
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -580,4 +580,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-

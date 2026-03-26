@@ -120,4 +120,3 @@ handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
                 , AgentTree.interactiveTracer = baseTracer
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
                 }
-

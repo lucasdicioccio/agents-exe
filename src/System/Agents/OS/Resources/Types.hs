@@ -344,4 +344,3 @@ data ResourceContext = ResourceContext
     { contextScope :: [ScopeLevel]
     , contextRegistry :: ResourceRegistry
     }
-

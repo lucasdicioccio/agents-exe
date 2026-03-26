@@ -37,7 +37,7 @@ module System.Agents.OS.Interfaces (
     -- * Utility Functions
     defaultInterfaceConfig,
     InterfaceMode (..),
-    
+
     -- * Re-exports from Compat.Runtime (deprecated)
     OS (..),
 ) where
@@ -290,4 +290,3 @@ unsubscribeFromEvents :: InterfaceHandle -> IO ()
 unsubscribeFromEvents _handle = do
     -- In a full implementation, this would remove the subscriber
     pure ()
-
