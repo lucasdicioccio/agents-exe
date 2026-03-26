@@ -14,6 +14,7 @@ agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS]
 |--------|---------|-------------|
 | `--api-keys FILE` | `~/.config/agents-exe/secret-keys` | Path to API keys JSON file |
 | `--agent-file FILE` | (from config) | Agent configuration file(s) |
+| `--agent SLUG` | - | Select agent by slug instead of file path |
 | `--log-file FILE` | `agents-logfile` | Raw log output file |
 | `--log-http URL` | - | HTTP endpoint for JSON logs |
 | `--log-json-file FILE` | - | Local JSON log file |
@@ -26,8 +27,14 @@ agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS]
 Validate agent configuration and display loaded tools.
 
 ```bash
-agents-exe check [--agent-file FILE]
+agents-exe check [--tools MODE]
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--tools MODE` | Tool display mode: `none`, `list`, `agents-exe`, `openai` (default: `none`) |
 
 **Output:**
 ```
@@ -45,6 +52,9 @@ agents-exe check
 
 # Check specific agent
 agents-exe check --agent-file ./custom-agent.json
+
+# List tools in agents-exe format
+agents-exe check --tools agents-exe
 ```
 
 ### run
@@ -60,11 +70,18 @@ agents-exe run [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--session-file FILE` | Resume from existing session |
+| `--thinking TARGET` | Output thinking: `none`, `stdout`, `stderr` (default: `none`) |
 | `--prompt TEXT` | Initial prompt text |
 | `--file FILE` | Read prompt from file |
 | `--shell COMMAND` | Use shell command output as prompt |
+| `--alias NAME` | Use predefined prompt alias |
 | `--sep4 TEXT` | Short separator (4 chars) |
 | `--sep40 TEXT` | Long separator (40 chars) |
+| `--session-xs FILE` | Inject session at minimal verbosity |
+| `--session-s FILE` | Inject session at low verbosity |
+| `--session-m FILE` | Inject session at medium verbosity |
+| `--session-l FILE` | Inject session at high verbosity |
+| `--session-xl FILE` | Inject session at maximum verbosity |
 
 **Examples:**
 
@@ -81,6 +98,9 @@ agents-exe run --agent-file agent.json --shell "git diff"
 # Resume session
 agents-exe run --agent-file agent.json --session-file session.json
 
+# Use alias
+agents-exe run --agent-file agent.json --alias code-review --file changes.patch
+
 # Multi-part prompt with separators
 agents-exe run \
   --prompt "Review this code:" \
@@ -88,6 +108,12 @@ agents-exe run \
   --file code.py \
   --sep40 "========================================" \
   --prompt "What improvements can be made?"
+
+# Inject previous session at medium verbosity
+agents-exe run \
+  --agent-file agent.json \
+  --session-m previous-session.json \
+  --prompt "Continue from where we left off"
 ```
 
 ### tui
@@ -179,11 +205,13 @@ agents-exe session-print [OPTIONS] SESSIONFILE
 
 | Option | Description |
 |--------|-------------|
-| `--show-tool-call-results` | Include tool call outputs |
+| `--show-tool-call-results MODE` | Display mode: `hidden`, `shown`, `elided` (default: `hidden`) |
+| `--show-tool-call-arguments MODE` | Display mode: `hidden`, `shown`, `elided` (default: `hidden`) |
 | `--n-turns N` | Limit to last N turns |
 | `--repeat-system-prompt` | Show system prompt each turn |
 | `--repeat-tools` | Show available tools each turn |
 | `--antichronological` | Newest first (default: oldest first) |
+| `--no-funny-stamp` | Skip the ASCII art logo |
 
 **Examples:**
 
@@ -191,14 +219,56 @@ agents-exe session-print [OPTIONS] SESSIONFILE
 # Print full session
 agents-exe session-print session.json
 
-# Print with tool results
-agents-exe session-print --show-tool-call-results session.json
+# Print with tool results visible
+agents-exe session-print --show-tool-call-results shown session.json
+
+# Elide long outputs (show first/last 10 lines)
+agents-exe session-print --show-tool-call-results elided session.json
 
 # Last 5 turns only
 agents-exe session-print --n-turns 5 session.json
 
 # Reverse order
 agents-exe session-print --antichronological session.json
+```
+
+### session-edit
+
+Edit a session file (reads JSON from STDIN, writes JSON to STDOUT).
+
+```bash
+agents-exe session-edit [OPTIONS] < input.json > output.json
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--take` | Take first N turns (use with `--count`) |
+| `--take-tail` | Take last N turns (use with `--count`) |
+| `--drop` | Drop first N turns (use with `--count`) |
+| `--drop-tail` | Drop last N turns (use with `--count`) |
+| `--count N`, `-n N` | Number of turns for take/drop operations |
+| `--censor-tool-calls` | Remove all tool calls |
+| `--censor-thinking` | Remove all thinking content |
+
+**Examples:**
+
+```bash
+# Keep only first 10 turns
+agents-exe session-edit --take --count 10 < session.json > trimmed.json
+
+# Keep only last 5 turns
+agents-exe session-edit --take-tail --count 5 < session.json > recent.json
+
+# Remove first 2 turns
+agents-exe session-edit --drop --count 2 < session.json > dropped.json
+
+# Remove all tool calls
+agents-exe session-edit --censor-tool-calls < session.json > no-tools.json
+
+# Remove thinking content
+agents-exe session-edit --censor-thinking < session.json > no-thinking.json
 ```
 
 ### list-tool-calls
@@ -213,7 +283,7 @@ agents-exe list-tool-calls [OPTIONS] SESSIONFILE
 
 | Option | Description |
 |--------|-------------|
-| `-f, --format FORMAT` | Output format: human, json, brief (default: human) |
+| `-f, --format FORMAT` | Output format: `human`, `json`, `brief` (default: `human`) |
 
 **Description:**
 Parses a session file and extracts all tool calls made during the conversation.
@@ -333,6 +403,88 @@ main = putStrLn "Hello, World!"
 ===================
 ```
 
+### tool-call
+
+Call a tool from the first loaded agent with JSON payload from stdin.
+
+```bash
+echo '{}' | agents-exe tool-call TOOLNAME [OPTIONS]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `TOOLNAME` | Name of the tool to call |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-l, --log-file FILE` | Optional log file for tracing tool execution |
+
+**Description:**
+Executes a single tool directly without involving the LLM. Useful for:
+
+- Testing tool implementations
+- Scripting tool usage
+- Debugging tool behavior
+
+**Examples:**
+
+```bash
+# Call a tool with arguments
+echo '{"filepath": "./README.md"}' | \
+    agents-exe tool-call read-file --agent-file ./agent.json
+
+# Call with logging
+echo '{"command": "ls -la"}' | \
+    agents-exe tool-call bash --log-file ./tool-debug.log
+```
+
+### check-tool-call
+
+Validate a tool call payload against a tool schema (reads JSON from stdin).
+
+```bash
+cat payload.json | agents-exe check-tool-call --tool TOOLPATH
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-t, --tool TOOLPATH` | Path to the tool script to validate against |
+
+**Description:**
+Validates that a JSON payload from stdin matches the tool's declared schema.
+Returns exit code 0 if valid, 1 if invalid with detailed error messages.
+
+**Example:**
+```bash
+# Create a test payload
+echo '{"filepath": "/path/to/file"}' | agents-exe check-tool-call --tool ./tools/read-file.sh
+
+# Validate from file
+cat payload.json | agents-exe check-tool-call --tool ./tools/my-tool.sh
+```
+
+**Example output (valid):**
+```
+✓ Tool call payload is valid
+```
+
+**Example output (invalid):**
+```
+Tool call validation failed for './tools/my-tool.sh (my-tool)' with 2 errors:
+
+1. filepath: Required property missing
+
+2. content: Required property missing
+
+Please correct these issues and try again.
+```
+
 ### init
 
 Initialize a new agent configuration.
@@ -364,17 +516,23 @@ agents-exe new (agent|tool) [OPTIONS]
 Create a new agent configuration file from a template.
 
 ```bash
-agents-exe new agent [OPTIONS] SLUG
+agents-exe new agent SLUG [FILE] [MODEL] [OPTIONS]
 ```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `SLUG` | Unique identifier for the agent |
+| `FILE` | Output file path (default: `./{slug}.json`) |
+| `MODEL` | Model name (e.g., gpt-4o, mistral-large) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--file FILE` | Output file path (default: `./{slug}.json`) |
-| `--preset PRESET` | Model preset: `openai`, `mistral`, `ollama` (default: `openai`) |
-| `--model MODEL` | Override the model name from preset |
-| `--force` | Overwrite existing file |
+| `-p, --preset PRESET` | Provider preset: `openai`, `mistral`, `ollama` (default: `openai`) |
+| `-f, --force` | Overwrite existing file |
 
 **Presets:**
 
@@ -397,7 +555,7 @@ agents-exe new agent my-assistant --preset mistral
 agents-exe new agent coder --preset openai --model gpt-4o
 
 # Create agent with custom output path
-agents-exe new agent my-assistant --file ./agents/assistant.json
+agents-exe new agent my-assistant ./agents/assistant.json
 
 # Overwrite existing
 agents-exe new agent my-assistant --force
@@ -433,34 +591,37 @@ agents-exe new agent my-assistant --force
 Create a new tool script from a template.
 
 ```bash
-agents-exe new tool [OPTIONS] SLUG
+agents-exe new tool SLUG LANGUAGE FILE [OPTIONS]
 ```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `SLUG` | Unique identifier for the tool |
+| `LANGUAGE` | Programming language: `bash`, `python`, `haskell`, `node` |
+| `FILE` | Output file path (without extension) |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--file FILE` | Output file path (default: `./tools/{slug}`) |
-| `--language LANG` | Language: `bash`, `python`, `haskell`, `node` (default: `bash`) |
-| `--force` | Overwrite existing file |
+| `-f, --force` | Overwrite existing file |
 
 **Examples:**
 
 ```bash
 # Create bash tool (default)
-agents-exe new tool my-tool
+agents-exe new tool my-tool bash ./tools/my-tool
 
 # Create Python tool
-agents-exe new tool my-tool --language python
+agents-exe new tool my-tool python ./scripts/my-tool
 
 # Create Haskell tool
-agents-exe new tool my-tool --language haskell
+agents-exe new tool my-tool haskell ./tools/my-tool
 
 # Create Node.js tool
-agents-exe new tool my-tool --language node
-
-# Custom output path
-agents-exe new tool my-tool --file ./scripts/my-tool.sh
+agents-exe new tool my-tool node ./scripts/my-tool
 ```
 
 **Generated bash tool:**
@@ -536,8 +697,15 @@ agents-exe spec bash-tools
 Display information about a tool script.
 
 ```bash
-agents-exe describe-tool TOOL_PATH
+agents-exe describe-tool TOOL_PATH [OPTIONS]
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format FORMAT` | Output format: `json` or `pretty` (default: `json`) |
+| `--check-only` | Only check validity, don't output full description |
 
 **Description:**
 Loads and displays the tool's description (the output of `tool describe`).
@@ -545,6 +713,12 @@ Loads and displays the tool's description (the output of `tool describe`).
 **Example:**
 ```bash
 agents-exe describe-tool ./tools/my-tool.sh
+
+# Pretty format
+agents-exe describe-tool ./tools/my-tool.sh --format pretty
+
+# Only check validity
+agents-exe describe-tool ./tools/my-tool.sh --check-only
 ```
 
 **Output:**
@@ -557,47 +731,32 @@ agents-exe describe-tool ./tools/my-tool.sh
 }
 ```
 
-### check-tool-call
+### paths
 
-Validate a tool call payload against a tool schema (reads JSON from stdin).
+Show important configuration paths.
 
 ```bash
-cat payload.json | agents-exe check-tool-call --tool TOOLPATH
+agents-exe paths [OPTIONS]
 ```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-t, --tool TOOLPATH` | Path to the tool script to validate against |
+| `--json` | Output in JSON format |
 
 **Description:**
-Validates that a JSON payload from stdin matches the tool's declared schema.
-Returns exit code 0 if valid, 1 if invalid with detailed error messages.
+Displays configuration paths including config directory, agent files, 
+API keys file, and session storage location.
 
-**Example:**
+**Examples:**
+
 ```bash
-# Create a test payload
-echo '{"filepath": "/path/to/file"}' | agents-exe check-tool-call --tool ./tools/read-file.sh
+# Human-readable output
+agents-exe paths
 
-# Validate from file
-cat payload.json | agents-exe check-tool-call --tool ./tools/my-tool.sh
-```
-
-**Example output (valid):**
-```
-✓ Tool call payload is valid
-```
-
-**Example output (invalid):**
-```
-Tool call validation failed for './tools/my-tool.sh (my-tool)' with 2 errors:
-
-1. filepath: Required property missing
-
-2. content: Required property missing
-
-Please correct these issues and try again.
+# JSON output
+agents-exe paths --json
 ```
 
 ### export
@@ -731,30 +890,32 @@ agents-exe import \
   --to ./tools/
 ```
 
-### session-edit
+### cowsay
 
-Edit a session file.
+Display a fun message with the agents-exe mascot.
 
 ```bash
-agents-exe session-edit [OPTIONS] SESSIONFILE
+agents-exe cowsay [MESSAGE] [OPTIONS]
 ```
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--compress-turns N` | Compress turns older than N |
-| `--remove-tool-calls` | Remove all tool calls |
-| `--remove-empty-messages` | Remove empty messages |
+| `-W, --width WIDTH` | Maximum width of speech bubble (default: 40) |
 
-**Examples:**
+**Description:**
+If no message is provided, reads from stdin.
 
+**Example:**
 ```bash
-# Compress old turns
-agents-exe session-edit --compress-turns 10 session.json
+agents-exe cowsay "Hello, agents!"
 
-# Clean up session
-agents-exe session-edit --remove-empty-messages session.json
+# With custom width
+agents-exe cowsay "A much longer message that needs more space" --width 60
+
+# Pipe from another command
+echo "System ready" | agents-exe cowsay
 ```
 
 ### describe
@@ -762,25 +923,19 @@ agents-exe session-edit --remove-empty-messages session.json
 Output self-describing schema for the agent.
 
 ```bash
-agents-exe describe
+agents-exe describe [OPTIONS]
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--self-describe-slug NAME` | Override the slug field |
+| `--self-describe-description DESC` | Override the description |
 
 **Output:** JSON schema for tool calling.
 
 **Use case:** Integration with external systems that need to understand the agent's interface.
-
-### cowsay
-
-Display a fun message (utility command).
-
-```bash
-agents-exe cowsay [MESSAGE]
-```
-
-**Example:**
-```bash
-agents-exe cowsay "Hello, agents!"
-```
 
 ### self-describe
 
@@ -806,6 +961,14 @@ Project-level configuration in `agents-exe.cfg.json`:
   "agentsFiles": [
     "./main-agent.json"
   ],
+  "promptAliases": {
+    "translate": {
+      "systemPrompt": ["You are a translator..."],
+      "userPromptPrefix": "Translate to English:"
+    }
+  },
+  "selfDescribeSlug": "my-agent",
+  "selfDescribeDescription": "A custom agent",
   "agentsLogs": {
     "logJsonHttpEndpoint": "http://localhost:8080/log",
     "logJsonPath": "./logs/agents.json",
@@ -849,7 +1012,7 @@ Project-level configuration in `agents-exe.cfg.json`:
 agents-exe new agent my-assistant
 
 # 2. Create a custom tool
-agents-exe new tool file-reader --language python
+agents-exe new tool file-reader python ./tools/file-reader
 
 # 3. Edit tool and agent configurations
 # (edit files as needed)
@@ -885,6 +1048,39 @@ agents-exe mcp-server \
   --agent-file ./coder.json
 ```
 
+### Session Management Workflow
+
+```bash
+# Run an agent session
+agents-exe run \
+    --agent-file ./my-agent.json \
+    --session-file ./session.json \
+    --prompt "Let's work on a project"
+
+# Later, inspect the session
+agents-exe session-print ./session.json
+
+# List all tool calls from the session
+agents-exe list-tool-calls ./session.json
+
+# Replay a specific tool call for debugging
+agents-exe replay-tool-call \
+  --session ./session.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh \
+  --validate-only
+
+# Trim to last 20 turns
+agents-exe session-edit --take-tail --count 20 < ./session.json > ./trimmed.json
+mv ./trimmed.json ./session.json
+
+# Continue the session
+agents-exe run \
+    --agent-file ./my-agent.json \
+    --session-file ./session.json \
+    --prompt "Where were we?"
+```
+
 ### Automation
 
 ```bash
@@ -902,6 +1098,12 @@ agents-exe run \
     --agent-file ./reviewer.json \
     --shell "git diff --cached" \
     --prompt "Review these changes."
+
+# Daily summary from logs
+agents-exe run \
+    --agent-file ./summarizer.json \
+    --shell "cat /var/log/app.log | tail -100" \
+    --prompt "Summarize any errors or warnings"
 ```
 
 ### Developer Workflow
@@ -911,10 +1113,15 @@ agents-exe run \
 agents-exe spec bash-tools
 
 # Create and validate a tool
-agents-exe new tool my-validator --language bash
+agents-exe new tool my-validator bash ./tools/my-validator
 # (edit the tool)
-agents-exe describe-tool ./tools/my-validator
-agents-exe check-tool-call ./tools/my-validator --arg input="test"
+agents-exe describe-tool ./tools/my-validator --format pretty
+
+# Validate a payload
+echo '{"input": "test"}' | agents-exe check-tool-call --tool ./tools/my-validator
+
+# Test the tool directly
+echo '{"input": "test"}' | agents-exe tool-call my-validator
 
 # Create agent with dev tools
 agents-exe new agent dev-assistant
@@ -928,22 +1135,22 @@ agents-exe new agent dev-assistant
 # Run an agent session
 agents-exe run --agent-file ./my-agent.json --prompt "Read the README"
 
-# Later, inspect the session
-cat conv.*.json | tail -1 | jq .
+# Find the session file
+agents-exe paths
 
-# List all tool calls from the session
-agents-exe list-tool-calls conv.*.json
+# List all tool calls
+agents-exe list-tool-calls ~/.config/agents-exe/sessions/session-*.json
 
-# Replay a specific tool call for debugging
+# Replay with validation only
 agents-exe replay-tool-call \
-  --session conv.*.json \
+  --session ~/.config/agents-exe/sessions/session-xxx.json \
   --tool-call 0 \
   --tool ./tools/read-file.sh \
   --validate-only
 
 # Actually replay the tool call
 agents-exe replay-tool-call \
-  --session conv.*.json \
+  --session ~/.config/agents-exe/sessions/session-xxx.json \
   --tool-call 0 \
   --tool ./tools/read-file.sh
 ```
