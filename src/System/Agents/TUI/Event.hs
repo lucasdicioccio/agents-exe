@@ -20,7 +20,7 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens ((.=), (%=), to, use)
+import Control.Lens (to, use, (%=), (.=))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
@@ -30,8 +30,8 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
-import qualified Data.Vector as Vector
 import Data.Time (diffUTCTime, getCurrentTime)
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
@@ -257,11 +257,12 @@ handleToggleExpandConversation = do
             liftIO $ atomically $ modifyTVar coreRef $ \c ->
                 let treeState = coreConversationTreeState c
                     newTreeState = toggleExpanded (conversationId conv) treeState
-                 in c { coreConversationTreeState = newTreeState }
+                 in c{coreConversationTreeState = newTreeState}
             let convsList = Vector.toList allConvs
-            showStatus StatusInfo $ if hasChildConversations conv convsList
-                then "Toggled conversation expansion"
-                else "No children to expand"
+            showStatus StatusInfo $
+                if hasChildConversations conv convsList
+                    then "Toggled conversation expansion"
+                    else "No children to expand"
             -- Refresh the conversation list to reflect changes
             handleHeartbeat
         Nothing -> pure ()
@@ -276,7 +277,7 @@ handleExpandConversation = do
             liftIO $ atomically $ modifyTVar coreRef $ \c ->
                 let treeState = coreConversationTreeState c
                     newExpanded = Set.insert (conversationId conv) (_expandedConversations treeState)
-                 in c { coreConversationTreeState = treeState { _expandedConversations = newExpanded } }
+                 in c{coreConversationTreeState = treeState{_expandedConversations = newExpanded}}
             handleHeartbeat
         Nothing -> pure ()
 
@@ -290,7 +291,7 @@ handleCollapseConversation = do
             liftIO $ atomically $ modifyTVar coreRef $ \c ->
                 let treeState = coreConversationTreeState c
                     newExpanded = Set.delete (conversationId conv) (_expandedConversations treeState)
-                 in c { coreConversationTreeState = treeState { _expandedConversations = newExpanded } }
+                 in c{coreConversationTreeState = treeState{_expandedConversations = newExpanded}}
             handleHeartbeat
         Nothing -> pure ()
 
@@ -303,7 +304,7 @@ handleExpandAllConversations = do
         let treeState = coreConversationTreeState c
             convsList = c.coreConversations
             newTreeState = expandAll convsList treeState
-         in c { coreConversationTreeState = newTreeState }
+         in c{coreConversationTreeState = newTreeState}
     showStatus StatusInfo "Expanded all conversations"
     handleHeartbeat
 
@@ -316,7 +317,7 @@ handleCollapseAllConversations = do
         let treeState = coreConversationTreeState c
             convsList = c.coreConversations
             newTreeState = collapseAll convsList treeState
-         in c { coreConversationTreeState = newTreeState }
+         in c{coreConversationTreeState = newTreeState}
     showStatus StatusInfo "Collapsed all conversations"
     handleHeartbeat
 
@@ -329,9 +330,9 @@ handleJumpToNextSibling = do
         Just (idx, conv) -> do
             let convsList = Vector.toList allConvs
                 currentDepth = getConversationDepth conv convsList
-                siblings = 
-                    [ (i, c) 
-                    | (i, c) <- zip [0..] convsList
+                siblings =
+                    [ (i, c)
+                    | (i, c) <- zip [0 ..] convsList
                     , getConversationDepth c convsList == currentDepth
                     , i > idx
                     ]
@@ -350,9 +351,9 @@ handleJumpToPreviousSibling = do
         Just (idx, conv) -> do
             let convsList = Vector.toList allConvs
                 currentDepth = getConversationDepth conv convsList
-                siblings = 
-                    [ (i, c) 
-                    | (i, c) <- zip [0..] convsList
+                siblings =
+                    [ (i, c)
+                    | (i, c) <- zip [0 ..] convsList
                     , getConversationDepth c convsList == currentDepth
                     , i < idx
                     ]
@@ -512,11 +513,11 @@ handleHeartbeat = do
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
-    
+
     -- Update tree cache
     liftIO $ atomically $ modifyTVar coreRef $ \c ->
-        c { coreConversationTreeState = updateConversationTreeCache convs (coreConversationTreeState c) }
-    
+        c{coreConversationTreeState = updateConversationTreeCache convs (coreConversationTreeState c)}
+
     -- Build display list respecting expanded state
     let visibleConvs = buildDisplayConversationList convs (coreConversationTreeState coreState)
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList visibleConvs) 1
@@ -914,4 +915,3 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-

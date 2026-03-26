@@ -9,7 +9,7 @@ import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList, listElements, list)
+import Brick.Widgets.List (list, listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -255,14 +255,15 @@ render_conversationList st =
 -- | Render a single conversation item with tree indentation.
 render_conversationItem :: TuiState -> ConversationTreeState -> Map ConversationId Int -> Map ConversationId Int -> Bool -> Conversation -> Widget N
 render_conversationItem st treeState depthMap childCountMap _ conv =
-    let -- Get depth and child count
+    let
+        -- Get depth and child count
         depth = Map.findWithDefault 0 (conversationId conv) depthMap
         childCount = Map.findWithDefault 0 (conversationId conv) childCountMap
         isExpanded = Set.member (conversationId conv) (treeState ^. expandedConversations)
-        
+
         -- Build indentation based on depth
         indent = Text.replicate (depth * 2) " "
-        
+
         -- Status indicator with expand/collapse marker for conversations with children
         indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
@@ -271,21 +272,22 @@ render_conversationItem st treeState depthMap childCountMap _ conv =
                     then if isExpanded then "▼ " else "▶ "
                     else if isUnread then "● " else "  "
             ConversationStatus_Paused -> "⏸ "
-        
+
         -- Child indicator suffix
-        childInfo = if childCount > 0
-            then " [" <> Text.pack (show childCount) <> " sub]"
-            else ""
-        
+        childInfo =
+            if childCount > 0
+                then " [" <> Text.pack (show childCount) <> " sub]"
+                else ""
+
         -- Turn count
         turnCount = case conversationSession conv of
             Nothing -> 0
             Just session -> length session.turns
         turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        
+
         -- Full text with styling
         fullText = indent <> indicator <> Text.take 18 (conversationName conv) <> childInfo <> turnSuffix
-        
+
         -- Apply styling based on status and depth
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
@@ -294,7 +296,8 @@ render_conversationItem st treeState depthMap childCountMap _ conv =
                 if depth > 0
                     then withAttr nestedConversationAttr $ txt $ " " <> fullText
                     else txt $ " " <> fullText
-     in widget
+     in
+        widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
 
@@ -318,7 +321,8 @@ render_sessionItem _st _ sess =
             Just _ -> " ↳ "
             Nothing -> " "
         widget = txt $ forkIndicator <> Text.pack (show sess.sessionId)
-     in widget
+     in
+        widget
 
 -------------------------------------------------------------------------------
 -- Agent Info Rendering
@@ -394,7 +398,7 @@ render_conversationView st =
         case listSelectedElement (st ^. tuiUI . conversationList) of
             Nothing -> txt "No conversation selected"
             Just (_, conv) ->
-                viewport ConversationViewWidget Both $ 
+                viewport ConversationViewWidget Both $
                     render_session_with_subagents (conversationSession conv) (st ^. tuiUI . ongoingConversations) allConvs
     -- Get all conversations for sub-agent lookup
     allConvs = Vector.toList $ listElements (st ^. tuiUI . conversationList)
@@ -408,7 +412,7 @@ render_sessionView st =
         case listSelectedElement (st ^. tuiUI . sessionList) of
             Nothing -> txt "No session selected"
             Just (_, session) ->
-                viewport SessionViewWidget Both $ 
+                viewport SessionViewWidget Both $
                     render_session (Just session) (st ^. tuiUI . ongoingConversations)
 
 -- | Render a session's turns with sub-agent call visualization.
@@ -418,7 +422,7 @@ render_session_with_subagents Nothing _ _ =
 render_session_with_subagents (Just session) _ongoingConvs allConvs =
     vBox $
         [render_session_total_bytes session]
-            ++ [ render_turn_with_subagents allConvs t 
+            ++ [ render_turn_with_subagents allConvs t
                | t <- Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns)
                ]
 
@@ -507,7 +511,7 @@ findSubAgentConversations :: [Conversation] -> [Conversation]
 findSubAgentConversations allConvs =
     -- For each tool call, check if it corresponds to a sub-agent call
     -- by looking for conversations forked from this session
-    [ conv 
+    [ conv
     | conv <- allConvs
     , isSubAgentConversation conv
     ]
@@ -516,9 +520,9 @@ findSubAgentConversations allConvs =
     isSubAgentConversation conv =
         -- Check if this conversation was forked from the current session
         case conversationSession conv of
-            Just sess -> 
+            Just sess ->
                 case sess.forkedFromSessionId of
-                    Just _ -> True  -- It's a forked session = sub-agent
+                    Just _ -> True -- It's a forked session = sub-agent
                     Nothing -> False
             Nothing -> False
 
@@ -532,9 +536,9 @@ renderSubAgentConversation conv =
                 Just sess ->
                     if null sess.turns
                         then txt "│ (session started, no turns yet)"
-                        else 
+                        else
                             -- Show first few turns of sub-agent conversation
-                            vBox $ take 3 $ map (render_subagent_turn . snd) (zip [(0::Int)..] $ reverse sess.turns)
+                            vBox $ take 3 $ map (render_subagent_turn . snd) (zip [(0 :: Int) ..] $ reverse sess.turns)
                 Nothing -> txt "│ (session not loaded)"
             , withAttr subAgentCallAttr $ txt "└────────────────────────────────────────┘"
             , txt ""
@@ -545,13 +549,15 @@ render_subagent_turn :: Turn -> Widget N
 render_subagent_turn turn =
     case turn of
         UserTurn userTurn _ ->
-            txt $ "│ < " <> case userQuery userTurn of
-                Just (UserQuery q) -> Text.take 50 q
-                Nothing -> "(no query)"
+            txt $
+                "│ < " <> case userQuery userTurn of
+                    Just (UserQuery q) -> Text.take 50 q
+                    Nothing -> "(no query)"
         LlmTurn llmTurn _ ->
-            txt $ "│ > " <> case llmTurn.llmResponse.responseText of
-                Just r -> Text.take 50 r
-                Nothing -> "(no response)"
+            txt $
+                "│ > " <> case llmTurn.llmResponse.responseText of
+                    Just r -> Text.take 50 r
+                    Nothing -> "(no response)"
 
 -- | Render a single turn with byte usage.
 render_turn :: (Int, Turn) -> Widget N
@@ -676,4 +682,3 @@ tui_appAttrMap _ =
         , (nestedConversationAttr, BrickUtil.fg Vty.brightBlue)
         , (depthIndentAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         ]
-

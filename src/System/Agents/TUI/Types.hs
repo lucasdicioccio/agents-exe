@@ -12,7 +12,7 @@ import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM (TQueue, TVar, newTVarIO)
-import Control.Lens (makeLenses, (^.), (.~), (%~), (&))
+import Control.Lens (makeLenses, (%~), (&), (.~), (^.))
 import Data.Aeson (Value)
 import Data.List (find)
 import Data.Map.Strict (Map)
@@ -255,12 +255,18 @@ data Conversation = Conversation
 -- | Manual Show instance for Conversation (BChan and ThreadId don't have Show)
 instance Show Conversation where
     show conv =
-        "Conversation { conversationId = " ++ show conv.conversationId
-            ++ ", conversationAgent = " ++ show conv.conversationAgent
-            ++ ", conversationThreadId = " ++ show (fmap (const ("<ThreadId>" :: String)) conv.conversationThreadId)
-            ++ ", conversationSession = " ++ show conv.conversationSession
-            ++ ", conversationName = " ++ show conv.conversationName
-            ++ ", conversationChan = <BChan>, conversationStatus = " ++ show conv.conversationStatus
+        "Conversation { conversationId = "
+            ++ show conv.conversationId
+            ++ ", conversationAgent = "
+            ++ show conv.conversationAgent
+            ++ ", conversationThreadId = "
+            ++ show (fmap (const ("<ThreadId>" :: String)) conv.conversationThreadId)
+            ++ ", conversationSession = "
+            ++ show conv.conversationSession
+            ++ ", conversationName = "
+            ++ show conv.conversationName
+            ++ ", conversationChan = <BChan>, conversationStatus = "
+            ++ show conv.conversationStatus
             ++ ", conversationOnProgress = <OnSessionProgress> }"
 
 -------------------------------------------------------------------------------
@@ -284,11 +290,16 @@ data ConversationNode = ConversationNode
 -- | Manual Show instance for ConversationNode
 instance Show ConversationNode where
     show node =
-        "ConversationNode { cnConversation = " ++ show node.cnConversation
-            ++ ", cnParentId = " ++ show node.cnParentId
-            ++ ", cnChildIds = " ++ show node.cnChildIds
-            ++ ", cnDepth = " ++ show node.cnDepth
-            ++ ", cnIsExpanded = " ++ show node.cnIsExpanded
+        "ConversationNode { cnConversation = "
+            ++ show node.cnConversation
+            ++ ", cnParentId = "
+            ++ show node.cnParentId
+            ++ ", cnChildIds = "
+            ++ show node.cnChildIds
+            ++ ", cnDepth = "
+            ++ show node.cnDepth
+            ++ ", cnIsExpanded = "
+            ++ show node.cnIsExpanded
             ++ " }"
 
 -- | State for tracking conversation tree visualization.
@@ -467,11 +478,12 @@ updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
 
--- | Build a flat list of conversations for display, respecting expanded state.
---
--- This function takes the list of all conversations and returns a list
--- suitable for display in the UI, with children hidden if their parent
--- is collapsed.
+{- | Build a flat list of conversations for display, respecting expanded state.
+
+This function takes the list of all conversations and returns a list
+suitable for display in the UI, with children hidden if their parent
+is collapsed.
+-}
 buildDisplayConversationList :: [Conversation] -> ConversationTreeState -> [Conversation]
 buildDisplayConversationList allConvs treeState =
     -- Start with root conversations (those at depth 0 or unknown depth)
@@ -571,11 +583,13 @@ collapseAll _convs treeState =
 -- | Update conversation tree cache based on current conversations.
 updateConversationTreeCache :: [Conversation] -> ConversationTreeState -> ConversationTreeState
 updateConversationTreeCache convs treeState =
-    let -- Build depth map
+    let
+        -- Build depth map
         depthMap = Map.fromList [(conversationId c, getConversationDepth c convs) | c <- convs]
         -- Build child cache
         childMap = Map.fromList [(conversationId c, findChildren c convs) | c <- convs]
-     in treeState
+     in
+        treeState
             & conversationDepth .~ depthMap
             & childConversationCache .~ childMap
   where
@@ -592,4 +606,3 @@ updateConversationTreeCache convs treeState =
                     Just parentConv -> conversationId parentConv == parentId
                     Nothing -> False
             Nothing -> False
-

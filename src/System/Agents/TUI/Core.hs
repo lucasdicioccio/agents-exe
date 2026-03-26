@@ -22,13 +22,13 @@ module System.Agents.TUI.Core (
     UIState (..),
     TuiState (..),
     SessionConfig (..),
-    
+
     -- * Conversation Tree Types
     ConversationNode (..),
     ConversationTreeState (..),
     ConversationHierarchyInfo (..),
     initConversationTreeState,
-    
+
     -- * Tree utility functions
     buildDisplayConversationList,
     hasChildConversations,
@@ -38,7 +38,7 @@ module System.Agents.TUI.Core (
     expandAll,
     collapseAll,
     updateConversationTreeCache,
-    
+
     -- * Initialization
     initUIState,
     initCore,
@@ -255,11 +255,11 @@ runTUIWithConfig config props = do
 
     -- Create core state with loaded conversations and tree state
     core0 <- initCore tuiAgents
-    
+
     -- Build initial tree state from loaded sessions
     let treeState = buildConversationTreeState [s | (_, Just s) <- loadedSessions]
-    
-    coreTVar <- newTVarIO $ core0 { coreConversationTreeState = treeState }
+
+    coreTVar <- newTVarIO $ core0{coreConversationTreeState = treeState}
 
     -- Create UI state with loaded sessions and collected tools
     let ui0 =
@@ -284,4 +284,3 @@ runTUIWithConfig config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-
