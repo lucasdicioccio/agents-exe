@@ -4,7 +4,7 @@ if [ "$1" == "describe" ]; then
     cat <<'EOF'
 {
   "slug": "run_agents_exe",
-  "description": "Runs agents-exe with specified arguments. Useful for testing CLI commands like init, check, run, describe, etc.",
+  "description": "Runs agents-exe with specified arguments. Useful for testing CLI commands like init, check, run, describe, and running repro cases when bug with specific command arise.",
   "args": [
     {
       "name": "args",

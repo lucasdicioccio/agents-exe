@@ -22,6 +22,7 @@ module System.Agents.AgentTree.ToolLoader (
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar)
+import Control.Exception (SomeException, try)
 import qualified Data.Aeson as Aeson
 import Data.Either (partitionEithers)
 import Data.Maybe (catMaybes, fromMaybe)
@@ -178,9 +179,15 @@ collectBashDescriptions agent =
 -- MCP Server Loading
 -------------------------------------------------------------------------------
 
+-- | Timeout for MCP server initialization (30 seconds in microseconds)
+mcpInitTimeoutMicros :: Int
+mcpInitTimeoutMicros = 30 * 1000 * 1000
+
 {- | Load MCP servers from the agent configuration.
 
 Each MCP server is started and its tools are registered.
+If a server fails to start or times out, an error is returned
+but processing continues for other servers.
 -}
 loadMcpServers ::
     Agent ->
@@ -196,6 +203,7 @@ loadMcpServers agent toolsTVar = do
             pure $ collectFirstError errors
 
 -- | Load a single MCP server and register its tools.
+-- Catches exceptions during initialization and returns a graceful error.
 loadMcpServer ::
     TVar [ToolRegistration] ->
     McpServerDescription ->
@@ -204,26 +212,39 @@ loadMcpServer toolsTVar (McpSimpleBinary config) = do
     let silentTracer = Tracer $ \_ -> pure ()
     let proc = System.Process.proc config.executable (map Text.unpack config.args)
     
-    -- Initialize the MCP toolbox
-    toolbox <- McpToolbox.initializeMcpToolbox silentTracer config.name proc
+    -- Try to initialize the MCP toolbox with exception handling
+    initResult <- try $ McpToolbox.initializeMcpToolbox silentTracer config.name proc
     
-    -- Wait for initial tool discovery
-    McpToolbox.waitForInitialDiscovery toolbox
-    
-    -- Get discovered tools
-    tools <- readTVarIO $ McpToolbox.toolsList toolbox
-    
-    -- Register each tool
-    let registrations = map (ToolReg.registerMcpToolInLLM toolbox) tools
-    let (errs, regs) = partitionEithers registrations
-    
-    -- Add successful registrations to the tools TVar
-    atomically $ modifyTVar' toolsTVar (\existing -> existing ++ regs)
-    
-    -- Return first error if any
-    pure $ case errs of
-        (e:_) -> Just $ McpLoadingError e
-        [] -> Nothing
+    case initResult of
+        Left (e :: SomeException) -> do
+            -- Initialization failed (e.g., executable not found)
+            let errMsg = Text.unpack config.name ++ ": Failed to initialize MCP server: " ++ show e
+            pure $ Just $ McpLoadingError errMsg
+        
+        Right toolbox -> do
+            -- Wait for initial tool discovery with timeout
+            discoveryResult <- McpToolbox.waitForInitialDiscoveryTimeout mcpInitTimeoutMicros toolbox
+            
+            if not discoveryResult
+                then do
+                    -- Timeout waiting for tool discovery
+                    let errMsg = Text.unpack config.name ++ ": Timeout waiting for MCP server tool discovery (" ++ show (mcpInitTimeoutMicros `div` 1000000) ++ "s)"
+                    pure $ Just $ McpLoadingError errMsg
+                else do
+                    -- Get discovered tools
+                    tools <- readTVarIO $ McpToolbox.toolsList toolbox
+                    
+                    -- Register each tool
+                    let registrations = map (ToolReg.registerMcpToolInLLM toolbox) tools
+                    let (errs, regs) = partitionEithers registrations
+                    
+                    -- Add successful registrations to the tools TVar
+                    atomically $ modifyTVar' toolsTVar (\existing -> existing ++ regs)
+                    
+                    -- Return first error if any registration failed
+                    pure $ case errs of
+                        (e:_) -> Just $ McpLoadingError e
+                        [] -> Nothing
   where
     readTVarIO tvar = atomically $ readTVar tvar
 
