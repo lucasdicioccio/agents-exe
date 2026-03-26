@@ -4,6 +4,7 @@ import Data.Text (Text)
 
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Session.Base (SessionId)
 import System.Agents.Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
@@ -21,7 +22,7 @@ This type captures trace events from various sources:
 * Builtin toolbox traces (SQLite, System, Developer, Lua, Skills)
 * Sub-agent traces for recursive agent calls
 
-The 'SubAgentTrace' constructor specifically captures the relationship
+The 'AgentTrace_SubAgentCall' constructor specifically captures the relationship
 between parent and child agent calls, enabling proper trace tree
 visualization for recursive agent invocations.
 -}
@@ -37,19 +38,22 @@ data Trace
     | SkillsToolboxTrace !Text !SkillsToolbox.Trace
     | SkillsToolboxInitError !Text !String
     | {- | Trace event for sub-agent (recursive) calls.
-      Captures the relationship between parent and child agent calls.
+      Captures the relationship between parent and child agent calls
+      along with detailed sub-agent lifecycle events.
       -}
-      SubAgentTrace
+      AgentTrace_SubAgentCall
         { subAgentCallerSlug :: AgentSlug
         -- ^ The slug of the calling agent
         , subAgentCallerId :: AgentId
         -- ^ The ID of the calling agent
         , subAgentParentConvId :: ConversationId
         -- ^ The parent conversation ID
+        , subAgentSubSlug :: AgentSlug
+        -- ^ The slug of the sub-agent being called
         , subAgentSubConvId :: ConversationId
         -- ^ The sub-agent's conversation ID
-        , subAgentTrace :: Trace
-        -- ^ The actual trace content from the sub-agent
+        , subAgentTrace :: SubAgentTrace
+        -- ^ The detailed sub-agent trace event
         }
     deriving (Show)
 
@@ -64,7 +68,7 @@ traceAgentSlug (DeveloperToolboxTrace tName _) = tName
 traceAgentSlug (LuaToolboxTrace tName _) = tName
 traceAgentSlug (SkillsToolboxTrace tName _) = tName
 traceAgentSlug (SkillsToolboxInitError tName _) = tName
-traceAgentSlug SubAgentTrace{subAgentCallerSlug = callerSlug} = callerSlug
+traceAgentSlug AgentTrace_SubAgentCall{subAgentCallerSlug = callerSlug} = callerSlug
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
@@ -77,7 +81,7 @@ traceAgentId (DeveloperToolboxTrace _ _) = AgentId (read "00000000-0000-0000-000
 traceAgentId (LuaToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (SkillsToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (SkillsToolboxInitError _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
-traceAgentId SubAgentTrace{subAgentCallerId = callerId} = callerId
+traceAgentId AgentTrace_SubAgentCall{subAgentCallerId = callerId} = callerId
 
 traceConversationId :: Trace -> Maybe ConversationId
 traceConversationId (AgentTrace_Loading _ _ _) = Nothing
@@ -90,7 +94,50 @@ traceConversationId (DeveloperToolboxTrace _ _) = Nothing
 traceConversationId (LuaToolboxTrace _ _) = Nothing
 traceConversationId (SkillsToolboxTrace _ _) = Nothing
 traceConversationId (SkillsToolboxInitError _ _) = Nothing
-traceConversationId SubAgentTrace{subAgentParentConvId = parentConvId} = Just parentConvId
+traceConversationId AgentTrace_SubAgentCall{subAgentParentConvId = parentConvId} = Just parentConvId
+
+{- | Detailed trace events for sub-agent (recursive) calls.
+
+These events capture the full lifecycle of a sub-agent execution:
+* When the sub-agent starts
+* LLM calls made by the sub-agent
+* Tool calls made by the sub-agent
+* Completion with final response
+* Failure with error message
+
+This enables comprehensive debugging of recursive agent calls.
+-}
+data SubAgentTrace
+    = -- | Sub-agent session started
+      SubAgentStarted
+        { subAgentSessionId :: SessionId
+        -- ^ The unique session ID for this sub-agent execution
+        }
+    | -- | LLM trace from sub-agent
+      SubAgentLLMTrace
+        { subAgentStepId :: StepId
+        -- ^ The step ID within the sub-agent's execution
+        , subAgentLLMTrace :: OpenAI.Trace
+        -- ^ The OpenAI trace event
+        }
+    | -- | Tool trace from sub-agent
+      SubAgentToolTrace
+        { subAgentStepId :: StepId
+        -- ^ The step ID within the sub-agent's execution
+        , subAgentToolTrace :: ToolTrace
+        -- ^ The tool execution trace
+        }
+    | -- | Sub-agent completed successfully with final response
+      SubAgentCompleted
+        { subAgentResponse :: Text
+        -- ^ The final text response from the sub-agent
+        }
+    | -- | Sub-agent failed with an error
+      SubAgentFailed
+        { subAgentError :: Text
+        -- ^ The error message explaining the failure
+        }
+    deriving (Show)
 
 data ConversationTrace
     = NewConversation
@@ -99,3 +146,4 @@ data ConversationTrace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
+

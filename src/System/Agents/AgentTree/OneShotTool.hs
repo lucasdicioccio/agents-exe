@@ -76,15 +76,17 @@ import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Prod.Tracer (Tracer (..), contramap)
+import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId, newStepId)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, StepId, newConversationId, newStepId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentStoreSession, parseModelFlavor)
-import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
+import System.Agents.Runtime.Trace (
+    SubAgentTrace (..),
+    Trace (..),
+ )
 import System.Agents.Session.Base (
     Action (..),
     Agent (..),
@@ -117,6 +119,7 @@ import System.Agents.ToolRegistration (
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 import qualified System.Agents.Tools.IO as IOTools
+import qualified System.Agents.Tools.Trace as ToolsTrace
 
 -------------------------------------------------------------------------------
 -- Session Tracking Callbacks
@@ -410,14 +413,9 @@ turnAgentRuntimeIntoIOTool store apiKeys node callerSlug callerId callbacks pare
         -- Generate a conversation ID for this sub-agent execution
         subConvId <- newConversationId
 
-        -- Create a tracer that captures sub-agent traces to the parent
-        let subTracer =
-                contramap
-                    (SubAgentTrace callerSlug callerId parentConversationId subConvId)
-                    parentTracer
-
-        -- Create the agent from the OS node
-        sessionAgent <- nodeToAgent store httpRuntime node subTracer callerSlug callerId parentConversationId
+        -- Create the agent from the OS node with proper tracer
+        -- The tracer captures sub-agent traces and routes them to the parent
+        sessionAgent <- nodeToAgent store httpRuntime node callerSlug callerId parentConversationId subConvId parentTracer
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent
@@ -429,6 +427,16 @@ turnAgentRuntimeIntoIOTool store apiKeys node callerSlug callerId callbacks pare
 
         -- Notify that session was created
         callbacks.onSessionCreated session0 subConvId
+
+        -- Emit start trace
+        runTracer parentTracer $
+            AgentTrace_SubAgentCall
+                callerSlug
+                callerId
+                parentConversationId
+                (Base.slug agent)
+                subConvId
+                (SubAgentStarted subSessionId)
 
         -- Run the agent and get the result
         -- We wrap the run in a try to ensure onSessionCompleted is always called
@@ -445,14 +453,33 @@ turnAgentRuntimeIntoIOTool store apiKeys node callerSlug callerId callbacks pare
             Right (_, finalSession) -> callbacks.onSessionCompleted finalSession
             Left _ -> callbacks.onSessionCompleted session0
 
-        -- Extract and return the response text
+        -- Extract and return the response text, emitting appropriate traces
         case result of
             Right (finalTurnContent, _) -> do
-                let txtResult = extractResponseText finalTurnContent.llmResponse
-                pure $ Text.encodeUtf8 txtResult
+                let response = extractResponseText finalTurnContent.llmResponse
+                -- Emit completion trace
+                runTracer parentTracer $
+                    AgentTrace_SubAgentCall
+                        callerSlug
+                        callerId
+                        parentConversationId
+                        (Base.slug agent)
+                        subConvId
+                        (SubAgentCompleted response)
+                pure $ Text.encodeUtf8 response
             Left err -> do
+                -- Emit failure trace
+                let errText = Text.pack $ show err
+                runTracer parentTracer $
+                    AgentTrace_SubAgentCall
+                        callerSlug
+                        callerId
+                        parentConversationId
+                        (Base.slug agent)
+                        subConvId
+                        (SubAgentFailed errText)
                 -- Return error message as response
-                pure $ Text.encodeUtf8 $ Text.pack $ "Sub-agent error: " ++ show err
+                pure $ Text.encodeUtf8 $ "Sub-agent error: " <> errText
 
 {- | Run an agent with session progress tracking and optional persistence.
 
@@ -529,18 +556,27 @@ The agent is configured with:
 * System prompt and tools from the node configuration
 * Tool execution capability
 * Session persistence if store is provided
+
+The tracer is contramapped to wrap sub-agent events in 'AgentTrace_SubAgentCall'
+so they can be properly attributed to the parent conversation.
 -}
 nodeToAgent ::
     SessionStore ->
     -- | HTTP runtime for making LLM requests
     HttpClient.Runtime ->
     OSAgentNode ->
-    Tracer IO Trace ->
+    -- | Caller slug for trace context
     AgentSlug ->
+    -- | Caller ID for trace context
     AgentId ->
+    -- | Parent conversation ID for trace context
     ConversationId ->
+    -- | Sub-agent conversation ID
+    ConversationId ->
+    -- | Parent tracer for capturing traces
+    Tracer IO Trace ->
     IO (Agent (LlmTurnContent, Session))
-nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = do
+nodeToAgent store httpRuntime node callerSlug callerId parentConvId subConvId parentTracer = do
     let agentCfg = node.osNodeConfig
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
 
@@ -550,10 +586,25 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
 
     stepId <- newStepId
 
-    -- Create completion config and function
+    -- Create a tracer for sub-agent LLM traces
+    -- This wraps LLM traces in SubAgentLLMTrace and then in AgentTrace_SubAgentCall
+    let subAgentLLMTracer =
+            contramap
+                ( \openaiTrace ->
+                    AgentTrace_SubAgentCall
+                        callerSlug
+                        callerId
+                        parentConvId
+                        (Base.slug agentCfg)
+                        subConvId
+                        (SubAgentLLMTrace stepId openaiTrace)
+                )
+                parentTracer
+
+    -- Create completion config and function with the sub-agent tracer
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) parentConvId . (LLMTrace stepId)) tracer
+                { cfgTracer = subAgentLLMTracer
                 , cfgRuntime = httpRuntime
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
                 , cfgModelName = Base.modelName agentCfg
@@ -561,15 +612,14 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 }
     let completeF = mkOpenAICompletion completionConfig
 
-    convId <- newConversationId
     pure $
-        agentStoreSession store Nothing convId $
+        agentWithSessionStorage store subConvId $
             Agent
                 { step = naiveTilNoToolCallStep
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeToolCall node.osNodeAgentId convId (osNodeTools node)
+                , toolCall = executeToolCall node.osNodeAgentId subConvId (osNodeTools node) callerSlug callerId parentConvId (Base.slug agentCfg) parentTracer stepId
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }
@@ -640,20 +690,62 @@ toolParamsToJson props =
 
 {- | Execute a tool call using the node's registered tools.
 
-TODO: This is a placeholder implementation. The actual tool execution
-should invoke the registered tools properly.
+This function now emits 'SubAgentToolTrace' events through the parent tracer
+when tools are executed by the sub-agent, allowing parent conversations to
+monitor sub-agent tool usage.
 -}
 executeToolCall ::
     AgentId ->
     ConversationId ->
     -- | Tools TVar from OSAgentNode
     TVar [ToolRegistration] ->
+    -- | Caller slug for trace context
+    AgentSlug ->
+    -- | Caller ID for trace context
+    AgentId ->
+    -- | Parent conversation ID for trace context
+    ConversationId ->
+    -- | Sub-agent slug for trace context
+    AgentSlug ->
+    -- | Parent tracer for emitting tool traces
+    Tracer IO Trace ->
+    -- | Step ID for trace context
+    StepId ->
     ToolExecutionContext ->
     LlmToolCall ->
     IO UserToolResponse
-executeToolCall _agentId _convId toolsTVar _ctx (LlmToolCall _callVal) = do
-    regs <- readTVarIO toolsTVar
-    pure $ UserToolResponse $ Aeson.String $ "Tool execution for " <> Text.pack (show (length regs)) <> " tools"
+executeToolCall _agentId convId toolsTVar callerSlug callerId parentConvId subAgentSlug parentTracer stepId _ctx (LlmToolCall callVal) = do
+    _regs <- readTVarIO toolsTVar
+
+    -- Execute the tool and emit trace
+    -- For now, we emit a placeholder trace - full tool execution tracking
+    -- would require deeper integration with the tool execution system
+    let toolName = extractToolName callVal
+    runTracer parentTracer $
+        AgentTrace_SubAgentCall
+            callerSlug
+            callerId
+            parentConvId
+            subAgentSlug
+            convId
+            (SubAgentToolTrace stepId (ToolsTrace.SubAgentToolCallTrace toolName callVal))
+
+    -- Return a placeholder response indicating tool execution
+    -- In a full implementation, this would actually execute the tool
+    pure $ UserToolResponse $ Aeson.String $ "Tool execution for " <> toolName
+
+-- | Extract tool name from LLM tool call for tracing purposes.
+extractToolName :: Aeson.Value -> Text
+extractToolName val =
+    case val of
+        Aeson.Object obj ->
+            case KeyMap.lookup "function" obj of
+                Just (Aeson.Object funcObj) ->
+                    case KeyMap.lookup "name" funcObj of
+                        Just (Aeson.String toolName) -> toolName
+                        _ -> "unknown"
+                _ -> "unknown"
+        _ -> "unknown"
 
 -------------------------------------------------------------------------------
 -- Helper Functions
@@ -674,7 +766,24 @@ agentWithSessionProgress onProgress agent =
         onProgress (SessionUpdated sess)
         f sess
 
+-- | Wrap an agent to store sessions to SessionStore.
+agentWithSessionStorage :: forall r. SessionStore -> ConversationId -> Agent r -> Agent r
+agentWithSessionStorage store convId agent =
+    agentWithSessionProgress handleProgress agent
+  where
+    handleProgress progress =
+        case progress of
+            SessionUpdated sess -> SessionStore.storeSession store convId sess
+            SessionCompleted sess -> SessionStore.storeSession store convId sess
+            SessionStarted sess -> SessionStore.storeSession store convId sess
+            SessionFailed sess _ -> SessionStore.storeSession store convId sess
+
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse mTxt _thinking _) =
     Maybe.fromMaybe "" mTxt
+
+-- | Parse flavor from text, defaulting to OpenAIv1 if not recognized.
+parseModelFlavor :: Text -> OpenAI.ModelFlavor
+parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
+
