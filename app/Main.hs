@@ -988,7 +988,7 @@ parseNewAgentOptions =
             ( long "preset"
                 <> short 'p'
                 <> metavar "PRESET"
-                <> help "Provider preset (openai, mistral, ollama)"
+                <> help ("Provider preset (" ++ NewCmd.formatPresetListHelp ++ ")")
                 <> value "openai"
                 <> showDefault
             )
