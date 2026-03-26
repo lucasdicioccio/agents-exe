@@ -29,14 +29,15 @@ import Data.Map (Map)
 import Data.Text (Text)
 
 import qualified Prod.Tracer as Prod
+import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.OneShot as OneShot
+import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
-import System.Agents.Base (AgentId)
-import System.Agents.ToolRegistration (ToolRegistration)
 
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.PromptScript (PromptScript, interpretPromptScript)
@@ -91,6 +92,28 @@ listOneShotAgentTools :: OneShotAgent -> IO [ToolRegistration]
 listOneShotAgentTools agent =
     readTVarIO (osNodeTools agent.oneShotNode)
 
+-- | Create an agent tool function with default session tracking.
+--
+-- This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+-- providing backward compatibility while allowing opt-in to full session tracking.
+makeAgentTool ::
+    SessionStore.SessionStore ->
+    AgentTree.LoadedApiKeys ->
+    AgentTree.OSAgentNode ->
+    AgentSlug ->
+    AgentId ->
+    ToolRegistration
+makeAgentTool store apiKeys node slug agentId =
+    OneShotTool.turnAgentRuntimeIntoIOTool
+        store
+        apiKeys
+        node
+        slug
+        agentId
+        OneShotTool.defaultAgentCallCallbacks
+        (Prod.silent :: Prod.Tracer IO Trace)
+        OneShotTool.defaultParentSessionLookup
+
 -- | Handle the one-shot run command
 handleOneShot ::
     -- | Base tracer for logging
@@ -118,6 +141,6 @@ handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFilePath
                 , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
+                , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys
                 }
 

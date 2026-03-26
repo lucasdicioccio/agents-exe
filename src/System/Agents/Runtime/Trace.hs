@@ -13,6 +13,17 @@ import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
 -------------------------------------------------------------------------------
+{- | Main trace type for all agent system events.
+
+This type captures trace events from various sources:
+* Agent loading and conversation events
+* Builtin toolbox traces (SQLite, System, Developer, Lua, Skills)
+* Sub-agent traces for recursive agent calls
+
+The 'SubAgentTrace' constructor specifically captures the relationship
+between parent and child agent calls, enabling proper trace tree
+visualization for recursive agent invocations.
+-}
 data Trace
     = AgentTrace_Loading !AgentSlug !AgentId !BashToolbox.Trace
     | AgentTrace_Conversation !AgentSlug !AgentId !ConversationId !ConversationTrace
@@ -24,6 +35,20 @@ data Trace
     | LuaToolboxTrace !Text !LuaToolbox.Trace
     | SkillsToolboxTrace !Text !SkillsToolbox.Trace
     | SkillsToolboxInitError !Text !String
+    | -- | Trace event for sub-agent (recursive) calls.
+      -- Captures the relationship between parent and child agent calls.
+      SubAgentTrace
+        { subAgentCallerSlug :: AgentSlug
+        -- ^ The slug of the calling agent
+        , subAgentCallerId :: AgentId
+        -- ^ The ID of the calling agent
+        , subAgentParentConvId :: ConversationId
+        -- ^ The parent conversation ID
+        , subAgentSubConvId :: ConversationId
+        -- ^ The sub-agent's conversation ID
+        , subAgentTrace :: Trace
+        -- ^ The actual trace content from the sub-agent
+        }
     deriving (Show)
 
 traceAgentSlug :: Trace -> AgentSlug
@@ -37,6 +62,7 @@ traceAgentSlug (DeveloperToolboxTrace tName _) = tName
 traceAgentSlug (LuaToolboxTrace tName _) = tName
 traceAgentSlug (SkillsToolboxTrace tName _) = tName
 traceAgentSlug (SkillsToolboxInitError tName _) = tName
+traceAgentSlug SubAgentTrace{subAgentCallerSlug = callerSlug} = callerSlug
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
@@ -49,6 +75,7 @@ traceAgentId (DeveloperToolboxTrace _ _) = AgentId (read "00000000-0000-0000-000
 traceAgentId (LuaToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (SkillsToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (SkillsToolboxInitError _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
+traceAgentId SubAgentTrace{subAgentCallerId = callerId} = callerId
 
 traceConversationId :: Trace -> Maybe ConversationId
 traceConversationId (AgentTrace_Loading _ _ _) = Nothing
@@ -61,6 +88,7 @@ traceConversationId (DeveloperToolboxTrace _ _) = Nothing
 traceConversationId (LuaToolboxTrace _ _) = Nothing
 traceConversationId (SkillsToolboxTrace _ _) = Nothing
 traceConversationId (SkillsToolboxInitError _ _) = Nothing
+traceConversationId SubAgentTrace{subAgentParentConvId = parentConvId} = Just parentConvId
 
 data ConversationTrace
     = NewConversation
@@ -69,3 +97,4 @@ data ConversationTrace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
+

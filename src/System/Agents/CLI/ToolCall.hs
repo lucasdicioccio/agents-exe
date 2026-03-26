@@ -28,14 +28,15 @@ import System.IO (stderr)
 
 import Control.Concurrent.STM (readTVarIO)
 import qualified Prod.Tracer as Prod
+import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.ToolRegistration (ToolRegistration)
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
-import System.Agents.Base (AgentId)
 import System.Agents.ToolPortal (makeToolPortal)
-import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Tools.Context (ToolCall (..))
 
 -- | Options for the tool-call command
@@ -88,6 +89,28 @@ listToolCallAgentTools :: ToolCallAgent -> IO [ToolRegistration]
 listToolCallAgentTools agent =
     readTVarIO (osNodeTools agent.toolCallNode)
 
+-- | Create an agent tool function with default session tracking.
+--
+-- This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+-- providing backward compatibility while allowing opt-in to full session tracking.
+makeAgentTool ::
+    SessionStore.SessionStore ->
+    AgentTree.LoadedApiKeys ->
+    AgentTree.OSAgentNode ->
+    AgentSlug ->
+    AgentId ->
+    ToolRegistration
+makeAgentTool store apiKeys node slug agentId =
+    OneShotTool.turnAgentRuntimeIntoIOTool
+        store
+        apiKeys
+        node
+        slug
+        agentId
+        OneShotTool.defaultAgentCallCallbacks
+        (Prod.silent :: Prod.Tracer IO Trace)
+        OneShotTool.defaultParentSessionLookup
+
 -- | Handle the tool-call command
 handleToolCall ::
     -- | Tool call options
@@ -123,7 +146,7 @@ handleToolCall opts apiKeysFile agentFiles = do
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore apiKeys
+                    , AgentTree.agentToTool = makeAgentTool SessionStore.defaultSessionStore apiKeys
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do
