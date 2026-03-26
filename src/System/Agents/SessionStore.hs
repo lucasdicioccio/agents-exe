@@ -21,6 +21,10 @@ module System.Agents.SessionStore (
     storeSession,
     readSession,
 
+    -- * Session lookup operations
+    findSessionByConversation,
+    findChildSessions,
+
     -- * Listing sessions
     listSessions,
     SessionFileInfo (..),
@@ -33,13 +37,14 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.List (isPrefixOf, sortOn)
+import Data.Maybe (mapMaybe)
 import Data.Ord (Down (..))
 import Data.Time (UTCTime)
 import System.Directory (doesFileExist, getModificationTime, listDirectory)
 import System.FilePath (takeFileName, (</>))
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Session.Base (Session (..))
+import System.Agents.Session.Base (Session (..), SessionId (..))
 
 -------------------------------------------------------------------------------
 -- Session Store Configuration
@@ -151,6 +156,53 @@ Returns 'Nothing' if the session file doesn't exist or can't be parsed.
 readSession :: SessionStore -> ConversationId -> IO (Maybe Session)
 readSession store convId =
     readSessionFromFile (sessionFilePath store convId)
+
+-------------------------------------------------------------------------------
+-- Session Lookup Operations
+-------------------------------------------------------------------------------
+
+{- | Find a session by ConversationId with proper error handling.
+
+This is an alias for 'readSession' that provides a more descriptive name
+for use cases where you're looking up a session by its conversation ID.
+
+Returns 'Nothing' if:
+- The session file doesn't exist
+- The session file can't be read
+- The session file contains invalid JSON
+-}
+findSessionByConversation :: SessionStore -> ConversationId -> IO (Maybe Session)
+findSessionByConversation = readSession
+
+{- | Find all sessions that were forked from a given parent session.
+
+This function scans all session files in the store and returns those
+whose 'forkedFromSessionId' matches the provided parent session ID.
+
+This is useful for:
+- Listing child sessions of a parent conversation
+- Auditing recursive agent calls
+- Cleaning up related sessions
+
+Returns a list of @(ConversationId, Session)@ pairs for all matching sessions.
+Note: This scans all session files, so it may be slow for large stores.
+-}
+findChildSessions :: SessionStore -> SessionId -> IO [(ConversationId, Session)]
+findChildSessions store parentSessionId = do
+    -- Find all session files
+    sessionFiles <- findSessionFiles store
+    -- Load each session and filter by forkedFromSessionId
+    results <- mapM loadAndCheck sessionFiles
+    pure $ mapMaybe id results
+  where
+    loadAndCheck :: SessionFileInfo -> IO (Maybe (ConversationId, Session))
+    loadAndCheck info = do
+        mSession <- readSessionFromFile info.sessionInfoPath
+        pure $ case mSession of
+            Just session
+                | session.forkedFromSessionId == Just parentSessionId ->
+                    Just (info.sessionInfoConversationId, session)
+            _ -> Nothing
 
 -------------------------------------------------------------------------------
 -- Session File Discovery
