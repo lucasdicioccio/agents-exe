@@ -18,8 +18,7 @@ import qualified Data.Text as Text
 import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..))
-import System.Agents.Base (ConversationId)
+import System.Agents.Base (Agent (..), ConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
@@ -193,9 +192,11 @@ statusAttr StatusError = statusErrorAttr
 -- | Render the agent list.
 render_agentList :: TuiState -> Widget N
 render_agentList st =
-    borderWithFocus st AgentListWidget "Agents" (
-        renderList render_agentItem hasFocus (st ^. tuiUI . agentList)
-        )
+    borderWithFocus
+        st
+        AgentListWidget
+        "Agents"
+        (renderList render_agentItem hasFocus (st ^. tuiUI . agentList))
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just AgentListWidget
 
@@ -214,9 +215,11 @@ render_agentItem _ agent =
 -- | Render the conversation list.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
-    borderWithFocus st ConversationListWidget "Conversations" (
-        renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList)
-        )
+    borderWithFocus
+        st
+        ConversationListWidget
+        "Conversations"
+        (renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList))
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
 
@@ -246,9 +249,11 @@ render_conversationItem st _ conv =
 -- | Render the sessions list.
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
-    borderWithFocus st SessionsListWidget "Sessions" (
-        renderList (render_sessionItem st) hasFocus (st ^. tuiUI . sessionList)
-        )
+    borderWithFocus
+        st
+        SessionsListWidget
+        "Sessions"
+        (renderList (render_sessionItem st) hasFocus (st ^. tuiUI . sessionList))
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
@@ -267,15 +272,19 @@ render_sessionItem _st _ sess =
 -- | Render agent information panel.
 render_agentInfo :: TuiState -> Widget N
 render_agentInfo st =
-    borderWithFocus st AgentInfoWidget "Agent Info" (
-        case st ^. tuiUI . selectedAgentInfo of
+    borderWithFocus
+        st
+        AgentInfoWidget
+        "Agent Info"
+        ( case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
                 let node = tuiNode agent
                     agentCfg = osNodeConfig node
                     mtools = lookup (tuiAgentId agent) (st ^. tuiUI . coreAgentTools)
                  in viewport AgentInfoWidget Both $
-                        vBox $ mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
+                        vBox $
+                            mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
         )
   where
     agentHeader :: Agent -> [Widget N]
@@ -307,8 +316,11 @@ render_agentInfo st =
 -- | Render the message input editor.
 render_messageEditor :: TuiState -> Widget N
 render_messageEditor st =
-    borderWithFocus st MessageEditorWidget "Message" (
-        renderEditor
+    borderWithFocus
+        st
+        MessageEditorWidget
+        "Message"
+        ( renderEditor
             (txt . Text.unlines)
             (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
             (st ^. tuiUI . messageEditor)
@@ -479,4 +491,3 @@ tui_appAttrMap _ =
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
         ]
-

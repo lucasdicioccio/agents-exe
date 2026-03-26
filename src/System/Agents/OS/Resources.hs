@@ -337,4 +337,3 @@ getResourceCount registry = do
     atomically $ do
         handles <- readTVar (registryHandles registry)
         pure $ HashMap.size handles
-

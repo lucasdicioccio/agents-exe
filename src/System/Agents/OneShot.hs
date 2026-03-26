@@ -21,7 +21,7 @@ module System.Agents.OneShot (
     mainPrintAgent,
     mainOneShotText,
     mainOneShotTextWithThinking,
-    
+
     -- * Utility functions
     parseModelFlavor,
 ) where
@@ -51,8 +51,8 @@ import System.Agents.AgentTree (
     Props (..),
     withAgentTree,
  )
-import qualified System.Agents.Base as Base
 import System.Agents.Base (AgentId, ConversationId, newConversationId, newStepId)
+import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
@@ -537,4 +537,3 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
-

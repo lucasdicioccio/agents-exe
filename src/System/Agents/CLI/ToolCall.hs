@@ -154,4 +154,3 @@ handleToolCall opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
-

@@ -23,7 +23,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 
-import System.Agents.AgentTree (OSAgentNode (..), LoadedApiKeys)
+import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
 import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId, newStepId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
@@ -160,8 +160,7 @@ lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) key
 
 -------------------------------------------------------------------------------
 
-{- | Creates an Agent from an OSAgentNode configured for use as a tool.
--}
+-- | Creates an Agent from an OSAgentNode configured for use as a tool.
 nodeToAgent ::
     SessionStore ->
     -- | HTTP runtime for making LLM requests
@@ -208,8 +207,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
 
 -------------------------------------------------------------------------------
 
-{- | Convert a ToolRegistration to a SystemTool for the Session agent.
--}
+-- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
 toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool
@@ -232,8 +230,7 @@ toolRegistrationToSystemTool reg =
                 }
      in SystemTool $ V1 toolDefv1
 
-{- | Convert tool parameters to JSON schema.
--}
+-- | Convert tool parameters to JSON schema.
 toolParamsToJson :: [ParamProperty] -> Aeson.Value
 toolParamsToJson props =
     Aeson.object
@@ -268,8 +265,7 @@ toolParamsToJson props =
 
 -------------------------------------------------------------------------------
 
-{- | Execute a tool call using the node's registered tools.
--}
+-- | Execute a tool call using the node's registered tools.
 executeToolCall ::
     AgentId ->
     ConversationId ->
@@ -291,4 +287,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
-

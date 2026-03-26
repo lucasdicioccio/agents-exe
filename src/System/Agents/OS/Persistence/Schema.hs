@@ -99,8 +99,8 @@ sqliteSchemaStatements =
             completed_at TIMESTAMP,
             status TEXT NOT NULL
         ) |]
-    -- Indexes
-    , [sql| CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id) |]
+    , -- Indexes
+      [sql| CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id) |]
     , [sql| CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type) |]
     , [sql| CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_id) |]
     , [sql| CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at) |]
@@ -370,8 +370,9 @@ data Migration = Migration
     }
     deriving (Show, Eq)
 
--- | Get the current schema version from the database.
--- Returns 0 if the schema_version table doesn't exist (fresh database).
+{- | Get the current schema version from the database.
+Returns 0 if the schema_version table doesn't exist (fresh database).
+-}
 getSchemaVersion :: Connection -> IO Int
 getSchemaVersion conn = do
     -- Check if schema_version table exists
@@ -382,7 +383,8 @@ getSchemaVersion conn = do
                 SELECT name FROM sqlite_master 
                 WHERE type='table' AND name='schema_version'
             |]
-            () :: IO [Only Text]
+            () ::
+            IO [Only Text]
 
     case tableExists of
         [] -> pure 0 -- Table doesn't exist, return version 0
@@ -424,4 +426,3 @@ applyMigrations conn fromVer toVer getMigration
                     -- Update schema version
                     execute conn "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP" (Only toVer)
                 pure $ Right toVer
-
