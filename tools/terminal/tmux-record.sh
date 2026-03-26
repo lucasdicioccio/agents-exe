@@ -8,16 +8,7 @@ if [[ "$1" == "describe" ]]; then
 {
     "slug": "tmux-record",
     "description": "Record the content of the currently-running tmux window using tmux capture-pane",
-    "args": [
-        {
-            "name": "start_line",
-            "description": "Line number to start capturing from (negative for relative to end, default captures all history)",
-            "type": "integer",
-            "backing_type": "integer",
-            "arity": "optional",
-            "mode": "positional"
-        }
-    ]
+    "args": [ ]
 }
 EOF
     exit 0
@@ -31,13 +22,10 @@ if [[ "$1" == "run" ]]; then
         exit 1
     fi
 
-    # Determine start line argument
-    # $2 contains the optional start_line argument
-    local_start_line="${2:--}"
-
     # Capture pane content
     echo "----"
-    tmux capture-pane -p -S "$local_start_line"
+    tmux capture-pane
+    tmux save-buffer /dev/stdout
     exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
