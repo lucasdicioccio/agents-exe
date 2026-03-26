@@ -69,6 +69,7 @@ import Data.Proxy (Proxy (..))
 import qualified Data.Text as Text
 import qualified System.FilePath as FilePath
 
+import Prod.Tracer (Tracer)
 import System.Agents.AgentTree (
     AgentConfigTree (..),
     AgentRegistry,
@@ -83,7 +84,6 @@ import System.Agents.OS.Core (AgentConfig (..), AgentState (..), World (..))
 import qualified System.Agents.OS.Core as OS
 import System.Agents.OS.Core.World (registerComponentStore)
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import Prod.Tracer (Tracer)
 
 -------------------------------------------------------------------------------
 -- Types
@@ -159,21 +159,23 @@ initOSAgentTree = do
     toolsStore <- createAgentToolsStore
 
     -- Create placeholder root (to be populated later)
-    let placeholderRoot = OSAgentNode
-            { osNodeFile = ""
-            , osNodeConfig = error "placeholder"
-            , osNodeAgentId = error "placeholder"
-            , osNodeChildren = []
-            }
+    let placeholderRoot =
+            OSAgentNode
+                { osNodeFile = ""
+                , osNodeConfig = error "placeholder"
+                , osNodeAgentId = error "placeholder"
+                , osNodeChildren = []
+                }
 
-    pure $ OSAgentTree
-        { osTreeWorld = world
-        , osTreeRegistry = registry
-        , osTreeToolsStore = toolsStore
-        , osTreeNodes = Map.empty
-        , osTreeRoot = placeholderRoot
-        , osTreeRootDir = "."
-        }
+    pure $
+        OSAgentTree
+            { osTreeWorld = world
+            , osTreeRegistry = registry
+            , osTreeToolsStore = toolsStore
+            , osTreeNodes = Map.empty
+            , osTreeRoot = placeholderRoot
+            , osTreeRootDir = "."
+            }
 
 -------------------------------------------------------------------------------
 -- Agent Creation
@@ -194,24 +196,25 @@ This function:
 Returns the updated OSAgentTree with the new agent added.
 -}
 createOSAgentFromTree ::
+    -- | Current tree state
     OSAgentTree ->
-    -- ^ Current tree state
+    -- | Legacy config tree
     AgentConfigTree ->
-    -- ^ Legacy config tree
     IO (Either AgentCreationError (OSAgentTree, AgentId))
 createOSAgentFromTree tree configTree = do
     let agent = configTree.agentConfig
     let rootDir = FilePath.takeDirectory configTree.agentConfigFile
 
     -- Create OS AgentConfig
-    let osConfig = createAgentConfig
-            agent.slug
-            agent.flavor
-            agent.modelUrl
-            agent.modelName
-            agent.apiKeyId
-            (Text.unlines agent.systemPrompt)
-            []  -- Toolbox bindings to be set up separately
+    let osConfig =
+            createAgentConfig
+                agent.slug
+                agent.flavor
+                agent.modelUrl
+                agent.modelName
+                agent.apiKeyId
+                (Text.unlines agent.systemPrompt)
+                [] -- Toolbox bindings to be set up separately
 
     -- Create OS agent entity
     result <- createAgent (osTreeWorld tree) osConfig
@@ -222,19 +225,21 @@ createOSAgentFromTree tree configTree = do
             _ <- registerAgent (osTreeRegistry tree) agent.slug osConfig
 
             -- Create node
-            let node = OSAgentNode
-                    { osNodeFile = configTree.agentConfigFile
-                    , osNodeConfig = agent
-                    , osNodeAgentId = agentId
-                    , osNodeChildren = []  -- Populated separately
-                    }
+            let node =
+                    OSAgentNode
+                        { osNodeFile = configTree.agentConfigFile
+                        , osNodeConfig = agent
+                        , osNodeAgentId = agentId
+                        , osNodeChildren = [] -- Populated separately
+                        }
 
             -- Update tree
-            let tree' = tree
-                    { osTreeNodes = Map.insert agent.slug node (osTreeNodes tree)
-                    , osTreeRoot = if null (osTreeRootDir tree) then node else osTreeRoot tree
-                    , osTreeRootDir = if null (osTreeRootDir tree) then rootDir else osTreeRootDir tree
-                    }
+            let tree' =
+                    tree
+                        { osTreeNodes = Map.insert agent.slug node (osTreeNodes tree)
+                        , osTreeRoot = if null (osTreeRootDir tree) then node else osTreeRoot tree
+                        , osTreeRootDir = if null (osTreeRootDir tree) then rootDir else osTreeRootDir tree
+                        }
 
             pure $ Right (tree', agentId)
 
@@ -242,26 +247,21 @@ createOSAgentFromTree tree configTree = do
 -- Agent Lookup
 -------------------------------------------------------------------------------
 
-{- | Get an agent's configuration from the OS tree.
--}
+-- | Get an agent's configuration from the OS tree.
 getOSAgentConfig :: OSAgentTree -> AgentId -> IO (Maybe AgentConfig)
 getOSAgentConfig tree agentId =
     atomically $ getAgentConfig (osTreeWorld tree) agentId
 
-{- | Get tools for an OS agent.
--}
+-- | Get tools for an OS agent.
 getOSAgentTools :: OSAgentTree -> AgentSlug -> IO [ToolRegistration]
 getOSAgentTools tree agentSlug =
     getAgentTools (osTreeToolsStore tree) agentSlug
 
-{- | Get an agent node by slug.
--}
+-- | Get an agent node by slug.
 getOSAgentNode :: OSAgentTree -> AgentSlug -> Maybe OSAgentNode
 getOSAgentNode tree agentSlug =
     Map.lookup agentSlug (osTreeNodes tree)
 
-{- | Get the root agent node.
--}
+-- | Get the root agent node.
 getOSRootAgent :: OSAgentTree -> OSAgentNode
 getOSRootAgent = osTreeRoot
-

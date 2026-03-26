@@ -227,10 +227,11 @@ filterScriptsByBasename filt scripts =
 
 -------------------------------------------------------------------------------
 
--- | Legacy compatibility: Initialize a single directory toolbox.
---
--- This is kept for backward compatibility with existing code.
--- Note: The path is resolved relative to the current working directory.
+{- | Legacy compatibility: Initialize a single directory toolbox.
+
+This is kept for backward compatibility with existing code.
+Note: The path is resolved relative to the current working directory.
+-}
 initializeBackroundToolbox ::
     Tracer IO Trace ->
     FilePath ->
@@ -244,4 +245,3 @@ readMultiSourceTools :: MultiSourceBashTools -> IO [BashTools.ScriptDescription]
 readMultiSourceTools multi = do
     allTools <- mapM (Background.readBackgroundVal . tools) multi.sources
     pure $ concat allTools
-

@@ -26,7 +26,9 @@ import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 
@@ -48,6 +50,29 @@ data CheckOptions = CheckOptions
     }
     deriving (Show, Eq)
 
+{- | Create an agent tool function with default session tracking.
+
+This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+providing backward compatibility while allowing opt-in to full session tracking.
+-}
+makeAgentTool ::
+    SessionStore.SessionStore ->
+    AgentTree.LoadedApiKeys ->
+    AgentTree.OSAgentNode ->
+    AgentSlug ->
+    AgentId ->
+    ToolRegistration
+makeAgentTool store apiKeys node slug agentId =
+    OneShotTool.turnAgentRuntimeIntoIOTool
+        store
+        apiKeys
+        node
+        slug
+        agentId
+        OneShotTool.defaultAgentCallCallbacks
+        (Prod.silent :: Prod.Tracer IO Trace)
+        OneShotTool.defaultParentSessionLookup
+
 -- | Handle the check command: validate and display agent configuration
 handleCheck ::
     -- | Check options
@@ -67,7 +92,7 @@ handleCheck opts apiKeysFile agentFiles = do
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = Prod.silent
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore apiKeys
+                , AgentTree.agentToTool = makeAgentTool SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs
@@ -158,4 +183,3 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
-

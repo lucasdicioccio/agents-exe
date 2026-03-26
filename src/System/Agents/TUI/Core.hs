@@ -165,8 +165,7 @@ refreshAgentTools :: TuiAgent -> IO [ToolRegistration]
 refreshAgentTools agent =
     readTVarIO (osNodeTools agent.tuiNode)
 
-{- | Get tools for a TuiAgent from the OS-native TVar.
--}
+-- | Get tools for a TuiAgent from the OS-native TVar.
 getAgentTools :: TuiAgent -> IO [ToolRegistration]
 getAgentTools = refreshAgentTools
 
@@ -220,9 +219,10 @@ runTUIWithConfig config props = do
     coreTVar <- newTVarIO core0
 
     -- Create UI state with loaded sessions and collected tools
-    let ui0 = (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
-            { _coreAgentTools = agentTools
-            }
+    let ui0 =
+            (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
+                { _coreAgentTools = agentTools
+                }
 
     -- Create TUI state with session configuration
     let st = TuiState coreTVar ui0 evChan config
@@ -241,4 +241,3 @@ runTUIWithConfig config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-

@@ -22,8 +22,9 @@ import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.MCP.Base as Mcp
 import qualified System.Agents.Session.Base as SessionBase
 
--- | A mapped tool representing an expert agent exposed as an MCP tool.
--- Stores the OSAgentTree along with the API keys needed for execution.
+{- | A mapped tool representing an expert agent exposed as an MCP tool.
+Stores the OSAgentTree along with the API keys needed for execution.
+-}
 data MappedTool
     = ExpertAgentAsPrompt Mcp.Name AgentTree.OSAgentTree AgentTree.LoadedApiKeys
 
@@ -125,4 +126,3 @@ encodeConduit = do
         C.yield $ Chunk . L8.toStrict $ Aeson.encode m
         C.yield $ Chunk "\n"
         C.yield Flush
-

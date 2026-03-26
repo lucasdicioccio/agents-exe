@@ -2,11 +2,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | OS-native agent tree management.
---
--- This module provides agent discovery, configuration loading, and tree
--- building using the OS-native ECS architecture. It replaces the legacy
--- Runtime-per-agent model with pure OS-native operations.
+{- | OS-native agent tree management.
+
+This module provides agent discovery, configuration loading, and tree
+building using the OS-native ECS architecture. It replaces the legacy
+Runtime-per-agent model with pure OS-native operations.
+-}
 module System.Agents.AgentTree (
     -- * Registry types and operations
     AgentRegistry,
@@ -87,10 +88,10 @@ import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Either as Either
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import qualified Data.List as List
 import qualified Data.List.NonEmpty as NonEmpty
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import Data.Proxy (Proxy (..))
 import Data.Semigroup (sconcat)
@@ -120,29 +121,31 @@ import System.Agents.Base (
     PostgRESTServerOnDisk (..),
     PostgRESTToolboxDescription (..),
     -- Export field accessors (except apiKeyId which conflicts)
-    slug,
+
     announce,
-    systemPrompt,
-    flavor,
-    modelUrl,
-    modelName,
-    toolDirectory,
+    autoEnableSkills,
     bashToolboxes,
-    mcpServers,
-    openApiToolboxes,
-    postgrestToolboxes,
     builtinToolboxes,
     extraAgents,
+    flavor,
+    mcpServers,
+    modelName,
+    modelUrl,
+    openApiToolboxes,
+    postgrestToolboxes,
     skillSources,
-    autoEnableSkills,
+    slug,
+    systemPrompt,
+    toolDirectory,
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -- OS Core imports
-import System.Agents.OS.Core.Types (EntityId (..))
+
 import qualified System.Agents.OS.Core as OS
+import System.Agents.OS.Core.Types (EntityId (..))
 import qualified System.Agents.OS.Core.Types as OSTypes
 import qualified System.Agents.OS.Core.World as OSWorld
 
@@ -196,10 +199,11 @@ data AgentRegistry = AgentRegistry
     -- ^ Index mapping slugs to entity IDs for O(1) lookups
     }
 
--- | Create a new empty OS-based agent registry.
---
--- This initializes a new ECS world with the required component stores
--- registered for agent configuration and state.
+{- | Create a new empty OS-based agent registry.
+
+This initializes a new ECS world with the required component stores
+registered for agent configuration and state.
+-}
 newAgentRegistry :: IO AgentRegistry
 newAgentRegistry = do
     world <- atomically $ do
@@ -210,10 +214,11 @@ newAgentRegistry = do
     slugIndex <- newTVarIO HashMap.empty
     pure $ AgentRegistry worldTVar slugIndex
 
--- | Register an agent in the OS registry.
---
--- Creates a new entity for the agent, attaches the AgentConfig component,
--- and updates the slug index.
+{- | Register an agent in the OS registry.
+
+Creates a new entity for the agent, attaches the AgentConfig component,
+and updates the slug index.
+-}
 registerAgent :: AgentRegistry -> AgentSlug -> OS.AgentConfig -> IO AgentId
 registerAgent registry agentSlug config = do
     -- Generate a new agent ID
@@ -231,18 +236,20 @@ registerAgent registry agentSlug config = do
 
     pure theNewAgentId
 
--- | Lookup an agent by its EntityId in the OS registry.
---
--- Returns the AgentConfig if found.
+{- | Lookup an agent by its EntityId in the OS registry.
+
+Returns the AgentConfig if found.
+-}
 lookupAgent :: AgentRegistry -> AgentId -> IO (Maybe OS.AgentConfig)
 lookupAgent registry (AgentId uuid) = do
     let entityId = EntityId uuid
     world <- readTVarIO (registryWorld registry)
     atomically $ OSWorld.getComponent world entityId
 
--- | Lookup an agent by its slug in the OS registry.
---
--- This uses the slug index for O(1) lookup.
+{- | Lookup an agent by its slug in the OS registry.
+
+This uses the slug index for O(1) lookup.
+-}
 lookupAgentBySlug :: AgentRegistry -> AgentSlug -> IO (Maybe (AgentId, OS.AgentConfig))
 lookupAgentBySlug registry agentSlug = do
     mEntityId <- HashMap.lookup agentSlug <$> readTVarIO (registrySlugIndex registry)
@@ -258,8 +265,9 @@ lookupAgentBySlug registry agentSlug = do
 -- OS Agent Tree Types
 -------------------------------------------------------------------------------
 
--- | An agent node in the OS-native tree.
--- Contains references to OS entities and their associated data.
+{- | An agent node in the OS-native tree.
+Contains references to OS entities and their associated data.
+-}
 data OSAgentNode = OSAgentNode
     { osNodeFile :: FilePath
     , osNodeConfig :: Agent
@@ -269,8 +277,9 @@ data OSAgentNode = OSAgentNode
     -- ^ Mutable tools for this agent (OS-native via STM)
     }
 
--- | The OS-native agent tree.
--- Contains the world, registry, and tree structure for OS-native agent management.
+{- | The OS-native agent tree.
+Contains the world, registry, and tree structure for OS-native agent management.
+-}
 data OSAgentTree = OSAgentTree
     { osTreeWorld :: OS.World
     , osTreeRegistry :: AgentRegistry
@@ -684,17 +693,19 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
     let _rootDir = FilePath.takeDirectory node.nodeFile
 
     -- Create OS AgentConfig
-    let osConfig = OS.AgentConfig
-            { OS.agentName = slug agent
-            , OS.agentModel = OS.ModelConfig
-                { OS.modelFlavor = flavor agent
-                , OS.modelUrl = modelUrl agent
-                , OS.modelName = modelName agent
-                , OS.modelApiKeyId = agent.apiKeyId  -- use record dot syntax to avoid ambiguity
+    let osConfig =
+            OS.AgentConfig
+                { OS.agentName = slug agent
+                , OS.agentModel =
+                    OS.ModelConfig
+                        { OS.modelFlavor = flavor agent
+                        , OS.modelUrl = modelUrl agent
+                        , OS.modelName = modelName agent
+                        , OS.modelApiKeyId = agent.apiKeyId -- use record dot syntax to avoid ambiguity
+                        }
+                , OS.agentSystemPrompt = Text.unlines (systemPrompt agent)
+                , OS.agentToolboxBindings = [] -- To be set up separately
                 }
-            , OS.agentSystemPrompt = Text.unlines (systemPrompt agent)
-            , OS.agentToolboxBindings = [] -- To be set up separately
-            }
 
     -- Create OS agent entity and register
     agentId <- registerAgent registry (slug agent) osConfig
@@ -703,13 +714,14 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
     toolsTVar <- newTVarIO []
 
     -- Create node
-    let osNode = OSAgentNode
-            { osNodeFile = node.nodeFile
-            , osNodeConfig = agent
-            , osNodeAgentId = agentId
-            , osNodeChildren = [] -- Populated separately
-            , osNodeTools = toolsTVar
-            }
+    let osNode =
+            OSAgentNode
+                { osNodeFile = node.nodeFile
+                , osNodeConfig = agent
+                , osNodeAgentId = agentId
+                , osNodeChildren = [] -- Populated separately
+                , osNodeTools = toolsTVar
+                }
 
     pure $ Right osNode
 
@@ -817,13 +829,14 @@ buildAgentTree graph nodeMap =
                 Left errs -> Left errs
                 Right (rootOSNode, _) ->
                     let rootDir = FilePath.takeDirectory rootNode.nodeFile
-                     in Right $ OSAgentTree
-                        { osTreeWorld = error "World not yet initialized" -- Will be populated from registry
-                        , osTreeRegistry = error "Registry not yet stored" -- Caller must set this
-                        , osTreeNodes = nodeMap
-                        , osTreeRoot = rootOSNode
-                        , osTreeRootDir = rootDir
-                        }
+                     in Right $
+                            OSAgentTree
+                                { osTreeWorld = error "World not yet initialized" -- Will be populated from registry
+                                , osTreeRegistry = error "Registry not yet stored" -- Caller must set this
+                                , osTreeNodes = nodeMap
+                                , osTreeRoot = rootOSNode
+                                , osTreeRootDir = rootDir
+                                }
 
 {- | Recursively build a subtree with cycle detection.
 
@@ -849,22 +862,24 @@ buildSubtree graph nodeMap visited nodeSlug node =
                 let newVisited = Set.insert nodeSlug visited
                 -- Build children
                 let childSlugs = node.nodeChildren ++ node.nodeExtraRefs
-                (children, finalVisited) <- foldlM
-                    (\(acc, v) childSlug ->
-                        case Map.lookup childSlug graph.graphNodes of
-                            Nothing -> pure (acc, v) -- Skip missing children
-                            Just childNode ->
-                                case buildSubtree graph nodeMap v childSlug childNode of
-                                    Left errs -> Left errs
-                                    Right (childOSNode, v') -> pure (childOSNode : acc, v'))
-                    ([], newVisited)
-                    childSlugs
+                (children, finalVisited) <-
+                    foldlM
+                        ( \(acc, v) childSlug ->
+                            case Map.lookup childSlug graph.graphNodes of
+                                Nothing -> pure (acc, v) -- Skip missing children
+                                Just childNode ->
+                                    case buildSubtree graph nodeMap v childSlug childNode of
+                                        Left errs -> Left errs
+                                        Right (childOSNode, v') -> pure (childOSNode : acc, v')
+                        )
+                        ([], newVisited)
+                        childSlugs
                 Right (osNode{osNodeChildren = reverse children}, finalVisited)
 
 -- Helper for Either with accumulator
 foldlM :: (b -> a -> Either e b) -> b -> [a] -> Either e b
 foldlM _ acc [] = Right acc
-foldlM f acc (x:xs) = case f acc x of
+foldlM f acc (x : xs) = case f acc x of
     Left e -> Left e
     Right acc' -> foldlM f acc' xs
 
@@ -933,9 +948,10 @@ extractCycle nodeSlug recStack =
 -- Loading Functions
 -------------------------------------------------------------------------------
 
--- | Load agent configuration tree from file.
--- This is a legacy compatibility function that loads the tree structure
--- without creating OS entities.
+{- | Load agent configuration tree from file.
+This is a legacy compatibility function that loads the tree structure
+without creating OS entities.
+-}
 loadAgentTreeConfig ::
     Props ->
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
@@ -965,13 +981,14 @@ loadAgentTreeConfig props = do
                 Nothing -> do
                     pure $ Right $ AgentConfigTree props.rootAgentFile agent oks
 
--- | Main entry point for loading agent trees (OS-native).
---
--- Phase 0: Discover all configs via BFS traversal
--- Phase 1: Validate all references
--- Phase 2: Create OS agents
--- Phase 3: Wire tool references (includes loading toolboxes + helper agents)
--- Phase 4: Build final tree
+{- | Main entry point for loading agent trees (OS-native).
+
+Phase 0: Discover all configs via BFS traversal
+Phase 1: Validate all references
+Phase 2: Create OS agents
+Phase 3: Wire tool references (includes loading toolboxes + helper agents)
+Phase 4: Build final tree
+-}
 loadAgentTree :: Props -> IO LoadAgentResult
 loadAgentTree props = do
     -- Create the agent registry
@@ -1096,4 +1113,3 @@ readOpenApiKeysFile keysPath =
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
-

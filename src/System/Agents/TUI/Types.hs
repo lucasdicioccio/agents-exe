@@ -23,7 +23,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import qualified Data.Vector as Vector
 
-import System.Agents.AgentTree (OSAgentTree, OSAgentNode, LoadedApiKeys)
+import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode, OSAgentTree)
 import System.Agents.Base (AgentId, ConversationId (..))
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
@@ -386,4 +386,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-

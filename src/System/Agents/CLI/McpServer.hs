@@ -26,13 +26,14 @@ import Control.Concurrent.STM (readTVarIO)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.Base (AgentId, AgentSlug)
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.MCP.Server as McpServer
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.ToolRegistration (ToolRegistration)
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
-import System.Agents.Base (AgentId)
-import System.Agents.ToolRegistration (ToolRegistration)
 
 {- | MCP Server agent using OS-native structures.
 
@@ -75,6 +76,29 @@ listMcpServerAgentTools :: McpServerAgent -> IO [ToolRegistration]
 listMcpServerAgentTools agent =
     readTVarIO (osNodeTools agent.mcpNode)
 
+{- | Create an agent tool function with default session tracking.
+
+This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+providing backward compatibility while allowing opt-in to full session tracking.
+-}
+makeAgentTool ::
+    SessionStore.SessionStore ->
+    AgentTree.LoadedApiKeys ->
+    AgentTree.OSAgentNode ->
+    AgentSlug ->
+    AgentId ->
+    ToolRegistration
+makeAgentTool store apiKeys node slug agentId =
+    OneShotTool.turnAgentRuntimeIntoIOTool
+        store
+        apiKeys
+        node
+        slug
+        agentId
+        OneShotTool.defaultAgentCallCallbacks
+        (Prod.silent :: Prod.Tracer IO Trace)
+        OneShotTool.defaultParentSessionLookup
+
 -- | Handle the MCP server command: start MCP server for agents
 handleMcpServer ::
     -- | Base tracer for logging
@@ -98,9 +122,8 @@ handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
                         Prod.traceBoth
                             baseTracer
                             traceUsefulPromptStderr
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
+                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
-

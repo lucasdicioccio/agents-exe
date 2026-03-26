@@ -19,8 +19,11 @@ module System.Agents.CLI.TUI (
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.Base (AgentId, AgentSlug)
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
+import System.Agents.ToolRegistration (ToolRegistration)
 
 -- | Options for the TUI command
 data TuiOptions = TuiOptions
@@ -47,9 +50,31 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
+                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUI sessionStore apiKeys agentPropsList
 
+{- | Create an agent tool function with default session tracking.
+
+This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+providing backward compatibility while allowing opt-in to full session tracking.
+-}
+makeAgentTool ::
+    SessionStore.SessionStore ->
+    AgentTree.LoadedApiKeys ->
+    AgentTree.OSAgentNode ->
+    AgentSlug ->
+    AgentId ->
+    ToolRegistration
+makeAgentTool store apiKeys node slug agentId =
+    OneShotTool.turnAgentRuntimeIntoIOTool
+        store
+        apiKeys
+        node
+        slug
+        agentId
+        OneShotTool.defaultAgentCallCallbacks
+        (Prod.silent :: Prod.Tracer IO Trace)
+        OneShotTool.defaultParentSessionLookup

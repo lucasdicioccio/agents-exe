@@ -550,4 +550,3 @@ getChildToolCalls backend parentId = do
                     )
                 )
                 results
-

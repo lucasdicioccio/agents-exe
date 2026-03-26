@@ -1051,8 +1051,9 @@ parseWorktrees txt =
                 then Just (Text.drop (Text.length "refs/heads/") ref)
                 else Nothing
 
--- | Strip the "-<sha>.<tries>" suffix that execTask appends to create branch names.
--- e.g. "gh-355-092bb89.1" -> "gh-355"; returns original if suffix not found.
+{- | Strip the "-<sha>.<tries>" suffix that execTask appends to create branch names.
+e.g. "gh-355-092bb89.1" -> "gh-355"; returns original if suffix not found.
+-}
 stripBranchSuffix :: String -> String
 stripBranchSuffix nm =
     let rev = reverse nm

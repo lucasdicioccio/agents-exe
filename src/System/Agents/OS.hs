@@ -53,30 +53,29 @@ module System.Agents.OS (
     OS (..),
 ) where
 
-import System.Agents.OS.Core
-import System.Agents.OS.Agents
 import System.Agents.OS.AgentTree
-import System.Agents.OS.Resources hiding (ResourceScope)
+import System.Agents.OS.Agents
 import System.Agents.OS.Concurrent
-import System.Agents.OS.Persistence
 import System.Agents.OS.Conversation hiding (ConversationStatus)
+import System.Agents.OS.Core
 import System.Agents.OS.Interfaces (
-    InterfaceHandle (..),
-    InterfaceConfig (..),
-    OSInterface (..),
     AgentHandle (..),
     ConversationHandle (..),
-    OSEvent (..),
-    subscribeToEvents,
-    unsubscribeFromEvents,
-    defaultInterfaceConfig,
+    InterfaceConfig (..),
+    InterfaceHandle (..),
     InterfaceMode (..),
-    sendMessage,
-    receiveMessage,
-    startConversation,
+    OS (..),
+    OSEvent (..),
+    OSInterface (..),
+    defaultInterfaceConfig,
+    destroyAgent,
     endConversation,
     getConversationStatus,
-    destroyAgent,
-    OS (..),
+    receiveMessage,
+    sendMessage,
+    startConversation,
+    subscribeToEvents,
+    unsubscribeFromEvents,
  )
-
+import System.Agents.OS.Persistence
+import System.Agents.OS.Resources hiding (ResourceScope)

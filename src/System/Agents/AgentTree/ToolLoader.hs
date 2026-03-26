@@ -17,6 +17,7 @@ imports.
 module System.Agents.AgentTree.ToolLoader (
     -- * Tool loading
     loadAgentTools,
+
     -- * Loading errors
     LoadingError (..),
 ) where
@@ -60,16 +61,16 @@ import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
-import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
-import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
-import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.Skills.Source as SkillsSource
+import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import System.Agents.Tools.Skills.Types (
     SkillName,
     SkillSource (..),
     SkillsStore,
     allSkills,
  )
+import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
+import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
 -- | Loading error type
 data LoadingError
@@ -103,7 +104,7 @@ Tools are loaded and appended to the node's tools TVar.
 
 Returns a list of loading errors (empty if all tools loaded successfully).
 
-Note: Bash toolboxes and Skills directories are resolved relative to the 
+Note: Bash toolboxes and Skills directories are resolved relative to the
 execution's current working directory.
 -}
 loadAgentTools ::
@@ -116,14 +117,16 @@ loadAgentTools ::
     TVar [ToolRegistration] ->
     IO [LoadingError]
 loadAgentTools _tracer baseDir agent toolsTVar = do
-    errors <- catMaybes <$> sequence
-        [ loadBashTools agent toolsTVar
-        , loadMcpServers agent toolsTVar
-        , loadOpenAPIToolboxes baseDir agent toolsTVar
-        , loadPostgRESTToolboxes baseDir agent toolsTVar
-        , loadBuiltinToolboxes agent toolsTVar
-        , loadSkillsTools agent toolsTVar
-        ]
+    errors <-
+        catMaybes
+            <$> sequence
+                [ loadBashTools agent toolsTVar
+                , loadMcpServers agent toolsTVar
+                , loadOpenAPIToolboxes baseDir agent toolsTVar
+                , loadPostgRESTToolboxes baseDir agent toolsTVar
+                , loadBuiltinToolboxes agent toolsTVar
+                , loadSkillsTools agent toolsTVar
+                ]
     pure errors
 
 -------------------------------------------------------------------------------
@@ -151,9 +154,10 @@ loadBashTools agent toolsTVar = do
         else do
             -- Create a silent tracer for bash toolbox
             let silentTracer = Tracer $ \_ -> pure ()
-            result <- BashToolbox.initializeMultiSourceToolbox
-                silentTracer
-                descriptions
+            result <-
+                BashToolbox.initializeMultiSourceToolbox
+                    silentTracer
+                    descriptions
 
             case result of
                 Left (BashToolbox.LoadingError _msg _errs) -> do
@@ -164,16 +168,17 @@ loadBashTools agent toolsTVar = do
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing
 
--- | Collect all bash toolbox descriptions from the agent config.
--- Note: Relative paths in bash toolboxes are resolved relative to the
--- execution's current working directory.
+{- | Collect all bash toolbox descriptions from the agent config.
+Note: Relative paths in bash toolboxes are resolved relative to the
+execution's current working directory.
+-}
 collectBashDescriptions :: Agent -> [BashToolboxDescription]
 collectBashDescriptions agent =
     let legacyDir = case toolDirectory agent of
             Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing]
             Nothing -> []
         toolboxDescs = fromMaybe [] (bashToolboxes agent)
-    in legacyDir ++ toolboxDescs
+     in legacyDir ++ toolboxDescs
 
 -------------------------------------------------------------------------------
 -- MCP Server Loading
@@ -202,8 +207,9 @@ loadMcpServers agent toolsTVar = do
             errors <- mapM (loadMcpServer toolsTVar) servers
             pure $ collectFirstError errors
 
--- | Load a single MCP server and register its tools.
--- Catches exceptions during initialization and returns a graceful error.
+{- | Load a single MCP server and register its tools.
+Catches exceptions during initialization and returns a graceful error.
+-}
 loadMcpServer ::
     TVar [ToolRegistration] ->
     McpServerDescription ->
@@ -211,20 +217,19 @@ loadMcpServer ::
 loadMcpServer toolsTVar (McpSimpleBinary config) = do
     let silentTracer = Tracer $ \_ -> pure ()
     let proc = System.Process.proc config.executable (map Text.unpack config.args)
-    
+
     -- Try to initialize the MCP toolbox with exception handling
     initResult <- try $ McpToolbox.initializeMcpToolbox silentTracer config.name proc
-    
+
     case initResult of
         Left (e :: SomeException) -> do
             -- Initialization failed (e.g., executable not found)
             let errMsg = Text.unpack config.name ++ ": Failed to initialize MCP server: " ++ show e
             pure $ Just $ McpLoadingError errMsg
-        
         Right toolbox -> do
             -- Wait for initial tool discovery with timeout
             discoveryResult <- McpToolbox.waitForInitialDiscoveryTimeout mcpInitTimeoutMicros toolbox
-            
+
             if not discoveryResult
                 then do
                     -- Timeout waiting for tool discovery
@@ -233,17 +238,17 @@ loadMcpServer toolsTVar (McpSimpleBinary config) = do
                 else do
                     -- Get discovered tools
                     tools <- readTVarIO $ McpToolbox.toolsList toolbox
-                    
+
                     -- Register each tool
                     let registrations = map (ToolReg.registerMcpToolInLLM toolbox) tools
                     let (errs, regs) = partitionEithers registrations
-                    
+
                     -- Add successful registrations to the tools TVar
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ regs)
-                    
+
                     -- Return first error if any registration failed
                     pure $ case errs of
-                        (e:_) -> Just $ McpLoadingError e
+                        (e : _) -> Just $ McpLoadingError e
                         [] -> Nothing
   where
     readTVarIO tvar = atomically $ readTVar tvar
@@ -278,22 +283,22 @@ loadOpenAPIToolbox ::
     IO (Maybe LoadingError)
 loadOpenAPIToolbox baseDir toolsTVar description = do
     let silentTracer = Tracer $ \_ -> pure ()
-    
+
     -- Resolve the description to get the actual config
     configResult <- resolveOpenAPIDescription baseDir description
-    
+
     case configResult of
         Left err -> pure $ Just $ OpenAPILoadingError err
         Right config -> do
             -- Initialize the toolbox
             initResult <- OpenAPIToolbox.initializeToolbox silentTracer config
-            
+
             case initResult of
                 Left err -> pure $ Just $ OpenAPILoadingError (show err)
                 Right toolbox -> do
                     -- Register all tools from the toolbox
                     regResult <- ToolReg.registerOpenAPITools toolbox
-                    
+
                     case regResult of
                         Left err -> pure $ Just $ OpenAPILoadingError err
                         Right registrations -> do
@@ -306,13 +311,15 @@ resolveOpenAPIDescription ::
     OpenAPIToolboxDescription ->
     IO (Either String OpenAPIToolbox.Config)
 resolveOpenAPIDescription _baseDir (OpenAPIServer desc) =
-    pure $ Right $ OpenAPIToolbox.Config
-        { OpenAPIToolbox.configUrl = openApiSpecUrl desc
-        , OpenAPIToolbox.configBaseUrl = openApiBaseUrl desc
-        , OpenAPIToolbox.configHeaders = fromMaybe mempty (openApiHeaders desc)
-        , OpenAPIToolbox.configToken = openApiToken desc
-        , OpenAPIToolbox.configFilter = openApiFilter desc
-        }
+    pure $
+        Right $
+            OpenAPIToolbox.Config
+                { OpenAPIToolbox.configUrl = openApiSpecUrl desc
+                , OpenAPIToolbox.configBaseUrl = openApiBaseUrl desc
+                , OpenAPIToolbox.configHeaders = fromMaybe mempty (openApiHeaders desc)
+                , OpenAPIToolbox.configToken = openApiToken desc
+                , OpenAPIToolbox.configFilter = openApiFilter desc
+                }
 resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
     result <- Aeson.eitherDecodeFileStrict' fullPath
@@ -350,22 +357,22 @@ loadPostgRESTToolbox ::
     IO (Maybe LoadingError)
 loadPostgRESTToolbox baseDir toolsTVar description = do
     let silentTracer = Tracer $ \_ -> pure ()
-    
+
     -- Resolve the description to get the actual config
     configResult <- resolvePostgRESTDescription baseDir description
-    
+
     case configResult of
         Left err -> pure $ Just $ PostgRESTLoadingError err
         Right config -> do
             -- Initialize the toolbox
             initResult <- PostgRESToolbox.initializeToolbox silentTracer config
-            
+
             case initResult of
                 Left err -> pure $ Just $ PostgRESTLoadingError (show err)
                 Right toolbox -> do
                     -- Register all tools from the toolbox
                     regResult <- ToolReg.registerPostgRESTools toolbox
-                    
+
                     case regResult of
                         Left err -> pure $ Just $ PostgRESTLoadingError err
                         Right registrations -> do
@@ -378,14 +385,16 @@ resolvePostgRESTDescription ::
     PostgRESTToolboxDescription ->
     IO (Either String PostgRESToolbox.Config)
 resolvePostgRESTDescription _baseDir (PostgRESTServer desc) =
-    pure $ Right $ PostgRESToolbox.Config
-        { PostgRESToolbox.configUrl = postgrestSpecUrl desc
-        , PostgRESToolbox.configBaseUrl = postgrestBaseUrl desc
-        , PostgRESToolbox.configHeaders = fromMaybe mempty (postgrestHeaders desc)
-        , PostgRESToolbox.configToken = postgrestToken desc
-        , PostgRESToolbox.configAllowedMethods = fromMaybe [] (postgrestAllowedMethods desc)
-        , PostgRESToolbox.configFilter = postgrestFilter desc
-        }
+    pure $
+        Right $
+            PostgRESToolbox.Config
+                { PostgRESToolbox.configUrl = postgrestSpecUrl desc
+                , PostgRESToolbox.configBaseUrl = postgrestBaseUrl desc
+                , PostgRESToolbox.configHeaders = fromMaybe mempty (postgrestHeaders desc)
+                , PostgRESToolbox.configToken = postgrestToken desc
+                , PostgRESToolbox.configAllowedMethods = fromMaybe [] (postgrestAllowedMethods desc)
+                , PostgRESToolbox.configFilter = postgrestFilter desc
+                }
 resolvePostgRESTDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
     result <- Aeson.eitherDecodeFileStrict' fullPath
@@ -439,16 +448,16 @@ loadSqliteToolbox ::
     IO (Maybe LoadingError)
 loadSqliteToolbox toolsTVar desc = do
     let silentTracer = Tracer $ \_ -> pure ()
-    
+
     -- Initialize the toolbox
     initResult <- SqliteToolbox.initializeToolbox silentTracer desc
-    
+
     case initResult of
         Left err -> pure $ Just $ SqliteLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
             regResult <- ToolReg.registerSqliteTools toolbox
-            
+
             case regResult of
                 Left err -> pure $ Just $ SqliteLoadingError err
                 Right registrations -> do
@@ -466,16 +475,16 @@ loadSystemToolbox ::
     IO (Maybe LoadingError)
 loadSystemToolbox toolsTVar desc = do
     let silentTracer = Tracer $ \_ -> pure ()
-    
+
     -- Initialize the toolbox
     initResult <- SystemToolbox.initializeToolbox silentTracer desc
-    
+
     case initResult of
         Left err -> pure $ Just $ SystemLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
             regResult <- ToolReg.registerSystemTools toolbox
-            
+
             case regResult of
                 Left err -> pure $ Just $ SystemLoadingError err
                 Right registrations -> do
@@ -493,16 +502,16 @@ loadDeveloperToolbox ::
     IO (Maybe LoadingError)
 loadDeveloperToolbox toolsTVar desc = do
     let silentTracer = Tracer $ \_ -> pure ()
-    
+
     -- Initialize the toolbox
     initResult <- DeveloperToolbox.initializeToolbox silentTracer desc
-    
+
     case initResult of
         Left err -> pure $ Just $ DeveloperLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
             regResult <- ToolReg.registerDeveloperTools toolbox
-            
+
             case regResult of
                 Left err -> pure $ Just $ DeveloperLoadingError err
                 Right registrations -> do
@@ -520,16 +529,16 @@ loadLuaToolbox ::
     IO (Maybe LoadingError)
 loadLuaToolbox toolsTVar desc = do
     let silentTracer = Tracer $ \_ -> pure ()
-    
+
     -- Initialize the toolbox
     initResult <- LuaToolbox.initializeToolbox silentTracer desc
-    
+
     case initResult of
         Left err -> pure $ Just $ LuaLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
             regResult <- ToolReg.registerLuaTools toolbox
-            
+
             case regResult of
                 Left err -> pure $ Just $ LuaLoadingError err
                 Right registrations -> do
@@ -567,43 +576,47 @@ loadSkillsTools agent toolsTVar = do
         else do
             -- Resolve relative paths in skill sources to current working directory
             resolvedSources <- mapM resolveSkillSource sources
-            
+
             -- Load skills from all sources
             result <- SkillsSource.loadSkillsFromSources resolvedSources
-            
+
             case result of
                 Left err -> pure $ Just $ SkillsLoadingError (Text.unpack err)
                 Right skillsStore -> do
                     -- Register skill metadata tools (always available)
-                    let metaTools = concatMap (SkillsToolbox.makeMetaTools skillsStore) 
-                                           (allSkills skillsStore)
-                    
+                    let metaTools =
+                            concatMap
+                                (SkillsToolbox.makeMetaTools skillsStore)
+                                (allSkills skillsStore)
+
                     -- Register skill_list tool if there are skills
                     let listTool = SkillsToolbox.makeListSkillsTool skillsStore
-                    
+
                     -- Register auto-enable tools for skills in autoEnableSkills
                     autoTools <- loadAutoEnableSkills skillsStore autoEnable
-                    
+
                     -- Combine all tools
                     let allTools = metaTools ++ maybeToList listTool ++ autoTools
-                    
+
                     -- Add to tools TVar
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ allTools)
-                    
+
                     pure Nothing
 
--- | Resolve relative paths in skill sources to absolute paths.
--- Note: SkillDirectory paths are resolved relative to the execution's current
--- working directory.
+{- | Resolve relative paths in skill sources to absolute paths.
+Note: SkillDirectory paths are resolved relative to the execution's current
+working directory.
+-}
 resolveSkillSource :: SkillSource -> IO SkillSource
 resolveSkillSource (SkillDirectory path) = do
     cwd <- getCurrentDirectory
     pure $ SkillDirectory $ if FilePath.isRelative path then cwd </> path else path
 resolveSkillSource gitRepo@(SkillGitRepo _ _) = pure gitRepo
 
--- | Load tools for auto-enabled skills.
--- For now, this is empty - script tools will be computed dynamically
--- based on session state via computeSkillTools.
+{- | Load tools for auto-enabled skills.
+For now, this is empty - script tools will be computed dynamically
+based on session state via computeSkillTools.
+-}
 loadAutoEnableSkills :: SkillsStore -> [SkillName] -> IO [ToolRegistration]
 loadAutoEnableSkills _skillsStore _autoEnable = do
     -- Note: Script tools for auto-enabled skills are computed dynamically
@@ -629,4 +642,3 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
-
