@@ -274,4 +274,3 @@ listSessions store = do
     let sortedFiles = sortOn (Data.Ord.Down . sessionInfoModTime) sessionFiles
     -- Load each session file
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sortedFiles
-

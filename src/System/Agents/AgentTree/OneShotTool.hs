@@ -678,4 +678,3 @@ agentWithSessionProgress onProgress agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse mTxt _thinking _) =
     Maybe.fromMaybe "" mTxt
-
