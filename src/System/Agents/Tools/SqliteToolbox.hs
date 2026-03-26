@@ -33,6 +33,7 @@ Snapshot Mode:
 * The copy is named with the conversation ID as suffix: @original.{uuid}.snapshot.sqlite@
 * Each conversation gets its own isolated copy
 * Changes are persisted to the snapshot file but don't affect the original
+* The WAL file (if present) is also copied to ensure data integrity
 
 Example usage:
 
@@ -148,6 +149,8 @@ data Trace
       SnapshotCreatedTrace !FilePath !FilePath
     | -- | Snapshot creation failed
       SnapshotErrorTrace !FilePath !Text
+    | -- | Empty database created for snapshot mode (original didn't exist)
+      EmptyDatabaseCreatedTrace !FilePath
     deriving (Show)
 
 {- | State for snapshot mode connections.
@@ -495,8 +498,44 @@ openConnection tracer dbPath = do
     _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
     pure (conn, directDb)
 
+{- | Create an empty SQLite database file at the given path.
+
+This is used when a database file is expected to exist but doesn't.
+Simply opening and closing a connection creates the empty database file.
+-}
+createEmptyDatabase :: Tracer IO Trace -> FilePath -> IO ()
+createEmptyDatabase tracer dbPath = do
+    -- Create an empty database by opening and closing a connection
+    conn <- SQLite.open dbPath
+    SQLite.close conn
+    runTracer tracer (EmptyDatabaseCreatedTrace dbPath)
+
+{- | Copy a file if it exists, doing nothing if the source file doesn't exist.
+
+This is used to copy WAL and SHM files which may or may not exist
+depending on the database state.
+-}
+copyFileIfExists :: FilePath -> FilePath -> IO ()
+copyFileIfExists src dst = do
+    exists <- doesFileExist src
+    when exists $ copyFile src dst
+
 {- | Create a snapshot copy of the database for the given conversation.
+
 Returns the path to the snapshot database.
+
+If the original database file does not exist, an empty SQLite database
+will be created first. This is useful for snapshot mode where the user
+may want to start with an empty database.
+
+IMPORTANT: In WAL mode, the database consists of multiple files:
+* The main database file (e.g., dev-abc.db)
+* The WAL file (e.g., dev-abc.db-wal) - contains uncheckpointed changes
+* The SHM file (e.g., dev-abc.db-shm) - shared memory for WAL mode
+
+All of these files are copied to ensure data integrity. If we only copy
+the main database file, recent changes that haven't been checkpointed
+will be invisible in the snapshot.
 -}
 createSnapshot ::
     Tracer IO Trace ->
@@ -511,17 +550,29 @@ createSnapshot tracer originalPath (ConversationId uuid) = do
     let newSnapshotPath = originalPath -<.> (suffix ++ ".snapshot.sqlite")
 
     result <- try $ do
-        -- Check if original exists
+        -- Check if original exists - if not, create an empty database
         exists <- doesFileExist originalPath
         when (not exists) $ do
-            error $ "Original database does not exist: " ++ originalPath
-        -- Copy the database
+            createEmptyDatabase tracer originalPath
+
+        -- Copy the main database file
         copyFile originalPath newSnapshotPath
+
+        -- Also copy WAL and SHM files if they exist
+        -- The WAL file contains uncheckpointed changes that are essential for data integrity
+        let originalWalPath = originalPath ++ "-wal"
+        let originalShmPath = originalPath ++ "-shm"
+        let newWalPath = newSnapshotPath ++ "-wal"
+        let newShmPath = newSnapshotPath ++ "-shm"
+
+        copyFileIfExists originalWalPath newWalPath
+        copyFileIfExists originalShmPath newShmPath
+
         pure newSnapshotPath
 
     case result of
         Left (e :: SomeException) -> do
-            let errMsg = Text.pack $ "Failed to create snapshot: " ++ show e
+            let errMsg = Text.pack $ "Failed to create snapshot: " <> show e
             runTracer tracer (SnapshotErrorTrace newSnapshotPath errMsg)
             pure $ Left errMsg
         Right path -> do
