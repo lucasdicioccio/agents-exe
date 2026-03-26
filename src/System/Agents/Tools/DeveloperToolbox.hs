@@ -562,19 +562,21 @@ executeValidateAgent toolbox agentPath = do
 -- | Validate agent structure and return (errors, warnings).
 validateAgentStructure :: Agent -> ([Text], [Text])
 validateAgentStructure agent =
-    let errors = concat
-            [ checkRequired "slug" (slug agent)
-            , checkRequired "apiKeyId" (apiKeyId agent)
-            , checkRequired "flavor" (flavor agent)
-            , checkRequired "modelUrl" (modelUrl agent)
-            , checkRequired "modelName" (modelName agent)
-            , checkRequired "announce" (announce agent)
-            , checkSystemPrompt (systemPrompt agent)
-            ]
-        warnings = concat
-            [ checkToolSources agent
-            ]
-    in (errors, warnings)
+    let errors =
+            concat
+                [ checkRequired "slug" (slug agent)
+                , checkRequired "apiKeyId" (apiKeyId agent)
+                , checkRequired "flavor" (flavor agent)
+                , checkRequired "modelUrl" (modelUrl agent)
+                , checkRequired "modelName" (modelName agent)
+                , checkRequired "announce" (announce agent)
+                , checkSystemPrompt (systemPrompt agent)
+                ]
+        warnings =
+            concat
+                [ checkToolSources agent
+                ]
+     in (errors, warnings)
   where
     checkRequired :: Text -> Text -> [Text]
     checkRequired fieldName value =
@@ -614,9 +616,9 @@ validateAgentStructure agent =
                 Just agents -> not (null agents)
                 Nothing -> False
             hasAnySource = hasToolDir || hasBashToolboxes || hasMcpServers || hasOpenApi || hasPostgrest || hasBuiltin || hasExtraAgents
-        in if hasAnySource
-            then []
-            else ["No tool sources configured (toolDirectory, bashToolboxes, mcpServers, openApiToolboxes, postgrestToolboxes, builtinToolboxes, or extraAgents)"]
+         in if hasAnySource
+                then []
+                else ["No tool sources configured (toolDirectory, bashToolboxes, mcpServers, openApiToolboxes, postgrestToolboxes, builtinToolboxes, or extraAgents)"]
 
 -------------------------------------------------------------------------------
 -- Tool Execution - Creation
@@ -992,7 +994,8 @@ makeBashToolTemplateFromConfig config =
                     , "    esac"
                     , "done"
                     ]
-                _ -> -- dashdashspace (default)
+                _ ->
+                    -- dashdashspace (default)
                     [ varName <> "=\"\""
                     , "while [[ $# -gt 0 ]]; do"
                     , "    case $1 in"
@@ -1486,4 +1489,3 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
-
