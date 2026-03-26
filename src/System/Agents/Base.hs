@@ -532,20 +532,29 @@ instance FromJSON PostgRESTToolboxDescription where
 
 {- | Access mode for SQLite databases.
 
-Controls whether the database is opened in read-only or read-write mode.
+Controls whether the database is opened in read-only, read-write, or snapshot mode.
 This affects both file permissions and SQLite's internal locking behavior.
+
+* 'SqliteReadOnly': Open database in read-only mode. No modifications allowed.
+* 'SqliteReadWrite': Open database in read-write mode. Both reads and writes allowed.
+* 'SqliteSnapshot': Create a copy of the database for this conversation and open it
+  in read-write mode. Changes are isolated to the conversation lifetime.
 -}
 data SqliteAccessMode
     = -- | Open database in read-only mode. No modifications allowed.
       SqliteReadOnly
     | -- | Open database in read-write mode. Both reads and writes allowed.
       SqliteReadWrite
+    | -- | Create a snapshot copy for this conversation, opened in read-write mode.
+      -- The snapshot is created on first use using the conversation ID as suffix.
+      SqliteSnapshot
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SqliteAccessMode as kebab-case strings.
 instance ToJSON SqliteAccessMode where
     toJSON SqliteReadOnly = Aeson.String "read-only"
     toJSON SqliteReadWrite = Aeson.String "read-write"
+    toJSON SqliteSnapshot = Aeson.String "snapshot"
 
 -- | Parse SqliteAccessMode from kebab-case strings.
 instance FromJSON SqliteAccessMode where
@@ -553,7 +562,8 @@ instance FromJSON SqliteAccessMode where
         case txt of
             "read-only" -> return SqliteReadOnly
             "read-write" -> return SqliteReadWrite
-            other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only' or 'read-write'."
+            "snapshot" -> return SqliteSnapshot
+            other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only', 'read-write', or 'snapshot'."
 
 {- | Configuration for a SQLite builtin toolbox.
 
@@ -573,9 +583,10 @@ Example configuration:
 @
 
 The 'access' field controls whether the database is opened in
-read-only or read-write mode. Use 'read-only' for safety when
-the agent should only query data, and 'read-write' when the agent
-needs to modify the database.
+read-only, read-write, or snapshot mode. Use 'read-only' for safety when
+the agent should only query data, 'read-write' when the agent
+needs to modify the database directly, and 'snapshot' when you want
+isolated changes per conversation.
 -}
 data SqliteToolboxDescription
     = SqliteToolboxDescription
@@ -586,7 +597,7 @@ data SqliteToolboxDescription
     , sqliteToolboxPath :: FilePath
     -- ^ Path to the SQLite database file
     , sqliteToolboxAccess :: SqliteAccessMode
-    -- ^ Access mode: read-only or read-write
+    -- ^ Access mode: read-only, read-write, or snapshot
     }
     deriving (Show, Ord, Eq, Generic)
 

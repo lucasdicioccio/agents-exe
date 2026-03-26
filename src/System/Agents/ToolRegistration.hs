@@ -757,7 +757,7 @@ registerSqliteTool box =
             [ ParamProperty
                 { propertyKey = "sql"
                 , propertyType = StringParamType
-                , propertyDescription = "SQL query to execute (SELECT for read-only, any valid SQL for read-write)"
+                , propertyDescription = "SQL query to execute (SELECT for read-only, any valid SQL for read-write or snapshot)"
                 , propertyRequired = True
                 }
             ]
@@ -1193,10 +1193,12 @@ sqliteTool box =
             , SqliteTools.toolDescriptionDatabasePath = box.toolboxPath
             }
 
-    run _tracer _ctx (Aeson.Object v) = do
+    run _tracer ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "sql") v of
             Just (Aeson.String query) -> do
-                result <- SqliteTools.executeQuery box query
+                -- Get conversation ID from context for snapshot mode
+                let mConvId = Just (Context.ctxConversationId ctx)
+                result <- SqliteTools.executeQueryWithContext box mConvId query
                 case result of
                     Left err -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
@@ -1345,3 +1347,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+
