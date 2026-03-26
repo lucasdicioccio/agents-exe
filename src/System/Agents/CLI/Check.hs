@@ -24,11 +24,11 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 
 import qualified Prod.Tracer as Prod
-import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import System.Agents.Runtime.Trace (Trace)
+import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 
@@ -50,10 +50,11 @@ data CheckOptions = CheckOptions
     }
     deriving (Show, Eq)
 
--- | Create an agent tool function with default session tracking.
---
--- This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
--- providing backward compatibility while allowing opt-in to full session tracking.
+{- | Create an agent tool function with default session tracking.
+
+This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+providing backward compatibility while allowing opt-in to full session tracking.
+-}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
@@ -182,4 +183,3 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
-

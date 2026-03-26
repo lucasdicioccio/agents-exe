@@ -1,11 +1,12 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Event handling for the TUI application.
---
--- This module handles all user input and application events for the TUI.
--- During migration to the OS model, tool operations use the RuntimeBridge
--- which synchronizes tools between the legacy Runtime and OS Core.
+{- | Event handling for the TUI application.
+
+This module handles all user input and application events for the TUI.
+During migration to the OS model, tool operations use the RuntimeBridge
+which synchronizes tools between the legacy Runtime and OS Core.
+-}
 module System.Agents.TUI.Event where
 
 import Brick
@@ -489,11 +490,10 @@ refreshToolsForAgent agent = do
     tuiUI . coreAgentTools %= updateAgentTools (tuiAgentId agent) tools
   where
     updateAgentTools :: AgentId -> [a] -> [(AgentId, [a])] -> [(AgentId, [a])]
-    updateAgentTools aid newTools = 
+    updateAgentTools aid newTools =
         ((aid, newTools) :) . filter ((/= aid) . fst)
 
-{- | Handle F5 key: Refresh tools for selected agent.
--}
+-- | Handle F5 key: Refresh tools for selected agent.
 handleRefreshTools :: EventM N TuiState ()
 handleRefreshTools = do
     selected <- use (tuiUI . selectedAgentInfo)
@@ -506,7 +506,7 @@ handleRefreshTools = do
         Nothing -> showStatus StatusWarning "No agent selected"
   where
     updateAgentTools :: AgentId -> [a] -> [(AgentId, [a])] -> [(AgentId, [a])]
-    updateAgentTools aid newTools = 
+    updateAgentTools aid newTools =
         ((aid, newTools) :) . filter ((/= aid) . fst)
 
 -------------------------------------------------------------------------------
@@ -729,4 +729,3 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-

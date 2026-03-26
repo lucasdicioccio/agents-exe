@@ -28,9 +28,9 @@ import System.IO (stderr)
 
 import Control.Concurrent.STM (readTVarIO)
 import qualified Prod.Tracer as Prod
-import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.Base (AgentId, AgentSlug)
 import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration)
@@ -89,10 +89,11 @@ listToolCallAgentTools :: ToolCallAgent -> IO [ToolRegistration]
 listToolCallAgentTools agent =
     readTVarIO (osNodeTools agent.toolCallNode)
 
--- | Create an agent tool function with default session tracking.
---
--- This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
--- providing backward compatibility while allowing opt-in to full session tracking.
+{- | Create an agent tool function with default session tracking.
+
+This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
+providing backward compatibility while allowing opt-in to full session tracking.
+-}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
@@ -177,4 +178,3 @@ handleToolCall opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
-

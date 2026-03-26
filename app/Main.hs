@@ -91,7 +91,7 @@ defaultApiKeysContent =
                         [ "id" .= ("ollama-key" :: Text)
                         , "value" .= ("ollama" :: Text)
                         ]
-                ]
+                   ]
             ]
 
 -- | Default OpenAI agent configuration
@@ -1287,9 +1287,10 @@ maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
 
--- | Convert TreeTrace to JSON for logging purposes.
--- This function is simplified for the OS-native migration and may not
--- cover all trace types that were previously supported.
+{- | Convert TreeTrace to JSON for logging purposes.
+This function is simplified for the OS-native migration and may not
+cover all trace types that were previously supported.
+-}
 toJsonTrace :: AgentTree.TreeTrace -> Maybe Aeson.Value
 toJsonTrace x = case x of
     AgentTree.McpTrace cfg tr -> encodeMcpTrace cfg tr
@@ -1298,10 +1299,11 @@ toJsonTrace x = case x of
     AgentTree.DataLoadingTrace _ -> Nothing
     AgentTree.ConfigLoadedTrace _ -> Nothing
     AgentTree.CyclicReferencesWarning cycles ->
-        Just $ Aeson.object
-            [ "type" .= ("cyclic-references-warning" :: Text)
-            , "cycles" .= cycles
-            ]
+        Just $
+            Aeson.object
+                [ "type" .= ("cyclic-references-warning" :: Text)
+                , "cycles" .= cycles
+                ]
     AgentTree.ReferenceValidationTrace _ -> Nothing
   where
     encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
@@ -1360,4 +1362,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-

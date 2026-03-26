@@ -13,6 +13,7 @@ import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
 -------------------------------------------------------------------------------
+
 {- | Main trace type for all agent system events.
 
 This type captures trace events from various sources:
@@ -35,8 +36,9 @@ data Trace
     | LuaToolboxTrace !Text !LuaToolbox.Trace
     | SkillsToolboxTrace !Text !SkillsToolbox.Trace
     | SkillsToolboxInitError !Text !String
-    | -- | Trace event for sub-agent (recursive) calls.
-      -- Captures the relationship between parent and child agent calls.
+    | {- | Trace event for sub-agent (recursive) calls.
+      Captures the relationship between parent and child agent calls.
+      -}
       SubAgentTrace
         { subAgentCallerSlug :: AgentSlug
         -- ^ The slug of the calling agent
@@ -97,4 +99,3 @@ data ConversationTrace
     | RunToolTrace !StepId !ToolTrace
     | ChildrenTrace !Trace
     deriving (Show)
-

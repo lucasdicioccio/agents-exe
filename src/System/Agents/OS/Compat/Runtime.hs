@@ -3,19 +3,20 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
--- |
--- Compatibility runtime layer - minimal exports for transitional compatibility.
--- This module is deprecated and will be removed in a future release.
+{- |
+Compatibility runtime layer - minimal exports for transitional compatibility.
+This module is deprecated and will be removed in a future release.
+-}
 module System.Agents.OS.Compat.Runtime (
     -- * OS Type (re-exported from OS.Core for compatibility)
     OS (..),
     initializeOS,
-    
+
     -- * Runtime Bridge (deprecated)
     RuntimeBridge (..),
     newRuntimeBridge,
     runWithBridge,
-    
+
     -- * AgentRuntime class (deprecated)
     AgentRuntime (..),
 ) where
@@ -43,7 +44,7 @@ newtype OS = OS
 
 -- | Manual Eq instance for OS
 instance Eq OS where
-    _ == _ = True  -- All OS instances are equal for compatibility
+    _ == _ = True -- All OS instances are equal for compatibility
 
 -- | Manual Show instance for OS
 instance Show OS where
@@ -59,8 +60,9 @@ initializeOS = do
 -- Runtime Bridge (deprecated)
 -------------------------------------------------------------------------------
 
--- | Bridge from old Runtime interface to new OS (deprecated).
--- This type is kept for backward compatibility but should not be used in new code.
+{- | Bridge from old Runtime interface to new OS (deprecated).
+This type is kept for backward compatibility but should not be used in new code.
+-}
 data RuntimeBridge = RuntimeBridge
     { bridgeAgentId :: AgentId
     , bridgeOS :: OS
@@ -69,10 +71,11 @@ data RuntimeBridge = RuntimeBridge
 
 -- | Create a new runtime bridge for an agent (deprecated).
 newRuntimeBridge :: AgentId -> OS -> RuntimeBridge
-newRuntimeBridge agentId os = RuntimeBridge
-    { bridgeAgentId = agentId
-    , bridgeOS = os
-    }
+newRuntimeBridge agentId os =
+    RuntimeBridge
+        { bridgeAgentId = agentId
+        , bridgeOS = os
+        }
 
 -- | Run an operation with a RuntimeBridge (deprecated).
 runWithBridge :: RuntimeBridge -> ReaderT RuntimeBridge IO a -> IO a
@@ -82,8 +85,9 @@ runWithBridge bridge action = runReaderT action bridge
 -- AgentRuntime Typeclass (deprecated)
 -------------------------------------------------------------------------------
 
--- | Typeclass for agent runtime operations (deprecated).
--- This is kept for backward compatibility but should not be used in new code.
+{- | Typeclass for agent runtime operations (deprecated).
+This is kept for backward compatibility but should not be used in new code.
+-}
 class (Monad m) => AgentRuntime m where
     -- | List all available tools for the agent.
     listTools :: m [ToolRegistration]
@@ -107,4 +111,3 @@ instance AgentRuntime (ReaderT RuntimeBridge IO) where
     getTracer = do
         -- Return a no-op tracer by default
         pure $ Tracer $ const $ pure ()
-

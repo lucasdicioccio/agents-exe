@@ -1,7 +1,7 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 
 {- |
 OS-native agent initialization and management.
@@ -39,12 +39,13 @@ import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readT
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Maybe (isJust)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
-import Data.Proxy (Proxy (..))
 
 import System.Agents.Base (AgentId (..), AgentSlug, newAgentId)
 import qualified System.Agents.Base as Base
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.OS.Core (
     AgentConfig (..),
     AgentState (..),
@@ -55,14 +56,12 @@ import System.Agents.OS.Core (
 import System.Agents.OS.Core.Types (Component (..), EntityId (..))
 import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -------------------------------------------------------------------------------
 -- Agent Creation
 -------------------------------------------------------------------------------
 
-{- | Errors that can occur during agent creation.
--}
+-- | Errors that can occur during agent creation.
 data AgentCreationError
     = AgentConfigStoreNotRegistered
     | AgentStateStoreNotRegistered
@@ -119,11 +118,12 @@ createAgent world config = do
 
             -- Create initial agent state
             now <- getCurrentTime
-            let initialState = AgentState
-                    { agentStatus = AgentIdle
-                    , agentCurrentConversation = Nothing
-                    , agentCreatedAt = now
-                    }
+            let initialState =
+                    AgentState
+                        { agentStatus = AgentIdle
+                        , agentCurrentConversation = Nothing
+                        , agentCreatedAt = now
+                        }
 
             -- Store components in the world
             atomically $ do
@@ -138,30 +138,31 @@ This helper function converts the old Runtime-style parameters to
 the new OS AgentConfig format.
 -}
 createAgentConfig ::
+    -- | Agent name/slug
     Text ->
-    -- ^ Agent name/slug
+    -- | Model flavor (e.g., "openai")
     Text ->
-    -- ^ Model flavor (e.g., "openai")
+    -- | Model URL
     Text ->
-    -- ^ Model URL
+    -- | Model name
     Text ->
-    -- ^ Model name
+    -- | API key ID
     Text ->
-    -- ^ API key ID
+    -- | System prompt
     Text ->
-    -- ^ System prompt
+    -- | Toolbox binding specs
     [Text] ->
-    -- ^ Toolbox binding specs
     AgentConfig
 createAgentConfig name flavor url mname apiKeyId prompt toolboxBindings =
     AgentConfig
         { agentName = name
-        , agentModel = ModelConfig
-            { modelFlavor = flavor
-            , modelUrl = url
-            , modelName = mname
-            , modelApiKeyId = apiKeyId
-            }
+        , agentModel =
+            ModelConfig
+                { modelFlavor = flavor
+                , modelUrl = url
+                , modelName = mname
+                , modelApiKeyId = apiKeyId
+                }
         , agentSystemPrompt = prompt
         , agentToolboxBindings = toolboxBindings
         }
@@ -231,34 +232,29 @@ newtype AgentToolsStore = AgentToolsStore
     { unAgentToolsStore :: TVar (HashMap AgentSlug [ToolRegistration])
     }
 
-{- | Create a new empty agent tools store.
--}
+-- | Create a new empty agent tools store.
 createAgentToolsStore :: IO AgentToolsStore
 createAgentToolsStore = AgentToolsStore <$> newTVarIO HashMap.empty
 
-{- | Get all tools for an agent by slug.
--}
+-- | Get all tools for an agent by slug.
 getAgentTools :: AgentToolsStore -> AgentSlug -> IO [ToolRegistration]
 getAgentTools store slug = do
     toolsMap <- readTVarIO (unAgentToolsStore store)
     pure $ HashMap.lookupDefault [] slug toolsMap
 
-{- | Set all tools for an agent (replaces existing).
--}
+-- | Set all tools for an agent (replaces existing).
 setAgentTools :: AgentToolsStore -> AgentSlug -> [ToolRegistration] -> IO ()
 setAgentTools store slug tools =
     atomically $ modifyTVar' (unAgentToolsStore store) (HashMap.insert slug tools)
 
-{- | Add a single tool to an agent.
--}
+-- | Add a single tool to an agent.
 addAgentTool :: AgentToolsStore -> AgentSlug -> ToolRegistration -> IO ()
 addAgentTool store slug tool =
     atomically $ modifyTVar' (unAgentToolsStore store) $ \m ->
         let existing = HashMap.lookupDefault [] slug m
          in HashMap.insert slug (existing ++ [tool]) m
 
-{- | Remove a tool from an agent by name.
--}
+-- | Remove a tool from an agent by name.
 removeAgentTool :: AgentToolsStore -> AgentSlug -> Text -> IO ()
 removeAgentTool store slug toolName =
     atomically $ modifyTVar' (unAgentToolsStore store) $ \m ->
@@ -278,4 +274,3 @@ modifyTVar' :: TVar a -> (a -> a) -> STM ()
 modifyTVar' tvar f = do
     val <- readTVar tvar
     writeTVar tvar $! f val
-
