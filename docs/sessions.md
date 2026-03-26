@@ -245,16 +245,72 @@ mainOneShot store mPath mSession props prompt = do
     writeSession store updatedSession
 ```
 
-### Session Printing
+## Session Printing (`System.Agents.SessionPrint`)
 
-The `session-print` command displays session history:
+The `SessionPrint` module provides rich markdown formatting for session files, including statistics visualization and configurable content display.
+
+### Session Print Types
+
+```haskell
+-- | Preference for ordering session steps.
+data OrderPreference
+    = Chronological      -- Oldest first
+    | Antichronological  -- Newest first
+
+-- | Amount of content to print (lines or characters).
+data PrintAmount
+    = Lines Int
+    | Chars Int
+
+-- | Visibility preference for displaying content.
+data PrintVisibility
+    = Hidden                    -- Don't show content
+    | Elided PrintAmount PrintAmount  -- Show leading/trailing, elide middle
+    | ShownFull                 -- Show complete content
+
+-- | Options for controlling session print output.
+data SessionPrintOptions = SessionPrintOptions
+    { sessionPrintFile :: FilePath
+    , showToolCallResults :: PrintVisibility
+    , showToolCallArguments :: PrintVisibility
+    , nTurns :: Maybe Int
+    , repeatSystemPrompt :: Bool
+    , repeatTools :: Bool
+    , orderPreference :: OrderPreference
+    , noFunnyStamp :: Bool
+    }
+
+-- | Statistics about a session.
+data SessionStatistics = SessionStatistics
+    { statTotalTurns :: Int
+    , statUserTurns :: Int
+    , statLlmTurns :: Int
+    , statTotalToolCalls :: Int
+    , statToolCallsByName :: Map Text Int
+    , statInputBytes :: Int
+    , statOutputBytes :: Int
+    , statReasoningBytes :: Int
+    , statTotalBytes :: Int
+    }
+```
+
+### CLI: session-print Command
 
 ```bash
 # Print full session
 agents-exe session-print session.json
 
-# Print with tool call results
-agents-exe session-print --show-tool-call-results session.json
+# Print with tool call results visible
+agents-exe session-print --show-tool-call-results shown session.json
+
+# Show tool call arguments too
+agents-exe session-print \
+    --show-tool-call-results shown \
+    --show-tool-call-arguments shown \
+    session.json
+
+# Elide long outputs (show first/last 10 lines)
+agents-exe session-print --show-tool-call-results elided session.json
 
 # Limit to N turns
 agents-exe session-print --n-turns 5 session.json
@@ -264,26 +320,148 @@ agents-exe session-print --antichronological session.json
 
 # Show system prompts and tools each turn
 agents-exe session-print --repeat-system-prompt --repeat-tools session.json
+
+# Skip the ASCII art logo
+agents-exe session-print --no-funny-stamp session.json
 ```
 
-### Session Edit
+### Content Elision
 
-Sessions can be edited for:
-
-- Removing problematic turns
-- Modifying system prompts
-- Injecting context
+The `elideDocument` function intelligently handles content that's too long:
 
 ```haskell
--- Remove last N turns
-pruneTurns :: Int -> Session -> Session
-pruneTurns n session = session 
-    { turns = take (length (turns session) - n) (turns session) }
+-- | Elide a document by keeping leading and trailing portions.
+elideDocument :: PrintAmount -> PrintAmount -> Text -> Text
 
--- Inject context
-injectContext :: Text -> Session -> Session
-injectContext context session = 
-    -- Add as first system message
+-- Examples:
+elideDocument (Lines 3) (Lines 3) "line1\nline2\n...\nline7"
+-- Shows all 7 lines (no overlap)
+
+elideDocument (Lines 2) (Lines 2) "line1\nline2\nline3\nline4\nline5"
+-- "line1\nline2\n... (1 line elided) ...\nline4\nline5"
+```
+
+### Statistics Visualization
+
+Session print includes visual bar charts for:
+
+1. **Tool usage**: Bar chart showing which tools were called most
+2. **Byte usage**: Input, output, and reasoning token breakdown
+
+```
+📊 Statistics
+
+### 🔧 Tool Calls
+
+Total Tool Calls: 15
+
+`read-file`         8   ████████████████████████████████████████
+`write-file`        4   ████████████████████
+`grep-files`        3   ███████████████
+
+### 💾 Byte Usage
+
+`Input    `      2 KiB   ████████████████████████
+`Output   `      5 KiB   ████████████████████████████████████████████████
+`Reasoning`      1 KiB   ████████████
+
+Total: 8 KiB
+```
+
+## Session Content Injection (`System.Agents.SessionPrint.Inject`)
+
+The `SessionInject` module allows injecting session content into prompts with various verbosity levels.
+
+### Injection Verbosity Levels
+
+```haskell
+data SessionInjectMode
+    = SessionXS   -- Minimal: queries/responses only, skips tool-only turns
+    | SessionS    -- Low: +thinking, +tool names
+    | SessionM    -- Medium: +statistics
+    | SessionL    -- High: +tool call results
+    | SessionXL   -- Maximum: complete session
+```
+
+### CLI: Session Injection Options
+
+```bash
+# Inject session at minimal verbosity
+agents-exe run --session-xs previous-session.json --prompt "Continue..."
+
+# Inject at low verbosity
+agents-exe run --session-s previous-session.json --prompt "Continue..."
+
+# Inject at medium verbosity
+agents-exe run --session-m previous-session.json --prompt "Continue..."
+
+# Inject at high verbosity (includes tool results)
+agents-exe run --session-l previous-session.json --prompt "Continue..."
+
+# Maximum verbosity
+agents-exe run --session-xl previous-session.json --prompt "Continue..."
+```
+
+### Programmatic Usage
+
+```haskell
+import System.Agents.SessionPrint.Inject
+
+-- Load session content at specific verbosity
+loadSessionForPrompt :: SessionInjectMode -> Session -> Text
+loadSessionForPrompt mode session = case mode of
+    SessionXS -> formatMinimal session   -- Just user queries and LLM responses
+    SessionS  -> formatLow session       -- + thinking process
+    SessionM  -> formatMedium session    -- + statistics
+    SessionL  -> formatHigh session      -- + tool call results
+    SessionXL -> formatComplete session  -- Everything
+```
+
+## Session Edit
+
+The `SessionEdit` module provides operations for modifying session files.
+
+### CLI: session-edit Command
+
+```bash
+# Take first N turns
+agents-exe session-edit --take --count 10 session.json < input.json > output.json
+
+# Take last N turns
+agents-exe session-edit --take-tail --count 5 session.json < input.json > output.json
+
+# Drop first N turns
+agents-exe session-edit --drop --count 2 session.json < input.json > output.json
+
+# Drop last N turns
+agents-exe session-edit --drop-tail --count 1 session.json < input.json > output.json
+
+# Remove all tool calls
+agents-exe session-edit --censor-tool-calls session.json < input.json > output.json
+
+# Remove all thinking content
+agents-exe session-edit --censor-thinking session.json < input.json > output.json
+```
+
+### Edit Operations
+
+```haskell
+data SessionEditOp
+    = SessionEditTake Int       -- Take first N turns
+    | SessionEditTakeTail Int   -- Take last N turns
+    | SessionEditDrop Int       -- Drop first N turns
+    | SessionEditDropTail Int   -- Drop last N turns
+    | SessionEditCensorToolCalls  -- Remove tool calls
+    | SessionEditCensorThinking   -- Remove thinking content
+
+applyEdit :: SessionEditOp -> Session -> Session
+applyEdit (SessionEditTake n) session = 
+    session { turns = take n (turns session) }
+applyEdit (SessionEditDrop n) session = 
+    session { turns = drop n (turns session) }
+applyEdit SessionEditCensorToolCalls session =
+    session { turns = map removeToolCalls (turns session) }
+-- etc.
 ```
 
 ## Context Window Management
@@ -372,21 +550,6 @@ memorySessionStore = do
 2. **Pagination**: For long sessions, load turns in chunks
 3. **Compression**: Consider gzip for large session files
 
-## Session Print Options
-
-```haskell
-data SessionPrintOptions = SessionPrintOptions
-    { sessionFile :: FilePath
-    , showToolCallResults :: Bool
-    , nTurns :: Maybe Int           -- Limit number of turns
-    , repeatSystemPrompt :: Bool    -- Show system prompt each turn
-    , repeatTools :: Bool           -- Show available tools each turn
-    , order :: PrintOrder
-    }
-
-data PrintOrder = Chronological | Antichronological
-```
-
 ## Example: Session Analysis
 
 ```haskell
@@ -410,4 +573,18 @@ errorTurns session =
     [turn | turn <- turns session
           , any (isLeft . toolOutput) (toolCalls turn)]
 ```
+
+## Related Modules
+
+| Module | Purpose |
+|--------|---------|
+| `System.Agents.Session.Types` | Core session types |
+| `System.Agents.Session.Base` | Session operations |
+| `System.Agents.Session.Loop` | Conversation loop |
+| `System.Agents.Session.Step` | Single turn execution |
+| `System.Agents.Session.Edit` | Session editing operations |
+| `System.Agents.Session.OpenAI` | OpenAI-specific session handling |
+| `System.Agents.SessionStore` | Persistent storage |
+| `System.Agents.SessionPrint` | Markdown printing and statistics |
+| `System.Agents.SessionPrint.Inject` | Session content injection |
 

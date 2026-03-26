@@ -41,6 +41,8 @@ The framework supports multiple tool types:
 | **System Tools** | System information | Runtime context |
 | **Developer Tools** | Development utilities | Agent/tool scaffolding |
 | **IO Tools** | Haskell functions | In-process operations |
+| **Lua Tools** | Lua scripts | Embedded scripting |
+| **Skills** | Progressive disclosure | Procedural knowledge |
 
 ## Tool Registration
 
@@ -657,6 +659,411 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
+## Lua Tools
+
+Lua tools provide embedded scripting capabilities through Lua scripts that can execute within the agent process.
+
+### Lua Toolbox
+
+The `LuaToolbox` module provides a complete Lua environment with security controls and API modules.
+
+```haskell
+data LuaToolbox = LuaToolbox
+    { toolboxName :: Text
+    , toolboxDescription :: Text
+    , scripts :: [LuaScript]
+    }
+```
+
+### Lua Modules
+
+Scripts have access to these built-in modules:
+
+| Module | Functions | Description |
+|--------|-----------|-------------|
+| `json` | `encode`, `decode`, `encode_pretty` | JSON manipulation |
+| `http` | `get`, `post`, `put`, `delete` | HTTP requests |
+| `time` | `now`, `sleep`, `format` | Time utilities |
+| `fs` | `read_file`, `write_file`, `list_dir` | File system (sandboxed) |
+| `text` | `split`, `join`, `trim`, `match` | String utilities |
+
+### Example Lua Script
+
+```lua
+-- my-script.lua
+local json = require("json")
+local http = require("http")
+local fs = require("fs")
+
+function describe()
+    return json.encode({
+        slug = "fetch-and-save",
+        description = "Fetch URL content and save to file",
+        args = {
+            { name = "url", type = "string", required = true },
+            { name = "output", type = "string", required = true }
+        }
+    })
+end
+
+function run(args)
+    local response = http.get(args.url)
+    fs.write_file(args.output, response.body)
+    return json.encode({
+        success = true,
+        bytes_written = #response.body
+    })
+end
+
+-- Entry point
+local cmd = arg[1]
+if cmd == "describe" then
+    print(describe())
+elseif cmd == "run" then
+    local args = json.decode(arg[2] or "{}")
+    print(run(args))
+else
+    error("Unknown command: " .. tostring(cmd))
+end
+```
+
+### Security Features
+
+- **Sandboxed file system**: Restricted to allowed directories
+- **Network allowlist**: HTTP requests limited to approved domains
+- **Timeout controls**: Maximum execution time enforced
+- **Memory limits**: Lua state memory constrained
+
+## Skills System
+
+The Skills system provides procedural knowledge and executable capabilities via progressive disclosure, following the [agentskills.io](https://agentskills.io) specification.
+
+### Overview
+
+Skills are packages of related functionality that can be dynamically enabled/disabled during a session. They implement progressive disclosure:
+
+1. **Initially**: Only metadata tools are visible (describe, enable, disable, list)
+2. **After enable**: Script tools become available for execution
+
+```
+Session Start
+      │
+      ▼
+┌─────────────┐
+│ skill_list  │  ← Always available
+│ skill_desc  │  ← Always available
+│ skill_enable│  ← Always available
+└──────┬──────┘
+       │
+       ▼ (user calls skill_enable_pdf-processing)
+┌─────────────┐
+│ skill_list  │
+│ skill_desc  │
+│ skill_enable│
+│ skill_pdf_* │  ← NEW: Script tools now visible
+└─────────────┘
+```
+
+### Skill Structure
+
+A skill directory contains:
+
+```
+skill-directory/
+├── SKILL.md          # Frontmatter + instructions
+├── scripts/          # Executable scripts
+│   ├── extract-text.sh
+│   └── convert.sh
+└── references/       # Documentation (optional)
+    └── api-docs.md
+```
+
+### SKILL.md Format
+
+```markdown
+---
+name: pdf-processing
+description: Extract and manipulate PDF files
+license: MIT
+compatibility: Linux, macOS
+metadata:
+  author: team-pdf
+  version: "1.0"
+---
+
+# PDF Processing
+
+This skill provides tools for working with PDF documents.
+
+## Usage
+
+Enable the skill, then use the available script tools...
+```
+
+### Skill Types (`System.Agents.Tools.Skills.Types`)
+
+```haskell
+-- | Validated skill name (1-64 chars, lowercase, digits, hyphens)
+newtype SkillName = SkillName { unSkillName :: Text }
+
+-- | Complete skill with metadata, instructions, scripts, and references
+data Skill = Skill
+    { skillMetadata :: SkillMetadata
+    , skillInstructions :: Text
+    , skillPath :: FilePath
+    , skillScripts :: [ScriptInfo]
+    , skillReferences :: [ReferenceInfo]
+    }
+
+-- | Metadata from SKILL.md frontmatter
+data SkillMetadata = SkillMetadata
+    { smName :: SkillName
+    , smDescription :: Text
+    , smLicense :: Maybe Text
+    , smCompatibility :: Maybe Text
+    , smMetadata :: Map Text Text
+    }
+
+-- | Script following the describe/run protocol
+data ScriptInfo = ScriptInfo
+    { siName :: ScriptName
+    , siPath :: FilePath
+    , siDescription :: Maybe Text
+    , siArgs :: [ScriptArgInfo]
+    }
+```
+
+### Skill State
+
+```haskell
+-- | Session state tracking which skills and scripts are enabled
+newtype SkillsSessionState = SkillsSessionState
+    { sssActiveSkills :: Map SkillName SkillScriptsState
+    }
+
+-- | Script state within a skill
+type SkillScriptsState = Map ScriptName ScriptState
+data ScriptState = Enabled | Disabled
+
+-- | Monoid instance for folding over session turns
+instance Monoid SkillsSessionState where
+    mempty = SkillsSessionState Map.empty
+    -- Later state overrides earlier state
+```
+
+### Toolbox Integration (`System.Agents.Tools.Skills.Toolbox`)
+
+```haskell
+-- | Compute all available skill tools from session state
+computeSkillTools :: SkillsStore -> Session -> [ToolRegistration]
+computeSkillTools store session =
+    let state = foldSession session
+        -- Always available
+        metaTools = concatMap makeMetaTools (allSkills store)
+        -- Available only when enabled
+        scriptTools = 
+            concatMap (makeScriptToolsForSkill state store) 
+                      (sssActiveSkills state)
+     in listTool ++ metaTools ++ scriptTools
+
+-- Tool naming convention
+skill2LLMName :: Text -> SkillName -> ToolName
+-- skill_describe_pdf-processing
+-- skill_enable_pdf-processing
+-- skill_pdf-processing_extract-text
+```
+
+### Generated Tools
+
+For each skill, these tools are generated:
+
+| Tool | Purpose | Always Available |
+|------|---------|------------------|
+| `skill_list` | List all skills | Yes |
+| `skill_describe_{name}` | Get skill metadata | Yes |
+| `skill_enable_{name}` | Enable skill scripts | Yes |
+| `skill_disable_{name}` | Disable skill scripts | Yes |
+| `skill_{name}_{script}` | Execute script | No (requires enable) |
+
+### Skill Sources
+
+Skills can be loaded from:
+
+```haskell
+data SkillSource
+    = SkillDirectory FilePath           -- Local directory
+    | SkillGitRepo GitUrl (Maybe Subdirectory)  -- Git repository
+```
+
+Configuration:
+
+```json
+{
+  "skillSources": [
+    { "tag": "SkillDirectory", "contents": "./skills" },
+    { "tag": "SkillGitRepo", 
+      "contents": { 
+        "url": "https://github.com/org/skills-repo",
+        "subdir": "pdf-tools"
+      }
+    }
+  ],
+  "autoEnableSkills": ["core-utils"]
+}
+```
+
+### Progressive Disclosure Benefits
+
+1. **Reduced context window**: Only relevant tools visible
+2. **Discoverability**: Users learn about skills organically
+3. **Modularity**: Skills are self-contained packages
+4. **Safety**: Scripts only accessible after explicit enable
+5. **Auditability**: State changes tracked in session
+
+## Tool Validation (`System.Agents.Tools.Validation`)
+
+Tool input validation helps LLMs self-correct when they make incorrect tool calls.
+
+### Validation Types
+
+```haskell
+-- | Single validation error with context
+data ValidationError = ValidationError
+    { errorPath :: Text       -- JSON path (e.g., "user.name")
+    , errorMessage :: Text    -- Human-readable description
+    }
+
+-- | Validation configuration
+data ValidationConfig = ValidationConfig
+    { allowExtraProperties :: Bool
+    , strictMode :: Bool
+    }
+```
+
+### Validation Function
+
+```haskell
+-- | Validate tool input against its schema
+validateToolInput :: 
+    [ParamProperty] ->  -- Tool schema
+    Aeson.Value ->      -- Input value
+    [ValidationError]   -- Empty if valid
+
+-- Example usage:
+let errors = validateToolInput toolSchema inputValue
+case errors of
+    [] -> proceedWithToolCall
+    errs -> returnValidationErrors errs
+```
+
+### Supported Validations
+
+| Check | Description |
+|-------|-------------|
+| Required fields | Ensures required properties are present |
+| Type checking | Validates string, number, boolean, enum, object |
+| Enum values | Checks string is in allowed values list |
+| Nested objects | Recursively validates nested structures |
+| Extra properties | Optionally rejects unknown properties |
+
+### CLI: check-tool-call
+
+```bash
+# Validate a tool call payload
+echo '{"filepath": "/path/to/file"}' | \
+    agents-exe check-tool-call --tool ./tools/read-file.sh
+
+# Example output (invalid):
+# Tool call validation failed for 'read-file' with 2 errors:
+# 1. filepath: Required property missing
+# 2. content: Required property missing
+```
+
+### Error Formatting
+
+```haskell
+formatValidationErrors :: Text -> [ValidationError] -> Text
+-- Produces:
+-- Tool call validation failed for 'tool-name' with 2 errors:
+--
+-- 1. filters.status: Invalid enum value: pending. Allowed: active, inactive
+-- 2. user.age: Expected number but got string
+--
+-- Please correct these issues and try again.
+```
+
+## Tool Portal (`System.Agents.ToolPortal`)
+
+The Tool Portal enables inter-toolbox communication, allowing tools to invoke other tools through a controlled callback mechanism.
+
+### Use Cases
+
+- **Lua scripts** calling other tools via `tools.call()`
+- **Orchestration tools** that coordinate multiple operations
+- **Composite tools** that build on existing tools
+
+### Portal Types
+
+```haskell
+-- | Tool portal callback type
+type ToolPortal = ToolCall -> IO ToolResult
+
+-- | Portal execution errors
+data PortalError
+    = PortalToolNotFound Text
+    | PortalToolNotAllowed Text [Text]
+    | PortalInvalidArguments Text
+    | PortalExecutionError Text
+```
+
+### Creating a Portal
+
+```haskell
+import System.Agents.ToolPortal
+
+-- Create portal from registered tools
+let portal = makeToolPortal tracer registrations
+
+-- Create context with portal
+let ctx = mkPortalContext
+        sessId convId turnId mAgentId mSession
+        callStack maxDepth (Just portal) allowedTools
+```
+
+### Lua Integration
+
+Lua scripts can call tools through the portal:
+
+```lua
+local tools = require("tools")
+
+-- Call another tool
+local result = tools.call("read_file", {
+    filepath = "/path/to/file"
+})
+
+-- Access result
+print(result.data)
+print(result.duration)
+```
+
+### Security
+
+- **Tool whitelist**: Only allowed tools can be called
+- **No nested portals**: Prevents infinite recursion
+- **Execution tracking**: Each portal call is timed and logged
+- **Minimal context**: Portal tools execute without their own portal
+
+### Portal Result
+
+```haskell
+data ToolResult = ToolResult
+    { resultData :: Aeson.Value
+    , resultDuration :: NominalDiffTime
+    , resultTraceId :: Text
+    }
+```
+
 ## IO Tools
 
 IO tools are Haskell functions that run within the agent process.
@@ -687,8 +1094,6 @@ exampleTool slug agentId = ToolRegistration
 
 ### IO Tool with Context
 
-IO tools receive full execution context:
-
 ```haskell
 ioTool ::
     (Aeson.FromJSON llmArg) =>
@@ -714,6 +1119,8 @@ data ToolExecutionContext = ToolExecutionContext
     , ctxFullSession :: Maybe Session
     , ctxCallStack :: [CallStackEntry]
     , ctxMaxDepth :: Maybe Int
+    , ctxToolPortal :: Maybe ToolPortal
+    , ctxAllowedTools :: [Text]
     }
 
 data CallStackEntry = CallStackEntry
@@ -758,6 +1165,8 @@ data CallResult call
     | DeveloperToolResult call ValidationResult
     | DeveloperToolScaffoldResult call ScaffoldResult
     | DeveloperToolSpecResult call Text
+    | LuaToolResult call Aeson.Value
+    | LuaToolError call Text
 ```
 
 ## Tool Schema
@@ -815,7 +1224,10 @@ Tools are named according to their type and toolbox:
 | SQLite | `sqlite_{toolbox}_query` | `sqlite_analytics_query` |
 | System | `system_{toolbox}_system_info` | `system_system_system_info` |
 | Developer | `developer_{toolbox}_developer_tools` | `developer_dev_developer_tools` |
+| Lua | `lua_{toolbox}_{script}` | `lua_utils_format_json` |
 | IO | `io_{slug}` | `io_calculator` |
+| Skill (meta) | `skill_{action}_{name}` | `skill_describe_pdf-processing` |
+| Skill (script) | `skill_{name}_{script}` | `skill_pdf-processing_extract-text` |
 
 ## Combining Tool Sources
 
@@ -848,9 +1260,17 @@ newRuntime ... = do
     -- Developer tools from builtin toolboxes
     devTools <- readDeveloperToolsRegistrations tracer devToolboxes
     
+    -- Lua tools from builtin toolboxes
+    luaTools <- readLuaToolsRegistrations tracer luaToolboxes
+    
+    -- Skills tools from skill sources
+    skillsStore <- loadSkillsFromSources skillSources
+    let skillsTools = computeSkillTools skillsStore session
+    
     -- Combine all
     let allTools = ioTools ++ bashTools ++ mcpTools ++ openApiTools ++ 
-                   postgrestTools ++ sqliteTools ++ systemTools ++ devTools
+                   postgrestTools ++ sqliteTools ++ systemTools ++ 
+                   devTools ++ luaTools ++ skillsTools
 ```
 
 ## Error Handling
@@ -901,6 +1321,25 @@ data DeveloperToolError
     | InvalidTemplateError Text
 ```
 
+### Validation Errors
+
+```haskell
+data ValidationError = ValidationError
+    { errorPath :: Text
+    , errorMessage :: Text
+    }
+```
+
+### Portal Errors
+
+```haskell
+data PortalError
+    = PortalToolNotFound Text
+    | PortalToolNotAllowed Text [Text]
+    | PortalInvalidArguments Text
+    | PortalExecutionError Text
+```
+
 ## Best Practices
 
 1. **Idempotency**: Tools should be safe to call multiple times
@@ -911,6 +1350,8 @@ data DeveloperToolError
 6. **Error messages**: Return clear error messages for LLM consumption
 7. **Parameter naming**: Use descriptive parameter names
 8. **Required vs Optional**: Mark truly required parameters as required
+9. **Progressive disclosure**: Use Skills for complex tool suites
+10. **Portal safety**: Always whitelist tools for portal access
 
 ## Example: Complete Tool Configuration
 
@@ -924,6 +1365,9 @@ data DeveloperToolError
   "announce": "A file management assistant",
   "systemPrompt": ["You help users manage files."],
   "toolDirectory": "tools",
+  "bashToolboxes": [
+    { "path": "./extra-tools", "name": "extras" }
+  ],
   "mcpServers": [
     {
       "tag": "McpSimpleBinary",
@@ -979,11 +1423,44 @@ data DeveloperToolError
         "description": "Development utilities",
         "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool"]
       }
+    },
+    {
+      "tag": "LuaToolbox",
+      "contents": {
+        "name": "lua",
+        "description": "Lua scripting tools",
+        "scripts": ["./lua-scripts"]
+      }
     }
   ],
+  "skillSources": [
+    { "tag": "SkillDirectory", "contents": "./skills" }
+  ],
+  "autoEnableSkills": ["core-utils"],
   "extraAgents": [
     {"slug": "helper", "path": "./helper.json"}
   ]
 }
 ```
+
+## Related Modules
+
+| Module | Purpose |
+|--------|---------|
+| `System.Agents.Tools.Base` | Core tool types |
+| `System.Agents.Tools.Context` | Tool execution context |
+| `System.Agents.Tools.Bash` | Bash script execution |
+| `System.Agents.Tools.BashToolbox` | Bash tool management |
+| `System.Agents.Tools.McpToolbox` | MCP server integration |
+| `System.Agents.Tools.OpenAPIToolbox` | OpenAPI conversion |
+| `System.Agents.Tools.SqliteToolbox` | SQLite tools |
+| `System.Agents.Tools.SystemToolbox` | System information |
+| `System.Agents.Tools.DeveloperToolbox` | Development utilities |
+| `System.Agents.Tools.LuaToolbox` | Lua scripting |
+| `System.Agents.Tools.Skills.Toolbox` | Skills system |
+| `System.Agents.Tools.Skills.Types` | Skill types |
+| `System.Agents.Tools.Validation` | Input validation |
+| `System.Agents.ToolPortal` | Inter-tool communication |
+| `System.Agents.ToolRegistration` | Tool registration |
+| `System.Agents.ToolSchema` | Schema definitions |
 
