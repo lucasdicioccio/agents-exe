@@ -545,8 +545,9 @@ data SqliteAccessMode
       SqliteReadOnly
     | -- | Open database in read-write mode. Both reads and writes allowed.
       SqliteReadWrite
-    | -- | Create a snapshot copy for this conversation, opened in read-write mode.
-      -- The snapshot is created on first use using the conversation ID as suffix.
+    | {- | Create a snapshot copy for this conversation, opened in read-write mode.
+      The snapshot is created on first use using the conversation ID as suffix.
+      -}
       SqliteSnapshot
     deriving (Show, Ord, Eq, Generic)
 

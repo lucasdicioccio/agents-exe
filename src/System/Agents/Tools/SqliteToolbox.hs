@@ -88,7 +88,7 @@ module System.Agents.Tools.SqliteToolbox (
     formatResults,
 ) where
 
-import Control.Concurrent.MVar (MVar, newMVar, withMVar, modifyMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import Control.Exception (SomeException, try)
 import Control.Monad (when)
 import Data.Aeson (ToJSON (..), Value (..), (.=))
@@ -110,9 +110,9 @@ import System.Directory (copyFile, doesFileExist)
 import System.FilePath ((-<.>))
 
 import System.Agents.Base (
+    ConversationId (..),
     SqliteAccessMode (..),
     SqliteToolboxDescription (..),
-    ConversationId (..),
  )
 
 -------------------------------------------------------------------------------
@@ -167,9 +167,9 @@ data SnapshotState
 
 -- | Custom Show instance since Connection doesn't have one
 instance Show SnapshotState where
-    show (SnapshotUninitialized path) = 
+    show (SnapshotUninitialized path) =
         "SnapshotUninitialized {originalPath = " ++ show path ++ "}"
-    show (SnapshotInitialized _conn _directDb path) = 
+    show (SnapshotInitialized _conn _directDb path) =
         "SnapshotInitialized {snapshotPath = " ++ show path ++ ", connection = <connection>}"
 
 {- | Runtime state for a SQLite toolbox.
@@ -445,17 +445,18 @@ initializeToolbox tracer desc = do
             -- It will be created on first use with the conversation ID
             lock <- newMVar ()
             snapshotState <- newMVar (SnapshotUninitialized dbPath)
-            pure $ Right $
-                Toolbox
-                    { toolboxConnection = Nothing
-                    , toolboxDirectDb = Nothing
-                    , toolboxLock = lock
-                    , toolboxName = desc.sqliteToolboxName
-                    , toolboxDescription = desc.sqliteToolboxDescription
-                    , toolboxPath = dbPath
-                    , toolboxAccessMode = accessMode
-                    , toolboxSnapshotState = Just snapshotState
-                    }
+            pure $
+                Right $
+                    Toolbox
+                        { toolboxConnection = Nothing
+                        , toolboxDirectDb = Nothing
+                        , toolboxLock = lock
+                        , toolboxName = desc.sqliteToolboxName
+                        , toolboxDescription = desc.sqliteToolboxDescription
+                        , toolboxPath = dbPath
+                        , toolboxAccessMode = accessMode
+                        , toolboxSnapshotState = Just snapshotState
+                        }
         _ -> do
             -- For read-only and read-write modes, open connection immediately
             result <- try $ openConnection tracer dbPath
@@ -494,8 +495,9 @@ openConnection tracer dbPath = do
     _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
     pure (conn, directDb)
 
--- | Create a snapshot copy of the database for the given conversation.
--- Returns the path to the snapshot database.
+{- | Create a snapshot copy of the database for the given conversation.
+Returns the path to the snapshot database.
+-}
 createSnapshot ::
     Tracer IO Trace ->
     FilePath ->
@@ -507,7 +509,7 @@ createSnapshot tracer originalPath (ConversationId uuid) = do
     let suffix = Text.unpack $ Text.replace "-" "" $ Text.pack $ show uuid
     -- Create snapshot path: original.{uuid}.snapshot.sqlite
     let newSnapshotPath = originalPath -<.> (suffix ++ ".snapshot.sqlite")
-    
+
     result <- try $ do
         -- Check if original exists
         exists <- doesFileExist originalPath
@@ -516,7 +518,7 @@ createSnapshot tracer originalPath (ConversationId uuid) = do
         -- Copy the database
         copyFile originalPath newSnapshotPath
         pure newSnapshotPath
-    
+
     case result of
         Left (e :: SomeException) -> do
             let errMsg = Text.pack $ "Failed to create snapshot: " ++ show e
@@ -526,8 +528,9 @@ createSnapshot tracer originalPath (ConversationId uuid) = do
             runTracer tracer (SnapshotCreatedTrace originalPath path)
             pure $ Right path
 
--- | Ensure snapshot is initialized for snapshot mode.
--- This is called within the toolbox lock, so it's thread-safe.
+{- | Ensure snapshot is initialized for snapshot mode.
+This is called within the toolbox lock, so it's thread-safe.
+-}
 ensureSnapshotInitialized ::
     Tracer IO Trace ->
     MVar SnapshotState ->
@@ -544,7 +547,7 @@ ensureSnapshotInitialized tracer stateVar convId = do
                 -- Need to create the snapshot
                 snapshotResult <- createSnapshot tracer originalPath convId
                 case snapshotResult of
-                    Left err -> 
+                    Left err ->
                         -- Keep uninitialized state on error
                         pure (state, Left $ SnapshotError err)
                     Right newPath -> do
@@ -888,4 +891,3 @@ _formatResultsAsObjects result =
 _rowToObject :: [Text] -> [Value] -> Value
 _rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
-
