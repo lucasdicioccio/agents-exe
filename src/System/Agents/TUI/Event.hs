@@ -60,6 +60,17 @@ import Prod.Tracer (Tracer (..))
 -- | Main event handler for the TUI application.
 tui_appHandleEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
 tui_appHandleEvent ev = do
+    -- First check for debug view toggle (works from any state)
+    case ev of
+        VtyEvent (Vty.EvKey (Vty.KChar 'd') [Vty.MMeta]) ->
+            toggleDebugView
+        VtyEvent (Vty.EvKey (Vty.KChar 'i') [Vty.MCtrl]) ->
+            toggleDebugView
+        VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) ->
+            toggleDebugView
+        _ -> pure ()
+
+    -- Handle other events
     case ev of
         -- Application events
         AppEvent AppEvent_Heartbeat ->
@@ -76,7 +87,8 @@ tui_appHandleEvent ev = do
             handleClearStatus
         -- VTY events
         VtyEvent (Vty.EvKey Vty.KEsc _) ->
-            halt
+            -- If debug view is open, close it; otherwise halt
+            handleEscKey
         VtyEvent (Vty.EvKey (Vty.KChar 'q') [Vty.MCtrl]) ->
             halt
         VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
@@ -110,26 +122,67 @@ tui_appHandleEvent ev = do
             handleExpandAllConversations
         VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl, Vty.MShift]) ->
             handleCollapseAllConversations
+        -- Debug view scrolling
+        VtyEvent (Vty.EvKey Vty.KUp [Vty.MMeta]) ->
+            vScrollBy (viewportScroll DebugViewWidget) (-1)
+        VtyEvent (Vty.EvKey Vty.KDown [Vty.MMeta]) ->
+            vScrollBy (viewportScroll DebugViewWidget) 1
+        VtyEvent (Vty.EvKey Vty.KPageUp [Vty.MMeta]) ->
+            vScrollPage (viewportScroll DebugViewWidget) Up
+        VtyEvent (Vty.EvKey Vty.KPageDown [Vty.MMeta]) ->
+            vScrollPage (viewportScroll DebugViewWidget) Down
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
-            currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
-            case currentFocus of
-                Just AgentListWidget ->
-                    handleAgentListEvent vtyEv
-                Just SessionsListWidget ->
-                    handleSessionsListEvent vtyEv
-                Just ConversationListWidget ->
-                    handleConversationListEvent vtyEv
-                Just MessageEditorWidget ->
-                    handleMessageEditorEvent ev
-                Just ConversationViewWidget ->
-                    handleConversationViewEvent vtyEv
-                Just SessionViewWidget ->
-                    handleSessionViewEvent vtyEv
-                Just AgentInfoWidget ->
-                    handleAgentInfoEvent vtyEv
-                _ ->
-                    pure ()
+            debugOpen <- use (tuiUI . showDebugView)
+            if debugOpen
+                then handleDebugViewEvent vtyEv
+                else do
+                    currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+                    case currentFocus of
+                        Just AgentListWidget ->
+                            handleAgentListEvent vtyEv
+                        Just SessionsListWidget ->
+                            handleSessionsListEvent vtyEv
+                        Just ConversationListWidget ->
+                            handleConversationListEvent vtyEv
+                        Just MessageEditorWidget ->
+                            handleMessageEditorEvent (VtyEvent vtyEv)
+                        Just ConversationViewWidget ->
+                            handleConversationViewEvent vtyEv
+                        Just SessionViewWidget ->
+                            handleSessionViewEvent vtyEv
+                        Just AgentInfoWidget ->
+                            handleAgentInfoEvent vtyEv
+                        _ ->
+                            pure ()
+        _ -> pure ()
+
+-- | Handle ESC key - close debug view if open, otherwise halt.
+handleEscKey :: EventM N TuiState ()
+handleEscKey = do
+    debugOpen <- use (tuiUI . showDebugView)
+    if debugOpen
+        then tuiUI . showDebugView .= False
+        else halt
+
+-- | Toggle the debug view visibility.
+toggleDebugView :: EventM N TuiState ()
+toggleDebugView = do
+    tuiUI . showDebugView %= not
+    showStatus StatusInfo "Debug view toggled"
+
+-- | Handle events when debug view is open.
+handleDebugViewEvent :: Vty.Event -> EventM N TuiState ()
+handleDebugViewEvent ev =
+    case ev of
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll DebugViewWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll DebugViewWidget) 1
+        Vty.EvKey Vty.KPageUp _ ->
+            vScrollPage (viewportScroll DebugViewWidget) Up
+        Vty.EvKey Vty.KPageDown _ ->
+            vScrollPage (viewportScroll DebugViewWidget) Down
         _ -> pure ()
 
 -------------------------------------------------------------------------------

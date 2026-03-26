@@ -8,6 +8,7 @@ import Brick
 import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
+import Brick.Widgets.Center (centerLayer)
 import Brick.Widgets.Edit (renderEditor)
 import Brick.Widgets.List (list, listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
@@ -84,13 +85,27 @@ nestedConversationAttr = attrName "nestedConversation"
 depthIndentAttr :: AttrName
 depthIndentAttr = attrName "depthIndent"
 
+-- | Attribute for debug view background.
+debugBgAttr :: AttrName
+debugBgAttr = attrName "debugBg"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
 
 -- | Main application draw function.
 tui_appDraw :: TuiState -> [Widget N]
-tui_appDraw st = [render_ui st]
+tui_appDraw st =
+    if st ^. tuiUI . showDebugView
+        then render_with_debug st
+        else [render_ui st]
+
+-- | Render UI with debug view overlay.
+render_with_debug :: TuiState -> [Widget N]
+render_with_debug st =
+    [ render_ui st
+    , centerLayer $ render_debugView st
+    ]
 
 -- | Render the main UI based on current state.
 render_ui :: TuiState -> Widget N
@@ -140,6 +155,7 @@ render_contentArea st =
         Just MessageEditorWidget -> render_conversationArea st
         Just ConversationListWidget -> render_conversationArea st
         Just ConversationViewWidget -> render_conversationArea st
+        Just DebugViewWidget -> render_conversationArea st  -- Default to conversation area when debug widget "focused"
         Nothing -> txt "hello"
 
 -- | Agent detail view with info and tools.
@@ -170,7 +186,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md"
+            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Alt+d: debug"
             ]
 
 -- | Conversation area with message input and conversation history.
@@ -185,6 +201,81 @@ render_sessionArea st =
             hBox
                 [ render_sessionView st
                 ]
+
+-------------------------------------------------------------------------------
+-- Debug View Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the debug view showing state skeleton.
+render_debugView :: TuiState -> Widget N
+render_debugView st =
+    withAttr debugBgAttr $
+        borderWithLabel (withAttr focusedAttr $ txt " DEBUG VIEW (Alt+d to close) ") $
+            vLimit 40 $ hLimit 100 $
+                viewport DebugViewWidget Both debugContent
+  where
+    debugContent = vBox
+        [ txt "=== CONVERSATIONS ==="
+        , render_conversations_debug st
+        , txt ""
+        , txt "=== SESSION STORE (all sessions) ==="
+        , txt "(SessionStore listing not available in render context)"
+        , txt ""
+        , txt "=== TREE STATE ==="
+        , render_treeState_debug st
+        , txt ""
+        , txt "=== CORE STATE ==="
+        , render_coreState_debug st
+        ]
+
+-- | Render conversation debug info.
+render_conversations_debug :: TuiState -> Widget N
+render_conversations_debug st =
+    let allConvs = Vector.toList $ listElements (st ^. tuiUI . conversationList)
+    in if null allConvs
+        then txt "  (no conversations)"
+        else vBox $ map render_conv_debug allConvs
+  where
+    render_conv_debug conv =
+        let cid = conversationId conv
+            mSession = conversationSession conv
+            sessionInfo = case mSession of
+                Nothing -> "no session"
+                Just sess ->
+                    let sid = Text.take 8 $ Text.pack $ show sess.sessionId
+                        forkInfo = case sess.forkedFromSessionId of
+                            Nothing -> ""
+                            Just parentId -> " <- " <> Text.take 8 (Text.pack $ show parentId)
+                        turnCount = Text.pack $ show (length sess.turns)
+                    in "sess:" <> sid <> forkInfo <> " turns:" <> turnCount
+            status = Text.pack $ show $ conversationStatus conv
+        in txt $ "  " <> formatConversationId cid <> " [" <> status <> "] " <> sessionInfo
+
+-- | Render tree state debug info.
+render_treeState_debug :: TuiState -> Widget N
+render_treeState_debug st =
+    let treeState = st ^. tuiUI . uiConversationTreeState
+        depthMap = treeState ^. conversationDepth
+        childCache = treeState ^. childConversationCache
+        expanded = treeState ^. expandedConversations
+    in vBox
+        [ txt $ "  Depth map entries: " <> Text.pack (show $ Map.size depthMap)
+        , txt $ "  Child cache entries: " <> Text.pack (show $ Map.size childCache)
+        , txt $ "  Expanded: " <> Text.pack (show $ Set.size expanded) <> " items"
+        , txt "  Depths:"
+        , vBox $ map (\(cid, d) -> txt $ "    " <> formatConversationId cid <> " -> depth " <> Text.pack (show d)) (Map.toList depthMap)
+        , txt "  Children:"
+        , vBox $ map (\(cid, cs) -> txt $ "    " <> formatConversationId cid <> " -> [" <> Text.intercalate ", " (map formatConversationId cs) <> "]") (Map.toList childCache)
+        ]
+
+-- | Render core state debug info.
+render_coreState_debug :: TuiState -> Widget N
+render_coreState_debug _st =
+    txt "  (Core state in TVar - use Alt+d during runtime to refresh)"
+
+-- | Format a ConversationId for display.
+formatConversationId :: ConversationId -> Text
+formatConversationId (ConversationId eid) = Text.take 8 $ Text.pack $ show eid
 
 -------------------------------------------------------------------------------
 -- Status Bar Rendering
@@ -681,4 +772,5 @@ tui_appAttrMap _ =
         , (subAgentCallAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.bold)
         , (nestedConversationAttr, BrickUtil.fg Vty.brightBlue)
         , (depthIndentAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (debugBgAttr, BrickUtil.bg Vty.black `Vty.withForeColor` Vty.white)
         ]

@@ -44,6 +44,7 @@ data WidgetName
     | ConversationViewWidget
     | SessionViewWidget
     | AgentInfoWidget
+    | DebugViewWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -105,7 +106,7 @@ data TuiAgent = TuiAgent
 -- | Manual Show instance for TuiAgent.
 instance Show TuiAgent where
     show agent =
-        "TuiAgent {tuiAgentId = "
+        "TuiAgent { tuiAgentId = "
             ++ show agent.tuiAgentId
             ++ ", tuiSlug = "
             ++ show agent.tuiSlug
@@ -388,6 +389,8 @@ makeLenses ''Core
 data UIState = UIState
     { _uiFocusRing :: FocusRing WidgetName
     , _zoomed :: Bool
+    , _showDebugView :: Bool
+    -- ^ Whether to show the debug view overlay
     , _agentList :: List WidgetName TuiAgent
     , _sessionList :: List WidgetName Session
     , _conversationList :: List WidgetName Conversation
@@ -437,8 +440,10 @@ initUIState agents loadedSessions =
                 , MessageEditorWidget
                 , SessionViewWidget
                 , AgentInfoWidget
+                , DebugViewWidget
                 ]
         , _zoomed = False
+        , _showDebugView = False
         , _agentList = list AgentListWidget (Vector.fromList agents) 1
         , _conversationList = list ConversationListWidget Vector.empty 1
         , _sessionList = list SessionsListWidget (Vector.fromList loadedSessions) 1
