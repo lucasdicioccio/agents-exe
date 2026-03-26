@@ -28,4 +28,3 @@ data ToolTrace
         -- ^ Arguments passed to the tool
         }
     deriving (Show)
-

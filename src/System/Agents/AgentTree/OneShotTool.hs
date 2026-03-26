@@ -786,4 +786,3 @@ extractResponseText (LlmResponse mTxt _thinking _) =
 -- | Parse flavor from text, defaulting to OpenAIv1 if not recognized.
 parseModelFlavor :: Text -> OpenAI.ModelFlavor
 parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
-

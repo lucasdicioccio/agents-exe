@@ -136,4 +136,3 @@ handleMcpServer baseTracer subAgentTracer sessionStore apiKeysFile agentFiles = 
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
-
