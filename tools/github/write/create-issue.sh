@@ -3,6 +3,7 @@
 # This script creates GitHub issues with appropriate labels based on dependencies.
 # Issues with no dependencies are labeled 'agq/to-be-taken' (ready to work on).
 # Issues with dependencies are labeled 'agq/wait' (must wait for dependencies).
+# Issues can optionally be labeled 'agq/arbitrage-needed'.
 
 case $1 in
   describe)
@@ -38,6 +39,13 @@ case $1 in
     , "arity": "single"
     , "mode": "positional"
     }
+  ,{ "name": "needs_arbitrage"
+    , "description": "Set to 'true' to add the 'agq/arbitrage-needed' label. Defaults to 'false'."
+    , "type": "string"
+    , "backing_type": "string"
+    , "arity": "single"
+    , "mode": "positional"
+    }
   ,{ "name": "body"
     , "description": "the detailed description/body of the issue"
     , "type": "text"
@@ -55,6 +63,7 @@ EOD
     dependencies="$3"
     branch_name="${4:-main}"
     is_final="${5:-false}"
+    needs_arbitrage="${6:-false}"
     scope="root"
 
     case "${scope}" in
@@ -76,6 +85,11 @@ EOD
     fi
 
     labels="${agent_label},${scope}"
+
+    # Optionally add the arbitrage-needed label
+    if [[ "${needs_arbitrage}" == "true" ]]; then
+      labels="${labels},agq/arbitrage-needed"
+    fi
 
     # Use --body-file - to read the body from stdin
     # Prepend metadata to the body

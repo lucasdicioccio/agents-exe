@@ -29,9 +29,36 @@
         "path": "oneshot-rlm.json"
       }
     ],
+    "builtinToolboxes": [
+      {
+        "tag": "DeveloperToolbox",
+        "contents": {
+          "Name": "dev",
+          "Description": "Development utilities",
+          "Capabilities": [
+            "validate-tool",
+            "scaffold-agent",
+            "scaffold-tool",
+            "show-spec"
+          ]
+        }
+      }
+    ],
     "bashToolboxes": [
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read", "BasenameFilter": ".sh"}},
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/write", "BasenameFilter": ".sh"}}
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/read",
+          "BasenameFilter": ".sh"
+        }
+      },
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/write",
+          "BasenameFilter": ".sh"
+        }
+      }
     ]
   }
 }
