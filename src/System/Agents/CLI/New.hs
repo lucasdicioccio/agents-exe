@@ -143,8 +143,9 @@ defaultPresets =
             )
         ]
 
--- | Get a formatted list of available presets for help text
--- Returns: "openai, mistral, ollama"
+{- | Get a formatted list of available presets for help text
+Returns: "openai, mistral, ollama"
+-}
 formatPresetListHelp :: String
 formatPresetListHelp = Text.unpack $ Text.intercalate ", " (Map.keys defaultPresets)
 
@@ -484,4 +485,3 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
-

@@ -1358,8 +1358,7 @@ toJsonTrace x = case x of
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
             Just $
-            Aeson.object
-                [ "x" .= ("tool-call-end" :: Text)
-                , "name" .= n
-                ]
-
+                Aeson.object
+                    [ "x" .= ("tool-call-end" :: Text)
+                    , "name" .= n
+                    ]
