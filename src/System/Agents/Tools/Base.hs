@@ -108,6 +108,10 @@ data CallResult call
       DeveloperToolScaffoldResult call DeveloperTools.ScaffoldResult
     | -- | Developer tool spec result
       DeveloperToolSpecResult call Text
+    | -- | Developer tool agent validation result
+      DeveloperToolAgentValidationResult call DeveloperTools.AgentValidationResult
+    | -- | Developer tool create result
+      DeveloperToolCreateResult call DeveloperTools.CreateResult
     | -- | Developer tool execution failed
       DeveloperToolError call DeveloperTools.DeveloperToolError
     | -- | Lua tool executed successfully with result
@@ -139,6 +143,8 @@ mapCallResult f c =
         (DeveloperToolResult v r) -> DeveloperToolResult (f v) r
         (DeveloperToolScaffoldResult v r) -> DeveloperToolScaffoldResult (f v) r
         (DeveloperToolSpecResult v r) -> DeveloperToolSpecResult (f v) r
+        (DeveloperToolAgentValidationResult v r) -> DeveloperToolAgentValidationResult (f v) r
+        (DeveloperToolCreateResult v r) -> DeveloperToolCreateResult (f v) r
         (DeveloperToolError v e) -> DeveloperToolError (f v) e
         (LuaToolResult v r) -> LuaToolResult (f v) r
         (LuaToolError v e) -> LuaToolError (f v) e
@@ -171,6 +177,8 @@ extractCall (SystemToolError c _) = c
 extractCall (DeveloperToolResult c _) = c
 extractCall (DeveloperToolScaffoldResult c _) = c
 extractCall (DeveloperToolSpecResult c _) = c
+extractCall (DeveloperToolAgentValidationResult c _) = c
+extractCall (DeveloperToolCreateResult c _) = c
 extractCall (DeveloperToolError c _) = c
 extractCall (LuaToolResult c _) = c
 extractCall (LuaToolError c _) = c
@@ -226,6 +234,10 @@ callResultByteSize (DeveloperToolScaffoldResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (DeveloperToolSpecResult _ content) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String content)))
+callResultByteSize (DeveloperToolAgentValidationResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (DeveloperToolCreateResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (DeveloperToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 callResultByteSize (LuaToolResult _ result) =

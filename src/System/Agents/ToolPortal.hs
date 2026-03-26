@@ -355,23 +355,35 @@ callResultToJson (SystemToolError _ err) =
         , "error" .= show err
         , "toolType" .= ("system" :: Text)
         ]
-callResultToJson (DeveloperToolResult _ err) =
+callResultToJson (DeveloperToolResult _ result) =
     Aeson.object
-        [ "type" .= ("error" :: Text)
-        , "error" .= show err
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
         , "toolType" .= ("devtool" :: Text)
         ]
-callResultToJson (DeveloperToolScaffoldResult _ err) =
+callResultToJson (DeveloperToolScaffoldResult _ result) =
     Aeson.object
-        [ "type" .= ("error" :: Text)
-        , "error" .= show err
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
         , "toolType" .= ("devtool-scaffold" :: Text)
         ]
-callResultToJson (DeveloperToolSpecResult _ err) =
+callResultToJson (DeveloperToolSpecResult _ result) =
     Aeson.object
-        [ "type" .= ("error" :: Text)
-        , "error" .= show err
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
         , "toolType" .= ("devtool-spec" :: Text)
+        ]
+callResultToJson (DeveloperToolAgentValidationResult _ result) =
+    Aeson.object
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
+        , "toolType" .= ("devtool-agent-validation" :: Text)
+        ]
+callResultToJson (DeveloperToolCreateResult _ result) =
+    Aeson.object
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
+        , "toolType" .= ("devtool-create" :: Text)
         ]
 callResultToJson (DeveloperToolError _ err) =
     Aeson.object

@@ -523,6 +523,10 @@ runAgentWithQuery onProgress apiKeys tree query = do
                 UserToolResponse $ Aeson.toJSON scaffoldResult
             DeveloperToolSpecResult _ specContent ->
                 UserToolResponse $ Aeson.String specContent
+            DeveloperToolAgentValidationResult _ validationResult ->
+                UserToolResponse $ Aeson.toJSON validationResult
+            DeveloperToolCreateResult _ createResult ->
+                UserToolResponse $ Aeson.toJSON createResult
             DeveloperToolError _ err ->
                 UserToolResponse $ Aeson.String $ Text.pack $ "Developer tool error: " <> show err
             LuaToolResult _ toolResult ->
