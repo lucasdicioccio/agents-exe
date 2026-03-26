@@ -12,8 +12,9 @@ import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM (TQueue, TVar, newTVarIO)
-import Control.Lens (makeLenses)
+import Control.Lens (makeLenses, (^.), (.~), (%~), (&))
 import Data.Aeson (Value)
+import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
@@ -223,7 +224,7 @@ newtype EventType = EventType Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
--- Conversation Types
+-- Conversation Status and Types
 -------------------------------------------------------------------------------
 
 -- | Status of a conversation regarding its execution state.
@@ -250,6 +251,76 @@ data Conversation = Conversation
     , conversationOnProgress :: OnSessionProgress
     -- ^ Callback for session progress updates
     }
+
+-- | Manual Show instance for Conversation (BChan and ThreadId don't have Show)
+instance Show Conversation where
+    show conv =
+        "Conversation { conversationId = " ++ show conv.conversationId
+            ++ ", conversationAgent = " ++ show conv.conversationAgent
+            ++ ", conversationThreadId = " ++ show (fmap (const ("<ThreadId>" :: String)) conv.conversationThreadId)
+            ++ ", conversationSession = " ++ show conv.conversationSession
+            ++ ", conversationName = " ++ show conv.conversationName
+            ++ ", conversationChan = <BChan>, conversationStatus = " ++ show conv.conversationStatus
+            ++ ", conversationOnProgress = <OnSessionProgress> }"
+
+-------------------------------------------------------------------------------
+-- Conversation Tree Types
+-------------------------------------------------------------------------------
+
+-- | Enhanced conversation node with hierarchy information for tree view.
+data ConversationNode = ConversationNode
+    { cnConversation :: Conversation
+    -- ^ The conversation itself
+    , cnParentId :: Maybe ConversationId
+    -- ^ Parent conversation ID (Nothing for root)
+    , cnChildIds :: [ConversationId]
+    -- ^ Child conversation IDs
+    , cnDepth :: Int
+    -- ^ Depth in the conversation tree (0 for roots)
+    , cnIsExpanded :: Bool
+    -- ^ Whether this conversation's children are visible
+    }
+
+-- | Manual Show instance for ConversationNode
+instance Show ConversationNode where
+    show node =
+        "ConversationNode { cnConversation = " ++ show node.cnConversation
+            ++ ", cnParentId = " ++ show node.cnParentId
+            ++ ", cnChildIds = " ++ show node.cnChildIds
+            ++ ", cnDepth = " ++ show node.cnDepth
+            ++ ", cnIsExpanded = " ++ show node.cnIsExpanded
+            ++ " }"
+
+-- | State for tracking conversation tree visualization.
+data ConversationTreeState = ConversationTreeState
+    { _expandedConversations :: Set ConversationId
+    -- ^ Set of conversation IDs that have been expanded
+    , _conversationDepth :: Map ConversationId Int
+    -- ^ Cache of conversation depths for quick lookup
+    , _childConversationCache :: Map ConversationId [ConversationId]
+    -- ^ Cache of child conversation IDs per parent
+    }
+    deriving (Show)
+
+makeLenses ''ConversationTreeState
+
+-- | Initial empty conversation tree state.
+initConversationTreeState :: ConversationTreeState
+initConversationTreeState =
+    ConversationTreeState
+        { _expandedConversations = Set.empty
+        , _conversationDepth = Map.empty
+        , _childConversationCache = Map.empty
+        }
+
+-- | Information about a conversation's position in the hierarchy.
+data ConversationHierarchyInfo = ConversationHierarchyInfo
+    { chiParentId :: Maybe ConversationId
+    , chiChildCount :: Int
+    , chiDepth :: Int
+    , chiIsExpanded :: Bool
+    }
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Auxiliary Task Types
@@ -292,6 +363,8 @@ data Core = Core
     while the agent is processing tool calls. Messages are consumed and
     concatenated when the agent collects user input.
     -}
+    , coreConversationTreeState :: ConversationTreeState
+    -- ^ State for tracking conversation hierarchy
     }
 
 makeLenses ''Core
@@ -371,7 +444,14 @@ initUIState agents loadedSessions =
 initCore :: [TuiAgent] -> IO Core
 initCore agents = do
     bufferVar <- newTVarIO Map.empty
-    pure $ Core agents [] Set.empty bufferVar
+    pure $
+        Core
+            { coreAgents = agents
+            , coreConversations = []
+            , corePausedConversations = Set.empty
+            , coreBufferedMessages = bufferVar
+            , coreConversationTreeState = initConversationTreeState
+            }
 
 -------------------------------------------------------------------------------
 -- Utility Functions
@@ -386,3 +466,130 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+
+-- | Build a flat list of conversations for display, respecting expanded state.
+--
+-- This function takes the list of all conversations and returns a list
+-- suitable for display in the UI, with children hidden if their parent
+-- is collapsed.
+buildDisplayConversationList :: [Conversation] -> ConversationTreeState -> [Conversation]
+buildDisplayConversationList allConvs treeState =
+    -- Start with root conversations (those at depth 0 or unknown depth)
+    let rootConvs = filter (isRoot treeState) allConvs
+     in concatMap (buildSubtree allConvs treeState) rootConvs
+  where
+    isRoot :: ConversationTreeState -> Conversation -> Bool
+    isRoot ts conv =
+        case Map.lookup (conversationId conv) (ts ^. conversationDepth) of
+            Nothing -> True
+            Just depth -> depth == 0
+
+    buildSubtree :: [Conversation] -> ConversationTreeState -> Conversation -> [Conversation]
+    buildSubtree convs ts parent =
+        let children = findChildren convs ts (conversationId parent)
+            isExpanded = Set.member (conversationId parent) (ts ^. expandedConversations)
+         in [parent]
+                ++ if isExpanded
+                    then concatMap (buildSubtree convs ts) children
+                    else []
+
+    findChildren :: [Conversation] -> ConversationTreeState -> ConversationId -> [Conversation]
+    findChildren convs ts parentId =
+        case Map.lookup parentId (ts ^. childConversationCache) of
+            Just childIds ->
+                [c | c <- convs, conversationId c `elem` childIds]
+            Nothing ->
+                -- Fallback: check session forkedFromSessionId
+                [c | c <- convs, isChildOf parentId c]
+
+    isChildOf :: ConversationId -> Conversation -> Bool
+    isChildOf parentId conv =
+        case conversationSession conv >>= (.forkedFromSessionId) of
+            Just parentSessionId ->
+                -- Find parent conversation by session ID
+                case find ((== Just parentSessionId) . fmap (.sessionId) . conversationSession) allConvs of
+                    Just parentConv -> conversationId parentConv == parentId
+                    Nothing -> False
+            Nothing -> False
+
+-- | Check if a conversation has children (sub-agent calls).
+hasChildConversations :: Conversation -> [Conversation] -> Bool
+hasChildConversations conv allConvs =
+    any (isChildOf (conversationId conv)) allConvs
+  where
+    isChildOf :: ConversationId -> Conversation -> Bool
+    isChildOf parentId childConv =
+        case conversationSession childConv >>= (.forkedFromSessionId) of
+            Just parentSessionId ->
+                case find ((== Just parentSessionId) . fmap (.sessionId) . conversationSession) allConvs of
+                    Just parentConv -> conversationId parentConv == parentId
+                    Nothing -> False
+            Nothing -> False
+
+-- | Get child count for a conversation.
+getChildConversationCount :: Conversation -> [Conversation] -> Int
+getChildConversationCount conv allConvs =
+    length [c | c <- allConvs, isChildOf (conversationId conv) c]
+  where
+    isChildOf :: ConversationId -> Conversation -> Bool
+    isChildOf parentId childConv =
+        case conversationSession childConv >>= (.forkedFromSessionId) of
+            Just parentSessionId ->
+                case find ((== Just parentSessionId) . fmap (.sessionId) . conversationSession) allConvs of
+                    Just parentConv -> conversationId parentConv == parentId
+                    Nothing -> False
+            Nothing -> False
+
+-- | Get depth of a conversation in the tree (0 for root).
+getConversationDepth :: Conversation -> [Conversation] -> Int
+getConversationDepth conv allConvs = go 0 (conversationSession conv >>= (.forkedFromSessionId))
+  where
+    go :: Int -> Maybe SessionId -> Int
+    go depth Nothing = depth
+    go depth (Just parentSessionId) =
+        case find ((== Just parentSessionId) . fmap (.sessionId) . conversationSession) allConvs of
+            Just parentConv -> go (depth + 1) (conversationSession parentConv >>= (.forkedFromSessionId))
+            Nothing -> depth
+
+-- | Toggle expanded state for a conversation.
+toggleExpanded :: ConversationId -> ConversationTreeState -> ConversationTreeState
+toggleExpanded convId treeState =
+    if Set.member convId (treeState ^. expandedConversations)
+        then treeState & expandedConversations %~ Set.delete convId
+        else treeState & expandedConversations %~ Set.insert convId
+
+-- | Expand all conversations.
+expandAll :: [Conversation] -> ConversationTreeState -> ConversationTreeState
+expandAll convs treeState =
+    treeState & expandedConversations .~ Set.fromList (map conversationId convs)
+
+-- | Collapse all conversations (except roots).
+collapseAll :: [Conversation] -> ConversationTreeState -> ConversationTreeState
+collapseAll _convs treeState =
+    treeState & expandedConversations .~ Set.empty
+
+-- | Update conversation tree cache based on current conversations.
+updateConversationTreeCache :: [Conversation] -> ConversationTreeState -> ConversationTreeState
+updateConversationTreeCache convs treeState =
+    let -- Build depth map
+        depthMap = Map.fromList [(conversationId c, getConversationDepth c convs) | c <- convs]
+        -- Build child cache
+        childMap = Map.fromList [(conversationId c, findChildren c convs) | c <- convs]
+     in treeState
+            & conversationDepth .~ depthMap
+            & childConversationCache .~ childMap
+  where
+    findChildren :: Conversation -> [Conversation] -> [ConversationId]
+    findChildren parent allCs =
+        map conversationId $
+            filter (isChildOf (conversationId parent)) allCs
+
+    isChildOf :: ConversationId -> Conversation -> Bool
+    isChildOf parentId childConv =
+        case conversationSession childConv >>= (.forkedFromSessionId) of
+            Just parentSessionId ->
+                case find ((== Just parentSessionId) . fmap (.sessionId) . conversationSession) convs of
+                    Just parentConv -> conversationId parentConv == parentId
+                    Nothing -> False
+            Nothing -> False
+

@@ -20,7 +20,7 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens (to, use, (%=), (.=))
+import Control.Lens ((.=), (%=), to, use)
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
@@ -30,8 +30,8 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
-import Data.Time (diffUTCTime, getCurrentTime)
 import qualified Data.Vector as Vector
+import Data.Time (diffUTCTime, getCurrentTime)
 import qualified Graphics.Vty as Vty
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
@@ -101,6 +101,15 @@ tui_appHandleEvent ev = do
             handleViewSessionWithExternalViewer Chronological
         VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) ->
             handleViewSessionWithExternalViewer Antichronological
+        -- Tree navigation shortcuts
+        VtyEvent (Vty.EvKey Vty.KRight [Vty.MCtrl]) ->
+            handleExpandConversation
+        VtyEvent (Vty.EvKey Vty.KLeft [Vty.MCtrl]) ->
+            handleCollapseConversation
+        VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl, Vty.MShift]) ->
+            handleExpandAllConversations
+        VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl, Vty.MShift]) ->
+            handleCollapseAllConversations
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
             currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
@@ -143,13 +152,30 @@ handleAgentListEvent ev = do
 -- | Handle conversation list navigation.
 handleConversationListEvent :: Vty.Event -> EventM N TuiState ()
 handleConversationListEvent ev = do
-    zoom (tuiUI . conversationList) $ handleListEvent ev
-    -- Mark conversation as read when selected
-    selected <- use (tuiUI . conversationList . to listSelectedElement)
-    case selected of
-        Just (_, conv) ->
-            tuiUI . unreadConversations %= Set.delete (conversationId conv)
-        Nothing -> pure ()
+    case ev of
+        -- Enter key toggles expand/collapse for conversations with children
+        Vty.EvKey Vty.KEnter [] ->
+            handleToggleExpandConversation
+        -- Ctrl+Down: jump to next sibling
+        Vty.EvKey Vty.KDown [Vty.MCtrl] ->
+            handleJumpToNextSibling
+        -- Ctrl+Up: jump to previous sibling
+        Vty.EvKey Vty.KUp [Vty.MCtrl] ->
+            handleJumpToPreviousSibling
+        -- Arrow keys for expand/collapse
+        Vty.EvKey Vty.KRight [] ->
+            handleExpandConversation
+        Vty.EvKey Vty.KLeft [] ->
+            handleCollapseConversation
+        -- Otherwise handle normal list navigation
+        _ -> do
+            zoom (tuiUI . conversationList) $ handleListEvent ev
+            -- Mark conversation as read when selected
+            selected <- use (tuiUI . conversationList . to listSelectedElement)
+            case selected of
+                Just (_, conv) ->
+                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                Nothing -> pure ()
 
 -- | Handle sessions list navigation.
 handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
@@ -215,6 +241,126 @@ handleAgentInfoEvent ev =
         Vty.EvKey Vty.KRight _ ->
             hScrollBy (viewportScroll AgentInfoWidget) 1
         _ -> pure ()
+
+-------------------------------------------------------------------------------
+-- Tree Navigation Handlers
+-------------------------------------------------------------------------------
+
+-- | Toggle expand/collapse for the currently selected conversation.
+handleToggleExpandConversation :: EventM N TuiState ()
+handleToggleExpandConversation = do
+    mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+    allConvs <- use (tuiUI . conversationList . to listElements)
+    case mSelected of
+        Just (_, conv) -> do
+            coreRef <- use tuiCore
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                let treeState = coreConversationTreeState c
+                    newTreeState = toggleExpanded (conversationId conv) treeState
+                 in c { coreConversationTreeState = newTreeState }
+            let convsList = Vector.toList allConvs
+            showStatus StatusInfo $ if hasChildConversations conv convsList
+                then "Toggled conversation expansion"
+                else "No children to expand"
+            -- Refresh the conversation list to reflect changes
+            handleHeartbeat
+        Nothing -> pure ()
+
+-- | Expand the currently selected conversation.
+handleExpandConversation :: EventM N TuiState ()
+handleExpandConversation = do
+    mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+    case mSelected of
+        Just (_, conv) -> do
+            coreRef <- use tuiCore
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                let treeState = coreConversationTreeState c
+                    newExpanded = Set.insert (conversationId conv) (_expandedConversations treeState)
+                 in c { coreConversationTreeState = treeState { _expandedConversations = newExpanded } }
+            handleHeartbeat
+        Nothing -> pure ()
+
+-- | Collapse the currently selected conversation.
+handleCollapseConversation :: EventM N TuiState ()
+handleCollapseConversation = do
+    mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+    case mSelected of
+        Just (_, conv) -> do
+            coreRef <- use tuiCore
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                let treeState = coreConversationTreeState c
+                    newExpanded = Set.delete (conversationId conv) (_expandedConversations treeState)
+                 in c { coreConversationTreeState = treeState { _expandedConversations = newExpanded } }
+            handleHeartbeat
+        Nothing -> pure ()
+
+-- | Expand all conversations.
+handleExpandAllConversations :: EventM N TuiState ()
+handleExpandAllConversations = do
+    _convs <- use (tuiUI . conversationList . to listElements)
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        let treeState = coreConversationTreeState c
+            convsList = c.coreConversations
+            newTreeState = expandAll convsList treeState
+         in c { coreConversationTreeState = newTreeState }
+    showStatus StatusInfo "Expanded all conversations"
+    handleHeartbeat
+
+-- | Collapse all conversations.
+handleCollapseAllConversations :: EventM N TuiState ()
+handleCollapseAllConversations = do
+    _convs <- use (tuiUI . conversationList . to listElements)
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        let treeState = coreConversationTreeState c
+            convsList = c.coreConversations
+            newTreeState = collapseAll convsList treeState
+         in c { coreConversationTreeState = newTreeState }
+    showStatus StatusInfo "Collapsed all conversations"
+    handleHeartbeat
+
+-- | Jump to next sibling conversation.
+handleJumpToNextSibling :: EventM N TuiState ()
+handleJumpToNextSibling = do
+    mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+    allConvs <- use (tuiUI . conversationList . to listElements)
+    case mSelected of
+        Just (idx, conv) -> do
+            let convsList = Vector.toList allConvs
+                currentDepth = getConversationDepth conv convsList
+                siblings = 
+                    [ (i, c) 
+                    | (i, c) <- zip [0..] convsList
+                    , getConversationDepth c convsList == currentDepth
+                    , i > idx
+                    ]
+            case siblings of
+                ((nextIdx, _) : _) ->
+                    tuiUI . conversationList . listSelectedL .= Just nextIdx
+                [] -> pure () -- No more siblings
+        Nothing -> pure ()
+
+-- | Jump to previous sibling conversation.
+handleJumpToPreviousSibling :: EventM N TuiState ()
+handleJumpToPreviousSibling = do
+    mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+    allConvs <- use (tuiUI . conversationList . to listElements)
+    case mSelected of
+        Just (idx, conv) -> do
+            let convsList = Vector.toList allConvs
+                currentDepth = getConversationDepth conv convsList
+                siblings = 
+                    [ (i, c) 
+                    | (i, c) <- zip [0..] convsList
+                    , getConversationDepth c convsList == currentDepth
+                    , i < idx
+                    ]
+            case reverse siblings of
+                ((prevIdx, _) : _) ->
+                    tuiUI . conversationList . listSelectedL .= Just prevIdx
+                [] -> pure () -- No previous siblings
+        Nothing -> pure ()
 
 -------------------------------------------------------------------------------
 -- Status Message Helpers
@@ -355,6 +501,7 @@ Preserves the currently selected conversation when refreshing the list.
 During migration, this also:
 1. Refreshes tools for the selected agent via RuntimeBridge
 2. Synchronizes tool state between legacy Runtime and OS Core
+3. Updates conversation tree cache for hierarchical display
 -}
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
@@ -365,15 +512,22 @@ handleHeartbeat = do
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
-    tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList convs) 1
+    
+    -- Update tree cache
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c { coreConversationTreeState = updateConversationTreeCache convs (coreConversationTreeState c) }
+    
+    -- Build display list respecting expanded state
+    let visibleConvs = buildDisplayConversationList convs (coreConversationTreeState coreState)
+    tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList visibleConvs) 1
 
-    -- Restore the selection if the conversation still exists
+    -- Restore the selection if the conversation still exists in visible list
     case mSelectedConvId of
         Just selectedConvId -> do
-            let newConvs = Vector.fromList convs
+            let newConvs = Vector.fromList visibleConvs
             case Vector.findIndex (\c -> conversationId c == selectedConvId) newConvs of
                 Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
-                Nothing -> pure () -- Conversation was removed, keep no selection
+                Nothing -> pure () -- Conversation was removed or collapsed, keep no selection
         Nothing -> pure ()
 
     -- Refresh tools for the currently selected agent
@@ -760,3 +914,4 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
