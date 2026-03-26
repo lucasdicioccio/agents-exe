@@ -988,7 +988,7 @@ parseNewAgentOptions =
             ( long "preset"
                 <> short 'p'
                 <> metavar "PRESET"
-                <> help "Provider preset (openai, mistral, ollama)"
+                <> help ("Provider preset (" ++ NewCmd.formatPresetListHelp ++ ")")
                 <> value "openai"
                 <> showDefault
             )
@@ -1358,7 +1358,8 @@ toJsonTrace x = case x of
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
             Just $
-                Aeson.object
-                    [ "x" .= ("tool-call-end" :: Text)
-                    , "name" .= n
-                    ]
+            Aeson.object
+                [ "x" .= ("tool-call-end" :: Text)
+                , "name" .= n
+                ]
+

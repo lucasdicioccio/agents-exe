@@ -16,6 +16,7 @@ module System.Agents.CLI.New (
     -- Exported for testing
     buildAgentConfig,
     defaultPresets,
+    formatPresetListHelp,
     defaultSystemPrompt,
     toolLanguageToExtension,
     makeToolTemplate,
@@ -141,6 +142,11 @@ defaultPresets =
                 }
             )
         ]
+
+-- | Get a formatted list of available presets for help text
+-- Returns: "openai, mistral, ollama"
+formatPresetListHelp :: String
+formatPresetListHelp = Text.unpack $ Text.intercalate ", " (Map.keys defaultPresets)
 
 -- | Default system prompt based on agent slug
 defaultSystemPrompt :: Text -> [Text]
@@ -478,3 +484,4 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
+
