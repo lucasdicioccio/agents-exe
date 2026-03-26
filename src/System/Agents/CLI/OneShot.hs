@@ -92,19 +92,26 @@ listOneShotAgentTools :: OneShotAgent -> IO [ToolRegistration]
 listOneShotAgentTools agent =
     readTVarIO (osNodeTools agent.oneShotNode)
 
-{- | Create an agent tool function with default session tracking.
+{- | Create an agent tool function with session tracking and tracing.
 
-This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
-providing backward compatibility while allowing opt-in to full session tracking.
+This wraps 'turnAgentRuntimeIntoIOTool' with callbacks for session tracking
+and a tracer for capturing sub-agent traces. The tracer allows monitoring
+of recursive agent calls including start/completion events, LLM traces,
+and tool execution traces.
+
+When the sub-agent tracer is 'Prod.silent', no traces are emitted (backward
+compatible behavior). For debugging, pass a tracer that writes to stderr
+or a custom trace handler.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
+    Prod.Tracer IO Trace ->
     AgentTree.OSAgentNode ->
     AgentSlug ->
     AgentId ->
     ToolRegistration
-makeAgentTool store apiKeys node slug agentId =
+makeAgentTool store apiKeys tracer node slug agentId =
     OneShotTool.turnAgentRuntimeIntoIOTool
         store
         apiKeys
@@ -112,13 +119,15 @@ makeAgentTool store apiKeys node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        (Prod.silent :: Prod.Tracer IO Trace)
+        tracer
         OneShotTool.defaultParentSessionLookup
 
 -- | Handle the one-shot run command
 handleOneShot ::
     -- | Base tracer for logging
     Prod.Tracer IO AgentTree.TreeTrace ->
+    -- | Tracer for sub-agent calls (conversation traces)
+    Prod.Tracer IO Trace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -130,7 +139,7 @@ handleOneShot ::
     -- | One-shot options
     OneShotOptions ->
     IO ()
-handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
+handleOneShot baseTracer subAgentTracer sessionStore apiKeysFile agentFiles aliases opts = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     forM_ (take 1 agentFiles) $ \agentFilePath -> do
         promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
@@ -142,5 +151,5 @@ handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFilePath
                 , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys
+                , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys subAgentTracer
                 }

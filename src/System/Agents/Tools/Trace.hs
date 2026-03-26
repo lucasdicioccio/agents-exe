@@ -2,6 +2,7 @@ module System.Agents.Tools.Trace where
 
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 (ByteString)
+import Data.Text (Text)
 
 -------------------------------------------------------------------------------
 import qualified System.Agents.Tools.Bash as BashTools
@@ -19,4 +20,11 @@ data ToolTrace
     | SystemToolsTrace !SystemTools.Trace
     | DeveloperToolsTrace !DeveloperTools.Trace
     | LuaToolsTrace !LuaTools.Trace
+    | -- | Trace for tool calls within sub-agents (recursive agent calls)
+      SubAgentToolCallTrace
+        { subAgentToolName :: Text
+        -- ^ Name of the tool being called
+        , subAgentToolArgs :: Aeson.Value
+        -- ^ Arguments passed to the tool
+        }
     deriving (Show)

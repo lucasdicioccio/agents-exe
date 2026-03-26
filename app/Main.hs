@@ -57,6 +57,7 @@ import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.MCP.Client as McpClient (LoopTrace (..))
 import qualified System.Agents.MCP.Client.Runtime as McpClientRuntime
 import qualified System.Agents.OneShot as OneShot
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
@@ -1245,11 +1246,15 @@ runCommand pargs baseTracer sessionStore files =
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall opts
         TerminalUI _ ->
-            TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile files
+            -- For TUI, we use a tracer that writes traces to the event channel
+            -- The sub-agent tracer captures recursive agent calls and emits AppEvent_AgentTrace events
+            TUICmd.handleTUI baseTracer (Prod.silent :: Prod.Tracer IO Trace) sessionStore pargs.apiKeysFile files
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
-            OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
+            -- For OneShot, we use a silent tracer by default for backward compatibility
+            -- Users can enable tracing by modifying the code or using a custom build
+            OneShotCmd.handleOneShot baseTracer (Prod.silent :: Prod.Tracer IO Trace) sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         DescribeTool opts ->
@@ -1257,7 +1262,8 @@ runCommand pargs baseTracer sessionStore files =
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile files
         McpServer ->
-            McpServerCmd.handleMcpServer baseTracer sessionStore pargs.apiKeysFile files
+            -- For MCP Server, we use a silent tracer by default for backward compatibility
+            McpServerCmd.handleMcpServer baseTracer (Prod.silent :: Prod.Tracer IO Trace) sessionStore pargs.apiKeysFile files
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->

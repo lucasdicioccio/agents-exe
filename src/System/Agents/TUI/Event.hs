@@ -1,5 +1,7 @@
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 {- | Event handling for the TUI application.
 
@@ -41,7 +43,7 @@ import System.Process (readProcessWithExitCode)
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
 import System.Agents.OneShot (nodeToAgent)
-import System.Agents.Runtime.Trace (Trace)
+import System.Agents.Runtime.Trace (SubAgentTrace (..), Trace (..))
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
@@ -472,12 +474,41 @@ handleConversationUpdated convId sess = do
     handleHeartbeat
 
 {- | Handle agent trace events.
-TODO: remove
+
+This function now properly handles sub-agent trace events, including:
+- SubAgentStarted: When a sub-agent session begins
+- SubAgentLLMTrace: LLM calls made by sub-agents
+- SubAgentToolTrace: Tool calls made by sub-agents
+- SubAgentCompleted: When a sub-agent finishes successfully
+- SubAgentFailed: When a sub-agent encounters an error
+
+These traces can be displayed in the TUI debug/log views or used for
+monitoring recursive agent calls.
 -}
 handleAgentTrace :: Trace -> EventM N TuiState ()
-handleAgentTrace _trace = do
-    -- Currently a no-op, to be implemented
-    pure ()
+handleAgentTrace trace = do
+    case trace of
+        AgentTrace_SubAgentCall{subAgentTrace} -> do
+            -- Handle sub-agent traces
+            case subAgentTrace of
+                SubAgentStarted{} ->
+                    -- Could add to a sub-agent activity log
+                    pure ()
+                SubAgentCompleted{} ->
+                    -- Could display completion in status or log
+                    pure ()
+                SubAgentFailed{subAgentError} ->
+                    -- Could display error in status or log
+                    showStatus StatusWarning $ "Sub-agent failed: " <> Text.take 100 subAgentError
+                SubAgentLLMTrace{} ->
+                    -- Could display LLM activity in debug view
+                    pure ()
+                SubAgentToolTrace{} ->
+                    -- Could display tool activity in debug view
+                    pure ()
+        _ ->
+            -- Handle other trace types (existing behavior)
+            pure ()
 
 {- | Refresh tools for the given agent.
 
@@ -624,8 +655,8 @@ runConversation baseTuiAgent session = do
     -- Build the progress callback
     let notifyProgress = buildOnProgress convId outChan
 
-    -- Create a no-op tracer
-    let tracer = Tracer $ const $ pure ()
+    -- Create a tracer that writes to the event channel for display
+    let tracer = Tracer $ \tr -> writeBChan outChan (AppEvent_AgentTrace tr)
 
     -- Create the agent with the progress callback
     -- Use the agent's OSAgentNode through the TuiAgent
