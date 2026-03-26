@@ -7,13 +7,17 @@
 This module implements the SQLite toolbox functionality, including:
 
 * Database connection management
-* Query execution with access control (read-only vs read-write)
+* Query execution with access control (read-only vs read-write vs snapshot)
 * Concurrent access protection (within-agent serialization, cross-agent busy handling)
+* Snapshot mode for isolated conversation-scoped changes
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
 
-The toolbox can be configured to run in either read-only or read-write mode,
-providing safety when the agent should only query data.
+The toolbox can be configured to run in either read-only, read-write, or snapshot mode:
+* 'ReadOnly': Only SELECT queries are allowed
+* 'ReadWrite': All SQL operations are allowed on the original database
+* 'Snapshot': Creates a copy of the database for each conversation, allowing
+  isolated read-write access that doesn't affect the original database
 
 Concurrent Access:
 
@@ -22,6 +26,14 @@ Concurrent Access:
 * Across multiple agents: Each agent has its own connection. SQLite's WAL mode
   allows concurrent readers, but writers are serialized. A busy timeout of
   5 seconds prevents immediate failures when another agent is writing.
+
+Snapshot Mode:
+
+* When in snapshot mode, the original database is copied on first use
+* The copy is named with the conversation ID as suffix: @original.{uuid}.snapshot.sqlite@
+* Each conversation gets its own isolated copy
+* Changes are persisted to the snapshot file but don't affect the original
+* The WAL file (if present) is also copied to ensure data integrity
 
 Example usage:
 
@@ -41,7 +53,7 @@ main = do
     case result of
         Right toolbox -> do
             -- Execute a read-only query
-            result <- SQLite.executeReadOnlyQuery toolbox "SELECT * FROM users LIMIT 10"
+            result <- SQLite.executeQuery toolbox "SELECT * FROM users LIMIT 10"
             case result of
                 Right queryResult -> print queryResult
                 Left err -> print err
@@ -55,6 +67,7 @@ module System.Agents.Tools.SqliteToolbox (
     ToolDescription (..),
     QueryError (..),
     QueryResult (..),
+    SnapshotState (..),
 
     -- * Access control
     AccessMode (..),
@@ -70,13 +83,15 @@ module System.Agents.Tools.SqliteToolbox (
     executeQuery,
     executeReadOnlyQuery,
     executeWriteQuery,
+    executeQueryWithContext,
 
     -- * Result formatting
     formatResults,
 ) where
 
-import Control.Concurrent.MVar (MVar, newMVar, withMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, newMVar, withMVar)
 import Control.Exception (SomeException, try)
+import Control.Monad (when)
 import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -92,8 +107,14 @@ import Database.SQLite.Simple (Connection)
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite3 as Direct
 import Prod.Tracer (Tracer (..), runTracer)
+import System.Directory (copyFile, doesFileExist)
+import System.FilePath ((-<.>))
 
-import System.Agents.Base (SqliteAccessMode (..), SqliteToolboxDescription (..))
+import System.Agents.Base (
+    ConversationId (..),
+    SqliteAccessMode (..),
+    SqliteToolboxDescription (..),
+ )
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -107,6 +128,7 @@ These events allow tracking of:
 * Database errors
 * Connection lifecycle
 * Concurrent access contention
+* Snapshot creation
 -}
 data Trace
     = -- | Database connection opened
@@ -123,16 +145,45 @@ data Trace
       QueryErrorTrace !Text !Text
     | -- | Database busy, waiting for lock
       WaitingForLockTrace !Text
+    | -- | Snapshot created from original database
+      SnapshotCreatedTrace !FilePath !FilePath
+    | -- | Snapshot creation failed
+      SnapshotErrorTrace !FilePath !Text
+    | -- | Empty database created for snapshot mode (original didn't exist)
+      EmptyDatabaseCreatedTrace !FilePath
     deriving (Show)
+
+{- | State for snapshot mode connections.
+
+In snapshot mode, the connection is created lazily on first use.
+This type tracks whether the snapshot has been initialized.
+-}
+data SnapshotState
+    = -- | Snapshot not yet created, stores the original database path
+      SnapshotUninitialized !FilePath
+    | -- | Snapshot created and connection established
+      SnapshotInitialized
+        { snapshotConnection :: Connection
+        , snapshotDirectDb :: Direct.Database
+        , snapshotPath :: FilePath
+        }
+
+-- | Custom Show instance since Connection doesn't have one
+instance Show SnapshotState where
+    show (SnapshotUninitialized path) =
+        "SnapshotUninitialized {originalPath = " ++ show path ++ "}"
+    show (SnapshotInitialized _conn _directDb path) =
+        "SnapshotInitialized {snapshotPath = " ++ show path ++ ", connection = <connection>}"
 
 {- | Runtime state for a SQLite toolbox.
 
 The toolbox maintains:
-* A database connection (from sqlite-simple)
-* A direct database handle for metadata access
+* A database connection (from sqlite-simple) - for read-only and read-write modes
+* A direct database handle for metadata access - for read-only and read-write modes
 * An MVar lock for serializing access within this toolbox instance
-* The configured access mode (read-only or read-write)
+* The configured access mode (read-only, read-write, or snapshot)
 * Toolbox metadata (name, description)
+* For snapshot mode: an MVar tracking the lazy connection state
 
 The MVar ensures that even if multiple tool calls are made concurrently
 from the same agent, they execute sequentially. Combined with SQLite's
@@ -140,14 +191,19 @@ built-in locking and busy timeout, this provides robust concurrent access
 control.
 -}
 data Toolbox = Toolbox
-    { toolboxConnection :: Connection
-    , toolboxDirectDb :: Direct.Database
+    { toolboxConnection :: Maybe Connection
+    -- ^ Database connection (Nothing in snapshot mode until first use)
+    , toolboxDirectDb :: Maybe Direct.Database
+    -- ^ Direct database handle (Nothing in snapshot mode until first use)
     , toolboxLock :: MVar ()
     -- ^ Lock for serializing access within this toolbox instance
     , toolboxName :: Text
     , toolboxDescription :: Text
     , toolboxPath :: FilePath
+    -- ^ Original database path (for read-only/read-write) or snapshot template (for snapshot mode)
     , toolboxAccessMode :: AccessMode
+    , toolboxSnapshotState :: Maybe (MVar SnapshotState)
+    -- ^ Just for snapshot mode, Nothing for other modes
     }
 
 {- | Description of a SQLite tool.
@@ -203,6 +259,8 @@ data QueryError
       ConnectionError !Text
     | -- | Database is locked/busy (timeout exceeded waiting for lock)
       DatabaseLockedError !Text
+    | -- | Snapshot creation error
+      SnapshotError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -214,8 +272,9 @@ data QueryError
 Controls what operations are allowed:
 * 'ReadOnly': Only SELECT queries are allowed
 * 'ReadWrite': All SQL operations are allowed
+* 'Snapshot': Creates a per-conversation copy, all operations allowed on the copy
 -}
-data AccessMode = ReadOnly | ReadWrite
+data AccessMode = ReadOnly | ReadWrite | Snapshot
     deriving (Show, Eq)
 
 {- | SQL operation types for classification.
@@ -238,12 +297,12 @@ data SqlOperation
 fromBaseAccessMode :: SqliteAccessMode -> AccessMode
 fromBaseAccessMode SqliteReadOnly = ReadOnly
 fromBaseAccessMode SqliteReadWrite = ReadWrite
+fromBaseAccessMode SqliteSnapshot = Snapshot
 
 {- | Classify a SQL query by examining its first keyword.
 
 This function performs a simple classification by looking at the first
-non-whitespace, non-comment token in the query. It normalizes the query
-by:
+non-whitespace, non-comment token in the query. It normalizes the query by:
 1. Removing leading whitespace
 2. Removing single-line comments (-- ...)
 3. Removing multi-line comments (/* ... */)
@@ -301,6 +360,7 @@ classifyQuery query =
 
 * 'ReadOnly' mode allows only 'Select' operations
 * 'ReadWrite' mode allows all operations
+* 'Snapshot' mode allows all operations (it's read-write on a copy)
 
 Examples:
 
@@ -312,11 +372,15 @@ False
 
 >>> allowsOperation ReadWrite Delete
 True
+
+>>> allowsOperation Snapshot Insert
+True
 -}
 allowsOperation :: AccessMode -> SqlOperation -> Bool
 allowsOperation ReadOnly Select = True
 allowsOperation ReadOnly _ = False
 allowsOperation ReadWrite _ = True
+allowsOperation Snapshot _ = True
 
 {- | Validate that a query is allowed given an access mode.
 
@@ -347,9 +411,15 @@ This function:
 4. Creates an MVar lock for serializing access within this toolbox
 5. Returns a 'Toolbox' ready for query execution
 
+For snapshot mode:
+- The original database is NOT copied during initialization
+- The copy is deferred until the first query with a conversation context
+- This allows the conversation ID to be used as the snapshot suffix
+
 The access mode determines:
 * Whether the database is opened in read-only mode
 * What SQL operations will be allowed
+* Whether a snapshot copy is created
 
 Concurrent Access Protection:
 
@@ -372,52 +442,175 @@ initializeToolbox tracer desc = do
     let dbPath = desc.sqliteToolboxPath
     let accessMode = fromBaseAccessMode desc.sqliteToolboxAccess
 
-    -- Open connections (both sqlite-simple and direct)
-    result <- try $ do
-        -- Open sqlite-simple connection
-        conn <- SQLite.open dbPath
-
-        -- Open direct connection for metadata access
-        directDb <- Direct.open (Text.pack dbPath)
-
-        -- Configure database for efficient writes and data integrity
-        -- Enable foreign keys for better data integrity
-        _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
-
-        -- Enable Write-Ahead Logging (WAL) mode for better write performance
-        -- WAL mode reduces file churn and allows concurrent readers during writes
-        _ <- SQLite.execute_ conn "PRAGMA journal_mode = WAL"
-
-        -- Set synchronous to NORMAL for a good balance between durability and performance
-        -- This ensures data is safe while still being efficient
-        _ <- SQLite.execute_ conn "PRAGMA synchronous = NORMAL"
-
-        -- Set busy timeout to prevent SQLITE_BUSY errors when another connection is writing
-        -- This connection will wait up to 5 seconds for the lock before failing
-        _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
-
-        -- Create the lock for serializing access within this toolbox
-        lock <- newMVar ()
-
-        pure (conn, directDb, lock)
-
-    case result of
-        Left (e :: SomeException) -> do
-            let errMsg = "Failed to open database: " <> show e
-            runTracer tracer (QueryErrorTrace "initialization" (Text.pack errMsg))
-            pure $ Left errMsg
-        Right (conn, directDb, lock) -> do
+    case accessMode of
+        Snapshot -> do
+            -- For snapshot mode, we don't create the connection yet
+            -- It will be created on first use with the conversation ID
+            lock <- newMVar ()
+            snapshotState <- newMVar (SnapshotUninitialized dbPath)
             pure $
-                Right
+                Right $
                     Toolbox
-                        { toolboxConnection = conn
-                        , toolboxDirectDb = directDb
+                        { toolboxConnection = Nothing
+                        , toolboxDirectDb = Nothing
                         , toolboxLock = lock
                         , toolboxName = desc.sqliteToolboxName
                         , toolboxDescription = desc.sqliteToolboxDescription
                         , toolboxPath = dbPath
                         , toolboxAccessMode = accessMode
+                        , toolboxSnapshotState = Just snapshotState
                         }
+        _ -> do
+            -- For read-only and read-write modes, open connection immediately
+            result <- try $ openConnection tracer dbPath
+            case result of
+                Left (e :: SomeException) -> do
+                    let errMsg = "Failed to open database: " <> show e
+                    runTracer tracer (QueryErrorTrace "initialization" (Text.pack errMsg))
+                    pure $ Left errMsg
+                Right (conn, directDb) -> do
+                    lock <- newMVar ()
+                    pure $
+                        Right
+                            Toolbox
+                                { toolboxConnection = Just conn
+                                , toolboxDirectDb = Just directDb
+                                , toolboxLock = lock
+                                , toolboxName = desc.sqliteToolboxName
+                                , toolboxDescription = desc.sqliteToolboxDescription
+                                , toolboxPath = dbPath
+                                , toolboxAccessMode = accessMode
+                                , toolboxSnapshotState = Nothing
+                                }
+
+-- | Open a database connection with standard configuration.
+openConnection :: Tracer IO Trace -> FilePath -> IO (Connection, Direct.Database)
+openConnection tracer dbPath = do
+    runTracer tracer (ConnectionOpenedTrace dbPath)
+    -- Open sqlite-simple connection
+    conn <- SQLite.open dbPath
+    -- Open direct connection for metadata access
+    directDb <- Direct.open (Text.pack dbPath)
+    -- Configure database for efficient writes and data integrity
+    _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
+    _ <- SQLite.execute_ conn "PRAGMA journal_mode = WAL"
+    _ <- SQLite.execute_ conn "PRAGMA synchronous = NORMAL"
+    _ <- SQLite.execute_ conn $ "PRAGMA busy_timeout = " <> SQLite.Query (Text.pack $ show defaultBusyTimeoutMs)
+    pure (conn, directDb)
+
+{- | Create an empty SQLite database file at the given path.
+
+This is used when a database file is expected to exist but doesn't.
+Simply opening and closing a connection creates the empty database file.
+-}
+createEmptyDatabase :: Tracer IO Trace -> FilePath -> IO ()
+createEmptyDatabase tracer dbPath = do
+    -- Create an empty database by opening and closing a connection
+    conn <- SQLite.open dbPath
+    SQLite.close conn
+    runTracer tracer (EmptyDatabaseCreatedTrace dbPath)
+
+{- | Copy a file if it exists, doing nothing if the source file doesn't exist.
+
+This is used to copy WAL and SHM files which may or may not exist
+depending on the database state.
+-}
+copyFileIfExists :: FilePath -> FilePath -> IO ()
+copyFileIfExists src dst = do
+    exists <- doesFileExist src
+    when exists $ copyFile src dst
+
+{- | Create a snapshot copy of the database for the given conversation.
+
+Returns the path to the snapshot database.
+
+If the original database file does not exist, an empty SQLite database
+will be created first. This is useful for snapshot mode where the user
+may want to start with an empty database.
+
+IMPORTANT: In WAL mode, the database consists of multiple files:
+* The main database file (e.g., dev-abc.db)
+* The WAL file (e.g., dev-abc.db-wal) - contains uncheckpointed changes
+* The SHM file (e.g., dev-abc.db-shm) - shared memory for WAL mode
+
+All of these files are copied to ensure data integrity. If we only copy
+the main database file, recent changes that haven't been checkpointed
+will be invisible in the snapshot.
+-}
+createSnapshot ::
+    Tracer IO Trace ->
+    FilePath ->
+    -- | Original database path
+    ConversationId ->
+    -- | Conversation ID for the suffix
+    IO (Either Text FilePath)
+createSnapshot tracer originalPath (ConversationId uuid) = do
+    let suffix = Text.unpack $ Text.replace "-" "" $ Text.pack $ show uuid
+    -- Create snapshot path: original.{uuid}.snapshot.sqlite
+    let newSnapshotPath = originalPath -<.> (suffix ++ ".snapshot.sqlite")
+
+    result <- try $ do
+        -- Check if original exists - if not, create an empty database
+        exists <- doesFileExist originalPath
+        when (not exists) $ do
+            createEmptyDatabase tracer originalPath
+
+        -- Copy the main database file
+        copyFile originalPath newSnapshotPath
+
+        -- Also copy WAL and SHM files if they exist
+        -- The WAL file contains uncheckpointed changes that are essential for data integrity
+        let originalWalPath = originalPath ++ "-wal"
+        let originalShmPath = originalPath ++ "-shm"
+        let newWalPath = newSnapshotPath ++ "-wal"
+        let newShmPath = newSnapshotPath ++ "-shm"
+
+        copyFileIfExists originalWalPath newWalPath
+        copyFileIfExists originalShmPath newShmPath
+
+        pure newSnapshotPath
+
+    case result of
+        Left (e :: SomeException) -> do
+            let errMsg = Text.pack $ "Failed to create snapshot: " <> show e
+            runTracer tracer (SnapshotErrorTrace newSnapshotPath errMsg)
+            pure $ Left errMsg
+        Right path -> do
+            runTracer tracer (SnapshotCreatedTrace originalPath path)
+            pure $ Right path
+
+{- | Ensure snapshot is initialized for snapshot mode.
+This is called within the toolbox lock, so it's thread-safe.
+-}
+ensureSnapshotInitialized ::
+    Tracer IO Trace ->
+    MVar SnapshotState ->
+    ConversationId ->
+    IO (Either QueryError (Connection, Direct.Database, FilePath))
+ensureSnapshotInitialized tracer stateVar convId = do
+    -- Use modifyMVar to atomically check and update state
+    modifyMVar stateVar $ \state ->
+        case state of
+            SnapshotInitialized conn directDb path ->
+                -- Already initialized, return existing connection
+                pure (state, Right (conn, directDb, path))
+            SnapshotUninitialized originalPath -> do
+                -- Need to create the snapshot
+                snapshotResult <- createSnapshot tracer originalPath convId
+                case snapshotResult of
+                    Left err ->
+                        -- Keep uninitialized state on error
+                        pure (state, Left $ SnapshotError err)
+                    Right newPath -> do
+                        -- Open connection to the snapshot
+                        connResult <- try $ openConnection tracer newPath
+                        case connResult of
+                            Left (e :: SomeException) ->
+                                pure (state, Left $ ConnectionError $ Text.pack $ show e)
+                            Right (conn, directDb) -> do
+                                -- Update state to initialized
+                                let newState = SnapshotInitialized conn directDb newPath
+                                pure (newState, Right (conn, directDb, newPath))
 
 {- | Close a toolbox and release its resources.
 
@@ -426,8 +619,22 @@ to properly close the database connection.
 -}
 _closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
 _closeToolbox tracer toolbox = do
-    SQLite.close (toolboxConnection toolbox)
-    Direct.close (toolboxDirectDb toolbox)
+    case toolboxConnection toolbox of
+        Just conn -> SQLite.close conn
+        Nothing -> pure ()
+    case toolboxDirectDb toolbox of
+        Just db -> Direct.close db
+        Nothing -> pure ()
+    -- Also close snapshot connection if initialized
+    case toolboxSnapshotState toolbox of
+        Just stateVar -> do
+            state <- withMVar stateVar pure
+            case state of
+                SnapshotInitialized conn directDb _ -> do
+                    SQLite.close conn
+                    Direct.close directDb
+                _ -> pure ()
+        Nothing -> pure ()
     runTracer tracer ConnectionClosedTrace
 
 -------------------------------------------------------------------------------
@@ -447,9 +654,31 @@ Returns:
 * 'Right QueryResult' on successful execution
 * 'Left QueryError' on access violation or database error
 * 'Left DatabaseLockedError' if the database is busy and timeout is exceeded
+
+Note: For snapshot mode without a conversation context, this function
+will return an error. Use 'executeQueryWithContext' instead.
 -}
 executeQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeQuery toolbox query = do
+executeQuery toolbox query =
+    executeQueryWithContext toolbox Nothing query
+
+{- | Execute a SQL query with an optional conversation context.
+
+This is the main query execution function that handles all access modes
+including snapshot mode which requires a conversation ID.
+
+For snapshot mode:
+* If 'Just ConversationId' is provided, creates/uses the snapshot for that conversation
+* If 'Nothing' is provided, returns an error (snapshot mode requires context)
+
+For read-only and read-write modes, the conversation context is ignored.
+-}
+executeQueryWithContext ::
+    Toolbox ->
+    Maybe ConversationId ->
+    Text ->
+    IO (Either QueryError QueryResult)
+executeQueryWithContext toolbox mConvId query = do
     -- Validate access based on toolbox mode
     case validateAccess (toolboxAccessMode toolbox) query of
         Left err -> do
@@ -458,7 +687,38 @@ executeQuery toolbox query = do
         Right () -> do
             -- Acquire lock to serialize access within this toolbox instance
             withMVar (toolboxLock toolbox) $ \() -> do
-                executeQueryInternal toolbox query
+                case toolboxAccessMode toolbox of
+                    Snapshot ->
+                        case mConvId of
+                            Nothing ->
+                                pure $ Left $ SnapshotError "Snapshot mode requires conversation context but none was provided"
+                            Just convId ->
+                                executeSnapshotQueryInternal toolbox convId query
+                    _ ->
+                        executeStandardQueryInternal toolbox query
+
+-- | Execute query on a standard (non-snapshot) toolbox.
+executeStandardQueryInternal :: Toolbox -> Text -> IO (Either QueryError QueryResult)
+executeStandardQueryInternal toolbox query = do
+    case (toolboxConnection toolbox, toolboxDirectDb toolbox) of
+        (Just conn, Just directDb) ->
+            executeQueryInternal conn directDb query
+        _ ->
+            pure $ Left $ ConnectionError "Database connection not initialized"
+
+-- | Execute query on a snapshot toolbox, ensuring snapshot is created first.
+executeSnapshotQueryInternal :: Toolbox -> ConversationId -> Text -> IO (Either QueryError QueryResult)
+executeSnapshotQueryInternal toolbox convId query =
+    case toolboxSnapshotState toolbox of
+        Nothing ->
+            pure $ Left $ SnapshotError "Snapshot state not initialized"
+        Just stateVar -> do
+            -- Ensure snapshot is initialized (thread-safe via MVar)
+            initResult <- ensureSnapshotInitialized (Tracer (const (pure ()))) stateVar convId
+            case initResult of
+                Left err -> pure $ Left err
+                Right (conn, directDb, _snapshotPath) ->
+                    executeQueryInternal conn directDb query
 
 {- | Execute a read-only (SELECT) query.
 
@@ -479,14 +739,19 @@ executeReadOnlyQuery toolbox query =
         Select ->
             -- Acquire lock to serialize access within this toolbox instance
             withMVar (toolboxLock toolbox) $ \() -> do
-                executeQueryInternal toolbox query
+                case toolboxAccessMode toolbox of
+                    Snapshot ->
+                        -- For snapshot mode, we still need conversation context
+                        pure $ Left $ SnapshotError "Use executeQueryWithContext for snapshot mode"
+                    _ ->
+                        executeStandardQueryInternal toolbox query
         other -> do
             let err = AccessDeniedError $ "Expected SELECT query, got: " <> Text.pack (show other)
             pure $ Left err
 
 {- | Execute a write query (INSERT, UPDATE, DELETE, etc.).
 
-This function ensures that the toolbox is in read-write mode
+This function ensures that the toolbox is in read-write or snapshot mode
 before executing the query. Use this for explicit write operations.
 
 Like 'executeQuery', this function acquires the toolbox lock before
@@ -503,19 +768,21 @@ executeWriteQuery toolbox query =
             let err = AccessDeniedError "Write operations not allowed in read-only mode"
             pure $ Left err
         ReadWrite ->
-            -- Acquire lock to serialize access within this toolbox instance
-            withMVar (toolboxLock toolbox) $ \() -> do
-                executeQueryInternal toolbox query
+            withMVar (toolboxLock toolbox) $ \() ->
+                executeStandardQueryInternal toolbox query
+        Snapshot ->
+            -- Snapshot mode requires conversation context
+            pure $ Left $ SnapshotError "Use executeQueryWithContext for snapshot mode"
 
 {- | Internal function to execute a query and extract results with column names.
 This function does NOT acquire the lock - callers must hold the lock.
 -}
-executeQueryInternal :: Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeQueryInternal toolbox query = do
+executeQueryInternal :: Connection -> Direct.Database -> Text -> IO (Either QueryError QueryResult)
+executeQueryInternal _conn directDb query = do
     startTime <- getCurrentTime
 
     result <- try $ do
-        let db = toolboxDirectDb toolbox
+        let db = directDb
 
         -- Prepare the statement
         stmt <- Direct.prepare db query
