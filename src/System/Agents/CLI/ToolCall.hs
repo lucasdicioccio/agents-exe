@@ -93,6 +93,8 @@ listToolCallAgentTools agent =
 
 This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
 providing backward compatibility while allowing opt-in to full session tracking.
+
+Uses silent tracers since tool-call operates in a non-interactive mode.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
@@ -109,7 +111,7 @@ makeAgentTool store apiKeys node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        (Prod.silent :: Prod.Tracer IO Trace)
+        Prod.silent
         OneShotTool.defaultParentSessionLookup
 
 -- | Handle the tool-call command
@@ -138,15 +140,17 @@ handleToolCall opts apiKeysFile agentFiles = do
             Text.hPutStrLn stderr "Error: No agent file specified"
             error "No agent file specified"
         (agentFilePath : _) -> do
-            -- Use silent tracer (tool portal handles its own output)
-            let baseTracer = Prod.silent
+            -- Use silent tracers (tool portal handles its own output)
+            let treeLoadingTracer = Prod.silent
+            let mSubAgentTracer = Nothing :: Maybe (Prod.Tracer IO Trace)
 
             -- Load the agent tree
             AgentTree.withAgentTree
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFilePath
-                    , AgentTree.interactiveTracer = baseTracer
+                    , AgentTree.treeLoadingTracer = treeLoadingTracer
+                    , AgentTree.subAgentTracer = mSubAgentTracer
                     , AgentTree.agentToTool = makeAgentTool SessionStore.defaultSessionStore apiKeys
                     }
                 $ \result -> case result of
@@ -178,3 +182,4 @@ handleToolCall opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
+

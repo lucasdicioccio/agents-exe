@@ -54,6 +54,8 @@ data CheckOptions = CheckOptions
 
 This wraps 'turnAgentRuntimeIntoIOTool' with default callbacks and lookup,
 providing backward compatibility while allowing opt-in to full session tracking.
+
+Uses silent tracers since check operates in a non-interactive mode.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
@@ -70,7 +72,7 @@ makeAgentTool store apiKeys node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        (Prod.silent :: Prod.Tracer IO Trace)
+        Prod.silent
         OneShotTool.defaultParentSessionLookup
 
 -- | Handle the check command: validate and display agent configuration
@@ -86,12 +88,16 @@ handleCheck opts apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
     forM_ agentFiles $ \agentFile -> do
-        -- Use silent tracer to suppress diagnostic output during agent loading
+        -- Use silent tracers to suppress diagnostic output during agent loading
+        let treeLoadingTracer = Prod.silent
+        let mSubAgentTracer = Nothing :: Maybe (Prod.Tracer IO Trace)
+
         AgentTree.withAgentTree
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
-                , AgentTree.interactiveTracer = Prod.silent
+                , AgentTree.treeLoadingTracer = treeLoadingTracer
+                , AgentTree.subAgentTracer = mSubAgentTracer
                 , AgentTree.agentToTool = makeAgentTool SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of
@@ -183,3 +189,4 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
+

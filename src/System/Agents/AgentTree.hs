@@ -149,6 +149,7 @@ import System.Agents.OS.Core.Types (EntityId (..))
 import qualified System.Agents.OS.Core.Types as OSTypes
 import qualified System.Agents.OS.Core.World as OSWorld
 
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
@@ -454,10 +455,26 @@ data LoadAgentResult
 -- Props Configuration
 -------------------------------------------------------------------------------
 
+{- | Properties for agent tree initialization.
+
+The tracer fields have been unified to support a single trace type with
+recursive levels:
+
+* 'treeLoadingTracer' - For tree loading and configuration traces ('TreeTrace')
+* 'subAgentTracer' - For sub-agent conversation traces ('Trace'), wrapped in
+  'Maybe' since not all contexts need sub-agent tracing (e.g., silent mode)
+
+This design avoids the previous confusion where sub-agent tracers were created
+separately in different command handlers. Now the tracer configuration is
+explicit in Props.
+-}
 data Props = Props
     { apiKeys :: LoadedApiKeys
     , rootAgentFile :: FilePath
-    , interactiveTracer :: Tracer IO TreeTrace
+    , treeLoadingTracer :: Tracer IO TreeTrace
+    -- ^ Tracer for tree loading and configuration events
+    , subAgentTracer :: Maybe (Tracer IO Trace)
+    -- ^ Optional tracer for sub-agent calls (Nothing = silent)
     , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> ToolRegistration
     -- ^ Function to create a tool registration from an agent node
     }
@@ -570,7 +587,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
 
                             bfsDiscovery props (queue ++ childQueue ++ extraQueue) visited'
   where
-    tracer = props.interactiveTracer
+    tracer = props.treeLoadingTracer
 
 {- | Discover child agent files from an agent configuration.
 This looks at the legacy 'toolDirectory' field and any 'FileSystemDirectory'
@@ -793,7 +810,7 @@ wireAgentTools props _graph nodeMap (nodeSlug, node) =
 
             -- Log self-references for debugging
             unless (null selfRefs) $
-                runTracer props.interactiveTracer $
+                runTracer props.treeLoadingTracer $
                     ReferenceValidationTrace $
                         SelfReferenceDetected nodeSlug node.nodeFile nodeSlug
 
@@ -956,7 +973,7 @@ loadAgentTreeConfig ::
     Props ->
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
-    let tracer = props.interactiveTracer
+    let tracer = props.treeLoadingTracer
     boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.rootAgentFile
     case boss of
         Left err ->
@@ -1000,7 +1017,7 @@ loadAgentTree props = do
         Left errs -> pure $ Errors errs
         Right graph -> do
             -- Log discovery
-            runTracer props.interactiveTracer $
+            runTracer props.treeLoadingTracer $
                 ReferenceValidationTrace $
                     ValidationStarted (Map.keysSet graph.graphNodes)
 
@@ -1008,12 +1025,12 @@ loadAgentTree props = do
             case validateReferences graph of
                 Left errs -> pure $ Errors errs
                 Right () -> do
-                    runTracer props.interactiveTracer (ReferenceValidationTrace ValidationComplete)
+                    runTracer props.treeLoadingTracer (ReferenceValidationTrace ValidationComplete)
 
                     -- Detect and warn about cycles (cycles are allowed)
                     let cycles = detectCycles graph
                     unless (null cycles) $
-                        runTracer props.interactiveTracer (CyclicReferencesWarning cycles)
+                        runTracer props.treeLoadingTracer (CyclicReferencesWarning cycles)
 
                     -- Phase 2: Create OS agents
                     agentsResult <- createAgents props graph registry
@@ -1113,3 +1130,4 @@ readOpenApiKeysFile keysPath =
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
+

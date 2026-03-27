@@ -83,19 +83,19 @@ and a tracer for capturing sub-agent traces. The tracer allows monitoring
 of recursive agent calls including start/completion events, LLM traces,
 and tool execution traces.
 
-When the sub-agent tracer is 'Prod.silent', no traces are emitted (backward
-compatible behavior). For debugging, pass a tracer that writes to stderr
-or a custom trace handler.
+When the sub-agent tracer is 'Nothing', no traces are emitted (backward
+compatible silent behavior). For debugging, pass 'Just' a tracer that
+writes to stderr or a custom trace handler.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
-    Prod.Tracer IO Trace ->
+    Maybe (Prod.Tracer IO Trace) ->
     AgentTree.OSAgentNode ->
     AgentSlug ->
     AgentId ->
     ToolRegistration
-makeAgentTool store apiKeys tracer node slug agentId =
+makeAgentTool store apiKeys mTracer node slug agentId =
     OneShotTool.turnAgentRuntimeIntoIOTool
         store
         apiKeys
@@ -103,15 +103,21 @@ makeAgentTool store apiKeys tracer node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        tracer
+        (maybe Prod.silent id mTracer)
         OneShotTool.defaultParentSessionLookup
 
--- | Handle the MCP server command: start MCP server for agents
+{- | Handle the MCP server command: start MCP server for agents
+
+The tracer configuration is now unified in Props:
+- 'treeLoadingTracer' is used for tree loading traces (combined with stderr tracer)
+- 'subAgentTracer' is an optional Maybe tracer for sub-agent calls
+  (Nothing = silent mode for backward compatibility)
+-}
 handleMcpServer ::
-    -- | Base tracer for logging
+    -- | Tracer for tree loading and configuration events
     Prod.Tracer IO AgentTree.TreeTrace ->
-    -- | Tracer for sub-agent calls (conversation traces)
-    Prod.Tracer IO Trace ->
+    -- | Optional tracer for sub-agent calls (Nothing = silent)
+    Maybe (Prod.Tracer IO Trace) ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -119,20 +125,22 @@ handleMcpServer ::
     -- | List of agent files to expose
     [FilePath] ->
     IO ()
-handleMcpServer baseTracer subAgentTracer sessionStore apiKeysFile agentFiles = do
+handleMcpServer treeLoadingTracer mSubAgentTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let oneAgent agentFilePath = do
-            -- Use OS-native props (no registry needed)
+            -- Use OS-native props with unified tracer configuration
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFilePath
-                    , AgentTree.interactiveTracer =
+                    , AgentTree.treeLoadingTracer =
                         Prod.traceBoth
-                            baseTracer
+                            treeLoadingTracer
                             traceUsefulPromptStderr
-                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys subAgentTracer
+                    , AgentTree.subAgentTracer = mSubAgentTracer
+                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys mSubAgentTracer
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
+

@@ -32,8 +32,8 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (AgentId, AgentSlug)
-import qualified System.Agents.OneShot as OneShot
 import System.Agents.Runtime.Trace (Trace)
+import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration)
 
@@ -99,19 +99,19 @@ and a tracer for capturing sub-agent traces. The tracer allows monitoring
 of recursive agent calls including start/completion events, LLM traces,
 and tool execution traces.
 
-When the sub-agent tracer is 'Prod.silent', no traces are emitted (backward
-compatible behavior). For debugging, pass a tracer that writes to stderr
-or a custom trace handler.
+When the sub-agent tracer is 'Nothing', no traces are emitted (backward
+compatible silent behavior). For debugging, pass 'Just' a tracer that
+writes to stderr or a custom trace handler.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
-    Prod.Tracer IO Trace ->
+    Maybe (Prod.Tracer IO Trace) ->
     AgentTree.OSAgentNode ->
     AgentSlug ->
     AgentId ->
     ToolRegistration
-makeAgentTool store apiKeys tracer node slug agentId =
+makeAgentTool store apiKeys mTracer node slug agentId =
     OneShotTool.turnAgentRuntimeIntoIOTool
         store
         apiKeys
@@ -119,15 +119,21 @@ makeAgentTool store apiKeys tracer node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        tracer
+        (maybe Prod.silent id mTracer)
         OneShotTool.defaultParentSessionLookup
 
--- | Handle the one-shot run command
+{- | Handle the one-shot run command
+
+The tracer configuration is now unified in Props:
+- 'treeLoadingTracer' is used for tree loading traces
+- 'subAgentTracer' is an optional Maybe tracer for sub-agent calls
+  (Nothing = silent mode for backward compatibility)
+-}
 handleOneShot ::
-    -- | Base tracer for logging
+    -- | Tracer for tree loading and configuration events
     Prod.Tracer IO AgentTree.TreeTrace ->
-    -- | Tracer for sub-agent calls (conversation traces)
-    Prod.Tracer IO Trace ->
+    -- | Optional tracer for sub-agent calls (Nothing = silent)
+    Maybe (Prod.Tracer IO Trace) ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -139,18 +145,27 @@ handleOneShot ::
     -- | One-shot options
     OneShotOptions ->
     IO ()
-handleOneShot baseTracer subAgentTracer sessionStore apiKeysFile agentFiles aliases opts = do
+handleOneShot treeLoadingTracer mSubAgentTracer sessionStore apiKeysFile agentFiles aliases opts = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     forM_ (take 1 agentFiles) $ \agentFilePath -> do
         promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
         mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
-        -- Use OS-native agent loading (no registry needed)
-        -- TODO(lucas): change subAgentTracer with something else
-        let oneShot text props = OneShot.mainOneShotTextWithThinking subAgentTracer sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+        -- Use OS-native agent loading with unified tracer configuration
+        -- The subAgentTracer is passed to Props for use when sub-agents are called
+        let oneShot text props = OneShot.mainOneShotTextWithThinking 
+                (maybe Prod.silent id mSubAgentTracer) 
+                sessionStore 
+                opts.sessionFile 
+                mSession 
+                opts.thinkingOutput 
+                props 
+                text
         oneShot promptContents $
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFilePath
-                , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys subAgentTracer
+                , AgentTree.treeLoadingTracer = treeLoadingTracer
+                , AgentTree.subAgentTracer = mSubAgentTracer
+                , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys mSubAgentTracer
                 }
+

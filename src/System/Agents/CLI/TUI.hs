@@ -35,12 +35,12 @@ data TuiOptions = TuiOptions
 
 {- | Handle the TUI command: launch interactive terminal interface
 
-This function creates a tracer that writes trace events to the TUI's
-event channel, allowing LLM tool calls and sub-agent activities to be
-traced and displayed in the TUI's debug view.
+This function creates Props where the subAgentTracer writes trace events
+to the TUI's event channel, allowing LLM tool calls and sub-agent activities
+to be traced and displayed in the TUI's debug view.
 -}
 handleTUI ::
-    -- | Base tracer for logging
+    -- | Tracer for tree loading and configuration events
     Prod.Tracer IO AgentTree.TreeTrace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
@@ -49,18 +49,19 @@ handleTUI ::
     -- | List of agent files to load
     [FilePath] ->
     IO ()
-handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
+handleTUI treeLoadingTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    -- The tracer will be created in runTUI where the event channel is available
-    -- We pass a function that creates the tracer given the event channel
+    -- The sub-agent tracer will be created in runTUI where the event channel is available
+    -- We pass a function that creates Props given the event channel
     let makeProps evChan agentFile = do
-            -- Create a tracer that writes to the event channel
-            let subAgentTracer = Prod.Tracer $ \tr -> writeBChan evChan (AppEvent_AgentTrace tr)
+            -- Create a tracer that writes to the event channel for sub-agent traces
+            let subAgentTracer = Just $ Prod.Tracer $ \tr -> writeBChan evChan (AppEvent_AgentTrace tr)
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFile
-                    , AgentTree.interactiveTracer = baseTracer
+                    , AgentTree.treeLoadingTracer = treeLoadingTracer
+                    , AgentTree.subAgentTracer = subAgentTracer
                     , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys subAgentTracer
                     }
     TUI.runTUIWithTracer sessionStore apiKeys makeProps agentFiles
@@ -83,12 +84,12 @@ conversation trees.
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
-    Prod.Tracer IO Trace ->
+    Maybe (Prod.Tracer IO Trace) ->
     AgentTree.OSAgentNode ->
     AgentSlug ->
     AgentId ->
     ToolRegistration
-makeAgentTool store apiKeys tracer node slug agentId =
+makeAgentTool store apiKeys mTracer node slug agentId =
     OneShotTool.turnAgentRuntimeIntoIOTool
         store
         apiKeys
@@ -96,6 +97,6 @@ makeAgentTool store apiKeys tracer node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        tracer
+        (maybe Prod.silent id mTracer)
         (OneShotTool.sessionIdFromConversationId store)
 
