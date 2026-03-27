@@ -26,6 +26,7 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.CircularList as CList
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
@@ -41,10 +42,10 @@ import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
 
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
-import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
+import System.Agents.Base (AgentId (..), AgentSlug, ConversationId (..), newConversationId)
 import System.Agents.OneShot (nodeToAgent)
 import System.Agents.Runtime.Trace (SubAgentTrace (..), Trace (..))
-import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
+import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionId (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
@@ -384,9 +385,9 @@ handleJumpToNextSibling = do
             let convsList = Vector.toList allConvs
                 currentDepth = getConversationDepth conv convsList
                 siblings =
-                    [ (i, c)
-                    | (i, c) <- zip [0 ..] convsList
-                    , getConversationDepth c convsList == currentDepth
+                    [ (i, sibling)
+                    | (i, sibling) <- zip [0 ..] convsList
+                    , getConversationDepth sibling convsList == currentDepth
                     , i > idx
                     ]
             case siblings of
@@ -405,9 +406,9 @@ handleJumpToPreviousSibling = do
             let convsList = Vector.toList allConvs
                 currentDepth = getConversationDepth conv convsList
                 siblings =
-                    [ (i, c)
-                    | (i, c) <- zip [0 ..] convsList
-                    , getConversationDepth c convsList == currentDepth
+                    [ (i, sibling)
+                    | (i, sibling) <- zip [0 ..] convsList
+                    , getConversationDepth sibling convsList == currentDepth
                     , i < idx
                     ]
             case reverse siblings of
@@ -689,29 +690,37 @@ handleConversationUpdated convId sess = do
 {- | Handle agent trace events.
 
 This function now properly handles sub-agent trace events, including:
-- SubAgentStarted: When a sub-agent session begins
+- SubAgentStarted: When a sub-agent session begins - creates a new Conversation entry
 - SubAgentLLMTrace: LLM calls made by sub-agents
 - SubAgentToolTrace: Tool calls made by sub-agents
 - SubAgentCompleted: When a sub-agent finishes successfully
 - SubAgentFailed: When a sub-agent encounters an error
 
-These traces can be displayed in the TUI debug/log views or used for
-monitoring recursive agent calls.
+The key fix is that SubAgentStarted now creates a Conversation entry in coreConversations,
+ensuring sub-agent conversations are visible in the TUI's conversation list.
 -}
 handleAgentTrace :: Trace -> EventM N TuiState ()
 handleAgentTrace trace = do
     case trace of
-        AgentTrace_SubAgentCall{subAgentTrace} -> do
+        AgentTrace_SubAgentCall{subAgentCallerSlug, subAgentCallerId, subAgentParentConvId, subAgentSubSlug, subAgentSubConvId, subAgentTrace} -> do
             -- Handle sub-agent traces
             case subAgentTrace of
-                SubAgentStarted{} ->
-                    -- Could add to a sub-agent activity log
-                    pure ()
-                SubAgentCompleted{} ->
-                    -- Could display completion in status or log
-                    pure ()
-                SubAgentFailed{subAgentError} ->
-                    -- Could display error in status or log
+                SubAgentStarted{subAgentSessionId} -> do
+                    -- BUG FIX: Create a conversation entry for the sub-agent
+                    -- This ensures sub-agent conversations appear in the TUI
+                    createSubAgentConversation
+                        subAgentSubConvId
+                        subAgentSubSlug
+                        subAgentSessionId
+                        subAgentParentConvId
+                        subAgentCallerSlug
+                        subAgentCallerId
+                SubAgentCompleted{} -> do
+                    -- Update sub-agent conversation status to completed
+                    updateSubAgentStatus subAgentSubConvId ConversationStatus_SubAgentCompleted
+                SubAgentFailed{subAgentError} -> do
+                    -- Update sub-agent conversation status to failed and show error
+                    updateSubAgentStatus subAgentSubConvId ConversationStatus_SubAgentFailed
                     showStatus StatusWarning $ "Sub-agent failed: " <> Text.take 100 subAgentError
                 SubAgentLLMTrace{} ->
                     -- Could display LLM activity in debug view
@@ -722,6 +731,130 @@ handleAgentTrace trace = do
         _ ->
             -- Handle other trace types (existing behavior)
             pure ()
+
+{- | Create a conversation entry for a sub-agent.
+
+This function is the KEY FIX for the sub-agent synchronization issue.
+When a sub-agent is started via turnAgentRuntimeIntoIOTool, it creates
+a new conversation ID but previously did NOT add it to coreConversations.
+This meant the sub-agent was invisible in the TUI.
+
+Now we create a minimal Conversation entry that:
+1. Has no BChan (sub-agents don't accept user input - they run autonomously)
+2. Has no ThreadId (they run within the parent's tool call)
+3. Is marked as a sub-agent conversation for proper display
+4. Tracks its parent conversation for tree hierarchy
+
+The conversation is added to coreConversations and the tree state is updated
+to reflect the parent-child relationship.
+-}
+createSubAgentConversation ::
+    ConversationId ->
+    AgentSlug ->
+    SessionId ->
+    ConversationId ->
+    AgentSlug ->
+    AgentId ->
+    EventM N TuiState ()
+createSubAgentConversation subConvId subAgentSlug subSessionId parentConvId parentSlug _parentAgentId = do
+    coreRef <- use tuiCore
+    agents <- use (tuiUI . agentList . to listElements)
+
+    -- Find the sub-agent's TuiAgent by slug
+    let mSubAgent = findAgentBySlug subAgentSlug agents
+
+    case mSubAgent of
+        Just subAgent -> do
+            -- Create a minimal sub-agent conversation
+            -- Note: We use a dummy BChan since sub-agents don't accept user input
+            -- The channel is never used but required by the Conversation type
+            dummyChan <- liftIO $ newBChan 1
+
+            -- Create a minimal session for the sub-agent
+            -- Note: turnId is not used for sub-agents, but required by Session type
+            subTurnId <- liftIO newTurnId
+            let subSession =
+                    Session
+                        { turns = []  -- Will be populated as sub-agent runs
+                        , sessionId = subSessionId
+                        , forkedFromSessionId = Nothing  -- Will be set when parent session is known
+                        , turnId = subTurnId
+                        }
+
+            let subConv =
+                    Conversation
+                        { conversationId = subConvId
+                        , conversationAgent = subAgent
+                        , conversationThreadId = Nothing -- Sub-agents run within parent's thread
+                        , conversationSession = Just subSession
+                        , conversationName = "@" <> subAgentSlug <> " (sub-agent)"
+                        , conversationChan = dummyChan -- Never used, but required by type
+                        , conversationStatus = ConversationStatus_SubAgentActive
+                        , conversationOnProgress = \_ -> pure () -- No-op for sub-agents
+                        }
+
+            -- Add to coreConversations
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                let newConvs = subConv : coreConversations c
+                    -- Update tree state to track parent-child relationship
+                    treeState = coreConversationTreeState c
+                    newTreeState =
+                        treeState
+                            { _childConversationCache =
+                                Map.insertWith
+                                    (++)
+                                    parentConvId
+                                    [subConvId]
+                                    (_childConversationCache treeState)
+                            , _conversationDepth =
+                                Map.insert
+                                    subConvId
+                                    (Map.findWithDefault 0 parentConvId (_conversationDepth treeState) + 1)
+                                    (_conversationDepth treeState)
+                            }
+                 in c
+                        { coreConversations = newConvs
+                        , coreConversationTreeState = newTreeState
+                        }
+
+            -- Show status message
+            showStatus StatusInfo $
+                "Sub-agent started: "
+                    <> subAgentSlug
+                    <> " (parent: "
+                    <> parentSlug
+                    <> ")"
+
+        Nothing -> do
+            -- Sub-agent type not found in loaded agents
+            -- This shouldn't happen but handle gracefully
+            showStatus StatusWarning $
+                "Sub-agent " <> subAgentSlug <> " not found in loaded agents"
+
+-- | Find an agent by its slug in the list of loaded agents.
+findAgentBySlug :: AgentSlug -> Vector.Vector TuiAgent -> Maybe TuiAgent
+findAgentBySlug slug agents =
+    listToMaybe $ filter (\a -> tuiSlug a == slug) $ Vector.toList agents
+
+{- | Update the status of a sub-agent conversation.
+
+This updates the conversation status in coreConversations when a sub-agent
+completes or fails. This allows the UI to display the final status.
+-}
+updateSubAgentStatus :: ConversationId -> ConversationStatus -> EventM N TuiState ()
+updateSubAgentStatus convId newStatus = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c
+            { coreConversations =
+                map
+                    ( \conv ->
+                        if conversationId conv == convId
+                            then conv{conversationStatus = newStatus}
+                            else conv
+                    )
+                    (coreConversations c)
+            }
 
 {- | Refresh tools for the given agent.
 

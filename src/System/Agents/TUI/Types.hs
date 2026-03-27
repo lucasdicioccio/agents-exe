@@ -228,7 +228,16 @@ newtype EventType = EventType Text
 -- Conversation Status and Types
 -------------------------------------------------------------------------------
 
--- | Status of a conversation regarding its execution state.
+{- | Status of a conversation regarding its execution state.
+
+This type now includes statuses for sub-agent (recursive) conversations:
+- SubAgentActive: Sub-agent is currently running
+- SubAgentCompleted: Sub-agent finished successfully
+- SubAgentFailed: Sub-agent encountered an error
+
+These statuses allow the TUI to properly display sub-agent conversations
+in the conversation tree, showing their lifecycle state.
+-}
 data ConversationStatus
     = -- | Conversation is currently running (agent is processing)
       ConversationStatus_Active
@@ -236,6 +245,12 @@ data ConversationStatus
       ConversationStatus_WaitingForInput
     | -- | Conversation is paused (blocks step iteration until unpaused)
       ConversationStatus_Paused
+    | -- | Sub-agent conversation is currently running
+      ConversationStatus_SubAgentActive
+    | -- | Sub-agent conversation completed successfully
+      ConversationStatus_SubAgentCompleted
+    | -- | Sub-agent conversation failed with an error
+      ConversationStatus_SubAgentFailed
     deriving (Show, Eq)
 
 -- | A conversation with an agent.
@@ -244,13 +259,15 @@ data Conversation = Conversation
     , conversationAgent :: TuiAgent
     , conversationThreadId :: Maybe ThreadId
     -- ^ Nothing for restored conversations that haven't been continued yet
+    -- Also Nothing for sub-agent conversations (they run within parent's thread)
     , conversationSession :: Maybe Session
     , conversationName :: Text
     , conversationChan :: BChan (Maybe UserQuery)
+    -- ^ Channel for user input. Unused for sub-agent conversations.
     , conversationStatus :: ConversationStatus
     -- ^ Current status of the conversation
     , conversationOnProgress :: OnSessionProgress
-    -- ^ Callback for session progress updates
+    -- ^ Callback for session progress updates. No-op for sub-agent conversations.
     }
 
 -- | Manual Show instance for Conversation (BChan and ThreadId don't have Show)

@@ -364,6 +364,10 @@ render_conversationItem st treeState depthMap childCountMap _ conv =
                     then if isExpanded then "▼ " else "▶ "
                     else if isUnread then "● " else "  "
             ConversationStatus_Paused -> "⏸ "
+            -- Sub-agent statuses:
+            ConversationStatus_SubAgentActive -> "⟳ "
+            ConversationStatus_SubAgentCompleted -> "✓ "
+            ConversationStatus_SubAgentFailed -> "✗ "
 
         -- Child indicator suffix
         childInfo =
@@ -384,6 +388,10 @@ render_conversationItem st treeState depthMap childCountMap _ conv =
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
                 withAttr pausedAttr $ txt $ " " <> fullText
+            ConversationStatus_SubAgentFailed ->
+                withAttr statusErrorAttr $ txt $ " " <> fullText
+            ConversationStatus_SubAgentCompleted ->
+                withAttr byteUsageAttr $ txt $ " " <> fullText  -- Use dimmed style for completed
             _ ->
                 if depth > 0
                     then withAttr nestedConversationAttr $ txt $ " " <> fullText

@@ -143,17 +143,19 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
 This function uses OS-native types for agent execution.
 -}
 mainOneShotText ::
+    Tracer IO Trace ->
     SessionStore ->
     Maybe FilePath ->
     Maybe Session ->
     Props ->
     Text ->
     IO ()
-mainOneShotText store mPath mSession props query = do
-    mainOneShotTextWithThinking store mPath mSession ThinkingNone props query
+mainOneShotText tracer store mPath mSession props query = do
+    mainOneShotTextWithThinking tracer store mPath mSession ThinkingNone props query
 
 -- | Run a one-shot agent with configurable thinking output.
 mainOneShotTextWithThinking ::
+    Tracer IO Trace ->
     SessionStore ->
     Maybe FilePath ->
     Maybe Session ->
@@ -161,10 +163,9 @@ mainOneShotTextWithThinking ::
     Props ->
     Text ->
     IO ()
-mainOneShotTextWithThinking store mPath mSession thinkingOut props query = do
+mainOneShotTextWithThinking tracer store mPath mSession thinkingOut props query = do
     convId <- newConversationId
     -- Create a no-op tracer
-    let tracer = Tracer $ const $ pure ()
     withAgentTree props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs

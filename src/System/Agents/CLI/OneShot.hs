@@ -145,7 +145,8 @@ handleOneShot baseTracer subAgentTracer sessionStore apiKeysFile agentFiles alia
         promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
         mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
         -- Use OS-native agent loading (no registry needed)
-        let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+        -- TODO(lucas): change subAgentTracer with something else
+        let oneShot text props = OneShot.mainOneShotTextWithThinking subAgentTracer sessionStore opts.sessionFile mSession opts.thinkingOutput props text
         oneShot promptContents $
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
