@@ -63,6 +63,7 @@ module System.Agents.TUI.Core (
     expandedConversations,
     conversationDepth,
     childConversationCache,
+    uiConversationTreeState,
     tuiCore,
     tuiUI,
     eventChan,
@@ -265,6 +266,7 @@ runTUIWithConfig config props = do
     let ui0 =
             (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
                 { _coreAgentTools = agentTools
+                , _uiConversationTreeState = treeState
                 }
 
     -- Create TUI state with session configuration
@@ -284,3 +286,4 @@ runTUIWithConfig config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+

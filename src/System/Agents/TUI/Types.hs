@@ -406,6 +406,8 @@ data UIState = UIState
     , _coreAgentTools :: [(AgentId, [ToolRegistration])]
     , _statusMessage :: Maybe StatusMessage
     -- ^ Current status message to display (if any)
+    , _uiConversationTreeState :: ConversationTreeState
+    -- ^ Cached copy of conversation tree state for rendering (synced from Core)
     }
 
 makeLenses ''UIState
@@ -454,6 +456,7 @@ initUIState agents loadedSessions =
         , _auxiliaryTasks = []
         , _coreAgentTools = []
         , _statusMessage = Nothing
+        , _uiConversationTreeState = initConversationTreeState
         }
 
 -- | Create initial Core state.
@@ -611,3 +614,4 @@ updateConversationTreeCache convs treeState =
                     Just parentConv -> conversationId parentConv == parentId
                     Nothing -> False
             Nothing -> False
+

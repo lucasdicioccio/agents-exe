@@ -68,6 +68,10 @@ conversations to monitor sub-agent execution including:
 * LLM calls made by sub-agents
 * Tool calls made by sub-agents
 * Success/failure status
+
+The parent session lookup uses the SessionStore to establish parent-child
+relationships between conversations, enabling the TUI to display hierarchical
+conversation trees.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
@@ -86,4 +90,5 @@ makeAgentTool store apiKeys tracer node slug agentId =
         agentId
         OneShotTool.defaultAgentCallCallbacks
         tracer
-        OneShotTool.defaultParentSessionLookup
+        (OneShotTool.sessionIdFromConversationId store)
+

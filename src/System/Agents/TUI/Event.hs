@@ -556,6 +556,7 @@ During migration, this also:
 1. Refreshes tools for the selected agent via RuntimeBridge
 2. Synchronizes tool state between legacy Runtime and OS Core
 3. Updates conversation tree cache for hierarchical display
+4. Syncs tree state from Core to UI for rendering
 -}
 handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
@@ -567,12 +568,16 @@ handleHeartbeat = do
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
 
-    -- Update tree cache
+    -- Update tree cache in Core
+    let updatedTreeState = updateConversationTreeCache convs (coreConversationTreeState coreState)
     liftIO $ atomically $ modifyTVar coreRef $ \c ->
-        c{coreConversationTreeState = updateConversationTreeCache convs (coreConversationTreeState c)}
+        c{coreConversationTreeState = updatedTreeState}
+
+    -- Sync tree state from Core to UI state for rendering
+    tuiUI . uiConversationTreeState .= updatedTreeState
 
     -- Build display list respecting expanded state
-    let visibleConvs = buildDisplayConversationList convs (coreConversationTreeState coreState)
+    let visibleConvs = buildDisplayConversationList convs updatedTreeState
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList visibleConvs) 1
 
     -- Restore the selection if the conversation still exists in visible list
@@ -968,3 +973,4 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+

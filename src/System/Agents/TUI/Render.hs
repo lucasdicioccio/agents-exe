@@ -103,8 +103,7 @@ tui_appDraw st =
 -- | Render UI with debug view overlay.
 render_with_debug :: TuiState -> [Widget N]
 render_with_debug st =
-    [ render_ui st
-    , centerLayer $ render_debugView st
+    [ centerLayer $ render_debugView st
     ]
 
 -- | Render the main UI based on current state.
@@ -333,12 +332,14 @@ render_conversationList st =
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
     allConvs = Vector.toList $ listElements (st ^. tuiUI . conversationList)
-    -- Get tree state from core
-    treeState = initConversationTreeState
-    -- Build depth and child count maps
-    depthMap = Map.fromList [(conversationId c, getConversationDepth c allConvs) | c <- allConvs]
-    childCountMap = Map.fromList [(conversationId c, getChildConversationCount c allConvs) | c <- allConvs]
+    -- Get tree state from UI state (synced from Core during heartbeat)
+    treeState = st ^. tuiUI . uiConversationTreeState
+    -- Build depth and child count maps from tree state
+    depthMap = treeState ^. conversationDepth
+    childCountMap = Map.map length (treeState ^. childConversationCache)
     -- Build visible conversations list respecting expanded state
+    -- Note: The conversationList in UIState should already be filtered by handleHeartbeat,
+    -- but we recalculate here to ensure consistency with current tree state
     visibleConvs = buildDisplayConversationList allConvs treeState
     -- Create a Brick List from the visible conversations
     visibleConvsList = list ConversationListWidget (Vector.fromList visibleConvs) 1
@@ -774,3 +775,4 @@ tui_appAttrMap _ =
         , (depthIndentAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (debugBgAttr, BrickUtil.bg Vty.black `Vty.withForeColor` Vty.white)
         ]
+
