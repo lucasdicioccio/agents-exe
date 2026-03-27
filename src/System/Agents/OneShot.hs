@@ -121,8 +121,8 @@ runOneShotWithConfig ::
     OSAgentNode ->
     Text ->
     IO OneShotResult
-runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
-    agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId tracer loadedApiKeys node
+runOneShotWithConfig store config convId subAgentTracer loadedApiKeys node query = do
+    agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId subAgentTracer loadedApiKeys node
     let agent =
             agentSetQuery (UserQuery query) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
@@ -150,8 +150,8 @@ mainOneShotText ::
     Props ->
     Text ->
     IO ()
-mainOneShotText tracer store mPath mSession props query = do
-    mainOneShotTextWithThinking tracer store mPath mSession ThinkingNone props query
+mainOneShotText subAgentTracer store mPath mSession props query = do
+    mainOneShotTextWithThinking subAgentTracer store mPath mSession ThinkingNone props query
 
 -- | Run a one-shot agent with configurable thinking output.
 mainOneShotTextWithThinking ::
@@ -163,7 +163,7 @@ mainOneShotTextWithThinking ::
     Props ->
     Text ->
     IO ()
-mainOneShotTextWithThinking tracer store mPath mSession thinkingOut props query = do
+mainOneShotTextWithThinking subAgentTracer store mPath mSession thinkingOut props query = do
     convId <- newConversationId
     -- Create a no-op tracer
     withAgentTree props $ \x -> do
@@ -172,7 +172,7 @@ mainOneShotTextWithThinking tracer store mPath mSession thinkingOut props query 
             Initialized tree -> do
                 let config = (fileStoringConfig store mSession mPath){thinkingOutput = thinkingOut}
                 let node = osTreeRoot tree
-                OneShotResult result <- runOneShotWithConfig store config convId tracer (apiKeys props) node query
+                OneShotResult result <- runOneShotWithConfig store config convId subAgentTracer (apiKeys props) node query
                 Text.putStrLn result
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
@@ -212,8 +212,8 @@ nodeToAgent ::
     LoadedApiKeys ->
     OSAgentNode ->
     IO (Agent (LlmTurnContent, Session))
-nodeToAgent store mPath convId tracer loadedApiKeys node =
-    nodeToAgentWithThinking store mPath ThinkingNone convId tracer loadedApiKeys node
+nodeToAgent store mPath convId subAgentTracer loadedApiKeys node =
+    nodeToAgentWithThinking store mPath ThinkingNone convId subAgentTracer loadedApiKeys node
 
 -- | Converts an OSAgentNode into an Agent with configurable thinking output.
 nodeToAgentWithThinking ::
@@ -227,7 +227,7 @@ nodeToAgentWithThinking ::
     LoadedApiKeys ->
     OSAgentNode ->
     IO (Agent (LlmTurnContent, Session))
-nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node = do
+nodeToAgentWithThinking store mPath thinkingOut convId subAgentTracer loadedApiKeys node = do
     let agentCfg = osNodeConfig node
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
 
@@ -247,7 +247,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
     -- Use node's agent slug and id for tracing
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) convId . (LLMTrace stepId)) tracer
+                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) convId . (LLMTrace stepId)) subAgentTracer
                 , cfgRuntime = httpRuntime
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
                 , cfgModelName = Base.modelName agentCfg
@@ -538,3 +538,4 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+

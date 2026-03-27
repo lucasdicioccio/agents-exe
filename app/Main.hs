@@ -8,16 +8,25 @@ This module handles command-line argument parsing and dispatches to
 the appropriate command handlers. The actual command logic is implemented
 in separate modules under 'System.Agents.CLI'.
 
-== Tracer Architecture
+== Unified Tracer Architecture
 
-The tracer architecture has been unified to use a single 'Props' configuration
-with two tracer fields:
+The tracer system uses a unified 'TreeTrace' type that can represent all
+trace events:
 
-* 'treeLoadingTracer' - For tree loading and configuration events ('TreeTrace')
-* 'subAgentTracer' - Optional tracer for sub-agent calls ('Trace')
+* Tree loading and configuration events ('McpTrace', 'OpenAPITrace', etc.)
+* Data loading and validation traces
+* Sub-agent call traces wrapped in 'SubAgentTrace' constructor
 
-This replaces the previous confusing pattern where sub-agent tracers were
-passed separately to different command handlers.
+This unified design allows for a single tracer to handle both tree-level
+and sub-agent-level tracing, with proper nesting for recursive calls.
+
+To extract sub-agent traces from a TreeTrace tracer, use:
+
+> Prod.contramap AgentTree.SubAgentTrace tracer
+
+To route sub-agent traces to the same tracer (for unified logging):
+
+> Prod.contramap AgentTree.SubAgentTrace treeTracer
 -}
 module Main where
 
@@ -68,7 +77,6 @@ import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.MCP.Client as McpClient (LoopTrace (..))
 import qualified System.Agents.MCP.Client.Runtime as McpClientRuntime
 import qualified System.Agents.OneShot as OneShot
-import System.Agents.Runtime.Trace (Trace)
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
@@ -1200,7 +1208,7 @@ main = do
                     Nothing -> Nothing
                     Just t -> Just $ choose (maybeToEither . toJsonTrace) Prod.silent t
 
-        let treeLoadingTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` logFileJsonTracer
+        let tracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` logFileJsonTracer
 
         -- Initialize SessionStore from the session prefix argument
         let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
@@ -1213,7 +1221,7 @@ main = do
                 Text.hPutStrLn stderr err
                 exitFailure
             Right agentFiles' ->
-                runCommand pargs treeLoadingTracer sessionStore agentFiles'
+                runCommand pargs tracer sessionStore agentFiles'
 
 -- | Resolve agent files based on optional slug selection
 resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
@@ -1246,63 +1254,53 @@ resolveAgentFiles files (Just agentSlug) = do
 
 {- | Run the selected command.
 
-The tracer architecture is now unified:
-- 'treeLoadingTracer' is used for tree loading and configuration traces (TreeTrace)
-- 'mSubAgentTracer' is an optional Maybe tracer for sub-agent calls (Trace)
-  (Nothing = silent mode for backward compatibility)
-
-This replaces the previous confusing pattern where sub-agent tracers were
-passed separately to different command handlers.
+The tracer architecture is now unified under a single 'TreeTrace' type.
+Sub-agent traces are wrapped in 'SubAgentTrace' constructor.
 -}
 runCommand :: Prog -> Prod.Tracer IO AgentTree.TreeTrace -> SessionStore.SessionStore -> [FilePath] -> IO ()
-runCommand pargs treeLoadingTracer sessionStore files =
-    -- Default sub-agent tracer is Nothing (silent) for backward compatibility
-    let mSubAgentTracer = Nothing :: Maybe (Prod.Tracer IO Trace)
-     in case pargs.mainCommand of
-            Check checkOpts ->
-                CheckCmd.handleCheck checkOpts pargs.apiKeysFile files
-            CheckToolCall opts ->
-                CheckToolCallCmd.handleCheckToolCall opts
-            ListToolCalls opts ->
-                ReplayToolCallCmd.handleListToolCalls opts
-            ReplayToolCall opts ->
-                ReplayToolCallCmd.handleReplayToolCall opts
-            TerminalUI _ ->
-                -- For TUI, the sub-agent tracer is created internally by handleTUI
-                -- using the event channel. This ensures LLM tool calls and sub-agent
-                -- activities are properly traced and displayed in the TUI's debug view.
-                TUICmd.handleTUI treeLoadingTracer sessionStore pargs.apiKeysFile files
-            EchoPrompt opts ->
-                EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
-            OneShot opts ->
-                -- For OneShot, we use a silent sub-agent tracer by default (Nothing)
-                -- for backward compatibility. Users can enable tracing by passing
-                -- a custom tracer if needed.
-                OneShotCmd.handleOneShot treeLoadingTracer mSubAgentTracer sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
-            SelfDescribe opts ->
-                SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
-            DescribeTool opts ->
-                DescribeToolCmd.handleDescribeTool opts
-            Initialize ->
-                InitializeCmd.handleInitialize pargs.apiKeysFile files
-            McpServer ->
-                -- For MCP Server, we use a silent sub-agent tracer by default (Nothing)
-                -- for backward compatibility.
-                McpServerCmd.handleMcpServer treeLoadingTracer mSubAgentTracer sessionStore pargs.apiKeysFile files
-            SessionPrint opts ->
-                SessionPrint.handleSessionPrint opts
-            SessionEdit opts ->
-                SessionEditCmd.handleSessionEdit opts
-            Paths opts ->
-                PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile pargs.sessionsJsonPrefix
-            Cowsay opts ->
-                CowsayCmd.handleCowsay opts
-            Spec opts ->
-                SpecCmd.handleSpec opts
-            New opts ->
-                NewCmd.handleNew opts
-            ToolCall opts ->
-                ToolCallCmd.handleToolCall opts pargs.apiKeysFile files
+runCommand pargs tracer sessionStore files =
+    case pargs.mainCommand of
+        Check checkOpts ->
+            CheckCmd.handleCheck checkOpts pargs.apiKeysFile files
+        CheckToolCall opts ->
+            CheckToolCallCmd.handleCheckToolCall opts
+        ListToolCalls opts ->
+            ReplayToolCallCmd.handleListToolCalls opts
+        ReplayToolCall opts ->
+            ReplayToolCallCmd.handleReplayToolCall opts
+        TerminalUI _ ->
+            -- For TUI, sub-agent traces are wrapped in SubAgentTrace and routed
+            -- to the event channel for display in the debug view.
+            TUICmd.handleTUI tracer sessionStore pargs.apiKeysFile files
+        EchoPrompt opts ->
+            EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
+        OneShot opts ->
+            -- For OneShot, sub-agent traces are wrapped in SubAgentTrace.
+            -- Use Prod.silent if you want to disable sub-agent tracing.
+            OneShotCmd.handleOneShot tracer sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
+        SelfDescribe opts ->
+            SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
+        DescribeTool opts ->
+            DescribeToolCmd.handleDescribeTool opts
+        Initialize ->
+            InitializeCmd.handleInitialize pargs.apiKeysFile files
+        McpServer ->
+            -- For MCP Server, sub-agent traces are wrapped in SubAgentTrace.
+            McpServerCmd.handleMcpServer tracer sessionStore pargs.apiKeysFile files
+        SessionPrint opts ->
+            SessionPrint.handleSessionPrint opts
+        SessionEdit opts ->
+            SessionEditCmd.handleSessionEdit opts
+        Paths opts ->
+            PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile pargs.sessionsJsonPrefix
+        Cowsay opts ->
+            CowsayCmd.handleCowsay opts
+        Spec opts ->
+            SpecCmd.handleSpec opts
+        New opts ->
+            NewCmd.handleNew opts
+        ToolCall opts ->
+            ToolCallCmd.handleToolCall opts pargs.apiKeysFile files
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)
@@ -1336,6 +1334,7 @@ toJsonTrace x = case x of
                 , "cycles" .= cycles
                 ]
     AgentTree.ReferenceValidationTrace _ -> Nothing
+    AgentTree.SubAgentTrace _ -> Nothing
   where
     encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
     encodeMcpTrace (McpSimpleBinary cfg) tr = do

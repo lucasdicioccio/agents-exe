@@ -28,7 +28,6 @@ import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (AgentId, AgentSlug)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 
@@ -88,16 +87,14 @@ handleCheck opts apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
     forM_ agentFiles $ \agentFile -> do
-        -- Use silent tracers to suppress diagnostic output during agent loading
-        let treeLoadingTracer = Prod.silent
-        let mSubAgentTracer = Nothing :: Maybe (Prod.Tracer IO Trace)
+        -- Use silent tracer to suppress diagnostic output during agent loading
+        let tracer = Prod.silent
 
         AgentTree.withAgentTree
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
-                , AgentTree.treeLoadingTracer = treeLoadingTracer
-                , AgentTree.subAgentTracer = mSubAgentTracer
+                , AgentTree.tracer = tracer
                 , AgentTree.agentToTool = makeAgentTool SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of

@@ -29,7 +29,6 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (AgentId, AgentSlug)
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.MCP.Server as McpServer
-import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration)
 
@@ -79,23 +78,21 @@ listMcpServerAgentTools agent =
 {- | Create an agent tool function with session tracking and tracing.
 
 This wraps 'turnAgentRuntimeIntoIOTool' with callbacks for session tracking
-and a tracer for capturing sub-agent traces. The tracer allows monitoring
-of recursive agent calls including start/completion events, LLM traces,
-and tool execution traces.
+and a tracer for capturing sub-agent traces.
 
-When the sub-agent tracer is 'Nothing', no traces are emitted (backward
-compatible silent behavior). For debugging, pass 'Just' a tracer that
-writes to stderr or a custom trace handler.
+The sub-agent tracer is derived from the unified TreeTrace tracer by
+extracting 'SubAgentTrace' events. When the main tracer is silent,
+sub-agent tracing is effectively disabled.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
-    Maybe (Prod.Tracer IO Trace) ->
+    Prod.Tracer IO AgentTree.TreeTrace ->
     AgentTree.OSAgentNode ->
     AgentSlug ->
     AgentId ->
     ToolRegistration
-makeAgentTool store apiKeys mTracer node slug agentId =
+makeAgentTool store apiKeys tracer node slug agentId =
     OneShotTool.turnAgentRuntimeIntoIOTool
         store
         apiKeys
@@ -103,21 +100,17 @@ makeAgentTool store apiKeys mTracer node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        (maybe Prod.silent id mTracer)
+        (Prod.contramap AgentTree.SubAgentTrace tracer)
         OneShotTool.defaultParentSessionLookup
 
 {- | Handle the MCP server command: start MCP server for agents
 
-The tracer configuration is now unified in Props:
-- 'treeLoadingTracer' is used for tree loading traces (combined with stderr tracer)
-- 'subAgentTracer' is an optional Maybe tracer for sub-agent calls
-  (Nothing = silent mode for backward compatibility)
+The tracer is now unified under a single 'TreeTrace' type. Sub-agent
+traces are wrapped in 'SubAgentTrace' constructor.
 -}
 handleMcpServer ::
-    -- | Tracer for tree loading and configuration events
+    -- | Unified tracer for all events
     Prod.Tracer IO AgentTree.TreeTrace ->
-    -- | Optional tracer for sub-agent calls (Nothing = silent)
-    Maybe (Prod.Tracer IO Trace) ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -125,20 +118,18 @@ handleMcpServer ::
     -- | List of agent files to expose
     [FilePath] ->
     IO ()
-handleMcpServer treeLoadingTracer mSubAgentTracer sessionStore apiKeysFile agentFiles = do
+handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let oneAgent agentFilePath = do
             -- Use OS-native props with unified tracer configuration
+            -- Combine the main tracer with stderr tracer for useful prompts
+            let combinedTracer = Prod.traceBoth tracer traceUsefulPromptStderr
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFilePath
-                    , AgentTree.treeLoadingTracer =
-                        Prod.traceBoth
-                            treeLoadingTracer
-                            traceUsefulPromptStderr
-                    , AgentTree.subAgentTracer = mSubAgentTracer
-                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys mSubAgentTracer
+                    , AgentTree.tracer = combinedTracer
+                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys combinedTracer
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

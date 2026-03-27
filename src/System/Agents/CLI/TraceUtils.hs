@@ -50,3 +50,8 @@ traceUsefulPromptHandle h = Tracer f
         Text.hPutStrLn h $ "Cyclic references warning: " <> Text.pack (show warns)
     f (ReferenceValidationTrace refs) =
         Text.hPutStrLn h $ "Reference validation trace: " <> Text.pack (show refs)
+    f (SubAgentTrace _) =
+        -- Sub-agent traces are handled separately by sub-agent tooling
+        -- This tracer focuses on tree-level traces
+        pure ()
+

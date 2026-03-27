@@ -31,7 +31,6 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (AgentId, AgentSlug)
-import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration)
 
@@ -140,17 +139,15 @@ handleToolCall opts apiKeysFile agentFiles = do
             Text.hPutStrLn stderr "Error: No agent file specified"
             error "No agent file specified"
         (agentFilePath : _) -> do
-            -- Use silent tracers (tool portal handles its own output)
-            let treeLoadingTracer = Prod.silent
-            let mSubAgentTracer = Nothing :: Maybe (Prod.Tracer IO Trace)
+            -- Use silent tracer (tool portal handles its own output)
+            let tracer = Prod.silent
 
             -- Load the agent tree
             AgentTree.withAgentTree
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFilePath
-                    , AgentTree.treeLoadingTracer = treeLoadingTracer
-                    , AgentTree.subAgentTracer = mSubAgentTracer
+                    , AgentTree.tracer = tracer
                     , AgentTree.agentToTool = makeAgentTool SessionStore.defaultSessionStore apiKeys
                     }
                 $ \result -> case result of

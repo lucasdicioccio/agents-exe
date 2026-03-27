@@ -7,6 +7,16 @@
 This module provides agent discovery, configuration loading, and tree
 building using the OS-native ECS architecture. It replaces the legacy
 Runtime-per-agent model with pure OS-native operations.
+
+== Tracer Architecture
+
+The tracer system uses a unified 'TreeTrace' type that can represent:
+
+* Tree loading and configuration events ('McpTrace', 'OpenAPITrace', etc.)
+* Sub-agent call traces wrapped in 'SubAgentTrace' constructor
+
+This unified design allows for a single tracer to handle both tree-level
+and sub-agent-level tracing, with proper nesting for recursive calls.
 -}
 module System.Agents.AgentTree (
     -- * Registry types and operations
@@ -159,7 +169,18 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
 -- Trace Types
 -------------------------------------------------------------------------------
 
--- | Trace events for agent tree operations.
+{- | Unified trace events for agent tree operations.
+
+This type captures all trace events in a unified hierarchy:
+
+* Tree loading and configuration events (MCP, OpenAPI, etc.)
+* Data loading and validation traces
+* Sub-agent traces wrapped in 'SubAgentTrace' constructor
+
+The 'SubAgentTrace' constructor enables recursive tracing where sub-agent
+calls are traced as part of the tree trace hierarchy. This allows parent
+agents to monitor child agent execution through a unified tracing interface.
+-}
 data TreeTrace
     = McpTrace McpServerDescription McpTools.Trace
     | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
@@ -168,6 +189,10 @@ data TreeTrace
     | ConfigLoadedTrace AgentConfigTree
     | CyclicReferencesWarning [[AgentSlug]]
     | ReferenceValidationTrace ReferenceValidationTrace
+    | -- | Sub-agent trace events wrapped for hierarchical tracing.
+      -- This constructor lifts sub-agent 'Trace' events into the 'TreeTrace'
+      -- hierarchy, enabling unified tracing of recursive agent calls.
+      SubAgentTrace Trace
     deriving (Show)
 
 -- | Trace events for reference validation phase
@@ -457,26 +482,27 @@ data LoadAgentResult
 
 {- | Properties for agent tree initialization.
 
-The tracer fields have been unified to support a single trace type with
-recursive levels:
+The tracer configuration is now fully unified under a single 'TreeTrace' type:
 
-* 'treeLoadingTracer' - For tree loading and configuration traces ('TreeTrace')
-* 'subAgentTracer' - For sub-agent conversation traces ('Trace'), wrapped in
-  'Maybe' since not all contexts need sub-agent tracing (e.g., silent mode)
+* 'tracer' - Handles all trace events including:
+  - Tree loading and configuration events ('McpTrace', 'DataLoadingTrace', etc.)
+  - Sub-agent call traces wrapped in 'SubAgentTrace' constructor
 
-This design avoids the previous confusion where sub-agent tracers were created
-separately in different command handlers. Now the tracer configuration is
-explicit in Props.
+This design eliminates the previous confusion where sub-agent tracers were
+managed separately. Now, sub-agent traces are just another constructor in
+the unified 'TreeTrace' hierarchy, enabling recursive trace trees.
+
+To disable sub-agent tracing, use 'Prod.silent' or simply not emit 'SubAgentTrace'
+events in the 'agentToTool' implementation.
 -}
 data Props = Props
     { apiKeys :: LoadedApiKeys
     , rootAgentFile :: FilePath
-    , treeLoadingTracer :: Tracer IO TreeTrace
-    -- ^ Tracer for tree loading and configuration events
-    , subAgentTracer :: Maybe (Tracer IO Trace)
-    -- ^ Optional tracer for sub-agent calls (Nothing = silent)
+    , tracer :: Tracer IO TreeTrace
+    -- ^ Unified tracer for all events (tree loading + sub-agent calls)
     , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> ToolRegistration
-    -- ^ Function to create a tool registration from an agent node
+    -- ^ Function to create a tool registration from an agent node.
+    -- The implementation decides whether to wrap sub-agent traces in 'SubAgentTrace'.
     }
 
 -------------------------------------------------------------------------------
@@ -540,7 +566,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
             bfsDiscovery props queue visited'
         Nothing -> do
             -- Load the agent config
-            loadResult <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) filePath
+            loadResult <- FileLoader.loadJsonFile (contramap DataLoadingTrace propsTracer) filePath
             case loadResult of
                 Left err -> pure $ Left (NonEmpty.singleton $ AgentLoadingError err)
                 Right (AgentDescription agent) -> do
@@ -587,7 +613,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
 
                             bfsDiscovery props (queue ++ childQueue ++ extraQueue) visited'
   where
-    tracer = props.treeLoadingTracer
+    propsTracer = props.tracer
 
 {- | Discover child agent files from an agent configuration.
 This looks at the legacy 'toolDirectory' field and any 'FileSystemDirectory'
@@ -810,7 +836,7 @@ wireAgentTools props _graph nodeMap (nodeSlug, node) =
 
             -- Log self-references for debugging
             unless (null selfRefs) $
-                runTracer props.treeLoadingTracer $
+                runTracer props.tracer $
                     ReferenceValidationTrace $
                         SelfReferenceDetected nodeSlug node.nodeFile nodeSlug
 
@@ -973,8 +999,8 @@ loadAgentTreeConfig ::
     Props ->
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
-    let tracer = props.treeLoadingTracer
-    boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.rootAgentFile
+    let propsTracer = props.tracer
+    boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace propsTracer) props.rootAgentFile
     case boss of
         Left err ->
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
@@ -1017,7 +1043,7 @@ loadAgentTree props = do
         Left errs -> pure $ Errors errs
         Right graph -> do
             -- Log discovery
-            runTracer props.treeLoadingTracer $
+            runTracer props.tracer $
                 ReferenceValidationTrace $
                     ValidationStarted (Map.keysSet graph.graphNodes)
 
@@ -1025,12 +1051,12 @@ loadAgentTree props = do
             case validateReferences graph of
                 Left errs -> pure $ Errors errs
                 Right () -> do
-                    runTracer props.treeLoadingTracer (ReferenceValidationTrace ValidationComplete)
+                    runTracer props.tracer (ReferenceValidationTrace ValidationComplete)
 
                     -- Detect and warn about cycles (cycles are allowed)
                     let cycles = detectCycles graph
                     unless (null cycles) $
-                        runTracer props.treeLoadingTracer (CyclicReferencesWarning cycles)
+                        runTracer props.tracer (CyclicReferencesWarning cycles)
 
                     -- Phase 2: Create OS agents
                     agentsResult <- createAgents props graph registry

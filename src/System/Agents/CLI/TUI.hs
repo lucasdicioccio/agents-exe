@@ -21,7 +21,6 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (AgentId, AgentSlug)
-import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
 import System.Agents.TUI.Types (AppEvent (..))
@@ -35,12 +34,13 @@ data TuiOptions = TuiOptions
 
 {- | Handle the TUI command: launch interactive terminal interface
 
-This function creates Props where the subAgentTracer writes trace events
-to the TUI's event channel, allowing LLM tool calls and sub-agent activities
-to be traced and displayed in the TUI's debug view.
+This function creates Props where sub-agent traces are wrapped in
+'SubAgentTrace' and written to the TUI's event channel, allowing
+LLM tool calls and sub-agent activities to be traced and displayed
+in the TUI's debug view.
 -}
 handleTUI ::
-    -- | Tracer for tree loading and configuration events
+    -- | Unified tracer for all events
     Prod.Tracer IO AgentTree.TreeTrace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
@@ -49,20 +49,24 @@ handleTUI ::
     -- | List of agent files to load
     [FilePath] ->
     IO ()
-handleTUI treeLoadingTracer sessionStore apiKeysFile agentFiles = do
+handleTUI tracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     -- The sub-agent tracer will be created in runTUI where the event channel is available
     -- We pass a function that creates Props given the event channel
     let makeProps evChan agentFile = do
-            -- Create a tracer that writes to the event channel for sub-agent traces
-            let subAgentTracer = Just $ Prod.Tracer $ \tr -> writeBChan evChan (AppEvent_AgentTrace tr)
+            -- Create a tracer that extracts SubAgentTrace events and writes to the event channel
+            let subAgentTracer = Prod.Tracer $ \treeTr ->
+                    case treeTr of
+                        AgentTree.SubAgentTrace tr -> writeBChan evChan (AppEvent_AgentTrace tr)
+                        _ -> pure ()
+            -- Combine the tracers: both receive TreeTrace events
+            let combinedTracer = Prod.traceBoth tracer subAgentTracer
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFile
-                    , AgentTree.treeLoadingTracer = treeLoadingTracer
-                    , AgentTree.subAgentTracer = subAgentTracer
-                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys subAgentTracer
+                    , AgentTree.tracer = combinedTracer
+                    , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys combinedTracer
                     }
     TUI.runTUIWithTracer sessionStore apiKeys makeProps agentFiles
 
@@ -80,16 +84,18 @@ conversations to monitor sub-agent execution including:
 The parent session lookup uses the SessionStore to establish parent-child
 relationships between conversations, enabling the TUI to display hierarchical
 conversation trees.
+
+Sub-agent traces are wrapped in 'SubAgentTrace' constructor for unified tracing.
 -}
 makeAgentTool ::
     SessionStore.SessionStore ->
     AgentTree.LoadedApiKeys ->
-    Maybe (Prod.Tracer IO Trace) ->
+    Prod.Tracer IO AgentTree.TreeTrace ->
     AgentTree.OSAgentNode ->
     AgentSlug ->
     AgentId ->
     ToolRegistration
-makeAgentTool store apiKeys mTracer node slug agentId =
+makeAgentTool store apiKeys tracer node slug agentId =
     OneShotTool.turnAgentRuntimeIntoIOTool
         store
         apiKeys
@@ -97,6 +103,6 @@ makeAgentTool store apiKeys mTracer node slug agentId =
         slug
         agentId
         OneShotTool.defaultAgentCallCallbacks
-        (maybe Prod.silent id mTracer)
+        (Prod.contramap AgentTree.SubAgentTrace tracer)
         (OneShotTool.sessionIdFromConversationId store)
 
