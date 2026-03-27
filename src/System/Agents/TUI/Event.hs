@@ -221,6 +221,11 @@ handleConversationListEvent ev = do
             handleExpandConversation
         Vty.EvKey Vty.KLeft [] ->
             handleCollapseConversation
+        -- Up/Down navigation with explicit bounds checking
+        Vty.EvKey Vty.KUp [] ->
+            handleConversationListMoveUp
+        Vty.EvKey Vty.KDown [] ->
+            handleConversationListMoveDown
         -- Otherwise handle normal list navigation
         _ -> do
             zoom (tuiUI . conversationList) $ handleListEvent ev
@@ -230,6 +235,40 @@ handleConversationListEvent ev = do
                 Just (_, conv) ->
                     tuiUI . unreadConversations %= Set.delete (conversationId conv)
                 Nothing -> pure ()
+
+-- | Move up in the conversation list with bounds checking.
+handleConversationListMoveUp :: EventM N TuiState ()
+handleConversationListMoveUp = do
+    mCurrentIdx <- use (tuiUI . conversationList . listSelectedL)
+    case mCurrentIdx of
+        Just idx | idx > 0 ->
+            tuiUI . conversationList . listSelectedL .= Just (idx - 1)
+        _ -> pure ()
+    -- Mark conversation as read when selected
+    selected <- use (tuiUI . conversationList . to listSelectedElement)
+    case selected of
+        Just (_, conv) ->
+            tuiUI . unreadConversations %= Set.delete (conversationId conv)
+        Nothing -> pure ()
+
+-- | Move down in the conversation list with bounds checking.
+handleConversationListMoveDown :: EventM N TuiState ()
+handleConversationListMoveDown = do
+    mCurrentIdx <- use (tuiUI . conversationList . listSelectedL)
+    listLen <- use (tuiUI . conversationList . to (Vector.length . listElements))
+    case mCurrentIdx of
+        Just idx | idx < listLen - 1 ->
+            tuiUI . conversationList . listSelectedL .= Just (idx + 1)
+        Nothing | listLen > 0 ->
+            -- If no selection, select first item
+            tuiUI . conversationList . listSelectedL .= Just 0
+        _ -> pure ()
+    -- Mark conversation as read when selected
+    selected <- use (tuiUI . conversationList . to listSelectedElement)
+    case selected of
+        Just (_, conv) ->
+            tuiUI . unreadConversations %= Set.delete (conversationId conv)
+        Nothing -> pure ()
 
 -- | Handle sessions list navigation.
 handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
@@ -564,6 +603,9 @@ handleHeartbeat = do
     -- Save the currently selected conversation ID before refreshing
     mSelectedConvId <- getFocusedConversationId
 
+    -- Also save the current selection index as a fallback
+    mSelectedIdx <- use (tuiUI . conversationList . listSelectedL)
+
     -- Refresh conversations from core
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
@@ -579,16 +621,31 @@ handleHeartbeat = do
 
     -- Build display list respecting expanded state
     let visibleConvs = buildDisplayConversationList convs updatedTreeState
-    tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList visibleConvs) 1
+        visibleVec = Vector.fromList visibleConvs
 
-    -- Restore the selection if the conversation still exists in visible list
-    case mSelectedConvId of
-        Just selectedConvId -> do
-            let newConvs = Vector.fromList visibleConvs
-            case Vector.findIndex (\c -> conversationId c == selectedConvId) newConvs of
-                Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
-                Nothing -> pure () -- Conversation was removed or collapsed, keep no selection
-        Nothing -> pure ()
+    -- Create new list with proper selection handling
+    -- Start with no selection, then restore properly
+    let newList = List.list ConversationListWidget visibleVec 1
+
+    -- Restore selection: first try by conversation ID, then by index
+    let restoredList = case mSelectedConvId of
+            Just selectedConvId ->
+                case Vector.findIndex (\c -> conversationId c == selectedConvId) visibleVec of
+                    Just idx -> List.listMoveTo idx newList
+                    Nothing ->
+                        -- Conversation not visible, try to keep index if valid
+                        case mSelectedIdx of
+                            Just idx | idx < Vector.length visibleVec ->
+                                List.listMoveTo idx newList
+                            _ -> newList
+            Nothing ->
+                -- No previous selection, try to keep index if valid
+                case mSelectedIdx of
+                    Just idx | idx < Vector.length visibleVec ->
+                        List.listMoveTo idx newList
+                    _ -> newList
+
+    tuiUI . conversationList .= restoredList
 
     -- Refresh tools for the currently selected agent
     selectedAgent <- use (tuiUI . selectedAgentInfo)
@@ -792,6 +849,7 @@ createSubAgentConversation subConvId subAgentSlug subSessionId parentConvId pare
                         , conversationStatus = ConversationStatus_SubAgentActive
                         , conversationOnProgress = \_ -> pure () -- No-op for sub-agents
                         }
+
 
             -- Add to coreConversations
             liftIO $ atomically $ modifyTVar coreRef $ \c ->

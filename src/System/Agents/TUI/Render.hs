@@ -10,7 +10,7 @@ import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Center (centerLayer)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.List (list, listElements, listSelectedAttr, listSelectedElement, renderList)
+import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -322,27 +322,24 @@ render_agentItem _ agent =
 -------------------------------------------------------------------------------
 
 -- | Render the conversation list with tree structure.
+-- Note: The conversation list in UIState is already filtered to visible conversations
+-- by handleHeartbeat, so we render it directly without re-filtering.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
     borderWithFocus
         st
         ConversationListWidget
         "Conversations"
-        (renderList (render_conversationItem st treeState depthMap childCountMap) hasFocus visibleConvsList)
+        (renderList (render_conversationItem st treeState depthMap childCountMap) hasFocus convsList)
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
-    allConvs = Vector.toList $ listElements (st ^. tuiUI . conversationList)
+    -- Get the already-filtered conversation list from UI state
+    convsList = st ^. tuiUI . conversationList
     -- Get tree state from UI state (synced from Core during heartbeat)
     treeState = st ^. tuiUI . uiConversationTreeState
     -- Build depth and child count maps from tree state
     depthMap = treeState ^. conversationDepth
     childCountMap = Map.map length (treeState ^. childConversationCache)
-    -- Build visible conversations list respecting expanded state
-    -- Note: The conversationList in UIState should already be filtered by handleHeartbeat,
-    -- but we recalculate here to ensure consistency with current tree state
-    visibleConvs = buildDisplayConversationList allConvs treeState
-    -- Create a Brick List from the visible conversations
-    visibleConvsList = list ConversationListWidget (Vector.fromList visibleConvs) 1
 
 -- | Render a single conversation item with tree indentation.
 render_conversationItem :: TuiState -> ConversationTreeState -> Map ConversationId Int -> Map ConversationId Int -> Bool -> Conversation -> Widget N
