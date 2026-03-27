@@ -1246,9 +1246,10 @@ runCommand pargs baseTracer sessionStore files =
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall opts
         TerminalUI _ ->
-            -- For TUI, we use a tracer that writes traces to the event channel
-            -- The sub-agent tracer captures recursive agent calls and emits AppEvent_AgentTrace events
-            TUICmd.handleTUI baseTracer (Prod.silent :: Prod.Tracer IO Trace) sessionStore pargs.apiKeysFile files
+            -- For TUI, the sub-agent tracer is created internally by handleTUI
+            -- using the event channel. This ensures LLM tool calls and sub-agent
+            -- activities are properly traced and displayed in the TUI's debug view.
+            TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile files
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
@@ -1368,3 +1369,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+

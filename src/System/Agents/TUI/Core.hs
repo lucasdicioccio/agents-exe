@@ -84,6 +84,7 @@ module System.Agents.TUI.Core (
     -- * Main entry point
     runTUI,
     runTUIWithConfig,
+    runTUIWithTracer,
     fileSessionConfig,
 
     -- * OS-native helpers
@@ -93,7 +94,7 @@ module System.Agents.TUI.Core (
 ) where
 
 import Brick hiding (Down)
-import Brick.BChan (newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO, readTVarIO)
@@ -222,13 +223,16 @@ buildConversationTreeState _sessions =
 
 {- | Initialize the TUI with props and optional conversation prefix (legacy API).
 
-For more control, use 'runTUIWithConfig' instead.
+For more control, use 'runTUIWithConfig' or 'runTUIWithTracer' instead.
 
 This function:
 1. Loads agent trees from the provided props
 2. Creates TuiAgents with OS-native structures
 3. Initializes the TUI with the agents and loaded sessions
 4. Builds the conversation tree state for hierarchical display
+
+Note: This function uses a no-op tracer for sub-agent tracing. Use 'runTUIWithTracer'
+for proper sub-agent trace capture.
 -}
 runTUI :: SessionStore -> LoadedApiKeys -> [Props] -> IO ()
 runTUI store apiKeys props = do
@@ -270,6 +274,80 @@ runTUIWithConfig config props = do
                 }
 
     -- Create TUI state with session configuration
+    let st = TuiState coreTVar ui0 evChan config
+
+    -- Build and run the app
+    let app =
+            App
+                { appDraw = tui_appDraw
+                , appChooseCursor = tui_appChooseCursor
+                , appHandleEvent = tui_appHandleEvent
+                , appStartEvent = tui_appStartEvent
+                , appAttrMap = tui_appAttrMap
+                }
+
+    void $ forkIO $ forever $ do
+        writeBChan evChan AppEvent_Heartbeat
+        threadDelay 1000000
+    void $ customMainWithDefaultVty (Just evChan) app st
+
+{- | Initialize the TUI with a tracer-creating function.
+
+This function is similar to 'runTUIWithConfig' but accepts a function that
+creates Props given an event channel. This allows the Props to include a
+tracer that writes to the event channel, enabling proper sub-agent trace
+capture and display in the TUI's debug view.
+
+The tracer function is called with the event channel, allowing sub-agent
+traces (including LLM tool calls) to be emitted as 'AppEvent_AgentTrace'
+events and handled by the TUI's event loop.
+-}
+runTUIWithTracer ::
+    SessionStore ->
+    LoadedApiKeys ->
+    -- | Function that creates Props given an event channel.
+    -- The channel can be used to create a tracer that emits AppEvent_AgentTrace events.
+    (BChan AppEvent -> FilePath -> IO Props) ->
+    [FilePath] ->
+    IO ()
+runTUIWithTracer store apiKeys makeProps agentFiles = do
+    -- Create event channel first (before loading agents)
+    -- This allows the tracer to be created with access to the channel
+    evChan <- newBChan 100
+
+    -- Create Props with the event channel available for tracer creation
+    props <- traverse (makeProps evChan) agentFiles
+
+    -- Load agent trees and create TuiAgents
+    trees <- traverse loadAgentTree props
+    let itrees = [tree | Initialized tree <- trees]
+
+    -- Create TUI agents from OS-native trees
+    let tuiAgents = map createTuiAgent itrees
+
+    -- Load existing session files
+    loadedSessions <- loadSessionFiles store
+
+    -- Collect tools from all agents (read from their TVars)
+    agentTools <- collectAgentTools tuiAgents
+
+    -- Create core state with loaded conversations and tree state
+    core0 <- initCore tuiAgents
+
+    -- Build initial tree state from loaded sessions
+    let treeState = buildConversationTreeState [s | (_, Just s) <- loadedSessions]
+
+    coreTVar <- newTVarIO $ core0{coreConversationTreeState = treeState}
+
+    -- Create UI state with loaded sessions and collected tools
+    let ui0 =
+            (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
+                { _coreAgentTools = agentTools
+                , _uiConversationTreeState = treeState
+                }
+
+    -- Create session config and TUI state
+    let config = fileSessionConfig store apiKeys
     let st = TuiState coreTVar ui0 evChan config
 
     -- Build and run the app

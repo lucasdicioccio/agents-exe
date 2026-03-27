@@ -16,6 +16,7 @@ module System.Agents.CLI.TUI (
     handleTUI,
 ) where
 
+import Brick.BChan (writeBChan)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
@@ -23,6 +24,7 @@ import System.Agents.Base (AgentId, AgentSlug)
 import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
+import System.Agents.TUI.Types (AppEvent (..))
 import System.Agents.ToolRegistration (ToolRegistration)
 
 -- | Options for the TUI command
@@ -31,12 +33,15 @@ data TuiOptions = TuiOptions
     }
     deriving (Show)
 
--- | Handle the TUI command: launch interactive terminal interface
+{- | Handle the TUI command: launch interactive terminal interface
+
+This function creates a tracer that writes trace events to the TUI's
+event channel, allowing LLM tool calls and sub-agent activities to be
+traced and displayed in the TUI's debug view.
+-}
 handleTUI ::
     -- | Base tracer for logging
     Prod.Tracer IO AgentTree.TreeTrace ->
-    -- | Tracer for sub-agent calls (conversation traces)
-    Prod.Tracer IO Trace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -44,9 +49,13 @@ handleTUI ::
     -- | List of agent files to load
     [FilePath] ->
     IO ()
-handleTUI baseTracer subAgentTracer sessionStore apiKeysFile agentFiles = do
+handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    let oneAgent agentFile = do
+    -- The tracer will be created in runTUI where the event channel is available
+    -- We pass a function that creates the tracer given the event channel
+    let makeProps evChan agentFile = do
+            -- Create a tracer that writes to the event channel
+            let subAgentTracer = Prod.Tracer $ \tr -> writeBChan evChan (AppEvent_AgentTrace tr)
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
@@ -54,9 +63,7 @@ handleTUI baseTracer subAgentTracer sessionStore apiKeysFile agentFiles = do
                     , AgentTree.interactiveTracer = baseTracer
                     , AgentTree.agentToTool = makeAgentTool sessionStore apiKeys subAgentTracer
                     }
-    -- Use traverse to sequence the IO actions for creating Props
-    agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUI sessionStore apiKeys agentPropsList
+    TUI.runTUIWithTracer sessionStore apiKeys makeProps agentFiles
 
 {- | Create an agent tool function with session tracking and tracing.
 
