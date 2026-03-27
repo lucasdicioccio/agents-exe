@@ -43,6 +43,7 @@ The framework supports multiple tool types:
 | **IO Tools** | Haskell functions | In-process operations |
 | **Lua Tools** | Lua scripts | Embedded scripting |
 | **Skills** | Progressive disclosure | Procedural knowledge |
+| **Terminal Tools** | Terminal utilities | Tmux, screen capture |
 
 ## Tool Registration
 
@@ -150,6 +151,59 @@ Features:
 - **Hot reloading**: File changes trigger automatic reload
 - **Background thread**: Non-blocking tool discovery
 - **Error isolation**: Failed scripts don't break other tools
+
+## Terminal Tools
+
+Terminal tools provide utilities for interacting with terminal emulators, particularly useful when running agents within tmux sessions.
+
+### tmux-record
+
+The `tmux-record` tool captures the content of the currently-running tmux window using `tmux capture-pane`.
+
+**Location:** `tools/terminal/tmux-record.sh`
+
+**Features:**
+- Captures current tmux pane content to stdout
+- Supports optional `start_line` argument for partial capture
+- Uses `----` separator convention like other read tools
+- Verifies running inside tmux session
+
+**Arguments:**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `start_line` | integer | No | Line number to start capturing from. Use negative values for relative-to-end (e.g., `-1000` for last 1000 lines). Default: `-` (capture all history) |
+
+**Usage Examples:**
+
+```bash
+# Capture all history from current tmux pane
+tmux-record run
+
+# Capture last 1000 lines
+tmux-record run -1000
+
+# Capture from line 500 to end
+tmux-record run 500
+```
+
+**Configuration:**
+
+To use the tmux-record tool, add the terminal tools directory to your agent's `bashToolboxes`:
+
+```json
+{
+  "bashToolboxes": [
+    { "path": "./tools/terminal", "name": "terminal" }
+  ]
+}
+```
+
+**Use Cases:**
+- Capturing terminal output for documentation
+- Recording agent session output
+- Debugging terminal-based interactions
+- Creating session transcripts
 
 ## MCP Tools
 
@@ -607,6 +661,7 @@ DESCRIBE_EOF
     ;;
   run)
     # TODO: Implement tool logic
+    # Access arguments via environment or command line
     echo "Tool my-tool executed"
     ;;
   *)
@@ -977,6 +1032,8 @@ echo '{"filepath": "/path/to/file"}' | \
 # Tool call validation failed for 'read-file' with 2 errors:
 # 1. filepath: Required property missing
 # 2. content: Required property missing
+#
+# Please correct these issues and try again.
 ```
 
 ### Error Formatting
@@ -1228,6 +1285,7 @@ Tools are named according to their type and toolbox:
 | IO | `io_{slug}` | `io_calculator` |
 | Skill (meta) | `skill_{action}_{name}` | `skill_describe_pdf-processing` |
 | Skill (script) | `skill_{name}_{script}` | `skill_pdf-processing_extract-text` |
+| Terminal | `bash_{slug}` | `bash_tmux_record` |
 
 ## Combining Tool Sources
 
@@ -1366,7 +1424,8 @@ data PortalError
   "systemPrompt": ["You help users manage files."],
   "toolDirectory": "tools",
   "bashToolboxes": [
-    { "path": "./extra-tools", "name": "extras" }
+    { "path": "./extra-tools", "name": "extras" },
+    { "path": "./tools/terminal", "name": "terminal" }
   ],
   "mcpServers": [
     {
