@@ -101,6 +101,7 @@ library agents-lib
                     , System.Agents.Tools.LuaToolbox.Modules.Json
                     , System.Agents.Tools.LuaToolbox.Modules.Text
                     , System.Agents.Tools.LuaToolbox.Modules.Time
+                    , System.Agents.Tools.LuaToolbox.Modules.Tools
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver

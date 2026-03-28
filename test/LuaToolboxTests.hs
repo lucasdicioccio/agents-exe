@@ -1,15 +1,17 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Comprehensive unit tests for LuaToolbox.
 --
 -- These tests verify:
 -- * Basic Lua execution (arithmetic, tables)
 -- * Sandbox security (os.execute, io.popen blocked)
--- * Standard library modules (json, text, time)
+-- * Standard library modules (json, text, time, tools)
 -- * Resource limits (memory, timeout)
 -- * Filesystem sandboxing
 -- * HTTP sandboxing
+-- * Tool portal integration
 -- * Error handling
 --
 -- NOTE: Some tests use the module functions directly as globals since
@@ -22,6 +24,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import qualified Data.Vector as Vector
 import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>))
@@ -45,7 +48,7 @@ luaToolboxTests =
         , moduleTests
         , resourceLimitTests
         , errorHandlingTests
-        -- , portalIntegrationTests
+        , portalIntegrationTests
         ]
 
 -------------------------------------------------------------------------------
@@ -283,7 +286,7 @@ testSandboxBlocksIoTmpfile = withTestToolbox $ \box -> do
         Right _ -> assertFailure "Should have failed with sandbox error"
 
 -------------------------------------------------------------------------------
--- Module Tests (json, text, time, fs)
+-- Module Tests (json, text, time, fs, tools)
 -------------------------------------------------------------------------------
 
 moduleTests :: TestTree
@@ -293,6 +296,7 @@ moduleTests =
         [ testCase "JSON module is available" testJsonAvailable
         , testCase "Text module is available" testTextAvailable
         , testCase "Time module is available" testTimeAvailable
+        , testCase "Tools module is available" testToolsAvailable
         , testCase "FS module blocks unauthorized access" testFsBlocksUnauthorized
         ]
 
@@ -318,6 +322,15 @@ testTimeAvailable :: Assertion
 testTimeAvailable = withTestToolbox $ \box -> do
     -- Test that time module exists
     result <- LuaToolbox.executeScript box "return time ~= nil"
+    case result of
+        Left err -> assertFailure $ show err
+        Right execResult ->
+            execResult.resultValues @?= [Aeson.Bool True]
+
+testToolsAvailable :: Assertion
+testToolsAvailable = withTestToolbox $ \box -> do
+    -- Test that tools module exists
+    result <- LuaToolbox.executeScript box "return tools ~= nil"
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -415,8 +428,8 @@ testPcallError = withTestToolbox $ \box -> do
 -- Portal Integration Tests
 -------------------------------------------------------------------------------
 
-_portalIntegrationTests :: TestTree
-_portalIntegrationTests =
+portalIntegrationTests :: TestTree
+portalIntegrationTests =
     testGroup
         "Portal Integration"
         [ testCase "Tool call with mock portal" testPortalToolCall
@@ -464,12 +477,25 @@ testPortalToolCall = do
                 Right execResult -> do
                     case execResult.resultValues of
                         ((Aeson.Object resultObj):[]) -> do
-                            case KeyMap.lookup "data" resultObj of
-                                Just (Aeson.Object dataObj) -> do
-                                    case KeyMap.lookup "tool" dataObj of
-                                        Just (Aeson.String t) -> t @?= "test_tool"
-                                        _ -> assertFailure "Expected tool name in data"
-                                _ -> assertFailure "Expected data object"
+                            -- Check status field
+                            case KeyMap.lookup "status" resultObj of
+                                Just (Aeson.String "ok") -> pure () -- Expected
+                                Just (Aeson.String status) -> assertFailure $ "Unexpected status: " ++ Text.unpack status
+                                _ -> assertFailure "Expected status field with 'ok'"
+                            -- Check result_txt field contains expected data
+                            case KeyMap.lookup "result_txt" resultObj of
+                                Just (Aeson.String resultTxt) -> do
+                                    -- Parse the JSON result
+                                    case Aeson.eitherDecodeStrict (Text.encodeUtf8 resultTxt) of
+                                        Left parseErr -> assertFailure $ "Failed to parse result_txt: " ++ parseErr
+                                        Right (val :: Aeson.Value) -> do
+                                            case val of
+                                                Aeson.Object dataObj -> do
+                                                    case KeyMap.lookup "tool" dataObj of
+                                                        Just (Aeson.String t) -> t @?= "test_tool"
+                                                        _ -> assertFailure "Expected tool name in data"
+                                                _ -> assertFailure "Expected data object"
+                                _ -> assertFailure "Expected result_txt field"
                         _ -> assertFailure $ "Unexpected result: " ++ show execResult.resultValues
 
 testNoPortal :: Assertion
@@ -478,17 +504,18 @@ testNoPortal = withTestToolbox $ \box -> do
     result <-
         LuaToolbox.executeScript box $
             Text.unlines
-                [ "local result, err = tools.call('bash', {command = 'echo hello'})"
-                , "return {result = result, error = err}"
+                [ "local result = tools.call('bash', {command = 'echo hello'})"
+                , "return result"
                 ]
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
             case execResult.resultValues of
                 ((Aeson.Object obj):[]) -> do
-                    case KeyMap.lookup "result" obj of
-                        Nothing -> pure () -- Expected: result-key is absent
-                        _ -> assertFailure ("Expected no result, got:" <> show obj)
+                    case KeyMap.lookup "status" obj of
+                        Just (Aeson.String "not-found") -> pure () -- Expected
+                        Just (Aeson.String status) -> assertFailure $ "Expected 'not-found' status, got: " ++ Text.unpack status
+                        _ -> assertFailure "Expected status field"
                 _ -> assertFailure "Expected object result"
 
 testToolWhitelist :: Assertion
@@ -514,8 +541,8 @@ testToolWhitelist = do
                     silent
                     box
                     ( Text.unlines
-                        [ "local result, err = tools.call('blocked_tool', {})"
-                        , "return {result = result, error = err}"
+                        [ "local result = tools.call('blocked_tool', {})"
+                        , "return result"
                         ]
                     )
                     (Just mockPortal)
@@ -527,8 +554,9 @@ testToolWhitelist = do
                 Right execResult ->
                     case execResult.resultValues of
                         ((Aeson.Object obj):[]) -> do
-                            case KeyMap.lookup "result" obj of
-                                Nothing -> pure () -- Expected: result is missing
-                                _ -> assertFailure ("Expected no result for blocked tool, got:" <> show obj)
+                            case KeyMap.lookup "status" obj of
+                                Just (Aeson.String "not-allowed") -> pure () -- Expected
+                                Just (Aeson.String status) -> assertFailure $ "Expected 'not-allowed' status, got: " ++ Text.unpack status
+                                _ -> assertFailure "Expected status field"
                         _ -> assertFailure "Expected object result"
 
