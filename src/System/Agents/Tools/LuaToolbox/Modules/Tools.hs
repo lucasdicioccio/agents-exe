@@ -16,7 +16,7 @@ Lua API:
 
 > local tools = require("tools")
 > local result = tools.call("bash", {command = "echo hello"})
-> 
+>
 > if result.status == "ok" then
 >     local json = require("json")
 >     local data = json.decode(result.result_txt)
@@ -105,8 +105,9 @@ registerToolsModule tracer lstate config mPortal = Lua.runWith lstate $ do
 
     Lua.setglobal (Lua.Name "tools")
 
--- | Lua function to call a tool through the portal.
--- Usage: tools.call(toolName, payload) -> result table
+{- | Lua function to call a tool through the portal.
+Usage: tools.call(toolName, payload) -> result table
+-}
 luaCall ::
     Tracer IO ToolsTrace ->
     ToolsConfig ->
@@ -151,8 +152,9 @@ luaCall tracer config mPortal = do
                             pushToolResult result
                             pure 1
 
--- | Check if a tool is in the allowed whitelist.
--- Empty whitelist means NO tools are allowed (secure default).
+{- | Check if a tool is in the allowed whitelist.
+Empty whitelist means NO tools are allowed (secure default).
+-}
 isToolAllowed :: ToolsConfig -> Text -> Bool
 isToolAllowed config toolName =
     -- Empty allowed list means no tools allowed (secure default)
@@ -372,4 +374,3 @@ collectObjectPairs = do
                 key <- Lua.tostring' (Lua.nthTop 2)
                 val <- luaToJsonValueTop
                 go ((AesonKey.fromText (Text.decodeUtf8 key), val) : acc)
-
