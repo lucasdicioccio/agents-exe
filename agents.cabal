@@ -87,6 +87,7 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Context
+                    , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash

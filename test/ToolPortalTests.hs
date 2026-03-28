@@ -90,7 +90,7 @@ portalExecutionTests =
                     , callCallerId = "test-caller"
                     }
             
-            result <- callToolViaPortal silent [] toolCall
+            result <- callToolViaPortal silent (error "portal recursive loop") [] toolCall
             
             case result of
                 Left (PortalToolNotFound name) -> name @?= "nonexistent-tool"
@@ -106,7 +106,7 @@ portalExecutionTests =
             
             let mockReg = makeMockRegistration "mock-tool"
             
-            result <- callToolViaPortal silent [mockReg] toolCall
+            result <- callToolViaPortal silent (error "portal recusrive loop") [mockReg] toolCall
             
             case result of
                 Left err -> assertFailure $ "Expected success, got error: " ++ show err

@@ -10,7 +10,7 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-import Control.Concurrent.STM (TVar, readTVarIO)
+import Control.Concurrent.STM (readTVarIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -24,7 +24,7 @@ import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId, newStepId)
+import System.Agents.Base (AgentSlug, AgentId, ConversationId, newConversationId, newStepId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -33,7 +33,6 @@ import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
-    LlmToolCall (..),
     LlmTurnContent (..),
     Session (..),
     SystemPrompt (..),
@@ -41,7 +40,6 @@ import System.Agents.Session.Base (
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
     UserQuery (..),
-    UserToolResponse (..),
     defaultContextConfig,
     newSessionId,
     newTurnId,
@@ -56,6 +54,7 @@ import System.Agents.ToolRegistration (
  )
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
+import System.Agents.Tools.ExecuteToolCall (executeToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
@@ -201,6 +200,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
                 , toolCall = executeToolCall node.osNodeAgentId convId (osNodeTools node)
+                , toolPortal = error "TODO: tool-portal"
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }
@@ -265,19 +265,6 @@ toolParamsToJson props =
 
 -------------------------------------------------------------------------------
 
--- | Execute a tool call using the node's registered tools.
-executeToolCall ::
-    AgentId ->
-    ConversationId ->
-    -- | Tools TVar from OSAgentNode
-    TVar [ToolRegistration] ->
-    ToolExecutionContext ->
-    LlmToolCall ->
-    IO UserToolResponse
-executeToolCall _agentId _convId toolsTVar _ctx (LlmToolCall _callVal) = do
-    regs <- readTVarIO toolsTVar
-    pure $ UserToolResponse $ Aeson.String $ "Tool execution for " <> Text.pack (show (length regs)) <> " tools"
-
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
@@ -287,3 +274,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
+

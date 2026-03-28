@@ -125,7 +125,7 @@ makeToolPortal tracer registrations = portal
     portal :: ToolPortal
     portal toolCall = do
         startTime <- getCurrentTime
-        result <- callToolViaPortal tracer registrations toolCall
+        result <- callToolViaPortal tracer portal registrations toolCall -- TODO(lucas): clarify stack recursion here
         endTime <- getCurrentTime
         let duration = diffUTCTime endTime startTime
 
@@ -162,10 +162,11 @@ a nested portal. This prevents infinite recursion through the portal.
 -}
 callToolViaPortal ::
     Tracer IO Trace ->
+    ToolPortal ->
     [ToolRegistration] ->
     ToolCall ->
     IO (Either PortalError (CallResult ()))
-callToolViaPortal tracer registrations toolCall = do
+callToolViaPortal tracer portal registrations toolCall = do
     -- Find tool by name
     case findToolByName registrations (callToolName toolCall) of
         Nothing ->
@@ -180,7 +181,7 @@ callToolViaPortal tracer registrations toolCall = do
                     pure $ Left $ PortalToolNotFound (callToolName toolCall)
                 Just matchedTool -> do
                     -- Execute with minimal context (no nested portal)
-                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) matchedTool (callArgs toolCall)
+                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) portal matchedTool (callArgs toolCall)
                     pure $ first PortalExecutionError execResult
 
 {- | Find a tool registration by tool name.
@@ -243,15 +244,16 @@ This is a safety measure to avoid potential infinite recursion.
 -}
 executeTool ::
     Tracer IO ToolTrace ->
+    ToolPortal ->
     Tool OpenAI.ToolCall ->
     Aeson.Value ->
     IO (Either Text (CallResult ()))
-executeTool toolTracer tool args = do
+executeTool toolTracer portal tool args = do
     -- Create minimal context without portal
     sessId <- newSessionId
     convId <- newConversationId
     turnId <- newTurnId
-    let minimalCtx = mkMinimalContext sessId convId turnId
+    let minimalCtx = mkMinimalContext sessId convId turnId portal
 
     -- Execute the tool
     result <- try $ tool.toolRun toolTracer minimalCtx args

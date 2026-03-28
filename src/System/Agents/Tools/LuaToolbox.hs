@@ -120,9 +120,7 @@ module System.Agents.Tools.LuaToolbox (
     applyTimeout,
 
     -- * Module registration
-    registerStandardModules,
-    registerStandardModulesWithTracer,
-    registerStandardModulesWithPortal,
+    registerSandardModules,
 
     -- * Re-exported module traces for convenience
     module System.Agents.Tools.LuaToolbox.Modules.Fs,
@@ -328,7 +326,6 @@ initializeToolbox ::
 initializeToolbox tracer desc =
     initializeToolboxWithModuleTracer
         tracer
-        (Tracer (const (pure ())))
         desc
 
 {- | Initialize a Lua toolbox with module tracing support.
@@ -351,10 +348,9 @@ result <- initializeToolboxWithModuleTracer tracer moduleTracer desc
 -}
 initializeToolboxWithModuleTracer ::
     Tracer IO Trace ->
-    Tracer IO LuaModuleTrace ->
     LuaToolboxDescription ->
     IO (Either String Toolbox)
-initializeToolboxWithModuleTracer tracer moduleTracer desc = do
+initializeToolboxWithModuleTracer tracer desc = do
     runTracer tracer (StateInitializedTrace desc.luaToolboxName)
 
     -- Create Lua state
@@ -372,10 +368,6 @@ initializeToolboxWithModuleTracer tracer moduleTracer desc = do
             when (desc.luaToolboxMaxMemoryMB > 0) $
                 applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
 
-            -- Register standard library modules with security settings and tracers
-            -- Note: No portal at initialization time, portal is set per-script execution
-            registerStandardModulesWithPortal moduleTracer lstate desc Nothing
-
             -- Create lock for serializing access
             lock <- newEmptyMVar
             putMVar lock ()
@@ -389,66 +381,19 @@ initializeToolboxWithModuleTracer tracer moduleTracer desc = do
                         , toolboxName = desc.luaToolboxName
                         }
 
-{- | Register all standard library modules in the Lua state.
+{- | Register all standard library modules with tracing support and portal.
 
-This registers:
-* json: JSON encoding/decoding
-* text: UTF-8 string utilities
-* time: Time functions
-* fs: Sandboxed filesystem with path canonicalization (using allowedPaths from config)
-* http: HTTP requests with host validation (using allowedHosts from config)
-* tools: Tool portal module (without portal - for initialization only)
-
-Security:
-* Empty allowedPaths means NO filesystem access
-* Empty allowedHosts means NO network access
-* Empty allowedTools means NO tool access
-
-Note: This function uses a silent tracer (no-op). Use 'registerStandardModulesWithTracer'
-for tracing support, or 'registerStandardModulesWithPortal' for portal support.
--}
-registerStandardModules :: Lua.State -> LuaToolboxDescription -> IO ()
-registerStandardModules lstate desc =
-    registerStandardModulesWithPortal (Tracer (const (pure ()))) lstate desc Nothing
-
-{- | Register all standard library modules with tracing support.
-
-This variant allows passing a 'LuaModuleTrace' tracer that will receive
-events from all primitive functions in the modules.
-
-Uses 'contramap' to create sub-tracers for each module from the union tracer:
-
-@
-let fsTracer = contramap FsTrace moduleTracer
-    httpTracer = contramap HttpTrace moduleTracer
-    timeTracer = contramap TimeTrace moduleTracer
-    textTracer = contramap TextTrace moduleTracer
-    jsonTracer = contramap JsonTrace moduleTracer
-    toolsTracer = contramap ToolsTrace moduleTracer
-@
--}
-registerStandardModulesWithTracer ::
-    Tracer IO LuaModuleTrace ->
-    Lua.State ->
-    LuaToolboxDescription ->
-    IO ()
-registerStandardModulesWithTracer moduleTracer lstate desc =
-    registerStandardModulesWithPortal moduleTracer lstate desc Nothing
-
-{- | Register all standard library modules with tracing support and optional portal.
-
-This variant includes the tools module with portal support. It is called
-during script execution when a portal is available.
+This variant includes the tools module with portal support.
 
 The portal enables Lua scripts to call other tools through tools.call().
 -}
-registerStandardModulesWithPortal ::
+registerSandardModules ::
     Tracer IO LuaModuleTrace ->
     Lua.State ->
     LuaToolboxDescription ->
-    Maybe ToolPortal ->
+    ToolPortal ->
     IO ()
-registerStandardModulesWithPortal moduleTracer lstate desc mPortal = do
+registerSandardModules moduleTracer lstate desc portal = do
     -- Create individual module tracers using contramap
     let fsTracer = contramap FsTrace moduleTracer
     let httpTracer = contramap HttpTrace moduleTracer
@@ -492,7 +437,7 @@ registerStandardModulesWithPortal moduleTracer lstate desc mPortal = do
         ToolsMod.ToolsConfig
             { ToolsMod.toolsAllowedTools = desc.luaToolboxAllowedTools
             }
-        mPortal
+        portal
 
 {- | Close a toolbox and release its resources.
 
@@ -677,17 +622,15 @@ The script should return a value that can be converted to JSON:
 * number -> number
 * string -> string
 * table -> object/array (if table has only integer keys starting at 1, it's an array)
-
-Without portal - just execute script with no tool access.
 -}
 executeScript ::
     Toolbox ->
     -- | Lua script source
     Text.Text ->
+    ToolPortal ->
     IO (Either ScriptError ExecutionResult)
-executeScript toolbox script =
-    -- Without portal - just execute script with no tool access
-    executeScriptWithPortal (Tracer (const (pure ()))) toolbox script Nothing
+executeScript toolbox script portal =
+    executeScriptWithPortal (Tracer (const (pure ()))) toolbox script portal
 
 {- | Execute a Lua script with access to the tool portal.
 
@@ -706,13 +649,13 @@ executeScriptWithPortal ::
     Toolbox ->
     -- | Lua script source
     Text.Text ->
-    -- | Optional tool portal for calling other tools
-    Maybe ToolPortal ->
+    -- | Tool portal for calling other tools
+    ToolPortal ->
     IO (Either ScriptError ExecutionResult)
-executeScriptWithPortal tracer toolbox script mPortal = do
+executeScriptWithPortal tracer toolbox script portal = do
     -- Acquire lock to serialize access within this toolbox instance
     withMVar (toolboxLock toolbox) $ \() ->
-        executeScriptInternal tracer toolbox script mPortal
+        executeScriptInternal tracer toolbox script portal
 
 -- | Helper to run IO action with MVar lock
 withMVar :: MVar a -> (a -> IO b) -> IO b
@@ -726,9 +669,9 @@ executeScriptInternal ::
     Tracer IO Trace ->
     Toolbox ->
     Text.Text ->
-    Maybe ToolPortal ->
+    ToolPortal ->
     IO (Either ScriptError ExecutionResult)
-executeScriptInternal tracer toolbox script mPortal = do
+executeScriptInternal tracer toolbox script portal = do
     startTime <- getCurrentTime
     let lstate = toolboxLuaState toolbox
     let maxTime = (toolboxConfig toolbox).luaToolboxMaxExecutionTimeSeconds
@@ -736,11 +679,11 @@ executeScriptInternal tracer toolbox script mPortal = do
 
     -- Re-register modules with portal before execution
     -- This ensures the tools module has access to the portal
-    registerStandardModulesWithPortal
+    registerSandardModules
         (Tracer (const (pure ())))
         lstate
         desc
-        mPortal
+        portal
 
     -- Trace script execution start with full script content
     runTracer tracer (ScriptExecutionStartTrace script)
@@ -790,3 +733,4 @@ executeScriptInternal tracer toolbox script mPortal = do
                         { resultValues = val
                         , resultExecutionTime = execTime
                         }
+

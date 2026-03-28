@@ -37,7 +37,7 @@ module System.Agents.Session.Base (
 
 import Data.Text (Text)
 
-import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.Context (ToolPortal, ToolExecutionContext)
 
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Session.Types
@@ -107,6 +107,7 @@ data Agent r = Agent
     , sysTools :: IO [SystemTool]
     , usrQuery :: IO (Maybe UserQuery)
     , toolCall :: ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+    , toolPortal :: ToolPortal
     , --
       complete :: LlmCompletion -> IO (LlmResponse, [LlmToolCall])
     , --

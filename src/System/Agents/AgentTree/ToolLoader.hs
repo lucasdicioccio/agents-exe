@@ -530,7 +530,8 @@ loadLuaToolbox ::
 loadLuaToolbox toolsTVar desc = do
     let silentTracer = Tracer $ \_ -> pure ()
 
-    -- Initialize the toolbox
+    -- Initialize the toolbox with a dummy portal
+    -- The actual portal is passed at execution time
     initResult <- LuaToolbox.initializeToolbox silentTracer desc
 
     case initResult of
@@ -642,3 +643,4 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
+

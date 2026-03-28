@@ -1074,8 +1074,8 @@ The tool accepts a 'script' parameter containing the Lua source code.
 
 The tool execution:
 1. Extracts the script from the arguments
-2. Gets the tool portal and allowed tools from the execution context
-3. Executes the script with portal access (if available)
+2. Gets the tool portal from the execution context
+3. Executes the script with portal access
 4. Returns the result as JSON
 
 Errors are properly caught and returned as LuaToolError.
@@ -1092,21 +1092,17 @@ luaTool box =
         -- Extract script from arguments
         case KeyMap.lookup (AesonKey.fromText "script") v of
             Just (Aeson.String script) -> do
-                -- Get portal and allowed tools from context
-                let mPortal = Context.ctxToolPortal ctx
-                -- let allowedTools = Context.ctxAllowedTools ctx
+                        -- Execute script with portal, passing the tracer for detailed logging
+                        result <-
+                            LuaTools.executeScriptWithPortal
+                                (contramap LuaToolsTrace tracer)
+                                box
+                                script
+                                (Context.ctxToolPortal ctx)
 
-                -- Execute script with portal, passing the tracer for detailed logging
-                result <-
-                    LuaTools.executeScriptWithPortal
-                        (contramap LuaToolsTrace tracer)
-                        box
-                        script
-                        mPortal
-
-                case result of
-                    Left err -> pure $ LuaToolError call (Text.pack $ show err)
-                    Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
+                        case result of
+                            Left err -> pure $ LuaToolError call (Text.pack $ show err)
+                            Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
             _ ->
                 pure $ LuaToolError call "Missing 'script' parameter or invalid type"
     run _tracer _ctx _ =
@@ -1350,3 +1346,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

@@ -162,7 +162,18 @@ tool) wants to call another tool, it uses this portal.
 Note: The portal is synchronous (IO ToolResult) for simplicity.
 Async support can be added later if needed.
 -}
+
 type ToolPortal = ToolCall -> IO ToolResult
+
+dummyPortal :: ToolPortal
+dummyPortal _call =
+    pure $
+        ToolResult
+            { resultData = Aeson.object [("error", Aeson.String "Tool portal not available during initialization")]
+            , resultDuration = 0
+            , resultTraceId = "dummy"
+            }
+
 
 -------------------------------------------------------------------------------
 -- Tool Execution Context
@@ -233,8 +244,8 @@ data ToolExecutionContext = ToolExecutionContext
     {- ^ Optional maximum recursion depth. When specified, nested agent
     calls that would exceed this depth will fail with a 'RecursionError'.
     -}
-    , ctxToolPortal :: Maybe ToolPortal
-    {- ^ Optional tool portal for inter-toolbox communication. When present,
+    , ctxToolPortal :: ToolPortal
+    {- ^ Tool portal for inter-toolbox communication. When present,
     tools can use this callback to invoke other tools. This enables Lua
     scripts and other tools to orchestrate multiple tool calls.
     -}
@@ -284,9 +295,7 @@ instance Show ToolExecutionContext where
             ++ show (ctxAllowedTools ctx)
             ++ " }"
       where
-        portalStr = case ctxToolPortal ctx of
-            Nothing -> "Nothing"
-            Just _ -> "Just <portal>"
+        portalStr = "<portal>"
 
 {- | JSON serialization support for 'ToolExecutionContext'.
 Note: The tool portal function is not serialized (functions can't be serialized).
@@ -315,41 +324,24 @@ instance FromJSON ToolExecutionContext where
             <*> v .: "fullSession"
             <*> v .: "callStack"
             <*> v .: "maxDepth"
-            <*> pure Nothing -- ToolPortal can't be deserialized
+            <*> pure dummyPortal
             <*> v .: "allowedTools"
 
 -------------------------------------------------------------------------------
 -- Construction Helpers
 -------------------------------------------------------------------------------
 
-{- | Create a complete 'ToolExecutionContext' with all fields populated.
-
-This is the preferred constructor when you have all context information
-available and want to provide tools with full session access.
-
-Example:
-
-@
-context <- mkToolExecutionContext
-    sessionId
-    conversationId
-    turnId
-    (Just agentId)
-    (Just fullSession)
-    [CallStackEntry "root" conversationId 0]
-    Nothing
-@
--}
 mkToolExecutionContext ::
     SessionId ->
     ConversationId ->
     TurnId ->
     Maybe AgentId ->
     Maybe Session ->
+    ToolPortal ->
     [CallStackEntry] ->
     Maybe Int ->
     ToolExecutionContext
-mkToolExecutionContext sessId convId tId mAgentId mSession stack maxDepth =
+mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth =
     ToolExecutionContext
         { ctxSessionId = sessId
         , ctxConversationId = convId
@@ -358,7 +350,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession stack maxDepth =
         , ctxFullSession = mSession
         , ctxCallStack = stack
         , ctxMaxDepth = maxDepth
-        , ctxToolPortal = Nothing
+        , ctxToolPortal = portal
         , ctxAllowedTools = []
         }
 
@@ -381,8 +373,9 @@ mkMinimalContext ::
     SessionId ->
     ConversationId ->
     TurnId ->
+    ToolPortal ->
     ToolExecutionContext
-mkMinimalContext sessId convId tId =
+mkMinimalContext sessId convId tId portal =
     ToolExecutionContext
         { ctxSessionId = sessId
         , ctxConversationId = convId
@@ -391,7 +384,7 @@ mkMinimalContext sessId convId tId =
         , ctxFullSession = Nothing
         , ctxCallStack = []
         , ctxMaxDepth = Nothing
-        , ctxToolPortal = Nothing
+        , ctxToolPortal = portal
         , ctxAllowedTools = []
         }
 
@@ -419,10 +412,11 @@ mkRootContext ::
     TurnId ->
     Maybe AgentId ->
     Maybe Session ->
+    ToolPortal ->
     -- | Optional maximum recursion depth limit
     Maybe Int ->
     ToolExecutionContext
-mkRootContext sessId convId tId mAgentId mSession maxDepth =
+mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
     ToolExecutionContext
         { ctxSessionId = sessId
         , ctxConversationId = convId
@@ -431,7 +425,7 @@ mkRootContext sessId convId tId mAgentId mSession maxDepth =
         , ctxFullSession = mSession
         , ctxCallStack = [CallStackEntry "root" convId 0]
         , ctxMaxDepth = maxDepth
-        , ctxToolPortal = Nothing
+        , ctxToolPortal = portal
         , ctxAllowedTools = []
         }
 
@@ -463,7 +457,7 @@ mkPortalContext ::
     Maybe Session ->
     [CallStackEntry] ->
     Maybe Int ->
-    Maybe ToolPortal ->
+    ToolPortal ->
     [Text] -> -- allowed tools
     ToolExecutionContext
 mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowed =

@@ -25,10 +25,20 @@ import Test.Tasty.HUnit
 import Prod.Tracer (silent)
 
 import System.Agents.Base (LuaToolboxDescription (..))
-import System.Agents.Tools.Context (ToolResult (..))
+import System.Agents.Tools.Context (ToolPortal, ToolResult (..))
 import System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
+
+-- | Dummy portal for tests
+dummyPortal :: ToolPortal
+dummyPortal _call =
+    pure $
+        ToolResult
+            { resultData = Aeson.object [("error", Aeson.String "Tool portal not available in test")]
+            , resultDuration = 0
+            , resultTraceId = "dummy"
+            }
 
 tests :: TestTree
 tests =
@@ -199,7 +209,7 @@ securityDefaultsTests =
                     Left err -> assertFailure $ "Failed to initialize: " ++ err
                     Right toolbox -> do
                         -- Try to read a file - should return nil or error string
-                        scriptResult <- LuaToolbox.executeScript toolbox "return fs.read('/etc/passwd')"
+                        scriptResult <- LuaToolbox.executeScript toolbox "return fs.read('/etc/passwd')" dummyPortal
                         case scriptResult of
                             Left err -> 
                                 -- Script execution itself failed
@@ -227,7 +237,7 @@ securityDefaultsTests =
                 Left err -> assertFailure $ "Failed to initialize: " ++ err
                 Right toolbox -> do
                     -- Try to make HTTP request - should return nil or error string
-                    scriptResult <- LuaToolbox.executeScript toolbox "return http.get('http://example.com')"
+                    scriptResult <- LuaToolbox.executeScript toolbox "return http.get('http://example.com')" dummyPortal
                     case scriptResult of
                         Left err -> 
                             -- Script execution itself failed

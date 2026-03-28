@@ -22,12 +22,20 @@ Lua API:
 >     local data = json.decode(result.result_txt)
 >     print(data.stdout)
 > end
+>
+> -- List available tools
+> local availableTools = tools.list()
+> for i, toolName in ipairs(availableTools) do
+>     print("Tool: " .. toolName)
+> end
 
-The result table has the following structure:
+The result table from tools.call has the following structure:
 * status: "ok" | "error" | "not-found" | "not-allowed"
 * result_txt: JSON string with result data (empty string on error)
 * duration: execution time in seconds (number, optional)
 * trace_id: trace identifier string (optional)
+
+The tools.list() function returns an array of tool name strings.
 -}
 module System.Agents.Tools.LuaToolbox.Modules.Tools (
     ToolsConfig (..),
@@ -67,8 +75,6 @@ data ToolsTrace
       ToolsResultTrace !Text !Text !Aeson.Value
     | -- | Tool call blocked (not in whitelist)
       ToolsBlockedTrace !Text ![Text]
-    | -- | Tool call failed - portal not available
-      ToolsNoPortalTrace !Text
     deriving (Show, Eq)
 
 {- | Tools module configuration.
@@ -94,16 +100,48 @@ registerToolsModule ::
     Tracer IO ToolsTrace ->
     Lua.State ->
     ToolsConfig ->
-    Maybe ToolPortal ->
+    ToolPortal ->
     IO ()
-registerToolsModule tracer lstate config mPortal = Lua.runWith lstate $ do
+registerToolsModule tracer lstate config portal = Lua.runWith lstate $ do
     Lua.newtable
 
     Lua.pushName "call"
-    Lua.pushHaskellFunction (luaCall tracer config mPortal)
+    Lua.pushHaskellFunction (luaCall tracer config portal)
+    Lua.settable (Lua.nthTop 3)
+
+    Lua.pushName "list"
+    Lua.pushHaskellFunction (luaList config)
     Lua.settable (Lua.nthTop 3)
 
     Lua.setglobal (Lua.Name "tools")
+
+{- | Lua function to list available tools.
+Usage: tools.list() -> array of tool name strings
+Returns an array containing all tool names in the allowed whitelist.
+-}
+luaList ::
+    ToolsConfig ->
+    Lua.LuaE Lua.Exception Lua.NumResults
+luaList config = do
+    -- Pop any arguments (ignore them)
+    top <- Lua.gettop
+    Lua.pop (getStackInt top)
+
+    -- Create result array table
+    Lua.newtable
+
+    -- Add each allowed tool to the array
+    let allowedTools = toolsAllowedTools config
+    mapM_ (\(idx, toolName) -> pushToolName (idx + 1) toolName) (zip [0..] allowedTools)
+
+    -- Return the array
+    pure 1
+  where
+    pushToolName :: Int -> Text -> Lua.LuaE Lua.Exception ()
+    pushToolName idx toolName = do
+        Lua.pushinteger (fromIntegral idx)
+        Lua.pushstring (Text.encodeUtf8 toolName)
+        Lua.settable (Lua.nthTop 3)
 
 {- | Lua function to call a tool through the portal.
 Usage: tools.call(toolName, payload) -> result table
@@ -111,9 +149,9 @@ Usage: tools.call(toolName, payload) -> result table
 luaCall ::
     Tracer IO ToolsTrace ->
     ToolsConfig ->
-    Maybe ToolPortal ->
+    ToolPortal ->
     Lua.LuaE Lua.Exception Lua.NumResults
-luaCall tracer config mPortal = do
+luaCall tracer config portal = do
     top <- Lua.gettop
     let topInt = getStackInt top
 
@@ -131,26 +169,19 @@ luaCall tracer config mPortal = do
 
             let toolName = Text.decodeUtf8 toolNameBytes
 
-            -- Check if portal is available
-            case mPortal of
-                Nothing -> do
-                    liftIO $ runTracer tracer (ToolsNoPortalTrace toolName)
-                    pushErrorResult "not-found" "Tool portal not available" Nothing Nothing
+            -- Check whitelist (empty list = no tools allowed)
+            if not (isToolAllowed config toolName)
+                then do
+                    liftIO $ runTracer tracer (ToolsBlockedTrace toolName (toolsAllowedTools config))
+                    pushErrorResult "not-allowed" ("Tool '" <> toolName <> "' not in allowed whitelist") Nothing Nothing
                     pure 1
-                Just portal -> do
-                    -- Check whitelist (empty list = no tools allowed)
-                    if not (isToolAllowed config toolName)
-                        then do
-                            liftIO $ runTracer tracer (ToolsBlockedTrace toolName (toolsAllowedTools config))
-                            pushErrorResult "not-allowed" ("Tool '" <> toolName <> "' not in allowed whitelist") Nothing Nothing
-                            pure 1
-                        else do
-                            -- Execute the tool call through portal
-                            liftIO $ runTracer tracer (ToolsCallTrace toolName payloadValue)
-                            result <- liftIO $ callToolThroughPortal portal toolName payloadValue
-                            liftIO $ runTracer tracer (ToolsResultTrace toolName (resultStatus result) (resultData result))
-                            pushToolResult result
-                            pure 1
+                else do
+                    -- Execute the tool call through portal
+                    liftIO $ runTracer tracer (ToolsCallTrace toolName payloadValue)
+                    result <- liftIO $ callToolThroughPortal portal toolName payloadValue
+                    liftIO $ runTracer tracer (ToolsResultTrace toolName (resultStatus result) (resultData result))
+                    pushToolResult result
+                    pure 1
 
 {- | Check if a tool is in the allowed whitelist.
 Empty whitelist means NO tools are allowed (secure default).
@@ -374,3 +405,4 @@ collectObjectPairs = do
                 key <- Lua.tostring' (Lua.nthTop 2)
                 val <- luaToJsonValueTop
                 go ((AesonKey.fromText (Text.decodeUtf8 key), val) : acc)
+
