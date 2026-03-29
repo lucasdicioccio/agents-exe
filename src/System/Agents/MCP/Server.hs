@@ -67,6 +67,7 @@ import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolSchema as ToolSchema
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import qualified System.Agents.ToolPortal as ToolPortal
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -303,6 +304,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
     -- Read tools from the OS-native TVar
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (AgentTree.osNodeTools node)
 
+    let tp = ToolPortal.makeToolPortal silent (AgentTree.osNodeTools node)
     -- Create the agent with the naive step function that stops when no tool calls remain
     let agent =
             Agent
@@ -311,7 +313,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
                 , sysTools = pure sTools
                 , usrQuery = pure (Just $ UserQuery query)
                 , toolCall = executeLlmToolCall silent (AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = error "TODO: tool-portal"
+                , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }

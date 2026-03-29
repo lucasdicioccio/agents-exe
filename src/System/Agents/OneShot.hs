@@ -66,6 +66,7 @@ import System.Agents.ToolSchema (ToolName(..), ToolDescription(..), ParamPropert
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 import qualified Data.Aeson.Key as AesonKey
+import qualified System.Agents.ToolPortal as ToolPortal
 
 -- | Controls where thinking content should be output.
 data ThinkingOutput
@@ -251,6 +252,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                 , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
                 }
     let completeF = mkOpenAICompletion completionConfig
+    let tp = ToolPortal.makeToolPortal (contramap (ToolPortalTrace (Base.slug agentCfg)) tracer) (osNodeTools node)
 
     pure $
         agentStoreSession store mPath convId $
@@ -270,7 +272,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
                 , toolCall = executeLlmToolCall (contramap (ToolTrace agentCfg.slug) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = error "TODO: tool-portal"
+                , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }

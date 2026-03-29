@@ -12,6 +12,7 @@ import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 import qualified System.Agents.Tools.Trace as Tools
+import qualified System.Agents.ToolPortal as ToolPortal
 
 -------------------------------------------------------------------------------
 data Trace
@@ -26,6 +27,7 @@ data Trace
     | SkillsToolboxTrace !Text !SkillsToolbox.Trace
     | SkillsToolboxInitError !Text !String
     | ToolTrace !Text !Tools.ToolTrace
+    | ToolPortalTrace !Text !ToolPortal.Trace
     deriving (Show)
 
 traceAgentSlug :: Trace -> AgentSlug
@@ -40,6 +42,7 @@ traceAgentSlug (LuaToolboxTrace tName _) = tName
 traceAgentSlug (SkillsToolboxTrace tName _) = tName
 traceAgentSlug (SkillsToolboxInitError tName _) = tName
 traceAgentSlug (ToolTrace tName _) = tName
+traceAgentSlug (ToolPortalTrace tName _) = tName
 
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
@@ -53,6 +56,7 @@ traceAgentId (LuaToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-0000
 traceAgentId (SkillsToolboxTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (SkillsToolboxInitError _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (ToolTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
+traceAgentId (ToolPortalTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 
 traceConversationId :: Trace -> Maybe ConversationId
 traceConversationId (AgentTrace_Loading _ _ _) = Nothing
@@ -66,6 +70,7 @@ traceConversationId (LuaToolboxTrace _ _) = Nothing
 traceConversationId (SkillsToolboxTrace _ _) = Nothing
 traceConversationId (SkillsToolboxInitError _ _) = Nothing
 traceConversationId (ToolTrace _ _) = Nothing
+traceConversationId (ToolPortalTrace _ _) = Nothing
 
 data ConversationTrace
     = NewConversation

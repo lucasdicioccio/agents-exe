@@ -31,6 +31,7 @@ Security:
 * Execution time is tracked for each portal invocation
 -}
 module System.Agents.ToolPortal (
+    Trace(..),
     -- * Portal creation
     makeToolPortal,
 
@@ -56,7 +57,7 @@ import Prod.Tracer (Tracer (..), contramap)
 import System.Agents.Base (newConversationId)
 import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
+import System.Agents.Tools.Base (CallResult (..), Tool (..))
 import System.Agents.Tools.Context (
     ToolCall (..),
     ToolPortal,
@@ -123,6 +124,7 @@ makeToolPortal tracer registrations = portal
   where
     portal :: ToolPortal
     portal toolCall = do
+        print toolCall
         startTime <- getCurrentTime
         result <- callToolViaPortal tracer portal registrations toolCall -- TODO(lucas): clarify stack recursion here
         endTime <- getCurrentTime
@@ -164,7 +166,7 @@ callToolViaPortal ::
     ToolPortal ->
     TVar [ToolRegistration] ->
     ToolCall ->
-    IO (Either PortalError (CallResult ()))
+    IO (Either PortalError (CallResult ToolCall))
 callToolViaPortal tracer portal registrations toolCall = do
     regs <- readTVarIO registrations
     -- Find tool by name
@@ -219,7 +221,7 @@ executeTool ::
     ToolPortal ->
     Tool ToolCall ->
     Aeson.Value ->
-    IO (Either Text (CallResult ()))
+    IO (Either Text (CallResult ToolCall))
 executeTool toolTracer portal tool args = do
     -- Create minimal context without portal
     sessId <- newSessionId
@@ -235,7 +237,7 @@ executeTool toolTracer portal tool args = do
             pure $ Left $ Text.pack $ show e
         Right callResult ->
             -- Strip the OpenAI.ToolCall from the result
-            pure $ Right $ mapCallResult (const ()) callResult
+            pure $ Right callResult
 
 -------------------------------------------------------------------------------
 -- Result Conversion
@@ -246,7 +248,7 @@ executeTool toolTracer portal tool args = do
 Different tool types have different result shapes, so we normalize them
 to JSON for the portal interface.
 -}
-callResultToJson :: CallResult () -> Aeson.Value
+callResultToJson :: forall a. CallResult a -> Aeson.Value
 callResultToJson (BlobToolSuccess _ bs) =
     Aeson.object
         [ "type" .= ("blob" :: Text)

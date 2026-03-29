@@ -242,7 +242,7 @@ loadScript tracer path = do
             Right info -> pure $ Right $ ScriptDescription path info
 
 data RunScriptError
-    = SerializeArgumentErrors FilePath String
+    = SerializeArgumentErrors FilePath Aeson.Value String
     | ScriptExecutionError FilePath ExitCode ByteString
     deriving (Show)
 
@@ -379,7 +379,7 @@ runValue tracer script mCtx val = do
     let maybeBehavior = script.scriptInfo.scriptEmptyResultBehavior
     case parseArgsForValue script val of
         Left err ->
-            pure $ Left $ SerializeArgumentErrors path err
+            pure $ Left $ SerializeArgumentErrors path val err
         Right (argz, stdin) -> do
             let args = "run" : [Text.unpack arg | arg <- argz]
             runTracer tracer (RunCommandStart path args)

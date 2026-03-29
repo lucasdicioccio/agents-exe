@@ -114,7 +114,7 @@ portalExecutionTests =
                 Left err -> assertFailure $ "Expected success, got error: " ++ show err
                 Right callResult -> do
                     case callResult of
-                        BlobToolSuccess () output -> output @?= "mock output"
+                        BlobToolSuccess toolCall output -> output @?= "mock output"
                         other -> assertFailure $ "Expected BlobToolSuccess, got: " ++ show other
         ]
 

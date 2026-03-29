@@ -45,17 +45,16 @@ module System.Agents.Tools.LuaToolbox.Modules.Tools (
 
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Text as AesonText
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Lazy as LazyText
-import qualified Data.Vector as Vector
 import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), runTracer)
 
 import System.Agents.Tools.Context (ToolCall (..), ToolPortal, ToolResult (..))
+import System.Agents.Tools.LuaToolbox.Utils (luaToJsonValue)
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -163,6 +162,7 @@ luaCall tracer config portal = do
         else do
             -- Get tool name from first argument
             toolNameBytes <- Lua.tostring' (Lua.nthTop 2)
+            Lua.pop 1
             -- Get payload table from second argument
             payloadValue <- luaTableToAeson (Lua.nthTop 1)
             Lua.pop topInt
@@ -289,119 +289,8 @@ luaTableToAeson idx = do
     -- Use the standard luaToJsonValue conversion from Utils
     -- First, we need to push a copy of the table/value to the top
     Lua.pushvalue idx
-    luaToJsonValueTop
-
--- | Convert the value at the top of the Lua stack to JSON.
-luaToJsonValueTop :: Lua.LuaE Lua.Exception Aeson.Value
-luaToJsonValueTop = do
-    ltype <- Lua.ltype (Lua.nthTop 1)
-    case ltype of
-        Lua.TypeNil -> do
-            Lua.pop 1
-            pure Aeson.Null
-        Lua.TypeBoolean -> do
-            b <- Lua.toboolean (Lua.nthTop 1)
-            Lua.pop 1
-            pure $ Aeson.Bool b
-        Lua.TypeNumber -> do
-            mNum <- Lua.tonumber (Lua.nthTop 1)
-            Lua.pop 1
-            case mNum of
-                Nothing -> pure Aeson.Null
-                Just n -> do
-                    let intVal = round n :: Integer
-                    if fromIntegral intVal == n
-                        then pure $ Aeson.Number (fromIntegral intVal)
-                        else pure $ Aeson.Number (fromRational (toRational n))
-        Lua.TypeString -> do
-            s <- Lua.tostring' (Lua.nthTop 1)
-            Lua.pop 1
-            pure $ Aeson.String (Text.decodeUtf8 s)
-        Lua.TypeTable -> do
-            convertTable
-        _ -> do
-            -- For other types, convert to null
-            Lua.pop 1
-            pure Aeson.Null
-
--- | Convert a Lua table to JSON (object or array)
-convertTable :: Lua.LuaE Lua.Exception Aeson.Value
-convertTable = do
-    -- Check if it's an array (integer keys starting at 1, contiguous)
-    isArr <- isArray
-    if isArr
-        then convertArray
-        else convertObject
-
--- | Check if the table at top of stack is an array
-isArray :: Lua.LuaE Lua.Exception Bool
-isArray = do
-    Lua.pushnil -- first key
-    isSequential 1
-  where
-    isSequential :: Int -> Lua.LuaE Lua.Exception Bool
-    isSequential expectedIdx = do
-        hasNext <- Lua.next (Lua.nthTop 2)
-        if not hasNext
-            then pure True
-            else do
-                isNum <- Lua.isnumber (Lua.nthTop 2)
-                if isNum
-                    then do
-                        mIdx <- Lua.tointeger (Lua.nthTop 2)
-                        case mIdx of
-                            Just idx
-                                | idx == fromIntegral expectedIdx -> do
-                                    Lua.pop 1
-                                    isSequential (expectedIdx + 1)
-                            _ -> do
-                                Lua.pop 2
-                                pure False
-                    else do
-                        Lua.pop 2
-                        pure False
-
--- | Convert array table to JSON Array
-convertArray :: Lua.LuaE Lua.Exception Aeson.Value
-convertArray = do
-    vals <- collectArrayValues
-    pure $ Aeson.Array (Vector.fromList vals)
-
--- | Collect values from an array table
-collectArrayValues :: Lua.LuaE Lua.Exception [Aeson.Value]
-collectArrayValues = do
-    len' <- Lua.rawlen (Lua.nthTop 1)
-    vals <-
-        mapM
-            ( \(i :: Integer) -> do
-                Lua.pushinteger (fromIntegral i)
-                _ <- Lua.gettable (Lua.nthTop 2)
-                luaToJsonValueTop
-            )
-            [1 .. fromIntegral len']
+    ret <- luaToJsonValue
     Lua.pop 1
-    pure vals
+    pure ret
 
--- | Convert object table to JSON Object
-convertObject :: Lua.LuaE Lua.Exception Aeson.Value
-convertObject = do
-    pairs <- collectObjectPairs
-    pure $ Aeson.Object (KeyMap.fromList pairs)
-
-collectObjectPairs :: Lua.LuaE Lua.Exception [(AesonKey.Key, Aeson.Value)]
-collectObjectPairs = do
-    Lua.pushnil
-    go []
-  where
-    go :: [(AesonKey.Key, Aeson.Value)] -> Lua.LuaE Lua.Exception [(AesonKey.Key, Aeson.Value)]
-    go acc = do
-        hasNext <- Lua.next (Lua.nthTop 2)
-        if not hasNext
-            then do
-                Lua.pop 1
-                pure acc
-            else do
-                key <- Lua.tostring' (Lua.nthTop 2)
-                val <- luaToJsonValueTop
-                go ((AesonKey.fromText (Text.decodeUtf8 key), val) : acc)
 

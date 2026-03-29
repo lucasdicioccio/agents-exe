@@ -44,6 +44,7 @@ import System.Agents.Session.Base (
     newSessionId,
     newTurnId,
  )
+import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.Session.Loop (run)
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
@@ -192,6 +193,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 }
     let completeF = mkOpenAICompletion completionConfig
 
+    let tp = ToolPortal.makeToolPortal (contramap (ToolPortalTrace (Base.slug agentCfg)) tracer) (osNodeTools node)
     convId <- newConversationId
     pure $
         agentStoreSession store Nothing convId $
@@ -201,7 +203,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
                 , toolCall = executeLlmToolCall (contramap (ToolTrace (Base.slug agentCfg)) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = error "TODO: tool-portal"
+                , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }
