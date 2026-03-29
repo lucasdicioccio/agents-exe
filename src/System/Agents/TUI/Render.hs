@@ -19,11 +19,11 @@ import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
 import System.Agents.Base (Agent (..), ConversationId)
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool)
+import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
 
 -------------------------------------------------------------------------------
 -- Attribute Names
@@ -301,7 +301,7 @@ render_agentInfo st =
         ]
     renderToolsSection (Just toolz) =
         [ txt "# Tools:"
-        , txt $ Text.unlines ["- " <> (OpenAI.getToolName $ OpenAI.toolName (declareTool tool)) | tool <- toolz]
+        , txt $ Text.unlines ["- " <> (tool.declareTool.toolDescriptionName.getToolName) | tool <- toolz]
         ]
     agentPrompt :: Agent -> [Widget N]
     agentPrompt agentCfg =

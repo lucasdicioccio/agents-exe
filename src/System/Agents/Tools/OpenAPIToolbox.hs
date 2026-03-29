@@ -114,7 +114,7 @@ import System.Agents.Tools.EndpointPredicate (
 import System.Agents.Tools.IO (RunError (..))
 import System.Agents.Tools.OpenAPI.Converter (
     NameMapping (..),
-    OpenAPITool (..),
+    InternalTool (..),
     buildToolNameMapping,
     convertOpenAPIToTools,
     findToolByNormalizedName,
@@ -214,7 +214,7 @@ The toolbox maintains:
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxBaseUrl :: Text
-    , toolboxTools :: [OpenAPITool]
+    , toolboxTools :: [InternalTool]
     -- ^ Tools converted from the OpenAPI spec (filtered if configFilter was provided)
     , toolboxNameMapping :: Map Text NameMapping
     -- ^ Mapping from normalized LLM names to original operation IDs
@@ -412,7 +412,7 @@ Returns 'Nothing' if no tool with that normalized name exists.
 getToolByNormalizedName ::
     Toolbox ->
     Text ->
-    Maybe OpenAPITool
+    Maybe InternalTool
 getToolByNormalizedName toolbox normalizedName = do
     -- Look up the original operation ID from the mapping
     originalOpId <- findToolByNormalizedName (toolboxNameMapping toolbox) normalizedName
@@ -430,7 +430,7 @@ returns results in the standard CallResult format.
 -}
 createToolHandler ::
     Toolbox ->
-    OpenAPITool ->
+    InternalTool ->
     Tracer IO ToolTrace ->
     ToolExecutionContext ->
     Value ->
@@ -463,7 +463,7 @@ This function:
 -}
 handleToolCall ::
     Toolbox ->
-    OpenAPITool ->
+    InternalTool ->
     Value ->
     IO (Either Text (Text, ToolResult))
 handleToolCall toolbox tool args = do

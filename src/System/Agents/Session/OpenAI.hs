@@ -71,16 +71,18 @@ mkOpenAICompletion config completion = do
     systemToolToOpenAI :: SystemTool -> OpenAI.Tool
     systemToolToOpenAI (SystemTool (V1 tool)) =
         OpenAI.Tool
-            { OpenAI.toolName = OpenAI.ToolName $ tool.llmName
-            , OpenAI.toolDescription = tool.description
-            , OpenAI.toolParamProperties = tool.properties
-            }
+            $ ToolDescription
+                { toolDescriptionName = OpenAI.ToolName $ tool.llmName
+                , toolDescriptionText = tool.description
+                , toolDescriptionParamProperties = tool.properties
+                }
     systemToolToOpenAI (SystemTool (V0 (Aeson.Object v0obj))) =
         OpenAI.Tool
-            { OpenAI.toolName = OpenAI.ToolName $ extractName v0obj
-            , OpenAI.toolDescription = extractDescription v0obj
-            , OpenAI.toolParamProperties = extractParams v0obj
-            }
+            $ ToolDescription
+                { toolDescriptionName = ToolName $ extractName v0obj
+                , toolDescriptionText = extractDescription v0obj
+                , toolDescriptionParamProperties = extractParams v0obj
+                }
       where
         extractName :: KeyMap.KeyMap Aeson.Value -> Text
         extractName obj =
@@ -159,10 +161,11 @@ mkOpenAICompletion config completion = do
     systemToolToOpenAI (SystemTool (V0 other)) =
         -- Handle non-object V0 values by creating a minimal tool
         OpenAI.Tool
-            { OpenAI.toolName = OpenAI.ToolName "unknown_tool"
-            , OpenAI.toolDescription = "Unknown tool format: " <> Text.pack (show other)
-            , OpenAI.toolParamProperties = []
-            }
+            $ ToolDescription
+                { toolDescriptionName = OpenAI.ToolName "unknown_tool"
+                , toolDescriptionText = "Unknown tool format: " <> Text.pack (show other)
+                , toolDescriptionParamProperties = []
+                }
 
     -- Build the messages array for the OpenAI API
     buildMessages :: LlmCompletion -> [Aeson.Value]
@@ -257,8 +260,8 @@ mkOpenAICompletion config completion = do
                 Just calls -> map toolCallToLlmToolCall calls
          in (llmRsp, toolCalls)
 
-    -- Convert OpenAI ToolCall to LlmToolCall (wrapping the raw object)
-    toolCallToLlmToolCall :: OpenAI.ToolCall -> LlmToolCall
+    -- Convert OpenAI OpenAIToolCall to LlmToolCall (wrapping the raw object)
+    toolCallToLlmToolCall :: OpenAI.OpenAIToolCall -> LlmToolCall
     toolCallToLlmToolCall tc = LlmToolCall $ Aeson.Object tc.rawToolCall
 
 newConfig :: Tracer IO OpenAI.Trace -> IO OpenAICompletionConfig
@@ -269,3 +272,26 @@ newConfig tracer =
         <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
         <*> pure "gpt-4.1-mini"
         <*> pure OpenAI.OpenAIv1
+
+
+parseToolCall_openAI :: Aeson.Value -> Maybe OpenAI.OpenAIToolCall
+parseToolCall_openAI val =
+    case Aeson.parseMaybe Aeson.parseJSON val of
+        Just tc -> Just tc
+        Nothing ->
+            -- Try to extract from our LlmToolCall format
+            case val of
+                Aeson.Object obj ->
+                    case (KeyMap.lookup "id" obj, KeyMap.lookup "function" obj) of
+                        (Just (Aeson.String tid), Just funcVal) ->
+                            Just $
+                                OpenAI.OpenAIToolCall
+                                    { OpenAI.rawToolCall = obj
+                                    , OpenAI.toolCallId = tid
+                                    , OpenAI.toolCallType = KeyMap.lookup "type" obj >>= \v -> case v of Aeson.String t -> Just t; _ -> Nothing
+                                    , OpenAI.toolCallFunction = case Aeson.parseMaybe Aeson.parseJSON funcVal of
+                                        Just f -> f
+                                        Nothing -> OpenAI.ToolCallFunction (OpenAI.ToolName "") "" Nothing
+                                    }
+                        _ -> Nothing
+                _ -> Nothing

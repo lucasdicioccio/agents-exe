@@ -9,6 +9,7 @@ including portal execution, error handling, tracing, and the makeToolPortal func
 {-# LANGUAGE ScopedTypeVariables #-}
 module ToolPortalTests where
 
+import Control.Concurrent.STM.TVar (newTVarIO)
 import Data.Aeson (Value(..), object, (.=))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.IORef (newIORef, readIORef, modifyIORef')
@@ -27,6 +28,7 @@ import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools.Trace (ToolTrace(..))
+import System.Agents.ToolSchema (ToolDescription(..))
 
 -- | Test suite entry point
 toolPortalTestSuite :: TestTree
@@ -87,10 +89,10 @@ portalExecutionTests =
             let toolCall = ToolCall
                     { callToolName = "nonexistent-tool"
                     , callArgs = object []
-                    , callCallerId = "test-caller"
                     }
             
-            result <- callToolViaPortal silent (error "portal recursive loop") [] toolCall
+            registrations <- newTVarIO []
+            result <- callToolViaPortal silent (error "portal recursive loop") registrations toolCall
             
             case result of
                 Left (PortalToolNotFound name) -> name @?= "nonexistent-tool"
@@ -101,12 +103,12 @@ portalExecutionTests =
             let toolCall = ToolCall
                     { callToolName = "io_mock-tool"
                     , callArgs = object ["input" .= ("test" :: Text)]
-                    , callCallerId = "test-caller"
                     }
             
             let mockReg = makeMockRegistration "mock-tool"
+            registrations <- newTVarIO [mockReg]
             
-            result <- callToolViaPortal silent (error "portal recusrive loop") [mockReg] toolCall
+            result <- callToolViaPortal silent (error "portal recusrive loop") registrations toolCall
             
             case result of
                 Left err -> assertFailure $ "Expected success, got error: " ++ show err
@@ -135,7 +137,6 @@ makeToolPortalTests =
             let toolCall = ToolCall
                     { callToolName = "io_test-tool"
                     , callArgs = object []
-                    , callCallerId = "caller-1"
                     }
             
             result <- portal toolCall
@@ -176,7 +177,6 @@ makeToolPortalTests =
             let toolCall = ToolCall
                     { callToolName = "unknown-tool"
                     , callArgs = object []
-                    , callCallerId = "caller-2"
                     }
             
             result <- portal toolCall
@@ -205,7 +205,6 @@ makeToolPortalTests =
             let call1 = ToolCall
                     { callToolName = "io_tool-a"
                     , callArgs = object []
-                    , callCallerId = "multi-caller"
                     }
             result1 <- portal call1
             
@@ -213,7 +212,6 @@ makeToolPortalTests =
             let call2 = ToolCall
                     { callToolName = "io_tool-b"
                     , callArgs = object []
-                    , callCallerId = "multi-caller"
                     }
             result2 <- portal call2
             
@@ -247,7 +245,6 @@ portalTracingTests =
             let toolCall = ToolCall
                     { callToolName = "bash_test"
                     , callArgs = object ["cmd" .= ("echo hello" :: Text)]
-                    , callCallerId = "test-123"
                     }
             let nestedTraces = [BashToolsTrace $ BashTools.RunCommandStart "/bin/bash" ["echo hello"]]
             let portalTrace = PortalToolTrace
@@ -277,7 +274,6 @@ portalTracingTests =
             let toolCall = ToolCall
                     { callToolName = "io_tracing-tool"
                     , callArgs = object []
-                    , callCallerId = "trace-caller"
                     }
             
             result <- portal toolCall
@@ -375,16 +371,16 @@ makeMockRegistration name =
             }
         
         -- Mock OpenAI tool declaration
-        declareTool = OpenAI.Tool
-            { OpenAI.toolName = toolName
-            , OpenAI.toolDescription = "Mock tool for testing"
-            , OpenAI.toolParamProperties = []
+        declareTool = ToolDescription
+            { toolDescriptionName = toolName
+            , toolDescriptionText = "Mock tool for testing"
+            , toolDescriptionParamProperties = []
             }
         
         -- Find function that matches on this tool's name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call = 
-            if OpenAI.toolCallFunctionName (OpenAI.toolCallFunction call) == toolName
+            if call.callToolName == toolName.getToolName
                 then Just $ mapToolResult (const call) mockTool
                 else Nothing
         
@@ -416,16 +412,16 @@ makeTracingMockRegistration name =
             }
         
         -- Mock OpenAI tool declaration
-        declareTool = OpenAI.Tool
-            { OpenAI.toolName = toolName
-            , OpenAI.toolDescription = "Tracing mock tool for testing"
-            , OpenAI.toolParamProperties = []
+        declareTool = ToolDescription
+            { toolDescriptionName = toolName
+            , toolDescriptionText = "Tracing mock tool for testing"
+            , toolDescriptionParamProperties = []
             }
         
         -- Find function that matches on this tool's name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call = 
-            if OpenAI.toolCallFunctionName (OpenAI.toolCallFunction call) == toolName
+            if call.callToolName == toolName.getToolName
                 then Just $ mapToolResult (const call) mockTool
                 else Nothing
         

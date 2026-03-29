@@ -28,6 +28,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 -- Modules under test
+import System.Agents.ToolSchema (ToolDescription(..))
 import System.Agents.Tools.OpenAPI.Converter as Converter
 import System.Agents.Tools.OpenAPI.Resolver as Resolver
 import System.Agents.Tools.OpenAPI.Types as Types
@@ -614,13 +615,13 @@ test_toOpenAITool = testCase "Converts to OpenAI tool format" $ do
     let param = Parameter "id" ParamInPath Nothing True (Just schema)
     let op = Operation (Just "testOp") (Just "Test") (Just "A test op") [param] Nothing
     let apiTool = convertOperation "/test" "GET" op
-    let tool = toOpenAITool apiTool
+    let tool = toToolDescription apiTool
 
     -- Verify OpenAI.Tool fields
-    OpenAI.toolName tool @?= OpenAI.ToolName "openapi_testOp"
-    OpenAI.toolDescription tool @?= "Test:\nA test op"
+    toolDescriptionName tool @?= OpenAI.ToolName "openapi_testOp"
+    toolDescriptionText tool @?= "Test:\nA test op"
     -- Check that parameters are converted
-    assertBool "Has parameter properties" (not $ null $ OpenAI.toolParamProperties tool)
+    assertBool "Has parameter properties" (not $ null $ toolDescriptionParamProperties tool)
 
 -- -------------------------------------------------------------------------
 -- 4. Integration Tests

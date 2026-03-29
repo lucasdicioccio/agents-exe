@@ -132,8 +132,6 @@ data ToolCall = ToolCall
     -- ^ The name of the tool to invoke (e.g., "bash", "sqlite_query")
     , callArgs :: Aeson.Value
     -- ^ JSON arguments for the tool
-    , callCallerId :: Text
-    -- ^ Identifier for the calling tool (for tracing: who called whom)
     }
     deriving (Show, Eq, Generic)
 

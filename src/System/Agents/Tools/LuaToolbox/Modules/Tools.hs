@@ -198,7 +198,6 @@ callToolThroughPortal portal toolName args = do
             ToolCall
                 { callToolName = toolName
                 , callArgs = args
-                , callCallerId = "lua-tools-module"
                 }
     portal toolCall
 

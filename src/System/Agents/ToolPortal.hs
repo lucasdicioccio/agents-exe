@@ -41,12 +41,11 @@ module System.Agents.ToolPortal (
     PortalError (..),
 ) where
 
+import Control.Concurrent.STM (TVar, readTVarIO)
 import Control.Exception (SomeException, try)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Bifunctor (first)
-import Data.ByteString.Lazy (toStrict)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8)
@@ -55,7 +54,6 @@ import Data.Time (diffUTCTime, getCurrentTime)
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.Base (newConversationId)
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
@@ -66,6 +64,7 @@ import System.Agents.Tools.Context (
     mkMinimalContext,
  )
 import System.Agents.Tools.Trace (ToolTrace (..))
+import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
 
 data Trace = PortalCall !ToolCall !ToolTrace
     deriving (Show)
@@ -118,7 +117,7 @@ makeToolPortal ::
     -- | Tracer for tool execution events
     Tracer IO Trace ->
     -- | Registered tools available through the portal
-    [ToolRegistration] ->
+    TVar [ToolRegistration] ->
     ToolPortal
 makeToolPortal tracer registrations = portal
   where
@@ -163,20 +162,18 @@ a nested portal. This prevents infinite recursion through the portal.
 callToolViaPortal ::
     Tracer IO Trace ->
     ToolPortal ->
-    [ToolRegistration] ->
+    TVar [ToolRegistration] ->
     ToolCall ->
     IO (Either PortalError (CallResult ()))
 callToolViaPortal tracer portal registrations toolCall = do
+    regs <- readTVarIO registrations
     -- Find tool by name
-    case findToolByName registrations (callToolName toolCall) of
+    case findToolByName regs (callToolName toolCall) of
         Nothing ->
             pure $ Left $ PortalToolNotFound (callToolName toolCall)
         Just _tool -> do
-            -- Create a synthetic OpenAI ToolCall to match the existing API
-            let openaiCall = makeSyntheticToolCall toolCall
-
             -- Find the specific tool with the call context
-            case findMatchingTool registrations openaiCall of
+            case findMatchingTool regs toolCall of
                 Nothing ->
                     pure $ Left $ PortalToolNotFound (callToolName toolCall)
                 Just matchedTool -> do
@@ -201,37 +198,12 @@ findToolByName regs name =
   where
     matchesName :: Text -> ToolRegistration -> Bool
     matchesName n reg =
-        n == OpenAI.getToolName (OpenAI.toolName reg.declareTool)
+        n == reg.declareTool.toolDescriptionName.getToolName
 
-{- | Create a synthetic OpenAI ToolCall from a portal ToolCall.
-
-The existing findTool infrastructure expects OpenAI.ToolCall, so we
-convert our ToolCall to that format for compatibility.
--}
-makeSyntheticToolCall ::
-    ToolCall ->
-    OpenAI.ToolCall
-makeSyntheticToolCall tc =
-    OpenAI.ToolCall
-        { OpenAI.rawToolCall = KeyMap.empty
-        , OpenAI.toolCallId = "portal-" <> callCallerId tc
-        , OpenAI.toolCallType = Just "function"
-        , OpenAI.toolCallFunction =
-            OpenAI.ToolCallFunction
-                { OpenAI.toolCallFunctionName = OpenAI.ToolName (callToolName tc)
-                , OpenAI.toolCallFunctionArgsUnparsed = decodeUtf8 $ toStrict $ Aeson.encode (callArgs tc)
-                , OpenAI.toolCallFunctionArgs = Just (callArgs tc)
-                }
-        }
-
-{- | Find a matching tool from registrations using OpenAI ToolCall.
-
-Uses the findTool function from each registration to find a match.
--}
 findMatchingTool ::
     [ToolRegistration] ->
-    OpenAI.ToolCall ->
-    Maybe (Tool OpenAI.ToolCall)
+    ToolCall ->
+    Maybe (Tool ToolCall)
 findMatchingTool regs call =
     case concatMap (\r -> maybe [] (: []) (r.findTool call)) regs of
         (t : _) -> Just t
@@ -245,7 +217,7 @@ This is a safety measure to avoid potential infinite recursion.
 executeTool ::
     Tracer IO ToolTrace ->
     ToolPortal ->
-    Tool OpenAI.ToolCall ->
+    Tool ToolCall ->
     Aeson.Value ->
     IO (Either Text (CallResult ()))
 executeTool toolTracer portal tool args = do

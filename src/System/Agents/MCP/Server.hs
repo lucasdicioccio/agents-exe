@@ -25,7 +25,7 @@ import qualified Data.Text.Lazy as LText
 import Formatting ((%))
 import qualified Formatting as Format
 import qualified Network.JSONRPC as Rpc
-import Prod.Tracer (Tracer (..))
+import Prod.Tracer (silent) -- TODO(lucas): remove silent
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.AgentTree as AgentTree
@@ -55,7 +55,7 @@ import qualified System.Agents.Session.Base as SessionBase
 import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (
     OpenAICompletionConfig (..),
-    mkOpenAICompletion,
+    mkOpenAICompletion
  )
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.Session.Types (
@@ -63,9 +63,10 @@ import System.Agents.Session.Types (
     newTurnId,
  )
 import qualified System.Agents.Session.Types as SessionTypes
+import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolSchema as ToolSchema
-import System.Agents.Tools.ExecuteToolCall (executeToolCall)
+import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -276,9 +277,6 @@ runAgentWithQuery onProgress apiKeys tree query = do
     let node = AgentTree.osTreeRoot tree
     let agentCfg = AgentTree.osNodeConfig node
 
-    -- Create a no-op tracer (MCP server doesn't need tracing)
-    let tracer = Tracer $ const $ pure ()
-
     -- Get the API key for this agent
     let apiKeyIdentifier = apiKeyId agentCfg
     let mApiKey = lookupApiKey apiKeyIdentifier apiKeys
@@ -291,7 +289,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
     -- Create OpenAI completion config
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = tracer
+                { cfgTracer = silent
                 , cfgRuntime = httpRuntime
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ AgentTree.modelUrl agentCfg
                 , cfgModelName = AgentTree.modelName agentCfg
@@ -312,7 +310,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure (Just $ UserQuery query)
-                , toolCall = executeToolCall (AgentTree.osNodeAgentId node) convId (AgentTree.osNodeTools node)
+                , toolCall = executeLlmToolCall silent (AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = error "TODO: tool-portal"
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -353,9 +351,9 @@ runAgentWithQuery onProgress apiKeys tree query = do
     toolRegistrationToSystemTool :: ToolRegistration -> SessionTypes.SystemTool
     toolRegistrationToSystemTool reg =
         let llmTool = reg.declareTool
-            toolNameText = llmTool.toolName.getToolName
-            toolDesc = llmTool.toolDescription
-            toolProps = llmTool.toolParamProperties
+            toolNameText = llmTool.toolDescriptionName.getToolName
+            toolDesc = llmTool.toolDescriptionText
+            toolProps = llmTool.toolDescriptionParamProperties
             toolDefv1 =
                 SessionTypes.SystemToolDefinitionV1
                     toolNameText

@@ -86,7 +86,7 @@ import System.Agents.Tools.Base (
  )
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
-import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.Context (ToolCall, ToolExecutionContext)
 import qualified System.Agents.Tools.Context as Context
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
@@ -97,7 +97,7 @@ import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (
     NameMapping (..),
     normalizeForLLM,
-    toOpenAITool,
+    toToolDescription,
  )
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import System.Agents.Tools.OpenAPI.Types (Schema (..))
@@ -131,8 +131,8 @@ is passed at runtime via 'toolRun', not stored in the tool itself.
 data ToolRegistration
     = ToolRegistration
     { innerTool :: Tool ()
-    , declareTool :: OpenAI.Tool
-    , findTool :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+    , declareTool :: ToolDescription
+    , findTool :: ToolCall -> Maybe (Tool ToolCall)
     }
 
 instance Show ToolRegistration where
@@ -216,21 +216,21 @@ registerBashToolInLLM ::
     ToolRegistration
 registerBashToolInLLM script =
     let
-        matchName :: ScriptDescription -> OpenAI.ToolCall -> Bool
-        matchName bash call = bash2LLMName bash == call.toolCallFunction.toolCallFunctionName
+        matchName :: ScriptDescription -> ToolCall -> Bool
+        matchName bash call = getToolName (bash2LLMName bash) == call.callToolName
 
-        mapToolDescriptionBash2LLM :: ScriptDescription -> OpenAI.Tool
+        mapToolDescriptionBash2LLM :: ScriptDescription -> ToolDescription
         mapToolDescriptionBash2LLM bash =
-            OpenAI.Tool
-                { OpenAI.toolName = bash2LLMName bash
-                , OpenAI.toolDescription = bash.scriptInfo.scriptDescription
-                , OpenAI.toolParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
-                }
+                ToolDescription
+                    { toolDescriptionName = bash2LLMName bash
+                    , toolDescriptionText = bash.scriptInfo.scriptDescription
+                    , toolDescriptionParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
+                    }
 
         tool :: Tool ()
         tool = bashTool script
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
      in
         ToolRegistration tool (mapToolDescriptionBash2LLM script) find
@@ -247,22 +247,22 @@ registerIOScriptInLLM ::
     ToolRegistration
 registerIOScriptInLLM script llmProps =
     let
-        matchName :: IOScript a b -> OpenAI.ToolCall -> Bool
-        matchName io call = io2LLMName io == call.toolCallFunction.toolCallFunctionName
+        matchName :: IOScript a b -> ToolCall -> Bool
+        matchName io call = getToolName (io2LLMName io) == call.callToolName
 
         tool :: Tool ()
         tool = ioTool script
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
 
-        llmTool :: OpenAI.Tool
+        llmTool :: ToolDescription
         llmTool =
-            OpenAI.Tool
-                { OpenAI.toolName = io2LLMName script
-                , OpenAI.toolDescription = script.description.ioDescription
-                , OpenAI.toolParamProperties = llmProps
-                }
+                ToolDescription
+                    { toolDescriptionName = io2LLMName script
+                    , toolDescriptionText = script.description.ioDescription
+                    , toolDescriptionParamProperties = llmProps
+                    }
      in
         ToolRegistration tool llmTool find
 
@@ -278,8 +278,8 @@ registerMcpToolInLLM ::
     Either String ToolRegistration
 registerMcpToolInLLM box mcp =
     let
-        matchName :: McpTools.ToolDescription -> OpenAI.ToolCall -> Bool
-        matchName td call = mcp2LLMName box td == call.toolCallFunction.toolCallFunctionName
+        matchName :: McpTools.ToolDescription -> ToolCall -> Bool
+        matchName td call = getToolName (mcp2LLMName box td) == call.callToolName
 
         llmBasedSchema :: Either String [ParamProperty]
         llmBasedSchema = adaptSchema mcp.getToolDescription.inputSchema
@@ -290,18 +290,18 @@ registerMcpToolInLLM box mcp =
         llmDescription :: Text
         llmDescription = Maybe.fromMaybe "" mcp.getToolDescription.description
 
-        mapToolDescriptionMcp2LLM :: [ParamProperty] -> OpenAI.Tool
+        mapToolDescriptionMcp2LLM :: [ParamProperty] -> ToolDescription
         mapToolDescriptionMcp2LLM schema =
-            OpenAI.Tool
-                { OpenAI.toolName = llmName
-                , OpenAI.toolDescription = llmDescription
-                , OpenAI.toolParamProperties = schema
-                }
+                ToolDescription
+                    { toolDescriptionName = llmName
+                    , toolDescriptionText = llmDescription
+                    , toolDescriptionParamProperties = schema
+                    }
 
         tool :: Tool ()
         tool = mcpTool box mcp
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
      in
         case llmBasedSchema of
@@ -337,7 +337,7 @@ case registerOpenAPITool toolbox apiTool of
 -}
 registerOpenAPITool ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPI.OpenAPITool ->
+    OpenAPI.InternalTool ->
     Either String ToolRegistration
 registerOpenAPITool toolbox tool =
     let
@@ -360,10 +360,7 @@ registerOpenAPITool toolbox tool =
             Just _nameMapping ->
                 let
                     -- Convert to OpenAI Tool format with normalized name
-                    openaiTool =
-                        (toOpenAITool tool)
-                            { OpenAI.toolName = llmName
-                            }
+                    toolDescription = toToolDescription tool
 
                     -- Create the tool handler that uses the mapping
                     runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
@@ -384,16 +381,16 @@ registerOpenAPITool toolbox tool =
                             }
 
                     -- Find function - matches on the normalized LLM name
-                    find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+                    find :: ToolCall -> Maybe (Tool ToolCall)
                     find call =
-                        if call.toolCallFunction.toolCallFunctionName == llmName
+                        if call.callToolName == getToolName llmName
                             then Just $ mapToolResult (const call) tool'
                             else Nothing
                  in
                     Right $
                         ToolRegistration
                             { innerTool = mapToolResult (const ()) tool'
-                            , declareTool = openaiTool
+                            , declareTool = toolDescription
                             , findTool = find
                             }
 
@@ -437,7 +434,7 @@ registerOpenAPITools ::
     IO (Either String [ToolRegistration])
 registerOpenAPITools toolbox =
     -- Fail fast - return first error encountered
-    let registerAll :: [OpenAPI.OpenAPITool] -> Either String [ToolRegistration] -> Either String [ToolRegistration]
+    let registerAll :: [OpenAPI.InternalTool] -> Either String [ToolRegistration] -> Either String [ToolRegistration]
         registerAll [] acc = acc
         registerAll (t : ts) (Right regs) =
             case registerOpenAPITool toolbox t of
@@ -457,7 +454,7 @@ provided for backward compatibility.
 -}
 registerOpenAPIToolInLLM ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPI.OpenAPITool ->
+    OpenAPI.InternalTool ->
     Either String ToolRegistration
 registerOpenAPIToolInLLM = registerOpenAPITool
 
@@ -503,12 +500,12 @@ registerPostgRESTool toolbox tool =
         paramProps = buildPostgRESTParamProperties params
 
         -- Create the OpenAI Tool declaration
-        openaiTool =
-            OpenAI.Tool
-                { OpenAI.toolName = llmName
-                , OpenAI.toolDescription = prtDescription tool
-                , OpenAI.toolParamProperties = paramProps
-                }
+        toolDescription =
+                ToolDescription
+                    { toolDescriptionName = llmName
+                    , toolDescriptionText = prtDescription tool
+                    , toolDescriptionParamProperties = paramProps
+                    }
 
         -- Create the tool handler
         runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
@@ -529,15 +526,15 @@ registerPostgRESTool toolbox tool =
                 }
 
         -- Find function - matches on the LLM name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
      in Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
-                , declareTool = openaiTool
+                , declareTool = toolDescription
                 , findTool = find
                 }
 
@@ -762,27 +759,27 @@ registerSqliteTool box =
                 }
             ]
 
-        openaiTool =
-            OpenAI.Tool
-                { OpenAI.toolName = llmName
-                , OpenAI.toolDescription = box.toolboxDescription
-                , OpenAI.toolParamProperties = paramProps
-                }
+        toolDescription =
+                ToolDescription
+                    { toolDescriptionName = llmName
+                    , toolDescriptionText = box.toolboxDescription
+                    , toolDescriptionParamProperties = paramProps
+                    }
 
         -- Create the tool
         tool' = sqliteTool box
 
         -- Find function - matches on the LLM name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
-                , declareTool = openaiTool
+                , declareTool = toolDescription
                 , findTool = find
                 }
 
@@ -825,27 +822,27 @@ registerSystemTool box =
                 }
             ]
 
-        openaiTool =
-            OpenAI.Tool
-                { OpenAI.toolName = llmName
-                , OpenAI.toolDescription = "Provides system information: " <> box.toolboxDescription
-                , OpenAI.toolParamProperties = paramProps
-                }
+        toolDescription =
+                ToolDescription
+                    { toolDescriptionName = llmName
+                    , toolDescriptionText = "Provides system information: " <> box.toolboxDescription
+                    , toolDescriptionParamProperties = paramProps
+                    }
 
         -- Create the tool
         tool' = systemTool box
 
         -- Find function - matches on the LLM name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
-                , declareTool = openaiTool
+                , declareTool = toolDescription
                 , findTool = find
                 }
 
@@ -946,27 +943,27 @@ registerDeveloperTool box =
                 }
             ]
 
-        openaiTool =
-            OpenAI.Tool
-                { OpenAI.toolName = llmName
-                , OpenAI.toolDescription = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
-                , OpenAI.toolParamProperties = paramProps
-                }
+        toolDescription =
+                ToolDescription
+                    { toolDescriptionName = llmName
+                    , toolDescriptionText = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
+                    , toolDescriptionParamProperties = paramProps
+                    }
 
         -- Create the tool
         tool' = developerTool box
 
         -- Find function - matches on the LLM name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
-                , declareTool = openaiTool
+                , declareTool = toolDescription
                 , findTool = find
                 }
 
@@ -1029,29 +1026,29 @@ registerLuaTool box =
             ]
 
         -- Extract the description from the toolbox config
-        toolDescription = luaToolboxDescription (LuaTools.toolboxConfig box)
+        luaDescription = luaToolboxDescription (LuaTools.toolboxConfig box)
 
-        openaiTool =
-            OpenAI.Tool
-                { OpenAI.toolName = llmName
-                , OpenAI.toolDescription = toolDescription
-                , OpenAI.toolParamProperties = paramProps
-                }
+        toolDescription =
+                ToolDescription
+                    { toolDescriptionName = llmName
+                    , toolDescriptionText = luaDescription
+                    , toolDescriptionParamProperties = paramProps
+                    }
 
         -- Create the tool
         tool' = luaTool box
 
         -- Find function - matches on the LLM name
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
-                , declareTool = openaiTool
+                , declareTool = toolDescription
                 , findTool = find
                 }
 

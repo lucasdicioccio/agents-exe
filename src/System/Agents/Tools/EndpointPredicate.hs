@@ -363,7 +363,7 @@ matchesTool _ _ = True
 Extracts the relevant endpoint information from the OpenAPI tool
 and evaluates the predicate.
 -}
-matchesOpenAPITool :: EndpointPredicate -> OpenAPI.OpenAPITool -> Bool
+matchesOpenAPITool :: EndpointPredicate -> OpenAPI.InternalTool -> Bool
 matchesOpenAPITool predicate tool =
     let op = OpenAPI.toolOperation tool
         info =

@@ -149,7 +149,7 @@ and the execution uses the HTTP runtime from the toolbox.
 -}
 openapiTool ::
     OpenAPIToolbox.Toolbox ->
-    OpenAPI.OpenAPITool ->
+    OpenAPI.InternalTool ->
     Tool ()
 openapiTool toolbox apiTool =
     let opId = fromMaybe (OpenAPI.toolName apiTool) (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation apiTool))

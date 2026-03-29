@@ -58,11 +58,12 @@ import System.Agents.Session.Base
 import System.Agents.Session.Loop
 import System.Agents.Session.OpenAI
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
+import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import System.Agents.Tools.ExecuteToolCall (executeToolCall)
+import System.Agents.ToolSchema (ToolName(..), ToolDescription(..), ParamProperty (..), ParamType (..))
+import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 import qualified Data.Aeson.Key as AesonKey
 
@@ -268,7 +269,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeToolCall (osNodeAgentId node) convId (osNodeTools node)
+                , toolCall = executeLlmToolCall (contramap (ToolTrace agentCfg.slug) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = error "TODO: tool-portal"
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -280,18 +281,18 @@ toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool
         toolDefv1 =
             SystemToolDefinitionV1
-                { name = llmTool.toolName.getToolName
-                , llmName = llmTool.toolName.getToolName
-                , description = llmTool.toolDescription
-                , properties = llmTool.toolParamProperties
+                { name = llmTool.toolDescriptionName.getToolName
+                , llmName = llmTool.toolDescriptionName.getToolName
+                , description = llmTool.toolDescriptionText
+                , properties = llmTool.toolDescriptionParamProperties
                 , raw =
                     Aeson.object
                         [ "type" .= ("function" :: Text)
                         , "function"
                             .= Aeson.object
-                                [ "name" .= llmTool.toolName.getToolName
-                                , "description" .= llmTool.toolDescription
-                                , "parameters" .= toolParamsToJson llmTool.toolParamProperties
+                                [ "name" .= llmTool.toolDescriptionName.getToolName
+                                , "description" .= llmTool.toolDescriptionText
+                                , "parameters" .= toolParamsToJson llmTool.toolDescriptionParamProperties
                                 ]
                         ]
                 }

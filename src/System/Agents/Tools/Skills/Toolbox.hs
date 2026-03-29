@@ -62,9 +62,9 @@ import Prod.Tracer (Tracer)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (Session (..))
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ParamProperty (..), ToolName(..), ParamType (..), ToolDescription(..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..), ToolDef (..), mapToolResult)
-import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.Context (ToolCall(..), ToolExecutionContext)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.State (foldSession, isScriptEnabled)
 import System.Agents.Tools.Skills.Types
@@ -193,9 +193,9 @@ makeDescribeTool skill =
                     pure $ BlobToolSuccess () responseBytes
                 }
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc []) find
@@ -219,9 +219,9 @@ makeEnableTool skill =
                     pure $ BlobToolSuccess () responseBytes
                 }
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc []) find
@@ -244,9 +244,9 @@ makeDisableTool skill =
                     pure $ BlobToolSuccess () responseBytes
                 }
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc []) find
@@ -280,9 +280,9 @@ makeListSkillsTool store =
                             pure $ BlobToolSuccess () responseBytes
                         }
 
-                find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+                find :: ToolCall -> Maybe (Tool ToolCall)
                 find call =
-                    if call.toolCallFunction.toolCallFunctionName == llmName
+                    if call.callToolName == getToolName llmName
                         then Just $ mapToolResult (const call) tool
                         else Nothing
              in Just $ ToolRegistration tool (makeToolDecl llmName llmDesc []) find
@@ -309,9 +309,9 @@ makeScriptTool skill script =
                 , toolRun = runScriptTool script
                 }
 
-        find :: OpenAI.ToolCall -> Maybe (Tool OpenAI.ToolCall)
+        find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.toolCallFunction.toolCallFunctionName == llmName
+            if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find
@@ -390,12 +390,12 @@ scriptArgToParam arg =
         }
 
 -- | Make a tool declaration for OpenAI.
-makeToolDecl :: OpenAI.ToolName -> Text -> [ParamProperty] -> OpenAI.Tool
+makeToolDecl :: OpenAI.ToolName -> Text -> [ParamProperty] -> ToolDescription
 makeToolDecl name desc props =
-    OpenAI.Tool
-        { OpenAI.toolName = name
-        , OpenAI.toolDescription = desc
-        , OpenAI.toolParamProperties = props
+    ToolDescription
+        { toolDescriptionName = name
+        , toolDescriptionText = desc
+        , toolDescriptionParamProperties = props
         }
 
 -- | Extract command line arguments from the tool call value.

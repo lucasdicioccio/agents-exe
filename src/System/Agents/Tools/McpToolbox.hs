@@ -82,7 +82,7 @@ initializeMcpToolbox ttracer tname proc = do
     let nextToolCall = atomically $ readTBMChan chan
     let doCallTool :: ToolDescription -> Maybe Aeson.Object -> IO McpClient.ToolCallResponse
         doCallTool td param = do
-            let tc = McpClient.ToolCall td.getToolDescription.name param
+            let tc = McpClient.McpToolCall td.getToolDescription.name param
             mbox <- newEmptyMVar
             let done res = do
                     putMVar mbox res

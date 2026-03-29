@@ -26,9 +26,9 @@ import qualified Data.Text.IO as Text
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
 
 -- | How to display tool information in the check output
 data ToolsOutputMode
@@ -119,8 +119,8 @@ printToolsList tools = do
     Text.putStrLn "**Tools:**"
     forM_ tools $ \tool -> do
         let toolDecl = declareTool tool
-        let name = OpenAI.getToolName $ OpenAI.toolName toolDecl
-        let desc = OpenAI.toolDescription toolDecl
+        let name = toolDecl.toolDescriptionName.getToolName
+        let desc = toolDecl.toolDescriptionText
         Text.putStrLn $ "- **" <> name <> "**: " <> desc
     Text.putStrLn ""
 
@@ -136,9 +136,9 @@ printToolsAgentsExe tools = do
         let toolDecl = declareTool tool
         let jsonVal =
                 Aeson.object
-                    [ "name" Aeson..= OpenAI.getToolName (OpenAI.toolName toolDecl)
-                    , "description" Aeson..= OpenAI.toolDescription toolDecl
-                    , "paramProperties" Aeson..= OpenAI.toolParamProperties toolDecl
+                    [ "name" Aeson..= toolDecl.toolDescriptionName.getToolName
+                    , "description" Aeson..= toolDecl.toolDescriptionText
+                    , "paramProperties" Aeson..= toolDecl.toolDescriptionParamProperties
                     ]
         LBS8.putStrLn $ Aeson.encodePretty jsonVal
     Text.putStrLn "```"

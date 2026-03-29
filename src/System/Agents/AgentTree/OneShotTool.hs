@@ -45,6 +45,7 @@ import System.Agents.Session.Base (
     newTurnId,
  )
 import System.Agents.Session.Loop (run)
+import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
@@ -52,9 +53,9 @@ import System.Agents.ToolRegistration (
     ToolRegistration (..),
     registerIOScriptInLLM,
  )
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ToolName(..), ToolDescription(..), ParamProperty (..), ParamType (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
-import System.Agents.Tools.ExecuteToolCall (executeToolCall)
+import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
@@ -199,7 +200,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeToolCall node.osNodeAgentId convId (osNodeTools node)
+                , toolCall = executeLlmToolCall (contramap (ToolTrace (Base.slug agentCfg)) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = error "TODO: tool-portal"
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -213,18 +214,18 @@ toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool
         toolDefv1 =
             SystemToolDefinitionV1
-                { name = OpenAI.getToolName llmTool.toolName
-                , llmName = OpenAI.getToolName llmTool.toolName
-                , description = llmTool.toolDescription
-                , properties = llmTool.toolParamProperties
+                { name = llmTool.toolDescriptionName.getToolName
+                , llmName = llmTool.toolDescriptionName.getToolName
+                , description = llmTool.toolDescriptionText
+                , properties = llmTool.toolDescriptionParamProperties
                 , raw =
                     Aeson.object
                         [ "type" .= ("function" :: Text)
                         , "function"
                             .= Aeson.object
-                                [ "name" .= OpenAI.getToolName llmTool.toolName
-                                , "description" .= llmTool.toolDescription
-                                , "parameters" .= toolParamsToJson llmTool.toolParamProperties
+                                [ "name" .= llmTool.toolDescriptionName.getToolName
+                                , "description" .= llmTool.toolDescriptionText
+                                , "parameters" .= toolParamsToJson llmTool.toolDescriptionParamProperties
                                 ]
                         ]
                 }
