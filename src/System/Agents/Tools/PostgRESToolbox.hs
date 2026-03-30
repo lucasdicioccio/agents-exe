@@ -429,7 +429,7 @@ createToolHandler toolbox tool _tracer _ctx args = do
         Left err -> do
             pure $ IOToolError () (ScriptExecutionError (Text.unpack err))
         Right (textResult, _toolResult) -> do
-            pure $ BlobToolSuccess () (Text.encodeUtf8 textResult)
+            pure $ BlobToolSuccess () (Text.encodeUtf8 textResult) Nothing
 
 {- | Handle a tool call by executing the HTTP request.
 
@@ -712,3 +712,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+

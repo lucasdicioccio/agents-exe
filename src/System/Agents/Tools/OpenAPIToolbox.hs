@@ -442,7 +442,7 @@ createToolHandler toolbox tool tracer _ctx args = do
             runTracer (contramapTrace tracer) (ToolExecutionErrorTrace err)
             pure $ IOToolError () (ScriptExecutionError (Text.unpack err))
         Right (textResult, _toolResult) -> do
-            pure $ BlobToolSuccess () (ByteString.pack $ Text.unpack textResult)
+            pure $ BlobToolSuccess () (ByteString.pack $ Text.unpack textResult) Nothing
   where
     contramapTrace :: Tracer IO ToolTrace -> Tracer IO Trace
     contramapTrace _t = Tracer $ \_traceEvent -> do
@@ -746,3 +746,4 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
      in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
+
