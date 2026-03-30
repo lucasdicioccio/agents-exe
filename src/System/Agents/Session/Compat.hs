@@ -107,4 +107,3 @@ callResultToUserToolResponse _tc result =
             UserToolResponse luaResult
         LuaToolError _ err ->
             UserToolResponse $ Aeson.String err
-

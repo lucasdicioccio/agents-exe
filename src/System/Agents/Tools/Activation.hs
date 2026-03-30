@@ -179,17 +179,21 @@ data Activation
 
 instance Aeson.FromJSON Activation where
     parseJSON (Aeson.String "always") = return AlwaysActivated
-    parseJSON val = Aeson.withObject "Activation" (\obj -> do
-        tag <- obj Aeson..: "tag"
-        case (tag :: Text) of
-            "always" -> return AlwaysActivated
-            "on-demand" -> OnDemandActivated <$> obj Aeson..: "toolgroup"
-            "first-n-steps" -> do
-                steps <- obj Aeson..: "steps"
-                sticky <- obj Aeson..: "sticky"
-                return $ FirstNStepsActivated steps sticky
-            _other -> fail $ "Unknown Activation tag: " ++ Text.unpack tag
-        ) val
+    parseJSON val =
+        Aeson.withObject
+            "Activation"
+            ( \obj -> do
+                tag <- obj Aeson..: "tag"
+                case (tag :: Text) of
+                    "always" -> return AlwaysActivated
+                    "on-demand" -> OnDemandActivated <$> obj Aeson..: "toolgroup"
+                    "first-n-steps" -> do
+                        steps <- obj Aeson..: "steps"
+                        sticky <- obj Aeson..: "sticky"
+                        return $ FirstNStepsActivated steps sticky
+                    _other -> fail $ "Unknown Activation tag: " ++ Text.unpack tag
+            )
+            val
 
 instance Aeson.ToJSON Activation where
     toJSON AlwaysActivated = Aeson.String "always"
@@ -354,8 +358,9 @@ isToolgroupActive (ToolboxSessionState activeToolgroups) toolgroup =
 -- Tool Visibility Computation
 -------------------------------------------------------------------------------
 
--- | Minimal interface for tool registration needed by visibility computation.
--- This avoids circular dependencies with System.Agents.ToolRegistration
+{- | Minimal interface for tool registration needed by visibility computation.
+This avoids circular dependencies with System.Agents.ToolRegistration
+-}
 data ToolRegistration = ToolRegistration
     { trToolgroupName :: Maybe ToolgroupName
     -- ^ Optional toolgroup name (for on-demand activation)
@@ -393,14 +398,14 @@ Note: Tool usage tracking for sticky mode requires additional session
 data that should be computed separately and passed in.
 -}
 computeVisibleTools ::
+    -- | Current activation state
     ToolboxSessionState ->
-    -- ^ Current activation state
+    -- | Current step number (0-indexed)
     Int ->
-    -- ^ Current step number (0-indexed)
+    -- | All registered tools
     [ToolRegistration] ->
-    -- ^ All registered tools
+    -- | Filtered visible tools
     [ToolRegistration]
-    -- ^ Filtered visible tools
 computeVisibleTools sessionState currentStep =
     filter (shouldShowTool sessionState currentStep)
 
@@ -435,4 +440,3 @@ metaDeactivateToolName = "meta_deactivate_tool"
 -- | Name of the meta tool for discovering available toolgroups.
 metaDiscoverToolsName :: Text
 metaDiscoverToolsName = "meta_discover_tools"
-

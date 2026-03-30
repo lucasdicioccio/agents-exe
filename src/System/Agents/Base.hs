@@ -1373,4 +1373,3 @@ getMcpLifetime = maybe Activation.defaultLifetime id . mcpLifetime
 -- | Get the activation for an McpSimpleBinaryConfiguration, with default.
 getMcpActivation :: McpSimpleBinaryConfiguration -> Activation
 getMcpActivation = maybe Activation.defaultActivation id . mcpActivation
-

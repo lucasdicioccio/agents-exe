@@ -45,7 +45,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.Session.Types (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
-import System.Agents.Tools.Activation (ToolboxSessionState (..), ActivationState (..))
+import System.Agents.Tools.Activation (ActivationState (..), ToolboxSessionState (..))
 import qualified System.Agents.Tools.Activation as Activation
 import System.Agents.Tools.Skills.Types
 
@@ -243,4 +243,3 @@ fromToolboxSessionState (ToolboxSessionState toolgroups) =
                 case validateSkillName name of
                     Left _ -> Nothing -- Not a valid skill name
                     Right skillName -> Just (skillName, Map.empty) -- Empty map = all scripts enabled
-
