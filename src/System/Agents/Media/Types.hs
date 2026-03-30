@@ -33,8 +33,8 @@ module System.Agents.Media.Types (
     imageTypeToMime,
 ) where
 
-import qualified Data.Aeson as Aeson
 import Data.Aeson ((.:), (.=))
+import qualified Data.Aeson as Aeson
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -329,4 +329,3 @@ mimeToMediaType mime =
     case Aeson.fromJSON (Aeson.String mime) of
         Aeson.Success mt -> Just mt
         Aeson.Error _ -> Nothing
-

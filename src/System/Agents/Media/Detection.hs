@@ -158,9 +158,11 @@ Just (MediaText TextHTML)
 -}
 detectFromContentType :: Text -> Maybe MediaType
 detectFromContentType ct =
-    let -- Extract just the media type, ignoring parameters like charset
+    let
+        -- Extract just the media type, ignoring parameters like charset
         mainType = Text.toLower $ Text.takeWhile (/= ';') $ Text.strip ct
-     in case mainType of
+     in
+        case mainType of
             "image/png" -> Just $ MediaImage ImagePNG
             "image/jpeg" -> Just $ MediaImage ImageJPEG
             "image/jpg" -> Just $ MediaImage ImageJPEG
@@ -210,4 +212,3 @@ isValidUtf8 bs =
      in case decoded of
             Left _ -> False
             Right txt -> Text.encodeUtf8 txt == bs
-

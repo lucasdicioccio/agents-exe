@@ -17,9 +17,9 @@ module System.Agents.Session.Compat (
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as AesonTypes
-import qualified Data.ByteString.Base64 as B64
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base64 as B64
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -141,4 +141,3 @@ callResultToUserToolResponse _ result =
         SystemToolError _ err -> TextResponse $ Text.pack $ show err
         DeveloperToolError _ err -> TextResponse $ Text.pack $ show err
         LuaToolError _ err -> err
-
