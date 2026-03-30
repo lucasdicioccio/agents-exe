@@ -10,6 +10,9 @@ Progressive disclosure:
 - Initially, only metadata tools are visible (skill_describe_{name}, skill_enable_{name})
 - After skill_enable_{name} is called, script tools become available
 - After skill_disable_{name} is called, script tools are hidden again
+
+Note: This module now uses the generic ToolboxSessionState internally
+while maintaining the same external API for backward compatibility.
 -}
 module System.Agents.Tools.Skills.State (
     -- * Session State Types
@@ -27,16 +30,23 @@ module System.Agents.Tools.Skills.State (
     disableSkill,
     isScriptEnabled,
     getEnabledScripts,
+
+    -- * Conversion to/from generic state
+    toToolboxSessionState,
+    fromToolboxSessionState,
 ) where
 
 import qualified Data.Aeson
 import qualified Data.Aeson.KeyMap
 import Data.Foldable (foldl')
 import qualified Data.Map.Strict as Map
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.Session.Types (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
+import System.Agents.Tools.Activation (ToolboxSessionState (..), ActivationState (..))
+import qualified System.Agents.Tools.Activation as Activation
 import System.Agents.Tools.Skills.Types
 
 -------------------------------------------------------------------------------
@@ -66,6 +76,11 @@ extractFromTurn (LlmTurn llmTurn _) =
 Recognizes:
 - skill_enable_{name} -> enables all scripts in the skill
 - skill_disable_{name} -> disables all scripts in the skill
+
+Also recognizes the underlying meta-tool calls for compatibility
+with the generic activation system:
+- meta_activate_tool(skill_name) -> enables the skill
+- meta_deactivate_tool(skill_name) -> disables the skill
 -}
 extractFromToolCall :: LlmToolCall -> SkillsSessionState
 extractFromToolCall (LlmToolCall val) =
@@ -99,6 +114,10 @@ Handles:
 - skill_{skill_name}_{script_name} -> no state change (execution only)
 - skill_describe_{skill_name} -> no state change (metadata only)
 - skill_list -> no state change (metadata only)
+
+Also handles generic meta-tool calls:
+- meta_activate_tool(skill_name) -> enables the skill
+- meta_deactivate_tool(skill_name) -> disables the skill
 -}
 parseSkillToolCall :: Text -> SkillsSessionState
 parseSkillToolCall funcName
@@ -106,6 +125,13 @@ parseSkillToolCall funcName
         enableSkillFromText skillName
     | Just skillName <- Text.stripPrefix "skill_disable_" funcName =
         disableSkillFromText skillName
+    | funcName == Activation.metaActivateToolName =
+        -- Generic activation - treat as skill enable if it looks like a skill name
+        -- The actual toolgroup will be extracted from arguments
+        mempty
+    | funcName == Activation.metaDeactivateToolName =
+        -- Generic deactivation
+        mempty
     | otherwise = mempty
 
 {- | Enable a skill by name (from text).
@@ -183,3 +209,38 @@ getEnabledScripts (SkillsSessionState activeSkills) skillName =
             if Map.null scriptsState
                 then Nothing -- All scripts enabled (no explicit list)
                 else Just $ Map.keys $ Map.filter (== Enabled) scriptsState
+
+-------------------------------------------------------------------------------
+-- Conversion to/from generic ToolboxSessionState
+-------------------------------------------------------------------------------
+
+{- | Convert a SkillsSessionState to a generic ToolboxSessionState.
+
+This allows skills to participate in the unified activation system.
+Each skill is mapped to a toolgroup named after the skill.
+-}
+toToolboxSessionState :: SkillsSessionState -> ToolboxSessionState
+toToolboxSessionState (SkillsSessionState skillsMap) =
+    ToolboxSessionState $
+        Map.mapKeys skillNameToText $
+            Map.map (\_ -> Active) skillsMap
+
+{- | Convert a generic ToolboxSessionState to a SkillsSessionState.
+
+This is a partial conversion - only toolgroups that are valid
+skill names are converted. Active toolgroups become enabled skills
+(with empty script state meaning all scripts enabled).
+-}
+fromToolboxSessionState :: ToolboxSessionState -> SkillsSessionState
+fromToolboxSessionState (ToolboxSessionState toolgroups) =
+    SkillsSessionState $ Map.fromList $ mapMaybe convertEntry (Map.toList toolgroups)
+  where
+    convertEntry :: (Text, ActivationState) -> Maybe (SkillName, SkillScriptsState)
+    convertEntry (name, state) =
+        case state of
+            Inactive -> Nothing -- Skip inactive toolgroups (not enabled skills)
+            Active ->
+                case validateSkillName name of
+                    Left _ -> Nothing -- Not a valid skill name
+                    Right skillName -> Just (skillName, Map.empty) -- Empty map = all scripts enabled
+

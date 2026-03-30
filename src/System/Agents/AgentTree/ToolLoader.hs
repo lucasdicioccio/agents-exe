@@ -123,7 +123,7 @@ loadAgentTools _tracer baseDir agent toolsTVar = do
                 [ loadBashTools agent toolsTVar
                 , loadMcpServers agent toolsTVar
                 , loadOpenAPIToolboxes baseDir agent toolsTVar
-                , loadPostgRESTToolboxes baseDir agent toolsTVar
+                , loadPostgRESToolboxes baseDir agent toolsTVar
                 , loadBuiltinToolboxes agent toolsTVar
                 , loadSkillsTools agent toolsTVar
                 ]
@@ -175,7 +175,7 @@ execution's current working directory.
 collectBashDescriptions :: Agent -> [BashToolboxDescription]
 collectBashDescriptions agent =
     let legacyDir = case toolDirectory agent of
-            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing]
+            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing Nothing]
             Nothing -> []
         toolboxDescs = fromMaybe [] (bashToolboxes agent)
      in legacyDir ++ toolboxDescs
@@ -216,15 +216,15 @@ loadMcpServer ::
     IO (Maybe LoadingError)
 loadMcpServer toolsTVar (McpSimpleBinary config) = do
     let silentTracer = Tracer $ \_ -> pure ()
-    let proc = System.Process.proc config.executable (map Text.unpack config.args)
+    let proc = System.Process.proc config.mcpExecutable (map Text.unpack config.mcpArgs)
 
     -- Try to initialize the MCP toolbox with exception handling
-    initResult <- try $ McpToolbox.initializeMcpToolbox silentTracer config.name proc
+    initResult <- try $ McpToolbox.initializeMcpToolbox silentTracer config.mcpName proc
 
     case initResult of
         Left (e :: SomeException) -> do
             -- Initialization failed (e.g., executable not found)
-            let errMsg = Text.unpack config.name ++ ": Failed to initialize MCP server: " ++ show e
+            let errMsg = Text.unpack config.mcpName ++ ": Failed to initialize MCP server: " ++ show e
             pure $ Just $ McpLoadingError errMsg
         Right toolbox -> do
             -- Wait for initial tool discovery with timeout
@@ -233,7 +233,7 @@ loadMcpServer toolsTVar (McpSimpleBinary config) = do
             if not discoveryResult
                 then do
                     -- Timeout waiting for tool discovery
-                    let errMsg = Text.unpack config.name ++ ": Timeout waiting for MCP server tool discovery (" ++ show (mcpInitTimeoutMicros `div` 1000000) ++ "s)"
+                    let errMsg = Text.unpack config.mcpName ++ ": Timeout waiting for MCP server tool discovery (" ++ show (mcpInitTimeoutMicros `div` 1000000) ++ "s)"
                     pure $ Just $ McpLoadingError errMsg
                 else do
                     -- Get discovered tools
@@ -335,12 +335,12 @@ resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServer
 
 Each PostgREST toolbox fetches its spec and registers converted tools.
 -}
-loadPostgRESTToolboxes ::
+loadPostgRESToolboxes ::
     FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadPostgRESTToolboxes baseDir agent toolsTVar = do
+loadPostgRESToolboxes baseDir agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes
@@ -643,3 +643,4 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
+

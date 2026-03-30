@@ -86,6 +86,7 @@ library agents-lib
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
+                    , System.Agents.Tools.Activation
                     , System.Agents.Tools.Context
                     , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.Trace
@@ -125,8 +126,8 @@ library agents-lib
                     , System.Agents.Runtime.Trace
                     , System.Agents.Session.Types
                     , System.Agents.Session.Base
-                    , System.Agents.Session.Edit
                     , System.Agents.Session.Compat
+                    , System.Agents.Session.Edit
                     , System.Agents.Session.OpenAI
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
@@ -325,5 +326,4 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
-
 

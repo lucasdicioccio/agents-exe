@@ -74,6 +74,8 @@ testLuaToolboxHttp =
         , luaToolboxAllowedTools = []
         , luaToolboxAllowedPaths = []
         , luaToolboxAllowedHosts = ["localhost", "127.0.0.1"]
+        , luaToolboxLifetime = Nothing
+        , luaToolboxActivation = Nothing
         }
 
 -- | Toolbox config with NO http access (empty allowedHosts)
@@ -87,6 +89,8 @@ testLuaToolboxNoHttp =
         , luaToolboxAllowedTools = []
         , luaToolboxAllowedPaths = []
         , luaToolboxAllowedHosts = []
+        , luaToolboxLifetime = Nothing
+        , luaToolboxActivation = Nothing
         }
 
 withTestToolboxHttp :: (LuaToolbox.Toolbox -> IO ()) -> IO ()
