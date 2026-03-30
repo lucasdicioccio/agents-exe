@@ -17,7 +17,6 @@ module System.Agents.CLI.ToolCall (
     ToolCallOptions (..),
     ToolCallAgent (..),
     createToolCallAgent,
-    listToolCallAgentTools,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -26,7 +25,6 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
-import Control.Concurrent.STM (readTVarIO)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
@@ -35,7 +33,6 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
 import System.Agents.Base (AgentId)
 import System.Agents.ToolPortal (makeToolPortal)
-import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.Tools.Context (ToolCall (..))
 
 -- | Options for the tool-call command
@@ -79,14 +76,6 @@ createToolCallAgent tree =
             , toolCallTree = tree
             , toolCallNode = rootNode
             }
-
-{- | List tools for a ToolCallAgent.
-
-Reads tools directly from the OS-native TVar.
--}
-listToolCallAgentTools :: ToolCallAgent -> IO [ToolRegistration]
-listToolCallAgentTools agent =
-    readTVarIO (osNodeTools agent.toolCallNode)
 
 -- | Handle the tool-call command
 handleToolCall ::
@@ -134,18 +123,14 @@ handleToolCall opts apiKeysFile agentFiles = do
                         -- Create ToolCallAgent
                         let agent = createToolCallAgent tree
 
-                        -- Get registered tools
-                        registrations <- listToolCallAgentTools agent
-
                         -- Create tool portal with silent tracer
-                        let portal = makeToolPortal Prod.silent registrations
+                        let portal = makeToolPortal Prod.silent (osNodeTools agent.toolCallNode)
 
                         -- Create the tool call
                         let toolCall =
                                 ToolCall
                                     { callToolName = opts.toolName
                                     , callArgs = args
-                                    , callCallerId = "cli-tool-call"
                                     }
 
                         -- Execute the tool call through the portal

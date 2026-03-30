@@ -4,7 +4,7 @@
 module System.Agents.Tools.Bash where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
@@ -242,39 +242,41 @@ loadScript tracer path = do
             Right info -> pure $ Right $ ScriptDescription path info
 
 data RunScriptError
-    = SerializeArgumentErrors FilePath String
+    = SerializeArgumentErrors FilePath Aeson.Value String
     | ScriptExecutionError FilePath ExitCode ByteString
     deriving (Show)
 
 -- | Translates arguments by collecting script arguments with their associated values.
-translateArguments :: ScriptInfo -> Aeson.Value -> Aeson.Parser [(ScriptArg, Text)]
+translateArguments :: ScriptInfo -> Aeson.Value -> Aeson.Parser [(ScriptArg, Maybe Text)]
 translateArguments script = Aeson.withObject "Args" $ \v -> do
     vals <- traverse (parseArg v) script.scriptArgs
     pure $ List.zip script.scriptArgs vals
   where
-    parseArg :: Aeson.Object -> ScriptArg -> Aeson.Parser Text
-    parseArg v arg = v .: (textToKey $ arg.argName)
+    parseArg :: Aeson.Object -> ScriptArg -> Aeson.Parser (Maybe Text)
+    parseArg v arg = v .:? (textToKey $ arg.argName)
 
     textToKey :: Text -> Aeson.Key
     textToKey = read . Prelude.show
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.
-flattenArguments :: [(ScriptArg, Text)] -> [Text]
+flattenArguments :: [(ScriptArg, Maybe Text)] -> [Text]
 flattenArguments = mconcat . fmap flatten1
   where
-    flatten1 :: (ScriptArg, Text) -> [Text]
-    flatten1 (arg, txt) =
+    flatten1 :: (ScriptArg, Maybe Text) -> [Text]
+    flatten1 (_, Nothing) = []
+    flatten1 (arg, Just txt) =
         case arg.argCallingMode of
             Stdin -> []
             Positional -> [txt]
             DashDashEqual -> [mconcat ["--", arg.argName, "=", txt]]
             DashDashSpace -> [mconcat ["--", arg.argName], txt]
 
-flattenInput :: [(ScriptArg, Text)] -> Text
+flattenInput :: [(ScriptArg, Maybe Text)] -> Text
 flattenInput = Text.unlines . mconcat . fmap flatten1
   where
-    flatten1 :: (ScriptArg, Text) -> [Text]
-    flatten1 (arg, txt) =
+    flatten1 :: (ScriptArg, Maybe Text) -> [Text]
+    flatten1 (_, Nothing) = []
+    flatten1 (arg, Just txt) =
         case arg.argCallingMode of
             Stdin -> [txt]
             Positional -> []
@@ -379,7 +381,7 @@ runValue tracer script mCtx val = do
     let maybeBehavior = script.scriptInfo.scriptEmptyResultBehavior
     case parseArgsForValue script val of
         Left err ->
-            pure $ Left $ SerializeArgumentErrors path err
+            pure $ Left $ SerializeArgumentErrors path val err
         Right (argz, stdin) -> do
             let args = "run" : [Text.unpack arg | arg <- argz]
             runTracer tracer (RunCommandStart path args)

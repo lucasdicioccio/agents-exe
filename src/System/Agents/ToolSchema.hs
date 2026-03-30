@@ -1,7 +1,15 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
-module System.Agents.ToolSchema where
+module System.Agents.ToolSchema (
+    ToolName (..),
+    ToolDescription (..),
+    ParamProperty (..),
+    ParamType (..),
+    jsonSchema,
+    toJsonSchemaPair,
+) where
 
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.=))
 import qualified Data.Aeson as Aeson
@@ -64,3 +72,15 @@ jsonSchema p =
                 , "additionalProperties" .= False
                 , "required" .= fmap propertyKey requiredProps
                 ]
+
+newtype ToolName = ToolName {getToolName :: Text}
+    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
+
+data ToolDescription = ToolDescription
+    { toolDescriptionName :: ToolName
+    , toolDescriptionText :: Text
+    , toolDescriptionParamProperties :: [ParamProperty]
+    }
+    deriving (Show, Ord, Eq, Generic)
+instance FromJSON ToolDescription
+instance ToJSON ToolDescription

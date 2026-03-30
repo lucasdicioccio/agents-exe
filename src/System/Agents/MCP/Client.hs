@@ -204,13 +204,13 @@ enumerateTools = do
         go (item : xs) (previewCursor item)
 
 -------------------------------------------------------------------------------
-data ToolCall
-    = ToolCall Mcp.Name (Maybe Aeson.Object)
+data McpToolCall
+    = McpToolCall Mcp.Name (Maybe Aeson.Object)
 
 type ToolCallResponse = Maybe (Either Rpc.ErrorObj CallToolResultRsp)
 
 data FullToolCall
-    = FullToolCall ToolCall (ToolCallResponse -> IO ())
+    = FullToolCall McpToolCall (ToolCallResponse -> IO ())
 
 data LoopTrace
     = StartToolCall Mcp.Name (Maybe Aeson.Object)
@@ -283,7 +283,7 @@ defaultLoop props clientInfos = do
         case tc of
             Nothing -> do
                 liftIO $ runTracer props.tracer ExitingToolCallLoop
-            Just (FullToolCall (ToolCall tname obj) resp) -> do
+            Just (FullToolCall (McpToolCall tname obj) resp) -> do
                 liftIO $ runTracer props.tracer (StartToolCall tname obj)
                 _ <- async $ do
                     r <- callTool tname obj

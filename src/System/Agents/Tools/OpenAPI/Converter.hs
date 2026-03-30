@@ -22,7 +22,7 @@ Example:
 -}
 module System.Agents.Tools.OpenAPI.Converter (
     -- * Core types
-    OpenAPITool (..),
+    InternalTool (..),
     ToolParameters (..),
     PropertySchema (..),
     ToolHandler,
@@ -56,8 +56,8 @@ module System.Agents.Tools.OpenAPI.Converter (
     findToolByNormalizedName,
     generateUniqueNormalizedName,
 
-    -- * OpenAI conversion
-    toOpenAITool,
+    -- * Base conversion
+    toToolDescription,
 
     -- * Handler helpers
     defaultHandler,
@@ -74,8 +74,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),
@@ -97,7 +96,7 @@ by the caller based on their HTTP client needs.
 type ToolHandler = Map Text Value -> IO (Either Text Text)
 
 -- | Internal representation of a tool derived from OpenAPI.
-data OpenAPITool = OpenAPITool
+data InternalTool = InternalTool
     { toolOperation :: Operation
     , toolPath :: Path
     , toolMethod :: Method
@@ -283,13 +282,13 @@ buildToolNameMapping ::
     -- | Toolbox name (for context)
     Text ->
     -- | List of tools
-    [OpenAPITool] ->
+    [InternalTool] ->
     -- | Map from normalized name to NameMapping
     Map Text NameMapping
 buildToolNameMapping toolboxName tools =
     fst $ foldl' addTool (Map.empty, Set.empty) tools
   where
-    addTool :: (Map Text NameMapping, Set Text) -> OpenAPITool -> (Map Text NameMapping, Set Text)
+    addTool :: (Map Text NameMapping, Set Text) -> InternalTool -> (Map Text NameMapping, Set Text)
     addTool (mapping, used) tool =
         let original = getOperationIdOrFallback tool
             baseNormalized = normalizeForLLM original
@@ -300,7 +299,7 @@ buildToolNameMapping toolboxName tools =
             )
 
     -- Helper to get operation ID or fall back to generated name
-    getOperationIdOrFallback :: OpenAPITool -> Text
+    getOperationIdOrFallback :: InternalTool -> Text
     getOperationIdOrFallback tool =
         fromMaybe (toolName tool) (opOperationId (toolOperation tool))
 
@@ -333,7 +332,7 @@ findToolByNormalizedName mapping normalizedName =
 {- | Converts an OpenAPI spec into a list of tools.
 
 This function walks through all paths and methods in the spec,
-converting each operation into an 'OpenAPITool'.
+converting each operation into an 'InternalTool'.
 
 Example:
 >>> let spec = OpenAPISpec (Map.singleton "/pets" (Map.singleton "GET" op)) Nothing
@@ -343,7 +342,7 @@ Example:
 -}
 convertOpenAPIToTools ::
     OpenAPISpec ->
-    [OpenAPITool]
+    [InternalTool]
 convertOpenAPIToTools spec = do
     (path, methods) <- Map.toList (specPaths spec)
     (method, operation) <- Map.toList methods
@@ -370,9 +369,9 @@ convertOperation ::
     Path ->
     Method ->
     Operation ->
-    OpenAPITool
+    InternalTool
 convertOperation path method op =
-    OpenAPITool
+    InternalTool
         { toolOperation = op
         , toolPath = path
         , toolMethod = method
@@ -613,10 +612,10 @@ getRequiredParams op =
         _ -> []
 
 -- -------------------------------------------------------------------------
--- Conversion to OpenAI Tool Format
+-- Conversion to Internal Tool Format
 -- -------------------------------------------------------------------------
 
-{- | Converts an OpenAPITool to the OpenAI Tool format.
+{- | Converts an InternalTool to the internal Tool format.
 
 This allows OpenAPITools to be used directly with the LLM interface.
 
@@ -626,17 +625,16 @@ you typically want to use the normalized name via 'normalizeForLLM'.
 Example:
 >>> let op = Operation (Just "test") (Just "Test op") (Just "A test") [] Nothing
 >>> let apiTool = convertOperation "/test" "GET" op
->>> let tool = toOpenAITool apiTool
->>> OpenAI.toolName tool
+>>> let tool = toToolDescription apiTool
+>>> Base.toolName tool
 ToolName {getToolName = "openapi_test"}
 -}
-toOpenAITool :: OpenAPITool -> OpenAI.Tool
-toOpenAITool apiTool =
-    OpenAI.Tool
-        { OpenAI.toolName = OpenAI.ToolName (toolName apiTool)
-        , OpenAI.toolDescription = toolDescription apiTool
-        , OpenAI.toolParamProperties = map (propertyToParamProperty requiredSet) $ Map.toList (paramsProperties (toolParameters apiTool))
-        }
+toToolDescription :: InternalTool -> ToolDescription
+toToolDescription apiTool =
+    ToolDescription
+        (ToolName (toolName apiTool))
+        (toolDescription apiTool)
+        (map (propertyToParamProperty requiredSet) $ Map.toList (paramsProperties (toolParameters apiTool)))
   where
     -- Build a set of required parameter names for O(1) lookup
     requiredSet :: Set Text

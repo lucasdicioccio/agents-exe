@@ -45,7 +45,6 @@ import Data.Time (getCurrentTime)
 
 import System.Agents.Base (AgentId (..), AgentSlug, newAgentId)
 import qualified System.Agents.Base as Base
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.OS.Core (
     AgentConfig (..),
     AgentState (..),
@@ -56,6 +55,7 @@ import System.Agents.OS.Core (
 import System.Agents.OS.Core.Types (Component (..), EntityId (..))
 import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 
 -------------------------------------------------------------------------------
 -- Agent Creation
@@ -259,12 +259,12 @@ removeAgentTool :: AgentToolsStore -> AgentSlug -> Text -> IO ()
 removeAgentTool store slug toolName =
     atomically $ modifyTVar' (unAgentToolsStore store) $ \m ->
         let existing = HashMap.lookupDefault [] slug m
-            filtered = filter (\t -> toolName /= getToolName t) existing
+            filtered = filter (\t -> toolName /= getToolName' t) existing
          in HashMap.insert slug filtered m
 
 -- | Extract tool name from ToolRegistration
-getToolName :: ToolRegistration -> Text
-getToolName reg = OpenAI.getToolName (declareTool reg).toolName
+getToolName' :: ToolRegistration -> Text
+getToolName' reg = reg.declareTool.toolDescriptionName.getToolName
 
 -------------------------------------------------------------------------------
 -- STM Helpers

@@ -10,7 +10,7 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-import Control.Concurrent.STM (TVar, readTVarIO)
+import Control.Concurrent.STM (readTVarIO)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -33,7 +33,6 @@ import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
-    LlmToolCall (..),
     LlmTurnContent (..),
     Session (..),
     SystemPrompt (..),
@@ -41,21 +40,23 @@ import System.Agents.Session.Base (
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
     UserQuery (..),
-    UserToolResponse (..),
     defaultContextConfig,
     newSessionId,
     newTurnId,
  )
+import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
+import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (
     ToolRegistration (..),
     registerIOScriptInLLM,
  )
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
+import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
@@ -192,6 +193,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 }
     let completeF = mkOpenAICompletion completionConfig
 
+    let tp = ToolPortal.makeToolPortal (contramap (ToolPortalTrace (Base.slug agentCfg)) tracer) (osNodeTools node)
     convId <- newConversationId
     pure $
         agentStoreSession store Nothing convId $
@@ -200,7 +202,8 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeToolCall node.osNodeAgentId convId (osNodeTools node)
+                , toolCall = executeLlmToolCall (contramap (ToolTrace (Base.slug agentCfg)) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 }
@@ -213,18 +216,18 @@ toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool
         toolDefv1 =
             SystemToolDefinitionV1
-                { name = OpenAI.getToolName llmTool.toolName
-                , llmName = OpenAI.getToolName llmTool.toolName
-                , description = llmTool.toolDescription
-                , properties = llmTool.toolParamProperties
+                { name = llmTool.toolDescriptionName.getToolName
+                , llmName = llmTool.toolDescriptionName.getToolName
+                , description = llmTool.toolDescriptionText
+                , properties = llmTool.toolDescriptionParamProperties
                 , raw =
                     Aeson.object
                         [ "type" .= ("function" :: Text)
                         , "function"
                             .= Aeson.object
-                                [ "name" .= OpenAI.getToolName llmTool.toolName
-                                , "description" .= llmTool.toolDescription
-                                , "parameters" .= toolParamsToJson llmTool.toolParamProperties
+                                [ "name" .= llmTool.toolDescriptionName.getToolName
+                                , "description" .= llmTool.toolDescriptionText
+                                , "parameters" .= toolParamsToJson llmTool.toolDescriptionParamProperties
                                 ]
                         ]
                 }
@@ -264,19 +267,6 @@ toolParamsToJson props =
     paramTypeToString (ObjectParamType _) = "object"
 
 -------------------------------------------------------------------------------
-
--- | Execute a tool call using the node's registered tools.
-executeToolCall ::
-    AgentId ->
-    ConversationId ->
-    -- | Tools TVar from OSAgentNode
-    TVar [ToolRegistration] ->
-    ToolExecutionContext ->
-    LlmToolCall ->
-    IO UserToolResponse
-executeToolCall _agentId _convId toolsTVar _ctx (LlmToolCall _callVal) = do
-    regs <- readTVarIO toolsTVar
-    pure $ UserToolResponse $ Aeson.String $ "Tool execution for " <> Text.pack (show (length regs)) <> " tools"
 
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r

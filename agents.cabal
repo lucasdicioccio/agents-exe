@@ -87,6 +87,7 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Context
+                    , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
@@ -101,6 +102,7 @@ library agents-lib
                     , System.Agents.Tools.LuaToolbox.Modules.Json
                     , System.Agents.Tools.LuaToolbox.Modules.Text
                     , System.Agents.Tools.LuaToolbox.Modules.Time
+                    , System.Agents.Tools.LuaToolbox.Modules.Tools
                     , System.Agents.Tools.McpToolbox
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver
@@ -124,6 +126,7 @@ library agents-lib
                     , System.Agents.Session.Types
                     , System.Agents.Session.Base
                     , System.Agents.Session.Edit
+                    , System.Agents.Session.Compat
                     , System.Agents.Session.OpenAI
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step

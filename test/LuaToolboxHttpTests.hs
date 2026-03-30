@@ -31,12 +31,23 @@ import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), silent)
 
 import System.Agents.Base (LuaToolboxDescription (..))
+import System.Agents.Tools.Context (ToolPortal, ToolResult (..))
 import System.Agents.Tools.LuaToolbox as LuaToolbox
 import System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     RequestOptions (..),
     parseOptions,
  )
+
+-- | Dummy portal for tests
+dummyPortal :: ToolPortal
+dummyPortal _call =
+    pure $
+        ToolResult
+            { resultData = Aeson.object [("error", Aeson.String "Tool portal not available in test")]
+            , resultDuration = 0
+            , resultTraceId = "dummy"
+            }
 
 luaToolboxHttpTests :: TestTree
 luaToolboxHttpTests =
@@ -119,8 +130,7 @@ httpGetTests =
 -- | Test that http.get is blocked when no hosts are allowed
 testHttpGetBlockedHost :: Assertion
 testHttpGetBlockedHost = withTestToolboxNoHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $
-        "return http.get('http://example.com')"
+    result <- LuaToolbox.executeScript box "return http.get('http://example.com')" dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -138,8 +148,7 @@ testHttpGetBlockedHost = withTestToolboxNoHttp $ \box -> do
 testHttpGetHostValidation :: Assertion
 testHttpGetHostValidation = withTestToolboxHttp $ \box -> do
     -- localhost should be allowed but will fail to connect (no server)
-    result <- LuaToolbox.executeScript box $
-        "return http.get('http://localhost:99999/test')"
+    result <- LuaToolbox.executeScript box "return http.get('http://localhost:99999/test')" dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -179,11 +188,11 @@ testHttpPostArgumentOrder = withTestToolboxHttp $ \box -> do
     -- a segfault when trying to parse an invalid URL.
     
     -- Use a simple string body that is definitely NOT a valid URL
-    result <- LuaToolbox.executeScript box $ Text.unlines
+    result <- LuaToolbox.executeScript box (Text.unlines
         [ "local url = 'http://localhost:99999/api'"
         , "local body = 'this is not a url'"
         , "return http.post(url, body)"
-        ]
+        ]) dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -212,8 +221,7 @@ testHttpPostArgumentOrder = withTestToolboxHttp $ \box -> do
 -- | Test that http.post validates host correctly before attempting request
 testHttpPostHostValidation :: Assertion
 testHttpPostHostValidation = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $
-        "return http.post('http://localhost:99999/test', 'data')"
+    result <- LuaToolbox.executeScript box "return http.post('http://localhost:99999/test', 'data')" dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -230,14 +238,14 @@ testHttpPostHostValidation = withTestToolboxHttp $ \box -> do
 -- See the comments in luaPost function.
 testHttpPostWithOptions :: Assertion
 testHttpPostWithOptions = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $ Text.unlines
+    result <- LuaToolbox.executeScript box (Text.unlines
         [ "local url = 'http://localhost:99999/api'"
         , "local body = '{\"key\": \"value\"}'"
         , "local options = {"
         , "    headers = {['Content-Type'] = 'application/json'}"
         , "}"
         , "return http.post(url, body, options)"
-        ]
+        ]) dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -252,8 +260,7 @@ testHttpPostWithOptions = withTestToolboxHttp $ \box -> do
 -- | Test that http.post correctly blocks non-whitelisted hosts
 testHttpPostBlocksNonWhitelisted :: Assertion
 testHttpPostBlocksNonWhitelisted = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $
-        "return http.post('http://example.com/api', 'data')"
+    result <- LuaToolbox.executeScript box "return http.post('http://example.com/api', 'data')" dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -280,13 +287,13 @@ httpRequestTests =
 -- | Test http.request function with all parameters
 testHttpRequestWithBody :: Assertion
 testHttpRequestWithBody = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $ Text.unlines
+    result <- LuaToolbox.executeScript box (Text.unlines
         [ "return http.request({"
         , "    method = 'POST',"
         , "    url = 'http://localhost:99999/api',"
         , "    body = 'test data'"
         , "})"
-        ]
+        ]) dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -300,12 +307,12 @@ testHttpRequestWithBody = withTestToolboxHttp $ \box -> do
 -- | Test that http.request validates host
 testHttpRequestValidatesHost :: Assertion
 testHttpRequestValidatesHost = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $ Text.unlines
+    result <- LuaToolbox.executeScript box (Text.unlines
         [ "return http.request({"
         , "    method = 'GET',"
         , "    url = 'http://evil.com/data'"
         , "})"
-        ]
+        ]) dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -336,8 +343,7 @@ hostValidationErrorTests =
 -- | Test error message for invalid URL
 testInvalidUrlError :: Assertion
 testInvalidUrlError = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $
-        "return http.get('not-a-valid-url')"
+    result <- LuaToolbox.executeScript box "return http.get('not-a-valid-url')" dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -351,8 +357,7 @@ testInvalidUrlError = withTestToolboxHttp $ \box -> do
 -- | Test error for URL without host (like file://)
 testUrlWithoutHost :: Assertion
 testUrlWithoutHost = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScript box $
-        "return http.get('file:///etc/passwd')"
+    result <- LuaToolbox.executeScript box "return http.get('file:///etc/passwd')" dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do

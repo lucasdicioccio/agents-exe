@@ -31,6 +31,8 @@ Security:
 * Execution time is tracked for each portal invocation
 -}
 module System.Agents.ToolPortal (
+    Trace (..),
+
     -- * Portal creation
     makeToolPortal,
 
@@ -41,12 +43,11 @@ module System.Agents.ToolPortal (
     PortalError (..),
 ) where
 
+import Control.Concurrent.STM (TVar, readTVarIO)
 import Control.Exception (SomeException, try)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Bifunctor (first)
-import Data.ByteString.Lazy (toStrict)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8)
@@ -55,10 +56,10 @@ import Data.Time (diffUTCTime, getCurrentTime)
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.Base (newConversationId)
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
+import System.Agents.Tools.Base (CallResult (..), Tool (..))
 import System.Agents.Tools.Context (
     ToolCall (..),
     ToolPortal,
@@ -118,14 +119,15 @@ makeToolPortal ::
     -- | Tracer for tool execution events
     Tracer IO Trace ->
     -- | Registered tools available through the portal
-    [ToolRegistration] ->
+    TVar [ToolRegistration] ->
     ToolPortal
 makeToolPortal tracer registrations = portal
   where
     portal :: ToolPortal
     portal toolCall = do
+        print toolCall
         startTime <- getCurrentTime
-        result <- callToolViaPortal tracer registrations toolCall
+        result <- callToolViaPortal tracer portal registrations toolCall -- TODO(lucas): clarify stack recursion here
         endTime <- getCurrentTime
         let duration = diffUTCTime endTime startTime
 
@@ -162,25 +164,24 @@ a nested portal. This prevents infinite recursion through the portal.
 -}
 callToolViaPortal ::
     Tracer IO Trace ->
-    [ToolRegistration] ->
+    ToolPortal ->
+    TVar [ToolRegistration] ->
     ToolCall ->
-    IO (Either PortalError (CallResult ()))
-callToolViaPortal tracer registrations toolCall = do
+    IO (Either PortalError (CallResult ToolCall))
+callToolViaPortal tracer portal registrations toolCall = do
+    regs <- readTVarIO registrations
     -- Find tool by name
-    case findToolByName registrations (callToolName toolCall) of
+    case findToolByName regs (callToolName toolCall) of
         Nothing ->
             pure $ Left $ PortalToolNotFound (callToolName toolCall)
         Just _tool -> do
-            -- Create a synthetic OpenAI ToolCall to match the existing API
-            let openaiCall = makeSyntheticToolCall toolCall
-
             -- Find the specific tool with the call context
-            case findMatchingTool registrations openaiCall of
+            case findMatchingTool regs toolCall of
                 Nothing ->
                     pure $ Left $ PortalToolNotFound (callToolName toolCall)
                 Just matchedTool -> do
                     -- Execute with minimal context (no nested portal)
-                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) matchedTool (callArgs toolCall)
+                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) portal matchedTool (callArgs toolCall)
                     pure $ first PortalExecutionError execResult
 
 {- | Find a tool registration by tool name.
@@ -200,37 +201,12 @@ findToolByName regs name =
   where
     matchesName :: Text -> ToolRegistration -> Bool
     matchesName n reg =
-        n == OpenAI.getToolName (OpenAI.toolName reg.declareTool)
+        n == reg.declareTool.toolDescriptionName.getToolName
 
-{- | Create a synthetic OpenAI ToolCall from a portal ToolCall.
-
-The existing findTool infrastructure expects OpenAI.ToolCall, so we
-convert our ToolCall to that format for compatibility.
--}
-makeSyntheticToolCall ::
-    ToolCall ->
-    OpenAI.ToolCall
-makeSyntheticToolCall tc =
-    OpenAI.ToolCall
-        { OpenAI.rawToolCall = KeyMap.empty
-        , OpenAI.toolCallId = "portal-" <> callCallerId tc
-        , OpenAI.toolCallType = Just "function"
-        , OpenAI.toolCallFunction =
-            OpenAI.ToolCallFunction
-                { OpenAI.toolCallFunctionName = OpenAI.ToolName (callToolName tc)
-                , OpenAI.toolCallFunctionArgsUnparsed = decodeUtf8 $ toStrict $ Aeson.encode (callArgs tc)
-                , OpenAI.toolCallFunctionArgs = Just (callArgs tc)
-                }
-        }
-
-{- | Find a matching tool from registrations using OpenAI ToolCall.
-
-Uses the findTool function from each registration to find a match.
--}
 findMatchingTool ::
     [ToolRegistration] ->
-    OpenAI.ToolCall ->
-    Maybe (Tool OpenAI.ToolCall)
+    ToolCall ->
+    Maybe (Tool ToolCall)
 findMatchingTool regs call =
     case concatMap (\r -> maybe [] (: []) (r.findTool call)) regs of
         (t : _) -> Just t
@@ -243,15 +219,16 @@ This is a safety measure to avoid potential infinite recursion.
 -}
 executeTool ::
     Tracer IO ToolTrace ->
-    Tool OpenAI.ToolCall ->
+    ToolPortal ->
+    Tool ToolCall ->
     Aeson.Value ->
-    IO (Either Text (CallResult ()))
-executeTool toolTracer tool args = do
+    IO (Either Text (CallResult ToolCall))
+executeTool toolTracer portal tool args = do
     -- Create minimal context without portal
     sessId <- newSessionId
     convId <- newConversationId
     turnId <- newTurnId
-    let minimalCtx = mkMinimalContext sessId convId turnId
+    let minimalCtx = mkMinimalContext sessId convId turnId portal
 
     -- Execute the tool
     result <- try $ tool.toolRun toolTracer minimalCtx args
@@ -261,7 +238,7 @@ executeTool toolTracer tool args = do
             pure $ Left $ Text.pack $ show e
         Right callResult ->
             -- Strip the OpenAI.ToolCall from the result
-            pure $ Right $ mapCallResult (const ()) callResult
+            pure $ Right callResult
 
 -------------------------------------------------------------------------------
 -- Result Conversion
@@ -272,7 +249,7 @@ executeTool toolTracer tool args = do
 Different tool types have different result shapes, so we normalize them
 to JSON for the portal interface.
 -}
-callResultToJson :: CallResult () -> Aeson.Value
+callResultToJson :: forall a. CallResult a -> Aeson.Value
 callResultToJson (BlobToolSuccess _ bs) =
     Aeson.object
         [ "type" .= ("blob" :: Text)

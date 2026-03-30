@@ -4,7 +4,7 @@
 module System.Agents.LLMs.OpenAI (
     Tool (..),
     Trace (..),
-    ToolCall (..),
+    OpenAIToolCall (..),
     ToolCallFunction (..),
     ToolName (..),
     Model (..),
@@ -43,7 +43,7 @@ import Prod.Tracer (Tracer (..), contramap, runTracer)
 import Text.Read (readMaybe)
 
 import qualified System.Agents.HttpClient as HttpClient
-import System.Agents.ToolSchema
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..), jsonSchema)
 
 -------------------------------------------------------------------------------
 -- Trace with byte counts
@@ -200,24 +200,17 @@ waitRateLimit lims onWait = Tracer go
     go _ = pure ()
 
 -------------------------------------------------------------------------------
-newtype ToolName = ToolName {getToolName :: Text}
-    deriving (Show, Eq, Ord)
-
-data Tool = Tool
-    { toolName :: ToolName
-    , toolDescription :: Text
-    , toolParamProperties :: [ParamProperty]
-    }
+newtype Tool = Tool {getTool :: ToolDescription}
     deriving (Show)
 
 instance ToJSON Tool where
-    toJSON t =
+    toJSON (Tool t) =
         Aeson.object
             [ "type" .= ("function" :: Text)
             , "function"
                 .= Aeson.object
-                    [ "name" .= t.toolName.getToolName
-                    , "description" .= t.toolDescription
+                    [ "name" .= t.toolDescriptionName.getToolName
+                    , "description" .= t.toolDescriptionText
                     , "parameters" .= Aeson.object (jsonSchema toplevelProperty)
                     ]
             ]
@@ -225,9 +218,9 @@ instance ToJSON Tool where
         toplevelProperty :: ParamProperty
         toplevelProperty =
             ParamProperty
-                { propertyKey = t.toolName.getToolName
-                , propertyType = ObjectParamType t.toolParamProperties
-                , propertyDescription = t.toolDescription
+                { propertyKey = t.toolDescriptionName.getToolName
+                , propertyType = ObjectParamType t.toolDescriptionParamProperties
+                , propertyDescription = t.toolDescriptionText
                 , propertyRequired = True
                 }
 
@@ -372,8 +365,8 @@ instance FromJSON ToolCallFunction where
                 <*> pure argsStr
                 <*> pure argVal
 
-data ToolCall
-    = ToolCall
+data OpenAIToolCall
+    = OpenAIToolCall
     { rawToolCall :: Aeson.Object
     , toolCallId :: Text
     , toolCallType :: Maybe Text
@@ -381,10 +374,10 @@ data ToolCall
     }
     deriving (Show)
 
-instance FromJSON ToolCall where
+instance FromJSON OpenAIToolCall where
     parseJSON =
-        Aeson.withObject "ToolCall" $ \v ->
-            ToolCall
+        Aeson.withObject "OpenAIToolCall" $ \v ->
+            OpenAIToolCall
                 <$> pure v
                 <*> v .: "id"
                 <*> v .:? "type"
@@ -396,7 +389,7 @@ data Response
     , chosenMessage :: Aeson.Object
     , finishReason :: Maybe Text
     , rspContent :: Maybe Text
-    , rspToolCalls :: Maybe [ToolCall]
+    , rspToolCalls :: Maybe [OpenAIToolCall]
     , rspReasoningContent :: Maybe Text
     }
     deriving (Show)
