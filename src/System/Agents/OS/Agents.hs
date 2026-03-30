@@ -55,7 +55,7 @@ import System.Agents.OS.Core (
 import System.Agents.OS.Core.Types (Component (..), EntityId (..))
 import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 
 -------------------------------------------------------------------------------
 -- Agent Creation

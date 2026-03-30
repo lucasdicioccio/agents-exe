@@ -28,7 +28,7 @@ import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 
 -- | How to display tool information in the check output
 data ToolsOutputMode

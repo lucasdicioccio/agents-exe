@@ -52,10 +52,11 @@ import System.Agents.Session.Base (
     defaultContextConfig,
  )
 import qualified System.Agents.Session.Base as SessionBase
+import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (
     OpenAICompletionConfig (..),
-    mkOpenAICompletion
+    mkOpenAICompletion,
  )
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.Session.Types (
@@ -63,11 +64,10 @@ import System.Agents.Session.Types (
     newTurnId,
  )
 import qualified System.Agents.Session.Types as SessionTypes
-import qualified System.Agents.Session.Compat as SessionCompat
+import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolSchema as ToolSchema
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
-import qualified System.Agents.ToolPortal as ToolPortal
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -458,4 +458,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-

@@ -113,8 +113,8 @@ import System.Agents.Tools.EndpointPredicate (
  )
 import System.Agents.Tools.IO (RunError (..))
 import System.Agents.Tools.OpenAPI.Converter (
-    NameMapping (..),
     InternalTool (..),
+    NameMapping (..),
     buildToolNameMapping,
     convertOpenAPIToTools,
     findToolByNormalizedName,

@@ -43,7 +43,7 @@ import Prod.Tracer (Tracer (..), contramap, runTracer)
 import Text.Read (readMaybe)
 
 import qualified System.Agents.HttpClient as HttpClient
-import System.Agents.ToolSchema (ToolDescription(..), ToolName(..), ParamProperty(..), ParamType(..), jsonSchema)
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..), jsonSchema)
 
 -------------------------------------------------------------------------------
 -- Trace with byte counts
@@ -200,7 +200,7 @@ waitRateLimit lims onWait = Tracer go
     go _ = pure ()
 
 -------------------------------------------------------------------------------
-newtype Tool = Tool { getTool :: ToolDescription }
+newtype Tool = Tool {getTool :: ToolDescription}
     deriving (Show)
 
 instance ToJSON Tool where

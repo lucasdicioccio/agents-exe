@@ -131,7 +131,7 @@ luaList config = do
 
     -- Add each allowed tool to the array
     let allowedTools = toolsAllowedTools config
-    mapM_ (\(idx, toolName) -> pushToolName (idx + 1) toolName) (zip [0..] allowedTools)
+    mapM_ (\(idx, toolName) -> pushToolName (idx + 1) toolName) (zip [0 ..] allowedTools)
 
     -- Return the array
     pure 1
@@ -292,5 +292,3 @@ luaTableToAeson idx = do
     ret <- luaToJsonValue
     Lua.pop 1
     pure ret
-
-

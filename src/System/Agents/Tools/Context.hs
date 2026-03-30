@@ -160,7 +160,6 @@ tool) wants to call another tool, it uses this portal.
 Note: The portal is synchronous (IO ToolResult) for simplicity.
 Async support can be added later if needed.
 -}
-
 type ToolPortal = ToolCall -> IO ToolResult
 
 dummyPortal :: ToolPortal
@@ -171,7 +170,6 @@ dummyPortal _call =
             , resultDuration = 0
             , resultTraceId = "dummy"
             }
-
 
 -------------------------------------------------------------------------------
 -- Tool Execution Context

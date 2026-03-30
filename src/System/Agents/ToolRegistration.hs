@@ -221,11 +221,11 @@ registerBashToolInLLM script =
 
         mapToolDescriptionBash2LLM :: ScriptDescription -> ToolDescription
         mapToolDescriptionBash2LLM bash =
-                ToolDescription
-                    { toolDescriptionName = bash2LLMName bash
-                    , toolDescriptionText = bash.scriptInfo.scriptDescription
-                    , toolDescriptionParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
-                    }
+            ToolDescription
+                { toolDescriptionName = bash2LLMName bash
+                , toolDescriptionText = bash.scriptInfo.scriptDescription
+                , toolDescriptionParamProperties = fmap mapArg bash.scriptInfo.scriptArgs
+                }
 
         tool :: Tool ()
         tool = bashTool script
@@ -258,11 +258,11 @@ registerIOScriptInLLM script llmProps =
 
         llmTool :: ToolDescription
         llmTool =
-                ToolDescription
-                    { toolDescriptionName = io2LLMName script
-                    , toolDescriptionText = script.description.ioDescription
-                    , toolDescriptionParamProperties = llmProps
-                    }
+            ToolDescription
+                { toolDescriptionName = io2LLMName script
+                , toolDescriptionText = script.description.ioDescription
+                , toolDescriptionParamProperties = llmProps
+                }
      in
         ToolRegistration tool llmTool find
 
@@ -292,11 +292,11 @@ registerMcpToolInLLM box mcp =
 
         mapToolDescriptionMcp2LLM :: [ParamProperty] -> ToolDescription
         mapToolDescriptionMcp2LLM schema =
-                ToolDescription
-                    { toolDescriptionName = llmName
-                    , toolDescriptionText = llmDescription
-                    , toolDescriptionParamProperties = schema
-                    }
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = llmDescription
+                , toolDescriptionParamProperties = schema
+                }
 
         tool :: Tool ()
         tool = mcpTool box mcp
@@ -501,11 +501,11 @@ registerPostgRESTool toolbox tool =
 
         -- Create the OpenAI Tool declaration
         toolDescription =
-                ToolDescription
-                    { toolDescriptionName = llmName
-                    , toolDescriptionText = prtDescription tool
-                    , toolDescriptionParamProperties = paramProps
-                    }
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = prtDescription tool
+                , toolDescriptionParamProperties = paramProps
+                }
 
         -- Create the tool handler
         runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
@@ -760,11 +760,11 @@ registerSqliteTool box =
             ]
 
         toolDescription =
-                ToolDescription
-                    { toolDescriptionName = llmName
-                    , toolDescriptionText = box.toolboxDescription
-                    , toolDescriptionParamProperties = paramProps
-                    }
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = box.toolboxDescription
+                , toolDescriptionParamProperties = paramProps
+                }
 
         -- Create the tool
         tool' = sqliteTool box
@@ -823,11 +823,11 @@ registerSystemTool box =
             ]
 
         toolDescription =
-                ToolDescription
-                    { toolDescriptionName = llmName
-                    , toolDescriptionText = "Provides system information: " <> box.toolboxDescription
-                    , toolDescriptionParamProperties = paramProps
-                    }
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = "Provides system information: " <> box.toolboxDescription
+                , toolDescriptionParamProperties = paramProps
+                }
 
         -- Create the tool
         tool' = systemTool box
@@ -944,11 +944,11 @@ registerDeveloperTool box =
             ]
 
         toolDescription =
-                ToolDescription
-                    { toolDescriptionName = llmName
-                    , toolDescriptionText = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
-                    , toolDescriptionParamProperties = paramProps
-                    }
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
+                , toolDescriptionParamProperties = paramProps
+                }
 
         -- Create the tool
         tool' = developerTool box
@@ -1029,11 +1029,11 @@ registerLuaTool box =
         luaDescription = luaToolboxDescription (LuaTools.toolboxConfig box)
 
         toolDescription =
-                ToolDescription
-                    { toolDescriptionName = llmName
-                    , toolDescriptionText = luaDescription
-                    , toolDescriptionParamProperties = paramProps
-                    }
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = luaDescription
+                , toolDescriptionParamProperties = paramProps
+                }
 
         -- Create the tool
         tool' = luaTool box
@@ -1089,17 +1089,17 @@ luaTool box =
         -- Extract script from arguments
         case KeyMap.lookup (AesonKey.fromText "script") v of
             Just (Aeson.String script) -> do
-                        -- Execute script with portal, passing the tracer for detailed logging
-                        result <-
-                            LuaTools.executeScriptWithPortal
-                                (contramap LuaToolsTrace tracer)
-                                box
-                                script
-                                (Context.ctxToolPortal ctx)
+                -- Execute script with portal, passing the tracer for detailed logging
+                result <-
+                    LuaTools.executeScriptWithPortal
+                        (contramap LuaToolsTrace tracer)
+                        box
+                        script
+                        (Context.ctxToolPortal ctx)
 
-                        case result of
-                            Left err -> pure $ LuaToolError call (Text.pack $ show err)
-                            Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
+                case result of
+                    Left err -> pure $ LuaToolError call (Text.pack $ show err)
+                    Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
             _ ->
                 pure $ LuaToolError call "Missing 'script' parameter or invalid type"
     run _tracer _ctx _ =
@@ -1343,4 +1343,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-

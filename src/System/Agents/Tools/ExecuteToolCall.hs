@@ -16,7 +16,7 @@ LLM tool call formats and the internal OpenAIToolCall representation.
 -}
 module System.Agents.Tools.ExecuteToolCall (
     -- * Tool Call Execution
-    executeLlmToolCall
+    executeLlmToolCall,
 ) where
 
 import Control.Concurrent.STM (TVar, readTVarIO)
@@ -30,17 +30,16 @@ import System.Agents.Session.Base (
  )
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
-import System.Agents.Tools.Trace (ToolTrace)
 import System.Agents.Tools.Context (
-    ToolCall(..),
+    ToolCall (..),
     ToolExecutionContext,
  )
+import System.Agents.Tools.Trace (ToolTrace)
 
 type ToolMappingFunctions r =
-  ( LlmToolCall -> Maybe r
-  , r -> CallResult r -> UserToolResponse
-  )
-
+    ( LlmToolCall -> Maybe r
+    , r -> CallResult r -> UserToolResponse
+    )
 
 {- | Execute a tool call using the node's registered tools.
 

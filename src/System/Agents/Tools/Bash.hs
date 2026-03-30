@@ -4,7 +4,7 @@
 module System.Agents.Tools.Bash where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Data.Aeson (FromJSON, ToJSON, (.:), (.=), (.:?))
+import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)

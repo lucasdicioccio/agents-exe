@@ -62,9 +62,9 @@ import Prod.Tracer (Tracer)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (Session (..))
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ParamProperty (..), ToolName(..), ParamType (..), ToolDescription(..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..), ToolDef (..), mapToolResult)
-import System.Agents.Tools.Context (ToolCall(..), ToolExecutionContext)
+import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.State (foldSession, isScriptEnabled)
 import System.Agents.Tools.Skills.Types

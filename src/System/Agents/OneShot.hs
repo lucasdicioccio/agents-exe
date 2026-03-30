@@ -55,14 +55,14 @@ import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base
+import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop
 import System.Agents.Session.OpenAI
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
-import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..), ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 import qualified Data.Aeson.Key as AesonKey
@@ -397,4 +397,3 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
-

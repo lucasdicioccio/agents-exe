@@ -24,7 +24,7 @@ import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
-import System.Agents.Base (AgentSlug, AgentId, ConversationId, newConversationId, newStepId)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId, newStepId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -44,17 +44,17 @@ import System.Agents.Session.Base (
     newSessionId,
     newTurnId,
  )
-import qualified System.Agents.ToolPortal as ToolPortal
-import System.Agents.Session.Loop (run)
 import qualified System.Agents.Session.Compat as SessionCompat
+import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
+import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (
     ToolRegistration (..),
     registerIOScriptInLLM,
  )
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..), ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
@@ -277,4 +277,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _) =
     Maybe.fromMaybe "" txt
-

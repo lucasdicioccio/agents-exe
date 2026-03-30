@@ -14,7 +14,7 @@ import System.Agents.Base (ConversationId)
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext, ToolPortal)
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, ToolPortal, mkToolExecutionContext)
 
 {- | Runs a single step of agent for a given session.
 Agent may be modified, may decide to return a session, or decide to stop.

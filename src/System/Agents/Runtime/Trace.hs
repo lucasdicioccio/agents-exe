@@ -4,6 +4,7 @@ import Data.Text (Text)
 
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
@@ -12,7 +13,6 @@ import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 import qualified System.Agents.Tools.Trace as Tools
-import qualified System.Agents.ToolPortal as ToolPortal
 
 -------------------------------------------------------------------------------
 data Trace

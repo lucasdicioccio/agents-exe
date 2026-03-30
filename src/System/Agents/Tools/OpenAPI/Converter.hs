@@ -74,7 +74,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..), ParamProperty (..), ParamType (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),

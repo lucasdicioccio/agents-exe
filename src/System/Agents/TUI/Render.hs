@@ -23,7 +23,7 @@ import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool)
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 
 -------------------------------------------------------------------------------
 -- Attribute Names

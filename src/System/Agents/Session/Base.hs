@@ -37,7 +37,7 @@ module System.Agents.Session.Base (
 
 import Data.Text (Text)
 
-import System.Agents.Tools.Context (ToolPortal, ToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Session.Types

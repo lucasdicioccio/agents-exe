@@ -31,7 +31,8 @@ Security:
 * Execution time is tracked for each portal invocation
 -}
 module System.Agents.ToolPortal (
-    Trace(..),
+    Trace (..),
+
     -- * Portal creation
     makeToolPortal,
 
@@ -57,6 +58,7 @@ import Prod.Tracer (Tracer (..), contramap)
 import System.Agents.Base (newConversationId)
 import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), Tool (..))
 import System.Agents.Tools.Context (
     ToolCall (..),
@@ -65,7 +67,6 @@ import System.Agents.Tools.Context (
     mkMinimalContext,
  )
 import System.Agents.Tools.Trace (ToolTrace (..))
-import System.Agents.ToolSchema (ToolName(..), ToolDescription(..))
 
 data Trace = PortalCall !ToolCall !ToolTrace
     deriving (Show)

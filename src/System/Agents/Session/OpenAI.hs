@@ -70,15 +70,15 @@ mkOpenAICompletion config completion = do
     -- manually to extract name, description, and parameters.
     systemToolToOpenAI :: SystemTool -> OpenAI.Tool
     systemToolToOpenAI (SystemTool (V1 tool)) =
-        OpenAI.Tool
-            $ ToolDescription
+        OpenAI.Tool $
+            ToolDescription
                 { toolDescriptionName = OpenAI.ToolName $ tool.llmName
                 , toolDescriptionText = tool.description
                 , toolDescriptionParamProperties = tool.properties
                 }
     systemToolToOpenAI (SystemTool (V0 (Aeson.Object v0obj))) =
-        OpenAI.Tool
-            $ ToolDescription
+        OpenAI.Tool $
+            ToolDescription
                 { toolDescriptionName = ToolName $ extractName v0obj
                 , toolDescriptionText = extractDescription v0obj
                 , toolDescriptionParamProperties = extractParams v0obj
@@ -160,8 +160,8 @@ mkOpenAICompletion config completion = do
         parseParamType _ other _ = OpaqueParamType other
     systemToolToOpenAI (SystemTool (V0 other)) =
         -- Handle non-object V0 values by creating a minimal tool
-        OpenAI.Tool
-            $ ToolDescription
+        OpenAI.Tool $
+            ToolDescription
                 { toolDescriptionName = OpenAI.ToolName "unknown_tool"
                 , toolDescriptionText = "Unknown tool format: " <> Text.pack (show other)
                 , toolDescriptionParamProperties = []
@@ -272,7 +272,6 @@ newConfig tracer =
         <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
         <*> pure "gpt-4.1-mini"
         <*> pure OpenAI.OpenAIv1
-
 
 parseToolCall_openAI :: Aeson.Value -> Maybe OpenAI.OpenAIToolCall
 parseToolCall_openAI val =

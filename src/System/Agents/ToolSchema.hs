@@ -1,13 +1,14 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module System.Agents.ToolSchema (
-  ToolName(..),
-  ToolDescription(..),
-  ParamProperty(..),
-  ParamType(..),
-  jsonSchema, toJsonSchemaPair
+    ToolName (..),
+    ToolDescription (..),
+    ParamProperty (..),
+    ParamType (..),
+    jsonSchema,
+    toJsonSchemaPair,
 ) where
 
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.=))
