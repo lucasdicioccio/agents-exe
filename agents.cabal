@@ -56,6 +56,8 @@ library agents-lib
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
+                    , System.Agents.Media.Types
+                    , System.Agents.Media.Detection
                     , System.Agents.OS
                     , System.Agents.OS.Agents
                     , System.Agents.OS.AgentTree

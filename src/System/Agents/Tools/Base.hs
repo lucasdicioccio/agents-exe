@@ -12,6 +12,7 @@ import qualified Data.Text as Text
 import Prod.Tracer (Tracer)
 
 import qualified System.Agents.MCP.Base as Mcp
+import qualified System.Agents.Media.Types as Media
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
@@ -72,10 +73,14 @@ data ToolDef
 This type represents the various outcomes that can occur when executing
 a tool through the agent system. Each constructor pairs the call context
 with the specific result or error type.
+
+Note: 'BlobToolSuccess' now carries an optional 'MediaTypeHint' to support
+binary media outputs (images, audio, etc.). This enables proper handling
+of binary tool outputs without breaking existing code that passes 'Nothing'.
 -}
 data CallResult call
-    = -- | Successful execution returning raw bytes (e.g., bash/IO tool output)
-      BlobToolSuccess call ByteString
+    = -- | Successful execution returning raw bytes with optional media type hint
+      BlobToolSuccess call ByteString (Maybe Media.MediaTypeHint)
     | -- | Tool was not found in the registered tools
       ToolNotFound call
     | -- | Bash script execution failed
@@ -129,7 +134,7 @@ mapCallResult f c =
         (ToolNotFound v) -> ToolNotFound (f v)
         (BashToolError v e) -> BashToolError (f v) e
         (IOToolError v e) -> IOToolError (f v) e
-        (BlobToolSuccess v b) -> BlobToolSuccess (f v) b
+        (BlobToolSuccess v b m) -> BlobToolSuccess (f v) b m
         (McpToolResult v b) -> McpToolResult (f v) b
         (McpToolError v b) -> McpToolError (f v) b
         (OpenAPIToolResult v r) -> OpenAPIToolResult (f v) r
@@ -163,7 +168,7 @@ extractCall :: CallResult call -> call
 extractCall (ToolNotFound c) = c
 extractCall (BashToolError c _) = c
 extractCall (IOToolError c _) = c
-extractCall (BlobToolSuccess c _) = c
+extractCall (BlobToolSuccess c _ _) = c
 extractCall (McpToolResult c _) = c
 extractCall (McpToolError c _) = c
 extractCall (OpenAPIToolResult c _) = c
@@ -196,7 +201,7 @@ Note: For BlobToolSuccess, we count the raw ByteString length directly.
 For other result types, we encode to JSON and count the bytes.
 -}
 callResultByteSize :: CallResult call -> Int
-callResultByteSize (BlobToolSuccess _ bs) =
+callResultByteSize (BlobToolSuccess _ bs _) =
     -- Raw bytes - count the ByteString length directly
     BS.length bs
 callResultByteSize (ToolNotFound _) =

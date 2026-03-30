@@ -91,7 +91,7 @@ bashTool script =
         ret <- BashTools.runValue (contramap BashToolsTrace tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
-            Right rsp -> pure $ BlobToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp Nothing
 
 -------------------------------------------------------------------------------
 
@@ -387,4 +387,4 @@ ioTool script =
         ret <- IOTools.runValue (contramap adaptTrace tracer) script ctx v
         case ret of
             Left err -> pure $ IOToolError call err
-            Right rsp -> pure $ BlobToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp Nothing
