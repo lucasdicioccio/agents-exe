@@ -76,6 +76,8 @@ testLuaToolbox =
         , luaToolboxAllowedTools = []
         , luaToolboxAllowedPaths = []
         , luaToolboxAllowedHosts = []
+        , luaToolboxLifetime = Nothing
+        , luaToolboxActivation = Nothing
         }
 
 -- | Run an action with a test toolbox initialized

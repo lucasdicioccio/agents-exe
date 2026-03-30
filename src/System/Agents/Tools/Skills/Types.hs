@@ -9,6 +9,10 @@
 This module defines the fundamental types for loading, validating, and
 managing skills in the agent system. Skills provide procedural knowledge
 and executable capabilities via progressive disclosure.
+
+Note: The skills system now uses the generic activation infrastructure
+internally (see System.Agents.Tools.Activation) while maintaining the
+same external API for backward compatibility.
 -}
 module System.Agents.Tools.Skills.Types (
     -- * Skill Names and Validation
@@ -38,7 +42,7 @@ module System.Agents.Tools.Skills.Types (
     allSkills,
     insertSkill,
 
-    -- * Skill Script State
+    -- * Skill Script State (legacy, for backward compatibility)
     ScriptState (..),
     SkillScriptsState,
     SkillsSessionState (..),
@@ -362,10 +366,10 @@ allSkills (SkillsStore m) = Map.elems m
 -- | Insert a skill into the store.
 insertSkill :: Skill -> SkillsStore -> SkillsStore
 insertSkill skill (SkillsStore m) =
-    SkillsStore $ Map.insert (skillMetadata skill).smName skill m
+    SkillsStore $ Map.insert (skill.skillMetadata).smName skill m
 
 -------------------------------------------------------------------------------
--- Session State for Skills
+-- Session State for Skills (legacy, for backward compatibility)
 -------------------------------------------------------------------------------
 
 {- | Activation state for individual scripts within a skill.
@@ -382,6 +386,10 @@ type SkillScriptsState = Map ScriptName ScriptState
 
 This is a monoid that can be built by folding over session turns.
 Later state overrides earlier state (last enable/disable wins).
+
+Note: This type is kept for backward compatibility. Internally, the skills
+system now uses the generic 'System.Agents.Tools.Activation.ToolboxSessionState'
+which provides the same functionality for all toolbox types.
 -}
 newtype SkillsSessionState = SkillsSessionState
     { sssActiveSkills :: Map SkillName SkillScriptsState
