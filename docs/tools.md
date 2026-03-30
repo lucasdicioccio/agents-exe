@@ -661,78 +661,170 @@ if __name__ == "__main__":
 
 ## Lua Tools
 
-Lua tools provide embedded scripting capabilities through Lua scripts that can execute within the agent process.
+Lua tools provide embedded scripting capabilities through a sandboxed Lua interpreter. This enables agents to orchestrate complex workflows by combining multiple tools through Lua scripts.
 
-### Lua Toolbox
+### Recursive Language Models (LRM) with Lua
 
-The `LuaToolbox` module provides a complete Lua environment with security controls and API modules.
+The Lua toolbox enables a powerful pattern called **Recursive Language Models (LRM)**. By configuring an agent to reference itself in `extraAgents` and granting the Lua toolbox permission to call the resulting `io_prompt_agent_{slug}` tool, you create an agent that can recursively invoke itself for complex reasoning tasks.
 
-```haskell
-data LuaToolbox = LuaToolbox
-    { toolboxName :: Text
-    , toolboxDescription :: Text
-    , scripts :: [LuaScript]
-    }
+### Configuration
+
+```json
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "local_lrmlua",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.5",
+    "announce": "The main agent, capable of reasoning.",
+    "systemPrompt": [
+      "You are a helpful software agent trying to solve user requests"
+    ],
+    "extraAgents": [
+      {
+        "slug": "local_lrmlua",
+        "path": "kimi-10.lrmlua.json"
+      }
+    ],
+    "bashToolboxes": [
+      {
+        "tag": "SingleTool",
+        "contents": "./tools/askuser/ask-user.bash"
+      }
+    ],
+    "builtinToolboxes": [
+      {
+        "tag": "LuaToolbox",
+        "contents": {
+          "name": "lua",
+          "description": "Sandboxed Lua interpreter",
+          "maxMemoryMB": 256,
+          "maxExecutionTimeSeconds": 300,
+          "allowedTools": [
+            "bash_ask_user",
+            "io_prompt_agent_local_lrmlua",
+            "sqlite_shared_working_memory_query"
+          ],
+          "allowedPaths": [
+            "./repro-cases",
+            "./README.md"
+          ],
+          "allowedHosts": [
+            "localhost",
+            "127.0.0.1"
+          ]
+        }
+      },
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "name": "shared_working_memory",
+          "description": "A base to help you coordinate large works.",
+          "path": "./dev-memory.db",
+          "access": "read-write"
+        }
+      }
+    ]
+  }
+}
 ```
 
-### Lua Modules
+### LuaToolbox Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique name for this toolbox instance (used as tool prefix) |
+| `description` | string | Human-readable description |
+| `maxMemoryMB` | integer | Maximum Lua heap memory in megabytes |
+| `maxExecutionTimeSeconds` | integer | Maximum script execution time in seconds |
+| `allowedTools` | [string] | Whitelist of tool names Lua scripts can call via the portal |
+| `allowedPaths` | [string] | Whitelist of filesystem paths accessible to Lua scripts |
+| `allowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module |
+
+### Security Features
+
+The Lua toolbox provides a sandboxed execution environment:
+
+- **Memory limits**: Lua state memory is constrained via allocator hooks
+- **Timeout enforcement**: Scripts that exceed `maxExecutionTimeSeconds` are terminated
+- **Path sandboxing**: Filesystem access restricted to `allowedPaths` (prevents symlink traversal)
+- **Host whitelisting**: HTTP requests limited to `allowedHosts`
+- **Tool whitelist**: Only tools in `allowedTools` can be called through the portal
+- **Dangerous functions removed**: `os.execute`, `io.popen`, `loadfile`, `dofile`, etc. are removed
+- **Empty whitelist = no access**: Secure defaults - empty lists mean no access
+
+### Lua Standard Library Modules
 
 Scripts have access to these built-in modules:
 
 | Module | Functions | Description |
 |--------|-----------|-------------|
 | `json` | `encode`, `decode`, `encode_pretty` | JSON manipulation |
-| `http` | `get`, `post`, `put`, `delete` | HTTP requests |
+| `http` | `get`, `post`, `put`, `delete` | HTTP requests (host-restricted) |
 | `time` | `now`, `sleep`, `format` | Time utilities |
 | `fs` | `read_file`, `write_file`, `list_dir` | File system (sandboxed) |
 | `text` | `split`, `join`, `trim`, `match` | String utilities |
+| `tools` | `call` | Tool portal integration |
 
 ### Example Lua Script
 
 ```lua
--- my-script.lua
 local json = require("json")
-local http = require("http")
-local fs = require("fs")
+local tools = require("tools")
 
-function describe()
-    return json.encode({
-        slug = "fetch-and-save",
-        description = "Fetch URL content and save to file",
-        args = {
-            { name = "url", type = "string", required = true },
-            { name = "output", type = "string", required = true }
-        }
+-- Call the recursive agent for complex reasoning
+local reasoning_result = tools.call("io_prompt_agent_local_lrmlua", {
+    what = "Analyze this codebase structure and identify potential refactoring opportunities"
+})
+
+-- Process the result
+if reasoning_result.status == "ok" then
+    local analysis = json.decode(reasoning_result.result_txt)
+    
+    -- Query the shared working memory
+    local db_result = tools.call("sqlite_shared_working_memory_query", {
+        sql = "INSERT INTO analysis_results (content) VALUES ('" .. analysis.summary .. "')"
     })
-end
-
-function run(args)
-    local response = http.get(args.url)
-    fs.write_file(args.output, response.body)
-    return json.encode({
+    
+    return {
         success = true,
-        bytes_written = #response.body
-    })
-end
-
--- Entry point
-local cmd = arg[1]
-if cmd == "describe" then
-    print(describe())
-elseif cmd == "run" then
-    local args = json.decode(arg[2] or "{}")
-    print(run(args))
+        analysis = analysis,
+        stored = db_result.status == "ok"
+    }
 else
-    error("Unknown command: " .. tostring(cmd))
+    return {
+        success = false,
+        error = reasoning_result.error
+    }
 end
 ```
 
-### Security Features
+### Tool Naming
 
-- **Sandboxed file system**: Restricted to allowed directories
-- **Network allowlist**: HTTP requests limited to approved domains
-- **Timeout controls**: Maximum execution time enforced
-- **Memory limits**: Lua state memory constrained
+The Lua toolbox exposes a single tool named `lua_{name}_execute`:
+
+```json
+{
+  "script": "local json = require('json'); return json.encode({status='ok'})",
+  "timeout": 60
+}
+```
+
+### Error Handling
+
+Lua script errors are captured and returned to the LLM:
+
+```haskell
+data ScriptError
+    = LuaRuntimeError [Aeson.Value]      -- Syntax or runtime error
+    | TimeoutError Int                   -- Script exceeded time limit
+    | MemoryError Int                    -- Script exceeded memory limit
+    | SandboxError Text                  -- Attempted sandbox violation
+    | ToolInvocationError Text           -- Error calling another tool
+    | InitializationError Text           -- Failed to initialize Lua state
+```
 
 ## Skills System
 
@@ -977,6 +1069,8 @@ echo '{"filepath": "/path/to/file"}' | \
 # Tool call validation failed for 'read-file' with 2 errors:
 # 1. filepath: Required property missing
 # 2. content: Required property missing
+#
+# Please correct these issues and try again.
 ```
 
 ### Error Formatting
@@ -1224,8 +1318,9 @@ Tools are named according to their type and toolbox:
 | SQLite | `sqlite_{toolbox}_query` | `sqlite_analytics_query` |
 | System | `system_{toolbox}_system_info` | `system_system_system_info` |
 | Developer | `developer_{toolbox}_developer_tools` | `developer_dev_developer_tools` |
-| Lua | `lua_{toolbox}_{script}` | `lua_utils_format_json` |
+| Lua | `lua_{toolbox}_execute` | `lua_utils_execute` |
 | IO | `io_{slug}` | `io_calculator` |
+| IO (Agent) | `io_prompt_agent_{slug}` | `io_prompt_agent_helper` |
 | Skill (meta) | `skill_{action}_{name}` | `skill_describe_pdf-processing` |
 | Skill (script) | `skill_{name}_{script}` | `skill_pdf-processing_extract-text` |
 
@@ -1352,6 +1447,8 @@ data PortalError
 8. **Required vs Optional**: Mark truly required parameters as required
 9. **Progressive disclosure**: Use Skills for complex tool suites
 10. **Portal safety**: Always whitelist tools for portal access
+11. **Recursive agents**: When using LRM pattern, set appropriate maxDepth to prevent infinite recursion
+12. **Lua security**: Always specify allowedTools, allowedPaths, and allowedHosts - empty means no access
 
 ## Example: Complete Tool Configuration
 
@@ -1429,7 +1526,11 @@ data PortalError
       "contents": {
         "name": "lua",
         "description": "Lua scripting tools",
-        "scripts": ["./lua-scripts"]
+        "maxMemoryMB": 256,
+        "maxExecutionTimeSeconds": 300,
+        "allowedTools": ["bash_read_file", "sqlite_analytics_query"],
+        "allowedPaths": ["./scripts", "./data"],
+        "allowedHosts": ["localhost"]
       }
     }
   ],
