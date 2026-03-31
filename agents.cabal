@@ -37,10 +37,8 @@ library agents-lib
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
-                    , System.Agents.CLI.Export
                     , System.Agents.CLI.Initialize
                     , System.Agents.CLI.InitProject
-                    , System.Agents.CLI.Import
                     , System.Agents.CLI.McpServer
                     , System.Agents.CLI.New
                     , System.Agents.CLI.OneShot

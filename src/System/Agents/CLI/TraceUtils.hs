@@ -2,9 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module System.Agents.CLI.TraceUtils (
-    tracePrintingTextResponses,
     traceUsefulPromptStderr,
-    traceUsefulPromptStdout,
 ) where
 
 import Data.Text ()
@@ -12,17 +10,9 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import GHC.IO.Handle (Handle)
 import Prod.Tracer (Tracer (..))
-import System.IO (stderr, stdout)
+import System.IO (stderr)
 
 import System.Agents.AgentTree (AgentConfigTree (..), TreeTrace (..))
-
-tracePrintingTextResponses :: Tracer IO TreeTrace
-tracePrintingTextResponses = Tracer f
-  where
-    f _ = pure () -- Stub implementation
-
-traceUsefulPromptStdout :: Tracer IO TreeTrace
-traceUsefulPromptStdout = traceUsefulPromptHandle stdout
 
 traceUsefulPromptStderr :: Tracer IO TreeTrace
 traceUsefulPromptStderr = traceUsefulPromptHandle stderr
