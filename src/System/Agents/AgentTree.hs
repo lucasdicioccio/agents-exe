@@ -107,36 +107,17 @@ import qualified System.FilePath as FilePath
 import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import System.Agents.ApiKeys
 import System.Agents.Base (
-    Agent,
     AgentDescription (..),
     AgentId (..),
     AgentSlug,
     ExtraAgentRef (..),
     FileSystemDirectoryDescription (..),
-    McpServerDescription,
     OpenAPIServerDescription (..),
     OpenAPIServerOnDisk (..),
     OpenAPIToolboxDescription (..),
     PostgRESTServerDescription (..),
     PostgRESTServerOnDisk (..),
     PostgRESTToolboxDescription (..),
-    -- Export field accessors (except apiKeyId which conflicts)
-
-    announce,
-    autoEnableSkills,
-    bashToolboxes,
-    builtinToolboxes,
-    extraAgents,
-    flavor,
-    mcpServers,
-    modelName,
-    modelUrl,
-    openApiToolboxes,
-    postgrestToolboxes,
-    skillSources,
-    slug,
-    systemPrompt,
-    toolDirectory,
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
@@ -150,34 +131,7 @@ import qualified System.Agents.OS.Core.Types as OSTypes
 import qualified System.Agents.OS.Core.World as OSWorld
 
 import System.Agents.ToolRegistration
-import qualified System.Agents.Tools.McpToolbox as McpTools
-import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
-import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
-import qualified System.Agents.Runtime.Trace as Runtime
-
--------------------------------------------------------------------------------
--- Trace Types
--------------------------------------------------------------------------------
-
--- | Trace events for agent tree operations.
-data TreeTrace
-    = McpTrace McpServerDescription McpTools.Trace
-    | OpenAPITrace OpenAPIToolboxDescription OpenAPIToolbox.Trace
-    | PostgRESTrace PostgRESTToolboxDescription PostgREST.Trace
-    | DataLoadingTrace FileLoader.Trace
-    | ConfigLoadedTrace AgentConfigTree
-    | CyclicReferencesWarning [[AgentSlug]]
-    | ReferenceValidationTrace ReferenceValidationTrace
-    | RuntimeTrace Runtime.Trace
-    deriving (Show)
-
--- | Trace events for reference validation phase
-data ReferenceValidationTrace
-    = ValidationStarted (Set.Set AgentSlug)
-    | ValidationComplete
-    | DuplicateSlugDetected AgentSlug [FilePath]
-    | SelfReferenceDetected AgentSlug FilePath AgentSlug
-    deriving (Show)
+import System.Agents.AgentTree.Trace
 
 -------------------------------------------------------------------------------
 -- API Keys Type
@@ -289,17 +243,6 @@ data OSAgentTree = OSAgentTree
     , osTreeRoot :: OSAgentNode
     , osTreeRootDir :: FilePath
     }
-
--- | Configuration tree from file loading (intermediate structure)
-data AgentConfigTree = AgentConfigTree
-    { agentConfigFile :: FilePath
-    , agentConfig :: Agent
-    , agentConfigChildren :: [AgentConfigTree]
-    }
-    deriving (Show)
-
-agentRootDir :: AgentConfigTree -> FilePath
-agentRootDir agent = FilePath.takeDirectory agent.agentConfigFile
 
 -------------------------------------------------------------------------------
 -- Configuration Graph Types
@@ -746,7 +689,7 @@ wireToolReferences ::
     IO [LoadingError]
 wireToolReferences props graph nodeMap = do
     -- First load configured toolboxes for all agents
-    toolboxErrors <- mapM (loadAgentToolboxes nodeMap) (Map.toList graph.graphNodes)
+    toolboxErrors <- mapM (loadAgentToolboxes props.interactiveTracer nodeMap) (Map.toList graph.graphNodes)
     -- Then wire helper agent tools
     mapM_ (wireAgentTools props graph nodeMap) (Map.toList graph.graphNodes)
     pure (concat toolboxErrors)
@@ -757,17 +700,17 @@ Loads bash tools, builtin toolboxes, MCP servers, OpenAPI, PostgREST,
 and Skills toolboxes configured in the agent's configuration.
 -}
 loadAgentToolboxes ::
+    Tracer IO TreeTrace ->
     Map.Map AgentSlug OSAgentNode ->
     (AgentSlug, AgentConfigNode) ->
     IO [LoadingError]
-loadAgentToolboxes nodeMap (nodeSlug, node) =
+loadAgentToolboxes tracer nodeMap (nodeSlug, node) =
     case Map.lookup nodeSlug nodeMap of
         Nothing -> pure []
         Just osNode -> do
             let baseDir = FilePath.takeDirectory node.nodeFile
             let agent = node.nodeConfig
-            let silentTracer = Tracer $ \_ -> pure ()
-            toolLoaderErrors <- ToolLoader.loadAgentTools silentTracer baseDir agent (osNodeTools osNode)
+            toolLoaderErrors <- ToolLoader.loadAgentTools tracer baseDir agent (osNodeTools osNode)
             pure $ map convertToolLoaderError toolLoaderErrors
 
 {- | Wire tools for a single agent by appending sub-agent tools to the TVar.

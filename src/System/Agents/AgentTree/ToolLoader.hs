@@ -28,7 +28,7 @@ import qualified Data.Aeson as Aeson
 import Data.Either (partitionEithers)
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as Text
-import Prod.Tracer (Tracer (..))
+import Prod.Tracer (Tracer (..), contramap)
 import System.Directory (getCurrentDirectory)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
@@ -52,7 +52,7 @@ import System.Agents.Base (
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
  )
-import System.Agents.FileLoader (Trace)
+import System.Agents.AgentTree.Trace (TreeTrace(..))
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
@@ -108,7 +108,7 @@ Note: Bash toolboxes and Skills directories are resolved relative to the
 execution's current working directory.
 -}
 loadAgentTools ::
-    Tracer IO Trace ->
+    Tracer IO TreeTrace ->
     -- | Base directory for resolving relative paths (for OpenAPI/PostgREST on-disk configs)
     FilePath ->
     -- | The agent configuration
@@ -116,15 +116,15 @@ loadAgentTools ::
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
     IO [LoadingError]
-loadAgentTools _tracer baseDir agent toolsTVar = do
+loadAgentTools tracer baseDir agent toolsTVar = do
     errors <-
         catMaybes
             <$> sequence
-                [ loadBashTools agent toolsTVar
-                , loadMcpServers agent toolsTVar
-                , loadOpenAPIToolboxes baseDir agent toolsTVar
-                , loadPostgRESTToolboxes baseDir agent toolsTVar
-                , loadBuiltinToolboxes agent toolsTVar
+                [ loadBashTools (contramap BashToolboxTrace tracer) agent toolsTVar
+                , loadMcpServers (contramap McpToolboxTrace tracer) agent toolsTVar
+                , loadOpenAPIToolboxes (contramap OpenApiToolboxTrace tracer) baseDir agent toolsTVar
+                , loadPostgRESTToolboxes (contramap PostgRESToolboxTrace tracer) baseDir agent toolsTVar
+                , loadBuiltinToolboxes tracer agent toolsTVar
                 , loadSkillsTools agent toolsTVar
                 ]
     pure errors
@@ -143,20 +143,19 @@ Note: Relative paths are resolved relative to the execution's current
 working directory.
 -}
 loadBashTools ::
+    Tracer IO BashToolbox.Trace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadBashTools agent toolsTVar = do
+loadBashTools tracer agent toolsTVar = do
     let descriptions = collectBashDescriptions agent
 
     if null descriptions
         then pure Nothing
         else do
-            -- Create a silent tracer for bash toolbox
-            let silentTracer = Tracer $ \_ -> pure ()
             result <-
                 BashToolbox.initializeMultiSourceToolbox
-                    silentTracer
+                    tracer
                     descriptions
 
             case result of
@@ -195,31 +194,32 @@ If a server fails to start or times out, an error is returned
 but processing continues for other servers.
 -}
 loadMcpServers ::
+    Tracer IO McpToolbox.Trace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadMcpServers agent toolsTVar = do
+loadMcpServers tracer agent toolsTVar = do
     let servers = fromMaybe [] (mcpServers agent)
 
     if null servers
         then pure Nothing
         else do
-            errors <- mapM (loadMcpServer toolsTVar) servers
+            errors <- mapM (loadMcpServer tracer toolsTVar) servers
             pure $ collectFirstError errors
 
 {- | Load a single MCP server and register its tools.
 Catches exceptions during initialization and returns a graceful error.
 -}
 loadMcpServer ::
+    Tracer IO McpToolbox.Trace ->
     TVar [ToolRegistration] ->
     McpServerDescription ->
     IO (Maybe LoadingError)
-loadMcpServer toolsTVar (McpSimpleBinary config) = do
-    let silentTracer = Tracer $ \_ -> pure ()
+loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
     let proc = System.Process.proc config.executable (map Text.unpack config.args)
 
     -- Try to initialize the MCP toolbox with exception handling
-    initResult <- try $ McpToolbox.initializeMcpToolbox silentTracer config.name proc
+    initResult <- try $ McpToolbox.initializeMcpToolbox tracer config.name proc
 
     case initResult of
         Left (e :: SomeException) -> do
@@ -262,28 +262,28 @@ loadMcpServer toolsTVar (McpSimpleBinary config) = do
 Each OpenAPI toolbox fetches its spec and registers converted tools.
 -}
 loadOpenAPIToolboxes ::
+    Tracer IO OpenAPIToolbox.Trace ->
     FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadOpenAPIToolboxes baseDir agent toolsTVar = do
+loadOpenAPIToolboxes tracer baseDir agent toolsTVar = do
     let toolboxes = fromMaybe [] (openApiToolboxes agent)
 
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadOpenAPIToolbox baseDir toolsTVar) toolboxes
+            errors <- mapM (loadOpenAPIToolbox tracer baseDir toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single OpenAPI toolbox and register its tools.
 loadOpenAPIToolbox ::
+    Tracer IO OpenAPIToolbox.Trace ->
     FilePath ->
     TVar [ToolRegistration] ->
     OpenAPIToolboxDescription ->
     IO (Maybe LoadingError)
-loadOpenAPIToolbox baseDir toolsTVar description = do
-    let silentTracer = Tracer $ \_ -> pure ()
-
+loadOpenAPIToolbox tracer baseDir toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolveOpenAPIDescription baseDir description
 
@@ -291,7 +291,7 @@ loadOpenAPIToolbox baseDir toolsTVar description = do
         Left err -> pure $ Just $ OpenAPILoadingError err
         Right config -> do
             -- Initialize the toolbox
-            initResult <- OpenAPIToolbox.initializeToolbox silentTracer config
+            initResult <- OpenAPIToolbox.initializeToolbox tracer config
 
             case initResult of
                 Left err -> pure $ Just $ OpenAPILoadingError (show err)
@@ -336,28 +336,28 @@ resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServer
 Each PostgREST toolbox fetches its spec and registers converted tools.
 -}
 loadPostgRESTToolboxes ::
+    Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadPostgRESTToolboxes baseDir agent toolsTVar = do
+loadPostgRESTToolboxes tracer baseDir agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadPostgRESTToolbox baseDir toolsTVar) toolboxes
+            errors <- mapM (loadPostgRESTToolbox tracer baseDir toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single PostgREST toolbox and register its tools.
 loadPostgRESTToolbox ::
+    Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
     TVar [ToolRegistration] ->
     PostgRESTToolboxDescription ->
     IO (Maybe LoadingError)
-loadPostgRESTToolbox baseDir toolsTVar description = do
-    let silentTracer = Tracer $ \_ -> pure ()
-
+loadPostgRESTToolbox tracer baseDir toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolvePostgRESTDescription baseDir description
 
@@ -365,7 +365,7 @@ loadPostgRESTToolbox baseDir toolsTVar description = do
         Left err -> pure $ Just $ PostgRESTLoadingError err
         Right config -> do
             -- Initialize the toolbox
-            initResult <- PostgRESToolbox.initializeToolbox silentTracer config
+            initResult <- PostgRESToolbox.initializeToolbox tracer config
 
             case initResult of
                 Left err -> pure $ Just $ PostgRESTLoadingError (show err)
@@ -415,27 +415,29 @@ Builtin toolboxes include:
 - Lua sandbox
 -}
 loadBuiltinToolboxes ::
+    Tracer IO TreeTrace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadBuiltinToolboxes agent toolsTVar = do
+loadBuiltinToolboxes tracer agent toolsTVar = do
     let toolboxes = fromMaybe [] (builtinToolboxes agent)
 
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadBuiltinToolbox toolsTVar) toolboxes
+            errors <- mapM (loadBuiltinToolbox tracer toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single builtin toolbox.
 loadBuiltinToolbox ::
+    Tracer IO TreeTrace ->
     TVar [ToolRegistration] ->
     BuiltinToolboxDescription ->
     IO (Maybe LoadingError)
-loadBuiltinToolbox toolsTVar (SqliteToolbox desc) = loadSqliteToolbox toolsTVar desc
-loadBuiltinToolbox toolsTVar (SystemToolbox desc) = loadSystemToolbox toolsTVar desc
-loadBuiltinToolbox toolsTVar (DeveloperToolbox desc) = loadDeveloperToolbox toolsTVar desc
-loadBuiltinToolbox toolsTVar (LuaToolbox desc) = loadLuaToolbox toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (SqliteToolbox desc) = loadSqliteToolbox (contramap SqliteToolboxTrace tracer) toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (SystemToolbox desc) = loadSystemToolbox (contramap SystemToolboxTrace tracer) toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (DeveloperToolbox desc) = loadDeveloperToolbox (contramap DeveloperToolboxTrace tracer) toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (LuaToolbox desc) = loadLuaToolbox (contramap LuaToolboxTrace tracer) toolsTVar desc
 
 -------------------------------------------------------------------------------
 -- SQLite Toolbox Loading
@@ -443,14 +445,13 @@ loadBuiltinToolbox toolsTVar (LuaToolbox desc) = loadLuaToolbox toolsTVar desc
 
 -- | Load a SQLite toolbox and register its tools.
 loadSqliteToolbox ::
+    Tracer IO SqliteToolbox.Trace ->
     TVar [ToolRegistration] ->
     SqliteToolboxDescription ->
     IO (Maybe LoadingError)
-loadSqliteToolbox toolsTVar desc = do
-    let silentTracer = Tracer $ \_ -> pure ()
-
+loadSqliteToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox
-    initResult <- SqliteToolbox.initializeToolbox silentTracer desc
+    initResult <- SqliteToolbox.initializeToolbox tracer desc
 
     case initResult of
         Left err -> pure $ Just $ SqliteLoadingError err
@@ -470,14 +471,13 @@ loadSqliteToolbox toolsTVar desc = do
 
 -- | Load a System toolbox and register its tools.
 loadSystemToolbox ::
+    Tracer IO SystemToolbox.Trace ->
     TVar [ToolRegistration] ->
     SystemToolboxDescription ->
     IO (Maybe LoadingError)
-loadSystemToolbox toolsTVar desc = do
-    let silentTracer = Tracer $ \_ -> pure ()
-
+loadSystemToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox
-    initResult <- SystemToolbox.initializeToolbox silentTracer desc
+    initResult <- SystemToolbox.initializeToolbox tracer desc
 
     case initResult of
         Left err -> pure $ Just $ SystemLoadingError err
@@ -497,14 +497,13 @@ loadSystemToolbox toolsTVar desc = do
 
 -- | Load a Developer toolbox and register its tools.
 loadDeveloperToolbox ::
+    Tracer IO DeveloperToolbox.Trace ->
     TVar [ToolRegistration] ->
     DeveloperToolboxDescription ->
     IO (Maybe LoadingError)
-loadDeveloperToolbox toolsTVar desc = do
-    let silentTracer = Tracer $ \_ -> pure ()
-
+loadDeveloperToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox
-    initResult <- DeveloperToolbox.initializeToolbox silentTracer desc
+    initResult <- DeveloperToolbox.initializeToolbox tracer desc
 
     case initResult of
         Left err -> pure $ Just $ DeveloperLoadingError err
@@ -524,15 +523,14 @@ loadDeveloperToolbox toolsTVar desc = do
 
 -- | Load a Lua toolbox and register its tools.
 loadLuaToolbox ::
+    Tracer IO LuaToolbox.Trace ->
     TVar [ToolRegistration] ->
     LuaToolboxDescription ->
     IO (Maybe LoadingError)
-loadLuaToolbox toolsTVar desc = do
-    let silentTracer = Tracer $ \_ -> pure ()
-
+loadLuaToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox with a dummy portal
     -- The actual portal is passed at execution time
-    initResult <- LuaToolbox.initializeToolbox silentTracer desc
+    initResult <- LuaToolbox.initializeToolbox tracer desc
 
     case initResult of
         Left err -> pure $ Just $ LuaLoadingError err
@@ -643,3 +641,4 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
+

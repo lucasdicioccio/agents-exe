@@ -29,6 +29,14 @@ traceUsefulPromptHandle h = Tracer f
     f (RuntimeTrace tr) =
         Text.hPutStrLn h (Text.pack $ show tr)
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (BashToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (McpToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (OpenApiToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (PostgRESToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (SqliteToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (SystemToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (DeveloperToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
+    f (LuaToolboxTrace x) = Text.hPutStrLn h (Text.pack $ show x)
     f (ConfigLoadedTrace x) =
         Text.hPutStrLn h (showTree 0 x)
       where
@@ -42,3 +50,4 @@ traceUsefulPromptHandle h = Tracer f
         Text.hPutStrLn h $ "Cyclic references warning: " <> Text.pack (show warns)
     f (ReferenceValidationTrace refs) =
         Text.hPutStrLn h $ "Reference validation trace: " <> Text.pack (show refs)
+

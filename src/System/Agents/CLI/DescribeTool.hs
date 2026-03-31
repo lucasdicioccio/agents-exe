@@ -53,12 +53,13 @@ data DescribeToolOptions = DescribeToolOptions
 
 -- | Handle the describe tool command: validate and display tool info
 handleDescribeTool ::
+    Prod.Tracer IO Bash.LoadTrace ->
     -- | Options for describe command
     DescribeToolOptions ->
     IO ()
-handleDescribeTool opts = do
+handleDescribeTool tracer opts = do
     -- Load the script using the Bash module
-    result <- Bash.loadScript Prod.silent opts.describeToolPath
+    result <- Bash.loadScript tracer opts.describeToolPath
     case result of
         Left err -> do
             Text.hPutStrLn stderr $ formatError err

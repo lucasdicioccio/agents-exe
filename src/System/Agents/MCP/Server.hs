@@ -25,7 +25,7 @@ import qualified Data.Text.Lazy as LText
 import Formatting ((%))
 import qualified Formatting as Format
 import qualified Network.JSONRPC as Rpc
-import Prod.Tracer (silent) -- TODO(lucas): remove silent
+import Prod.Tracer (Tracer, contramap)
 import UnliftIO (async, liftIO, stderr, stdout)
 
 import qualified System.Agents.AgentTree as AgentTree
@@ -65,6 +65,7 @@ import System.Agents.Session.Types (
  )
 import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.ToolPortal as ToolPortal
+import qualified System.Agents.Tools.Trace as Tools
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolSchema as ToolSchema
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
@@ -84,29 +85,29 @@ defaultMcpServerConfig =
         { mcpOnSessionProgress = SessionBase.ignoreSessionProgress
         }
 
-mainAgentServer :: AgentTree.Props -> IO ()
-mainAgentServer props = do
-    multiAgentsServer defaultMcpServerConfig [props]
+mainAgentServer :: Tracer IO Trace -> AgentTree.Props -> IO ()
+mainAgentServer tracer props = do
+    multiAgentsServer tracer defaultMcpServerConfig [props]
 
 -- | Run MCP server with a custom configuration.
-runMcpServerWithConfig :: McpServerConfig -> [AgentTree.Props] -> IO ()
-runMcpServerWithConfig config props = multiAgentsServer config props
+runMcpServerWithConfig :: Tracer IO Trace -> McpServerConfig -> [AgentTree.Props] -> IO ()
+runMcpServerWithConfig tracer config props = multiAgentsServer tracer config props
 
-multiAgentsServer :: McpServerConfig -> [AgentTree.Props] -> IO ()
-multiAgentsServer config xs = multiAgentsServer' config 0 xs []
+multiAgentsServer :: Tracer IO Trace -> McpServerConfig -> [AgentTree.Props] -> IO ()
+multiAgentsServer tracer config xs = multiAgentsServer' tracer config 0 xs []
 
-multiAgentsServer' :: McpServerConfig -> Int -> [AgentTree.Props] -> MappedTools -> IO ()
-multiAgentsServer' _ _ [] [] = do
+multiAgentsServer' :: Tracer IO Trace -> McpServerConfig -> Int -> [AgentTree.Props] -> MappedTools -> IO ()
+multiAgentsServer' _ _ _ [] [] = do
     print ("no agent definitions" :: Text)
-multiAgentsServer' config _ [] mtools = do
+multiAgentsServer' tracer config _ [] mtools = do
     rt <- initRuntime mtools
     -- Store the callback in the runtime for access during tool calls
     let rtWithCallback = rt{mcpSessionProgress = Just (mcpOnSessionProgress config)}
-    runLoggingT (runReaderT (runMcpStack mainMcp) rtWithCallback) logTrace
+    runLoggingT (runReaderT (runMcpStack (mainMcp tracer)) rtWithCallback) logTrace
   where
     logTrace =
         defaultOutput stderr
-multiAgentsServer' config idx (props : xs) mtools = do
+multiAgentsServer' tracer config idx (props : xs) mtools = do
     -- Use OS-native agent loading
     AgentTree.withAgentTree props go
   where
@@ -115,18 +116,18 @@ multiAgentsServer' config idx (props : xs) mtools = do
         let toolname = Format.format ("ask_" % Format.text % "_" % Format.left 3 '0') (LText.fromStrict oai.slug) idx
         -- Store the tree along with the API keys from props
         let tool = ExpertAgentAsPrompt (LText.toStrict toolname) tree (AgentTree.apiKeys props)
-        multiAgentsServer' config (succ idx) xs (tool : mtools)
+        multiAgentsServer' tracer config (succ idx) xs (tool : mtools)
     go _ = do
         print ("failed to initialize" :: Text)
 
-mainMcp :: McpStack ()
-mainMcp = do
+mainMcp :: Tracer IO Trace -> McpStack ()
+mainMcp tracer = do
     runJSONRPCT'
         Rpc.V2
         False
         (Data.Conduit.Combinators.sinkHandleFlush stdout)
         stdinC
-        handlerLoop
+        (handlerLoop tracer)
 
 debugString :: String -> Rpc.JSONRPCT McpStack ()
 debugString = logDebugN . Text.pack
@@ -182,8 +183,8 @@ respond :: (Aeson.ToJSON val) => Rpc.Request -> val -> Rpc.Response
 respond req obj =
     Rpc.Response (req.getReqVer) (Aeson.toJSON obj) (req.getReqId)
 
-handlerLoop :: Rpc.JSONRPCT McpStack ()
-handlerLoop = do
+handlerLoop :: Tracer IO Trace -> Rpc.JSONRPCT McpStack ()
+handlerLoop tracer = do
     loop
   where
     loop :: Rpc.JSONRPCT McpStack ()
@@ -203,41 +204,41 @@ handlerLoop = do
     handleParsedReq :: Rpc.Request -> ClientMsg -> Rpc.JSONRPCT McpStack ()
     handleParsedReq req msg = do
         rt <- askRuntime
-        a <- async $ handleMsg req msg
+        a <- async $ handleMsg tracer req msg
         void $ liftIO $ addAsync rt req a
 
-handleMsg :: Rpc.Request -> ClientMsg -> Rpc.JSONRPCT McpStack ()
-handleMsg _ (CancelledNotificationMsg c) = do
+handleMsg :: Tracer IO Trace -> Rpc.Request -> ClientMsg -> Rpc.JSONRPCT McpStack ()
+handleMsg _ _ (CancelledNotificationMsg c) = do
     rt <- askRuntime
     liftIO $ cancellAsync rt c.requestId
-handleMsg req (InitializeMsg _) = do
+handleMsg _ req (InitializeMsg _) = do
     let rsp =
             respond
                 req
                 (Mcp.InitializeResult serverProtocolVersion serverCapabilities serverImplem (Just ""))
     Rpc.sendResponse rsp
-handleMsg _ (NotifyInitializedMsg _) =
+handleMsg _ _ (NotifyInitializedMsg _) =
     pure ()
-handleMsg req (ListResourcesRequestMsg _) = do
+handleMsg _ req (ListResourcesRequestMsg _) = do
     let rsp =
             respond
                 req
                 (Mcp.ListResourcesResult [] Nothing)
     Rpc.sendResponse rsp
-handleMsg req (ListToolsRequestMsg _) = do
+handleMsg _ req (ListToolsRequestMsg _) = do
     toolset <- askMappedTools
     let rsp =
             respond
                 req
                 (Mcp.ListToolsResult (makeMappedTools toolset) Nothing)
     Rpc.sendResponse rsp
-handleMsg req (ListPromptsRequestMsg _) = do
+handleMsg _ req (ListPromptsRequestMsg _) = do
     let rsp =
             respond
                 req
                 (Mcp.ListPromptsResult [] Nothing)
     Rpc.sendResponse rsp
-handleMsg req (CallToolRequestMsg callTool) = do
+handleMsg tracer req (CallToolRequestMsg callTool) = do
     mappedTool <- askMappedTools
     -- Get the session progress callback from runtime
     rt <- askRuntime
@@ -248,7 +249,7 @@ handleMsg req (CallToolRequestMsg callTool) = do
                 Nothing -> pure $ Left "no prompt given"
                 (Just query) -> do
                     -- Use OS-native agent execution via one-shot integration
-                    liftIO $ runAgentWithQuery onProgress apiKeys tree query
+                    liftIO $ runAgentWithQuery tracer onProgress apiKeys tree query
         Nothing -> do
             pure $ Left $ Text.unpack $ "no matching tool for " <> callTool.name
     let rsp =
@@ -256,6 +257,12 @@ handleMsg req (CallToolRequestMsg callTool) = do
                 req
                 (Mcp.CallToolResult [toolCallContent res] Nothing)
     Rpc.sendResponse rsp
+
+data Trace
+  = LlmCompletionTrace !OpenAI.Trace
+  | ToolPortalTrace !ToolPortal.Trace
+  | ToolTrace !Tools.ToolTrace
+  deriving (Show)
 
 {- | Run an agent with a query using the LLM session-based approach.
 
@@ -269,8 +276,8 @@ The function:
 4. Executes the agent loop until completion
 5. Returns the response text or an error
 -}
-runAgentWithQuery :: SessionBase.OnSessionProgress -> AgentTree.LoadedApiKeys -> AgentTree.OSAgentTree -> Text -> IO (Either String Text)
-runAgentWithQuery onProgress apiKeys tree query = do
+runAgentWithQuery :: Tracer IO Trace -> SessionBase.OnSessionProgress -> AgentTree.LoadedApiKeys -> AgentTree.OSAgentTree -> Text -> IO (Either String Text)
+runAgentWithQuery tracer onProgress apiKeys tree query = do
     -- Generate unique identifiers for this conversation
     convId <- newConversationId
     _stepId <- newStepId
@@ -290,7 +297,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
     -- Create OpenAI completion config
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = silent
+                { cfgTracer = contramap LlmCompletionTrace tracer
                 , cfgRuntime = httpRuntime
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ AgentTree.modelUrl agentCfg
                 , cfgModelName = AgentTree.modelName agentCfg
@@ -304,7 +311,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
     -- Read tools from the OS-native TVar
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (AgentTree.osNodeTools node)
 
-    let tp = ToolPortal.makeToolPortal silent (AgentTree.osNodeTools node)
+    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (AgentTree.osNodeTools node)
     -- Create the agent with the naive step function that stops when no tool calls remain
     let agent =
             Agent
@@ -312,7 +319,7 @@ runAgentWithQuery onProgress apiKeys tree query = do
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure (Just $ UserQuery query)
-                , toolCall = executeLlmToolCall silent (AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall (contramap ToolTrace tracer) (AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig

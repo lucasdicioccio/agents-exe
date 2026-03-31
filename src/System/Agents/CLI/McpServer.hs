@@ -9,6 +9,7 @@ exposes agents as MCP tools for integration with MCP clients.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.McpServer (
+    Trace(..),
     -- * Handler
     handleMcpServer,
 
@@ -75,10 +76,15 @@ listMcpServerAgentTools :: McpServerAgent -> IO [ToolRegistration]
 listMcpServerAgentTools agent =
     readTVarIO (osNodeTools agent.mcpNode)
 
+data Trace
+  = AgentTreeTrace AgentTree.TreeTrace
+  | McpServerTrace McpServer.Trace
+  deriving (Show)
+
 -- | Handle the MCP server command: start MCP server for agents
 handleMcpServer ::
     -- | Base tracer for logging
-    Prod.Tracer IO AgentTree.TreeTrace ->
+    Prod.Tracer IO Trace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -86,9 +92,10 @@ handleMcpServer ::
     -- | List of agent files to expose
     [FilePath] ->
     IO ()
-handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
+handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
+    let ttTracer = Prod.contramap AgentTreeTrace tracer
+        rtTracer = Prod.contramap AgentTree.RuntimeTrace ttTracer
         oneAgent agentFilePath = do
             -- Use OS-native props (no registry needed)
             pure $
@@ -97,10 +104,10 @@ handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer =
                         Prod.traceBoth
-                            baseTracer
+                            ttTracer
                             traceUsefulPromptStderr
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    McpServer.multiAgentsServer McpServer.defaultMcpServerConfig agentPropsList
+    McpServer.multiAgentsServer (Prod.contramap McpServerTrace tracer) McpServer.defaultMcpServerConfig agentPropsList

@@ -51,7 +51,7 @@ import System.Agents.Session.Types (
     Turn (..),
  )
 import qualified System.Agents.ToolRegistration as ToolReg
-import System.Agents.Tools.Bash (ScriptDescription (..), ScriptInfo (..), loadScript, runValue)
+import System.Agents.Tools.Bash (ScriptDescription (..), ScriptInfo (..), loadScript, runValue, LoadTrace, RunTrace)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
 
 -- | Information about a tool call extracted from a session
@@ -224,9 +224,13 @@ printBrief calls = do
         let argsPreview = Text.take 60 (Text.pack $ BSL.unpack $ Aeson.encode call.toolCallArguments)
         Text.putStrLn $ Text.pack (show call.toolCallIndex) <> "\t" <> call.toolCallName <> "\t" <> argsPreview
 
+data Trace = BashLoadTrace !LoadTrace
+  | BashRunTrace !RunTrace
+  deriving (Show)
+
 -- | Handle the replay-tool-call command
-handleReplayToolCall :: ReplayToolCallOptions -> IO ()
-handleReplayToolCall opts = do
+handleReplayToolCall :: Prod.Tracer IO Trace -> ReplayToolCallOptions -> IO ()
+handleReplayToolCall tracer opts = do
     -- First, extract tool calls from the session
     extractResult <- extractToolCallsFromSession opts.replaySessionFile
     case extractResult of
@@ -251,7 +255,7 @@ handleReplayToolCall opts = do
                     exitFailure
                 (targetCall : _) -> do
                     -- Load the tool
-                    toolResult <- loadScript Prod.silent opts.replayToolPath
+                    toolResult <- loadScript (Prod.contramap BashLoadTrace tracer) opts.replayToolPath
                     case toolResult of
                         Left err -> do
                             Text.hPutStrLn stderr $ "Failed to load tool: " <> Text.pack (show err)
@@ -273,7 +277,7 @@ handleReplayToolCall opts = do
                                         -- We need to parse the arguments back to the format expected by runValue
                                         case targetCall.toolCallArguments of
                                             Aeson.Object argObj -> do
-                                                runResult <- runValue Prod.silent scriptDesc Nothing (Aeson.Object argObj)
+                                                runResult <- runValue (Prod.contramap BashRunTrace tracer) scriptDesc Nothing (Aeson.Object argObj)
                                                 case runResult of
                                                     Left err -> do
                                                         Text.hPutStrLn stderr $ "Tool execution failed: " <> Text.pack (show err)

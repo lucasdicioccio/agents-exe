@@ -124,7 +124,6 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
                         -- Create ToolCallAgent
                         let agent = createToolCallAgent tree
 
-                        -- Create tool portal with silent tracer
                         let portal = makeToolPortal tpTracer (osNodeTools agent.toolCallNode)
 
                         -- Create the tool call

@@ -27,7 +27,7 @@ import System.IO (stderr)
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.ToolRegistration as ToolReg
-import System.Agents.Tools.Bash (ScriptDescription (..), ScriptInfo (..), loadScript)
+import System.Agents.Tools.Bash (LoadTrace, ScriptDescription (..), ScriptInfo (..), loadScript)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
 
 -- | Options for the check-tool-call command
@@ -42,10 +42,10 @@ data CheckToolCallOptions = CheckToolCallOptions
 Reads a JSON payload from stdin and validates it against the tool's schema.
 Returns exit code 0 if valid, 1 if invalid.
 -}
-handleCheckToolCall :: CheckToolCallOptions -> IO ()
-handleCheckToolCall opts = do
+handleCheckToolCall :: Prod.Tracer IO LoadTrace -> CheckToolCallOptions -> IO ()
+handleCheckToolCall tracer opts = do
     -- Load the tool to get its schema
-    toolResult <- loadScript Prod.silent opts.toolPath
+    toolResult <- loadScript tracer opts.toolPath
     case toolResult of
         Left err -> do
             Text.hPutStrLn stderr $ "Failed to load tool: " <> Text.pack (show err)

@@ -50,6 +50,7 @@ data CheckOptions = CheckOptions
 
 -- | Handle the check command: validate and display agent configuration
 handleCheck ::
+    Prod.Tracer IO AgentTree.TreeTrace ->
     -- | Check options
     CheckOptions ->
     -- | Path to the API keys file
@@ -57,17 +58,17 @@ handleCheck ::
     -- | List of agent files to check
     [FilePath] ->
     IO ()
-handleCheck opts apiKeysFile agentFiles = do
+handleCheck baseTracer opts apiKeysFile agentFiles = do
+    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
     forM_ agentFiles $ \agentFile -> do
-        -- Use silent tracer to suppress diagnostic output during agent loading
         AgentTree.withAgentTree
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
-                , AgentTree.interactiveTracer = Prod.silent
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool Prod.silent SessionStore.defaultSessionStore apiKeys
+                , AgentTree.interactiveTracer = baseTracer
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs

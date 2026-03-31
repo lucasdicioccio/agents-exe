@@ -1237,13 +1237,13 @@ runCommand :: Prog -> Prod.Tracer IO AgentTree.TreeTrace -> SessionStore.Session
 runCommand pargs baseTracer sessionStore files =
     case pargs.mainCommand of
         Check checkOpts ->
-            CheckCmd.handleCheck checkOpts pargs.apiKeysFile files
+            CheckCmd.handleCheck baseTracer checkOpts pargs.apiKeysFile files
         CheckToolCall opts ->
-            CheckToolCallCmd.handleCheckToolCall opts
+            CheckToolCallCmd.handleCheckToolCall Prod.silent opts
         ListToolCalls opts ->
             ReplayToolCallCmd.handleListToolCalls opts
         ReplayToolCall opts ->
-            ReplayToolCallCmd.handleReplayToolCall opts
+            ReplayToolCallCmd.handleReplayToolCall Prod.silent opts
         TerminalUI _ ->
             TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile files
         EchoPrompt opts ->
@@ -1253,11 +1253,14 @@ runCommand pargs baseTracer sessionStore files =
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         DescribeTool opts ->
-            DescribeToolCmd.handleDescribeTool opts
+            DescribeToolCmd.handleDescribeTool Prod.silent opts
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile files
         McpServer ->
-            McpServerCmd.handleMcpServer baseTracer sessionStore pargs.apiKeysFile files
+            let f (McpServerCmd.AgentTreeTrace tr) = Right tr
+                f (McpServerCmd.McpServerTrace tr) = Left tr
+            in
+            McpServerCmd.handleMcpServer (Prod.choose f Prod.silent baseTracer) sessionStore pargs.apiKeysFile files
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
@@ -1306,6 +1309,14 @@ toJsonTrace x = case x of
                 ]
     AgentTree.ReferenceValidationTrace _ -> Nothing
     AgentTree.RuntimeTrace _ -> Nothing -- TODO: develop here
+    AgentTree.BashToolboxTrace _ -> Nothing
+    AgentTree.McpToolboxTrace _ -> Nothing
+    AgentTree.OpenApiToolboxTrace _ -> Nothing
+    AgentTree.PostgRESToolboxTrace _ -> Nothing
+    AgentTree.SqliteToolboxTrace _ -> Nothing
+    AgentTree.SystemToolboxTrace _ -> Nothing
+    AgentTree.DeveloperToolboxTrace _ -> Nothing
+    AgentTree.LuaToolboxTrace _ -> Nothing
   where
     encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
     encodeMcpTrace (McpSimpleBinary cfg) tr = do
@@ -1363,3 +1374,4 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
+
