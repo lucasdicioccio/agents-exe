@@ -82,6 +82,7 @@ NOTE: This is a transitional implementation. In the final OS-native architecture
 this would use OS-native session management directly.
 -}
 turnAgentRuntimeIntoIOTool ::
+    Tracer IO Trace ->
     -- | Optional session store for persisting sessions
     SessionStore ->
     -- | API keys for creating HTTP runtime
@@ -94,7 +95,7 @@ turnAgentRuntimeIntoIOTool ::
     AgentId ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool store apiKeys node callerSlug callerId =
+turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
     registerIOScriptInLLM io props
   where
     agent = node.osNodeConfig
@@ -123,9 +124,6 @@ turnAgentRuntimeIntoIOTool store apiKeys node callerSlug callerId =
     runSubAgent ctx (PromptOtherAgent query) = do
         -- Extract the conversation ID from the execution context for tracing
         let parentConversationId = ctx.ctxConversationId
-
-        -- Create a tracer (using a no-op tracer for now)
-        let tracer = Tracer $ const $ pure ()
 
         -- Get the API key for this agent
         let apiKeyId = Base.apiKeyId agent

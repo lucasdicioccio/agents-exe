@@ -35,7 +35,7 @@ main = do
     case result of
         Right toolbox -> do
             -- Validate a tool script
-            result <- Dev.executeValidateTool toolbox "/path/to/tool.sh"
+            result <- Dev.executeValidateTool silent toolbox "/path/to/tool.sh"
             case result of
                 Right valResult -> print valResult
                 Left err -> print err
@@ -461,14 +461,15 @@ Returns:
 * 'Left DeveloperToolError' if capability not enabled
 -}
 executeValidateTool ::
+    Tracer IO Bash.LoadTrace ->
     Toolbox ->
     FilePath ->
     IO (Either DeveloperToolError ValidationResult)
-executeValidateTool toolbox toolPath = do
+executeValidateTool tracer toolbox toolPath = do
     if DevToolValidateTool `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "validate-tool"
         else do
-            result <- try $ Bash.loadScript (Tracer (const (pure ()))) toolPath
+            result <- try $ Bash.loadScript tracer toolPath
             case result of
                 Left (e :: SomeException) -> do
                     let errMsg = Text.pack $ show e
@@ -758,6 +759,7 @@ mergeAgentWithOverrides ref overrides =
         , autoEnableSkills = fromMaybe (autoEnableSkills ref) (overrideAutoEnableSkills overrides)
         }
 
+-- TODO(lucas): verify why unused
 {- | Execute tool creation.
 
 This function creates a new tool script in the specified language,
@@ -768,6 +770,8 @@ Returns:
 * 'Left DeveloperToolError' if capability not enabled
 -}
 executeCreateTool ::
+    Tracer IO Bash.LoadTrace ->
+    -- | Language (bash, python, haskell)
     Toolbox ->
     -- | Language (bash, python, haskell)
     Text ->
@@ -780,7 +784,7 @@ executeCreateTool ::
     -- | Force overwrite
     Bool ->
     IO (Either DeveloperToolError CreateResult)
-executeCreateTool toolbox language mReferencePath config outputPath force = do
+executeCreateTool tracer toolbox language mReferencePath config outputPath force = do
     if DevToolCreateTool `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "create-tool"
         else do
@@ -799,7 +803,7 @@ executeCreateTool toolbox language mReferencePath config outputPath force = do
                         then pure $ Left $ FileNotFoundError refPath
                         else do
                             -- Only bash tools can be loaded for reference
-                            result <- try $ Bash.loadScript (Tracer (const (pure ()))) refPath
+                            result <- try $ Bash.loadScript tracer refPath
                             case result of
                                 Left (e :: SomeException) ->
                                     pure $ Left $ ToolCreationError $ Text.pack $ show e
@@ -839,7 +843,7 @@ executeCreateTool toolbox language mReferencePath config outputPath force = do
                                         }
                         Right () -> do
                             -- Validate the created tool by running describe
-                            validationResult <- try $ Bash.loadScript (Tracer (const (pure ()))) outputPath
+                            validationResult <- try $ Bash.loadScript tracer outputPath
                             case validationResult of
                                 Left (e :: SomeException) ->
                                     pure $

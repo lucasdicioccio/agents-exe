@@ -88,7 +88,8 @@ handleMcpServer ::
     IO ()
 handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    let oneAgent agentFilePath = do
+    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
+        oneAgent agentFilePath = do
             -- Use OS-native props (no registry needed)
             pure $
                 AgentTree.Props
@@ -98,7 +99,7 @@ handleMcpServer baseTracer sessionStore apiKeysFile agentFiles = do
                         Prod.traceBoth
                             baseTracer
                             traceUsefulPromptStderr
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

@@ -73,6 +73,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import Prod.Tracer (Tracer, contramap)
+import qualified Prod.Tracer as Prod
 import System.Agents.Base (DeveloperToolCapability (..), LuaToolboxDescription (..), SystemToolCapability (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
@@ -364,7 +365,7 @@ registerOpenAPITool toolbox tool =
 
                     -- Create the tool handler that uses the mapping
                     runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-                    runFunc tr ctx argz = createToolHandler toolbox tool tr ctx argz
+                    runFunc _tracer ctx argz = createToolHandler toolbox tool Prod.silent ctx argz
 
                     -- Create the Tool
                     toolDef0 =
@@ -509,7 +510,7 @@ registerPostgRESTool toolbox tool =
 
         -- Create the tool handler
         runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-        runFunc tr ctx argz = PostgRESToolbox.createToolHandler toolbox tool tr ctx argz
+        runFunc _ ctx argz = PostgRESToolbox.createToolHandler toolbox tool Prod.silent ctx argz
 
         -- Create the Tool definition
         toolDef0 =
@@ -1194,7 +1195,7 @@ sqliteTool box =
             Just (Aeson.String query) -> do
                 -- Get conversation ID from context for snapshot mode
                 let mConvId = Just (Context.ctxConversationId ctx)
-                result <- SqliteTools.executeQueryWithContext box mConvId query
+                result <- SqliteTools.executeQueryWithContext Prod.silent box mConvId query
                 case result of
                     Left err -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
@@ -1220,7 +1221,7 @@ systemTool box =
     run _tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery box cap
+                result <- SystemTools.executeQuery Prod.silent box cap
                 case result of
                     Left err -> pure $ SystemToolError call err
                     Right rsp -> pure $ SystemToolResult call rsp
@@ -1256,7 +1257,7 @@ executeDeveloperCapability box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
             Just (Aeson.String tPath) -> do
-                result <- DeveloperTools.executeValidateTool box (Text.unpack tPath)
+                result <- DeveloperTools.executeValidateTool Prod.silent box (Text.unpack tPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult

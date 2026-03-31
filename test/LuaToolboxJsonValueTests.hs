@@ -23,6 +23,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Prod.Tracer (Tracer (..), silent)
+import qualified Prod.Tracer as Prod
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolPortal, ToolResult (..))
@@ -98,7 +99,7 @@ basicTableTests =
 
 testBasicMixedTable :: Assertion
 testBasicMixedTable = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {name = \"John\", age = 30, isStudent = false}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {name = \"John\", age = 30, isStudent = false}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -111,7 +112,7 @@ testBasicMixedTable = withTestToolbox $ \box -> do
 
 testNestedObject :: Assertion
 testNestedObject = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {address = {city = \"New York\", zip = \"10001\"}}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {address = {city = \"New York\", zip = \"10001\"}}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -125,7 +126,7 @@ testNestedObject = withTestToolbox $ \box -> do
 
 testTableWithArrayField :: Assertion
 testTableWithArrayField = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {scores = {95, 87, 92}}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {scores = {95, 87, 92}}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -141,7 +142,7 @@ testTableWithArrayField = withTestToolbox $ \box -> do
 testCompleteTest1Scenario :: Assertion
 testCompleteTest1Scenario = withTestToolbox $ \box -> do
     -- This is the exact table structure from toto.lua Test 1
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local testTable = {"
         , "    name = \"John\","
         , "    age = 30,"
@@ -190,7 +191,7 @@ arrayTests =
 testSimpleStringArray :: Assertion
 testSimpleStringArray = withTestToolbox $ \box -> do
     -- This is the exact test case from toto.lua Test 3
-    result <- LuaToolbox.executeScript box "return {\"apple\", \"banana\", \"cherry\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {\"apple\", \"banana\", \"cherry\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -203,7 +204,7 @@ testSimpleStringArray = withTestToolbox $ \box -> do
 
 testNumberArray :: Assertion
 testNumberArray = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {1, 2, 3, 4, 5}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {1, 2, 3, 4, 5}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -218,7 +219,7 @@ testNumberArray = withTestToolbox $ \box -> do
 
 testMixedTypeArray :: Assertion
 testMixedTypeArray = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {\"hello\", 42, true, false}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {\"hello\", 42, true, false}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -232,7 +233,7 @@ testMixedTypeArray = withTestToolbox $ \box -> do
 
 testEmptyArray :: Assertion
 testEmptyArray = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -243,7 +244,7 @@ testEmptyArray = withTestToolbox $ \box -> do
 testArrayWithJsonEncode :: Assertion
 testArrayWithJsonEncode = withTestToolbox $ \box -> do
     -- Test the actual scenario from toto.lua: encoding then returning
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local arr = {\"apple\", \"banana\", \"cherry\"}"
         , "local encoded = json.encode(arr)"
         , "return encoded"
@@ -274,7 +275,7 @@ dataTypeTests =
 
 testStringType :: Assertion
 testStringType = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {string = \"hello\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {string = \"hello\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -282,7 +283,7 @@ testStringType = withTestToolbox $ \box -> do
 
 testIntegerNumber :: Assertion
 testIntegerNumber = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {number = 42}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {number = 42}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -290,7 +291,7 @@ testIntegerNumber = withTestToolbox $ \box -> do
 
 testFloatNumber :: Assertion
 testFloatNumber = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {float = 3.14159}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {float = 3.14159}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -307,7 +308,7 @@ testFloatNumber = withTestToolbox $ \box -> do
 
 testBooleanTrue :: Assertion
 testBooleanTrue = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {boolean_true = true}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {boolean_true = true}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -315,7 +316,7 @@ testBooleanTrue = withTestToolbox $ \box -> do
 
 testBooleanFalse :: Assertion
 testBooleanFalse = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {boolean_false = false}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {boolean_false = false}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -323,7 +324,7 @@ testBooleanFalse = withTestToolbox $ \box -> do
 
 testNilValue :: Assertion
 testNilValue = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return nil" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return nil" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -333,7 +334,7 @@ testNilInTable :: Assertion
 testNilInTable = withTestToolbox $ \box -> do
     -- Lua tables with nil values - the nil key-value pair is effectively
     -- not stored in Lua tables
-    result <- LuaToolbox.executeScript box "return {a = 1, b = nil, c = 3}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {a = 1, b = nil, c = 3}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -353,7 +354,7 @@ testNilInTable = withTestToolbox $ \box -> do
 
 testCompleteTest4Scenario :: Assertion
 testCompleteTest4Scenario = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local typesTest = {"
         , "    string = \"hello\","
         , "    number = 42,"
@@ -395,7 +396,7 @@ nestedStructureTests =
 
 testArrayOfObjects :: Assertion
 testArrayOfObjects = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {{id = 1, name = \"Alice\"}, {id = 2, name = \"Bob\"}}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {{id = 1, name = \"Alice\"}, {id = 2, name = \"Bob\"}}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -407,7 +408,7 @@ testArrayOfObjects = withTestToolbox $ \box -> do
 
 testObjectWithNestedArrays :: Assertion
 testObjectWithNestedArrays = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return {"
         , "    product = \"Laptop\","
         , "    tags = {\"electronics\", \"computers\"}"
@@ -427,7 +428,7 @@ testObjectWithNestedArrays = withTestToolbox $ \box -> do
 
 testDeeplyNestedStructure :: Assertion
 testDeeplyNestedStructure = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return {"
         , "    level1 = {"
         , "        level2 = {"
@@ -455,7 +456,7 @@ testDeeplyNestedStructure = withTestToolbox $ \box -> do
 testComplexStructure :: Assertion
 testComplexStructure = withTestToolbox $ \box -> do
     -- This mimics the structure from toto.lua Test 5
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return {"
         , "    product = \"Laptop\","
         , "    price = 999.99,"
@@ -501,7 +502,7 @@ edgeCaseTests =
 
 testSingleElementArray :: Assertion
 testSingleElementArray = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {\"only\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {\"only\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -511,7 +512,7 @@ testSingleElementArray = withTestToolbox $ \box -> do
 testSparseArray :: Assertion
 testSparseArray = withTestToolbox $ \box -> do
     -- A sparse array (non-contiguous indices) should be treated as an object
-    result <- LuaToolbox.executeScript box "return {[1] = \"a\", [3] = \"c\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[1] = \"a\", [3] = \"c\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -529,7 +530,7 @@ testSparseArray = withTestToolbox $ \box -> do
 testMixedKeys :: Assertion
 testMixedKeys = withTestToolbox $ \box -> do
     -- Table with both string and integer keys is an object
-    result <- LuaToolbox.executeScript box "return {[1] = \"a\", name = \"test\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[1] = \"a\", name = \"test\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -540,7 +541,7 @@ testMixedKeys = withTestToolbox $ \box -> do
 
 testEmptyString :: Assertion
 testEmptyString = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {empty = \"\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {empty = \"\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -548,7 +549,7 @@ testEmptyString = withTestToolbox $ \box -> do
 
 testUnicodeString :: Assertion
 testUnicodeString = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {message = \"Hello 世界 🌍\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {message = \"Hello 世界 🌍\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -556,7 +557,7 @@ testUnicodeString = withTestToolbox $ \box -> do
 
 testNegativeNumbers :: Assertion
 testNegativeNumbers = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {neg = -42, negFloat = -3.14}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {neg = -42, negFloat = -3.14}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -573,7 +574,7 @@ testNegativeNumbers = withTestToolbox $ \box -> do
 
 testZeroValues :: Assertion
 testZeroValues = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {zero = 0, bool = false}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {zero = 0, bool = false}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -601,7 +602,7 @@ arraySequenceTests =
 testArrayStartsAtOne :: Assertion
 testArrayStartsAtOne = withTestToolbox $ \box -> do
     -- Standard Lua array starting at 1
-    result <- LuaToolbox.executeScript box "return {\"a\", \"b\", \"c\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {\"a\", \"b\", \"c\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -615,7 +616,7 @@ testArrayStartsAtOne = withTestToolbox $ \box -> do
 testArrayNotStartingAtOne :: Assertion
 testArrayNotStartingAtOne = withTestToolbox $ \box -> do
     -- Lua table starting at index 2 should be an object
-    result <- LuaToolbox.executeScript box "return {[2] = \"a\", [3] = \"b\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[2] = \"a\", [3] = \"b\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -629,7 +630,7 @@ testArrayNotStartingAtOne = withTestToolbox $ \box -> do
 testArrayGapAtBeginning :: Assertion
 testArrayGapAtBeginning = withTestToolbox $ \box -> do
     -- Gap at the beginning (nil at index 1)
-    result <- LuaToolbox.executeScript box "return {[2] = \"a\", [3] = \"b\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[2] = \"a\", [3] = \"b\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -645,7 +646,7 @@ testArrayGapAtEnd = withTestToolbox $ \box -> do
     -- Gap at the end would mean the table has non-contiguous keys
     -- {1, 2, nil, 4} - but nil values don't exist in Lua tables
     -- So we test with explicit keys
-    result <- LuaToolbox.executeScript box "return {[1] = \"a\", [2] = \"b\", [4] = \"d\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[1] = \"a\", [2] = \"b\", [4] = \"d\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -662,7 +663,7 @@ testArrayGapAtEnd = withTestToolbox $ \box -> do
 testArrayGapInMiddle :: Assertion
 testArrayGapInMiddle = withTestToolbox $ \box -> do
     -- Gap in the middle
-    result <- LuaToolbox.executeScript box "return {[1] = \"a\", [3] = \"c\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[1] = \"a\", [3] = \"c\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -676,7 +677,7 @@ testArrayGapInMiddle = withTestToolbox $ \box -> do
 testArrayWithNField :: Assertion
 testArrayWithNField = withTestToolbox $ \box -> do
     -- Table with sequential indices but also an 'n' field
-    result <- LuaToolbox.executeScript box "return {[1] = \"a\", [2] = \"b\", n = 2}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[1] = \"a\", [2] = \"b\", n = 2}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -691,7 +692,7 @@ testArrayWithNField = withTestToolbox $ \box -> do
 testDeeplyNestedArrayInObject :: Assertion
 testDeeplyNestedArrayInObject = withTestToolbox $ \box -> do
     -- Object with deeply nested array (like scores in toto.lua)
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return {"
         , "    student = {"
         , "        name = \"Alice\","
@@ -720,7 +721,7 @@ testDeeplyNestedArrayInObject = withTestToolbox $ \box -> do
 testMultipleArrayFields :: Assertion
 testMultipleArrayFields = withTestToolbox $ \box -> do
     -- Object with multiple array fields
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return {"
         , "    names = {\"Alice\", \"Bob\"},"
         , "    scores = {95, 87},"
@@ -746,7 +747,7 @@ testMultipleArrayFields = withTestToolbox $ \box -> do
 testLargeArrayPreservesOrder :: Assertion
 testLargeArrayPreservesOrder = withTestToolbox $ \box -> do
     -- Larger array to ensure order is preserved
-    result <- LuaToolbox.executeScript box "return {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -761,7 +762,7 @@ testLargeArrayPreservesOrder = withTestToolbox $ \box -> do
 testArrayIndexZero :: Assertion
 testArrayIndexZero = withTestToolbox $ \box -> do
     -- Lua "array" with index 0 should be an object
-    result <- LuaToolbox.executeScript box "return {[0] = \"zero\", [1] = \"one\"}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {[0] = \"zero\", [1] = \"one\"}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult -> do
@@ -785,7 +786,7 @@ roundTripTests =
 
 testSimpleRoundTrip :: Assertion
 testSimpleRoundTrip = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local original = {foo = \"bar\", count = 42}"
         , "local encoded = json.encode(original)"
         , "local decoded = json.decode(encoded)"
@@ -800,7 +801,7 @@ testSimpleRoundTrip = withTestToolbox $ \box -> do
 testComplexRoundTrip :: Assertion
 testComplexRoundTrip = withTestToolbox $ \box -> do
     -- This is the exact scenario from toto.lua Test 6
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local original = {"
         , "    users = {"
         , "        {id = 1, name = \"Alice\"},"
@@ -831,7 +832,7 @@ testComplexRoundTrip = withTestToolbox $ \box -> do
 
 testArrayRoundTrip :: Assertion
 testArrayRoundTrip = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box (Text.unlines
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local original = {1, 2, 3, \"four\", true}"
         , "local encoded = json.encode(original)"
         , "local decoded = json.decode(encoded)"

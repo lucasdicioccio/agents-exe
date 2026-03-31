@@ -13,12 +13,6 @@ interactive session handling.
 2. Layout mode management
 3. Interactive conversation handling
 4. Agent bus for inter-agent communication
-
-== Migration Notes
-
-Currently, this module provides a compatibility layer that works with
-RuntimeBridge. As the OS model matures, these operations will be
-implemented natively using OS primitives.
 -}
 module System.Agents.OS.Interfaces.TUI (
     -- * TUI Interface Handle
@@ -67,7 +61,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 
 import System.Agents.Base (AgentId, ConversationId, newAgentId, newConversationId)
-import System.Agents.OS.Compat.Runtime (RuntimeBridge, initializeOS, newRuntimeBridge)
+import System.Agents.OS.Compat.Runtime (initializeOS)
 import System.Agents.OS.Interfaces (
     InterfaceConfig (..),
     InterfaceHandle (..),
@@ -125,7 +119,7 @@ data TUIInterfaceHandle = TUIInterfaceHandle
     -- ^ Optional agent bus for multi-agent mode
     , tuiMultiAgentConfig :: Maybe MultiAgentConfig
     -- ^ Multi-agent configuration if enabled
-    , tuiRegisteredAgents :: TVar (Map.Map AgentId RuntimeBridge)
+    , tuiRegisteredAgents :: TVar (Map.Map AgentId ())
     -- ^ Registered agents with their bridges
     , tuiConversations :: TVar (Map.Map ConversationId TUIConversationHandle)
     -- ^ Active conversations
@@ -243,19 +237,15 @@ shutdownTUIInterface handle = do
 -------------------------------------------------------------------------------
 
 -- | Register a new agent with the TUI interface.
-registerAgent :: TUIInterfaceHandle -> Text -> IO (AgentId, RuntimeBridge)
+registerAgent :: TUIInterfaceHandle -> Text -> IO (AgentId)
 registerAgent handle _agentName = do
     -- Generate a new agent ID
     agentId <- newAgentId
 
-    -- Create a RuntimeBridge for this agent
-    let os = ihOS (tuiBaseHandle handle)
-    let bridge = newRuntimeBridge agentId os
-
     -- Register in the interface
-    atomically $ modifyTVar (tuiRegisteredAgents handle) $ Map.insert agentId bridge
+    atomically $ modifyTVar (tuiRegisteredAgents handle) $ Map.insert agentId ()
 
-    pure (agentId, bridge)
+    pure agentId
 
 -- | Unregister an agent from the TUI interface.
 unregisterAgent :: TUIInterfaceHandle -> AgentId -> IO ()
@@ -263,7 +253,7 @@ unregisterAgent handle agentId = do
     atomically $ modifyTVar (tuiRegisteredAgents handle) $ Map.delete agentId
 
 -- | Get all registered agents.
-getRegisteredAgents :: TUIInterfaceHandle -> IO [(AgentId, RuntimeBridge)]
+getRegisteredAgents :: TUIInterfaceHandle -> IO [(AgentId, ())]
 getRegisteredAgents handle = do
     Map.toList <$> readTVarIO (tuiRegisteredAgents handle)
 

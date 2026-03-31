@@ -1271,7 +1271,7 @@ runCommand pargs baseTracer sessionStore files =
         New opts ->
             NewCmd.handleNew opts
         ToolCall opts ->
-            ToolCallCmd.handleToolCall opts pargs.apiKeysFile files
+            ToolCallCmd.handleToolCall baseTracer opts pargs.apiKeysFile files
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)
@@ -1305,6 +1305,7 @@ toJsonTrace x = case x of
                 , "cycles" .= cycles
                 ]
     AgentTree.ReferenceValidationTrace _ -> Nothing
+    AgentTree.RuntimeTrace _ -> Nothing -- TODO: develop here
   where
     encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
     encodeMcpTrace (McpSimpleBinary cfg) tr = do

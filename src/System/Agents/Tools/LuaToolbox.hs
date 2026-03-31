@@ -111,7 +111,6 @@ module System.Agents.Tools.LuaToolbox (
     closeToolbox,
 
     -- * Script execution
-    executeScript,
     executeScriptWithPortal,
 
     -- * Sandbox configuration
@@ -226,6 +225,8 @@ data Trace
       StateInitializedTrace !Text.Text
     | -- | Lua state closed
       StateClosedTrace
+    | -- | Lua module registration
+      ModuleRegistrationTrace LuaModuleTrace
     | -- | Script execution started (legacy, script name only)
       ScriptStartedTrace !Text.Text
     | -- | Script execution started with full script content
@@ -607,31 +608,6 @@ applyTimeout seconds go =
 -- Script Execution
 -------------------------------------------------------------------------------
 
-{- | Execute a Lua script in the sandbox.
-
-This function:
-1. Acquires the toolbox lock for thread safety
-2. Records start time
-3. Loads and executes the script
-4. Converts the return value to JSON
-5. Returns the result or an error
-
-The script should return a value that can be converted to JSON:
-* nil -> null
-* boolean -> boolean
-* number -> number
-* string -> string
-* table -> object/array (if table has only integer keys starting at 1, it's an array)
--}
-executeScript ::
-    Toolbox ->
-    -- | Lua script source
-    Text.Text ->
-    ToolPortal ->
-    IO (Either ScriptError ExecutionResult)
-executeScript toolbox script portal =
-    executeScriptWithPortal (Tracer (const (pure ()))) toolbox script portal
-
 {- | Execute a Lua script with access to the tool portal.
 
 This is the full execution function that:
@@ -680,7 +656,7 @@ executeScriptInternal tracer toolbox script portal = do
     -- Re-register modules with portal before execution
     -- This ensures the tools module has access to the portal
     registerSandardModules
-        (Tracer (const (pure ())))
+        (contramap ModuleRegistrationTrace tracer)
         lstate
         desc
         portal

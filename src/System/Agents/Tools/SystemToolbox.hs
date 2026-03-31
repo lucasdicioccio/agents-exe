@@ -210,16 +210,16 @@ Returns:
 * 'Right QueryResult' on successful execution
 * 'Left QueryError' if capability is not enabled or system info cannot be gathered
 -}
-executeQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeQuery toolbox capabilityName = do
-    runTracer (Tracer (const (pure ()))) (SystemInfoRequestedTrace capabilityName)
+executeQuery :: Tracer IO Trace -> Toolbox -> Text -> IO (Either QueryError QueryResult)
+executeQuery tracer toolbox capabilityName = do
+    runTracer tracer (SystemInfoRequestedTrace capabilityName)
     startTime <- getCurrentTime
 
     -- Find the capability
     case capabilityFromName capabilityName of
         Nothing -> do
             let err = "Unknown capability: " <> capabilityName
-            runTracer (Tracer (const (pure ()))) (SystemInfoErrorTrace capabilityName err)
+            runTracer tracer (SystemInfoErrorTrace capabilityName err)
             pure $ Left $ SystemInfoError err
         Just capability -> do
             -- Check if capability is enabled
@@ -233,10 +233,10 @@ executeQuery toolbox capabilityName = do
 
                     case result of
                         Left err -> do
-                            runTracer (Tracer (const (pure ()))) (SystemInfoErrorTrace capabilityName err)
+                            runTracer tracer (SystemInfoErrorTrace capabilityName err)
                             pure $ Left $ SystemInfoError err
                         Right (_, value) -> do
-                            runTracer (Tracer (const (pure ()))) (SystemInfoRetrievedTrace capabilityName execTime)
+                            runTracer tracer (SystemInfoRetrievedTrace capabilityName execTime)
                             pure $
                                 Right $
                                     QueryResult

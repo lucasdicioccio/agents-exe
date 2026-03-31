@@ -23,6 +23,7 @@ import System.IO.Temp (createTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Prod.Tracer (silent)
+import qualified Prod.Tracer as Prod
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolPortal, ToolResult (..))
@@ -209,7 +210,7 @@ securityDefaultsTests =
                     Left err -> assertFailure $ "Failed to initialize: " ++ err
                     Right toolbox -> do
                         -- Try to read a file - should return nil or error string
-                        scriptResult <- LuaToolbox.executeScript toolbox "return fs.read('/etc/passwd')" dummyPortal
+                        scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return fs.read('/etc/passwd')" dummyPortal
                         case scriptResult of
                             Left err -> 
                                 -- Script execution itself failed
@@ -237,7 +238,7 @@ securityDefaultsTests =
                 Left err -> assertFailure $ "Failed to initialize: " ++ err
                 Right toolbox -> do
                     -- Try to make HTTP request - should return nil or error string
-                    scriptResult <- LuaToolbox.executeScript toolbox "return http.get('http://example.com')" dummyPortal
+                    scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return http.get('http://example.com')" dummyPortal
                     case scriptResult of
                         Left err -> 
                             -- Script execution itself failed

@@ -41,14 +41,15 @@ handleTUI ::
     IO ()
 handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    let oneAgent agentFile = do
+    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
+        oneAgent agentFile = do
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUI sessionStore apiKeys agentPropsList
+    TUI.runTUI rtTracer sessionStore apiKeys agentPropsList

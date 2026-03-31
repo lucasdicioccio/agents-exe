@@ -26,6 +26,8 @@ traceUsefulPromptHandle h = Tracer f
         Text.hPutStrLn h (Text.pack $ show tr)
     f (PostgRESTrace _ tr) =
         Text.hPutStrLn h (Text.pack $ show tr)
+    f (RuntimeTrace tr) =
+        Text.hPutStrLn h (Text.pack $ show tr)
     f (DataLoadingTrace x) = Text.hPutStrLn h (Text.pack $ show x)
     f (ConfigLoadedTrace x) =
         Text.hPutStrLn h (showTree 0 x)

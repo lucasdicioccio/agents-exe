@@ -153,6 +153,7 @@ import System.Agents.ToolRegistration
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
+import qualified System.Agents.Runtime.Trace as Runtime
 
 -------------------------------------------------------------------------------
 -- Trace Types
@@ -167,6 +168,7 @@ data TreeTrace
     | ConfigLoadedTrace AgentConfigTree
     | CyclicReferencesWarning [[AgentSlug]]
     | ReferenceValidationTrace ReferenceValidationTrace
+    | RuntimeTrace Runtime.Trace
     deriving (Show)
 
 -- | Trace events for reference validation phase

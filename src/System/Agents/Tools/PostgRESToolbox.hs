@@ -110,7 +110,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Numeric (showHex)
-import Prod.Tracer (Tracer (..), runTracer)
+import Prod.Tracer (Tracer (..), runTracer, contramap)
 
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -138,7 +138,6 @@ import System.Agents.Tools.PostgREST.Types (
     isReadOnlyMethod,
  )
 import qualified System.Agents.Tools.PostgREST.Types as Types
-import System.Agents.Tools.Trace (ToolTrace (..))
 
 -- -------------------------------------------------------------------------
 -- Core types
@@ -374,7 +373,7 @@ fetchSpecFromUrl ::
     IO (Either InitializationError LByteString.ByteString)
 fetchSpecFromUrl tracer runtime url = do
     runTracer tracer (FetchingSpecTrace url)
-    result <- try $ HttpClient.get runtime (Tracer (const (pure ()))) url
+    result <- try $ HttpClient.get runtime (contramap FetchingSpecFromUrlTrace tracer) url
     case result of
         Left (e :: HttpClient.HttpException) ->
             pure $ Left $ NetworkError (Text.pack $ show e)
@@ -419,12 +418,12 @@ returns results in the standard CallResult format.
 createToolHandler ::
     Toolbox ->
     PostgRESTool ->
-    Tracer IO ToolTrace ->
+    Tracer IO Trace ->
     ToolExecutionContext ->
     Value ->
     IO (CallResult ())
-createToolHandler toolbox tool _tracer _ctx args = do
-    result <- handleToolCall toolbox tool args
+createToolHandler toolbox tool tracer _ctx args = do
+    result <- handleToolCall tracer toolbox tool args
     case result of
         Left err -> do
             pure $ IOToolError () (ScriptExecutionError (Text.unpack err))
@@ -441,11 +440,12 @@ This function:
 5. Returns result
 -}
 handleToolCall ::
+    Tracer IO Trace ->
     Toolbox ->
     PostgRESTool ->
     Value ->
     IO (Either Text (Text, ToolResult))
-handleToolCall toolbox tool args = do
+handleToolCall tracer toolbox tool args = do
     case args of
         Object obj -> do
             -- Build query string from structured arguments (for read operations)
@@ -464,7 +464,7 @@ handleToolCall toolbox tool args = do
             let requestBody = extractRequestBody obj (buildToolParameters tool)
 
             -- Make HTTP request with appropriate method
-            result <- executeRequest toolbox.httpRuntime (prtMethod tool) fullUrl allHeaders requestBody
+            result <- executeRequest tracer toolbox.httpRuntime (prtMethod tool) fullUrl allHeaders requestBody
 
             case result of
                 Left err -> pure $ Left err
@@ -481,18 +481,19 @@ extractRequestBody obj _params =
 
 -- | Execute an HTTP request with the specified method.
 executeRequest ::
+    Tracer IO Trace ->
     HttpClient.Runtime ->
     HttpMethod ->
     Text ->
     Map Text Text ->
     Maybe Value ->
     IO (Either Text (Text, ToolResult))
-executeRequest runtime method url headers mbody = do
+executeRequest tracer runtime method url headers mbody = do
     -- Build request based on method
     req <- buildRequest method url headers mbody
 
     -- Execute the request
-    result <- HttpClient.runRequest runtime (Tracer (const (pure ()))) req
+    result <- HttpClient.runRequest runtime (contramap ExecuteRequest tracer) req
 
     case result of
         Left err -> pure $ Left (Text.pack $ show err)

@@ -34,6 +34,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Prod.Tracer (Tracer (..), silent)
+import qualified Prod.Tracer as Prod
 
 import System.Agents.Base (LuaToolboxDescription (..))
 import System.Agents.Tools.Context (ToolCall (..), ToolPortal, ToolResult (..))
@@ -132,7 +133,7 @@ basicExecutionTests =
 
 testSimpleArithmetic :: Assertion
 testSimpleArithmetic = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return 1 + 1" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return 1 + 1" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -140,7 +141,7 @@ testSimpleArithmetic = withTestToolbox $ \box -> do
 
 testReturnTable0 :: Assertion
 testReturnTable0 = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -149,7 +150,7 @@ testReturnTable0 = withTestToolbox $ \box -> do
 
 testReturnTable1 :: Assertion
 testReturnTable1 = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {foo = 42}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {foo = 42}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -158,7 +159,7 @@ testReturnTable1 = withTestToolbox $ \box -> do
 
 testReturnTable2 :: Assertion
 testReturnTable2 = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {foo = 'bar', count = 42}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {foo = 'bar', count = 42}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -167,7 +168,7 @@ testReturnTable2 = withTestToolbox $ \box -> do
 
 testReturnArray :: Assertion
 testReturnArray = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return {1, 2, 3}" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return {1, 2, 3}" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -176,7 +177,7 @@ testReturnArray = withTestToolbox $ \box -> do
 
 testReturnString :: Assertion
 testReturnString = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return 'hello world'" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return 'hello world'" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -184,7 +185,7 @@ testReturnString = withTestToolbox $ \box -> do
 
 testReturnBoolean :: Assertion
 testReturnBoolean = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return true" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return true" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -192,7 +193,7 @@ testReturnBoolean = withTestToolbox $ \box -> do
 
 testReturnNil :: Assertion
 testReturnNil = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return nil" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return nil" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -218,7 +219,7 @@ sandboxSecurityTests =
 
 testSandboxBlocksOsExecute :: Assertion
 testSandboxBlocksOsExecute = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "os.execute('echo pwned')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.execute('echo pwned')" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -228,7 +229,7 @@ testSandboxBlocksOsExecute = withTestToolbox $ \box -> do
 
 testSandboxBlocksIoPopen :: Assertion
 testSandboxBlocksIoPopen = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "io.popen('echo pwned')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "io.popen('echo pwned')" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -238,7 +239,7 @@ testSandboxBlocksIoPopen = withTestToolbox $ \box -> do
 
 testSandboxBlocksDofile :: Assertion
 testSandboxBlocksDofile = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "dofile('/etc/passwd')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "dofile('/etc/passwd')" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -248,7 +249,7 @@ testSandboxBlocksDofile = withTestToolbox $ \box -> do
 
 testSandboxBlocksLoadfile :: Assertion
 testSandboxBlocksLoadfile = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "loadfile('/etc/passwd')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "loadfile('/etc/passwd')" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -258,7 +259,7 @@ testSandboxBlocksLoadfile = withTestToolbox $ \box -> do
 
 testSandboxBlocksOsRemove :: Assertion
 testSandboxBlocksOsRemove = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "os.remove('/tmp/test')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.remove('/tmp/test')" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -268,7 +269,7 @@ testSandboxBlocksOsRemove = withTestToolbox $ \box -> do
 
 testSandboxBlocksOsRename :: Assertion
 testSandboxBlocksOsRename = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "os.rename('/tmp/a', '/tmp/b')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.rename('/tmp/a', '/tmp/b')" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -278,7 +279,7 @@ testSandboxBlocksOsRename = withTestToolbox $ \box -> do
 
 testSandboxBlocksOsExit :: Assertion
 testSandboxBlocksOsExit = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "os.exit(0)" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.exit(0)" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -288,7 +289,7 @@ testSandboxBlocksOsExit = withTestToolbox $ \box -> do
 
 testSandboxBlocksIoTmpfile :: Assertion
 testSandboxBlocksIoTmpfile = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "io.tmpfile()" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "io.tmpfile()" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention nil or attempt" $
@@ -314,7 +315,7 @@ moduleTests =
 testJsonAvailable :: Assertion
 testJsonAvailable = withTestToolbox $ \box -> do
     -- Test that json module exists and has encode/decode functions
-    result <- LuaToolbox.executeScript box "return json ~= nil" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return json ~= nil" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -323,7 +324,7 @@ testJsonAvailable = withTestToolbox $ \box -> do
 testTextAvailable :: Assertion
 testTextAvailable = withTestToolbox $ \box -> do
     -- Test that text module exists
-    result <- LuaToolbox.executeScript box "return text ~= nil" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return text ~= nil" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -332,7 +333,7 @@ testTextAvailable = withTestToolbox $ \box -> do
 testTimeAvailable :: Assertion
 testTimeAvailable = withTestToolbox $ \box -> do
     -- Test that time module exists
-    result <- LuaToolbox.executeScript box "return time ~= nil" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return time ~= nil" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -341,7 +342,7 @@ testTimeAvailable = withTestToolbox $ \box -> do
 testToolsAvailable :: Assertion
 testToolsAvailable = withTestToolbox $ \box -> do
     -- Test that tools module exists
-    result <- LuaToolbox.executeScript box "return tools ~= nil" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return tools ~= nil" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -350,7 +351,7 @@ testToolsAvailable = withTestToolbox $ \box -> do
 testFsBlocksUnauthorized :: Assertion
 testFsBlocksUnauthorized = withTestToolbox $ \box -> do
     -- With empty allowedPaths, fs should block all access
-    result <- LuaToolbox.executeScript box "return fs.read('/etc/passwd')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return fs.read('/etc/passwd')" dummyPortal
     case result of
         Left err -> assertFailure $ show err
         Right execResult ->
@@ -377,7 +378,7 @@ testTimeout = do
     case initResult of
         Left err -> assertFailure $ "Failed to initialize: " ++ err
         Right box -> do
-            result <- LuaToolbox.executeScript box "while true do end" dummyPortal
+            result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "while true do end" dummyPortal
             LuaToolbox.closeToolbox silent box
             case result of
                 Left (TimeoutError _) -> pure () -- Expected
@@ -399,7 +400,7 @@ errorHandlingTests =
 
 testSyntaxError :: Assertion
 testSyntaxError = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return 1 +" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return 1 +" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention syntax" $
@@ -409,7 +410,7 @@ testSyntaxError = withTestToolbox $ \box -> do
 
 testRuntimeError :: Assertion
 testRuntimeError = withTestToolbox $ \box -> do
-    result <- LuaToolbox.executeScript box "return error(\"aie\")" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return error(\"aie\")" dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg:[])) ->
             assertBool "Error should mention aie" $
@@ -420,7 +421,7 @@ testRuntimeError = withTestToolbox $ \box -> do
 testPcallError :: Assertion
 testPcallError = withTestToolbox $ \box -> do
     result <-
-        LuaToolbox.executeScript box
+        LuaToolbox.executeScriptWithPortal Prod.tracePrint box
             ( Text.unlines
                 [ "local ok, err = pcall(function() return error(\"aie\") end)"
                 , "return {success = ok, error = err}"
@@ -516,7 +517,7 @@ testToolBlockedByEmptyWhitelist :: Assertion
 testToolBlockedByEmptyWhitelist = withTestToolbox $ \box -> do
     -- With empty allowedTools (default testLuaToolbox), any tool call should be blocked
     result <-
-        LuaToolbox.executeScript box
+        LuaToolbox.executeScriptWithPortal Prod.tracePrint box
             ( Text.unlines
                 [ "local result = tools.call('bash', {command = 'echo hello'})"
                 , "return result"

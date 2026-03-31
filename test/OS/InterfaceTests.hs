@@ -18,9 +18,7 @@ import Test.Tasty.HUnit
 
 import System.Agents.Base (AgentId (..), ConversationId (..), newAgentId)
 import System.Agents.OS.Compat.Runtime (
-    RuntimeBridge (..),
     initializeOS,
-    newRuntimeBridge,
  )
 import System.Agents.OS.Interfaces (
     InterfaceConfig (..),
@@ -76,16 +74,6 @@ runtimeBridgeTests =
             os <- initializeOS
             -- OS should be created successfully
             pure ()
-        , testCase "can create RuntimeBridge" $ do
-            os <- initializeOS
-            agentId <- newAgentId
-            let bridge = newRuntimeBridge agentId os
-            bridgeAgentId bridge @?= agentId
-        , testCase "RuntimeBridge stores correct agent ID" $ do
-            os <- initializeOS
-            agentId <- newAgentId
-            let bridge = newRuntimeBridge agentId os
-            bridgeAgentId bridge @?= agentId
         ]
 
 -------------------------------------------------------------------------------
@@ -105,7 +93,7 @@ tuiInterfaceTests =
         , testCase "can register an agent" $ do
             let config = defaultTUIInterfaceConfig
             handle <- initTUIInterface config
-            (agentId, _bridge) <- registerAgent handle "test-agent"
+            (agentId) <- registerAgent handle "test-agent"
             agents <- getRegisteredAgents handle
             length agents @?= 1
             -- Use list index instead of head
@@ -115,8 +103,8 @@ tuiInterfaceTests =
         , testCase "can register multiple agents" $ do
             let config = defaultTUIInterfaceConfig
             handle <- initTUIInterface config
-            (agentId1, _) <- registerAgent handle "test-agent-1"
-            (agentId2, _) <- registerAgent handle "test-agent-2"
+            (agentId1) <- registerAgent handle "test-agent-1"
+            (agentId2) <- registerAgent handle "test-agent-2"
             agents <- getRegisteredAgents handle
             length agents @?= 2
             -- Check that both agent IDs are present (order doesn't matter)

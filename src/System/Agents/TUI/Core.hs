@@ -75,6 +75,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO, readTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
+import Prod.Tracer (Tracer)
 
 import System.Agents.AgentTree (
     LoadAgentResult (..),
@@ -84,6 +85,7 @@ import System.Agents.AgentTree (
     Props,
     loadAgentTree,
  )
+import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
 import System.Agents.Session.Base (Session (..))
@@ -190,14 +192,14 @@ This function:
 2. Creates TuiAgents with OS-native structures
 3. Initializes the TUI with the agents and loaded sessions
 -}
-runTUI :: SessionStore -> LoadedApiKeys -> [Props] -> IO ()
-runTUI store apiKeys props = do
+runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
+runTUI tracer store apiKeys props = do
     let config = fileSessionConfig store apiKeys
-    runTUIWithConfig config props
+    runTUIWithConfig tracer config props
 
 -- | Initialize the TUI with a custom session configuration.
-runTUIWithConfig :: SessionConfig -> [Props] -> IO ()
-runTUIWithConfig config props = do
+runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
+runTUIWithConfig tracer config props = do
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTree props
     let itrees = [tree | Initialized tree <- trees]
@@ -232,7 +234,7 @@ runTUIWithConfig config props = do
             App
                 { appDraw = tui_appDraw
                 , appChooseCursor = tui_appChooseCursor
-                , appHandleEvent = tui_appHandleEvent
+                , appHandleEvent = tui_appHandleEvent tracer
                 , appStartEvent = tui_appStartEvent
                 , appAttrMap = tui_appAttrMap
                 }

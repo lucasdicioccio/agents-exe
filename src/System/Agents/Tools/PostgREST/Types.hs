@@ -55,6 +55,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.Tools.OpenAPI.Types (Schema)
+import qualified System.Agents.HttpClient as HttpClient
 
 -- -------------------------------------------------------------------------
 -- HTTP Methods
@@ -195,6 +196,8 @@ data Trace
       FetchingSpecTrace !Text
     | -- | Loading spec from file path
       FetchingSpecFromFileTrace !Text
+    | -- | Loading spec from file url
+      FetchingSpecFromUrlTrace !HttpClient.Trace
     | -- | HTTP status of spec fetch (e.g., 200)
       SpecFetchedTrace !Int
     | -- | Successfully loaded spec from file
@@ -207,6 +210,8 @@ data Trace
       ToolsFilteredTrace !Int !Int
     | -- | method, path, query string being executed
       ExecutionTrace !Text !Text !Text
+    | -- | http
+      ExecuteRequest !HttpClient.Trace
     | -- | Error message during execution
       ExecutionErrorTrace !Text
     deriving (Show)

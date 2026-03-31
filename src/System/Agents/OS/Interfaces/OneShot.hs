@@ -48,7 +48,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 
 import System.Agents.Base (AgentId, newAgentId, newConversationId)
-import System.Agents.OS.Compat.Runtime (RuntimeBridge, initializeOS, newRuntimeBridge)
+import System.Agents.OS.Compat.Runtime (initializeOS)
 import System.Agents.OS.Interfaces (
     InterfaceConfig (..),
     InterfaceHandle (..),
@@ -130,8 +130,6 @@ data OneShotInterfaceHandle = OneShotInterfaceHandle
     -- ^ Base interface handle
     , oscConfig :: OneShotInterfaceConfig
     -- ^ OneShot-specific configuration
-    , oscAgentBridge :: Maybe RuntimeBridge
-    -- ^ RuntimeBridge for the single agent
     , oscExecutionAsync :: TVar (Maybe (Async OneShotResult))
     -- ^ Current execution async if running
     }
@@ -170,7 +168,6 @@ initOneShotInterface config = do
         OneShotInterfaceHandle
             { oscBaseHandle = baseHandle
             , oscConfig = config
-            , oscAgentBridge = Nothing
             , oscExecutionAsync = executionVar
             }
 
@@ -186,16 +183,11 @@ runOneShotInterface _handle = do
 -------------------------------------------------------------------------------
 
 -- | Register an agent for OneShot execution.
-registerOneShotAgent :: OneShotInterfaceHandle -> IO (AgentId, RuntimeBridge)
-registerOneShotAgent handle = do
+registerOneShotAgent :: OneShotInterfaceHandle -> IO (AgentId)
+registerOneShotAgent _ = do
     -- Generate a new agent ID
     agentId <- newAgentId
-
-    -- Create a RuntimeBridge for this agent
-    let os = ihOS (oscBaseHandle handle)
-    let bridge = newRuntimeBridge agentId os
-
-    pure (agentId, bridge)
+    pure agentId
 
 -------------------------------------------------------------------------------
 -- Execution
@@ -236,11 +228,7 @@ executeOneShotWithSession ::
 executeOneShotWithSession handle mAgentId session = do
     -- Get or create agent
     _ <- case mAgentId of
-        Just _aid -> do
-            -- Try to use existing agent bridge
-            case oscAgentBridge handle of
-                Just _b -> pure ()
-                Nothing -> void $ registerOneShotAgent handle
+        Just _aid -> void $ registerOneShotAgent handle
         Nothing -> void $ registerOneShotAgent handle
 
     -- Generate conversation ID (unused for now)

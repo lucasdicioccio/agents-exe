@@ -56,8 +56,8 @@ import Prod.Tracer (Tracer (..))
 -------------------------------------------------------------------------------
 
 -- | Main event handler for the TUI application.
-tui_appHandleEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
-tui_appHandleEvent ev = do
+tui_appHandleEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
+tui_appHandleEvent tracer ev = do
     case ev of
         -- Application events
         AppEvent AppEvent_Heartbeat ->
@@ -86,9 +86,9 @@ tui_appHandleEvent ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) ->
             toggleZoom
         VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) ->
-            handleNewConversationFromEditor
+            handleNewConversationFromEditor tracer
         VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) ->
-            handleRestoredConversation
+            handleRestoredConversation tracer
         VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
             handleSendMessage
         VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) ->
@@ -514,26 +514,26 @@ handleRefreshTools = do
 -------------------------------------------------------------------------------
 
 -- | Create a new conversation from the selected agent.
-handleNewConversationFromEditor :: EventM N TuiState ()
-handleNewConversationFromEditor = do
+handleNewConversationFromEditor :: Tracer IO Trace -> EventM N TuiState ()
+handleNewConversationFromEditor tracer = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
             session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
-            runConversation baseTuiAgent session
+            runConversation tracer baseTuiAgent session
         _ ->
             pure ()
 
 {- | Continue a session restored from storage.
 This starts the agent loop with the restored session.
 -}
-handleRestoredConversation :: EventM N TuiState ()
-handleRestoredConversation = do
+handleRestoredConversation :: Tracer IO Trace -> EventM N TuiState ()
+handleRestoredConversation tracer = do
     mSession <- use (tuiUI . sessionList . to listSelectedElement)
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
     case (,) <$> mSession <*> mAgent of
         Just ((_, session), (_, baseTuiAgent)) -> do
-            runConversation baseTuiAgent session
+            runConversation tracer baseTuiAgent session
         _ ->
             pure ()
 
@@ -610,8 +610,8 @@ addBufferedMessage :: ConversationId -> Core -> Text.Text -> IO ()
 addBufferedMessage convId core msg =
     atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
 
-runConversation :: TuiAgent -> Session -> EventM N TuiState ()
-runConversation baseTuiAgent session = do
+runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
+runConversation baseTracer baseTuiAgent session = do
     -- Get session configuration (includes API keys)
     config <- use sessionConfig
 
@@ -624,13 +624,10 @@ runConversation baseTuiAgent session = do
     -- Build the progress callback
     let notifyProgress = buildOnProgress convId outChan
 
-    -- Create a no-op tracer
-    let tracer = Tracer $ const $ pure ()
-
     -- Create the agent with the progress callback
     -- Use the agent's OSAgentNode through the TuiAgent
     -- Pass API keys from the session config
-    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId tracer config.sessionApiKeys (tuiNode baseTuiAgent)
+    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId baseTracer config.sessionApiKeys (tuiNode baseTuiAgent)
 
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore

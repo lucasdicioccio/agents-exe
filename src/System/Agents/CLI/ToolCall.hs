@@ -25,7 +25,8 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
-import qualified Prod.Tracer as Prod
+import Prod.Tracer (Tracer, contramap)
+import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
@@ -79,14 +80,15 @@ createToolCallAgent tree =
 
 -- | Handle the tool-call command
 handleToolCall ::
-    -- | Tool call options
+    Tracer IO AgentTree.TreeTrace ->
+    -- | Path to the API keys file
     ToolCallOptions ->
     -- | Path to the API keys file
     FilePath ->
     -- | List of agent files (only first is used)
     [FilePath] ->
     IO ()
-handleToolCall opts apiKeysFile agentFiles = do
+handleToolCall baseTracer opts apiKeysFile agentFiles = do
     -- Read JSON payload from stdin
     stdinContent <- LByteString.getContents
     args <- case Aeson.eitherDecode stdinContent of
@@ -96,6 +98,8 @@ handleToolCall opts apiKeysFile agentFiles = do
         Right val -> pure val
 
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
+    let rtTracer = contramap AgentTree.RuntimeTrace baseTracer
+    let tpTracer = contramap (Runtime.ToolPortalTrace "-tool-portal-agent-slug-missing-") rtTracer
 
     -- Process only the first agent file (like OneShot)
     case agentFiles of
@@ -103,16 +107,13 @@ handleToolCall opts apiKeysFile agentFiles = do
             Text.hPutStrLn stderr "Error: No agent file specified"
             error "No agent file specified"
         (agentFilePath : _) -> do
-            -- Use silent tracer (tool portal handles its own output)
-            let baseTracer = Prod.silent
-
             -- Load the agent tree
             AgentTree.withAgentTree
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore apiKeys
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do
@@ -124,7 +125,7 @@ handleToolCall opts apiKeysFile agentFiles = do
                         let agent = createToolCallAgent tree
 
                         -- Create tool portal with silent tracer
-                        let portal = makeToolPortal Prod.silent (osNodeTools agent.toolCallNode)
+                        let portal = makeToolPortal tpTracer (osNodeTools agent.toolCallNode)
 
                         -- Create the tool call
                         let toolCall =

@@ -67,7 +67,7 @@ handleCheck opts apiKeysFile agentFiles = do
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = Prod.silent
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool SessionStore.defaultSessionStore apiKeys
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool Prod.silent SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs

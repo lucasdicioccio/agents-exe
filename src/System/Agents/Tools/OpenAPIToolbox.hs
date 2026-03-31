@@ -102,7 +102,7 @@ import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
-import Prod.Tracer (Tracer (..), runTracer)
+import Prod.Tracer (Tracer (..), runTracer, contramap)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools.Base (CallResult (..))
@@ -129,7 +129,6 @@ import System.Agents.Tools.OpenAPI.Types (
     Path,
     ToolResult (..),
  )
-import System.Agents.Tools.Trace (ToolTrace (..))
 
 -- -------------------------------------------------------------------------
 -- Trace types
@@ -148,6 +147,8 @@ data Trace
       FetchingSpecTrace !Text
     | -- | Loading spec from file path
       FetchingSpecFromFileTrace !Text
+    | -- | Loading spec from file path
+      FetchingSpecFromUrlTrace !HttpClient.Trace
     | -- | HTTP status of spec fetch
       SpecFetchedTrace !Int
     | -- | Successfully loaded spec from file
@@ -158,6 +159,8 @@ data Trace
       ToolsFilteredTrace !Int !Int
     | -- | method, url, path being called
       CallingEndpointTrace !Text !Text !Text
+    | -- | method, url, path being called
+      ExecuteRequest !HttpClient.Trace
     | -- | HTTP status of endpoint response
       EndpointResponseTrace !Int
     | -- | Error during schema dereferencing
@@ -385,7 +388,7 @@ fetchSpecFromUrl ::
     IO (Either InitializationError LByteString.ByteString)
 fetchSpecFromUrl tracer runtime url = do
     runTracer tracer (FetchingSpecTrace url)
-    result <- try $ HttpClient.get runtime (Tracer (const (pure ()))) url
+    result <- try $ HttpClient.get runtime (contramap FetchingSpecFromUrlTrace tracer) url
     case result of
         Left (e :: HttpClient.HttpException) ->
             pure $ Left $ NetworkError (Text.pack $ show e)
@@ -431,24 +434,18 @@ returns results in the standard CallResult format.
 createToolHandler ::
     Toolbox ->
     InternalTool ->
-    Tracer IO ToolTrace ->
+    Tracer IO Trace ->
     ToolExecutionContext ->
     Value ->
     IO (CallResult ())
 createToolHandler toolbox tool tracer _ctx args = do
-    result <- handleToolCall toolbox tool args
+    result <- handleToolCall tracer toolbox tool args
     case result of
         Left err -> do
-            runTracer (contramapTrace tracer) (ToolExecutionErrorTrace err)
+            runTracer tracer (ToolExecutionErrorTrace err)
             pure $ IOToolError () (ScriptExecutionError (Text.unpack err))
         Right (textResult, _toolResult) -> do
             pure $ BlobToolSuccess () (ByteString.pack $ Text.unpack textResult)
-  where
-    contramapTrace :: Tracer IO ToolTrace -> Tracer IO Trace
-    contramapTrace _t = Tracer $ \_traceEvent -> do
-        -- Convert Trace to ToolTrace if needed
-        -- For now, we just don't trace these events to the main tool tracer
-        pure ()
 
 {- | Handle a tool call by executing the HTTP request.
 
@@ -462,11 +459,12 @@ This function:
 7. Returns result
 -}
 handleToolCall ::
+    Tracer IO Trace ->
     Toolbox ->
     InternalTool ->
     Value ->
     IO (Either Text (Text, ToolResult))
-handleToolCall toolbox tool args = do
+handleToolCall tracer toolbox tool args = do
     case args of
         Object obj -> do
             -- Extract parameters from the JSON object
@@ -487,14 +485,14 @@ handleToolCall toolbox tool args = do
 
             -- Make HTTP request
             let method = toolMethod tool
-            runTracer (Tracer (const (pure ()) :: Trace -> IO ())) $ CallingEndpointTrace method fullUrl formattedPath
+            runTracer tracer $ CallingEndpointTrace method fullUrl formattedPath
 
-            result <- executeRequest toolbox.httpRuntime method fullUrl queryParams bodyValue allHeaders
+            result <- executeRequest tracer toolbox.httpRuntime method fullUrl queryParams bodyValue allHeaders
 
             case result of
                 Left err -> pure $ Left err
                 Right (textResult, toolResult) -> do
-                    runTracer (Tracer (const (pure ()) :: Trace -> IO ())) $ EndpointResponseTrace (resultStatus toolResult)
+                    runTracer tracer $ EndpointResponseTrace (resultStatus toolResult)
                     pure $ Right (textResult, toolResult)
         _ -> pure $ Left "Tool arguments must be a JSON object"
 
@@ -636,6 +634,7 @@ body, and custom headers) and executes it using the runtime's 'runRequest'
 function.
 -}
 executeRequest ::
+    Tracer IO Trace ->
     HttpClient.Runtime ->
     Method ->
     Text ->
@@ -643,13 +642,12 @@ executeRequest ::
     Maybe Value ->
     Map Text Text ->
     IO (Either Text (Text, ToolResult))
-executeRequest runtime method fullUrl queryParams mbody headers = do
+executeRequest tracer runtime method fullUrl queryParams mbody headers = do
     -- Build the request with all headers and parameters
     req <- buildRequest method fullUrl queryParams mbody headers
 
     -- Execute the request using the runtime
-    let tracer = Tracer (const (pure ()))
-    result <- HttpClient.runRequest runtime tracer req
+    result <- HttpClient.runRequest runtime (contramap ExecuteRequest tracer) req
 
     case result of
         Left err -> pure $ Left (Text.pack $ show err)

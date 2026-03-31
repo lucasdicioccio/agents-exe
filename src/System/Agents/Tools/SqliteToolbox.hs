@@ -658,9 +658,9 @@ Returns:
 Note: For snapshot mode without a conversation context, this function
 will return an error. Use 'executeQueryWithContext' instead.
 -}
-executeQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeQuery toolbox query =
-    executeQueryWithContext toolbox Nothing query
+executeQuery :: Tracer IO Trace -> Toolbox -> Text -> IO (Either QueryError QueryResult)
+executeQuery tracer toolbox query =
+    executeQueryWithContext tracer toolbox Nothing query
 
 {- | Execute a SQL query with an optional conversation context.
 
@@ -674,15 +674,16 @@ For snapshot mode:
 For read-only and read-write modes, the conversation context is ignored.
 -}
 executeQueryWithContext ::
+    Tracer IO Trace ->
     Toolbox ->
     Maybe ConversationId ->
     Text ->
     IO (Either QueryError QueryResult)
-executeQueryWithContext toolbox mConvId query = do
+executeQueryWithContext tracer toolbox mConvId query = do
     -- Validate access based on toolbox mode
     case validateAccess (toolboxAccessMode toolbox) query of
         Left err -> do
-            runTracer (Tracer (const (pure ()))) (AccessViolationTrace query (classifyQuery query) (toolboxAccessMode toolbox))
+            runTracer tracer (AccessViolationTrace query (classifyQuery query) (toolboxAccessMode toolbox))
             pure $ Left err
         Right () -> do
             -- Acquire lock to serialize access within this toolbox instance
@@ -693,7 +694,7 @@ executeQueryWithContext toolbox mConvId query = do
                             Nothing ->
                                 pure $ Left $ SnapshotError "Snapshot mode requires conversation context but none was provided"
                             Just convId ->
-                                executeSnapshotQueryInternal toolbox convId query
+                                executeSnapshotQueryInternal tracer toolbox convId query
                     _ ->
                         executeStandardQueryInternal toolbox query
 
@@ -707,14 +708,14 @@ executeStandardQueryInternal toolbox query = do
             pure $ Left $ ConnectionError "Database connection not initialized"
 
 -- | Execute query on a snapshot toolbox, ensuring snapshot is created first.
-executeSnapshotQueryInternal :: Toolbox -> ConversationId -> Text -> IO (Either QueryError QueryResult)
-executeSnapshotQueryInternal toolbox convId query =
+executeSnapshotQueryInternal :: Tracer IO Trace -> Toolbox -> ConversationId -> Text -> IO (Either QueryError QueryResult)
+executeSnapshotQueryInternal tracer toolbox convId query =
     case toolboxSnapshotState toolbox of
         Nothing ->
             pure $ Left $ SnapshotError "Snapshot state not initialized"
         Just stateVar -> do
             -- Ensure snapshot is initialized (thread-safe via MVar)
-            initResult <- ensureSnapshotInitialized (Tracer (const (pure ()))) stateVar convId
+            initResult <- ensureSnapshotInitialized tracer stateVar convId
             case initResult of
                 Left err -> pure $ Left err
                 Right (conn, directDb, _snapshotPath) ->

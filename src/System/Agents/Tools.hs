@@ -45,6 +45,7 @@ import Data.ByteString.Char8 as CByteString
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import Prod.Tracer (contramap)
+import qualified Prod.Tracer as Prod
 
 -------------------------------------------------------------------------------
 
@@ -160,7 +161,7 @@ openapiTool toolbox apiTool =
   where
     call = ()
     run _tracer _ctx args = do
-        result <- OpenAPIToolbox.handleToolCall toolbox apiTool args
+        result <- OpenAPIToolbox.handleToolCall Prod.silent toolbox apiTool args
         case result of
             Left err -> do
                 pure $ OpenAPIToolError call (Text.unpack err)
@@ -203,7 +204,7 @@ postgrestTool toolbox prTool =
   where
     call = ()
     run _tracer _ctx args = do
-        result <- PostgRESToolbox.handleToolCall toolbox prTool args
+        result <- PostgRESToolbox.handleToolCall Prod.silent toolbox prTool args
         case result of
             Left err -> do
                 pure $ PostgRESToolError call (Text.unpack err)
@@ -234,7 +235,7 @@ systemTool box =
     run _tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery box cap
+                result <- SystemTools.executeQuery Prod.silent box cap
                 case result of
                     Left err -> pure $ SystemToolError call err
                     Right rsp -> pure $ SystemToolResult call rsp
@@ -281,7 +282,7 @@ executeDeveloperCapability box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
             Just (Aeson.String toolPath) -> do
-                result <- DeveloperTools.executeValidateTool box (Text.unpack toolPath)
+                result <- DeveloperTools.executeValidateTool Prod.silent box (Text.unpack toolPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult

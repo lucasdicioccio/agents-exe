@@ -107,16 +107,17 @@ handleOneShot ::
     OneShotOptions ->
     IO ()
 handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
+    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     forM_ (take 1 agentFiles) $ \agentFilePath -> do
         promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
         mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
         -- Use OS-native agent loading (no registry needed)
-        let oneShot text props = OneShot.mainOneShotTextWithThinking sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+        let oneShot text props = OneShot.mainOneShotTextWithThinking rtTracer sessionStore opts.sessionFile mSession opts.thinkingOutput props text
         oneShot promptContents $
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.rootAgentFile = agentFilePath
                 , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool sessionStore apiKeys
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
                 }
