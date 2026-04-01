@@ -34,6 +34,7 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import qualified System.Process
 
+import System.Agents.AgentTree.Trace (TreeTrace (..))
 import System.Agents.Base (
     Agent (..),
     BashToolboxDescription (..),
@@ -52,7 +53,6 @@ import System.Agents.Base (
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
  )
-import System.Agents.AgentTree.Trace (TreeTrace(..))
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
@@ -649,4 +649,3 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
-

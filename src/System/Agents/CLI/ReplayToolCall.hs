@@ -51,7 +51,7 @@ import System.Agents.Session.Types (
     Turn (..),
  )
 import qualified System.Agents.ToolRegistration as ToolReg
-import System.Agents.Tools.Bash (ScriptDescription (..), ScriptInfo (..), loadScript, runValue, LoadTrace, RunTrace)
+import System.Agents.Tools.Bash (LoadTrace, RunTrace, ScriptDescription (..), ScriptInfo (..), loadScript, runValue)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
 
 -- | Information about a tool call extracted from a session
@@ -224,9 +224,10 @@ printBrief calls = do
         let argsPreview = Text.take 60 (Text.pack $ BSL.unpack $ Aeson.encode call.toolCallArguments)
         Text.putStrLn $ Text.pack (show call.toolCallIndex) <> "\t" <> call.toolCallName <> "\t" <> argsPreview
 
-data Trace = BashLoadTrace !LoadTrace
-  | BashRunTrace !RunTrace
-  deriving (Show)
+data Trace
+    = BashLoadTrace !LoadTrace
+    | BashRunTrace !RunTrace
+    deriving (Show)
 
 -- | Handle the replay-tool-call command
 handleReplayToolCall :: Prod.Tracer IO Trace -> ReplayToolCallOptions -> IO ()

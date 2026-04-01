@@ -68,7 +68,7 @@ module System.Agents.Tools.Secrets (
 
 import Control.Exception (IOException, try)
 import Data.ByteString.Base64 as Base64
-import Data.Char (isSpace, isHexDigit, digitToInt)
+import Data.Char (digitToInt, isHexDigit, isSpace)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
@@ -82,11 +82,11 @@ import System.Exit (ExitCode (..))
 import System.IO.Error (isDoesNotExistError)
 import System.Process (readProcessWithExitCode)
 
-import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
-import qualified Data.Aeson as Aeson
 import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
-import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as LByteString
+import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
 
 -- -------------------------------------------------------------------------
 -- Secret Source Types
@@ -294,19 +294,18 @@ data ResolvedSecret = ResolvedSecret
     }
     deriving (Show, Eq)
 
-{- | Errors that can occur during secret resolution.
--}
+-- | Errors that can occur during secret resolution.
 data SecretResolutionError
-    = SourceNotFound Text
-    -- ^ The secret source was not found (file, env var, etc.)
-    | SourceReadError Text
-    -- ^ Error reading from the secret source
-    | DecodeError Text
-    -- ^ Error decoding the secret (invalid Base64, hex, etc.)
-    | ApiKeyNotFound Text
-    -- ^ The referenced API key was not found
-    | CommandFailed Text Int Text
-    -- ^ Command failed with exit code and stderr
+    = -- | The secret source was not found (file, env var, etc.)
+      SourceNotFound Text
+    | -- | Error reading from the secret source
+      SourceReadError Text
+    | -- | Error decoding the secret (invalid Base64, hex, etc.)
+      DecodeError Text
+    | -- | The referenced API key was not found
+      ApiKeyNotFound Text
+    | -- | Command failed with exit code and stderr
+      CommandFailed Text Int Text
     deriving (Show, Eq)
 
 {- | Resolve all secrets in a list.
@@ -340,8 +339,7 @@ resolveSecret apiKeysFile Secret{..} = do
                 Right decodedValue ->
                     pure $ Right $ ResolvedSecret decodedValue secretSerializer
 
-{- | Resolve a secret source to a raw (possibly encoded) value.
--}
+-- | Resolve a secret source to a raw (possibly encoded) value.
 resolveSecretSource ::
     FilePath ->
     SecretSource ->
@@ -387,8 +385,7 @@ resolveSecretSource _ (Command name args) = do
 -- Secret Decoding
 -- -------------------------------------------------------------------------
 
-{- | Decode a raw secret value using the specified decoder.
--}
+-- | Decode a raw secret value using the specified decoder.
 decodeSecret :: SecretDecoder -> Text -> Either SecretResolutionError Text
 decodeSecret (Clear trimNewlines) rawValue =
     let value = if trimNewlines then trimTrailingNewlines rawValue else rawValue
@@ -405,7 +402,7 @@ decodeSecret Hexadecimal encoded =
 -- | Decode a hex string to bytes.
 decodeHex :: String -> Maybe [Word8]
 decodeHex [] = Just []
-decodeHex (c1:c2:cs)
+decodeHex (c1 : c2 : cs)
     | isHexDigit c1 && isHexDigit c2 =
         let byte = fromIntegral (digitToInt c1 * 16 + digitToInt c2) :: Word8
          in (byte :) <$> decodeHex cs
@@ -486,4 +483,3 @@ applySecretsToQueryString ::
 applySecretsToQueryString secrets baseParams =
     let querySecrets = Map.fromList $ mapMaybe serializeSecretToQuery secrets
      in Map.union querySecrets baseParams
-

@@ -130,8 +130,8 @@ import System.Agents.OS.Core.Types (EntityId (..))
 import qualified System.Agents.OS.Core.Types as OSTypes
 import qualified System.Agents.OS.Core.World as OSWorld
 
-import System.Agents.ToolRegistration
 import System.Agents.AgentTree.Trace
+import System.Agents.ToolRegistration
 
 -------------------------------------------------------------------------------
 -- API Keys Type
@@ -712,12 +712,13 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
         Just osNode -> do
             let baseDir = FilePath.takeDirectory node.nodeFile
             let agent = node.nodeConfig
-            toolLoaderErrors <- ToolLoader.loadAgentTools 
-                props.interactiveTracer 
-                baseDir 
-                props.apiKeysFile  -- Pass the API keys file path for secret resolution
-                agent 
-                (osNodeTools osNode)
+            toolLoaderErrors <-
+                ToolLoader.loadAgentTools
+                    props.interactiveTracer
+                    baseDir
+                    props.apiKeysFile -- Pass the API keys file path for secret resolution
+                    agent
+                    (osNodeTools osNode)
             pure $ map convertToolLoaderError toolLoaderErrors
 
 {- | Wire tools for a single agent by appending sub-agent tools to the TVar.
@@ -1065,4 +1066,3 @@ readOpenApiKeysFile keysPath =
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
-

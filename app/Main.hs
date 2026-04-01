@@ -1259,8 +1259,7 @@ runCommand pargs baseTracer sessionStore files =
         McpServer ->
             let f (McpServerCmd.AgentTreeTrace tr) = Right tr
                 f (McpServerCmd.McpServerTrace tr) = Left tr
-            in
-            McpServerCmd.handleMcpServer (Prod.choose f Prod.silent baseTracer) sessionStore pargs.apiKeysFile files
+             in McpServerCmd.handleMcpServer (Prod.choose f Prod.silent baseTracer) sessionStore pargs.apiKeysFile files
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
@@ -1374,4 +1373,3 @@ toJsonTrace x = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-

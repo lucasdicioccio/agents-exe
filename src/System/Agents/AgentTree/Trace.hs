@@ -71,18 +71,18 @@ import qualified System.Agents.FileLoader as FileLoader
 
 -- OS Core imports
 
-import qualified System.Agents.Tools.McpToolbox as McpTools
-import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
-import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
+import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
+import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenApiToolbox
+import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
-import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
-import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 
 -------------------------------------------------------------------------------
 -- Trace Types
@@ -126,4 +126,3 @@ data ReferenceValidationTrace
     | DuplicateSlugDetected AgentSlug [FilePath]
     | SelfReferenceDetected AgentSlug FilePath AgentSlug
     deriving (Show)
-

@@ -26,9 +26,9 @@ import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
 import Prod.Tracer (Tracer, contramap)
-import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
@@ -140,4 +140,3 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
-

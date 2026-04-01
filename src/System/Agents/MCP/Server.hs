@@ -65,10 +65,10 @@ import System.Agents.Session.Types (
  )
 import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.ToolPortal as ToolPortal
-import qualified System.Agents.Tools.Trace as Tools
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolSchema as ToolSchema
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import qualified System.Agents.Tools.Trace as Tools
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -259,10 +259,10 @@ handleMsg tracer req (CallToolRequestMsg callTool) = do
     Rpc.sendResponse rsp
 
 data Trace
-  = LlmCompletionTrace !OpenAI.Trace
-  | ToolPortalTrace !ToolPortal.Trace
-  | ToolTrace !Tools.ToolTrace
-  deriving (Show)
+    = LlmCompletionTrace !OpenAI.Trace
+    | ToolPortalTrace !ToolPortal.Trace
+    | ToolTrace !Tools.ToolTrace
+    deriving (Show)
 
 {- | Run an agent with a query using the LLM session-based approach.
 
