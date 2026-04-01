@@ -117,7 +117,9 @@ handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
         oneShot promptContents $
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
+                , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFilePath
                 , AgentTree.interactiveTracer = baseTracer
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
                 }
+

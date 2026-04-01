@@ -111,6 +111,7 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
             AgentTree.withAgentTree
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
+                    , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = baseTracer
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys
@@ -139,3 +140,4 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         Text.putStrLn ""
+

@@ -10,6 +10,7 @@ This module provides a runtime that:
 * Converts table endpoints to executable tools (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS)
 * Handles HTTP execution with PostgREST-specific query parameter building
 * Integrates with the LLM tool registration system
+* Supports flexible secret management via the 'Secrets' configuration
 
 The toolbox follows patterns similar to OpenAPIToolbox, McpToolbox,
 and BashToolbox for consistent integration with the agents system.
@@ -20,13 +21,19 @@ Key features:
 * Configurable HTTP method exposure (read-only by default for safety)
 * Column-based row filtering
 * Automatic pagination and ordering support
-* JWT Bearer token authentication
+* JWT Bearer token authentication via secrets
+
+Secret Management:
+The toolbox supports flexible secret configuration via the 'secrets' field.
+Secrets can be sourced from environment variables, files, commands, or API
+key files, and can be serialized as custom headers or query string parameters.
 
 Example usage:
 
 @
 import System.Agents
 import qualified System.Agents.Tools.PostgRESToolbox as PostgREST
+import System.Agents.Tools.Secrets
 
 main :: IO ()
 main = do
@@ -34,11 +41,23 @@ main = do
             { configUrl = "http://localhost:3000/"
             , configBaseUrl = "http://localhost:3000"
             , configHeaders = Map.empty
-            , configToken = Just "eyJhbG..."
+            , configToken = Nothing  -- Legacy token, prefer secrets
             , configAllowedMethods = [GET, POST, PATCH]  -- Enable read and write
             , configFilter = Just (PathPrefix "/public")  -- Only public schema tables
+            , configSecrets =
+                [ Secret
+                    { secretSource = FileSystem "/run/secrets/jwt_token"
+                    , secretDecoder = Clear True
+                    , secretSerializer = Header "Authorization" (Just "Bearer {{secret}}")
+                    }
+                , Secret
+                    { secretSource = EnvVar "POSTGREST_ROLE"
+                    , secretDecoder = Clear False
+                    , secretSerializer = Header "X-Client-Info" Nothing
+                    }
+                ]
             }
-    result <- PostgREST.initializeToolbox tracer config
+    result <- PostgREST.initializeToolbox apiKeysFile tracer config
     case result of
         Right toolbox -> do
             -- Register tools with LLM
@@ -92,6 +111,13 @@ module System.Agents.Tools.PostgRESToolbox (
     -- * URL helpers
     isFileUrl,
     fileUrlToPath,
+
+    -- * Secrets
+    Secrets.ResolvedSecret,
+    Secrets.Secret (..),
+    Secrets.SecretSource (..),
+    Secrets.SecretDecoder (..),
+    Secrets.SecretSerializer (..),
 ) where
 
 import Control.Exception (try)
@@ -110,7 +136,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Numeric (showHex)
-import Prod.Tracer (Tracer (..), runTracer, contramap)
+import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -138,6 +164,7 @@ import System.Agents.Tools.PostgREST.Types (
     isReadOnlyMethod,
  )
 import qualified System.Agents.Tools.PostgREST.Types as Types
+import qualified System.Agents.Tools.Secrets as Secrets
 
 -- -------------------------------------------------------------------------
 -- Core types
@@ -153,12 +180,14 @@ data InitializationError
       ParseError !Text
     | -- | OpenAPI spec validation error
       SpecError !Text
+    | -- | Secret resolution error
+      SecretError !Secrets.SecretResolutionError
     deriving (Show, Eq)
 
 {- | Configuration for initializing a PostgREST toolbox.
 
 This configuration type extends the base 'Types.Config' with an optional
-'EndpointPredicate' filter to subset the available tools.
+'EndpointPredicate' filter and secret management capabilities.
 -}
 data Config = Config
     { configUrl :: Text
@@ -168,13 +197,15 @@ data Config = Config
     , configHeaders :: Map Text Text
     -- ^ Static headers to include in all requests
     , configToken :: Maybe Text
-    -- ^ Optional Bearer token for JWT authentication
+    -- ^ Optional Bearer token for JWT authentication (legacy, prefer secrets)
     , configAllowedMethods :: [HttpMethod]
     -- ^ HTTP methods to expose as tools (default: read-only methods)
     , configFilter :: Maybe EndpointPredicate
     {- ^ Optional filter to restrict which tables/endpoints are exposed as tools.
     If not specified, all tables are included.
     -}
+    , configSecrets :: [Secrets.Secret]
+    -- ^ Secrets to resolve and include in requests
     }
     deriving (Show, Eq)
 
@@ -196,7 +227,8 @@ The toolbox maintains:
 * The base URL for API calls
 * A list of available tools (one per table/method combination, filtered by configFilter if provided)
 * The HTTP runtime for making requests
-* Optional dynamic header function for auth
+* Resolved secrets for authentication
+* Static headers from config
 * The list of allowed HTTP methods
 -}
 data Toolbox = Toolbox
@@ -206,8 +238,8 @@ data Toolbox = Toolbox
     -- ^ Tools converted from the PostgREST spec (filtered if configFilter was provided)
     , httpRuntime :: HttpClient.Runtime
     -- ^ HTTP client runtime
-    , headerFunc :: Maybe (IO (Map Text Text))
-    -- ^ Optional function to get dynamic headers (e.g., for auth)
+    , resolvedSecrets :: [Secrets.ResolvedSecret]
+    -- ^ Secrets resolved at initialization
     , staticHeaders :: Map Text Text
     -- ^ Static headers from config
     , toolboxAllowedMethods :: [HttpMethod]
@@ -257,72 +289,82 @@ fileUrlToPath url =
 {- | Initialize a PostgREST toolbox from a configuration.
 
 This function:
-1. Creates an HTTP runtime with authentication
-2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
-3. Parses the JSON to an OpenAPISpec
-4. Converts table operations to tools based on allowed methods
-5. Applies the optional filter to subset tools (using 'matchesPostgRESTool')
-6. Detects row filters and builds parameter schemas
+1. Resolves any configured secrets from their sources
+2. Creates an HTTP runtime with authentication (legacy token support)
+3. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
+4. Parses the JSON to an OpenAPISpec
+5. Converts table operations to tools based on allowed methods
+6. Applies the optional filter to subset tools (using 'matchesPostgRESTool')
+7. Detects row filters and builds parameter schemas
 
 Returns an 'InitializationError' if any step fails.
 -}
 initializeToolbox ::
+    -- | Path to API keys file (for ApiKey secret source)
+    FilePath ->
     Tracer IO Trace ->
     Config ->
     IO (Either InitializationError Toolbox)
-initializeToolbox tracer config = do
-    -- Create HTTP runtime with auth
-    let token = case config.configToken of
-            Just t -> HttpClient.BearerToken t
-            Nothing -> HttpClient.NoToken
-    runtime <- HttpClient.newRuntime token
+initializeToolbox apiKeysFile tracer config = do
+    -- Resolve secrets first
+    eResolvedSecrets <- Secrets.resolveSecrets apiKeysFile (configSecrets config)
+    case eResolvedSecrets of
+        Left err -> do
+            runTracer tracer $ Types.ExecutionErrorTrace (Text.pack $ show err)
+            pure $ Left $ SecretError err
+        Right resolvedSecrets -> do
+            -- Create HTTP runtime with auth (legacy token support)
+            let token = case config.configToken of
+                    Just t -> HttpClient.BearerToken t
+                    Nothing -> HttpClient.NoToken
+            runtime <- HttpClient.newRuntime token
 
-    -- Fetch OpenAPI spec (from URL or file)
-    fetchResult <- fetchSpec tracer runtime config.configUrl
+            -- Fetch OpenAPI spec (from URL or file)
+            fetchResult <- fetchSpec tracer runtime config.configUrl
 
-    case fetchResult of
-        Left err -> pure $ Left err
-        Right body -> do
-            -- Parse JSON to OpenAPISpec
-            case Aeson.decode body of
-                Nothing -> pure $ Left $ ParseError "Failed to parse PostgREST OpenAPI spec JSON"
-                Just spec -> do
-                    -- Get allowed methods (default to read-only if not specified)
-                    let allowedMethods = case config.configAllowedMethods of
-                            [] -> defaultAllowedMethods
-                            methods -> methods
+            case fetchResult of
+                Left err -> pure $ Left err
+                Right body -> do
+                    -- Parse JSON to OpenAPISpec
+                    case Aeson.decode body of
+                        Nothing -> pure $ Left $ ParseError "Failed to parse PostgREST OpenAPI spec JSON"
+                        Just spec -> do
+                            -- Get allowed methods (default to read-only if not specified)
+                            let allowedMethods = case config.configAllowedMethods of
+                                    [] -> defaultAllowedMethods
+                                    methods -> methods
 
-                    -- Convert to tools
-                    let toolboxName = extractToolboxName config.configUrl
-                    let allTools = convertPostgRESToTools toolboxName allowedMethods spec
+                            -- Convert to tools
+                            let toolboxName = extractToolboxName config.configUrl
+                            let allTools = convertPostgRESToTools toolboxName allowedMethods spec
 
-                    -- Apply filter if provided
-                    let filteredTools = case config.configFilter of
-                            Nothing -> allTools
-                            Just predicate -> filter (matchesPostgRESTool predicate) allTools
+                            -- Apply filter if provided
+                            let filteredTools = case config.configFilter of
+                                    Nothing -> allTools
+                                    Just predicate -> filter (matchesPostgRESTool predicate) allTools
 
-                    -- Trace tool conversions
-                    mapM_ (\t -> runTracer tracer (TableConvertedTrace (prtPath t))) filteredTools
+                            -- Trace tool conversions
+                            mapM_ (\t -> runTracer tracer (TableConvertedTrace (prtPath t))) filteredTools
 
-                    -- Trace filtering results
-                    runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
+                            -- Trace filtering results
+                            runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
 
-                    -- Trace filter detection
-                    mapM_ (\t -> runTracer tracer (ColumnFiltersDetectedTrace (prtPath t) (length (prtRowFilters t)))) filteredTools
+                            -- Trace filter detection
+                            mapM_ (\t -> runTracer tracer (ColumnFiltersDetectedTrace (prtPath t) (length (prtRowFilters t)))) filteredTools
 
-                    -- Create toolbox
-                    pure $
-                        Right $
-                            Toolbox
-                                { toolboxName = toolboxName
-                                , toolboxBaseUrl = config.configBaseUrl
-                                , toolboxTools = filteredTools
-                                , httpRuntime = runtime
-                                , headerFunc = Nothing
-                                , staticHeaders = config.configHeaders
-                                , toolboxAllowedMethods = allowedMethods
-                                , toolboxFilter = config.configFilter
-                                }
+                            -- Create toolbox
+                            pure $
+                                Right $
+                                    Toolbox
+                                        { toolboxName = toolboxName
+                                        , toolboxBaseUrl = config.configBaseUrl
+                                        , toolboxTools = filteredTools
+                                        , httpRuntime = runtime
+                                        , resolvedSecrets = resolvedSecrets
+                                        , staticHeaders = config.configHeaders
+                                        , toolboxAllowedMethods = allowedMethods
+                                        , toolboxFilter = config.configFilter
+                                        }
 
 {- | Extract a toolbox name from the spec URL.
 
@@ -436,8 +478,9 @@ This function:
 1. Extracts structured arguments (filters, subset, ranking, body)
 2. Builds the query string from arguments
 3. Builds full URL
-4. Makes HTTP request with the appropriate method
-5. Returns result
+4. Applies resolved secrets to headers
+5. Makes HTTP request with the appropriate method
+6. Returns result
 -}
 handleToolCall ::
     Tracer IO Trace ->
@@ -454,11 +497,9 @@ handleToolCall tracer toolbox tool args = do
             -- Build full URL
             let fullUrl = toolboxBaseUrl toolbox <> prtPath tool <> queryString
 
-            -- Get headers
-            headers <- case toolbox.headerFunc of
-                Just hf -> hf
-                Nothing -> pure Map.empty
-            let allHeaders = Map.union headers (staticHeaders toolbox)
+            -- Build headers: static headers + resolved secrets
+            let secretHeaders = Secrets.applySecretsToHeaders (resolvedSecrets toolbox) Map.empty
+            let allHeaders = Map.unions [secretHeaders, staticHeaders toolbox]
 
             -- Extract request body if present (for POST/PUT/PATCH)
             let requestBody = extractRequestBody obj (buildToolParameters tool)
@@ -713,3 +754,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+

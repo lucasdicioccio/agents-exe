@@ -17,6 +17,7 @@ import GHC.Generics (Generic)
 
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
+import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
 type AgentSlug = Text
@@ -258,10 +259,21 @@ Example configuration:
     "baseUrl": "https://api.example.com",
     "headers": {"X-API-Version": "v1"},
     "token": "${API_TOKEN}",
-    "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
+    "filter": {"tag": "PathPrefix", "contents": "/api/v1"},
+    "secrets": [
+      {
+        "source": {"tag": "EnvVar", "contents": "API_KEY"},
+        "decoder": {"tag": "Clear", "contents": true},
+        "serializer": {"tag": "Header", "contents": ["X-API-Key", null]}
+      }
+    ]
   }
 }
 @
+
+The 'secrets' field allows flexible secret management with support for
+multiple sources (environment variables, files, commands), encodings
+(Base64, hex), and serialization locations (headers, query string).
 
 The optional 'filter' field allows restricting which endpoints are
 exposed as tools. See 'EndpointPredicate' for the available filter
@@ -276,9 +288,11 @@ data OpenAPIServerDescription
     , openApiHeaders :: Maybe (Map Text Text)
     -- ^ Optional static headers to include in all requests
     , openApiToken :: Maybe Text
-    -- ^ Optional Bearer token for authentication
+    -- ^ Optional Bearer token for authentication (legacy, prefer using 'secrets')
     , openApiFilter :: Maybe EndpointPredicate
     -- ^ Optional filter to restrict which endpoints are exposed as tools
+    , openApiSecrets :: Maybe [Secret]
+    -- ^ Optional list of secrets to resolve and include in requests
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -326,7 +340,8 @@ The referenced file should contain:
   "baseUrl": "https://api.example.com",
   "headers": {"X-API-Version": "v1"},
   "token": "${API_TOKEN}",
-  "filter": {"tag": "PathPrefix", "contents": "/api/v1"}
+  "filter": {"tag": "PathPrefix", "contents": "/api/v1"},
+  "secrets": []
 }
 @
 -}
@@ -404,10 +419,21 @@ Example configuration:
     "headers": {"Accept-Profile": "myschema"},
     "token": "${POSTGREST_TOKEN}",
     "allowedMethods": ["GET", "POST", "PATCH"],
-    "filter": {"tag": "PathPrefix", "contents": "/public"}
+    "filter": {"tag": "PathPrefix", "contents": "/public"},
+    "secrets": [
+      {
+        "source": {"tag": "FileSystem", "contents": "/run/secrets/jwt_token"},
+        "decoder": {"tag": "Clear", "contents": true},
+        "serializer": {"tag": "Header", "contents": ["Authorization", "Bearer {{secret}}"]}
+      }
+    ]
   }
 }
 @
+
+The 'secrets' field allows flexible secret management with support for
+multiple sources (environment variables, files, commands), encodings
+(Base64, hex), and serialization locations (headers, query string).
 
 The optional 'filter' field allows restricting which tables are
 exposed as tools. See 'EndpointPredicate' for the available filter
@@ -426,7 +452,7 @@ data PostgRESTServerDescription
     (e.g., for schema selection via Accept-Profile)
     -}
     , postgrestToken :: Maybe Text
-    -- ^ Optional Bearer token for JWT authentication
+    -- ^ Optional Bearer token for JWT authentication (legacy, prefer using 'secrets')
     , postgrestAllowedMethods :: Maybe [HttpMethod]
     {- ^ Optional list of HTTP methods to expose as tools.
     Default: read-only methods [GET, HEAD, OPTIONS] for safety.
@@ -434,6 +460,8 @@ data PostgRESTServerDescription
     -}
     , postgrestFilter :: Maybe EndpointPredicate
     -- ^ Optional filter to restrict which tables/endpoints are exposed as tools
+    , postgrestSecrets :: Maybe [Secret]
+    -- ^ Optional list of secrets to resolve and include in requests
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -480,7 +508,8 @@ The referenced file should contain:
   "headers": {"Accept-Profile": "myschema"},
   "token": "${POSTGREST_TOKEN}",
   "allowedMethods": ["GET", "POST", "PATCH"],
-  "filter": {"tag": "Not", "contents": {"tag": "PathContains", "contents": "_internal"}}
+  "filter": {"tag": "Not", "contents": {"tag": "PathContains", "contents": "_internal"}},
+  "secrets": []
 }
 @
 -}
@@ -1118,3 +1147,4 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+

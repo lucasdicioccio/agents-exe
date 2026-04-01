@@ -66,6 +66,7 @@ handleCheck baseTracer opts apiKeysFile agentFiles = do
         AgentTree.withAgentTree
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
+                , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = baseTracer
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys
@@ -159,3 +160,4 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
+

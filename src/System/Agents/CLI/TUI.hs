@@ -46,6 +46,7 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
+                    , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = baseTracer
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
@@ -53,3 +54,4 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUI rtTracer sessionStore apiKeys agentPropsList
+

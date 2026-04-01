@@ -101,6 +101,7 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
+                    , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer =
                         Prod.traceBoth
@@ -111,3 +112,4 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     McpServer.multiAgentsServer (Prod.contramap McpServerTrace tracer) McpServer.defaultMcpServerConfig agentPropsList
+
