@@ -54,8 +54,8 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import System.Agents.Tools.OpenAPI.Types (Schema)
 import qualified System.Agents.HttpClient as HttpClient
+import System.Agents.Tools.OpenAPI.Types (Schema)
 
 -- -------------------------------------------------------------------------
 -- HTTP Methods

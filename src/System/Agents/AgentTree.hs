@@ -130,8 +130,8 @@ import System.Agents.OS.Core.Types (EntityId (..))
 import qualified System.Agents.OS.Core.Types as OSTypes
 import qualified System.Agents.OS.Core.World as OSWorld
 
-import System.Agents.ToolRegistration
 import System.Agents.AgentTree.Trace
+import System.Agents.ToolRegistration
 
 -------------------------------------------------------------------------------
 -- API Keys Type
@@ -401,6 +401,8 @@ data LoadAgentResult
 
 data Props = Props
     { apiKeys :: LoadedApiKeys
+    , apiKeysFile :: FilePath
+    -- ^ Path to API keys file (for resolving ApiKey secret sources)
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO TreeTrace
     , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> ToolRegistration
@@ -689,7 +691,7 @@ wireToolReferences ::
     IO [LoadingError]
 wireToolReferences props graph nodeMap = do
     -- First load configured toolboxes for all agents
-    toolboxErrors <- mapM (loadAgentToolboxes props.interactiveTracer nodeMap) (Map.toList graph.graphNodes)
+    toolboxErrors <- mapM (loadAgentToolboxes props nodeMap) (Map.toList graph.graphNodes)
     -- Then wire helper agent tools
     mapM_ (wireAgentTools props graph nodeMap) (Map.toList graph.graphNodes)
     pure (concat toolboxErrors)
@@ -700,17 +702,23 @@ Loads bash tools, builtin toolboxes, MCP servers, OpenAPI, PostgREST,
 and Skills toolboxes configured in the agent's configuration.
 -}
 loadAgentToolboxes ::
-    Tracer IO TreeTrace ->
+    Props ->
     Map.Map AgentSlug OSAgentNode ->
     (AgentSlug, AgentConfigNode) ->
     IO [LoadingError]
-loadAgentToolboxes tracer nodeMap (nodeSlug, node) =
+loadAgentToolboxes props nodeMap (nodeSlug, node) =
     case Map.lookup nodeSlug nodeMap of
         Nothing -> pure []
         Just osNode -> do
             let baseDir = FilePath.takeDirectory node.nodeFile
             let agent = node.nodeConfig
-            toolLoaderErrors <- ToolLoader.loadAgentTools tracer baseDir agent (osNodeTools osNode)
+            toolLoaderErrors <-
+                ToolLoader.loadAgentTools
+                    props.interactiveTracer
+                    baseDir
+                    props.apiKeysFile -- Pass the API keys file path for secret resolution
+                    agent
+                    (osNodeTools osNode)
             pure $ map convertToolLoaderError toolLoaderErrors
 
 {- | Wire tools for a single agent by appending sub-agent tools to the TVar.

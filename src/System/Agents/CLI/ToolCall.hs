@@ -26,9 +26,9 @@ import qualified Data.Text.IO as Text
 import System.IO (stderr)
 
 import Prod.Tracer (Tracer, contramap)
-import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
@@ -111,6 +111,7 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
             AgentTree.withAgentTree
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
+                    , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = baseTracer
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys

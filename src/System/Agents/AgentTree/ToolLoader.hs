@@ -34,6 +34,7 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import qualified System.Process
 
+import System.Agents.AgentTree.Trace (TreeTrace (..))
 import System.Agents.Base (
     Agent (..),
     BashToolboxDescription (..),
@@ -52,7 +53,6 @@ import System.Agents.Base (
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
  )
-import System.Agents.AgentTree.Trace (TreeTrace(..))
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
@@ -111,19 +111,21 @@ loadAgentTools ::
     Tracer IO TreeTrace ->
     -- | Base directory for resolving relative paths (for OpenAPI/PostgREST on-disk configs)
     FilePath ->
+    -- | Path to API keys file (for resolving ApiKey secret sources)
+    FilePath ->
     -- | The agent configuration
     Agent ->
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
     IO [LoadingError]
-loadAgentTools tracer baseDir agent toolsTVar = do
+loadAgentTools tracer baseDir apiKeysFile agent toolsTVar = do
     errors <-
         catMaybes
             <$> sequence
                 [ loadBashTools (contramap BashToolboxTrace tracer) agent toolsTVar
                 , loadMcpServers (contramap McpToolboxTrace tracer) agent toolsTVar
-                , loadOpenAPIToolboxes (contramap OpenApiToolboxTrace tracer) baseDir agent toolsTVar
-                , loadPostgRESTToolboxes (contramap PostgRESToolboxTrace tracer) baseDir agent toolsTVar
+                , loadOpenAPIToolboxes (contramap OpenApiToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
+                , loadPostgRESTToolboxes (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
                 , loadBuiltinToolboxes tracer agent toolsTVar
                 , loadSkillsTools agent toolsTVar
                 ]
@@ -264,34 +266,36 @@ Each OpenAPI toolbox fetches its spec and registers converted tools.
 loadOpenAPIToolboxes ::
     Tracer IO OpenAPIToolbox.Trace ->
     FilePath ->
+    FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadOpenAPIToolboxes tracer baseDir agent toolsTVar = do
+loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
     let toolboxes = fromMaybe [] (openApiToolboxes agent)
 
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadOpenAPIToolbox tracer baseDir toolsTVar) toolboxes
+            errors <- mapM (loadOpenAPIToolbox tracer baseDir apiKeysFile toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single OpenAPI toolbox and register its tools.
 loadOpenAPIToolbox ::
     Tracer IO OpenAPIToolbox.Trace ->
     FilePath ->
+    FilePath ->
     TVar [ToolRegistration] ->
     OpenAPIToolboxDescription ->
     IO (Maybe LoadingError)
-loadOpenAPIToolbox tracer baseDir toolsTVar description = do
+loadOpenAPIToolbox tracer baseDir apiKeysFile toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolveOpenAPIDescription baseDir description
 
     case configResult of
         Left err -> pure $ Just $ OpenAPILoadingError err
         Right config -> do
-            -- Initialize the toolbox
-            initResult <- OpenAPIToolbox.initializeToolbox tracer config
+            -- Initialize the toolbox with API keys file for secret resolution
+            initResult <- OpenAPIToolbox.initializeToolbox apiKeysFile tracer config
 
             case initResult of
                 Left err -> pure $ Just $ OpenAPILoadingError (show err)
@@ -319,6 +323,7 @@ resolveOpenAPIDescription _baseDir (OpenAPIServer desc) =
                 , OpenAPIToolbox.configHeaders = fromMaybe mempty (openApiHeaders desc)
                 , OpenAPIToolbox.configToken = openApiToken desc
                 , OpenAPIToolbox.configFilter = openApiFilter desc
+                , OpenAPIToolbox.configSecrets = fromMaybe [] (openApiSecrets desc)
                 }
 resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
@@ -338,34 +343,36 @@ Each PostgREST toolbox fetches its spec and registers converted tools.
 loadPostgRESTToolboxes ::
     Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
+    FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadPostgRESTToolboxes tracer baseDir agent toolsTVar = do
+loadPostgRESTToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadPostgRESTToolbox tracer baseDir toolsTVar) toolboxes
+            errors <- mapM (loadPostgRESTToolbox tracer baseDir apiKeysFile toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single PostgREST toolbox and register its tools.
 loadPostgRESTToolbox ::
     Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
+    FilePath ->
     TVar [ToolRegistration] ->
     PostgRESTToolboxDescription ->
     IO (Maybe LoadingError)
-loadPostgRESTToolbox tracer baseDir toolsTVar description = do
+loadPostgRESTToolbox tracer baseDir apiKeysFile toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolvePostgRESTDescription baseDir description
 
     case configResult of
         Left err -> pure $ Just $ PostgRESTLoadingError err
         Right config -> do
-            -- Initialize the toolbox
-            initResult <- PostgRESToolbox.initializeToolbox tracer config
+            -- Initialize the toolbox with API keys file for secret resolution
+            initResult <- PostgRESToolbox.initializeToolbox apiKeysFile tracer config
 
             case initResult of
                 Left err -> pure $ Just $ PostgRESTLoadingError (show err)
@@ -394,6 +401,7 @@ resolvePostgRESTDescription _baseDir (PostgRESTServer desc) =
                 , PostgRESToolbox.configToken = postgrestToken desc
                 , PostgRESToolbox.configAllowedMethods = fromMaybe [] (postgrestAllowedMethods desc)
                 , PostgRESToolbox.configFilter = postgrestFilter desc
+                , PostgRESToolbox.configSecrets = fromMaybe [] (postgrestSecrets desc)
                 }
 resolvePostgRESTDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
@@ -641,4 +649,3 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
-

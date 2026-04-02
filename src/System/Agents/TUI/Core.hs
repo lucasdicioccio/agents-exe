@@ -85,9 +85,9 @@ import System.Agents.AgentTree (
     Props,
     loadAgentTree,
  )
-import System.Agents.Runtime.Trace (Trace)
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore

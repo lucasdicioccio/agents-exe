@@ -9,7 +9,8 @@ exposes agents as MCP tools for integration with MCP clients.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.McpServer (
-    Trace(..),
+    Trace (..),
+
     -- * Handler
     handleMcpServer,
 
@@ -77,9 +78,9 @@ listMcpServerAgentTools agent =
     readTVarIO (osNodeTools agent.mcpNode)
 
 data Trace
-  = AgentTreeTrace AgentTree.TreeTrace
-  | McpServerTrace McpServer.Trace
-  deriving (Show)
+    = AgentTreeTrace AgentTree.TreeTrace
+    | McpServerTrace McpServer.Trace
+    deriving (Show)
 
 -- | Handle the MCP server command: start MCP server for agents
 handleMcpServer ::
@@ -101,6 +102,7 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
+                    , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer =
                         Prod.traceBoth

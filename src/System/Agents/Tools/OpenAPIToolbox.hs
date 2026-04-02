@@ -9,6 +9,7 @@ This module provides a runtime that:
 * Converts operations to executable tools
 * Handles HTTP execution with proper parameter substitution
 * Integrates with the LLM tool registration system
+* Supports flexible secret management via the 'Secrets' configuration
 
 The toolbox follows patterns similar to McpToolbox and BashToolbox for
 consistent integration with the agents system.
@@ -17,11 +18,17 @@ Key feature: Name normalization for LLM compatibility.
 OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
 which are normalized to LLM-safe names using 'normalizeForLLM'.
 
+Secret Management:
+The toolbox supports flexible secret configuration via the 'secrets' field.
+Secrets can be sourced from environment variables, files, commands, or API
+key files, and can be serialized as custom headers or query string parameters.
+
 Example usage:
 
 @
 import System.Agents
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPI
+import System.Agents.Tools.Secrets
 
 main :: IO ()
 main = do
@@ -29,8 +36,15 @@ main = do
             { configUrl = "https://api.example.com/openapi.json"
             , configBaseUrl = "https://api.example.com"
             , configHeaders = Map.empty
-            , configToken = Just "my-bearer-token"
+            , configToken = Nothing  -- Legacy token, prefer secrets
             , configFilter = Just (PathPrefix "/api/v1")
+            , configSecrets =
+                [ Secret
+                    { secretSource = EnvVar "API_TOKEN"
+                    , secretDecoder = Clear True
+                    , secretSerializer = Header "Authorization" (Just "Bearer {{secret}}")
+                    }
+                ]
             }
     result <- OpenAPI.initializeToolbox tracer config
     case result of
@@ -84,6 +98,13 @@ module System.Agents.Tools.OpenAPIToolbox (
     -- * URL helpers
     isFileUrl,
     fileUrlToPath,
+
+    -- * Secrets
+    Secrets.ResolvedSecret,
+    Secrets.Secret (..),
+    Secrets.SecretSource (..),
+    Secrets.SecretDecoder (..),
+    Secrets.SecretSerializer (..),
 ) where
 
 import Control.Exception (try)
@@ -102,7 +123,7 @@ import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
 import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
-import Prod.Tracer (Tracer (..), runTracer, contramap)
+import Prod.Tracer (Tracer (..), contramap, runTracer)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools.Base (CallResult (..))
@@ -129,6 +150,7 @@ import System.Agents.Tools.OpenAPI.Types (
     Path,
     ToolResult (..),
  )
+import qualified System.Agents.Tools.Secrets as Secrets
 
 -- -------------------------------------------------------------------------
 -- Trace types
@@ -169,6 +191,10 @@ data Trace
       ToolExecutionErrorTrace !Text
     | -- | Original name and normalized name (for debugging)
       ToolNameNormalizedTrace !Text !Text
+    | -- | Secrets resolved successfully
+      SecretsResolvedTrace !Int
+    | -- | Error resolving secrets
+      SecretsResolutionErrorTrace !Text
     deriving (Show)
 
 -- -------------------------------------------------------------------------
@@ -185,9 +211,15 @@ data InitializationError
       ParseError !Text
     | -- | OpenAPI spec validation error
       SpecError !Text
+    | -- | Secret resolution error
+      SecretError !Secrets.SecretResolutionError
     deriving (Show, Eq)
 
--- | Configuration for initializing an OpenAPI toolbox.
+{- | Configuration for initializing an OpenAPI toolbox.
+
+The 'configSecrets' field allows flexible secret management. Secrets are
+resolved at initialization time and applied to all outgoing requests.
+-}
 data Config = Config
     { configUrl :: Text
     -- ^ URL to fetch OpenAPI spec from (supports http/https or file://)
@@ -196,11 +228,13 @@ data Config = Config
     , configHeaders :: Map Text Text
     -- ^ Static headers to include in all requests
     , configToken :: Maybe Text
-    -- ^ Optional Bearer token for authentication
+    -- ^ Optional Bearer token for authentication (legacy, prefer secrets)
     , configFilter :: Maybe EndpointPredicate
     {- ^ Optional filter to restrict which endpoints are exposed as tools.
     If not specified, all endpoints are included.
     -}
+    , configSecrets :: [Secrets.Secret]
+    -- ^ Secrets to resolve and include in requests
     }
     deriving (Show, Eq)
 
@@ -212,7 +246,8 @@ The toolbox maintains:
 * A list of available tools (filtered by configFilter if provided)
 * A name mapping for LLM-safe tool names
 * The HTTP runtime for making requests
-* An optional header function for dynamic auth headers
+* Resolved secrets for authentication
+* Static headers from config
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -223,8 +258,8 @@ data Toolbox = Toolbox
     -- ^ Mapping from normalized LLM names to original operation IDs
     , httpRuntime :: HttpClient.Runtime
     -- ^ HTTP client runtime
-    , headerFunc :: Maybe (IO (Map Text Text))
-    -- ^ Optional function to get dynamic headers (e.g., for auth)
+    , resolvedSecrets :: [Secrets.ResolvedSecret]
+    -- ^ Secrets resolved at initialization
     , staticHeaders :: Map Text Text
     -- ^ Static headers from config
     , toolboxFilter :: Maybe EndpointPredicate
@@ -272,73 +307,85 @@ fileUrlToPath url =
 {- | Initialize an OpenAPI toolbox from a configuration.
 
 This function:
-1. Creates an HTTP runtime with authentication
-2. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
-3. Parses the JSON to an OpenAPISpec
-4. Dereferences schema references ($ref)
-5. Converts operations to tools
-6. Applies the optional filter to subset tools (using 'matchesOpenAPITool')
-7. Builds the name mapping for LLM-safe names
+1. Resolves any configured secrets from their sources
+2. Creates an HTTP runtime with authentication (legacy token support)
+3. Fetches the OpenAPI spec from the configured URL (supports file:// URLs)
+4. Parses the JSON to an OpenAPISpec
+5. Dereferences schema references ($ref)
+6. Converts operations to tools
+7. Applies the optional filter to subset tools (using 'matchesOpenAPITool')
+8. Builds the name mapping for LLM-safe names
 
 Returns an 'InitializationError' if any step fails.
 -}
 initializeToolbox ::
+    -- | Path to API keys file (for ApiKey secret source)
+    FilePath ->
     Tracer IO Trace ->
     Config ->
     IO (Either InitializationError Toolbox)
-initializeToolbox tracer config = do
-    -- Create HTTP runtime with auth
-    let token = case config.configToken of
-            Just t -> HttpClient.BearerToken t
-            Nothing -> HttpClient.NoToken
-    runtime <- HttpClient.newRuntime token
+initializeToolbox apiKeysFile tracer config = do
+    -- Resolve secrets first
+    eResolvedSecrets <- Secrets.resolveSecrets apiKeysFile (configSecrets config)
+    case eResolvedSecrets of
+        Left err -> do
+            runTracer tracer $ SecretsResolutionErrorTrace (Text.pack $ show err)
+            pure $ Left $ SecretError err
+        Right resolvedSecrets -> do
+            runTracer tracer $ SecretsResolvedTrace (length resolvedSecrets)
 
-    -- Fetch OpenAPI spec (from URL or file)
-    fetchResult <- fetchSpec tracer runtime config.configUrl
+            -- Create HTTP runtime with auth (legacy token support)
+            let token = case config.configToken of
+                    Just t -> HttpClient.BearerToken t
+                    Nothing -> HttpClient.NoToken
+            runtime <- HttpClient.newRuntime token
 
-    case fetchResult of
-        Left err -> pure $ Left err
-        Right body -> do
-            -- Parse JSON to OpenAPISpec
-            case Aeson.decode body of
-                Nothing -> pure $ Left $ ParseError "Failed to parse OpenAPI spec JSON"
-                Just spec -> do
-                    -- Dereference schemas
-                    let dereferencedSpec = dereferenceSpec spec
+            -- Fetch OpenAPI spec (from URL or file)
+            fetchResult <- fetchSpec tracer runtime config.configUrl
 
-                    -- Convert to tools
-                    let allTools = convertOpenAPIToTools dereferencedSpec
-                    runTracer tracer (ToolsConvertedTrace (length allTools))
+            case fetchResult of
+                Left err -> pure $ Left err
+                Right body -> do
+                    -- Parse JSON to OpenAPISpec
+                    case Aeson.decode body of
+                        Nothing -> pure $ Left $ ParseError "Failed to parse OpenAPI spec JSON"
+                        Just spec -> do
+                            -- Dereference schemas
+                            let dereferencedSpec = dereferenceSpec spec
 
-                    -- Apply filter if provided
-                    let filteredTools = case config.configFilter of
-                            Nothing -> allTools
-                            Just predicate -> filter (matchesOpenAPITool predicate) allTools
+                            -- Convert to tools
+                            let allTools = convertOpenAPIToTools dereferencedSpec
+                            runTracer tracer (ToolsConvertedTrace (length allTools))
 
-                    -- Trace filtering results
-                    runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
+                            -- Apply filter if provided
+                            let filteredTools = case config.configFilter of
+                                    Nothing -> allTools
+                                    Just predicate -> filter (matchesOpenAPITool predicate) allTools
 
-                    -- Build name mapping for LLM-safe names (using filtered tools)
-                    let nameMapping = buildToolNameMapping toolboxName filteredTools
+                            -- Trace filtering results
+                            runTracer tracer (ToolsFilteredTrace (length allTools) (length filteredTools))
 
-                    -- Trace name normalizations (for debugging)
-                    mapM_
-                        (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m)))
-                        (Map.elems nameMapping)
+                            -- Build name mapping for LLM-safe names (using filtered tools)
+                            let nameMapping = buildToolNameMapping toolboxName filteredTools
 
-                    -- Create toolbox
-                    pure $
-                        Right $
-                            Toolbox
-                                { toolboxName = toolboxName
-                                , toolboxBaseUrl = config.configBaseUrl
-                                , toolboxTools = filteredTools
-                                , toolboxNameMapping = nameMapping
-                                , httpRuntime = runtime
-                                , headerFunc = Nothing
-                                , staticHeaders = config.configHeaders
-                                , toolboxFilter = config.configFilter
-                                }
+                            -- Trace name normalizations (for debugging)
+                            mapM_
+                                (\m -> runTracer tracer (ToolNameNormalizedTrace (nmOriginal m) (nmNormalized m)))
+                                (Map.elems nameMapping)
+
+                            -- Create toolbox
+                            pure $
+                                Right $
+                                    Toolbox
+                                        { toolboxName = toolboxName
+                                        , toolboxBaseUrl = config.configBaseUrl
+                                        , toolboxTools = filteredTools
+                                        , toolboxNameMapping = nameMapping
+                                        , httpRuntime = runtime
+                                        , resolvedSecrets = resolvedSecrets
+                                        , staticHeaders = config.configHeaders
+                                        , toolboxFilter = config.configFilter
+                                        }
   where
     toolboxName = extractToolboxName config.configUrl
 
@@ -455,8 +502,9 @@ This function:
 3. Extracts body (param "b")
 4. Formats the path with path args
 5. Builds full URL
-6. Makes HTTP request
-7. Returns result
+6. Applies resolved secrets to headers
+7. Makes HTTP request
+8. Returns result
 -}
 handleToolCall ::
     Tracer IO Trace ->
@@ -477,17 +525,19 @@ handleToolCall tracer toolbox tool args = do
             -- Build full URL
             let fullUrl = buildFullUrl (toolboxBaseUrl toolbox) formattedPath
 
-            -- Get headers
-            headers <- case toolbox.headerFunc of
-                Just hf -> hf
-                Nothing -> pure Map.empty
-            let allHeaders = Map.union headers (staticHeaders toolbox)
+            -- Build headers: static headers + resolved secrets
+            let secretHeaders = Secrets.applySecretsToHeaders (resolvedSecrets toolbox) Map.empty
+            let allHeaders = Map.unions [secretHeaders, staticHeaders toolbox]
+
+            -- Apply query string secrets
+            let secretQueryParams = Secrets.applySecretsToQueryString (resolvedSecrets toolbox) Map.empty
+            let finalQueryParams = Map.union queryParams secretQueryParams
 
             -- Make HTTP request
             let method = toolMethod tool
             runTracer tracer $ CallingEndpointTrace method fullUrl formattedPath
 
-            result <- executeRequest tracer toolbox.httpRuntime method fullUrl queryParams bodyValue allHeaders
+            result <- executeRequest tracer toolbox.httpRuntime method fullUrl finalQueryParams bodyValue allHeaders
 
             case result of
                 Left err -> pure $ Left err

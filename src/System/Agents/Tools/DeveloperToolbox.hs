@@ -760,6 +760,7 @@ mergeAgentWithOverrides ref overrides =
         }
 
 -- TODO(lucas): verify why unused
+
 {- | Execute tool creation.
 
 This function creates a new tool script in the specified language,

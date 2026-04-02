@@ -46,6 +46,7 @@ handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
+                    , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = baseTracer
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
