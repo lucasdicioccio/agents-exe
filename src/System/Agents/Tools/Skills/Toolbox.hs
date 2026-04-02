@@ -61,9 +61,10 @@ import System.Process (readProcessWithExitCode)
 import Prod.Tracer (Tracer)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (Session (..))
-import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Base (CallResult (..), Tool (..), ToolDef (..), mapToolResult)
+import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
+import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.State (foldSession, isScriptEnabled)
@@ -187,9 +188,9 @@ makeDescribeTool skill =
 
         tool :: Tool ()
         tool =
-            Tool
-                { toolDef = SkillTool skill.skillMetadata.smName "describe"
-                , toolRun = \_tracer _ctx _args ->
+            ToolBase.Tool
+                { ToolBase.toolDef = SkillTool skill.skillMetadata.smName "describe"
+                , ToolBase.toolRun = \_tracer _ctx _args ->
                     pure $ BlobToolSuccess () responseBytes
                 }
 
@@ -213,9 +214,9 @@ makeEnableTool skill =
 
         tool :: Tool ()
         tool =
-            Tool
-                { toolDef = SkillTool skill.skillMetadata.smName "enable"
-                , toolRun = \_tracer _ctx _args ->
+            ToolBase.Tool
+                { ToolBase.toolDef = SkillTool skill.skillMetadata.smName "enable"
+                , ToolBase.toolRun = \_tracer _ctx _args ->
                     pure $ BlobToolSuccess () responseBytes
                 }
 
@@ -238,9 +239,9 @@ makeDisableTool skill =
 
         tool :: Tool ()
         tool =
-            Tool
-                { toolDef = SkillTool skill.skillMetadata.smName "disable"
-                , toolRun = \_tracer _ctx _args ->
+            ToolBase.Tool
+                { ToolBase.toolDef = SkillTool skill.skillMetadata.smName "disable"
+                , ToolBase.toolRun = \_tracer _ctx _args ->
                     pure $ BlobToolSuccess () responseBytes
                 }
 
@@ -274,9 +275,9 @@ makeListSkillsTool store =
 
                 tool :: Tool ()
                 tool =
-                    Tool
-                        { toolDef = SkillListTool
-                        , toolRun = \_tracer _ctx _args ->
+                    ToolBase.Tool
+                        { ToolBase.toolDef = SkillListTool
+                        , ToolBase.toolRun = \_tracer _ctx _args ->
                             pure $ BlobToolSuccess () responseBytes
                         }
 
@@ -304,9 +305,9 @@ makeScriptTool skill script =
 
         tool :: Tool ()
         tool =
-            Tool
-                { toolDef = SkillScriptTool skill.skillMetadata.smName script.siName
-                , toolRun = runScriptTool script
+            ToolBase.Tool
+                { ToolBase.toolDef = SkillScriptTool skill.skillMetadata.smName script.siName
+                , ToolBase.toolRun = runScriptTool script
                 }
 
         find :: ToolCall -> Maybe (Tool ToolCall)

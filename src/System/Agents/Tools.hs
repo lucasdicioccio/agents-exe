@@ -18,7 +18,6 @@ Thus, a merge may happen at some point, but not just yet.
 -}
 module System.Agents.Tools (
     -- * Re-exports from Base
-    Tool (..),
     ToolDef (..),
     CallResult (..),
     mapToolResult,
@@ -29,6 +28,7 @@ module System.Agents.Tools (
     module System.Agents.Tools.Trace,
 
     -- * Tool builders
+    Tool,
     ioTool,
     bashTool,
     mcpTool,
@@ -50,7 +50,8 @@ import qualified Prod.Tracer as Prod
 -------------------------------------------------------------------------------
 
 import qualified System.Agents.MCP.Client as McpClient
-import System.Agents.Tools.Base
+import qualified System.Agents.Tools.Base as ToolBase
+import System.Agents.Tools.Base (CallResult(..),ToolDef(..),mapToolResult,mapCallResult,extractCall)
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
@@ -61,6 +62,8 @@ import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace
+
+type Tool call = ToolBase.Tool ToolTrace call 
 
 -------------------------------------------------------------------------------
 
@@ -82,9 +85,9 @@ bashTool ::
     BashTools.ScriptDescription ->
     Tool ()
 bashTool script =
-    Tool
-        { toolDef = BashTool script
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = BashTool script
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -106,9 +109,9 @@ mcpTool ::
     McpTools.ToolDescription ->
     Tool ()
 mcpTool toolbox desc =
-    Tool
-        { toolDef = MCPTool desc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = MCPTool desc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -154,9 +157,9 @@ openapiTool ::
     Tool ()
 openapiTool toolbox apiTool =
     let opId = fromMaybe (OpenAPI.toolName apiTool) (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation apiTool))
-     in Tool
-            { toolDef = OpenAPITool (OpenAPIToolbox.toolboxName toolbox) opId
-            , toolRun = run
+     in ToolBase.Tool
+            { ToolBase.toolDef = OpenAPITool (OpenAPIToolbox.toolboxName toolbox) opId
+            , ToolBase.toolRun = run
             }
   where
     call = ()
@@ -197,9 +200,9 @@ postgrestTool ::
     PostgREST.PostgRESTool ->
     Tool ()
 postgrestTool toolbox prTool =
-    Tool
-        { toolDef = PostgRESTool (PostgRESToolbox.toolboxName toolbox) (PostgREST.prtPath prTool)
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = PostgRESTool (PostgRESToolbox.toolboxName toolbox) (PostgREST.prtPath prTool)
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -220,9 +223,9 @@ The tool accepts a single parameter 'capability' specifying which information to
 -}
 systemTool :: SystemTools.Toolbox -> Tool ()
 systemTool box =
-    Tool
-        { toolDef = SystemTool toolDesc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = SystemTool toolDesc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -257,9 +260,9 @@ agents and tools. The tool accepts parameters based on the capability:
 -}
 developerTool :: DeveloperTools.Toolbox -> Tool ()
 developerTool box =
-    Tool
-        { toolDef = DeveloperTool toolDesc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = DeveloperTool toolDesc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -376,9 +379,9 @@ ioTool ::
     IOTools.IOScript llmArg ByteString ->
     Tool ()
 ioTool script =
-    Tool
-        { toolDef = IOTool script.description
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = IOTool script.description
+        , ToolBase.toolRun = run
         }
   where
     call = ()

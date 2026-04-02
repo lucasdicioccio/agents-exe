@@ -22,7 +22,6 @@ import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
 import qualified System.Agents.Tools.Skills.Types as SkillTypes
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
-import System.Agents.Tools.Trace (ToolTrace)
 
 -------------------------------------------------------------------------------
 
@@ -32,10 +31,10 @@ The 'toolRun' function receives a 'ToolExecutionContext' instead of a generic
 runtime value. This provides tools with access to session metadata (session ID,
 conversation ID, turn ID, etc.) without exposing these details to the LLM.
 -}
-data Tool call
+data Tool trace call
     = Tool
     { toolDef :: ToolDef
-    , toolRun :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult call)
+    , toolRun :: Tracer IO trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult call)
     }
 
 {- | Tool definition without the execution function.
@@ -150,7 +149,7 @@ mapCallResult f c =
         (LuaToolError v e) -> LuaToolError (f v) e
 
 -- | Explicit helper to map on the results a Tool makes.
-mapToolResult :: (a -> b) -> Tool a -> Tool b
+mapToolResult :: (a -> b) -> Tool tr a -> Tool tr b
 mapToolResult f (Tool d run) =
     Tool d (\tracer ctx v -> fmap (mapCallResult f) (run tracer ctx v))
 

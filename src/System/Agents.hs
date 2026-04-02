@@ -53,7 +53,7 @@ module System.Agents (
     module System.Agents.ToolSchema,
 ) where
 
-import System.Agents.ToolRegistration
+import System.Agents.ToolRegistration hiding (Tool)
 import System.Agents.ToolSchema
-import System.Agents.Tools
+import System.Agents.Tools hiding (Tool)
 import System.Agents.Tools.OpenAPIToolbox

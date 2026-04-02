@@ -57,9 +57,9 @@ import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.Base (newConversationId)
 import System.Agents.Session.Types (newSessionId, newTurnId)
-import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Base (CallResult (..), Tool (..))
+import System.Agents.Tools.Base (CallResult (..), toolRun)
 import System.Agents.Tools.Context (
     ToolCall (..),
     ToolPortal,

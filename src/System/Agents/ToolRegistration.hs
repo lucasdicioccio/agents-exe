@@ -23,6 +23,7 @@ bidirectional mapping between normalized and original names.
 -}
 module System.Agents.ToolRegistration (
     -- * Core types
+    Tool,
     ToolRegistration (..),
 
     -- * Registration functions
@@ -81,10 +82,10 @@ import qualified System.Agents.MCP.Client as McpClient
 import System.Agents.ToolSchema
 import System.Agents.Tools.Base (
     CallResult (..),
-    Tool (..),
     ToolDef (..),
     mapToolResult,
  )
+import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolCall, ToolExecutionContext)
@@ -122,12 +123,14 @@ import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import System.Agents.Tools.Trace (ToolTrace (..))
 
+type Tool call = ToolBase.Tool ToolTrace call 
+
 -------------------------------------------------------------------------------
 
 {- | We register tools that will take a ToolExecutionContext for execution.
 
 The 'innerTool' field uses 'Tool ()' since the tool execution context
-is passed at runtime via 'toolRun', not stored in the tool itself.
+is passed at runtime via 'ToolBase.toolRun', not stored in the tool itself.
 -}
 data ToolRegistration
     = ToolRegistration
@@ -376,9 +379,9 @@ registerOpenAPITool toolbox tool =
                                 }
 
                     tool' =
-                        Tool
-                            { toolDef = toolDef0
-                            , toolRun = runFunc
+                        ToolBase.Tool
+                            { ToolBase.toolDef = toolDef0
+                            , ToolBase.toolRun = runFunc
                             }
 
                     -- Find function - matches on the normalized LLM name
@@ -521,9 +524,9 @@ registerPostgRESTool toolbox tool =
                     }
 
         tool' =
-            Tool
-                { toolDef = toolDef0
-                , toolRun = runFunc
+            ToolBase.Tool
+                { ToolBase.toolDef = toolDef0
+                , ToolBase.toolRun = runFunc
                 }
 
         -- Find function - matches on the LLM name
@@ -1080,9 +1083,9 @@ Errors are properly caught and returned as LuaToolError.
 -}
 luaTool :: LuaTools.Toolbox -> Tool ()
 luaTool box =
-    Tool
-        { toolDef = LuaTool box.toolboxName
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = LuaTool box.toolboxName
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -1115,9 +1118,9 @@ bashTool ::
     ScriptDescription ->
     Tool ()
 bashTool script =
-    Tool
-        { toolDef = BashTool script
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = BashTool script
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -1133,9 +1136,9 @@ mcpTool ::
     McpTools.ToolDescription ->
     Tool ()
 mcpTool toolbox desc =
-    Tool
-        { toolDef = MCPTool desc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = MCPTool desc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -1156,9 +1159,9 @@ ioTool ::
     IOScript llmArg ByteString ->
     Tool ()
 ioTool script =
-    Tool
-        { toolDef = IOTool script.description
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = IOTool script.description
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -1174,9 +1177,9 @@ sqliteTool ::
     SqliteTools.Toolbox ->
     Tool ()
 sqliteTool box =
-    Tool
-        { toolDef = SqliteTool toolDesc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = SqliteTool toolDesc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -1206,9 +1209,9 @@ sqliteTool box =
 -- | Builder for a SystemToolbox-based tool.
 systemTool :: SystemTools.Toolbox -> Tool ()
 systemTool box =
-    Tool
-        { toolDef = SystemTool toolDesc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = SystemTool toolDesc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
@@ -1232,9 +1235,9 @@ systemTool box =
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
 developerTool box =
-    Tool
-        { toolDef = DeveloperTool toolDesc
-        , toolRun = run
+    ToolBase.Tool
+        { ToolBase.toolDef = DeveloperTool toolDesc
+        , ToolBase.toolRun = run
         }
   where
     call = ()
