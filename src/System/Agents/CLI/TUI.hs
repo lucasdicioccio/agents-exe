@@ -9,6 +9,7 @@ chatting with agents.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.TUI (
+    Trace(..),
     -- * Types
     TuiOptions (..),
 
@@ -22,6 +23,12 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
 
+data Trace
+  = TUITrace !TUI.Trace
+  | AgentTreeTrace !AgentTree.TreeTrace
+  | OneShotToolTrace !OneShotTool.Trace
+  deriving (Show)
+
 -- | Options for the TUI command
 data TuiOptions = TuiOptions
     {
@@ -31,7 +38,7 @@ data TuiOptions = TuiOptions
 -- | Handle the TUI command: launch interactive terminal interface
 handleTUI ::
     -- | Base tracer for logging
-    Prod.Tracer IO AgentTree.TreeTrace ->
+    Prod.Tracer IO Trace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -39,18 +46,17 @@ handleTUI ::
     -- | List of agent files to load
     [FilePath] ->
     IO ()
-handleTUI baseTracer sessionStore apiKeysFile agentFiles = do
+handleTUI tracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
-        oneAgent agentFile = do
+    let oneAgent agentFile = do
             pure $
                 AgentTree.Props
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFile
-                    , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
+                    , AgentTree.interactiveTracer = (Prod.contramap AgentTreeTrace tracer)
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUI rtTracer sessionStore apiKeys agentPropsList
+    TUI.runTUI (Prod.contramap TUITrace tracer) sessionStore apiKeys agentPropsList

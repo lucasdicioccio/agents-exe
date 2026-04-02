@@ -41,15 +41,22 @@ import System.Process (readProcessWithExitCode)
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
 import System.Agents.OneShot (nodeToAgent)
-import System.Agents.Runtime.Trace (Trace)
+import qualified System.Agents.OneShot as OneShot
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
+import qualified System.Agents.Runtime.Trace as Runtime
 
 -- Import Tracer for creating a no-op tracer
-import Prod.Tracer (Tracer (..))
+import Prod.Tracer (Tracer (..), contramap)
+
+
+data Trace
+  = RuntimeTrace !Runtime.Trace
+  | OneShotTrace !OneShot.Trace
+  deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Main Event Handler
@@ -66,8 +73,8 @@ tui_appHandleEvent tracer ev = do
             handleConversationUpdated convId sess
         AppEvent (AppEvent_AgentNeedsInput convId) ->
             handleConversationNeedsInput convId
-        AppEvent (AppEvent_AgentTrace trace) ->
-            handleAgentTrace trace
+        AppEvent (AppEvent_AgentTrace _) ->
+            pure () -- todo: handle traces made by the app
         AppEvent (AppEvent_ShowStatus severity text) ->
             handleShowStatus severity text
         AppEvent AppEvent_ClearStatus ->
@@ -471,14 +478,6 @@ handleConversationUpdated convId sess = do
     -- Refresh from core
     handleHeartbeat
 
-{- | Handle agent trace events.
-TODO: remove
--}
-handleAgentTrace :: Trace -> EventM N TuiState ()
-handleAgentTrace _trace = do
-    -- Currently a no-op, to be implemented
-    pure ()
-
 {- | Refresh tools for the given agent.
 
 This function reads tools from the OS-native TVar and updates the UI state.
@@ -611,7 +610,7 @@ addBufferedMessage convId core msg =
     atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
 
 runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
-runConversation baseTracer baseTuiAgent session = do
+runConversation tracer baseTuiAgent session = do
     -- Get session configuration (includes API keys)
     config <- use sessionConfig
 
@@ -627,7 +626,7 @@ runConversation baseTracer baseTuiAgent session = do
     -- Create the agent with the progress callback
     -- Use the agent's OSAgentNode through the TuiAgent
     -- Pass API keys from the session config
-    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId baseTracer config.sessionApiKeys (tuiNode baseTuiAgent)
+    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys (tuiNode baseTuiAgent)
 
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore

@@ -62,6 +62,7 @@ import Prod.Tracer (Tracer)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (Session (..))
 import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
+import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
@@ -69,7 +70,6 @@ import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.State (foldSession, isScriptEnabled)
 import System.Agents.Tools.Skills.Types
-import System.Agents.Tools.Trace (ToolTrace (..))
 
 -------------------------------------------------------------------------------
 -- Trace Events
@@ -326,7 +326,7 @@ Implements the describe/run protocol:
 -}
 runScriptTool ::
     ScriptInfo ->
-    Tracer IO ToolTrace ->
+    Tracer IO ToolRegistration.Trace ->
     ToolExecutionContext ->
     Aeson.Value ->
     IO (CallResult ())

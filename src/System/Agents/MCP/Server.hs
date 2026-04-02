@@ -36,7 +36,11 @@ import System.Agents.Base (
     newStepId,
     slug,
  )
-import System.Agents.MCP.Base as Mcp
+import System.Agents.MCP.Base (
+    ServerFlag(..),
+    Implementation(..),
+ )
+import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Server.Runtime
 
 -- OneShot integration imports
@@ -66,9 +70,19 @@ import System.Agents.Session.Types (
 import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (ToolRegistration (..))
+import qualified System.Agents.ToolRegistration as ToolRegistration
 import qualified System.Agents.ToolSchema as ToolSchema
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.Trace as Tools
+
+-------------------------------------------------------------------------------
+data Trace
+    = ToolRegistrationTrace !ToolRegistration.Trace
+    | LlmCompletionTrace !OpenAI.Trace
+    | ToolPortalTrace !ToolPortal.Trace
+    | ToolTrace !Tools.ToolTrace
+    deriving (Show)
+
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -258,12 +272,6 @@ handleMsg tracer req (CallToolRequestMsg callTool) = do
                 (Mcp.CallToolResult [toolCallContent res] Nothing)
     Rpc.sendResponse rsp
 
-data Trace
-    = LlmCompletionTrace !OpenAI.Trace
-    | ToolPortalTrace !ToolPortal.Trace
-    | ToolTrace !Tools.ToolTrace
-    deriving (Show)
-
 {- | Run an agent with a query using the LLM session-based approach.
 
 This implementation follows the same pattern as 'runOneShotWithConfig' from
@@ -319,7 +327,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure (Just $ UserQuery query)
-                , toolCall = executeLlmToolCall (contramap ToolTrace tracer) (AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig

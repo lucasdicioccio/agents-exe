@@ -9,6 +9,7 @@ This module re-exports functionality from the submodules and provides
 the main initialization and application runner using OS-native structures.
 -}
 module System.Agents.TUI.Core (
+    Trace(..),
     -- * Re-exports from Types
     WidgetName (..),
     N,
@@ -87,7 +88,6 @@ import System.Agents.AgentTree (
  )
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
-import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore

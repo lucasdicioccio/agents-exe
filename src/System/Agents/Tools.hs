@@ -24,9 +24,6 @@ module System.Agents.Tools (
     mapCallResult,
     extractCall,
 
-    -- * Re-exports from Trace
-    module System.Agents.Tools.Trace,
-
     -- * Tool builders
     Tool,
     ioTool,
@@ -44,8 +41,7 @@ import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 as CByteString
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
-import Prod.Tracer (contramap)
-import qualified Prod.Tracer as Prod
+import Prod.Tracer (Tracer,contramap)
 
 -------------------------------------------------------------------------------
 
@@ -61,9 +57,19 @@ import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
-import System.Agents.Tools.Trace
 
-type Tool call = ToolBase.Tool ToolTrace call 
+-------------------------------------------------------------------------------
+type Tool call = ToolBase.Tool Trace call 
+
+data Trace
+    = BashToolsLoadTrace !BashTools.LoadTrace
+    | BashToolsRunTrace !BashTools.RunTrace
+    | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
+    | SystemToolsTrace !SystemTools.Trace
+    | DeveloperToolsTrace !DeveloperTools.Trace
+    | PostgRESToolboxTrace !PostgRESToolbox.Trace
+    | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 
@@ -92,7 +98,7 @@ bashTool script =
   where
     call = ()
     run tracer ctx v = do
-        ret <- BashTools.runValue (contramap BashToolsTrace tracer) script (Just ctx) v
+        ret <- BashTools.runValue (contramap BashToolsRunTrace tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
@@ -163,8 +169,8 @@ openapiTool toolbox apiTool =
             }
   where
     call = ()
-    run _tracer _ctx args = do
-        result <- OpenAPIToolbox.handleToolCall Prod.silent toolbox apiTool args
+    run tracer _ctx args = do
+        result <- OpenAPIToolbox.handleToolCall (contramap OpenAPIToolboxTrace tracer) toolbox apiTool args
         case result of
             Left err -> do
                 pure $ OpenAPIToolError call (Text.unpack err)
@@ -206,8 +212,8 @@ postgrestTool toolbox prTool =
         }
   where
     call = ()
-    run _tracer _ctx args = do
-        result <- PostgRESToolbox.handleToolCall Prod.silent toolbox prTool args
+    run tracer _ctx args = do
+        result <- PostgRESToolbox.handleToolCall (contramap PostgRESToolboxTrace tracer) toolbox prTool args
         case result of
             Left err -> do
                 pure $ PostgRESToolError call (Text.unpack err)
@@ -235,10 +241,10 @@ systemTool box =
             , SystemTools.toolDescriptionDescription = box.toolboxDescription
             , SystemTools.toolDescriptionToolboxName = box.toolboxName
             }
-    run _tracer _ctx (Aeson.Object v) = do
+    run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery Prod.silent box cap
+                result <- SystemTools.executeQuery (contramap SystemToolsTrace tracer) box cap
                 case result of
                     Left err -> pure $ SystemToolError call err
                     Right rsp -> pure $ SystemToolResult call rsp
@@ -258,8 +264,8 @@ agents and tools. The tool accepts parameters based on the capability:
 * scaffold-tool: { "language": "bash", "slug": "my-tool", "file_path": "my-tool.sh", "force": false }
 * show-spec: { "spec_name": "bash-tools" }
 -}
-developerTool :: DeveloperTools.Toolbox -> Tool ()
-developerTool box =
+developerTool :: Tracer IO Trace -> DeveloperTools.Toolbox -> Tool ()
+developerTool tracer box =
     ToolBase.Tool
         { ToolBase.toolDef = DeveloperTool toolDesc
         , ToolBase.toolRun = run
@@ -274,18 +280,18 @@ developerTool box =
             }
     run _tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
-            Just (Aeson.String cap) -> executeDeveloperCapability box cap v
+            Just (Aeson.String cap) -> executeDeveloperCapability tracer box cap v
             _ -> pure $ DeveloperToolError call (DeveloperTools.ValidationError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ DeveloperToolError call (DeveloperTools.ValidationError "Arguments must be a JSON object")
 
 -- | Execute a developer tool capability
-executeDeveloperCapability :: DeveloperTools.Toolbox -> Text.Text -> Aeson.Object -> IO (CallResult ())
-executeDeveloperCapability box cap params = case cap of
+executeDeveloperCapability :: Tracer IO Trace -> DeveloperTools.Toolbox -> Text.Text -> Aeson.Object -> IO (CallResult ())
+executeDeveloperCapability tracer box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
             Just (Aeson.String toolPath) -> do
-                result <- DeveloperTools.executeValidateTool Prod.silent box (Text.unpack toolPath)
+                result <- DeveloperTools.executeValidateTool (contramap BashToolsLoadTrace tracer) box (Text.unpack toolPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult

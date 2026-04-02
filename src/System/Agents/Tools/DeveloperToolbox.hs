@@ -17,30 +17,6 @@ for:
 * Creating tool scripts
 
 These tools help developers write and validate agents and tools.
-
-Example usage:
-
-@
-import System.Agents.Tools.DeveloperToolbox as Dev
-import System.Agents.Base (DeveloperToolCapability(..))
-
-main :: IO ()
-main = do
-    let desc = DeveloperToolboxDescription
-            { developerToolboxName = "developer"
-            , developerToolboxDescription = "Development tools"
-            , developerToolboxCapabilities = [DevToolValidateTool, DevToolScaffoldAgent]
-            }
-    result <- Dev.initializeToolbox tracer desc
-    case result of
-        Right toolbox -> do
-            -- Validate a tool script
-            result <- Dev.executeValidateTool silent toolbox "/path/to/tool.sh"
-            case result of
-                Right valResult -> print valResult
-                Left err -> print err
-        Left err -> putStrLn $ "Failed to initialize: " ++ err
-@
 -}
 module System.Agents.Tools.DeveloperToolbox (
     -- * Core types

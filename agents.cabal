@@ -31,6 +31,7 @@ library agents-lib
                     , System.Agents.AgentTree.Trace
                     , System.Agents.ApiKeys
                     , System.Agents.Base
+                    , System.Agents.CLI
                     , System.Agents.CLI.Aliases
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check

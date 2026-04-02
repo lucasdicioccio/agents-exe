@@ -12,6 +12,7 @@ to use OS-native types. 'mainOneShotText' now works directly with 'OSAgentTree'.
 -}
 module System.Agents.OneShot (
     -- * Types
+    Trace (..),
     ThinkingOutput (..),
 
     -- * Main functions (OS-native)
@@ -49,11 +50,10 @@ import System.Agents.AgentTree (
     Props (..),
     withAgentTree,
  )
-import System.Agents.Base (ConversationId, newConversationId, newStepId)
+import System.Agents.Base (ConversationId, newConversationId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop
@@ -62,11 +62,19 @@ import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
+import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
+
+data Trace
+  = ToolRegistrationTrace !ToolRegistration.Trace
+  | ToolPortalTrace !ToolPortal.Trace
+  | OpenAITrace !OpenAI.Trace
+  deriving (Show)
+
 
 -- | Controls where thinking content should be output.
 data ThinkingOutput
@@ -232,8 +240,6 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
     -- Read tools from the OS-native TVar
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
 
-    stepId <- newStepId
-
     -- Get the API key for this agent and create HTTP runtime
     let apiKeyId = Base.apiKeyId agentCfg
     let mApiKey = lookupApiKey apiKeyId loadedApiKeys
@@ -245,14 +251,14 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
     -- Use node's agent slug and id for tracing
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) convId . (LLMTrace stepId)) tracer
+                { cfgTracer = contramap OpenAITrace tracer
                 , cfgRuntime = httpRuntime
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
                 , cfgModelName = Base.modelName agentCfg
                 , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
                 }
     let completeF = mkOpenAICompletion completionConfig
-    let tp = ToolPortal.makeToolPortal (contramap (ToolPortalTrace (Base.slug agentCfg)) tracer) (osNodeTools node)
+    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (osNodeTools node)
 
     pure $
         agentStoreSession store mPath convId $
@@ -271,7 +277,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap (ToolTrace agentCfg.slug) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig

@@ -58,6 +58,7 @@ import Prod.Tracer (Tracer (..), contramap)
 import System.Agents.Base (newConversationId)
 import System.Agents.Session.Types (newSessionId, newTurnId)
 import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
+import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), toolRun)
 import System.Agents.Tools.Context (
@@ -66,9 +67,7 @@ import System.Agents.Tools.Context (
     ToolResult (..),
     mkMinimalContext,
  )
-import System.Agents.Tools.Trace (ToolTrace (..))
-
-data Trace = PortalCall !ToolCall !ToolTrace
+data Trace = PortalCall !ToolCall !ToolRegistration.Trace
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -218,12 +217,12 @@ The minimal context has no portal to prevent nested portal calls.
 This is a safety measure to avoid potential infinite recursion.
 -}
 executeTool ::
-    Tracer IO ToolTrace ->
+    Tracer IO ToolRegistration.Trace ->
     ToolPortal ->
     Tool ToolCall ->
     Aeson.Value ->
     IO (Either Text (CallResult ToolCall))
-executeTool toolTracer portal tool args = do
+executeTool tracer portal tool args = do
     -- Create minimal context without portal
     sessId <- newSessionId
     convId <- newConversationId
@@ -231,7 +230,7 @@ executeTool toolTracer portal tool args = do
     let minimalCtx = mkMinimalContext sessId convId turnId portal
 
     -- Execute the tool
-    result <- try $ tool.toolRun toolTracer minimalCtx args
+    result <- try $ tool.toolRun tracer minimalCtx args
 
     case result of
         Left (e :: SomeException) ->

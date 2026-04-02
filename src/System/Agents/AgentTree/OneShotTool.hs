@@ -7,6 +7,7 @@ implementation of LLM session calls.
 This module has been updated to work with OS-native structures.
 -}
 module System.Agents.AgentTree.OneShotTool (
+    Trace(..),
     turnAgentRuntimeIntoIOTool,
 ) where
 
@@ -24,12 +25,11 @@ import qualified Data.Text.Encoding as Text
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
-import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId, newStepId)
+import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.OneShot (agentStoreSession, parseModelFlavor)
-import System.Agents.Runtime.Trace (ConversationTrace (..), Trace (..))
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -54,10 +54,17 @@ import System.Agents.ToolRegistration (
     ToolRegistration (..),
     registerIOScriptInLLM,
  )
+import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
+
+data Trace
+  = ToolRegistrationTrace !ToolRegistration.Trace
+  | ToolPortalTrace !ToolPortal.Trace 
+  | OpenAITrace !OpenAI.Trace 
+  deriving (Show)
 
 -------------------------------------------------------------------------------
 
@@ -170,7 +177,7 @@ nodeToAgent ::
     AgentId ->
     ConversationId ->
     IO (Agent (LlmTurnContent, Session))
-nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = do
+nodeToAgent store httpRuntime node tracer _callerSlug _callerId _parentConvId = do
     let agentCfg = node.osNodeConfig
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
 
@@ -178,12 +185,10 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
     toolRegs <- readTVarIO (osNodeTools node)
     let sTools = map toolRegistrationToSystemTool toolRegs
 
-    stepId <- newStepId
-
     -- Create completion config and function
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap (AgentTrace_Conversation (Base.slug agentCfg) (osNodeAgentId node) parentConvId . (LLMTrace stepId)) tracer
+                { cfgTracer = contramap OpenAITrace tracer
                 , cfgRuntime = httpRuntime
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
                 , cfgModelName = Base.modelName agentCfg
@@ -191,7 +196,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 }
     let completeF = mkOpenAICompletion completionConfig
 
-    let tp = ToolPortal.makeToolPortal (contramap (ToolPortalTrace (Base.slug agentCfg)) tracer) (osNodeTools node)
+    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (osNodeTools node)
     convId <- newConversationId
     pure $
         agentStoreSession store Nothing convId $
@@ -200,7 +205,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId parentConvId = d
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap (ToolTrace (Base.slug agentCfg)) tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig

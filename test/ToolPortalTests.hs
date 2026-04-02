@@ -20,14 +20,13 @@ import Test.Tasty.HUnit
 
 import Prod.Tracer (Tracer(..), contramap, runTracer, silent)
 
-import System.Agents.ToolPortal
-import System.Agents.ToolRegistration (ToolRegistration(..))
+import System.Agents.ToolPortal (PortalError(..), callToolViaPortal)
+import System.Agents.ToolRegistration (ToolRegistration(..), Trace(..))
 import System.Agents.Tools.Base (CallResult(..), Tool(..), ToolDef(..), mapToolResult)
 import System.Agents.Tools.Context (ToolCall(..), ToolResult(..))
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Tools.Trace (ToolTrace(..))
 import System.Agents.ToolSchema (ToolDescription(..))
 
 -- | Test suite entry point
@@ -359,7 +358,7 @@ makeMockRegistration name =
     let toolName = OpenAI.ToolName ("io_" <> name)
         
         -- Mock tool that returns a simple success result
-        mockTool :: Tool ()
+        mockTool :: Tool Trace ()
         mockTool = Tool
             { toolDef = IOTool $ IOTools.IOScriptDescription
                 { IOTools.ioSlug = "io_" <> name
@@ -378,7 +377,7 @@ makeMockRegistration name =
             }
         
         -- Find function that matches on this tool's name
-        find :: ToolCall -> Maybe (Tool ToolCall)
+        find :: ToolCall -> Maybe (Tool Trace ToolCall)
         find call = 
             if call.callToolName == toolName.getToolName
                 then Just $ mapToolResult (const call) mockTool
@@ -396,7 +395,7 @@ makeTracingMockRegistration name =
     let toolName = OpenAI.ToolName ("io_" <> name)
         
         -- Mock tool that emits traces during execution
-        mockTool :: Tool ()
+        mockTool :: Tool Trace ()
         mockTool = Tool
             { toolDef = IOTool $ IOTools.IOScriptDescription
                 { IOTools.ioSlug = "io_" <> name
@@ -419,7 +418,7 @@ makeTracingMockRegistration name =
             }
         
         -- Find function that matches on this tool's name
-        find :: ToolCall -> Maybe (Tool ToolCall)
+        find :: ToolCall -> Maybe (Tool Trace ToolCall)
         find call = 
             if call.callToolName == toolName.getToolName
                 then Just $ mapToolResult (const call) mockTool

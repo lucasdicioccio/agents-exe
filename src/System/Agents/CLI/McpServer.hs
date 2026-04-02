@@ -36,6 +36,12 @@ import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
 import System.Agents.Base (AgentId)
 import System.Agents.ToolRegistration (ToolRegistration)
 
+data Trace
+    = AgentTreeTrace !AgentTree.TreeTrace
+    | McpServerTrace !McpServer.Trace
+    | OneShotToolTrace !OneShotTool.Trace
+    deriving (Show)
+
 {- | MCP Server agent using OS-native structures.
 
 This structure wraps an OSAgentNode for MCP server operation.
@@ -77,11 +83,6 @@ listMcpServerAgentTools :: McpServerAgent -> IO [ToolRegistration]
 listMcpServerAgentTools agent =
     readTVarIO (osNodeTools agent.mcpNode)
 
-data Trace
-    = AgentTreeTrace AgentTree.TreeTrace
-    | McpServerTrace McpServer.Trace
-    deriving (Show)
-
 -- | Handle the MCP server command: start MCP server for agents
 handleMcpServer ::
     -- | Base tracer for logging
@@ -96,7 +97,6 @@ handleMcpServer ::
 handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let ttTracer = Prod.contramap AgentTreeTrace tracer
-        rtTracer = Prod.contramap AgentTree.RuntimeTrace ttTracer
         oneAgent agentFilePath = do
             -- Use OS-native props (no registry needed)
             pure $
@@ -108,7 +108,7 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
                         Prod.traceBoth
                             ttTracer
                             traceUsefulPromptStderr
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

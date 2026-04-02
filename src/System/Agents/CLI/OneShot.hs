@@ -9,6 +9,7 @@ the response. This is the non-interactive mode for agents-exe.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.OneShot (
+    Trace(..),
     -- * Types
     OneShotOptions (..),
     OneShotAgent (..),
@@ -40,6 +41,12 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.PromptScript (PromptScript, interpretPromptScript)
+
+data Trace
+  = AgentTreeTrace !AgentTree.TreeTrace
+  | OneShotTrace !OneShot.Trace
+  | OneShotToolTrace !OneShotTool.Trace
+  deriving (Show)
 
 -- | Options for the one-shot command
 data OneShotOptions = OneShotOptions
@@ -94,7 +101,7 @@ listOneShotAgentTools agent =
 -- | Handle the one-shot run command
 handleOneShot ::
     -- | Base tracer for logging
-    Prod.Tracer IO AgentTree.TreeTrace ->
+    Prod.Tracer IO Trace ->
     -- | Session store for persistence
     SessionStore.SessionStore ->
     -- | Path to API keys file
@@ -106,19 +113,18 @@ handleOneShot ::
     -- | One-shot options
     OneShotOptions ->
     IO ()
-handleOneShot baseTracer sessionStore apiKeysFile agentFiles aliases opts = do
-    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
+handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     forM_ (take 1 agentFiles) $ \agentFilePath -> do
         promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
         mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
         -- Use OS-native agent loading (no registry needed)
-        let oneShot text props = OneShot.mainOneShotTextWithThinking rtTracer sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+        let oneShot text props = OneShot.mainOneShotTextWithThinking (Prod.contramap OneShotTrace tracer) sessionStore opts.sessionFile mSession opts.thinkingOutput props text
         oneShot promptContents $
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFilePath
-                , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer sessionStore apiKeys
+                , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
                 }

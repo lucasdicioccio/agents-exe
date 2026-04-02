@@ -28,13 +28,12 @@ import System.Agents.Session.Base (
     LlmToolCall (..),
     UserToolResponse (..),
  )
-import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolRegistration (ToolRegistration (..), Trace)
 import System.Agents.Tools.Base (CallResult (..), Tool (..), mapCallResult)
 import System.Agents.Tools.Context (
     ToolCall (..),
     ToolExecutionContext,
  )
-import System.Agents.Tools.Trace (ToolTrace)
 
 type ToolMappingFunctions r =
     ( LlmToolCall -> Maybe r
@@ -58,7 +57,7 @@ then executes the tool with this context. The context gives tools access to:
 This function is the primary entry point for executing tool calls from LLM responses.
 -}
 executeLlmToolCall ::
-    Tracer IO ToolTrace ->
+    Tracer IO Trace ->
     -- | Tools TVar from OSAgentNode
     TVar [ToolRegistration] ->
     -- | Context passed from runStepM (used for tool portal access)
@@ -83,7 +82,7 @@ Looks up the tool in the registrations and runs it if found, returning
 an appropriate 'CallResult'.
 -}
 llmCallTool ::
-    Tracer IO ToolTrace ->
+    Tracer IO Trace ->
     [ToolRegistration] ->
     -- | Context containing session metadata for tools
     ToolExecutionContext ->

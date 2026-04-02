@@ -13,6 +13,7 @@ Example usage:
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.ToolCall (
+    Trace(..),
     handleToolCall,
     ToolCallOptions (..),
     ToolCallAgent (..),
@@ -28,13 +29,19 @@ import System.IO (stderr)
 import Prod.Tracer (Tracer, contramap)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
-import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
 import System.Agents.Base (AgentId)
 import System.Agents.ToolPortal (makeToolPortal)
+import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.Tools.Context (ToolCall (..))
+
+data Trace
+  = AgentTreeTrace !AgentTree.TreeTrace
+  | OneShotToolTrace !OneShotTool.Trace
+  | ToolPortalTrace !ToolPortal.Trace
+  deriving (Show)
 
 -- | Options for the tool-call command
 data ToolCallOptions = ToolCallOptions
@@ -80,7 +87,7 @@ createToolCallAgent tree =
 
 -- | Handle the tool-call command
 handleToolCall ::
-    Tracer IO AgentTree.TreeTrace ->
+    Tracer IO Trace ->
     -- | Path to the API keys file
     ToolCallOptions ->
     -- | Path to the API keys file
@@ -88,7 +95,7 @@ handleToolCall ::
     -- | List of agent files (only first is used)
     [FilePath] ->
     IO ()
-handleToolCall baseTracer opts apiKeysFile agentFiles = do
+handleToolCall tracer opts apiKeysFile agentFiles = do
     -- Read JSON payload from stdin
     stdinContent <- LByteString.getContents
     args <- case Aeson.eitherDecode stdinContent of
@@ -98,8 +105,6 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
         Right val -> pure val
 
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    let rtTracer = contramap AgentTree.RuntimeTrace baseTracer
-    let tpTracer = contramap (Runtime.ToolPortalTrace "-tool-portal-agent-slug-missing-") rtTracer
 
     -- Process only the first agent file (like OneShot)
     case agentFiles of
@@ -113,8 +118,8 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
                     { AgentTree.apiKeys = apiKeys
                     , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFilePath
-                    , AgentTree.interactiveTracer = baseTracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys
+                    , AgentTree.interactiveTracer = contramap AgentTreeTrace tracer
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap OneShotToolTrace tracer) SessionStore.defaultSessionStore apiKeys
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do
@@ -125,7 +130,7 @@ handleToolCall baseTracer opts apiKeysFile agentFiles = do
                         -- Create ToolCallAgent
                         let agent = createToolCallAgent tree
 
-                        let portal = makeToolPortal tpTracer (osNodeTools agent.toolCallNode)
+                        let portal = makeToolPortal (contramap ToolPortalTrace tracer) (osNodeTools agent.toolCallNode)
 
                         -- Create the tool call
                         let toolCall =

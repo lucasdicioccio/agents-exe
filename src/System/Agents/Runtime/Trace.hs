@@ -5,7 +5,6 @@ import Data.Text (Text)
 import System.Agents.Base
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.ToolPortal as ToolPortal
-import System.Agents.Tools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
@@ -76,6 +75,6 @@ data ConversationTrace
     = NewConversation
     | WaitingForPrompt
     | LLMTrace !StepId !OpenAI.Trace
-    | RunToolTrace !StepId !ToolTrace
+    | RunToolTrace !StepId !Trace
     | ChildrenTrace !Trace
     deriving (Show)

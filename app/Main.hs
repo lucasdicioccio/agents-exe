@@ -24,10 +24,14 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import GHC.Generics (Generic)
+import Options.Applicative
 import qualified Prod.Tracer as Prod
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
+import System.Exit (exitFailure)
+import System.FilePath (takeDirectory, (</>))
+import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
-import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..), McpServerDescription (..), McpSimpleBinaryConfiguration (..))
+import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..))
 import System.Agents.CLI.Aliases (
     AliasDefinition,
     defaultAliases,
@@ -54,20 +58,13 @@ import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
-import qualified System.Agents.MCP.Client as McpClient (LoopTrace (..))
-import qualified System.Agents.MCP.Client.Runtime as McpClientRuntime
 import qualified System.Agents.OneShot as OneShot
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
-import qualified System.Agents.Tools.McpToolbox as McpToolbox
-import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
-import System.Exit (exitFailure)
-import System.FilePath (takeDirectory, (</>))
-import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
-import Options.Applicative
+import  System.Agents.CLI (Trace(..), toJsonTrace)
 
 -------------------------------------------------------------------------------
 -- Default Configuration
@@ -1233,11 +1230,11 @@ resolveAgentFiles files (Just agentSlug) = do
                 ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
 
 -- | Run the selected command
-runCommand :: Prog -> Prod.Tracer IO AgentTree.TreeTrace -> SessionStore.SessionStore -> [FilePath] -> IO ()
+runCommand :: Prog -> Prod.Tracer IO Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
 runCommand pargs baseTracer sessionStore files =
     case pargs.mainCommand of
         Check checkOpts ->
-            CheckCmd.handleCheck baseTracer checkOpts pargs.apiKeysFile files
+            CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile files
         CheckToolCall opts ->
             CheckToolCallCmd.handleCheckToolCall Prod.silent opts
         ListToolCalls opts ->
@@ -1245,11 +1242,11 @@ runCommand pargs baseTracer sessionStore files =
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall Prod.silent opts
         TerminalUI _ ->
-            TUICmd.handleTUI baseTracer sessionStore pargs.apiKeysFile files
+            TUICmd.handleTUI (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile files
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
-            OneShotCmd.handleOneShot baseTracer sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
+            OneShotCmd.handleOneShot (Prod.contramap OneShotCmdTrace baseTracer) sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         DescribeTool opts ->
@@ -1257,9 +1254,7 @@ runCommand pargs baseTracer sessionStore files =
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile files
         McpServer ->
-            let f (McpServerCmd.AgentTreeTrace tr) = Right tr
-                f (McpServerCmd.McpServerTrace tr) = Left tr
-             in McpServerCmd.handleMcpServer (Prod.choose f Prod.silent baseTracer) sessionStore pargs.apiKeysFile files
+            McpServerCmd.handleMcpServer (Prod.contramap McpServerCmdTrace baseTracer) sessionStore pargs.apiKeysFile files
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
@@ -1273,7 +1268,7 @@ runCommand pargs baseTracer sessionStore files =
         New opts ->
             NewCmd.handleNew opts
         ToolCall opts ->
-            ToolCallCmd.handleToolCall baseTracer opts pargs.apiKeysFile files
+            ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)
@@ -1288,88 +1283,3 @@ makeHttpJsonTrace baseTracer url = do
 maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
-
-{- | Convert TreeTrace to JSON for logging purposes.
-This function is simplified for the OS-native migration and may not
-cover all trace types that were previously supported.
--}
-toJsonTrace :: AgentTree.TreeTrace -> Maybe Aeson.Value
-toJsonTrace x = case x of
-    AgentTree.McpTrace cfg tr -> encodeMcpTrace cfg tr
-    AgentTree.OpenAPITrace _desc _v -> Nothing
-    AgentTree.PostgRESTrace _desc _v -> Nothing
-    AgentTree.DataLoadingTrace _ -> Nothing
-    AgentTree.ConfigLoadedTrace _ -> Nothing
-    AgentTree.CyclicReferencesWarning cycles ->
-        Just $
-            Aeson.object
-                [ "type" .= ("cyclic-references-warning" :: Text)
-                , "cycles" .= cycles
-                ]
-    AgentTree.ReferenceValidationTrace _ -> Nothing
-    AgentTree.RuntimeTrace _ -> Nothing -- TODO: develop here
-    AgentTree.BashToolboxTrace _ -> Nothing
-    AgentTree.McpToolboxTrace _ -> Nothing
-    AgentTree.OpenApiToolboxTrace _ -> Nothing
-    AgentTree.PostgRESToolboxTrace _ -> Nothing
-    AgentTree.SqliteToolboxTrace _ -> Nothing
-    AgentTree.SystemToolboxTrace _ -> Nothing
-    AgentTree.DeveloperToolboxTrace _ -> Nothing
-    AgentTree.LuaToolboxTrace _ -> Nothing
-  where
-    encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
-    encodeMcpTrace (McpSimpleBinary cfg) tr = do
-        baseVal <- encodeBaseMcpTrace tr
-        Just $
-            Aeson.object
-                [ "e"
-                    .= Aeson.object
-                        [ "server" .= cfg.name
-                        , "val" .= baseVal
-                        ]
-                ]
-
-    encodeBaseMcpTrace :: McpToolbox.Trace -> Maybe Aeson.Value
-    encodeBaseMcpTrace (McpToolbox.McpClientClientTrace _) = Nothing
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientRunTrace (McpClientRuntime.RunBufferMoved _ _)) =
-            Nothing
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientRunTrace (McpClientRuntime.RunCommandStart _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("program-start" :: Text)
-                    ]
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientRunTrace (McpClientRuntime.RunCommandStopped _ code)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("program-end" :: Text)
-                    , "code-str" .= show code
-                    ]
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientLoopTrace McpClient.ExitingToolCallLoop) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("loop-end" :: Text)
-                    ]
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientLoopTrace (McpClient.ToolsRefreshed _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("tools-reloaded" :: Text)
-                    ]
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientLoopTrace (McpClient.StartToolCall n _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("tool-call-start" :: Text)
-                    , "name" .= n
-                    ]
-    encodeBaseMcpTrace
-        (McpToolbox.McpClientLoopTrace (McpClient.EndToolCall n _ _)) =
-            Just $
-                Aeson.object
-                    [ "x" .= ("tool-call-end" :: Text)
-                    , "name" .= n
-                    ]

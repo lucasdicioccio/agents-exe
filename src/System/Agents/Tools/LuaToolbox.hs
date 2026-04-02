@@ -31,34 +31,6 @@ The toolbox is designed to be safe for LLM-generated code by:
 * Sandboxing filesystem and HTTP access
 * Tracing all tool calls for debugging and auditing
 
-Example usage:
-
-@
-import System.Agents.Tools.LuaToolbox as Lua
-import System.Agents.Base (LuaToolboxDescription(..))
-import Prod.Tracer (Tracer(..), runTracer)
-
-main :: IO ()
-main = do
-    let desc = LuaToolboxDescription
-            { luaToolboxName = "lua"
-            , luaToolboxDescription = "Sandboxed Lua interpreter"
-            , luaToolboxMaxMemoryMB = 256
-            , luaToolboxMaxExecutionTimeSeconds = 300
-            , luaToolboxAllowedTools = ["bash", "sqlite"]
-            , luaToolboxAllowedPaths = ["./scripts"]
-            , luaToolboxAllowedHosts = ["localhost"]
-            }
-    result <- Lua.initializeToolbox Tracer.silent desc
-    case result of
-        Right toolbox -> do
-            result <- Lua.executeScript toolbox "return 1 + 1"
-            case result of
-                Right val -> print val
-                Left err -> print err
-        Left err -> putStrLn $ "Failed to initialize: " ++ err
-@
-
 Standard library modules available to Lua scripts:
 
 * @json@: JSON encoding/decoding with 'json.encode' and 'json.decode'

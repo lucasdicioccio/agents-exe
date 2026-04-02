@@ -9,6 +9,7 @@ information about loaded agents including their tools.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.Check (
+    Trace(..),
     handleCheck,
     printAgentCheck,
     ToolsOutputMode (..),
@@ -30,6 +31,11 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 
+data Trace
+  = AgentTreeTrace !AgentTree.TreeTrace
+  | OneShotToolTrace !OneShotTool.Trace
+  deriving (Show)
+
 -- | How to display tool information in the check output
 data ToolsOutputMode
     = -- | No tool information (default)
@@ -50,7 +56,7 @@ data CheckOptions = CheckOptions
 
 -- | Handle the check command: validate and display agent configuration
 handleCheck ::
-    Prod.Tracer IO AgentTree.TreeTrace ->
+    Prod.Tracer IO Trace ->
     -- | Check options
     CheckOptions ->
     -- | Path to the API keys file
@@ -58,8 +64,7 @@ handleCheck ::
     -- | List of agent files to check
     [FilePath] ->
     IO ()
-handleCheck baseTracer opts apiKeysFile agentFiles = do
-    let rtTracer = Prod.contramap AgentTree.RuntimeTrace baseTracer
+handleCheck tracer opts apiKeysFile agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
     forM_ agentFiles $ \agentFile -> do
@@ -68,8 +73,8 @@ handleCheck baseTracer opts apiKeysFile agentFiles = do
                 { AgentTree.apiKeys = apiKeys
                 , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFile
-                , AgentTree.interactiveTracer = baseTracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool rtTracer SessionStore.defaultSessionStore apiKeys
+                , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) SessionStore.defaultSessionStore apiKeys
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs

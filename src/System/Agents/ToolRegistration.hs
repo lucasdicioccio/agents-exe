@@ -24,6 +24,7 @@ bidirectional mapping between normalized and original names.
 module System.Agents.ToolRegistration (
     -- * Core types
     Tool,
+    Trace(..),
     ToolRegistration (..),
 
     -- * Registration functions
@@ -121,9 +122,20 @@ import System.Agents.Tools.PostgREST.Converter (
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
-import System.Agents.Tools.Trace (ToolTrace (..))
 
-type Tool call = ToolBase.Tool ToolTrace call 
+type Tool call = ToolBase.Tool Trace call 
+
+data Trace
+    = BashToolsRunTrace !BashTools.RunTrace
+    | BashToolsLoadTrace !BashTools.LoadTrace
+    | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
+    | SqliteToolsTrace !SqliteTools.Trace
+    | SystemToolsTrace !SystemTools.Trace
+    | DeveloperToolsTrace !DeveloperTools.Trace
+    | LuaToolsTrace !LuaTools.Trace
+    | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
+    | PostgRESToolboxTrace !PostgRESToolbox.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 
@@ -367,8 +379,9 @@ registerOpenAPITool toolbox tool =
                     toolDescription = toToolDescription tool
 
                     -- Create the tool handler that uses the mapping
-                    runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-                    runFunc _tracer ctx argz = createToolHandler toolbox tool Prod.silent ctx argz
+                    runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+                    runFunc tracer ctx argz =
+                        createToolHandler toolbox tool (contramap OpenAPIToolboxTrace tracer) ctx argz
 
                     -- Create the Tool
                     toolDef0 =
@@ -512,8 +525,8 @@ registerPostgRESTool toolbox tool =
                 }
 
         -- Create the tool handler
-        runFunc :: Tracer IO ToolTrace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-        runFunc _ ctx argz = PostgRESToolbox.createToolHandler toolbox tool Prod.silent ctx argz
+        runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+        runFunc tracer ctx argz = PostgRESToolbox.createToolHandler toolbox tool (Prod.contramap PostgRESToolboxTrace tracer) ctx argz
 
         -- Create the Tool definition
         toolDef0 =
@@ -1125,7 +1138,7 @@ bashTool script =
   where
     call = ()
     run tracer ctx v = do
-        ret <- BashTools.runValue (contramap BashToolsTrace tracer) script (Just ctx) v
+        ret <- BashTools.runValue (contramap BashToolsRunTrace tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp
@@ -1193,12 +1206,13 @@ sqliteTool box =
             , SqliteTools.toolDescriptionDatabasePath = box.toolboxPath
             }
 
-    run _tracer ctx (Aeson.Object v) = do
+    run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+    run tracer ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "sql") v of
             Just (Aeson.String query) -> do
                 -- Get conversation ID from context for snapshot mode
                 let mConvId = Just (Context.ctxConversationId ctx)
-                result <- SqliteTools.executeQueryWithContext Prod.silent box mConvId query
+                result <- SqliteTools.executeQueryWithContext (Prod.contramap SqliteToolsTrace tracer) box mConvId query
                 case result of
                     Left err -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
@@ -1221,10 +1235,11 @@ systemTool box =
             , SystemTools.toolDescriptionDescription = box.toolboxDescription
             , SystemTools.toolDescriptionToolboxName = box.toolboxName
             }
-    run _tracer _ctx (Aeson.Object v) = do
+    run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+    run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery Prod.silent box cap
+                result <- SystemTools.executeQuery (Prod.contramap SystemToolsTrace tracer) box cap
                 case result of
                     Left err -> pure $ SystemToolError call err
                     Right rsp -> pure $ SystemToolResult call rsp
@@ -1247,20 +1262,21 @@ developerTool box =
             , DeveloperTools.toolDescriptionDescription = box.toolboxDescription
             , DeveloperTools.toolDescriptionToolboxName = box.toolboxName
             }
-    run _tracer _ctx (Aeson.Object v) = do
+    run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+    run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
-            Just (Aeson.String cap) -> executeDeveloperCapability box cap v
+            Just (Aeson.String cap) -> executeDeveloperCapability tracer box cap v
             _ -> pure $ DeveloperToolError call (DeveloperTools.ValidationError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ DeveloperToolError call (DeveloperTools.ValidationError "Arguments must be a JSON object")
 
 -- | Execute a developer tool capability
-executeDeveloperCapability :: DeveloperTools.Toolbox -> Text -> Aeson.Object -> IO (CallResult ())
-executeDeveloperCapability box cap params = case cap of
+executeDeveloperCapability :: Tracer IO Trace -> DeveloperTools.Toolbox -> Text -> Aeson.Object -> IO (CallResult ())
+executeDeveloperCapability tracer box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
             Just (Aeson.String tPath) -> do
-                result <- DeveloperTools.executeValidateTool Prod.silent box (Text.unpack tPath)
+                result <- DeveloperTools.executeValidateTool (Prod.contramap BashToolsLoadTrace tracer) box (Text.unpack tPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult
