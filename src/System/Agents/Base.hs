@@ -15,6 +15,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.Tools.Activation (Activation, Lifetime)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
@@ -109,7 +110,9 @@ Example configuration:
   "tag": "FileSystemDirectory",
   "contents": {
     "path": "./tools",
-    "basenameFilter": null
+    "basenameFilter": null,
+    "lifetime": "conversation",
+    "activation": "always"
   }
 }
 @
@@ -117,6 +120,9 @@ Example configuration:
 The optional 'basenameFilter' field allows filtering tools by their
 filename. If specified, only executables whose names contain the
 filter string will be loaded.
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 
 Note: Relative paths are resolved relative to the execution's current
 working directory.
@@ -129,6 +135,10 @@ data FileSystemDirectoryDescription
     -- ^ Path to the directory containing bash tools
     , fsDirBasenameFilter :: Maybe Text
     -- ^ Optional filter for tool filenames (e.g., ".sh" to load only .sh files)
+    , fsDirLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , fsDirActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -163,7 +173,9 @@ Example configuration:
 {
   "tag": "SingleTool",
   "contents": {
-    "path": "/path/to/my-tool.sh"
+    "path": "/path/to/my-tool.sh",
+    "lifetime": "conversation",
+    "activation": "always"
   }
 }
 @
@@ -171,17 +183,34 @@ Example configuration:
 Note: Relative paths are resolved relative to the execution's current
 working directory.
 -}
-newtype SingleToolDescription = SingleToolDescription
+data SingleToolDescription = SingleToolDescription
     { singleToolPath :: FilePath
     -- ^ Path to the single executable tool
+    , singleToolLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , singleToolActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
+-- | Custom JSON options for SingleToolDescription
+singleToolOptions :: Aeson.Options
+singleToolOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "singleTool"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
 instance ToJSON SingleToolDescription where
-    toJSON (SingleToolDescription path) = Aeson.toJSON path
+    toJSON = Aeson.genericToJSON singleToolOptions
+    toEncoding = Aeson.genericToEncoding singleToolOptions
 
 instance FromJSON SingleToolDescription where
-    parseJSON v = SingleToolDescription <$> Aeson.parseJSON v
+    parseJSON = Aeson.genericParseJSON singleToolOptions
 
 {- | Wrapper type for bash toolbox descriptions with tag-based JSON serialization.
 
@@ -196,7 +225,7 @@ Example configuration:
   "bashToolboxes": [
     {"tag": "FileSystemDirectory", "contents": {"path": "./tools", "basenameFilter": null}},
     {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools", "basenameFilter": ".sh"}},
-    {"tag": "SingleTool", "contents": "/path/to/special-tool.sh"}
+    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
   ]
 }
 @
@@ -260,6 +289,8 @@ Example configuration:
     "headers": {"X-API-Version": "v1"},
     "token": "${API_TOKEN}",
     "filter": {"tag": "PathPrefix", "contents": "/api/v1"},
+    "lifetime": "conversation",
+    "activation": "always",
     "secrets": [
       {
         "source": {"tag": "EnvVar", "contents": "API_KEY"},
@@ -278,6 +309,9 @@ multiple sources (environment variables, files, commands), encodings
 The optional 'filter' field allows restricting which endpoints are
 exposed as tools. See 'EndpointPredicate' for the available filter
 predicates. If no filter is specified, all endpoints are included.
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data OpenAPIServerDescription
     = OpenAPIServerDescription
@@ -293,6 +327,10 @@ data OpenAPIServerDescription
     -- ^ Optional filter to restrict which endpoints are exposed as tools
     , openApiSecrets :: Maybe [Secret]
     -- ^ Optional list of secrets to resolve and include in requests
+    , openApiLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , openApiActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -341,6 +379,8 @@ The referenced file should contain:
   "headers": {"X-API-Version": "v1"},
   "token": "${API_TOKEN}",
   "filter": {"tag": "PathPrefix", "contents": "/api/v1"},
+  "lifetime": "conversation",
+  "activation": "always",
   "secrets": []
 }
 @
@@ -420,6 +460,8 @@ Example configuration:
     "token": "${POSTGREST_TOKEN}",
     "allowedMethods": ["GET", "POST", "PATCH"],
     "filter": {"tag": "PathPrefix", "contents": "/public"},
+    "lifetime": "conversation",
+    "activation": "always",
     "secrets": [
       {
         "source": {"tag": "FileSystem", "contents": "/run/secrets/jwt_token"},
@@ -438,6 +480,9 @@ multiple sources (environment variables, files, commands), encodings
 The optional 'filter' field allows restricting which tables are
 exposed as tools. See 'EndpointPredicate' for the available filter
 predicates. If no filter is specified, all tables are included.
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data PostgRESTServerDescription
     = PostgRESTServerDescription
@@ -462,6 +507,10 @@ data PostgRESTServerDescription
     -- ^ Optional filter to restrict which tables/endpoints are exposed as tools
     , postgrestSecrets :: Maybe [Secret]
     -- ^ Optional list of secrets to resolve and include in requests
+    , postgrestLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , postgrestActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -509,6 +558,8 @@ The referenced file should contain:
   "token": "${POSTGREST_TOKEN}",
   "allowedMethods": ["GET", "POST", "PATCH"],
   "filter": {"tag": "Not", "contents": {"tag": "PathContains", "contents": "_internal"}},
+  "lifetime": "conversation",
+  "activation": "always",
   "secrets": []
 }
 @
@@ -608,7 +659,9 @@ Example configuration:
   "name": "memory",
   "description": "a set of memories",
   "path": "/path/to/memories.sqlite",
-  "access": "read-write"
+  "access": "read-write",
+  "lifetime": "conversation",
+  "activation": "always"
 }
 @
 
@@ -617,6 +670,9 @@ read-only, read-write, or snapshot mode. Use 'read-only' for safety when
 the agent should only query data, 'read-write' when the agent
 needs to modify the database directly, and 'snapshot' when you want
 isolated changes per conversation.
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data SqliteToolboxDescription
     = SqliteToolboxDescription
@@ -628,6 +684,10 @@ data SqliteToolboxDescription
     -- ^ Path to the SQLite database file
     , sqliteToolboxAccess :: SqliteAccessMode
     -- ^ Access mode: read-only, read-write, or snapshot
+    , sqliteToolboxLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , sqliteToolboxActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -718,7 +778,9 @@ Example configuration:
     "name": "system",
     "description": "System information and context",
     "capabilities": ["date", "operating-system", "running-user", "hostname"],
-    "envVarFilter": null
+    "envVarFilter": null,
+    "lifetime": "conversation",
+    "activation": "always"
   }
 }
 @
@@ -726,6 +788,9 @@ Example configuration:
 The 'envVarFilter' field is an optional regex/pattern to filter
 environment variables when the 'env-vars' capability is enabled.
 If not specified, all environment variables are exposed.
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data SystemToolboxDescription
     = SystemToolboxDescription
@@ -737,6 +802,10 @@ data SystemToolboxDescription
     -- ^ List of system information capabilities to expose
     , systemToolboxEnvVarFilter :: Maybe Text
     -- ^ Optional regex/pattern to filter environment variables
+    , systemToolboxLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , systemToolboxActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -780,10 +849,15 @@ Example configuration:
     "maxExecutionTimeSeconds": 300,
     "allowedTools": ["bash", "sqlite", "io"],
     "allowedPaths": ["./repro", "./logs"],
-    "allowedHosts": ["localhost", "127.0.0.1"]
+    "allowedHosts": ["localhost", "127.0.0.1"],
+    "lifetime": "conversation",
+    "activation": "always"
   }
 }
 @
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data LuaToolboxDescription = LuaToolboxDescription
     { luaToolboxName :: Text
@@ -800,6 +874,10 @@ data LuaToolboxDescription = LuaToolboxDescription
     -- ^ Whitelist of filesystem paths accessible to Lua scripts
     , luaToolboxAllowedHosts :: [Text]
     -- ^ Whitelist of network hosts accessible to Lua HTTP module
+    , luaToolboxLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , luaToolboxActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -885,10 +963,15 @@ Example configuration:
   "contents": {
     "name": "developer",
     "description": "Tools for developing agents and tools",
-    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool"]
+    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool"],
+    "lifetime": "conversation",
+    "activation": "always"
   }
 }
 @
+
+The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data DeveloperToolboxDescription
     = DeveloperToolboxDescription
@@ -898,6 +981,10 @@ data DeveloperToolboxDescription
     -- ^ Human-readable description of the toolbox purpose
     , developerToolboxCapabilities :: [DeveloperToolCapability]
     -- ^ List of developer tool capabilities to expose
+    , developerToolboxLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    , developerToolboxActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1010,7 +1097,91 @@ Progressive disclosure:
 - Initially, only metadata tools are visible (skill_describe_{name}, skill_enable_{name})
 - After skill_enable_{name} is called, script tools become available
 - Tool availability is computed as a pure function of Session history
+
+Skills now use the generic activation infrastructure internally.
+Each skill maps to a toolgroup with the same name as the skill.
 -}
+
+-------------------------------------------------------------------------------
+-- MCP Server Configuration
+-------------------------------------------------------------------------------
+
+{- | Configuration for an MCP server.
+
+MCP servers provide tools via the Model Context Protocol.
+They run as external processes and communicate via JSON-RPC.
+
+The 'lifetime' field controls resource scoping. Note that MCP servers
+CANNOT use 'ToolCallLifetime' - this will result in a validation error.
+
+Example configuration:
+
+@
+{
+  "tag": "McpSimpleBinary",
+  "contents": {
+    "name": "filesystem",
+    "executable": "/usr/bin/mcp-filesystem",
+    "args": ["--readonly"],
+    "lifetime": "conversation",
+    "activation": {"tag": "first-n-steps", "steps": 5, "sticky": "sticky-if-used"}
+  }
+}
+@
+-}
+data McpSimpleBinaryConfiguration
+    = McpSimpleBinaryConfiguration
+    { name :: Text
+    -- ^ Name for this MCP server instance
+    , executable :: FilePath
+    -- ^ Path to the MCP server executable
+    , args :: [Text]
+    -- ^ Command-line arguments for the executable
+    , mcpLifetime :: Maybe Lifetime
+    -- ^ Optional resource lifetime (default: ConversationLifetime)
+    -- NOTE: Cannot be ToolCallLifetime for MCP servers
+    , mcpActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for McpSimpleBinaryConfiguration
+mcpSimpleBinaryOptions :: Aeson.Options
+mcpSimpleBinaryOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "mcp"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON McpSimpleBinaryConfiguration where
+    toJSON = Aeson.genericToJSON mcpSimpleBinaryOptions
+    toEncoding = Aeson.genericToEncoding mcpSimpleBinaryOptions
+
+instance FromJSON McpSimpleBinaryConfiguration where
+    parseJSON = Aeson.genericParseJSON mcpSimpleBinaryOptions
+
+data McpServerDescription
+    = McpSimpleBinary McpSimpleBinaryConfiguration
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON McpServerDescription where
+    toJSON (McpSimpleBinary val) =
+        Aeson.object
+            [ "tag" .= ("McpSimpleBinary" :: Text)
+            , "contents" .= val
+            ]
+
+instance FromJSON McpServerDescription where
+    parseJSON = Aeson.withObject "McpServerDescription" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "McpSimpleBinary" ->
+                McpSimpleBinary <$> v .: "contents"
+            _ -> fail "expecting McpSimpleBinary 'tag'"
 
 -------------------------------------------------------------------------------
 -- Agent Definition
@@ -1026,7 +1197,7 @@ An agent can load tools from multiple sources:
 3. MCP servers from @mcpServers@.
 4. OpenAPI toolboxes from @openApiToolboxes@.
 5. PostgREST toolboxes from @postgrestToolboxes@.
-6. Builtin toolboxes (SQLite, System, Developer) from @builtinToolboxes@.
+6. Builtin toolboxes (SQLite, System, Developer, Lua) from @builtinToolboxes@.
 
 If both @tools@ and @bashToolboxes@ are specified, both will be used.
 This maintains backward compatibility while allowing gradual migration.
@@ -1045,7 +1216,7 @@ Example configuration:
   "tools": "tools",
   "bashToolboxes": [
     {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools"}},
-    {"tag": "SingleTool", "contents": "/path/to/special-tool.sh"}
+    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
   ],
   "mcpServers": [...],
   "openApiToolboxes": [...],
@@ -1118,32 +1289,3 @@ instance FromJSON AgentDescription where
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
 
--------------------------------------------------------------------------------
-data McpSimpleBinaryConfiguration
-    = McpSimpleBinaryConfiguration
-    { name :: Text
-    , executable :: FilePath
-    , args :: [Text]
-    }
-    deriving (Show, Ord, Eq, Generic)
-
-instance FromJSON McpSimpleBinaryConfiguration
-instance ToJSON McpSimpleBinaryConfiguration
-data McpServerDescription
-    = McpSimpleBinary McpSimpleBinaryConfiguration
-    deriving (Show, Ord, Eq, Generic)
-
-instance ToJSON McpServerDescription where
-    toJSON (McpSimpleBinary val) =
-        Aeson.object
-            [ "tag" .= ("McpSimpleBinary" :: Text)
-            , "contents" .= val
-            ]
-
-instance FromJSON McpServerDescription where
-    parseJSON = Aeson.withObject "McpServerDescription" $ \v -> do
-        tag <- v .: "tag"
-        case (tag :: Text) of
-            "McpSimpleBinary" ->
-                McpSimpleBinary <$> v .: "contents"
-            _ -> fail "expecting McpSimpleBinary 'tag'"
