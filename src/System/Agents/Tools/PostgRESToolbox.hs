@@ -320,7 +320,8 @@ initializeToolbox apiKeysFile tracer config = do
             runtime <- HttpClient.newRuntime token
 
             -- Fetch OpenAPI spec (from URL or file)
-            fetchResult <- fetchSpec tracer runtime config.configUrl
+            -- Pass resolved secrets so they can be applied to the initial request
+            fetchResult <- fetchSpec tracer runtime resolvedSecrets config.configUrl
 
             case fetchResult of
                 Left err -> pure $ Left err
@@ -382,15 +383,19 @@ extractToolboxName url =
 
 Supports both HTTP/HTTPS URLs and file:// URLs. For file URLs,
 the spec is read directly from the filesystem.
+
+For HTTP URLs, resolved secrets are applied to headers and query string
+parameters, allowing authentication when fetching protected specs.
 -}
 fetchSpec ::
     Tracer IO Trace ->
     HttpClient.Runtime ->
+    [Secrets.ResolvedSecret] ->
     Text ->
     IO (Either InitializationError LByteString.ByteString)
-fetchSpec tracer runtime url
+fetchSpec tracer runtime resolvedSecrets url
     | isFileUrl url = fetchSpecFromFile tracer (fileUrlToPath url)
-    | otherwise = fetchSpecFromUrl tracer runtime url
+    | otherwise = fetchSpecFromUrl tracer runtime resolvedSecrets url
 
 -- | Fetch the OpenAPI spec from a file on disk.
 fetchSpecFromFile ::
@@ -407,15 +412,30 @@ fetchSpecFromFile tracer path = do
             runTracer tracer (SpecLoadedFromFileTrace path)
             pure $ Right content
 
--- | Fetch the OpenAPI spec from an HTTP URL.
+{- | Fetch the OpenAPI spec from an HTTP URL.
+
+This function applies resolved secrets to both headers and query string
+parameters, allowing authentication when fetching protected PostgREST specs.
+-}
 fetchSpecFromUrl ::
     Tracer IO Trace ->
     HttpClient.Runtime ->
+    [Secrets.ResolvedSecret] ->
     Text ->
     IO (Either InitializationError LByteString.ByteString)
-fetchSpecFromUrl tracer runtime url = do
+fetchSpecFromUrl tracer runtime resolvedSecrets url = do
     runTracer tracer (FetchingSpecTrace url)
-    result <- try $ HttpClient.get runtime (contramap FetchingSpecFromUrlTrace tracer) url
+
+    -- Apply secrets to headers and query string for the initial request
+    let secretHeaders = Secrets.applySecretsToHeaders resolvedSecrets Map.empty
+    let secretQueryParams = Secrets.applySecretsToQueryString resolvedSecrets Map.empty
+
+    -- Build and execute the request with secrets applied
+    result <- try $ do
+        let urlWithQuery = url <> buildQueryString secretQueryParams
+        req <- buildRequest GET urlWithQuery secretHeaders Nothing
+        HttpClient.runRequest runtime (contramap FetchingSpecFromUrlTrace tracer) req
+
     case result of
         Left (e :: HttpClient.HttpException) ->
             pure $ Left $ NetworkError (Text.pack $ show e)
@@ -754,3 +774,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+
