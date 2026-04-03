@@ -143,6 +143,12 @@ Loads tools from:
 
 Note: Relative paths are resolved relative to the execution's current
 working directory.
+
+Note: Bash tool activation is at the toolbox level (directory or single tool),
+not at the individual script level. The activation from the description is
+not currently passed to individual tool registrations. To support per-tool
+activation, the BashToolbox would need to track which activation applies to
+which loaded script.
 -}
 loadBashTools ::
     Tracer IO BashToolbox.Trace ->
@@ -165,7 +171,9 @@ loadBashTools tracer agent toolsTVar = do
                     pure $ Just $ BashLoadingError "Failed to load some bash tools"
                 Right multiSourceTools -> do
                     scripts <- BashToolbox.readMultiSourceTools multiSourceTools
-                    let registrations = map ToolReg.registerBashToolInLLM scripts
+                    -- Pass Nothing for activation since bash tool activation
+                    -- is at the toolbox level, not individual script level
+                    let registrations = map (ToolReg.registerBashToolInLLM Nothing) scripts
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing
 
@@ -194,6 +202,10 @@ mcpInitTimeoutMicros = 30 * 1000 * 1000
 Each MCP server is started and its tools are registered.
 If a server fails to start or times out, an error is returned
 but processing continues for other servers.
+
+Note: MCP toolbox activation is currently not supported because the
+McpToolbox.Toolbox type does not store the configuration. The activation
+from McpServerDescription would need to be added to the Toolbox type.
 -}
 loadMcpServers ::
     Tracer IO McpToolbox.Trace ->
@@ -262,6 +274,10 @@ loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
 {- | Load OpenAPI toolboxes from the agent configuration.
 
 Each OpenAPI toolbox fetches its spec and registers converted tools.
+
+Note: OpenAPI toolbox activation is currently not supported because the
+OpenAPIToolbox.Toolbox type does not store the configuration. The activation
+from OpenAPIServerDescription would need to be added to the Toolbox type.
 -}
 loadOpenAPIToolboxes ::
     Tracer IO OpenAPIToolbox.Trace ->
@@ -339,6 +355,10 @@ resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServer
 {- | Load PostgREST toolboxes from the agent configuration.
 
 Each PostgREST toolbox fetches its spec and registers converted tools.
+
+Note: PostgREST toolbox activation is currently not supported because the
+PostgRESToolbox.Toolbox type does not store the configuration. The activation
+from PostgRESTServerDescription would need to be added to the Toolbox type.
 -}
 loadPostgRESTToolboxes ::
     Tracer IO PostgRESToolbox.Trace ->
@@ -421,6 +441,12 @@ Builtin toolboxes include:
 - System information tools
 - Developer tools
 - Lua sandbox
+
+These toolboxes support activation via their configuration fields:
+- sqliteToolboxActivation
+- systemToolboxActivation
+- developerToolboxActivation
+- luaToolboxActivation
 -}
 loadBuiltinToolboxes ::
     Tracer IO TreeTrace ->
@@ -465,6 +491,7 @@ loadSqliteToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ SqliteLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from sqliteToolboxActivation in registerSqliteTool
             regResult <- ToolReg.registerSqliteTools toolbox
 
             case regResult of
@@ -491,6 +518,7 @@ loadSystemToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ SystemLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from systemToolboxActivation in registerSystemTool
             regResult <- ToolReg.registerSystemTools toolbox
 
             case regResult of
@@ -517,6 +545,7 @@ loadDeveloperToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ DeveloperLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from developerToolboxActivation in registerDeveloperTool
             regResult <- ToolReg.registerDeveloperTools toolbox
 
             case regResult of
@@ -544,6 +573,7 @@ loadLuaToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ LuaLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from luaToolboxActivation in registerLuaTool
             regResult <- ToolReg.registerLuaTools toolbox
 
             case regResult of
@@ -649,3 +679,4 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
+
