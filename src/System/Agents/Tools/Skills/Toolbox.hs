@@ -199,7 +199,7 @@ makeDescribeTool skill =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
-     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find
+     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find Nothing
 
 {- | Make the skill_enable_{name} tool.
 
@@ -225,7 +225,7 @@ makeEnableTool skill =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
-     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find
+     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find Nothing
 
 {- | Make the skill_disable_{name} tool.
 
@@ -250,7 +250,7 @@ makeDisableTool skill =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
-     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find
+     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find Nothing
 
 {- | Make the skill_list tool.
 
@@ -286,7 +286,7 @@ makeListSkillsTool store =
                     if call.callToolName == getToolName llmName
                         then Just $ mapToolResult (const call) tool
                         else Nothing
-             in Just $ ToolRegistration tool (makeToolDecl llmName llmDesc []) find
+             in Just $ ToolRegistration tool (makeToolDecl llmName llmDesc []) find Nothing
 
 -------------------------------------------------------------------------------
 -- Script Tool Builder
@@ -315,7 +315,7 @@ makeScriptTool skill script =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
-     in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find
+     in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find Nothing
 
 {- | Execute a skill script with the provided arguments.
 
@@ -417,3 +417,4 @@ valueToText val = case val of
     Aeson.Number n -> Just $ Text.pack $ show n
     Aeson.Bool b -> Just $ Text.pack $ show b
     _ -> Nothing
+

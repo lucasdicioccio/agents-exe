@@ -81,6 +81,7 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.MCP.Client as McpClient
 import System.Agents.ToolSchema
+import System.Agents.Tools.Activation (Activation (..))
 import System.Agents.Tools.Base (
     CallResult (..),
     ToolDef (..),
@@ -149,10 +150,18 @@ data ToolRegistration
     { innerTool :: Tool ()
     , declareTool :: ToolDescription
     , findTool :: ToolCall -> Maybe (Tool ToolCall)
+    , toolActivation :: Maybe Activation
     }
 
 instance Show ToolRegistration where
-    show (ToolRegistration d _ _) = Prelude.unwords ["ToolRegistration(", show d.toolDef, ")"]
+    show tr =
+        Prelude.unwords
+            [ "ToolRegistration("
+            , show tr.declareTool.toolDescriptionName
+            , ", activation ="
+            , show tr.toolActivation
+            , ")"
+            ]
 
 -------------------------------------------------------------------------------
 
@@ -249,7 +258,12 @@ registerBashToolInLLM script =
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
      in
-        ToolRegistration tool (mapToolDescriptionBash2LLM script) find
+        ToolRegistration
+            { innerTool = tool
+            , declareTool = mapToolDescriptionBash2LLM script
+            , findTool = find
+            , toolActivation = Nothing
+            }
 
 -------------------------------------------------------------------------------
 
@@ -280,7 +294,12 @@ registerIOScriptInLLM script llmProps =
                 , toolDescriptionParamProperties = llmProps
                 }
      in
-        ToolRegistration tool llmTool find
+        ToolRegistration
+            { innerTool = tool
+            , declareTool = llmTool
+            , findTool = find
+            , toolActivation = Nothing
+            }
 
 -------------------------------------------------------------------------------
 
@@ -322,7 +341,13 @@ registerMcpToolInLLM box mcp =
      in
         case llmBasedSchema of
             Right schema ->
-                Right $ ToolRegistration tool (mapToolDescriptionMcp2LLM schema) find
+                Right $
+                    ToolRegistration
+                        { innerTool = tool
+                        , declareTool = mapToolDescriptionMcp2LLM schema
+                        , findTool = find
+                        , toolActivation = Nothing
+                        }
             Left err ->
                 Left err
 
@@ -409,6 +434,7 @@ registerOpenAPITool toolbox tool =
                             { innerTool = mapToolResult (const ()) tool'
                             , declareTool = toolDescription
                             , findTool = find
+                            , toolActivation = Nothing
                             }
 
 -- | Find the name mapping for a given original operation ID.
@@ -553,6 +579,7 @@ registerPostgRESTool toolbox tool =
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = Nothing
                 }
 
 {- | Build parameter properties for PostgREST tool from structured parameters.
@@ -798,6 +825,7 @@ registerSqliteTool box =
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = Nothing
                 }
 
 {- | Register all tools from a SQLite toolbox.
@@ -861,6 +889,7 @@ registerSystemTool box =
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = Nothing
                 }
 
 -- Helper to convert capability to text
@@ -982,6 +1011,7 @@ registerDeveloperTool box =
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = Nothing
                 }
 
 -- Helper to convert developer capability to text
@@ -1067,6 +1097,7 @@ registerLuaTool box =
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = Nothing
                 }
 
 {- | Register all tools from a Lua toolbox.
@@ -1363,3 +1394,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

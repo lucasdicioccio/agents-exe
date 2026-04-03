@@ -121,7 +121,7 @@ portalExecutionTests =
 -- makeToolPortal Tests
 -------------------------------------------------------------------------------
 
-{-
+{-}
 
 makeToolPortalTests :: TestTree
 makeToolPortalTests =
@@ -387,6 +387,7 @@ makeMockRegistration name =
         { innerTool = mockTool
         , declareTool = declareTool
         , findTool = find
+        , toolActivation = Nothing
         }
 
 -- | Create a mock tool registration that emits traces during execution
@@ -428,5 +429,6 @@ makeTracingMockRegistration name =
         { innerTool = mockTool
         , declareTool = declareTool
         , findTool = find
+        , toolActivation = Nothing
         }
 
