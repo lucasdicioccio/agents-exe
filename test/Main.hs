@@ -62,6 +62,8 @@ import qualified OS.InterfaceTests
 import qualified OS.IntegrationTests
 -- Import OS Persistence tests
 import qualified OS.PersistenceTests
+-- Import Activation Session tests
+import qualified ActivationSessionTests
 
 main :: IO ()
 main = defaultMain tests
@@ -89,6 +91,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite
+        , ActivationSessionTests.activationSessionTestSuite
         , McpImplementationTests.mcpImplementationTestSuite
         , ToolPortalTests.toolPortalTestSuite
         , LuaToolboxSecurityTests.tests

@@ -87,6 +87,7 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
                     , System.Agents.Tools.Activation
+                    , System.Agents.Tools.Activation.Session
                     , System.Agents.Tools.Context
                     , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.Trace
@@ -261,7 +262,8 @@ test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
-    other-modules:    EndpointPredicateTests
+    other-modules:    ActivationSessionTests
+                    , EndpointPredicateTests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests
                     , LuaToolboxJsonValueTests
@@ -303,6 +305,7 @@ test-suite agents-tests
                       temporary,
                       time,
                       unordered-containers,
+                      uuid,
                       vector
 
 benchmark os-benchmarks
@@ -327,5 +330,6 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
+
 
 
