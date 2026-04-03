@@ -190,7 +190,7 @@ newtype OneShotResult = OneShotResult Text
 
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
-extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
+extractResponseText (LlmResponse txt _thinking _ _) = Maybe.fromMaybe "" txt
 
 -- | Parse flavor from text, defaulting to OpenAIv1 if not recognized.
 parseModelFlavor :: Text -> OpenAI.ModelFlavor
@@ -403,3 +403,4 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+

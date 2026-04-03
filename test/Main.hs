@@ -542,7 +542,7 @@ turnRoundTripTests =
                     , userQuery = Just (UserQuery "Hello")
                     , userToolResponses = []
                     }
-            let byteUsage = StepByteUsage 1000 500 300 100 100
+            let byteUsage = StepByteUsage 1000 500 300 100 100 Nothing
             let turn = UserTurn userContent (Just byteUsage)
             let json = encode turn
             let mDecoded = decode json :: Maybe Turn
@@ -552,6 +552,7 @@ turnRoundTripTests =
                     { SessionTypes.responseText = Just "Hello!"
                     , SessionTypes.responseThinking = Just "Thinking..."
                     , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                    , SessionTypes.responseTokenUsage = Nothing
                     }
             let llmContent = LlmTurnContent
                     { llmResponse = llmResp
@@ -566,12 +567,13 @@ turnRoundTripTests =
                     { SessionTypes.responseText = Just "Hello!"
                     , SessionTypes.responseThinking = Just "Thinking..."
                     , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                    , SessionTypes.responseTokenUsage = Nothing
                     }
             let llmContent = LlmTurnContent
                     { llmResponse = llmResp
                     , llmToolCalls = []
                     }
-            let byteUsage = StepByteUsage 2000 800 700 300 200
+            let byteUsage = StepByteUsage 2000 800 700 300 200 Nothing
             let turn = LlmTurn llmContent (Just byteUsage)
             let json = encode turn
             let mDecoded = decode json :: Maybe Turn
@@ -594,6 +596,7 @@ turnRoundTripTests =
                     { SessionTypes.responseText = Just "I'll help you"
                     , SessionTypes.responseThinking = Nothing
                     , SessionTypes.rawResponse = object ["choices" .= ([] :: [Value])]
+                    , SessionTypes.responseTokenUsage = Nothing
                     }
             let toolCall1 = LlmToolCall (object ["id" .= ("call-1" :: Text)])
             let toolCall2 = LlmToolCall (object ["id" .= ("call-2" :: Text)])
@@ -624,10 +627,11 @@ turnRoundTripTests =
                             { SessionTypes.responseText = Just "Response"
                             , SessionTypes.responseThinking = Nothing
                             , SessionTypes.rawResponse = object ["model" .= ("gpt-4" :: Text)]
+                            , SessionTypes.responseTokenUsage = Nothing
                             }
                         , llmToolCalls = []
                         })
-                    (Just (StepByteUsage 1000 400 400 100 100))
+                    (Just (StepByteUsage 1000 400 400 100 100 Nothing))
             
             let userTurn2 = UserTurn
                     (UserTurnContent
@@ -670,7 +674,7 @@ turnRoundTripTests =
                     , userQuery = Nothing
                     , userToolResponses = []
                     }
-            let turn = UserTurn userContent (Just (StepByteUsage 100 50 30 10 10))
+            let turn = UserTurn userContent (Just (StepByteUsage 100 50 30 10 10 Nothing))
             let json = encode turn
             let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
             -- Check that the JSON has the expected structure
@@ -705,7 +709,7 @@ turnRoundTripTests =
                     prompt @?= "Test"
                 Just _ -> assertFailure "Expected UserTurn with Nothing byteUsage"
         , testCase "decode from new format with byteUsage" $ do
-            let json = "{\"tag\":\"LlmTurn\",\"contents\":{\"llmResponse\":{\"responseText\":\"Hi\",\"responseThinking\":null,\"rawResponse\":{}},\"llmToolCalls\":[]},\"byteUsage\":{\"stepTotalBytes\":100,\"stepInputBytes\":50,\"stepOutputBytes\":30,\"stepReasoningBytes\":10,\"stepToolBytes\":10}}"
+            let json = "{\"tag\":\"LlmTurn\",\"contents\":{\"llmResponse\":{\"responseText\":\"Hi\",\"responseThinking\":null,\"rawResponse\":{},\"responseTokenUsage\":null},\"llmToolCalls\":[]},\"byteUsage\":{\"stepTotalBytes\":100,\"stepInputBytes\":50,\"stepOutputBytes\":30,\"stepReasoningBytes\":10,\"stepToolBytes\":10,\"stepTokenUsage\":null}}"
             let mTurn = decode (LBS.fromStrict $ Text.encodeUtf8 json) :: Maybe Turn
             case mTurn of
                 Nothing -> assertFailure "Failed to decode LlmTurn with byteUsage"

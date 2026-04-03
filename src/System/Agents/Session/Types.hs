@@ -38,6 +38,9 @@ module System.Agents.Session.Types (
     SystemTool (..),
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
+
+    -- * Re-exports for convenience
+    TokenUsage (..),
 ) where
 
 import Control.Applicative ((<|>))
@@ -48,6 +51,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
@@ -76,6 +80,9 @@ newTurnId =
 
 Tracks the amount of data exchanged during a single turn of conversation,
 broken down by category for cost transparency and debugging.
+
+Also includes optional token usage from the LLM provider for accurate
+billing and usage tracking.
 -}
 data StepByteUsage = StepByteUsage
     { stepTotalBytes :: Int
@@ -88,24 +95,51 @@ data StepByteUsage = StepByteUsage
     -- ^ Bytes in reasoning/thinking content (if model supports it)
     , stepToolBytes :: Int
     -- ^ Bytes in tool call responses
+    , stepTokenUsage :: Maybe TokenUsage
+    -- ^ Optional token usage from LLM provider for accurate billing
     }
     deriving (Show, Ord, Eq, Generic)
 
-instance FromJSON StepByteUsage
-instance ToJSON StepByteUsage
+-- | Custom ToJSON for StepByteUsage that maintains backward compatibility.
+-- Fields are only included if they have values (non-zero or Just).
+instance ToJSON StepByteUsage where
+    toJSON usage =
+        Aeson.object $
+            [ "stepTotalBytes" .= usage.stepTotalBytes
+            , "stepInputBytes" .= usage.stepInputBytes
+            , "stepOutputBytes" .= usage.stepOutputBytes
+            , "stepReasoningBytes" .= usage.stepReasoningBytes
+            , "stepToolBytes" .= usage.stepToolBytes
+            ]
+                ++ ["stepTokenUsage" .= tu | Just tu <- [usage.stepTokenUsage]]
+
+-- | Custom FromJSON for StepByteUsage that handles backward compatibility.
+-- Missing fields are filled with default values (0 for Int, Nothing for Maybe).
+instance FromJSON StepByteUsage where
+    parseJSON = Aeson.withObject "StepByteUsage" $ \v ->
+        StepByteUsage
+            <$> v .: "stepTotalBytes"
+            <*> v .: "stepInputBytes"
+            <*> v .: "stepOutputBytes"
+            <*> v .: "stepReasoningBytes"
+            <*> v .: "stepToolBytes"
+            <*> v .:? "stepTokenUsage"
 
 {- | Helper to calculate total bytes from components.
 Use this when you have individual components but want to ensure
 consistency between total and sum of parts.
+
+Includes optional token usage from the LLM provider.
 -}
-calculateStepByteUsage :: Int -> Int -> Int -> Int -> StepByteUsage
-calculateStepByteUsage input output reasoning tool =
+calculateStepByteUsage :: Int -> Int -> Int -> Int -> Maybe TokenUsage -> StepByteUsage
+calculateStepByteUsage input output reasoning tool mTokenUsage =
     StepByteUsage
         { stepTotalBytes = input + output + reasoning + tool
         , stepInputBytes = input
         , stepOutputBytes = output
         , stepReasoningBytes = reasoning
         , stepToolBytes = tool
+        , stepTokenUsage = mTokenUsage
         }
 
 {- | Calculate total bytes for an entire session.
@@ -141,11 +175,29 @@ data LlmResponse = LlmResponse
     , responseThinking :: Maybe Text
     -- ^ Separate thinking/reasoning content from models like o1/o3 and Claude
     , rawResponse :: Aeson.Value
+    , responseTokenUsage :: Maybe TokenUsage
+    -- ^ Token usage from the LLM response for accurate billing
     }
     deriving (Show, Ord, Eq, Generic)
 
-instance FromJSON LlmResponse
-instance ToJSON LlmResponse
+-- | Custom ToJSON for LlmResponse that maintains backward compatibility.
+instance ToJSON LlmResponse where
+    toJSON rsp =
+        Aeson.object $
+            [ "responseText" .= rsp.responseText
+            , "responseThinking" .= rsp.responseThinking
+            , "rawResponse" .= rsp.rawResponse
+            ]
+                ++ ["responseTokenUsage" .= tu | Just tu <- [rsp.responseTokenUsage]]
+
+-- | Custom FromJSON for LlmResponse that handles backward compatibility.
+instance FromJSON LlmResponse where
+    parseJSON = Aeson.withObject "LlmResponse" $ \v ->
+        LlmResponse
+            <$> v .: "responseText"
+            <*> v .: "responseThinking"
+            <*> v .: "rawResponse"
+            <*> v .:? "responseTokenUsage"
 
 -- | LLM tool-call.
 newtype LlmToolCall = LlmToolCall Aeson.Value
@@ -281,3 +333,4 @@ data Session
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Session
 instance ToJSON Session
+

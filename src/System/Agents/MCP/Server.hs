@@ -354,7 +354,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
   where
     -- Extract response text from LLM response, handling Nothing case
     extractResponseText :: LlmResponse -> Text
-    extractResponseText (LlmResponse mtxt _thinking _) = Maybe.fromMaybe "" mtxt
+    extractResponseText (LlmResponse mtxt _thinking _ _) = Maybe.fromMaybe "" mtxt
 
     -- Parse model flavor from text, defaulting to OpenAIv1
     parseModelFlavor :: Text -> OpenAI.ModelFlavor
@@ -473,3 +473,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+
