@@ -20,7 +20,14 @@
       "- Follow consistent formatting",
       "Use list-files to explore the project structure, read-file to understand existing code, write-file to create or modify files, and check-code to verify your work.",
       "Always compile code before considering the job done.",
-      "Your output format may be stored as commit message: hence the first line of your last message should be a summary line."
+      "Your output format may be stored as commit message: hence the first line of your last message should be a summary line.",
+      "You have access to a tool which is a copy of yourself named io_prompt_agent_oneshot, use it when a task is well-scoped in a way that it would save tokens in your context window and not interfere with your work."
+    ],
+    "extraAgents": [
+      {
+        "slug": "oneshot",
+        "path": "oneshot.json"
+      }
     ],
     "bashToolboxes": [
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read", "BasenameFilter": ".sh"}},
