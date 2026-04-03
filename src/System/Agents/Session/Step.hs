@@ -48,7 +48,7 @@ runStepM convId agent sess =
                 pure (agent0, Right sess1)
             AskLlmCompletion completion -> do
                 (llmRsp, llmTool) <- agent0.complete completion
-                -- Calculate byte usage for this LLM turn
+                -- Calculate byte usage for this LLM turn, including token usage
                 let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
                 sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
                 pure (agent0, Right sess1)
@@ -90,7 +90,7 @@ calculateUserTurnByteUsage sPrompt sTools uQuery toolResponses =
         -- User turns have no output or reasoning from the LLM
         outputBytes = 0
         reasoningBytes = 0
-     in calculateStepByteUsage inputBytes outputBytes reasoningBytes toolBytes
+     in calculateStepByteUsage inputBytes outputBytes reasoningBytes toolBytes Nothing
 
 {- | Calculate byte usage for an LLM turn.
 
@@ -98,6 +98,7 @@ This includes:
 * Output bytes: LLM response text
 * Reasoning bytes: thinking/reasoning content
 * Tool bytes: tool call definitions (payload sent to LLM)
+* Token usage: actual token counts from the LLM provider
 -}
 calculateLlmTurnByteUsage :: LlmResponse -> [LlmToolCall] -> StepByteUsage
 calculateLlmTurnByteUsage llmRsp llmTools =
@@ -107,7 +108,9 @@ calculateLlmTurnByteUsage llmRsp llmTools =
         toolBytes = sum (map toolCallBytes llmTools)
         -- LLM turns don't have input bytes (those are in the user turn)
         inputBytes = 0
-     in calculateStepByteUsage inputBytes outputBytes reasoningBytes toolBytes
+        -- Extract token usage from the LLM response
+        mTokenUsage = llmRsp.responseTokenUsage
+     in calculateStepByteUsage inputBytes outputBytes reasoningBytes toolBytes mTokenUsage
 
 -- | Calculate bytes for system prompt.
 systemPromptBytes :: SystemPrompt -> Int

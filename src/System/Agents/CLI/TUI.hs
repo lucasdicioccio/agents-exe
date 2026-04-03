@@ -9,7 +9,8 @@ chatting with agents.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.TUI (
-    Trace(..),
+    Trace (..),
+
     -- * Types
     TuiOptions (..),
 
@@ -24,10 +25,10 @@ import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
 
 data Trace
-  = TUITrace !TUI.Trace
-  | AgentTreeTrace !AgentTree.TreeTrace
-  | OneShotToolTrace !OneShotTool.Trace
-  deriving (Show)
+    = TUITrace !TUI.Trace
+    | AgentTreeTrace !AgentTree.TreeTrace
+    | OneShotToolTrace !OneShotTool.Trace
+    deriving (Show)
 
 -- | Options for the TUI command
 data TuiOptions = TuiOptions

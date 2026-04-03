@@ -61,7 +61,7 @@ import System.Process (readProcessWithExitCode)
 import Prod.Tracer (Tracer)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (Session (..))
-import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
+import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)

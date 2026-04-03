@@ -252,8 +252,9 @@ mkOpenAICompletion config completion = do
         let llmRsp =
                 LlmResponse
                     { responseText = rsp.rspContent
-                    , responseThinking = rsp.rspReasoningContent -- Extract thinking/reasoning content
+                    , responseThinking = rsp.rspReasoningContent
                     , rawResponse = rawValue
+                    , responseTokenUsage = rsp.rspTokenUsage
                     }
             toolCalls = case rsp.rspToolCalls of
                 Nothing -> []

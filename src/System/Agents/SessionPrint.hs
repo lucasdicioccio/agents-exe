@@ -32,7 +32,7 @@ import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (sortOn)
+import Data.List (intersperse, sortOn)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Text as Text
@@ -43,6 +43,8 @@ import qualified Data.Text.Lazy.Encoding as TextLazyEncoding
 import System.IO (stderr)
 
 import qualified System.Agents.Session.Base as Session
+import System.Agents.Session.Types (StepByteUsage (..))
+import System.Agents.LLMs.OpenAI (TokenUsage (..))
 
 -- | Preference for ordering session steps.
 data OrderPreference
@@ -93,6 +95,21 @@ data SessionPrintOptions = SessionPrintOptions
     -- ^ Whether to skip the ASCII art logo stamp in the header
     }
 
+-- | Token usage statistics aggregated across a session.
+data TokenUsageStats = TokenUsageStats
+    { statPromptTokens :: Int
+    -- ^ Tokens in the prompt/context (input)
+    , statCompletionTokens :: Int
+    -- ^ Tokens in the completion response (output)
+    , statTotalTokens :: Int
+    -- ^ Total tokens used
+    , statCachedTokens :: Maybe Int
+    -- ^ Cached tokens (if provider supports it)
+    , statThinkingTokens :: Maybe Int
+    -- ^ Reasoning/thinking tokens (if model supports it)
+    }
+    deriving (Show, Eq)
+
 -- | Statistics about a session.
 data SessionStatistics = SessionStatistics
     { statTotalTurns :: Int
@@ -104,6 +121,8 @@ data SessionStatistics = SessionStatistics
     , statOutputBytes :: Int
     , statReasoningBytes :: Int
     , statTotalBytes :: Int
+    , statTokenUsage :: Maybe TokenUsageStats
+    -- ^ Token usage statistics if available
     }
     deriving (Show, Eq)
 
@@ -306,6 +325,9 @@ calculateStatistics session =
         -- Calculate byte counts
         (inputBytes, outputBytes, reasoningBytes) = calculateByteCounts turns
         totalBytes = inputBytes + outputBytes + reasoningBytes
+
+        -- Calculate token usage from StepByteUsage data
+        tokenStats = calculateTokenUsageStats turns
      in SessionStatistics
             { statTotalTurns = totalTurns
             , statUserTurns = userTurns
@@ -316,7 +338,52 @@ calculateStatistics session =
             , statOutputBytes = outputBytes
             , statReasoningBytes = reasoningBytes
             , statTotalBytes = totalBytes
+            , statTokenUsage = tokenStats
             }
+
+-- | Calculate aggregated token usage statistics from all turns.
+calculateTokenUsageStats :: [Session.Turn] -> Maybe TokenUsageStats
+calculateTokenUsageStats turns =
+    let allTokenUsages = collectTokenUsages turns
+     in if null allTokenUsages
+            then Nothing
+            else Just $ aggregateTokenUsages allTokenUsages
+  where
+    collectTokenUsages :: [Session.Turn] -> [TokenUsage]
+    collectTokenUsages ts =
+        [ usage
+        | turn <- ts
+        , usage <- extractUsageFromTurn turn
+        ]
+
+    -- Extract token usage from a turn's StepByteUsage if present
+    extractUsageFromTurn :: Session.Turn -> [TokenUsage]
+    extractUsageFromTurn turn =
+        let mUsage = case turn of
+                Session.UserTurn _ mStepUsage -> mStepUsage
+                Session.LlmTurn _ mStepUsage -> mStepUsage
+         in case mUsage of
+                Just stepUsage -> maybeToList (stepTokenUsage stepUsage)
+                Nothing -> []
+
+    maybeToList :: Maybe a -> [a]
+    maybeToList Nothing = []
+    maybeToList (Just x) = [x]
+
+    aggregateTokenUsages :: [TokenUsage] -> TokenUsageStats
+    aggregateTokenUsages usages =
+        TokenUsageStats
+            { statPromptTokens = sum $ map tokenPromptTokens usages
+            , statCompletionTokens = sum $ map tokenCompletionTokens usages
+            , statTotalTokens = sum $ map tokenTotalTokens usages
+            , statCachedTokens = sumMaybe $ map tokenCachedTokens usages
+            , statThinkingTokens = sumMaybe $ map tokenThinkingTokens usages
+            }
+
+    sumMaybe :: [Maybe Int] -> Maybe Int
+    sumMaybe ms =
+        let vs = [v | Just v <- ms]
+         in if null vs then Nothing else Just (sum vs)
 
 -- | Count tool calls by name.
 countToolCallsByName :: [Session.LlmToolCall] -> Map Text.Text Int
@@ -372,6 +439,9 @@ formatStatistics stats =
         <> formatToolCallStats stats.statToolCallsByName
         <> "\n### 💾 Byte Usage\n\n"
         <> formatByteChart stats
+        <> case statTokenUsage stats of
+            Nothing -> ""
+            Just tokenStats -> "\n\n### 🎫 Token Usage\n\n" <> formatTokenChart tokenStats
 
 -- | Format tool call statistics with bar chart.
 formatToolCallStats :: Map Text.Text Int -> Text.Text
@@ -408,6 +478,65 @@ formatByteChart stats =
                 let chart = Text.intercalate "\n\n" $ map (formatByteBar maxBytes) categories
                     totalLine = "\n**Total:** " <> formatBytes total <> "\n"
                  in chart <> totalLine
+
+-- | Format token usage as bar chart.
+formatTokenChart :: TokenUsageStats -> Text.Text
+formatTokenChart stats =
+    let -- Build list of categories, only including non-zero ones
+        allCategories =
+            [ ("Prompt", statPromptTokens stats)
+            , ("Completion", statCompletionTokens stats)
+            ]
+        categories = filter ((> 0) . snd) allCategories
+        -- Add cached tokens if available
+        categoriesWithCached = case statCachedTokens stats of
+            Just n | n > 0 -> categories ++ [("Cached", n)]
+            _ -> categories
+        -- Add thinking tokens if available
+        categoriesWithThinking = case statThinkingTokens stats of
+            Just n | n > 0 -> categoriesWithCached ++ [("Thinking", n)]
+            _ -> categoriesWithCached
+        maxTokens = if null categoriesWithThinking then 1 else maximum (map snd categoriesWithThinking)
+        total = statTotalTokens stats
+     in if total == 0
+            then "_No token data recorded_\n"
+            else
+                let chart = Text.intercalate "\n\n" $ map (formatTokenBar maxTokens) categoriesWithThinking
+                    totalLine = "\n**Total:** " <> formatTokenCount total <> "\n"
+                    cachedNote = case statCachedTokens stats of
+                        Just n | n > 0 -> "\n_(" <> formatTokenCount n <> " cached)_\n"
+                        _ -> ""
+                    thinkingNote = case statThinkingTokens stats of
+                        Just n | n > 0 -> "\n_(" <> formatTokenCount n <> " thinking tokens)_\n"
+                        _ -> ""
+                 in chart <> totalLine <> cachedNote <> thinkingNote
+
+-- | Format a single token bar in the chart.
+formatTokenBar :: Int -> (Text.Text, Int) -> Text.Text
+formatTokenBar maxTokens (label, tokens) =
+    let barWidth = 60
+        filled = if maxTokens == 0 then 0 else (tokens * barWidth) `div` maxTokens
+        bar = Text.replicate filled "█"
+        label' = Text.justifyLeft 12 ' ' label
+        valueStr = Text.justifyRight 10 ' ' (formatTokenCount tokens)
+     in "`" <> label' <> "` " <> valueStr <> " " <> bar
+
+-- | Format token count with thousands separator.
+formatTokenCount :: Int -> Text.Text
+formatTokenCount n =
+    let txt = Text.pack (show n)
+     in addThousandSeparators txt
+
+-- | Add thousand separators to a numeric text.
+addThousandSeparators :: Text.Text -> Text.Text
+addThousandSeparators txt =
+    let digits = Text.unpack txt
+        grouped = reverse $ group3 (reverse digits)
+     in Text.pack $ concat (intersperse "," grouped)
+  where
+    group3 :: String -> [String]
+    group3 [] = []
+    group3 s = take 3 s : group3 (drop 3 s)
 
 -- | Format a single byte bar in the chart.
 formatByteBar :: Int -> (Text.Text, Int) -> Text.Text
@@ -674,3 +803,4 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
+

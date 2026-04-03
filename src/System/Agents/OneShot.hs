@@ -70,11 +70,10 @@ import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
 
 data Trace
-  = ToolRegistrationTrace !ToolRegistration.Trace
-  | ToolPortalTrace !ToolPortal.Trace
-  | OpenAITrace !OpenAI.Trace
-  deriving (Show)
-
+    = ToolRegistrationTrace !ToolRegistration.Trace
+    | ToolPortalTrace !ToolPortal.Trace
+    | OpenAITrace !OpenAI.Trace
+    deriving (Show)
 
 -- | Controls where thinking content should be output.
 data ThinkingOutput
@@ -190,7 +189,7 @@ newtype OneShotResult = OneShotResult Text
 
 -- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
-extractResponseText (LlmResponse txt _thinking _) = Maybe.fromMaybe "" txt
+extractResponseText (LlmResponse txt _thinking _ _) = Maybe.fromMaybe "" txt
 
 -- | Parse flavor from text, defaulting to OpenAIv1 if not recognized.
 parseModelFlavor :: Text -> OpenAI.ModelFlavor

@@ -47,6 +47,7 @@ mkTestSession n = Session.Session
                 { Session.responseText = Just "LLM response"
                 , Session.responseThinking = Just "Thinking content..."
                 , Session.rawResponse = Aeson.object []
+                , Session.responseTokenUsage = Nothing
                 }
             , Session.llmToolCalls = []
             }) Nothing
@@ -71,6 +72,7 @@ mkSessionWithToolCalls = Session.Session
                 { Session.responseText = Just "I'll help"
                 , Session.responseThinking = Just "Let me think..."
                 , Session.rawResponse = Aeson.object []
+                , Session.responseTokenUsage = Nothing
                 }
             , Session.llmToolCalls =
                 [ Session.LlmToolCall $ Aeson.object
@@ -412,5 +414,4 @@ edgeCaseTests = testGroup "edge cases"
                 ] session
         length result.turns @?= 5
     ]
-
 

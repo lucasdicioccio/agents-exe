@@ -37,8 +37,8 @@ import System.Agents.Base (
     slug,
  )
 import System.Agents.MCP.Base (
-    ServerFlag(..),
-    Implementation(..),
+    Implementation (..),
+    ServerFlag (..),
  )
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Server.Runtime
@@ -82,7 +82,6 @@ data Trace
     | ToolPortalTrace !ToolPortal.Trace
     | ToolTrace !Tools.ToolTrace
     deriving (Show)
-
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -354,7 +353,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
   where
     -- Extract response text from LLM response, handling Nothing case
     extractResponseText :: LlmResponse -> Text
-    extractResponseText (LlmResponse mtxt _thinking _) = Maybe.fromMaybe "" mtxt
+    extractResponseText (LlmResponse mtxt _thinking _ _) = Maybe.fromMaybe "" mtxt
 
     -- Parse model flavor from text, defaulting to OpenAIv1
     parseModelFlavor :: Text -> OpenAI.ModelFlavor

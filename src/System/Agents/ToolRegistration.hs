@@ -24,7 +24,7 @@ bidirectional mapping between normalized and original names.
 module System.Agents.ToolRegistration (
     -- * Core types
     Tool,
-    Trace(..),
+    Trace (..),
     ToolRegistration (..),
 
     -- * Registration functions
@@ -123,7 +123,7 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
-type Tool call = ToolBase.Tool Trace call 
+type Tool call = ToolBase.Tool Trace call
 
 data Trace
     = BashToolsRunTrace !BashTools.RunTrace

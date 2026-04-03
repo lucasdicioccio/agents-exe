@@ -42,21 +42,20 @@ import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
 import System.Agents.OneShot (nodeToAgent)
 import qualified System.Agents.OneShot as OneShot
+import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
-import qualified System.Agents.Runtime.Trace as Runtime
 
 -- Import Tracer for creating a no-op tracer
 import Prod.Tracer (Tracer (..), contramap)
 
-
 data Trace
-  = RuntimeTrace !Runtime.Trace
-  | OneShotTrace !OneShot.Trace
-  deriving (Show)
+    = RuntimeTrace !Runtime.Trace
+    | OneShotTrace !OneShot.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Main Event Handler

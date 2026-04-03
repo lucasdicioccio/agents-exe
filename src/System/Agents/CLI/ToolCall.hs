@@ -13,7 +13,7 @@ Example usage:
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.ToolCall (
-    Trace(..),
+    Trace (..),
     handleToolCall,
     ToolCallOptions (..),
     ToolCallAgent (..),
@@ -38,10 +38,10 @@ import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.Tools.Context (ToolCall (..))
 
 data Trace
-  = AgentTreeTrace !AgentTree.TreeTrace
-  | OneShotToolTrace !OneShotTool.Trace
-  | ToolPortalTrace !ToolPortal.Trace
-  deriving (Show)
+    = AgentTreeTrace !AgentTree.TreeTrace
+    | OneShotToolTrace !OneShotTool.Trace
+    | ToolPortalTrace !ToolPortal.Trace
+    deriving (Show)
 
 -- | Options for the tool-call command
 data ToolCallOptions = ToolCallOptions

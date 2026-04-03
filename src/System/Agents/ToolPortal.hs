@@ -57,7 +57,7 @@ import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.Base (newConversationId)
 import System.Agents.Session.Types (newSessionId, newTurnId)
-import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
+import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), toolRun)
@@ -67,6 +67,7 @@ import System.Agents.Tools.Context (
     ToolResult (..),
     mkMinimalContext,
  )
+
 data Trace = PortalCall !ToolCall !ToolRegistration.Trace
     deriving (Show)
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module System.Agents.LLMs.OpenAI (
@@ -14,6 +15,7 @@ module System.Agents.LLMs.OpenAI (
     ApiBaseUrl (..),
     SystemPrompt (..),
     Response (..),
+    TokenUsage (..),
     callLLMPayload,
     calculatePayloadBytes,
     parseLLMResponse,
@@ -23,9 +25,11 @@ module System.Agents.LLMs.OpenAI (
     WaitAction (..),
 ) where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
@@ -46,19 +50,96 @@ import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..), jsonSchema)
 
 -------------------------------------------------------------------------------
--- Trace with byte counts
+-- Token Usage Tracking
 -------------------------------------------------------------------------------
 
-{- | Trace events for LLM calls, now including byte counts for tracking.
+{- | Token usage breakdown from LLM API response.
 
-The constructors include byte counts for request/response payloads
-to support cost transparency and debugging.
+Different providers use different field names and structures.
+This type captures the common fields across providers while
+preserving the raw usage object for provider-specific fields.
+
+Supported providers:
+- OpenAI: prompt_tokens, completion_tokens, total_tokens, cached_tokens in prompt_tokens_details
+- Kimi/Moonshot: Same as OpenAI, cached_tokens at top level
+- Claude: input_tokens, output_tokens, thinking_tokens for extended thinking
+- Mistral: Same as OpenAI
+-}
+data TokenUsage = TokenUsage
+    { tokenPromptTokens :: Int
+    -- ^ Tokens in the prompt/context (input)
+    , tokenCompletionTokens :: Int
+    -- ^ Tokens in the completion response (output)
+    , tokenTotalTokens :: Int
+    -- ^ Total tokens used
+    , tokenCachedTokens :: Maybe Int
+    -- ^ Cached tokens (Kimi/OpenAI context caching)
+    , tokenThinkingTokens :: Maybe Int
+    -- ^ Reasoning/thinking tokens (Claude extended thinking)
+    , tokenRawUsage :: Aeson.Object
+    -- ^ Raw usage object for provider-specific fields
+    }
+    deriving (Show, Eq, Ord)
+
+instance FromJSON TokenUsage where
+    parseJSON = parseUsage
+
+instance ToJSON TokenUsage where
+    toJSON usage =
+        Aeson.Object $
+            KeyMap.fromList
+                [ "prompt_tokens" .= usage.tokenPromptTokens
+                , "completion_tokens" .= usage.tokenCompletionTokens
+                , "total_tokens" .= usage.tokenTotalTokens
+                ]
+                `KeyMap.union` usage.tokenRawUsage
+
+{- | Parse usage object handling different provider formats.
+Handles field name variations across OpenAI, Claude, Kimi, and Mistral.
+-}
+parseUsage :: Aeson.Value -> Aeson.Parser TokenUsage
+parseUsage = Aeson.withObject "Usage" $ \v -> do
+    -- Handle different field names across providers
+    -- OpenAI/Kimi/Mistral: prompt_tokens
+    -- Claude: input_tokens
+    prompt <- v .: "prompt_tokens" <|> v .: "input_tokens" <|> pure 0
+
+    -- OpenAI/Kimi/Mistral: completion_tokens
+    -- Claude: output_tokens
+    completion <- v .: "completion_tokens" <|> v .: "output_tokens" <|> pure 0
+
+    -- Total tokens - calculate if not provided
+    total <- v .:? "total_tokens" >>= maybe (pure (prompt + completion)) pure
+
+    -- Cached tokens - can be at top level (Kimi) or in details object (OpenAI)
+    cached <-
+        v .:? "cached_tokens"
+            <|> ( v .:? "prompt_tokens_details" >>= \case
+                    Just (Object d') -> d' .:? "cached_tokens"
+                    _ -> pure Nothing
+                )
+
+    -- Thinking/reasoning tokens (Claude extended thinking)
+    thinking <- v .:? "reasoning_tokens" <|> v .:? "thinking_tokens"
+
+    TokenUsage prompt completion total cached thinking <$> pure v
+
+-------------------------------------------------------------------------------
+-- Trace with byte counts and token usage
+-------------------------------------------------------------------------------
+
+{- | Trace events for LLM calls, now including byte counts and token usage for tracking.
+
+The constructors include:
+- Byte counts for request/response payloads to support cost transparency and debugging
+- Optional estimated tokens for requests (approximate, based on 4 chars/token)
+- Optional actual token usage from provider responses
 -}
 data Trace
-    = -- | Payload being sent to the LLM + byte count
-      CallChatCompletion !Aeson.Value !Int
-    | -- | Response received from the LLM + byte count
-      GotChatCompletion !Aeson.Value !Int
+    = -- | Payload being sent to the LLM + byte count + estimated tokens
+      CallChatCompletion !Aeson.Value !Int !(Maybe Int)
+    | -- | Response received from the LLM + byte count + actual token usage
+      GotChatCompletion !Aeson.Value !Int !(Maybe TokenUsage)
     | -- | Trace from the underlying HTTP client
       HttpClientTrace !HttpClient.Trace
     | -- | Moonshot/Kimi overloaded error backoff: retry attempt and delay in seconds
@@ -298,6 +379,16 @@ overloadedBackoffDelays = [60, 540, 1200] -- 1min, 9min, 20min
 -- Retry logic for LLM calls with overloaded error handling
 -------------------------------------------------------------------------------
 
+-- | Extract token usage from a JSON response body if present.
+extractTokenUsage :: Aeson.Value -> Maybe TokenUsage
+extractTokenUsage body =
+    case body of
+        Aeson.Object obj ->
+            case KeyMap.lookup "usage" obj of
+                Just usageVal -> Aeson.parseMaybe parseUsage usageVal
+                Nothing -> Nothing
+        _ -> Nothing
+
 callLLMPayload ::
     (ToJSON payload) =>
     Tracer IO Trace ->
@@ -323,7 +414,9 @@ callLLMPayload tracer rt baseUrl payload =
     makeRequest = do
         let payloadVal = Aeson.toJSON payload
         let requestBytes = calculatePayloadBytes payloadVal
-        runTracer tracer (CallChatCompletion payloadVal requestBytes)
+        -- Estimate tokens: roughly 4 characters per token
+        let estimatedTokens = Just (requestBytes `div` 4)
+        runTracer tracer (CallChatCompletion payloadVal requestBytes estimatedTokens)
         httpRsp <- rt.post (contramap HttpClientTrace tracer) (baseUrl.getBaseUrl <> "/chat/completions") (Just payloadVal)
         case httpRsp of
             Left (HttpClient.SomeError err) -> pure $ Left err
@@ -333,7 +426,9 @@ callLLMPayload tracer rt baseUrl payload =
                     Nothing -> pure $ Left "json decode body error"
                     Just body -> do
                         let responseBytes = calculatePayloadBytes body
-                        runTracer tracer (GotChatCompletion body responseBytes)
+                        -- Parse token usage from response if available
+                        let mTokenUsage = extractTokenUsage body
+                        runTracer tracer (GotChatCompletion body responseBytes mTokenUsage)
                         pure $ Right (status, body)
 
     handleOverloaded :: Int -> IO (Either String Value)
@@ -391,6 +486,8 @@ data Response
     , rspContent :: Maybe Text
     , rspToolCalls :: Maybe [OpenAIToolCall]
     , rspReasoningContent :: Maybe Text
+    , rspTokenUsage :: Maybe TokenUsage
+    -- ^ Parsed token usage from the 'usage' field
     }
     deriving (Show)
 
@@ -399,6 +496,8 @@ instance FromJSON Response where
         Aeson.withObject "Response" $ \v -> do
             choices <- v .: "choices" :: Aeson.Parser (NonEmpty Aeson.Object)
             firstChoice <- (NonEmpty.head choices) .: "message"
+            -- Parse usage field if present
+            mUsage <- v .:? "usage" >>= mapM parseUsage
             Response
                 <$> pure v
                 <*> pure firstChoice
@@ -406,6 +505,7 @@ instance FromJSON Response where
                 <*> firstChoice .: "content"
                 <*> firstChoice .:? "tool_calls"
                 <*> firstChoice .:? "reasoning_content"
+                <*> pure mUsage
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
