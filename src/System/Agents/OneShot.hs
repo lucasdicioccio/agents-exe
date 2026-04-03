@@ -28,7 +28,7 @@ module System.Agents.OneShot (
     parseModelFlavor,
 ) where
 
-import Control.Concurrent.STM (readTVarIO)
+import Control.Concurrent.STM (TVar, readTVarIO)
 import Control.Exception (Exception)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -415,13 +415,15 @@ nilUUID = UUID.fromWords 0 0 0 0
 {- | Wrap an agent to dynamically evaluate and filter active tools based on session history.
 
 This decorator:
-1. Creates an IORef to track the current session state
-2. Updates the IORef after each step (like onProgress)
-3. Filters sysTools based on the session's activation state
+1. Takes a TVar containing the available ToolRegistrations
+2. Creates an IORef to track the current session state
+3. Updates the IORef after each step (like onProgress)
+4. Reads from the TVar and filters ToolRegistrations based on session activation state
+5. Maps the filtered ToolRegistrations to SystemTools
 
 Tools are filtered based on 'meta_activate_tool' and 'meta_deactivate_tool' calls
-in the session history. The original list of tools is captured at agent creation
-time and dynamically filtered on each access.
+in the session history. The list of ToolRegistrations is read fresh from the TVar
+on each access, allowing runtime changes to the available tools.
 
 For now, this implementation filters tools that belong to inactive toolgroups.
 Tools without explicit toolgroup associations are considered always active.
@@ -430,11 +432,11 @@ Example usage:
 
 @
 agent <- nodeToAgent store mPath convId tracer loadedApiKeys node
-dynamicAgent <- agentEvaluateActiveTools agent
+dynamicAgent <- agentEvaluateActiveTools (osNodeTools node) agent
 @
 -}
-agentEvaluateActiveTools :: forall r. Agent r -> IO (Agent r)
-agentEvaluateActiveTools agent = do
+agentEvaluateActiveTools :: forall r. TVar [ToolRegistration] -> Agent r -> IO (Agent r)
+agentEvaluateActiveTools toolsTVar agent = do
     -- Create an IORef to track the current session
     -- Use nil UUIDs for initial empty session
     let emptySessionId = SessionId nilUUID
@@ -442,13 +444,10 @@ agentEvaluateActiveTools agent = do
     let emptySession = Session [] emptySessionId Nothing emptyTurnId
     sessionRef <- newIORef emptySession
     
-    -- Capture the original tools IO action
-    let originalToolsIO = agent.sysTools
-    
     -- Create the decorated agent
     pure $ agent
         { step = decorateStep sessionRef agent.step
-        , sysTools = filterTools sessionRef originalToolsIO
+        , sysTools = filterTools sessionRef toolsTVar
         }
   where
     -- | Decorates the step function to update the sessionRef after each step
@@ -460,28 +459,28 @@ agentEvaluateActiveTools agent = do
         stepFn sess
     
     -- | Filters tools based on the current session activation state
-    filterTools :: IORef Session -> IO [SystemTool] -> IO [SystemTool]
-    filterTools sessionRef toolsIO = do
+    filterTools :: IORef Session -> TVar [ToolRegistration] -> IO [SystemTool]
+    filterTools sessionRef tvar = do
         -- Get the current session state
         currentSession <- readIORef sessionRef
         
         -- Compute the activation state from session history
         let activationState = foldSession currentSession
         
-        -- Get the original tools
-        allTools <- toolsIO
+        -- Read the ToolRegistrations from the TVar
+        allToolRegs <- readTVarIO tvar
         
-        -- Filter tools based on activation state
-        -- For now, all tools are considered to belong to the default toolgroup
-        -- and are active unless explicitly deactivated
-        -- In a future enhancement, tools can be tagged with their toolgroup
-        pure $ filter (isToolActive activationState) allTools
+        -- Filter ToolRegistrations based on activation state
+        let activeToolRegs = filter (isToolRegActive activationState) allToolRegs
+        
+        -- Map the filtered ToolRegistrations to SystemTools
+        pure $ map toolRegistrationToSystemTool activeToolRegs
     
-    -- | Check if a tool is active based on the activation state
+    -- | Check if a ToolRegistration is active based on the activation state
     -- Currently treats all tools as belonging to the default/always-active category
     -- Future: tools can be associated with specific toolgroups for fine-grained control
-    isToolActive :: ToolboxSessionState -> SystemTool -> Bool
-    isToolActive activationState _tool = 
+    isToolRegActive :: ToolboxSessionState -> ToolRegistration -> Bool
+    isToolRegActive activationState _toolReg = 
         -- For now, we consider all tools to be in the "default" toolgroup
         -- which is always active unless explicitly deactivated
         -- The tool name could be used to determine its toolgroup in the future
