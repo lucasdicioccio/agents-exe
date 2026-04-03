@@ -37,8 +37,8 @@ import System.Agents.Base (
     slug,
  )
 import System.Agents.MCP.Base (
-    ServerFlag(..),
-    Implementation(..),
+    Implementation (..),
+    ServerFlag (..),
  )
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Server.Runtime
@@ -82,7 +82,6 @@ data Trace
     | ToolPortalTrace !ToolPortal.Trace
     | ToolTrace !Tools.ToolTrace
     deriving (Show)
-
 
 -- | Configuration for the MCP server.
 data McpServerConfig = McpServerConfig
@@ -473,4 +472,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-

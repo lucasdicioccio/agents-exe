@@ -41,13 +41,13 @@ import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 as CByteString
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
-import Prod.Tracer (Tracer,contramap)
+import Prod.Tracer (Tracer, contramap)
 
 -------------------------------------------------------------------------------
 
 import qualified System.Agents.MCP.Client as McpClient
+import System.Agents.Tools.Base (CallResult (..), ToolDef (..), extractCall, mapCallResult, mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
-import System.Agents.Tools.Base (CallResult(..),ToolDef(..),mapToolResult,mapCallResult,extractCall)
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
@@ -59,7 +59,7 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
 -------------------------------------------------------------------------------
-type Tool call = ToolBase.Tool Trace call 
+type Tool call = ToolBase.Tool Trace call
 
 data Trace
     = BashToolsLoadTrace !BashTools.LoadTrace

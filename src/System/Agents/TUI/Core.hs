@@ -9,7 +9,8 @@ This module re-exports functionality from the submodules and provides
 the main initialization and application runner using OS-native structures.
 -}
 module System.Agents.TUI.Core (
-    Trace(..),
+    Trace (..),
+
     -- * Re-exports from Types
     WidgetName (..),
     N,

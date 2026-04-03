@@ -7,7 +7,7 @@ implementation of LLM session calls.
 This module has been updated to work with OS-native structures.
 -}
 module System.Agents.AgentTree.OneShotTool (
-    Trace(..),
+    Trace (..),
     turnAgentRuntimeIntoIOTool,
 ) where
 
@@ -61,10 +61,10 @@ import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 
 data Trace
-  = ToolRegistrationTrace !ToolRegistration.Trace
-  | ToolPortalTrace !ToolPortal.Trace 
-  | OpenAITrace !OpenAI.Trace 
-  deriving (Show)
+    = ToolRegistrationTrace !ToolRegistration.Trace
+    | ToolPortalTrace !ToolPortal.Trace
+    | OpenAITrace !OpenAI.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 
@@ -280,4 +280,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
-

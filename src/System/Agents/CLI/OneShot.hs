@@ -9,7 +9,8 @@ the response. This is the non-interactive mode for agents-exe.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.OneShot (
-    Trace(..),
+    Trace (..),
+
     -- * Types
     OneShotOptions (..),
     OneShotAgent (..),
@@ -43,10 +44,10 @@ import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.PromptScript (PromptScript, interpretPromptScript)
 
 data Trace
-  = AgentTreeTrace !AgentTree.TreeTrace
-  | OneShotTrace !OneShot.Trace
-  | OneShotToolTrace !OneShotTool.Trace
-  deriving (Show)
+    = AgentTreeTrace !AgentTree.TreeTrace
+    | OneShotTrace !OneShot.Trace
+    | OneShotToolTrace !OneShotTool.Trace
+    deriving (Show)
 
 -- | Options for the one-shot command
 data OneShotOptions = OneShotOptions

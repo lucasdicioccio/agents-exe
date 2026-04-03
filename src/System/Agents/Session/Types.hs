@@ -100,8 +100,9 @@ data StepByteUsage = StepByteUsage
     }
     deriving (Show, Ord, Eq, Generic)
 
--- | Custom ToJSON for StepByteUsage that maintains backward compatibility.
--- Fields are only included if they have values (non-zero or Just).
+{- | Custom ToJSON for StepByteUsage that maintains backward compatibility.
+Fields are only included if they have values (non-zero or Just).
+-}
 instance ToJSON StepByteUsage where
     toJSON usage =
         Aeson.object $
@@ -113,8 +114,9 @@ instance ToJSON StepByteUsage where
             ]
                 ++ ["stepTokenUsage" .= tu | Just tu <- [usage.stepTokenUsage]]
 
--- | Custom FromJSON for StepByteUsage that handles backward compatibility.
--- Missing fields are filled with default values (0 for Int, Nothing for Maybe).
+{- | Custom FromJSON for StepByteUsage that handles backward compatibility.
+Missing fields are filled with default values (0 for Int, Nothing for Maybe).
+-}
 instance FromJSON StepByteUsage where
     parseJSON = Aeson.withObject "StepByteUsage" $ \v ->
         StepByteUsage
@@ -333,4 +335,3 @@ data Session
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON Session
 instance ToJSON Session
-

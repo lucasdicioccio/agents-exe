@@ -64,7 +64,7 @@ import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
 
-import  System.Agents.CLI (Trace(..), toJsonTrace)
+import System.Agents.CLI (Trace (..), toJsonTrace)
 
 -------------------------------------------------------------------------------
 -- Default Configuration

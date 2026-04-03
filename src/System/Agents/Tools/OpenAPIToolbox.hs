@@ -813,4 +813,3 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
      in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
-

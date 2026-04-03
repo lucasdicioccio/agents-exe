@@ -9,7 +9,7 @@ information about loaded agents including their tools.
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.Check (
-    Trace(..),
+    Trace (..),
     handleCheck,
     printAgentCheck,
     ToolsOutputMode (..),
@@ -32,9 +32,9 @@ import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 
 data Trace
-  = AgentTreeTrace !AgentTree.TreeTrace
-  | OneShotToolTrace !OneShotTool.Trace
-  deriving (Show)
+    = AgentTreeTrace !AgentTree.TreeTrace
+    | OneShotToolTrace !OneShotTool.Trace
+    deriving (Show)
 
 -- | How to display tool information in the check output
 data ToolsOutputMode

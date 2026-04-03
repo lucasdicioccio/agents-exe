@@ -94,8 +94,9 @@ instance ToJSON TokenUsage where
                 ]
                 `KeyMap.union` usage.tokenRawUsage
 
--- | Parse usage object handling different provider formats.
--- Handles field name variations across OpenAI, Claude, Kimi, and Mistral.
+{- | Parse usage object handling different provider formats.
+Handles field name variations across OpenAI, Claude, Kimi, and Mistral.
+-}
 parseUsage :: Aeson.Value -> Aeson.Parser TokenUsage
 parseUsage = Aeson.withObject "Usage" $ \v -> do
     -- Handle different field names across providers
@@ -508,4 +509,3 @@ instance FromJSON Response where
 
 parseLLMResponse :: Value -> Aeson.Parser Response
 parseLLMResponse v = Aeson.parseJSON v
-

@@ -70,11 +70,10 @@ import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
 
 data Trace
-  = ToolRegistrationTrace !ToolRegistration.Trace
-  | ToolPortalTrace !ToolPortal.Trace
-  | OpenAITrace !OpenAI.Trace
-  deriving (Show)
-
+    = ToolRegistrationTrace !ToolRegistration.Trace
+    | ToolPortalTrace !ToolPortal.Trace
+    | OpenAITrace !OpenAI.Trace
+    deriving (Show)
 
 -- | Controls where thinking content should be output.
 data ThinkingOutput
@@ -403,4 +402,3 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
-
