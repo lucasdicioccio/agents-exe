@@ -134,10 +134,15 @@ runOneShotWithConfig ::
     IO OneShotResult
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId tracer loadedApiKeys node
+    
+    -- Apply dynamic tool filtering based on session activation state
+    -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
+    agent1 <- agentEvaluateActiveTools (osNodeTools node) agent0
+    
     let agent =
             agentSetQuery (UserQuery query) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
-                    agent0
+                    agent1
 
     -- Create or use initial session with all required fields including sessionConversationId
     session0 <- case config.initialSession of
