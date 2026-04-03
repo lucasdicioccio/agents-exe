@@ -18,6 +18,7 @@ module System.Agents.OneShot (
     -- * Main functions (OS-native)
     nodeToAgent,
     agentStoreSession,
+    agentEvaluateActiveTools,
     fileStoringCallback,
     mainPrintAgent,
     mainOneShotText,
@@ -33,12 +34,15 @@ import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Foldable (traverse_)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), contramap)
 import System.IO (stderr)
 
@@ -65,6 +69,7 @@ import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import System.Agents.Tools.Activation.Session (foldSession, isToolgroupActive, ToolboxSessionState (..))
 
 import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
@@ -237,7 +242,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
 
     -- Read tools from the OS-native TVar
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
+    allTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
 
     -- Get the API key for this agent and create HTTP runtime
     let apiKeyId = Base.apiKeyId agentCfg
@@ -274,7 +279,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                         _ -> pure ()
                     pure action
                 , sysPrompt = pure sPrompt
-                , sysTools = pure sTools
+                , sysTools = pure allTools
                 , usrQuery = pure Nothing
                 , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
@@ -402,3 +407,84 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
+
+-- | A nil UUID for creating initial empty session references.
+nilUUID :: UUID
+nilUUID = UUID.fromWords 0 0 0 0
+
+{- | Wrap an agent to dynamically evaluate and filter active tools based on session history.
+
+This decorator:
+1. Creates an IORef to track the current session state
+2. Updates the IORef after each step (like onProgress)
+3. Filters sysTools based on the session's activation state
+
+Tools are filtered based on 'meta_activate_tool' and 'meta_deactivate_tool' calls
+in the session history. The original list of tools is captured at agent creation
+time and dynamically filtered on each access.
+
+For now, this implementation filters tools that belong to inactive toolgroups.
+Tools without explicit toolgroup associations are considered always active.
+
+Example usage:
+
+@
+agent <- nodeToAgent store mPath convId tracer loadedApiKeys node
+dynamicAgent <- agentEvaluateActiveTools agent
+@
+-}
+agentEvaluateActiveTools :: forall r. Agent r -> IO (Agent r)
+agentEvaluateActiveTools agent = do
+    -- Create an IORef to track the current session
+    -- Use nil UUIDs for initial empty session
+    let emptySessionId = SessionId nilUUID
+    let emptyTurnId = TurnId nilUUID
+    let emptySession = Session [] emptySessionId Nothing emptyTurnId
+    sessionRef <- newIORef emptySession
+    
+    -- Capture the original tools IO action
+    let originalToolsIO = agent.sysTools
+    
+    -- Create the decorated agent
+    pure $ agent
+        { step = decorateStep sessionRef agent.step
+        , sysTools = filterTools sessionRef originalToolsIO
+        }
+  where
+    -- | Decorates the step function to update the sessionRef after each step
+    decorateStep :: IORef Session -> (Session -> IO (Action r)) -> (Session -> IO (Action r))
+    decorateStep sessionRef stepFn = \sess -> do
+        -- Update the session reference with the current session
+        writeIORef sessionRef sess
+        -- Call the original step function
+        stepFn sess
+    
+    -- | Filters tools based on the current session activation state
+    filterTools :: IORef Session -> IO [SystemTool] -> IO [SystemTool]
+    filterTools sessionRef toolsIO = do
+        -- Get the current session state
+        currentSession <- readIORef sessionRef
+        
+        -- Compute the activation state from session history
+        let activationState = foldSession currentSession
+        
+        -- Get the original tools
+        allTools <- toolsIO
+        
+        -- Filter tools based on activation state
+        -- For now, all tools are considered to belong to the default toolgroup
+        -- and are active unless explicitly deactivated
+        -- In a future enhancement, tools can be tagged with their toolgroup
+        pure $ filter (isToolActive activationState) allTools
+    
+    -- | Check if a tool is active based on the activation state
+    -- Currently treats all tools as belonging to the default/always-active category
+    -- Future: tools can be associated with specific toolgroups for fine-grained control
+    isToolActive :: ToolboxSessionState -> SystemTool -> Bool
+    isToolActive activationState _tool = 
+        -- For now, we consider all tools to be in the "default" toolgroup
+        -- which is always active unless explicitly deactivated
+        -- The tool name could be used to determine its toolgroup in the future
+        let defaultToolgroup = "default" :: Text
+        in isToolgroupActive activationState defaultToolgroup
+
