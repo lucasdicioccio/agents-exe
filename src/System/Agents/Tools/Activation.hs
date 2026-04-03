@@ -184,4 +184,3 @@ instance Semigroup ToolboxSessionState where
 -- | Empty session state
 instance Monoid ToolboxSessionState where
     mempty = ToolboxSessionState Map.empty
-

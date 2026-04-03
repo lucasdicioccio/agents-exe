@@ -1138,8 +1138,9 @@ data McpSimpleBinaryConfiguration
     , args :: [Text]
     -- ^ Command-line arguments for the executable
     , mcpLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
-    -- NOTE: Cannot be ToolCallLifetime for MCP servers
+    {- ^ Optional resource lifetime (default: ConversationLifetime)
+    NOTE: Cannot be ToolCallLifetime for MCP servers
+    -}
     , mcpActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -1288,4 +1289,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-
