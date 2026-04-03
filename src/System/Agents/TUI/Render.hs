@@ -11,6 +11,7 @@ import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Edit (renderEditor)
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
+import Data.List (intersperse)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -397,9 +398,9 @@ aggregateSessionTokenUsage session =
             else Just $ aggregateTokenUsages allTokenUsages
   where
     collectTokenUsages :: [Turn] -> [TokenUsage]
-    collectTokenUsages turns =
+    collectTokenUsages turnList =
         [ usage
-        | turn <- turns
+        | turn <- turnList
         , usage <- extractUsageFromTurn turn
         ]
 
@@ -459,15 +460,15 @@ formatTokenStats stats =
 -- | Format token count with thousands separator.
 formatTokenCount :: Int -> Text
 formatTokenCount n =
-    let txt = Text.pack (show n)
-     in addThousandSeparators txt
+    let numText = Text.pack (show n)
+     in addThousandSeparators numText
 
 -- | Add thousand separators to a numeric text.
 addThousandSeparators :: Text -> Text
-addThousandSeparators txt =
-    let digits = Text.unpack txt
+addThousandSeparators numText =
+    let digits = Text.unpack numText
         grouped = reverse $ group3 (reverse digits)
-     in Text.pack $ concat (intersperse ',' grouped)
+     in Text.pack $ concat (intersperse "," grouped)
   where
     group3 :: String -> [String]
     group3 [] = []
