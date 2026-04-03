@@ -19,6 +19,7 @@ import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
 import System.Agents.Base (Agent (..), ConversationId)
+import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
@@ -60,6 +61,10 @@ statusErrorAttr = attrName "statusError"
 -- | Attribute for byte usage text (dimmed/smaller).
 byteUsageAttr :: AttrName
 byteUsageAttr = attrName "byteUsage"
+
+-- | Attribute for token usage text.
+tokenUsageAttr :: AttrName
+tokenUsageAttr = attrName "tokenUsage"
 
 -- | Attribute for paused conversation indicator.
 pausedAttr :: AttrName
@@ -358,20 +363,115 @@ render_session Nothing _ =
     vBox $ [txt "session not started yet"]
 render_session (Just session) _ongoingConvs =
     vBox $
-        [render_session_total_bytes session]
+        [render_session_usage session]
             ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
 
--- | Render total session bytes and turn count.
-render_session_total_bytes :: Session -> Widget N
-render_session_total_bytes session =
-    let totalBytes = sessionTotalBytes session
-        turnCount = length session.turns
-     in if totalBytes == 0 && turnCount == 0
+-- | Render total session usage (tokens if available, else bytes) and turn count.
+render_session_usage :: Session -> Widget N
+render_session_usage session =
+    let turnCount = length session.turns
+        -- Try to get aggregated token usage from all turns
+        mTokenStats = aggregateSessionTokenUsage session
+     in if turnCount == 0
             then emptyWidget
-            else
-                withAttr byteUsageAttr $
-                    txt $
-                        "Session total: " <> formatBytes totalBytes <> "  (" <> Text.pack (show turnCount) <> " turns)  "
+            else case mTokenStats of
+                Just tokenStats ->
+                    withAttr tokenUsageAttr $
+                        txt $
+                            "Session total: " <> formatTokenStats tokenStats <> "  (" <> Text.pack (show turnCount) <> " turns)  "
+                Nothing ->
+                    let totalBytes = sessionTotalBytes session
+                     in if totalBytes == 0
+                            then emptyWidget
+                            else
+                                withAttr byteUsageAttr $
+                                    txt $
+                                        "Session total: " <> formatBytes totalBytes <> "  (" <> Text.pack (show turnCount) <> " turns)  "
+
+-- | Aggregate token usage across all turns in a session.
+aggregateSessionTokenUsage :: Session -> Maybe TokenUsageStats
+aggregateSessionTokenUsage session =
+    let allTokenUsages = collectTokenUsages session.turns
+     in if null allTokenUsages
+            then Nothing
+            else Just $ aggregateTokenUsages allTokenUsages
+  where
+    collectTokenUsages :: [Turn] -> [TokenUsage]
+    collectTokenUsages turns =
+        [ usage
+        | turn <- turns
+        , usage <- extractUsageFromTurn turn
+        ]
+
+    extractUsageFromTurn :: Turn -> [TokenUsage]
+    extractUsageFromTurn turn =
+        let mUsage = case turn of
+                UserTurn _ mStepUsage -> mStepUsage
+                LlmTurn _ mStepUsage -> mStepUsage
+         in case mUsage of
+                Just stepUsage -> maybeToList (stepTokenUsage stepUsage)
+                Nothing -> []
+
+    maybeToList :: Maybe a -> [a]
+    maybeToList Nothing = []
+    maybeToList (Just x) = [x]
+
+    aggregateTokenUsages :: [TokenUsage] -> TokenUsageStats
+    aggregateTokenUsages usages =
+        TokenUsageStats
+            { statPromptTokens = sum $ map tokenPromptTokens usages
+            , statCompletionTokens = sum $ map tokenCompletionTokens usages
+            , statTotalTokens = sum $ map tokenTotalTokens usages
+            , statCachedTokens = sumMaybe $ map tokenCachedTokens usages
+            , statThinkingTokens = sumMaybe $ map tokenThinkingTokens usages
+            }
+
+    sumMaybe :: [Maybe Int] -> Maybe Int
+    sumMaybe ms =
+        let vs = [v | Just v <- ms]
+         in if null vs then Nothing else Just (sum vs)
+
+-- | Token usage statistics aggregated across a session.
+data TokenUsageStats = TokenUsageStats
+    { statPromptTokens :: Int
+    , statCompletionTokens :: Int
+    , statTotalTokens :: Int
+    , statCachedTokens :: Maybe Int
+    , statThinkingTokens :: Maybe Int
+    }
+
+-- | Format token stats for display.
+formatTokenStats :: TokenUsageStats -> Text
+formatTokenStats stats =
+    let baseText = formatTokenCount (statTotalTokens stats) <> " tokens"
+        details =
+            [ "in: " <> formatTokenCount (statPromptTokens stats)
+            , "out: " <> formatTokenCount (statCompletionTokens stats)
+            ]
+        withCached = case statCachedTokens stats of
+            Just n | n > 0 -> details ++ ["cached: " <> formatTokenCount n]
+            _ -> details
+        withThinking = case statThinkingTokens stats of
+            Just n | n > 0 -> withCached ++ ["think: " <> formatTokenCount n]
+            _ -> withCached
+     in baseText <> " (" <> Text.intercalate ", " withThinking <> ")"
+
+-- | Format token count with thousands separator.
+formatTokenCount :: Int -> Text
+formatTokenCount n =
+    let txt = Text.pack (show n)
+     in addThousandSeparators txt
+
+-- | Add thousand separators to a numeric text.
+addThousandSeparators :: Text -> Text
+addThousandSeparators txt =
+    let digits = Text.unpack txt
+        grouped = reverse $ group3 (reverse digits)
+     in Text.pack $ concat (intersperse ',' grouped)
+  where
+    group3 :: String -> [String]
+    group3 [] = []
+    group3 s = take 3 s : group3 (drop 3 s)
 
 -- | Format bytes in human-readable form.
 formatBytes :: Int -> Text
@@ -381,7 +481,7 @@ formatBytes n
     | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
     | otherwise = Text.pack (show n) <> " B"
 
--- | Render a single turn with byte usage.
+-- | Render a single turn with usage info (tokens preferred, bytes fallback).
 render_turn :: (Int, Turn) -> Widget N
 render_turn (k, turn) =
     case turn of
@@ -400,7 +500,7 @@ render_turn (k, turn) =
                         then txt $ "+ " <> getSystemPromptText (userPrompt userTurn)
                         else txt $ "+ ..."
                     , emptyWidget -- TODO n-tools, n-responses here
-                    , render_byte_usage mUsage
+                    , render_usage mUsage
                     , txt ""
                     ]
         LlmTurn llmTurn mUsage ->
@@ -416,7 +516,7 @@ render_turn (k, turn) =
                                 withAttr thinkingAttr $
                                     vBox [txt "🤔 Thinking...", txt thinking]
                             Nothing -> txt ""
-                        , render_byte_usage mUsage
+                        , render_usage mUsage
                         , txt " "
                         ]
                     , if null llmTurn.llmToolCalls
@@ -424,18 +524,36 @@ render_turn (k, turn) =
                         else
                             vBox
                                 [ txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
-                                , render_byte_usage mUsage
+                                , render_usage mUsage
                                 , txt " "
                                 ]
                     ]
 
--- | Render byte usage for a turn.
-render_byte_usage :: Maybe StepByteUsage -> Widget N
-render_byte_usage Nothing = emptyWidget
-render_byte_usage (Just usage) =
-    withAttr byteUsageAttr $
-        txt $
-            "[" <> formatByteBreakdown usage <> "]"
+-- | Render usage info for a turn (tokens if available, else bytes).
+render_usage :: Maybe StepByteUsage -> Widget N
+render_usage Nothing = emptyWidget
+render_usage (Just usage) =
+    case stepTokenUsage usage of
+        Just tokenUsage ->
+            withAttr tokenUsageAttr $ txt $ "[" <> formatTokenUsage tokenUsage <> "]"
+        Nothing ->
+            withAttr byteUsageAttr $ txt $ "[" <> formatByteBreakdown usage <> "]"
+
+-- | Format token usage for display.
+formatTokenUsage :: TokenUsage -> Text
+formatTokenUsage usage =
+    let parts =
+            concat
+                [ ["in: " <> formatTokenCount (tokenPromptTokens usage)]
+                , ["out: " <> formatTokenCount (tokenCompletionTokens usage)]
+                , case tokenCachedTokens usage of
+                    Just n | n > 0 -> ["cached: " <> formatTokenCount n]
+                    _ -> []
+                , case tokenThinkingTokens usage of
+                    Just n | n > 0 -> ["think: " <> formatTokenCount n]
+                    _ -> []
+                ]
+     in Text.intercalate ", " parts <> " | total: " <> formatTokenCount (tokenTotalTokens usage)
 
 {- | Format byte usage breakdown for display.
 TODO: display tools and tool-responses explicitly
@@ -485,9 +603,11 @@ tui_appAttrMap _ =
         , (llmMessageAttr, BrickUtil.fg Vty.cyan)
         , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
         , (byteUsageAttr, BrickUtil.fg Vty.brightYellow `Vty.withStyle` Vty.dim)
+        , (tokenUsageAttr, BrickUtil.fg Vty.brightGreen `Vty.withStyle` Vty.dim)
         , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
         ]
+
