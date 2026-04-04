@@ -191,7 +191,8 @@ createEmptySession =
 createSessionWithToolCalls :: [(Text, Text)] -> Session
 createSessionWithToolCalls calls =
     let toolCalls = map (\(name, group) -> createToolCall name (Just $ Aeson.object [("toolgroup", Aeson.String group)])) calls
-        llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null) toolCalls
+        -- LlmResponse now includes responseTokenUsage as 4th field
+        llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) toolCalls
         llmTurn = LlmTurn llmContent Nothing
      in Session
             { turns = [llmTurn]

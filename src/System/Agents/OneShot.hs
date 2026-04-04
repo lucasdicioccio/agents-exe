@@ -68,8 +68,17 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
+import System.Agents.Tools.Activation (Activation (..))
+import System.Agents.Tools.Activation.Session (
+    foldSession,
+    isToolgroupActive,
+    ToolboxSessionState (..),
+    extractToolgroups,
+    makeActivateTool,
+    makeDeactivateTool,
+    makeDiscoverTools,
+ )
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
-import System.Agents.Tools.Activation.Session (foldSession, isToolgroupActive, ToolboxSessionState (..))
 
 import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
@@ -425,13 +434,14 @@ This decorator:
 3. Updates the IORef after each step (like onProgress)
 4. Reads from the TVar and filters ToolRegistrations based on session activation state
 5. Maps the filtered ToolRegistrations to SystemTools
+6. Adds meta tools (meta_activate_tool, meta_deactivate_tool, meta_discover_tools) when toolgroups exist
 
 Tools are filtered based on 'meta_activate_tool' and 'meta_deactivate_tool' calls
 in the session history. The list of ToolRegistrations is read fresh from the TVar
 on each access, allowing runtime changes to the available tools.
 
-For now, this implementation filters tools that belong to inactive toolgroups.
-Tools without explicit toolgroup associations are considered always active.
+Tools with 'OnDemandActivated' activation are only visible when their toolgroup
+is active. Tools with 'AlwaysActivated' or no activation are always visible.
 
 Example usage:
 
@@ -475,20 +485,31 @@ agentEvaluateActiveTools toolsTVar agent = do
         -- Read the ToolRegistrations from the TVar
         allToolRegs <- readTVarIO tvar
         
+        -- Extract all unique toolgroups from the registrations
+        let toolgroups = extractToolgroups allToolRegs
+        
+        -- Build meta tools if any toolgroups exist
+        let metaTools = if null toolgroups
+                        then []
+                        else [makeActivateTool toolgroups, makeDeactivateTool toolgroups, makeDiscoverTools toolgroups]
+        
         -- Filter ToolRegistrations based on activation state
         let activeToolRegs = filter (isToolRegActive activationState) allToolRegs
         
-        -- Map the filtered ToolRegistrations to SystemTools
-        pure $ map toolRegistrationToSystemTool activeToolRegs
+        -- Combine meta tools with active tool registrations, then map to SystemTools
+        pure $ map toolRegistrationToSystemTool (metaTools ++ activeToolRegs)
     
     -- | Check if a ToolRegistration is active based on the activation state
-    -- Currently treats all tools as belonging to the default/always-active category
-    -- Future: tools can be associated with specific toolgroups for fine-grained control
     isToolRegActive :: ToolboxSessionState -> ToolRegistration -> Bool
-    isToolRegActive activationState _toolReg = 
-        -- For now, we consider all tools to be in the "default" toolgroup
-        -- which is always active unless explicitly deactivated
-        -- The tool name could be used to determine its toolgroup in the future
-        let defaultToolgroup = "default" :: Text
-        in isToolgroupActive activationState defaultToolgroup
+    isToolRegActive activationState toolReg = 
+        case toolReg.toolActivation of
+            Nothing -> True  -- No activation control = always visible
+            Just AlwaysActivated -> True  -- Always activated
+            Just (OnDemandActivated toolgroup) -> 
+                -- Check if the toolgroup is active in the session state
+                isToolgroupActive activationState toolgroup
+            Just (FirstNStepsActivated _ _) -> 
+                -- For now, first-N steps activation is treated as always active
+                -- Future: track step count in session state
+                True
 

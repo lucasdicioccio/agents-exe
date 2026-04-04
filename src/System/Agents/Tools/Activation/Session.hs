@@ -30,6 +30,12 @@ module System.Agents.Tools.Activation.Session (
     activateToolgroup,
     deactivateToolgroup,
 
+    -- * Meta Tool Builders
+    makeActivateTool,
+    makeDeactivateTool,
+    makeDiscoverTools,
+    extractToolgroups,
+
     -- * Re-exports from Activation
     ToolgroupName,
     ActivationState (..),
@@ -38,12 +44,24 @@ module System.Agents.Tools.Activation.Session (
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (foldl')
 import qualified Data.Map.Strict as Map
+import Data.Maybe (mapMaybe)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 
+import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
+import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
 import System.Agents.Tools.Activation
+import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
+import qualified System.Agents.Tools.Base as ToolBase
+import System.Agents.Tools.Context (ToolCall (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 
 -------------------------------------------------------------------------------
 -- Pure Session Folding
@@ -182,4 +200,155 @@ activateToolgroup toolgroup =
 deactivateToolgroup :: ToolgroupName -> ToolboxSessionState
 deactivateToolgroup toolgroup =
     ToolboxSessionState $ Map.singleton toolgroup Inactive
+
+-------------------------------------------------------------------------------
+-- Meta Tool Builders
+-------------------------------------------------------------------------------
+
+{- | Get all unique toolgroup names from a list of ToolRegistrations.
+
+Extracts toolgroups from the 'OnDemandActivated' activation mode.
+-}
+extractToolgroups :: [ToolRegistration] -> Set ToolgroupName
+extractToolgroups = Set.fromList . mapMaybe extractToolgroup
+  where
+    extractToolgroup :: ToolRegistration -> Maybe ToolgroupName
+    extractToolgroup reg = case reg.toolActivation of
+        Just (OnDemandActivated tg) -> Just tg
+        _ -> Nothing
+
+{- | Make the meta_activate_tool tool.
+
+Activates a toolgroup, making its associated tools available.
+The actual state change is tracked by the session folding mechanism.
+-}
+makeActivateTool :: Set ToolgroupName -> ToolRegistration
+makeActivateTool toolgroups =
+    let llmName = OpenAI.ToolName "meta_activate_tool"
+        availableGroups = Text.intercalate ", " (Set.toAscList toolgroups)
+        llmDesc = "Activate a toolgroup to access its tools. Available toolgroups: " <> availableGroups
+        paramProps =
+            [ ParamProperty
+                { propertyKey = "toolgroup"
+                , propertyType = StringParamType
+                , propertyDescription = "Name of the toolgroup to activate. Available: " <> availableGroups
+                , propertyRequired = True
+                }
+            ]
+
+        -- The run function checks if the toolgroup exists and returns "ok" or an error
+        tool :: Tool ()
+        tool =
+            ToolBase.Tool
+                { ToolBase.toolDef = MetaTool "activate"
+                , ToolBase.toolRun = \_tracer _ctx args ->
+                    case extractToolgroupFromArgs args of
+                        Just tg | tg `Set.member` toolgroups ->
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' activated")
+                        Just tg ->
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups)
+                        Nothing ->
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Missing 'toolgroup' parameter. Available: " <> availableGroups)
+                }
+
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call =
+            if call.callToolName == getToolName llmName
+                then Just $ mapToolResult (const call) tool
+                else Nothing
+     in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find Nothing
+
+{- | Make the meta_deactivate_tool tool.
+
+Deactivates a toolgroup, hiding its associated tools.
+-}
+makeDeactivateTool :: Set ToolgroupName -> ToolRegistration
+makeDeactivateTool toolgroups =
+    let llmName = OpenAI.ToolName "meta_deactivate_tool"
+        availableGroups = Text.intercalate ", " (Set.toAscList toolgroups)
+        llmDesc = "Deactivate a toolgroup to hide its tools. Available toolgroups: " <> availableGroups
+        paramProps =
+            [ ParamProperty
+                { propertyKey = "toolgroup"
+                , propertyType = StringParamType
+                , propertyDescription = "Name of the toolgroup to deactivate. Available: " <> availableGroups
+                , propertyRequired = True
+                }
+            ]
+
+        -- The run function checks if the toolgroup exists and returns "ok" or an error
+        tool :: Tool ()
+        tool =
+            ToolBase.Tool
+                { ToolBase.toolDef = MetaTool "deactivate"
+                , ToolBase.toolRun = \_tracer _ctx args ->
+                    case extractToolgroupFromArgs args of
+                        Just tg | tg `Set.member` toolgroups ->
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' deactivated")
+                        Just tg ->
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups)
+                        Nothing ->
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Missing 'toolgroup' parameter. Available: " <> availableGroups)
+                }
+
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call =
+            if call.callToolName == getToolName llmName
+                then Just $ mapToolResult (const call) tool
+                else Nothing
+     in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find Nothing
+
+{- | Make the meta_discover_tools tool.
+
+Returns a list of all available toolgroups without modifying state.
+-}
+makeDiscoverTools :: Set ToolgroupName -> ToolRegistration
+makeDiscoverTools toolgroups =
+    let llmName = OpenAI.ToolName "meta_discover_tools"
+        availableGroups = Text.intercalate ", " (Set.toAscList toolgroups)
+        llmDesc = "List all available toolgroups. Toolgroups: " <> availableGroups
+        responseObj = Aeson.object ["toolgroups" Aeson..= Set.toAscList toolgroups]
+        responseBytes = LByteString.toStrict $ Aeson.encode responseObj
+
+        tool :: Tool ()
+        tool =
+            ToolBase.Tool
+                { ToolBase.toolDef = MetaTool "discover"
+                , ToolBase.toolRun = \_tracer _ctx _args ->
+                    pure $ BlobToolSuccess () responseBytes
+                }
+
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call =
+            if call.callToolName == getToolName llmName
+                then Just $ mapToolResult (const call) tool
+                else Nothing
+     in ToolRegistration tool (makeToolDecl llmName llmDesc []) find Nothing
+
+-------------------------------------------------------------------------------
+-- Helper Functions
+-------------------------------------------------------------------------------
+
+{- | Extract the toolgroup name from tool call arguments.
+
+Expects: {"toolgroup": "name"} or just "name"
+-}
+extractToolgroupFromArgs :: Aeson.Value -> Maybe ToolgroupName
+extractToolgroupFromArgs val = case val of
+    Aeson.Object obj -> do
+        tg <- KeyMap.lookup "toolgroup" obj
+        case tg of
+            Aeson.String txt -> Just txt
+            _ -> Nothing
+    Aeson.String txt -> Just txt
+    _ -> Nothing
+
+-- | Make a tool declaration for OpenAI.
+makeToolDecl :: OpenAI.ToolName -> Text -> [ParamProperty] -> ToolDescription
+makeToolDecl name desc props =
+    ToolDescription
+        { toolDescriptionName = name
+        , toolDescriptionText = desc
+        , toolDescriptionParamProperties = props
+        }
 
