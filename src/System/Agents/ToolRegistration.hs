@@ -244,13 +244,8 @@ mapArg arg =
         }
 
 {- | Register a bash tool with the LLM system.
-
-The activation parameter controls when the tool is visible to the LLM:
-- 'Nothing' means no activation control (always visible)
-- 'Just activation' means the tool follows the activation rules
-
-This supports progressive disclosure where tools can be activated
-on-demand or based on conversation state.
+The activation is passed from the BashToolboxDescription and applied to all
+scripts from that source.
 -}
 registerBashToolInLLM ::
     Maybe Activation ->
@@ -325,9 +320,8 @@ registerIOScriptInLLM script llmProps =
 Returns 'Left' if the tool's schema cannot be adapted to the LLM format.
 
 Note: MCP toolbox activation is currently not supported because the
-McpToolbox.Toolbox type does not store the configuration. To support
-activation, the Toolbox type would need to be extended to include
-activation information from McpServerDescription.
+McpToolbox.Toolbox type does not store the configuration. The activation
+from McpServerDescription would need to be added to the Toolbox type.
 -}
 registerMcpToolInLLM ::
     McpTools.Toolbox ->

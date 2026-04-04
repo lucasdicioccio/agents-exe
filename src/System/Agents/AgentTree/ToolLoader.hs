@@ -144,11 +144,9 @@ Loads tools from:
 Note: Relative paths are resolved relative to the execution's current
 working directory.
 
-Note: Bash tool activation is at the toolbox level (directory or single tool),
-not at the individual script level. The activation from the description is
-not currently passed to individual tool registrations. To support per-tool
-activation, the BashToolbox would need to track which activation applies to
-which loaded script.
+The activation configuration from each BashToolboxDescription is applied to
+all scripts loaded from that source. This allows per-toolbox activation
+control (e.g., progressive disclosure via on-demand activation).
 -}
 loadBashTools ::
     Tracer IO BashToolbox.Trace ->
@@ -170,10 +168,16 @@ loadBashTools tracer agent toolsTVar = do
                 Left (BashToolbox.LoadingError _msg _errs) -> do
                     pure $ Just $ BashLoadingError "Failed to load some bash tools"
                 Right multiSourceTools -> do
-                    scripts <- BashToolbox.readMultiSourceTools multiSourceTools
-                    -- Pass Nothing for activation since bash tool activation
-                    -- is at the toolbox level, not individual script level
-                    let registrations = map (ToolReg.registerBashToolInLLM Nothing) scripts
+                    -- readMultiSourceTools now returns [(Maybe Activation, [ScriptDescription])]
+                    -- where each tuple contains the activation config for that source and its scripts
+                    activationAndScripts <- BashToolbox.readMultiSourceTools multiSourceTools
+
+                    -- Create registrations for each script, applying the source's activation config
+                    let registrations = concatMap makeRegistrations activationAndScripts
+                          where
+                            makeRegistrations (mbActivation, scripts) =
+                                map (ToolReg.registerBashToolInLLM mbActivation) scripts
+
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing
 

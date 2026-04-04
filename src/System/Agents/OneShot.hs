@@ -487,6 +487,7 @@ agentEvaluateActiveTools toolsTVar agent = do
         
         -- Extract all unique toolgroups from the registrations
         let toolgroups = extractToolgroups allToolRegs
+        print toolgroups
         
         -- Build meta tools if any toolgroups exist
         let metaTools = if null toolgroups
