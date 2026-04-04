@@ -177,7 +177,7 @@ isToolgroupActive (ToolboxSessionState stateMap) toolgroup =
     case Map.lookup toolgroup stateMap of
         Just Active -> True
         Just Inactive -> False
-        Nothing -> True -- Default: active if not explicitly tracked
+        Nothing -> False -- Default: inactive if not explicitly tracked
 
 {- | Get all currently active toolgroups.
 
