@@ -29,7 +29,7 @@ import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentStoreSession, parseModelFlavor)
+import System.Agents.OneShot (agentEvaluateActiveTools, agentStoreSession, parseModelFlavor)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -142,7 +142,11 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
             Nothing -> HttpClient.newRuntime HttpClient.NoToken
 
         -- Create the agent from the OS node
-        sessionAgent <- nodeToAgent store httpRuntime node tracer callerSlug callerId parentConversationId
+        sessionAgent0 <- nodeToAgent store httpRuntime node tracer callerSlug callerId parentConversationId
+
+        -- Apply dynamic tool filtering based on session activation state
+        -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
+        sessionAgent <- agentEvaluateActiveTools (osNodeTools node) sessionAgent0
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent
@@ -254,7 +258,7 @@ toolParamsToJson props =
         Aeson.object $
             [ "type" .= paramTypeToString p.propertyType
             , "description" .= p.propertyDescription
-            ]
+                ]
                 ++ case p.propertyType of
                     EnumParamType values -> ["enum" .= values]
                     _ -> []
@@ -280,3 +284,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
+
