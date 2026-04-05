@@ -102,4 +102,3 @@ data ConversationTrace
     | RunToolTrace !StepId !Trace
     | ChildrenTrace !Trace
     deriving (Show)
-

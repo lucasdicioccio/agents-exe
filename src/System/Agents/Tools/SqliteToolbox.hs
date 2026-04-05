@@ -948,4 +948,3 @@ _formatResultsAsObjects result =
 _rowToObject :: [Text] -> [Value] -> Value
 _rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
-

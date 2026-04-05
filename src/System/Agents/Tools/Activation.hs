@@ -13,7 +13,6 @@ Activation modes allow tools to be:
 - Always visible (always activated)
 - On-demand (activated via a toolgroup trigger)
 - Available for first N steps only (with optional stickiness)
-
 -}
 module System.Agents.Tools.Activation (
     -- * Activation

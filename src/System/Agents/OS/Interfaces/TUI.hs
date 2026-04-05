@@ -3,8 +3,8 @@
 
 {- | OS-native TUI interface - SKELETON IMPLEMENTATION.
 
-This module provides the structure for a complete interactive terminal 
-user interface using OS-native ECS primitives. This is currently a skeleton 
+This module provides the structure for a complete interactive terminal
+user interface using OS-native ECS primitives. This is currently a skeleton
 that defines the interface structure - full implementation to be completed.
 
 For now, the legacy System.Agents.TUI.* modules are still used for actual
@@ -228,4 +228,3 @@ runTUIInterface handle = do
 shutdownTUIInterface :: TUIInterfaceHandle -> IO ()
 shutdownTUIInterface handle = do
     atomically $ writeTVar (tuiShutdown handle) True
-
