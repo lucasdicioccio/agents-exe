@@ -105,10 +105,10 @@ skillToToolRegistrations :: Skill -> [ToolRegistration]
 skillToToolRegistrations skill =
     let skillToolgroup = skillToToolgroupName (skillMetadata skill).smName
         -- Describe tool for the skill
-        describeTool = (makeDescribeTool skill) { toolActivation = Just $ OnDemandActivated skillToolgroup }
+        describeTool = (makeDescribeTool skill){toolActivation = Just $ OnDemandActivated skillToolgroup}
         -- Script tools (all share same toolgroup - enabling skill enables all scripts)
-        scriptTools = map (\s -> (makeScriptTool skill s) { toolActivation = Just $ OnDemandActivated skillToolgroup }) (skillScripts skill)
-    in describeTool : scriptTools
+        scriptTools = map (\s -> (makeScriptTool skill s){toolActivation = Just $ OnDemandActivated skillToolgroup}) (skillScripts skill)
+     in describeTool : scriptTools
 
 {- | Get all skill toolgroup names for use with meta_discover_tools.
 
@@ -298,4 +298,3 @@ valueToText val = case val of
     Aeson.Number n -> Just $ Text.pack $ show n
     Aeson.Bool b -> Just $ Text.pack $ show b
     _ -> Nothing
-

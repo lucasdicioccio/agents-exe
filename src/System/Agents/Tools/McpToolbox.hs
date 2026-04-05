@@ -139,4 +139,3 @@ storeToolsInDiscoveredValues list discoveryMVar = Tracer f
                     Mcp.tools (McpClient.getListToolsResult rsp)
             g _ = []
          in mconcat $ map g mitems
-

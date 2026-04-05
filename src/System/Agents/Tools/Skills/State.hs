@@ -1,3 +1,2 @@
 -- File deleted: src/System/Agents/Tools/Skills/State.hs
 -- Functionality has been moved to System.Agents.Tools.Activation.Session
-

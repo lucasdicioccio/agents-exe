@@ -146,11 +146,11 @@ runOneShotWithConfig ::
     IO OneShotResult
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId tracer loadedApiKeys node
-    
+
     -- Apply dynamic tool filtering based on session activation state
     -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
     agent1 <- agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
-    
+
     let agent =
             agentSetQuery (UserQuery query) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
@@ -302,10 +302,11 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                 , sysPrompt = pure sPrompt
                 , sysTools = pure allTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall
-                                (contramap ToolRegistrationTrace tracer)
-                                (readTVarIO $ osNodeTools node)
-                                (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall =
+                    executeLlmToolCall
+                        (contramap ToolRegistrationTrace tracer)
+                        (readTVarIO $ osNodeTools node)
+                        (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -383,4 +384,3 @@ fileStoringCallback store convId progress =
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
-

@@ -246,4 +246,3 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
-

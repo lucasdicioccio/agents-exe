@@ -27,10 +27,11 @@ import Prod.Tracer (Tracer (..), contramap)
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
 import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId)
 import qualified System.Agents.Base as Base
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentStoreSession, parseModelFlavor, mapProgressiveDisclosureTrace)
-import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
+import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
+import qualified System.Agents.OneShot as OneShot
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -59,7 +60,6 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
-import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Tools.IO as IOTools
 
 data Trace
@@ -261,7 +261,7 @@ toolParamsToJson props =
         Aeson.object $
             [ "type" .= paramTypeToString p.propertyType
             , "description" .= p.propertyDescription
-                ]
+            ]
                 ++ case p.propertyType of
                     EnumParamType values -> ["enum" .= values]
                     _ -> []
@@ -287,4 +287,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
-

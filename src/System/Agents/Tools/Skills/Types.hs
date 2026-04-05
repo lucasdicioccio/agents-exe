@@ -361,4 +361,3 @@ allSkills (SkillsStore m) = Map.elems m
 insertSkill :: Skill -> SkillsStore -> SkillsStore
 insertSkill skill (SkillsStore m) =
     SkillsStore $ Map.insert (skillMetadata skill).smName skill m
-

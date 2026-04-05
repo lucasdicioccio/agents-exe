@@ -40,8 +40,8 @@ import System.Process (readProcessWithExitCode)
 
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
-import System.Agents.OneShot (nodeToAgent, mapProgressiveDisclosureTrace)
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
+import System.Agents.OneShot (mapProgressiveDisclosureTrace, nodeToAgent)
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
@@ -728,4 +728,3 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
-

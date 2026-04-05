@@ -62,11 +62,11 @@ import qualified Data.Text.Encoding as Text
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
 import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Activation
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..))
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 
 -------------------------------------------------------------------------------
 -- Pure Session Folding
@@ -288,8 +288,9 @@ makeActivateTool toolgroups =
                 { ToolBase.toolDef = MetaTool "activate"
                 , ToolBase.toolRun = \_tracer _ctx args ->
                     case extractToolgroupFromArgs args of
-                        Just tg | tg `Set.member` toolgroups ->
-                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' activated")
+                        Just tg
+                            | tg `Set.member` toolgroups ->
+                                pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' activated")
                         Just tg ->
                             pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups)
                         Nothing ->
@@ -328,8 +329,9 @@ makeDeactivateTool toolgroups =
                 { ToolBase.toolDef = MetaTool "deactivate"
                 , ToolBase.toolRun = \_tracer _ctx args ->
                     case extractToolgroupFromArgs args of
-                        Just tg | tg `Set.member` toolgroups ->
-                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' deactivated")
+                        Just tg
+                            | tg `Set.member` toolgroups ->
+                                pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' deactivated")
                         Just tg ->
                             pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups)
                         Nothing ->
@@ -396,4 +398,3 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
-
