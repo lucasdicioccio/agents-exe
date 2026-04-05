@@ -115,6 +115,7 @@ library agents-lib
                     , System.Agents.Tools.PostgREST.Types
                     , System.Agents.Tools.PostgREST.Converter
                     , System.Agents.Tools.PostgRESToolbox
+                    , System.Agents.Tools.ScriptTypes
                     , System.Agents.Tools.Secrets
                     , System.Agents.Tools.Skills.Types
                     , System.Agents.Tools.Skills.Parser

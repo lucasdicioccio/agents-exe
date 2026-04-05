@@ -22,7 +22,10 @@ module System.Agents.Tools.Skills.Types (
     -- * Script and Reference Types
     ScriptName (..),
     ScriptInfo (..),
-    ScriptArgInfo (..),
+    -- Re-export ScriptArg from ScriptTypes for argument definitions
+    ScriptArg,
+    ScriptArgArity (..),
+    ScriptArgCallingMode (..),
     ReferenceInfo (..),
 
     -- * Skill Metadata and Structure
@@ -49,6 +52,13 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
+
+-- Import shared script types (avoids circular dependency with Bash)
+import System.Agents.Tools.ScriptTypes (
+    ScriptArg,
+    ScriptArgArity (..),
+    ScriptArgCallingMode (..),
+ )
 
 -------------------------------------------------------------------------------
 -- Skill Name Validation
@@ -133,41 +143,27 @@ data ScriptInfo = ScriptInfo
     -- ^ Full path to the script file
     , siDescription :: Maybe Text
     -- ^ Description from script's describe output (loaded lazily)
-    , siArgs :: [ScriptArgInfo]
-    -- ^ Arguments from script's describe output
+    , siArgs :: [ScriptArg]
+    -- ^ Arguments from script's describe output (using ScriptArg from ScriptTypes)
     }
     deriving (Show, Eq, Generic)
 
+-- Manual JSON instances for ScriptInfo (internal format using Haskell field names)
 instance FromJSON ScriptInfo where
-    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
+    parseJSON = Aeson.withObject "ScriptInfo" $ \o ->
+        ScriptInfo
+            <$> o Aeson..: "siName"
+            <*> o Aeson..: "siPath"
+            <*> o Aeson..:? "siDescription"
+            <*> o Aeson..:? "siArgs" Aeson..!= []
 
 instance ToJSON ScriptInfo where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
-
--- | Information about a script argument from describe output.
-data ScriptArgInfo = ScriptArgInfo
-    { saName :: Text
-    , saDescription :: Text
-    , saType :: Text
-    , saRequired :: Bool
-    }
-    deriving (Show, Eq, Generic)
-
-instance FromJSON ScriptArgInfo where
-    parseJSON = Aeson.withObject "ScriptArgInfo" $ \o ->
-        ScriptArgInfo
-            <$> o Aeson..: "name"
-            <*> o Aeson..: "description"
-            <*> o Aeson..: "type"
-            <*> o Aeson..:? "required" Aeson..!= True
-
-instance ToJSON ScriptArgInfo where
-    toJSON arg =
+    toJSON si =
         Aeson.object
-            [ "name" Aeson..= saName arg
-            , "description" Aeson..= saDescription arg
-            , "type" Aeson..= saType arg
-            , "required" Aeson..= saRequired arg
+            [ "siName" Aeson..= siName si
+            , "siPath" Aeson..= siPath si
+            , "siDescription" Aeson..= siDescription si
+            , "siArgs" Aeson..= siArgs si
             ]
 
 -------------------------------------------------------------------------------
@@ -264,11 +260,25 @@ data Skill = Skill
     }
     deriving (Show, Eq, Generic)
 
+-- Manual JSON instances for Skill (internal format using Haskell field names)
 instance FromJSON Skill where
-    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
+    parseJSON = Aeson.withObject "Skill" $ \o ->
+        Skill
+            <$> o Aeson..: "skillMetadata"
+            <*> o Aeson..: "skillInstructions"
+            <*> o Aeson..: "skillPath"
+            <*> o Aeson..:? "skillScripts" Aeson..!= []
+            <*> o Aeson..:? "skillReferences" Aeson..!= []
 
 instance ToJSON Skill where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
+    toJSON skill =
+        Aeson.object
+            [ "skillMetadata" Aeson..= skillMetadata skill
+            , "skillInstructions" Aeson..= skillInstructions skill
+            , "skillPath" Aeson..= skillPath skill
+            , "skillScripts" Aeson..= skillScripts skill
+            , "skillReferences" Aeson..= skillReferences skill
+            ]
 
 -------------------------------------------------------------------------------
 -- Skill Sources
@@ -361,3 +371,4 @@ allSkills (SkillsStore m) = Map.elems m
 insertSkill :: Skill -> SkillsStore -> SkillsStore
 insertSkill skill (SkillsStore m) =
     SkillsStore $ Map.insert (skillMetadata skill).smName skill m
+

@@ -64,6 +64,10 @@ import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.Types
 
+-- Import shared script types and translateArguments from ScriptTypes
+-- Note: We import ScriptInfo with a qualified name to avoid conflict with Skills.Types.ScriptInfo
+import qualified System.Agents.Tools.ScriptTypes as ST
+
 -------------------------------------------------------------------------------
 -- Trace Events
 -------------------------------------------------------------------------------
@@ -212,7 +216,7 @@ Implements the describe/run protocol:
 2. Execute the script with those arguments
 3. Return the result
 
-Arguments are parsed from the JSON object using the ScriptArgInfo metadata,
+Arguments are parsed from the JSON object using the ScriptArg metadata,
 similar to how Bash.runValue handles arguments. This ensures that:
 - Arguments are matched by name from the JSON object
 - Only provided arguments are passed to the script
@@ -249,12 +253,12 @@ runScriptTool script _tracer _ctx args = do
                                         ]
 
 -------------------------------------------------------------------------------
--- Argument Parsing (similar to Bash.runValue)
+-- Argument Parsing (reuses translateArguments from ScriptTypes)
 -------------------------------------------------------------------------------
 
 {- | Parse arguments from JSON value using script argument metadata.
 
-This follows the same pattern as Bash.translateArguments and Bash.parseArgsForValue:
+This uses translateArguments from ScriptTypes which only requires the argName field:
 1. Extract argument values from the JSON object by name
 2. Build command line arguments from provided values
 
@@ -263,33 +267,24 @@ passing without calling modes (stdin, dashdash, etc.).
 -}
 parseArgsForScript :: ScriptInfo -> Aeson.Value -> Either String [String]
 parseArgsForScript script val = do
-    -- Parse arguments from JSON object, matching by name
-    argValues <- Aeson.parseEither (translateArguments script) val
+    -- Use translateArguments from ScriptTypes
+    -- We create a dummy ScriptInfo for ScriptTypes since translateArguments only uses scriptArgs
+    let scriptInfo = ST.ScriptInfo
+            { ST.scriptArgs = siArgs script
+            , ST.scriptSlug = ""  -- Not used by translateArguments
+            , ST.scriptDescription = ""  -- Not used by translateArguments
+            , ST.scriptEmptyResultBehavior = Nothing  -- Not used by translateArguments
+            }
+    argValues <- Aeson.parseEither (ST.translateArguments scriptInfo) val
     -- Flatten to command line arguments (only include provided args)
     pure $ concatMap argValueToString argValues
-
-{- | Translate JSON object to argument values using ScriptArgInfo metadata.
-
-Parses the JSON object and extracts values for each defined argument by name.
-Returns a list of (argument info, maybe value) pairs.
--}
-translateArguments :: ScriptInfo -> Aeson.Value -> Aeson.Parser [(ScriptArgInfo, Maybe Text)]
-translateArguments script = Aeson.withObject "Args" $ \obj -> do
-    vals <- traverse (parseArg obj) script.siArgs
-    pure $ zip script.siArgs vals
-  where
-    parseArg :: Aeson.Object -> ScriptArgInfo -> Aeson.Parser (Maybe Text)
-    parseArg obj arg = obj Aeson..:? textToKey (saName arg)
-
-    textToKey :: Text -> Aeson.Key
-    textToKey = read . show
 
 {- | Convert an argument value pair to command line strings.
 
 For skill scripts, arguments are passed positionally in the order defined
 by the script's argument metadata. Only provided (Just) values are included.
 -}
-argValueToString :: (ScriptArgInfo, Maybe Text) -> [String]
+argValueToString :: (ST.ScriptArg, Maybe Text) -> [String]
 argValueToString (_, Nothing) = []
 argValueToString (_, Just txt) = [Text.unpack txt]
 
@@ -320,14 +315,14 @@ makeScriptToolName skillName scriptName =
             <> "_"
             <> unScriptName scriptName
 
--- | Convert a script arg info to a ParamProperty for schema.
-scriptArgToParam :: ScriptArgInfo -> ParamProperty
+-- | Convert a script arg to a ParamProperty for schema.
+scriptArgToParam :: ST.ScriptArg -> ParamProperty
 scriptArgToParam arg =
     ParamProperty
-        { propertyKey = saName arg
-        , propertyType = OpaqueParamType (saType arg)
-        , propertyDescription = saDescription arg
-        , propertyRequired = saRequired arg
+        { propertyKey = ST.argName arg
+        , propertyType = OpaqueParamType (ST.argTypeString arg)
+        , propertyDescription = ST.argDescription arg
+        , propertyRequired = ST.argTypeArity arg == ST.Single
         }
 
 -- | Make a tool declaration for OpenAI.

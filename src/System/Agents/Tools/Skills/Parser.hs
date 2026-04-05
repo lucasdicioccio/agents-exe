@@ -29,6 +29,57 @@ import System.FilePath (dropExtension, takeDirectory, takeExtension, takeFileNam
 import System.Process (readProcessWithExitCode)
 
 import System.Agents.Tools.Skills.Types
+import System.Agents.Tools.ScriptTypes (
+    ScriptArg (..),
+ )
+
+-------------------------------------------------------------------------------
+-- Skills-specific JSON Parsing
+--
+-- Skills scripts use a simpler JSON format than Bash scripts:
+-- Skills format: { name, description, type, required (boolean) }
+-- Bash format:   { name, description, type, backing_type, arity, mode }
+-- Internal format: { argName, argDescription, argTypeString, ... }
+--
+-- The FromJSON instance for ScriptArg in ScriptTypes handles the internal format.
+-- Here we define newtype wrappers to parse the skills external format.
+-------------------------------------------------------------------------------
+
+-- | Newtype wrapper for parsing ScriptArg from skills external format
+newtype SkillsScriptArg = SkillsScriptArg { unSkillsScriptArg :: ScriptArg }
+
+instance Aeson.FromJSON SkillsScriptArg where
+    parseJSON = Aeson.withObject "ScriptArg" $ \o -> do
+        name <- o Aeson..: "name"
+        desc <- o Aeson..: "description"
+        ty <- o Aeson..: "type"
+        required <- o Aeson..:? "required" Aeson..!= True
+        let arity = if required then Single else Optional
+        SkillsScriptArg <$> (ScriptArg
+            <$> pure name
+            <*> pure desc
+            <*> pure ty
+            <*> pure ty  -- backing_type defaults to type
+            <*> pure arity
+            <*> pure Positional)  -- Skills use positional args
+
+-- | Script description from describe output.
+-- 
+-- Skills scripts use a simpler argument format than Bash scripts:
+-- - name, description, type, required (boolean)
+-- 
+-- We convert this to ScriptArg with sensible defaults for the
+-- additional fields (backing_type, arity, mode).
+data ScriptDescriptionOutput = ScriptDescriptionOutput
+    { sdDescription :: Text
+    , sdArgs :: [ScriptArg]
+    }
+
+instance Aeson.FromJSON ScriptDescriptionOutput where
+    parseJSON = Aeson.withObject "ScriptDescriptionOutput" $ \o ->
+        ScriptDescriptionOutput
+            <$> o Aeson..: "description"
+            <*> (map unSkillsScriptArg <$> o Aeson..:? "args" Aeson..!= [])
 
 -------------------------------------------------------------------------------
 -- SKILL.md Parsing
@@ -226,18 +277,6 @@ loadScriptDescription script = do
                     Left $
                         "Script describe failed with exit code "
                             <> Text.pack (show code)
-
--- | Script description from describe output.
-data ScriptDescriptionOutput = ScriptDescriptionOutput
-    { sdDescription :: Text
-    , sdArgs :: [ScriptArgInfo]
-    }
-
-instance Aeson.FromJSON ScriptDescriptionOutput where
-    parseJSON = Aeson.withObject "ScriptDescriptionOutput" $ \o ->
-        ScriptDescriptionOutput
-            <$> o Aeson..: "description"
-            <*> o Aeson..:? "args" Aeson..!= []
 
 -------------------------------------------------------------------------------
 -- Reference Loading
