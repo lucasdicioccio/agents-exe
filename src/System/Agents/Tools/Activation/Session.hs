@@ -138,8 +138,13 @@ parseMetaToolCall funcName val
 
 {- | Extract the 'toolgroup' argument from a tool call.
 
-Expects: {"function": {"arguments": {"toolgroup": "name"}, ...}, ...}
-Or: {"function": {"arguments": "name"}, ...} (direct string argument)
+The LLM API returns tool call arguments as a JSON-encoded string.
+This function handles both:
+1. JSON-encoded string arguments: {"arguments": "{\"toolgroup\":\"name\"}"}
+2. Direct object arguments: {"arguments": {"toolgroup": "name"}}
+
+It attempts to parse string arguments as JSON first, then extracts
+the "toolgroup" field from the resulting object.
 -}
 extractToolgroupArg :: Aeson.Value -> Maybe ToolgroupName
 extractToolgroupArg val = case val of
@@ -148,17 +153,40 @@ extractToolgroupArg val = case val of
         case func of
             Aeson.Object funcObj -> do
                 args <- KeyMap.lookup "arguments" funcObj
-                case args of
-                    Aeson.Object argsObj -> do
-                        -- Look for "toolgroup" key first
-                        tg <- KeyMap.lookup "toolgroup" argsObj
-                        case tg of
-                            Aeson.String txt -> Just txt
-                            _ -> Nothing
-                    Aeson.String txt -> Just txt
-                    _ -> Nothing
+                extractToolgroupFromArgsValue args
             _ -> Nothing
     _ -> Nothing
+
+{- | Extract the toolgroup name from the arguments value.
+
+Handles two cases:
+1. String containing JSON: parse it and extract "toolgroup" field
+2. Direct object: extract "toolgroup" field directly
+3. Plain string: use as toolgroup name (backward compatibility)
+-}
+extractToolgroupFromArgsValue :: Aeson.Value -> Maybe ToolgroupName
+extractToolgroupFromArgsValue args =
+    case args of
+        Aeson.String txt ->
+            -- Try to parse as JSON first (LLM API encodes args as JSON string)
+            case Aeson.decode (LByteString.fromStrict $ Text.encodeUtf8 txt) of
+                Just (Aeson.Object obj) ->
+                    -- Parsed as JSON object, extract toolgroup field
+                    case KeyMap.lookup "toolgroup" obj of
+                        Just (Aeson.String tg) -> Just tg
+                        _ -> Nothing
+                Just (Aeson.String tg) ->
+                    -- Parsed as JSON string, use directly
+                    Just tg
+                _ ->
+                    -- Not valid JSON or not an object/string, use raw string
+                    Just txt
+        Aeson.Object argsObj ->
+            -- Direct object, extract toolgroup field
+            case KeyMap.lookup "toolgroup" argsObj of
+                Just (Aeson.String tg) -> Just tg
+                _ -> Nothing
+        _ -> Nothing
 
 -------------------------------------------------------------------------------
 -- State Queries

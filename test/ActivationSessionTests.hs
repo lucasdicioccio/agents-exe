@@ -15,6 +15,8 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.UUID as UUID
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -99,6 +101,15 @@ toolCallParsingTests =
         , testCase "parses meta_deactivate_tool with object arguments" $ do
             let toolCall = createToolCall "meta_deactivate_tool" $ Just $ Aeson.object [("toolgroup", Aeson.String "filesystem")]
             isToolgroupActive (extractFromToolCall toolCall) "filesystem" @?= False
+        , testCase "parses meta_activate_tool with JSON-encoded string arguments" $ do
+            -- This is how the LLM API returns tool call arguments - as a JSON-encoded string
+            let argsJson = "{\"toolgroup\":\"ask-user\"}" :: Text
+                toolCall = createToolCallWithStringArgs "meta_activate_tool" argsJson
+            extractFromToolCall toolCall @?= activateToolgroup "ask-user"
+        , testCase "parses meta_deactivate_tool with JSON-encoded string arguments" $ do
+            let argsJson = "{\"toolgroup\":\"ask-user\"}" :: Text
+                toolCall = createToolCallWithStringArgs "meta_deactivate_tool" argsJson
+            extractFromToolCall toolCall @?= deactivateToolgroup "ask-user"
         , testCase "ignores meta_discover_tools" $ do
             let toolCall = createToolCall "meta_discover_tools" Nothing
             extractFromToolCall toolCall @?= mempty
@@ -117,6 +128,16 @@ toolCallParsingTests =
         , testCase "handles empty tool call" $ do
             let toolCall = LlmToolCall $ Aeson.object []
             extractFromToolCall toolCall @?= mempty
+        , testCase "handles JSON-encoded string with missing toolgroup field" $ do
+            let argsJson = "{\"other_field\":\"value\"}" :: Text
+                toolCall = createToolCallWithStringArgs "meta_activate_tool" argsJson
+            extractFromToolCall toolCall @?= mempty
+        , testCase "handles invalid JSON in string arguments" $ do
+            -- When JSON parsing fails, should treat the string as the toolgroup name
+            let argsJson = "not-valid-json" :: Text
+                toolCall = createToolCallWithStringArgs "meta_activate_tool" argsJson
+            -- This should return the raw string since it's not valid JSON
+            extractFromToolCall toolCall @?= activateToolgroup "not-valid-json"
         ]
 
 -- Helper to create a tool call with given function name and arguments
@@ -125,6 +146,15 @@ createToolCall funcName mbArgs =
     let funcObj = case mbArgs of
             Just args -> Aeson.object ["name" Aeson..= funcName, "arguments" Aeson..= args]
             Nothing -> Aeson.object ["name" Aeson..= funcName]
+     in LlmToolCall $ Aeson.object ["function" Aeson..= funcObj]
+
+-- Helper to create a tool call with JSON-encoded string arguments (as returned by LLM API)
+createToolCallWithStringArgs :: Text -> Text -> LlmToolCall
+createToolCallWithStringArgs funcName argsJson =
+    let funcObj = Aeson.object 
+            [ "name" Aeson..= funcName
+            , "arguments" Aeson..= argsJson
+            ]
      in LlmToolCall $ Aeson.object ["function" Aeson..= funcObj]
 
 -------------------------------------------------------------------------------
@@ -175,6 +205,19 @@ sessionFoldingTests =
                 userTurn = UserTurn userContent Nothing
                 session = Session {turns = [userTurn], sessionId = sessionId, forkedFromSessionId = Nothing, turnId = turnId}
             foldSession session @?= mempty
+        , testCase "session with JSON-encoded string arguments" $ do
+            -- Simulate how the LLM API actually returns tool calls
+            let toolCall = createToolCallWithStringArgs "meta_activate_tool" "{\"toolgroup\":\"test-group\"}"
+                llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [toolCall]
+                llmTurn = LlmTurn llmContent Nothing
+                session = Session 
+                    { turns = [llmTurn]
+                    , sessionId = SessionId UUID.nil
+                    , forkedFromSessionId = Nothing
+                    , turnId = TurnId UUID.nil
+                    }
+                state = foldSession session
+            isToolgroupActive state "test-group" @?= True
         ]
 
 -- Helper to create an empty session
