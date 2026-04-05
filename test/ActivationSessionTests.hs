@@ -38,6 +38,7 @@ activationSessionTestSuite =
         , sessionFoldingTests
         , progressiveDisclosureTests
         , stateQueryTests
+        , sessionFileTests
         ]
 
 -------------------------------------------------------------------------------
@@ -292,6 +293,36 @@ stateQueryTests =
         , testCase "isToolgroupActive handles untracked groups" $ do
             let state = activateToolgroup "tracked"
             isToolgroupActive state "untracked" @?= False
+        ]
+
+-------------------------------------------------------------------------------
+-- Session File Tests
+-------------------------------------------------------------------------------
+
+sessionFileTests :: TestTree
+sessionFileTests =
+    testGroup
+        "Session File Tests"
+        [ testCase "activation-session.json has ask-user active" $ do
+            -- Load the actual session file from test data
+            content <- LByteString.readFile "test/data/activation-session.json"
+            case Aeson.decode content of
+                Nothing -> assertFailure "Failed to parse activation-session.json"
+                Just session -> do
+                    let state = foldSession session
+                    -- The session should have ask-user activated
+                    assertBool "ask-user should be active" (isToolgroupActive state "ask-user")
+        , testCase "activation-session.json parsing extracts correct state" $ do
+            content <- LByteString.readFile "test/data/activation-session.json"
+            case Aeson.decode content of
+                Nothing -> assertFailure "Failed to parse activation-session.json"
+                Just session -> do
+                    -- Count turns
+                    length (turns session) @?= 8
+                    -- Compute activation state
+                    let state = foldSession session
+                    -- Should have ask-user active
+                    getActiveToolgroups state @?= ["ask-user"]
         ]
 
 -------------------------------------------------------------------------------

@@ -37,6 +37,8 @@ import Data.Foldable (traverse_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -68,7 +70,7 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Activation (Activation (..))
+import System.Agents.Tools.Activation (Activation (..), ToolgroupName)
 import System.Agents.Tools.Activation.Session (
     foldSession,
     isToolgroupActive,
@@ -437,7 +439,10 @@ This decorator:
 3. Updates the IORef after each step (like onProgress)
 4. Reads from the TVar and filters ToolRegistrations based on session activation state
 5. Maps the filtered ToolRegistrations to SystemTools
-6. Adds meta tools (meta_activate_tool, meta_deactivate_tool, meta_discover_tools) when toolgroups exist
+6. Adds meta tools (meta_activate_tool, meta_deactivate_tool, meta_discover_tools) conditionally:
+   - meta_activate_tool only if there are inactive toolgroups
+   - meta_deactivate_tool only if there are active toolgroups
+   - meta_discover_tools always added when any toolgroups exist
 
 Tools are filtered based on 'meta_activate_tool' and 'meta_deactivate_tool' calls
 in the session history. The list of ToolRegistrations is read fresh from the TVar
@@ -494,18 +499,27 @@ agentEvaluateActiveTools tracer toolsTVar agent = do
         -- Read the ToolRegistrations from the TVar
         allToolRegs <- readTVarIO tvar
         
-        -- Extract all unique toolgroups from the registrations
-        let toolgroups = extractToolgroups allToolRegs
+        -- Extract all unique toolgroups from the registrations (returns a Set)
+        let allToolgroups :: Set ToolgroupName
+            allToolgroups = extractToolgroups allToolRegs
         
-        -- Build meta tools if any toolgroups exist
-        let metaTools = if null toolgroups
-                        then []
-                        else [makeActivateTool toolgroups, makeDeactivateTool toolgroups, makeDiscoverTools toolgroups]
+        -- Determine which toolgroups are active vs inactive
+        let activeToolgroups :: Set ToolgroupName
+            activeToolgroups = Set.filter (isToolgroupActive activationState) allToolgroups
+        let inactiveToolgroups :: Set ToolgroupName
+            inactiveToolgroups = allToolgroups Set.\\ activeToolgroups
+        
+        -- Build meta tools conditionally based on active/inactive toolgroups
+        let metaTools = concat
+                [ [makeActivateTool inactiveToolgroups | not (Set.null inactiveToolgroups)]
+                , [makeDeactivateTool activeToolgroups | not (Set.null activeToolgroups)]
+                , [makeDiscoverTools allToolgroups | not (Set.null allToolgroups)]
+                ]
         
         -- Filter ToolRegistrations based on activation state
         let activeToolRegs = filter (isToolRegActive activationState) allToolRegs
         
-        -- Combine meta tools with active tool registrations, then map to SystemTools
+        -- Combine meta tools with active tool registrations
         pure $ (metaTools ++ activeToolRegs)
     
     -- | Check if a ToolRegistration is active based on the activation state
