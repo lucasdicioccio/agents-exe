@@ -504,7 +504,6 @@ agentEvaluateActiveTools tracer toolsTVar agent = do
         
         -- Filter ToolRegistrations based on activation state
         let activeToolRegs = filter (isToolRegActive activationState) allToolRegs
-        -- print (activationState, activeToolRegs)
         
         -- Combine meta tools with active tool registrations, then map to SystemTools
         pure $ (metaTools ++ activeToolRegs)
