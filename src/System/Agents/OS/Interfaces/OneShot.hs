@@ -1,24 +1,14 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | OneShot-specific interface for the OS model.
+{- | OS-native OneShot interface - SKELETON IMPLEMENTATION.
 
-This module provides OneShot-specific operations built on top of the common
-OS interface. It handles single-conversation batch execution with minimal
-overhead and no interactive features.
+This module provides the structure for complete one-shot (batch) execution 
+using OS-native ECS primitives. This is currently a skeleton that defines
+the interface structure - full implementation to be completed.
 
-== Features
-
-1. Single-agent batch execution
-2. Session persistence options
-3. Minimal resource overhead
-4. Compatibility with RuntimeBridge
-
-== Migration Notes
-
-Currently, this module provides a compatibility layer that works with
-RuntimeBridge. As the OS model matures, these operations will be
-implemented natively using OS primitives.
+For now, the legacy System.Agents.OneShot is still used for actual
+one-shot execution.
 -}
 module System.Agents.OS.Interfaces.OneShot (
     -- * OneShot Interface Handle
@@ -28,234 +18,167 @@ module System.Agents.OS.Interfaces.OneShot (
     -- * Initialization
     initOneShotInterface,
     runOneShotInterface,
+    shutdownOneShotInterface,
 
     -- * Execution
     OneShotResult (..),
     executeOneShot,
-    executeOneShotWithSession,
+
+    -- * Utility
+    extractResultText,
 
     -- * Configuration
     OneShotPersistence (..),
     defaultOneShotInterfaceConfig,
 
-    -- * Utility
-    extractResultText,
+    -- * Tracing
+    OneShotTrace (..),
 ) where
 
-import Control.Concurrent.Async (Async)
-import Control.Concurrent.STM (TVar, newTVarIO)
+import Control.Concurrent.STM (TQueue, TVar, atomically, newTQueueIO, newTVarIO, writeTVar)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import Prod.Tracer (Tracer (..))
 
-import System.Agents.Base (AgentId, newAgentId, newConversationId)
+import System.Agents.Base (AgentId)
 import System.Agents.OS.Compat.Runtime (initializeOS)
-import System.Agents.OS.Interfaces (
-    InterfaceConfig (..),
-    InterfaceHandle (..),
-    InterfaceMode (..),
-    defaultInterfaceConfig,
- )
-import System.Agents.Session.Base (Session (..), newSessionId, newTurnId)
+import System.Agents.OS.Interfaces (InterfaceConfig (..), InterfaceHandle (..), OSEvent, defaultInterfaceConfig)
+import System.Agents.Session.Base (Session)
 import System.Agents.SessionStore (SessionStore)
+
+-------------------------------------------------------------------------------
+-- Tracing
+-------------------------------------------------------------------------------
+
+-- | Trace events for OneShot interface debugging.
+data OneShotTrace
+    = OneShotTrace_Initialized
+    | OneShotTrace_Error Text
+    deriving (Show)
+
+-------------------------------------------------------------------------------
+-- Persistence Configuration
+-------------------------------------------------------------------------------
+
+-- | Persistence configuration for OneShot execution.
+data OneShotPersistence
+    = Persistence_None
+    | Persistence_SessionStore SessionStore
+    | Persistence_FilePath FilePath
+    deriving (Show)
+
+instance Eq OneShotPersistence where
+    Persistence_None == Persistence_None = True
+    Persistence_SessionStore _ == Persistence_SessionStore _ = True
+    Persistence_FilePath p1 == Persistence_FilePath p2 = p1 == p2
+    _ == _ = False
 
 -------------------------------------------------------------------------------
 -- OneShot Interface Configuration
 -------------------------------------------------------------------------------
 
--- | Persistence configuration for OneShot execution.
-data OneShotPersistence
-    = -- | No session persistence
-      Persistence_None
-    | -- | Persist to SessionStore
-      Persistence_SessionStore SessionStore
-    | -- | Persist to file path
-      Persistence_FilePath FilePath
-    | -- | Persist to both SessionStore and file
-      Persistence_Both SessionStore FilePath
-    deriving (Show)
-
--- | Manual Eq instance for OneShotPersistence (SessionStore doesn't have Eq).
-instance Eq OneShotPersistence where
-    Persistence_None == Persistence_None = True
-    Persistence_SessionStore _ == Persistence_SessionStore _ = True
-    Persistence_FilePath p1 == Persistence_FilePath p2 = p1 == p2
-    Persistence_Both _ p1 == Persistence_Both _ p2 = p1 == p2
-    _ == _ = False
-
 -- | Configuration specific to OneShot interface.
 data OneShotInterfaceConfig = OneShotInterfaceConfig
     { oscBaseConfig :: InterfaceConfig
-    -- ^ Base interface configuration
     , oscPersistence :: OneShotPersistence
-    -- ^ Session persistence configuration
     , oscEnableThinking :: Bool
-    -- ^ Whether to capture thinking output
     , oscTimeoutSeconds :: Maybe Int
-    -- ^ Optional timeout for execution
+    , oscTracer :: Tracer IO OneShotTrace
     }
-    deriving (Show, Eq)
 
 -- | Default OneShot interface configuration.
-defaultOneShotInterfaceConfig :: OneShotInterfaceConfig
-defaultOneShotInterfaceConfig =
-    OneShotInterfaceConfig
-        { oscBaseConfig = (defaultInterfaceConfig){ifcMode = ModeOneShot}
-        , oscPersistence = Persistence_None
-        , oscEnableThinking = False
-        , oscTimeoutSeconds = Nothing
-        }
+defaultOneShotInterfaceConfig :: IO OneShotInterfaceConfig
+defaultOneShotInterfaceConfig = do
+    let tracer = Tracer $ \_ -> pure ()
+    pure $
+        OneShotInterfaceConfig
+            { oscBaseConfig = defaultInterfaceConfig
+            , oscPersistence = Persistence_None
+            , oscEnableThinking = False
+            , oscTimeoutSeconds = Nothing
+            , oscTracer = tracer
+            }
 
 -------------------------------------------------------------------------------
--- OneShot Interface Handle
+-- OneShot Result
 -------------------------------------------------------------------------------
 
 -- | Result of a OneShot execution.
 data OneShotResult = OneShotResult
     { osrText :: Text
-    -- ^ Response text from the agent
     , osrThinking :: Maybe Text
-    -- ^ Thinking/reasoning content if captured
     , osrSession :: Maybe Session
-    -- ^ Final session state if persistence enabled
     , osrSuccess :: Bool
-    -- ^ Whether execution completed successfully
     , osrError :: Maybe Text
-    -- ^ Error message if failed
     }
     deriving (Show)
+
+-- | Extract just the result text from a OneShotResult.
+extractResultText :: OneShotResult -> Text
+extractResultText = osrText
+
+-------------------------------------------------------------------------------
+-- OneShot Interface Handle
+-------------------------------------------------------------------------------
 
 -- | Handle for OneShot-specific interface operations.
 data OneShotInterfaceHandle = OneShotInterfaceHandle
     { oscBaseHandle :: InterfaceHandle
-    -- ^ Base interface handle
     , oscConfig :: OneShotInterfaceConfig
-    -- ^ OneShot-specific configuration
-    , oscExecutionAsync :: TVar (Maybe (Async OneShotResult))
-    -- ^ Current execution async if running
+    , oscShutdown :: TVar Bool
     }
 
 -------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
--- | Initialize the OneShot interface.
+-- | Initialize the OneShot interface (skeleton implementation).
 initOneShotInterface :: OneShotInterfaceConfig -> IO OneShotInterfaceHandle
 initOneShotInterface config = do
-    -- Initialize OS
     os <- initializeOS
-
-    -- Create base interface components
     shutdownVar <- newTVarIO False
     agentsVar <- newTVarIO Map.empty
     conversationsVar <- newTVarIO Map.empty
-
-    -- Create a fake event queue - in real implementation would use STM
-    let fakeQueue = error "Event queue requires STM implementation"
+    eventQueue <- newTQueueIO :: IO (TQueue OSEvent)
 
     let baseHandle =
             InterfaceHandle
                 { ihOS = os
                 , ihConfig = oscBaseConfig config
-                , ihEventSub = fakeQueue
+                , ihEventSub = eventQueue
                 , ihShutdown = shutdownVar
                 , ihAgents = agentsVar
                 , ihConversations = conversationsVar
                 }
 
-    executionVar <- newTVarIO Nothing
+    -- Use the tracer
+    let Tracer tracerFn = oscTracer config
+    tracerFn OneShotTrace_Initialized
 
     pure $
         OneShotInterfaceHandle
             { oscBaseHandle = baseHandle
             , oscConfig = config
-            , oscExecutionAsync = executionVar
+            , oscShutdown = shutdownVar
             }
 
--- | Run the OneShot interface (minimal for batch mode).
+-- | Run the OneShot interface (skeleton - does nothing).
 runOneShotInterface :: OneShotInterfaceHandle -> IO ()
-runOneShotInterface _handle = do
-    -- OneShot interface doesn't need a running event loop
-    -- Execution happens synchronously in executeOneShot
-    pure ()
+runOneShotInterface _ = pure ()
 
--------------------------------------------------------------------------------
--- Agent Registration
--------------------------------------------------------------------------------
+-- | Execute a one-shot conversation (skeleton - returns placeholder).
+executeOneShot :: OneShotInterfaceHandle -> Maybe AgentId -> Text -> IO OneShotResult
+executeOneShot _ _ query = pure $
+    OneShotResult
+        { osrText = "OS-native OneShot not yet fully implemented: " <> query
+        , osrThinking = Nothing
+        , osrSession = Nothing
+        , osrSuccess = False
+        , osrError = Just "Skeleton implementation"
+        }
 
--- | Register an agent for OneShot execution.
-registerOneShotAgent :: OneShotInterfaceHandle -> IO (AgentId)
-registerOneShotAgent _ = do
-    -- Generate a new agent ID
-    agentId <- newAgentId
-    pure agentId
+-- | Shutdown the OneShot interface.
+shutdownOneShotInterface :: OneShotInterfaceHandle -> IO ()
+shutdownOneShotInterface handle = do
+    atomically $ writeTVar (oscShutdown handle) True
 
--------------------------------------------------------------------------------
--- Execution
--------------------------------------------------------------------------------
-
-{- | Execute a one-shot conversation with an agent.
-
-This is the main entry point for OneShot execution. It:
-1. Creates/uses the agent
-2. Executes the conversation
-3. Returns the result with optional persistence
--}
-executeOneShot ::
-    OneShotInterfaceHandle ->
-    -- | Agent identifier (or create new if empty)
-    Maybe AgentId ->
-    -- | User query
-    Text ->
-    -- | Result
-    IO OneShotResult
-executeOneShot handle mAgentId _query = do
-    -- Create session
-    session <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
-    executeOneShotWithSession handle mAgentId session
-
-{- | Execute a one-shot conversation with an existing session.
-
-This allows resuming from a previous session.
--}
-executeOneShotWithSession ::
-    OneShotInterfaceHandle ->
-    -- | Agent identifier (or create new if empty)
-    Maybe AgentId ->
-    -- | Initial session
-    Session ->
-    -- | Result
-    IO OneShotResult
-executeOneShotWithSession handle mAgentId session = do
-    -- Get or create agent
-    _ <- case mAgentId of
-        Just _aid -> void $ registerOneShotAgent handle
-        Nothing -> void $ registerOneShotAgent handle
-
-    -- Generate conversation ID (unused for now)
-    _ <- newConversationId
-
-    -- For now, return a placeholder result
-    -- In the full implementation, this would:
-    -- 1. Create the agent using the bridge
-    -- 2. Run the conversation
-    -- 3. Capture results and thinking
-    -- 4. Handle persistence
-
-    pure $
-        OneShotResult
-            { osrText = "OneShot execution not yet fully implemented - use legacy mainOneShotText"
-            , osrThinking = Nothing
-            , osrSession = Just session
-            , osrSuccess = False
-            , osrError = Just "OS-native OneShot not yet implemented"
-            }
-  where
-    void = (>> pure ())
-
--------------------------------------------------------------------------------
--- Utility
--------------------------------------------------------------------------------
-
--- | Extract just the result text from a OneShotResult.
-extractResultText :: OneShotResult -> Text
-extractResultText = osrText
