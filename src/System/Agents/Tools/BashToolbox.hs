@@ -255,4 +255,3 @@ readMultiSourceTools multi = do
     readSourceTools bg = do
         scripts <- Background.readBackgroundVal bg.tools
         pure (sourceActivation bg.source, scripts)
-

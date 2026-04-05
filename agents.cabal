@@ -119,7 +119,6 @@ library agents-lib
                     , System.Agents.Tools.Skills.Types
                     , System.Agents.Tools.Skills.Parser
                     , System.Agents.Tools.Skills.Source
-                    , System.Agents.Tools.Skills.State
                     , System.Agents.Tools.Skills.Toolbox
                     , System.Agents.Tools.SqliteToolbox
                     , System.Agents.Tools.SystemToolbox

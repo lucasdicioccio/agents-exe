@@ -4,8 +4,6 @@
 
 This module tests:
 - Skill name validation per agentskills.io spec
-- Session state monoid laws
-- Progressive disclosure behavior
 - SKILL.md file parsing
 -}
 module SkillsTests where
@@ -20,9 +18,7 @@ import qualified Data.Text.Encoding as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import System.Agents.Session.Types
 import System.Agents.Tools.Skills.Parser
-import System.Agents.Tools.Skills.State
 import System.Agents.Tools.Skills.Types
 
 -------------------------------------------------------------------------------
@@ -35,8 +31,6 @@ skillsTestSuite =
         "Skills Tests"
         [ skillNameValidationTests
         , skillNameParsingTests
-        , sessionStateMonoidTests
-        , progressiveDisclosureTests
         , skillFileParsingTests
         ]
 
@@ -98,79 +92,6 @@ skillNameParsingTests =
         ]
 
 -------------------------------------------------------------------------------
--- Monoid Laws Tests
--------------------------------------------------------------------------------
-
-sessionStateMonoidTests :: TestTree
-sessionStateMonoidTests =
-    testGroup
-        "Session State Monoid"
-        [ testCase "satisfies right identity" $ do
-            let a = sampleState "skill-a"
-            a <> mempty @?= a
-        , testCase "satisfies left identity" $ do
-            let a = sampleState "skill-a"
-            mempty <> a @?= a
-        , testCase "satisfies associativity" $ do
-            let a = sampleState "skill-a"
-                b = sampleState "skill-b"
-                c = sampleState "skill-c"
-            (a <> b) <> c @?= a <> (b <> c)
-        , testCase "later enable overrides earlier disable" $ do
-            let skillA = SkillName "skill-a"
-                disabled = disableSkill skillA
-                enabled = enableSkill skillA
-                combined = disabled <> enabled
-            getEnabledScripts combined skillA @?= Nothing -- All enabled
-        , testCase "earlier state preserved for different skills" $ do
-            let skillA = SkillName "skill-a"
-                skillB = SkillName "skill-b"
-                stateA = enableSkill skillA
-                stateB = enableSkill skillB
-                combined = stateA <> stateB
-            isScriptEnabled combined skillA (ScriptName "test") @?= True
-            isScriptEnabled combined skillB (ScriptName "test") @?= True
-        ]
-
--- Helper to create a sample state for a skill
-sampleState :: Text -> SkillsSessionState
-sampleState name =
-    case validateSkillName name of
-        Left _ -> mempty
-        Right skillName -> enableSkill skillName
-
--------------------------------------------------------------------------------
--- Progressive Disclosure Tests
--------------------------------------------------------------------------------
-
-progressiveDisclosureTests :: TestTree
-progressiveDisclosureTests =
-    testGroup
-        "Progressive Disclosure"
-        [ testCase "scripts disabled by default" $ do
-            let skillA = SkillName "skill-a"
-                scriptX = ScriptName "script-x"
-                state = mempty :: SkillsSessionState
-            isScriptEnabled state skillA scriptX @?= False
-        , testCase "all scripts enabled after skill enable" $ do
-            let skillA = SkillName "skill-a"
-                scriptX = ScriptName "script-x"
-                scriptY = ScriptName "script-y"
-                state = enableSkill skillA
-            isScriptEnabled state skillA scriptX @?= True
-            isScriptEnabled state skillA scriptY @?= True
-        , testCase "getEnabledScripts returns Nothing for enabled skill" $ do
-            let skillA = SkillName "skill-a"
-                state = enableSkill skillA
-            -- Nothing means "all scripts enabled" (no explicit list)
-            getEnabledScripts state skillA @?= Nothing
-        , testCase "getEnabledScripts returns empty list for disabled skill" $ do
-            let skillA = SkillName "skill-a"
-                state = mempty :: SkillsSessionState
-            getEnabledScripts state skillA @?= Just []
-        ]
-
--------------------------------------------------------------------------------
 -- SKILL.md File Parsing Tests
 -------------------------------------------------------------------------------
 
@@ -216,21 +137,4 @@ skillFileParsingTests =
                 Left _ -> pure () -- Expected - directory doesn't exist
                 Right skills -> skills @?= []
         ]
-
--------------------------------------------------------------------------------
--- Property Test Placeholders
--------------------------------------------------------------------------------
-
--- Note: Full property testing would require QuickCheck.
--- These are manual tests for the monoid laws.
-
--- | Test that the monoid laws hold for SkillsSessionState
-prop_monoidRightIdentity :: SkillsSessionState -> Bool
-prop_monoidRightIdentity a = a <> mempty == a
-
-prop_monoidLeftIdentity :: SkillsSessionState -> Bool
-prop_monoidLeftIdentity a = mempty <> a == a
-
-prop_monoidAssociativity :: SkillsSessionState -> SkillsSessionState -> SkillsSessionState -> Bool
-prop_monoidAssociativity a b c = (a <> b) <> c == a <> (b <> c)
 

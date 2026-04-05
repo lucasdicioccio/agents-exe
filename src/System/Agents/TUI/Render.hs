@@ -643,4 +643,3 @@ tui_appAttrMap _ =
         , (activationFirstNAttr, BrickUtil.fg Vty.cyan)
         , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         ]
-

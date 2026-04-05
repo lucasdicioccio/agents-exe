@@ -7,6 +7,7 @@ This module tests:
 - Meta-tool call parsing
 - Progressive disclosure behavior
 - Toolgroup activation/deactivation
+- Backward compatibility with old skill tool calls
 -}
 module ActivationSessionTests where
 
@@ -39,6 +40,7 @@ activationSessionTestSuite =
         , progressiveDisclosureTests
         , stateQueryTests
         , sessionFileTests
+        , backwardCompatibilityTests
         ]
 
 -------------------------------------------------------------------------------
@@ -117,12 +119,6 @@ toolCallParsingTests =
         , testCase "ignores unknown tool calls" $ do
             let toolCall = createToolCall "some_other_tool" Nothing
             extractFromToolCall toolCall @?= mempty
-        , testCase "ignores skill_enable calls" $ do
-            let toolCall = createToolCall "skill_enable_pdf-processing" Nothing
-            extractFromToolCall toolCall @?= mempty
-        , testCase "ignores skill_disable calls" $ do
-            let toolCall = createToolCall "skill_disable_pdf-processing" Nothing
-            extractFromToolCall toolCall @?= mempty
         , testCase "returns mempty for missing toolgroup argument" $ do
             let toolCall = createToolCall "meta_activate_tool" $ Just $ Aeson.object [("other_arg", Aeson.String "value")]
             extractFromToolCall toolCall @?= mempty
@@ -157,6 +153,37 @@ createToolCallWithStringArgs funcName argsJson =
             , "arguments" Aeson..= argsJson
             ]
      in LlmToolCall $ Aeson.object ["function" Aeson..= funcObj]
+
+-------------------------------------------------------------------------------
+-- Backward Compatibility Tests
+-------------------------------------------------------------------------------
+
+backwardCompatibilityTests :: TestTree
+backwardCompatibilityTests =
+    testGroup
+        "Backward Compatibility (old skill tool calls)"
+        [ testCase "skill_enable_{name} activates skill toolgroup" $ do
+            let toolCall = createToolCall "skill_enable_pdf-processing" Nothing
+                state = extractFromToolCall toolCall
+            isToolgroupActive state "skill:pdf-processing" @?= True
+        , testCase "skill_disable_{name} deactivates skill toolgroup" $ do
+            let toolCall = createToolCall "skill_disable_pdf-processing" Nothing
+                state = extractFromToolCall toolCall
+            isToolgroupActive state "skill:pdf-processing" @?= False
+        , testCase "skill_list is ignored (no state change)" $ do
+            let toolCall = createToolCall "skill_list" Nothing
+            extractFromToolCall toolCall @?= mempty
+        , testCase "old skill enable followed by new meta deactivate works" $ do
+            let enableCall = createToolCall "skill_enable_code-review" Nothing
+                deactivateCall = createToolCall "meta_deactivate_tool" $ Just $ Aeson.object [("toolgroup", Aeson.String "skill:code-review")]
+                state = extractFromToolCall enableCall <> extractFromToolCall deactivateCall
+            isToolgroupActive state "skill:code-review" @?= False
+        , testCase "new meta activate followed by old skill disable works" $ do
+            let activateCall = createToolCall "meta_activate_tool" $ Just $ Aeson.object [("toolgroup", Aeson.String "skill:git-helpers")]
+                disableCall = createToolCall "skill_disable_git-helpers" Nothing
+                state = extractFromToolCall activateCall <> extractFromToolCall disableCall
+            isToolgroupActive state "skill:git-helpers" @?= False
+        ]
 
 -------------------------------------------------------------------------------
 -- Session Folding Tests
@@ -219,6 +246,11 @@ sessionFoldingTests =
                     }
                 state = foldSession session
             isToolgroupActive state "test-group" @?= True
+        , testCase "old skill_enable calls in session activate skill toolgroups" $ do
+            let session = createSessionWithSkillEnableCalls ["pdf-processing", "code-review"]
+                state = foldSession session
+            isToolgroupActive state "skill:pdf-processing" @?= True
+            isToolgroupActive state "skill:code-review" @?= True
         ]
 
 -- Helper to create an empty session
@@ -236,6 +268,19 @@ createSessionWithToolCalls :: [(Text, Text)] -> Session
 createSessionWithToolCalls calls =
     let toolCalls = map (\(name, group) -> createToolCall name (Just $ Aeson.object [("toolgroup", Aeson.String group)])) calls
         -- LlmResponse now includes responseTokenUsage as 4th field
+        llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) toolCalls
+        llmTurn = LlmTurn llmContent Nothing
+     in Session
+            { turns = [llmTurn]
+            , sessionId = SessionId UUID.nil
+            , forkedFromSessionId = Nothing
+            , turnId = TurnId UUID.nil
+            }
+
+-- Helper to create a session with old-style skill_enable calls
+createSessionWithSkillEnableCalls :: [Text] -> Session
+createSessionWithSkillEnableCalls skillNames =
+    let toolCalls = map (\name -> createToolCall ("skill_enable_" <> name) Nothing) skillNames
         llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) toolCalls
         llmTurn = LlmTurn llmContent Nothing
      in Session

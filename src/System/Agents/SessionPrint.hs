@@ -42,9 +42,9 @@ import qualified Data.Text.Lazy as TextLazy
 import qualified Data.Text.Lazy.Encoding as TextLazyEncoding
 import System.IO (stderr)
 
+import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import qualified System.Agents.Session.Base as Session
 import System.Agents.Session.Types (StepByteUsage (..))
-import System.Agents.LLMs.OpenAI (TokenUsage (..))
 
 -- | Preference for ordering session steps.
 data OrderPreference
@@ -482,7 +482,8 @@ formatByteChart stats =
 -- | Format token usage as bar chart.
 formatTokenChart :: TokenUsageStats -> Text.Text
 formatTokenChart stats =
-    let -- Build list of categories, only including non-zero ones
+    let
+        -- Build list of categories, only including non-zero ones
         allCategories =
             [ ("Prompt", statPromptTokens stats)
             , ("Completion", statCompletionTokens stats)
@@ -498,7 +499,8 @@ formatTokenChart stats =
             _ -> categoriesWithCached
         maxTokens = if null categoriesWithThinking then 1 else maximum (map snd categoriesWithThinking)
         total = statTotalTokens stats
-     in if total == 0
+     in
+        if total == 0
             then "_No token data recorded_\n"
             else
                 let chart = Text.intercalate "\n\n" $ map (formatTokenBar maxTokens) categoriesWithThinking
@@ -803,4 +805,3 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
-

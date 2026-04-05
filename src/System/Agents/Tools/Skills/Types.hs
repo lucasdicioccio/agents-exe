@@ -9,6 +9,9 @@
 This module defines the fundamental types for loading, validating, and
 managing skills in the agent system. Skills provide procedural knowledge
 and executable capabilities via progressive disclosure.
+
+Note: Session state for skill activation is now handled generically by
+System.Agents.Tools.Activation.Session via the ToolboxSessionState type.
 -}
 module System.Agents.Tools.Skills.Types (
     -- * Skill Names and Validation
@@ -37,11 +40,6 @@ module System.Agents.Tools.Skills.Types (
     lookupSkill,
     allSkills,
     insertSkill,
-
-    -- * Skill Script State
-    ScriptState (..),
-    SkillScriptsState,
-    SkillsSessionState (..),
 ) where
 
 import Data.Aeson (FromJSON, FromJSONKey, ToJSON, ToJSONKey)
@@ -363,37 +361,3 @@ allSkills (SkillsStore m) = Map.elems m
 insertSkill :: Skill -> SkillsStore -> SkillsStore
 insertSkill skill (SkillsStore m) =
     SkillsStore $ Map.insert (skillMetadata skill).smName skill m
-
--------------------------------------------------------------------------------
--- Session State for Skills
--------------------------------------------------------------------------------
-
-{- | Activation state for individual scripts within a skill.
-
-Scripts start as 'Disabled' and become 'Enabled' when the skill is activated.
--}
-data ScriptState = Enabled | Disabled
-    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
-
--- | Map of script names to their activation state within a skill.
-type SkillScriptsState = Map ScriptName ScriptState
-
-{- | Session state tracking which skills and scripts are enabled.
-
-This is a monoid that can be built by folding over session turns.
-Later state overrides earlier state (last enable/disable wins).
--}
-newtype SkillsSessionState = SkillsSessionState
-    { sssActiveSkills :: Map SkillName SkillScriptsState
-    }
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
-
-instance Semigroup SkillsSessionState where
-    (SkillsSessionState s1) <> (SkillsSessionState s2) =
-        -- Union with later values overriding earlier ones
-        -- For each skill, script states are also unioned with later overriding
-        SkillsSessionState (Map.unionWith (Map.unionWith const) s1 s2)
-
-instance Monoid SkillsSessionState where
-    mempty = SkillsSessionState Map.empty

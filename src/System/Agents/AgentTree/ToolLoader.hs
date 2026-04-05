@@ -64,9 +64,7 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.Skills.Source as SkillsSource
 import qualified System.Agents.Tools.Skills.Toolbox as SkillsToolbox
 import System.Agents.Tools.Skills.Types (
-    SkillName,
     SkillSource (..),
-    SkillsStore,
     allSkills,
  )
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
@@ -594,13 +592,13 @@ loadLuaToolbox tracer toolsTVar desc = do
 {- | Load skills toolboxes from the agent configuration.
 
 Skills provide procedural knowledge and executable capabilities via
-progressive disclosure. This function:
+the ProgressiveDisclosure framework. This function:
 1. Loads skills from configured sources (directories, git repos)
-2. Registers metadata tools for all skills (skill_list, skill_describe_*)
-3. Auto-enables skills configured in autoEnableSkills
+2. Registers skill tools with OnDemandActivated "skill:{name}" activation
+3. All skills start hidden and must be activated via meta_activate_tool
 
-Note: Script tools are computed dynamically based on session state via
-computeSkillTools in System.Agents.Tools.Skills.Toolbox.
+The meta_discover_tools, meta_activate_tool, and meta_deactivate_tool tools
+are provided by the ProgressiveDisclosure combinator, not by this module.
 
 Note: SkillDirectory paths are resolved relative to the execution's current
 working directory.
@@ -611,7 +609,6 @@ loadSkillsTools ::
     IO (Maybe LoadingError)
 loadSkillsTools agent toolsTVar = do
     let sources = fromMaybe [] (skillSources agent)
-    let autoEnable = fromMaybe [] (autoEnableSkills agent)
 
     if null sources
         then pure Nothing
@@ -625,23 +622,12 @@ loadSkillsTools agent toolsTVar = do
             case result of
                 Left err -> pure $ Just $ SkillsLoadingError (Text.unpack err)
                 Right skillsStore -> do
-                    -- Register skill metadata tools (always available)
-                    let metaTools =
-                            concatMap
-                                (SkillsToolbox.makeMetaTools skillsStore)
-                                (allSkills skillsStore)
-
-                    -- Register skill_list tool if there are skills
-                    let listTool = SkillsToolbox.makeListSkillsTool skillsStore
-
-                    -- Register auto-enable tools for skills in autoEnableSkills
-                    autoTools <- loadAutoEnableSkills skillsStore autoEnable
-
-                    -- Combine all tools
-                    let allTools = metaTools ++ maybeToList listTool ++ autoTools
+                    -- Register all skill tool registrations with ProgressiveDisclosure activation
+                    -- Each skill becomes a toolgroup "skill:{name}" with describe + script tools
+                    let allSkillTools = concatMap SkillsToolbox.skillToToolRegistrations (allSkills skillsStore)
 
                     -- Add to tools TVar
-                    atomically $ modifyTVar' toolsTVar (\existing -> existing ++ allTools)
+                    atomically $ modifyTVar' toolsTVar (\existing -> existing ++ allSkillTools)
 
                     pure Nothing
 
@@ -655,24 +641,6 @@ resolveSkillSource (SkillDirectory path) = do
     pure $ SkillDirectory $ if FilePath.isRelative path then cwd </> path else path
 resolveSkillSource gitRepo@(SkillGitRepo _ _) = pure gitRepo
 
-{- | Load tools for auto-enabled skills.
-For now, this is empty - script tools will be computed dynamically
-based on session state via computeSkillTools.
--}
-loadAutoEnableSkills :: SkillsStore -> [SkillName] -> IO [ToolRegistration]
-loadAutoEnableSkills _skillsStore _autoEnable = do
-    -- Note: Script tools for auto-enabled skills are computed dynamically
-    -- via computeSkillTools based on session state. The enable/disable
-    -- state is tracked by the session folding mechanism.
-    -- For now, we just return empty - the actual script tools will be
-    -- computed when the session is available.
-    pure []
-
--- | Helper to convert Maybe to list.
-maybeToList :: Maybe a -> [a]
-maybeToList Nothing = []
-maybeToList (Just x) = [x]
-
 -------------------------------------------------------------------------------
 -- Utility Functions
 -------------------------------------------------------------------------------
@@ -684,4 +652,3 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
-
