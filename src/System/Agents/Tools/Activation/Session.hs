@@ -15,6 +15,11 @@ Progressive disclosure:
 - Tools with 'OnDemandActivated' activation are initially hidden
 - After meta_activate_tool is called, they become available
 - After meta_deactivate_tool is called, they become hidden again
+
+Backward Compatibility:
+- Old skill_enable_{name} calls are treated as meta_activate_tool("skill:{name}")
+- Old skill_disable_{name} calls are treated as meta_deactivate_tool("skill:{name}")
+- Old skill_list calls are ignored (no state change)
 -}
 module System.Agents.Tools.Activation.Session (
     -- * Pure Session Folding
@@ -90,7 +95,10 @@ extractFromTurn (LlmTurn llmTurn _) =
 Recognizes:
 - meta_activate_tool(toolgroup) -> activates the toolgroup
 - meta_deactivate_tool(toolgroup) -> deactivates the toolgroup
-- meta_discover_tools() -> no state change (metadata only)
+- skill_enable_{name} (backward compat) -> activates "skill:{name}"
+- skill_disable_{name} (backward compat) -> deactivates "skill:{name}"
+- meta_discover_tools() -> no state change
+- skill_list -> no state change (backward compat)
 -}
 extractFromToolCall :: LlmToolCall -> ToolboxSessionState
 extractFromToolCall (LlmToolCall val) =
@@ -120,7 +128,10 @@ extractFunctionName val = case val of
 Handles:
 - meta_activate_tool with 'toolgroup' argument -> activates the toolgroup
 - meta_deactivate_tool with 'toolgroup' argument -> deactivates the toolgroup
+- skill_enable_{name} -> activates "skill:{name}" (backward compatibility)
+- skill_disable_{name} -> deactivates "skill:{name}" (backward compatibility)
 - meta_discover_tools -> no state change
+- skill_list -> no state change (backward compatibility)
 - other tool calls -> no state change
 -}
 parseMetaToolCall :: Text -> Aeson.Value -> ToolboxSessionState
@@ -133,14 +144,22 @@ parseMetaToolCall funcName val
         case extractToolgroupArg val of
             Just toolgroup -> deactivateToolgroup toolgroup
             Nothing -> mempty
+    -- Backward compatibility: skill_enable_{name} -> meta_activate_tool("skill:{name}")
+    | Just skillName <- Text.stripPrefix "skill_enable_" funcName =
+        activateToolgroup ("skill:" <> skillName)
+    -- Backward compatibility: skill_disable_{name} -> meta_deactivate_tool("skill:{name}")
+    | Just skillName <- Text.stripPrefix "skill_disable_" funcName =
+        deactivateToolgroup ("skill:" <> skillName)
+    -- No state change for discovery tools
     | funcName == "meta_discover_tools" = mempty
+    | funcName == "skill_list" = mempty
     | otherwise = mempty
 
 {- | Extract the 'toolgroup' argument from a tool call.
 
 The LLM API returns tool call arguments as a JSON-encoded string.
 This function handles both:
-1. JSON-encoded string arguments: {"arguments": "{\"toolgroup\":\"name\"}"}
+1. JSON-encoded string arguments: {"arguments": "{\\"toolgroup\\":\\"name\\"}"}
 2. Direct object arguments: {"arguments": {"toolgroup": "name"}}
 
 It attempts to parse string arguments as JSON first, then extracts
@@ -195,17 +214,15 @@ extractToolgroupFromArgsValue args =
 {- | Check if a specific toolgroup is currently active.
 
 A toolgroup is active if:
-1. It's in the active toolgroups map, OR
-2. The map doesn't contain it (default for backward compatibility)
+1. It's in the active toolgroups map with Active state
 
-Returns False only if the toolgroup was explicitly deactivated.
+Returns False for toolgroups not explicitly activated.
 -}
 isToolgroupActive :: ToolboxSessionState -> ToolgroupName -> Bool
 isToolgroupActive (ToolboxSessionState stateMap) toolgroup =
     case Map.lookup toolgroup stateMap of
         Just Active -> True
-        Just Inactive -> False
-        Nothing -> False -- Default: inactive if not explicitly tracked
+        _ -> False
 
 {- | Get all currently active toolgroups.
 
