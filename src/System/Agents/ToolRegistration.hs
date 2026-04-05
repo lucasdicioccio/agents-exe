@@ -542,6 +542,9 @@ The tool parameters are structured into groups:
 All parameter groups and their sub-properties are marked as optional,
 allowing the LLM to provide only the parameters it needs.
 
+The activation is extracted from the toolbox's 'postgrestActivation' field,
+allowing per-toolbox progressive disclosure control.
+
 Returns 'Left' if the tool cannot be registered.
 
 Example:
@@ -596,12 +599,15 @@ registerPostgRESTool toolbox tool =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
+
+        -- Extract activation from the toolbox configuration
+        mbActivation = PostgRESToolbox.postgrestActivation toolbox
      in Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
-                , toolActivation = Nothing
+                , toolActivation = mbActivation
                 }
 
 {- | Build parameter properties for PostgREST tool from structured parameters.

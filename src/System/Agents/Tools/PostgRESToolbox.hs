@@ -11,6 +11,7 @@ This module provides a runtime that:
 * Handles HTTP execution with PostgREST-specific query parameter building
 * Integrates with the LLM tool registration system
 * Supports flexible secret management via the 'Secrets' configuration
+* Supports progressive disclosure via the 'configActivation' field
 
 The toolbox follows patterns similar to OpenAPIToolbox, McpToolbox,
 and BashToolbox for consistent integration with the agents system.
@@ -22,11 +23,16 @@ Key features:
 * Column-based row filtering
 * Automatic pagination and ordering support
 * JWT Bearer token authentication via secrets
+* Progressive disclosure via activation configuration
 
 Secret Management:
 The toolbox supports flexible secret configuration via the 'secrets' field.
 Secrets can be sourced from environment variables, files, commands, or API
 key files, and can be serialized as custom headers or query string parameters.
+
+Activation:
+The 'configActivation' field controls progressive disclosure for all tools
+from this toolbox. If not specified, defaults to always activated.
 
 Example usage:
 
@@ -56,6 +62,7 @@ main = do
                     , secretSerializer = Header "X-Client-Info" Nothing
                     }
                 ]
+            , configActivation = Nothing  -- Use default activation
             }
     result <- PostgREST.initializeToolbox apiKeysFile tracer config
     case result of
@@ -140,6 +147,7 @@ import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.EndpointPredicate (
@@ -187,7 +195,11 @@ data InitializationError
 {- | Configuration for initializing a PostgREST toolbox.
 
 This configuration type extends the base 'Types.Config' with an optional
-'EndpointPredicate' filter and secret management capabilities.
+'EndpointPredicate' filter, secret management capabilities, and activation
+configuration for progressive disclosure.
+
+The 'configActivation' field controls progressive disclosure for all tools
+from this toolbox. If not specified, defaults to always activated.
 -}
 data Config = Config
     { configUrl :: Text
@@ -206,6 +218,8 @@ data Config = Config
     -}
     , configSecrets :: [Secrets.Secret]
     -- ^ Secrets to resolve and include in requests
+    , configActivation :: Maybe Activation
+    -- ^ Optional activation mode for tools from this toolbox (default: always activated)
     }
     deriving (Show, Eq)
 
@@ -230,6 +244,7 @@ The toolbox maintains:
 * Resolved secrets for authentication
 * Static headers from config
 * The list of allowed HTTP methods
+* Activation configuration for progressive disclosure
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -246,6 +261,8 @@ data Toolbox = Toolbox
     -- ^ HTTP methods exposed by this toolbox
     , toolboxFilter :: Maybe EndpointPredicate
     -- ^ The filter used during initialization (stored for reference)
+    , postgrestActivation :: Maybe Activation
+    -- ^ Activation configuration for progressive disclosure
     }
 
 -- -------------------------------------------------------------------------
@@ -365,6 +382,7 @@ initializeToolbox apiKeysFile tracer config = do
                                         , staticHeaders = config.configHeaders
                                         , toolboxAllowedMethods = allowedMethods
                                         , toolboxFilter = config.configFilter
+                                        , postgrestActivation = config.configActivation
                                         }
 
 {- | Extract a toolbox name from the spec URL.
@@ -774,3 +792,4 @@ postgrest2LLMName toolboxName toolName =
     let normalizedToolbox = normalizeForLLM toolboxName
         normalizedTool = normalizeForLLM toolName
      in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
+

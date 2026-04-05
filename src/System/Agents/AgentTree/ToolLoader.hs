@@ -361,9 +361,8 @@ resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServer
 
 Each PostgREST toolbox fetches its spec and registers converted tools.
 
-Note: PostgREST toolbox activation is currently not supported because the
-PostgRESToolbox.Toolbox type does not store the configuration. The activation
-from PostgRESTServerDescription would need to be added to the Toolbox type.
+The activation from PostgRESTServerDescription is propagated to the Toolbox
+and applied to all tools from that toolbox via registerPostgRESTool.
 -}
 loadPostgRESTToolboxes ::
     Tracer IO PostgRESToolbox.Trace ->
@@ -403,6 +402,7 @@ loadPostgRESTToolbox tracer baseDir apiKeysFile toolsTVar description = do
                 Left err -> pure $ Just $ PostgRESTLoadingError (show err)
                 Right toolbox -> do
                     -- Register all tools from the toolbox
+                    -- Activation is extracted from postgrestActivation in registerPostgRESTool
                     regResult <- ToolReg.registerPostgRESTools toolbox
 
                     case regResult of
@@ -427,6 +427,7 @@ resolvePostgRESTDescription _baseDir (PostgRESTServer desc) =
                 , PostgRESToolbox.configAllowedMethods = fromMaybe [] (postgrestAllowedMethods desc)
                 , PostgRESToolbox.configFilter = postgrestFilter desc
                 , PostgRESToolbox.configSecrets = fromMaybe [] (postgrestSecrets desc)
+                , PostgRESToolbox.configActivation = postgrestActivation desc
                 }
 resolvePostgRESTDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
