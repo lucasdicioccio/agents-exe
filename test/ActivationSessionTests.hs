@@ -209,23 +209,23 @@ progressiveDisclosureTests :: TestTree
 progressiveDisclosureTests =
     testGroup
         "Progressive Disclosure"
-        [ testCase "toolgroups active by default" $ do
+        [ testCase "toolgroups inactive by default" $ do
             let state = mempty :: ToolboxSessionState
-            isToolgroupActive state "any-group" @?= True
-        , testCase "toolgroup becomes inactive after explicit deactivation" $ do
-            let state = deactivateToolgroup "test-group"
-            isToolgroupActive state "test-group" @?= False
+            isToolgroupActive state "any-group" @?= False
         , testCase "toolgroup becomes active after explicit activation" $ do
             let state = activateToolgroup "test-group"
             isToolgroupActive state "test-group" @?= True
-        , testCase "deactivation only affects specified group" $ do
-            let state = deactivateToolgroup "group-a"
-            isToolgroupActive state "group-a" @?= False
-            isToolgroupActive state "group-b" @?= True
         , testCase "activation only affects specified group" $ do
-            let state = activateToolgroup "group-a" <> deactivateToolgroup "group-b"
+            let state = activateToolgroup "group-a"
             isToolgroupActive state "group-a" @?= True
             isToolgroupActive state "group-b" @?= False
+        , testCase "activation then deactivation only affects specified group" $ do
+            let state0 = activateToolgroup "group-b" <> activateToolgroup "group-a"
+            isToolgroupActive state0 "group-a" @?= True
+            isToolgroupActive state0 "group-b" @?= True
+            let state1 = state0 <> deactivateToolgroup "group-a"
+            isToolgroupActive state1 "group-a" @?= False
+            isToolgroupActive state1 "group-b" @?= True
         ]
 
 -------------------------------------------------------------------------------
@@ -248,7 +248,7 @@ stateQueryTests =
             getActiveToolgroups (mempty :: ToolboxSessionState) @?= []
         , testCase "isToolgroupActive handles untracked groups" $ do
             let state = activateToolgroup "tracked"
-            isToolgroupActive state "untracked" @?= True
+            isToolgroupActive state "untracked" @?= False
         ]
 
 -------------------------------------------------------------------------------

@@ -58,11 +58,13 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Tools.IO as IOTools
 
 data Trace
     = ToolRegistrationTrace !ToolRegistration.Trace
     | ToolPortalTrace !ToolPortal.Trace
+    | OneShotTrace !OneShot.Trace
     | OpenAITrace !OpenAI.Trace
     deriving (Show)
 
@@ -146,7 +148,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
 
         -- Apply dynamic tool filtering based on session activation state
         -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-        sessionAgent <- agentEvaluateActiveTools (osNodeTools node) sessionAgent0
+        sessionAgent <- agentEvaluateActiveTools (contramap OneShotTrace tracer) (osNodeTools node) sessionAgent0
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent

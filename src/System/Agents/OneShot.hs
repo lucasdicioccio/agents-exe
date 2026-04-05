@@ -146,7 +146,7 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     
     -- Apply dynamic tool filtering based on session activation state
     -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-    agent1 <- agentEvaluateActiveTools (osNodeTools node) agent0
+    agent1 <- agentEvaluateActiveTools tracer (osNodeTools node) agent0
     
     let agent =
             agentSetQuery (UserQuery query) $
@@ -295,7 +295,10 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                 , sysPrompt = pure sPrompt
                 , sysTools = pure allTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (readTVarIO $ osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall
+                                (contramap ToolRegistrationTrace tracer)
+                                (readTVarIO $ osNodeTools node)
+                                (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -450,8 +453,8 @@ agent <- nodeToAgent store mPath convId tracer loadedApiKeys node
 dynamicAgent <- agentEvaluateActiveTools (osNodeTools node) agent
 @
 -}
-agentEvaluateActiveTools :: forall r. TVar [ToolRegistration] -> Agent r -> IO (Agent r)
-agentEvaluateActiveTools toolsTVar agent = do
+agentEvaluateActiveTools :: forall r. Tracer IO Trace -> TVar [ToolRegistration] -> Agent r -> IO (Agent r)
+agentEvaluateActiveTools tracer toolsTVar agent = do
     -- Create an IORef to track the current session
     -- Use nil UUIDs for initial empty session
     let emptySessionId = SessionId nilUUID
@@ -459,10 +462,16 @@ agentEvaluateActiveTools toolsTVar agent = do
     let emptySession = Session [] emptySessionId Nothing emptyTurnId
     sessionRef <- newIORef emptySession
     
+    let rTools = filterTools sessionRef toolsTVar
     -- Create the decorated agent
     pure $ agent
         { step = decorateStep sessionRef agent.step
-        , sysTools = filterTools sessionRef toolsTVar
+        , sysTools = fmap (map toolRegistrationToSystemTool) rTools
+        , toolCall =
+            executeLlmToolCall
+              (contramap ToolRegistrationTrace tracer)
+              rTools
+              (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
         }
   where
     -- | Decorates the step function to update the sessionRef after each step
@@ -474,7 +483,7 @@ agentEvaluateActiveTools toolsTVar agent = do
         stepFn sess
     
     -- | Filters tools based on the current session activation state
-    filterTools :: IORef Session -> TVar [ToolRegistration] -> IO [SystemTool]
+    filterTools :: IORef Session -> TVar [ToolRegistration] -> IO [ToolRegistration]
     filterTools sessionRef tvar = do
         -- Get the current session state
         currentSession <- readIORef sessionRef
@@ -495,9 +504,10 @@ agentEvaluateActiveTools toolsTVar agent = do
         
         -- Filter ToolRegistrations based on activation state
         let activeToolRegs = filter (isToolRegActive activationState) allToolRegs
+        print (activationState, activeToolRegs)
         
         -- Combine meta tools with active tool registrations, then map to SystemTools
-        pure $ map toolRegistrationToSystemTool (metaTools ++ activeToolRegs)
+        pure $ (metaTools ++ activeToolRegs)
     
     -- | Check if a ToolRegistration is active based on the activation state
     isToolRegActive :: ToolboxSessionState -> ToolRegistration -> Bool

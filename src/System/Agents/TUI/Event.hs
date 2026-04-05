@@ -628,7 +628,7 @@ runConversation tracer baseTuiAgent session = do
     -- Use the agent's OSAgentNode through the TuiAgent
     -- Pass API keys from the session config
     agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    agent1 <- liftIO $ agentEvaluateActiveTools (osNodeTools node) agent0
+    agent1 <- liftIO $ agentEvaluateActiveTools (contramap OneShotTrace tracer) (osNodeTools node) agent0
 
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
