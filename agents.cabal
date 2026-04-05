@@ -53,6 +53,7 @@ library agents-lib
                     , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
+                    , System.Agents.Combinators.ProgressiveDisclosure
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification

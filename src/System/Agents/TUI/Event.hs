@@ -40,7 +40,8 @@ import System.Process (readProcessWithExitCode)
 
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
-import System.Agents.OneShot (nodeToAgent, agentEvaluateActiveTools)
+import System.Agents.OneShot (nodeToAgent, mapProgressiveDisclosureTrace)
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
@@ -628,7 +629,7 @@ runConversation tracer baseTuiAgent session = do
     -- Use the agent's OSAgentNode through the TuiAgent
     -- Pass API keys from the session config
     agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    agent1 <- liftIO $ agentEvaluateActiveTools (contramap OneShotTrace tracer) (osNodeTools node) agent0
+    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
 
     -- Get reference to core state for pause checking and message buffering
     coreRef <- use tuiCore
@@ -727,3 +728,4 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+

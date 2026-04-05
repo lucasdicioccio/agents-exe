@@ -18,33 +18,31 @@ module System.Agents.OneShot (
     -- * Main functions (OS-native)
     nodeToAgent,
     agentStoreSession,
-    agentEvaluateActiveTools,
     fileStoringCallback,
     mainPrintAgent,
     mainOneShotText,
     mainOneShotTextWithThinking,
 
+    -- * Re-export from ProgressiveDisclosure
+    agentEvaluateActiveTools,
+
     -- * Utility functions
+    mapProgressiveDisclosureTrace,
     parseModelFlavor,
 ) where
 
-import Control.Concurrent.STM (TVar, readTVarIO)
+import Control.Concurrent.STM (readTVarIO)
 import Control.Exception (Exception)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Foldable (traverse_)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import Data.UUID (UUID)
-import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), contramap)
 import System.IO (stderr)
 
@@ -70,17 +68,11 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Activation (Activation (..), ToolgroupName)
-import System.Agents.Tools.Activation.Session (
-    foldSession,
-    isToolgroupActive,
-    ToolboxSessionState (..),
-    extractToolgroups,
-    makeActivateTool,
-    makeDeactivateTool,
-    makeDiscoverTools,
- )
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+
+-- Re-export agentEvaluateActiveTools from the new module
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
+import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
 
 import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
@@ -148,7 +140,7 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     
     -- Apply dynamic tool filtering based on session activation state
     -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-    agent1 <- agentEvaluateActiveTools tracer (osNodeTools node) agent0
+    agent1 <- agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
     
     let agent =
             agentSetQuery (UserQuery query) $
@@ -164,6 +156,10 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     (llmTurn, _) <- run convId agent session0
     config.onSessionProgress convId (SessionCompleted session0)
     pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
+
+mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
+mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolRegistrationTrace t) = ToolRegistrationTrace t
+mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolPortalTrace t) = ToolPortalTrace t
 
 {- | Run a one-shot agent with optional file-based session storage.
 
@@ -208,7 +204,7 @@ instance Exception SessionLoadingFailed
 -- | Stopping result type that carries the final response text.
 newtype OneShotResult = OneShotResult Text
 
--- | Extract text content from an LLM response.
+-- | Extract text from an LLM response.
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) = Maybe.fromMaybe "" txt
 
@@ -426,109 +422,4 @@ agentWithSessionProgress onProgress agent =
     decorate f = \sess -> do
         onProgress (SessionUpdated sess)
         f sess
-
--- | A nil UUID for creating initial empty session references.
-nilUUID :: UUID
-nilUUID = UUID.fromWords 0 0 0 0
-
-{- | Wrap an agent to dynamically evaluate and filter active tools based on session history.
-
-This decorator:
-1. Takes a TVar containing the available ToolRegistrations
-2. Creates an IORef to track the current session state
-3. Updates the IORef after each step (like onProgress)
-4. Reads from the TVar and filters ToolRegistrations based on session activation state
-5. Maps the filtered ToolRegistrations to SystemTools
-6. Adds meta tools (meta_activate_tool, meta_deactivate_tool, meta_discover_tools) conditionally:
-   - meta_activate_tool only if there are inactive toolgroups
-   - meta_deactivate_tool only if there are active toolgroups
-   - meta_discover_tools always added when any toolgroups exist
-
-Tools are filtered based on 'meta_activate_tool' and 'meta_deactivate_tool' calls
-in the session history. The list of ToolRegistrations is read fresh from the TVar
-on each access, allowing runtime changes to the available tools.
-
-Tools with 'OnDemandActivated' activation are only visible when their toolgroup
-is active. Tools with 'AlwaysActivated' or no activation are always visible.
-
-Example usage:
-
-@
-agent <- nodeToAgent store mPath convId tracer loadedApiKeys node
-dynamicAgent <- agentEvaluateActiveTools (osNodeTools node) agent
-@
--}
-agentEvaluateActiveTools :: forall r. Tracer IO Trace -> TVar [ToolRegistration] -> Agent r -> IO (Agent r)
-agentEvaluateActiveTools tracer toolsTVar agent = do
-    -- Create an IORef to track the current session
-    -- Use nil UUIDs for initial empty session
-    let emptySessionId = SessionId nilUUID
-    let emptyTurnId = TurnId nilUUID
-    let emptySession = Session [] emptySessionId Nothing emptyTurnId
-    sessionRef <- newIORef emptySession
-    
-    let rTools = filterTools sessionRef toolsTVar
-    -- Create the decorated agent
-    pure $ agent
-        { step = decorateStep sessionRef agent.step
-        , sysTools = fmap (map toolRegistrationToSystemTool) rTools
-        , toolCall =
-            executeLlmToolCall
-              (contramap ToolRegistrationTrace tracer)
-              rTools
-              (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-        }
-  where
-    -- | Decorates the step function to update the sessionRef after each step
-    decorateStep :: IORef Session -> (Session -> IO (Action r)) -> (Session -> IO (Action r))
-    decorateStep sessionRef stepFn = \sess -> do
-        -- Update the session reference with the current session
-        writeIORef sessionRef sess
-        -- Call the original step function
-        stepFn sess
-    
-    -- | Filters tools based on the current session activation state
-    filterTools :: IORef Session -> TVar [ToolRegistration] -> IO [ToolRegistration]
-    filterTools sessionRef tvar = do
-        -- Get the current session state
-        currentSession <- readIORef sessionRef
-        
-        -- Compute the activation state from session history
-        let activationState = foldSession currentSession
-        
-        -- Read the ToolRegistrations from the TVar
-        allToolRegs <- readTVarIO tvar
-        
-        -- Extract all unique toolgroups from the registrations (returns a Set)
-        let allToolgroups :: Set ToolgroupName
-            allToolgroups = extractToolgroups allToolRegs
-        
-        -- Determine which toolgroups are active vs inactive
-        let activeToolgroups :: Set ToolgroupName
-            activeToolgroups = Set.filter (isToolgroupActive activationState) allToolgroups
-        let inactiveToolgroups :: Set ToolgroupName
-            inactiveToolgroups = allToolgroups Set.\\ activeToolgroups
-        
-        -- Build meta tools conditionally based on active/inactive toolgroups
-        let metaTools = concat
-                [ [makeActivateTool inactiveToolgroups | not (Set.null inactiveToolgroups)]
-                , [makeDeactivateTool activeToolgroups | not (Set.null activeToolgroups)]
-                , [makeDiscoverTools allToolgroups | not (Set.null allToolgroups)]
-                ]
-        
-        -- Filter ToolRegistrations based on activation state
-        let activeToolRegs = filter (isToolRegActive activationState) allToolRegs
-        
-        -- Combine meta tools with active tool registrations
-        pure $ (metaTools ++ activeToolRegs)
-    
-    -- | Check if a ToolRegistration is active based on the activation state
-    isToolRegActive :: ToolboxSessionState -> ToolRegistration -> Bool
-    isToolRegActive activationState toolReg = 
-        case toolReg.toolActivation of
-            Nothing -> True  -- No activation control = always visible
-            Just AlwaysActivated -> True  -- Always activated
-            Just (OnDemandActivated toolgroup) -> 
-                -- Check if the toolgroup is active in the session state
-                isToolgroupActive activationState toolgroup
 

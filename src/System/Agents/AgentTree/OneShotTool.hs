@@ -29,7 +29,8 @@ import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentEvaluateActiveTools, agentStoreSession, parseModelFlavor)
+import System.Agents.OneShot (agentStoreSession, parseModelFlavor, mapProgressiveDisclosureTrace)
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -148,7 +149,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
 
         -- Apply dynamic tool filtering based on session activation state
         -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-        sessionAgent <- agentEvaluateActiveTools (contramap OneShotTrace tracer) (osNodeTools node) sessionAgent0
+        sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent
