@@ -184,6 +184,7 @@ The toolbox maintains:
 * The configured access mode (read-only, read-write, or snapshot)
 * Toolbox metadata (name, description)
 * For snapshot mode: an MVar tracking the lazy connection state
+* The original configuration description used to create this toolbox
 
 The MVar ensures that even if multiple tool calls are made concurrently
 from the same agent, they execute sequentially. Combined with SQLite's
@@ -204,6 +205,8 @@ data Toolbox = Toolbox
     , toolboxAccessMode :: AccessMode
     , toolboxSnapshotState :: Maybe (MVar SnapshotState)
     -- ^ Just for snapshot mode, Nothing for other modes
+    , toolboxConfig :: SqliteToolboxDescription
+    -- ^ Original configuration description used to create this toolbox
     }
 
 {- | Description of a SQLite tool.
@@ -459,6 +462,7 @@ initializeToolbox tracer desc = do
                         , toolboxPath = dbPath
                         , toolboxAccessMode = accessMode
                         , toolboxSnapshotState = Just snapshotState
+                        , toolboxConfig = desc
                         }
         _ -> do
             -- For read-only and read-write modes, open connection immediately
@@ -481,6 +485,7 @@ initializeToolbox tracer desc = do
                                 , toolboxPath = dbPath
                                 , toolboxAccessMode = accessMode
                                 , toolboxSnapshotState = Nothing
+                                , toolboxConfig = desc
                                 }
 
 -- | Open a database connection with standard configuration.
@@ -943,3 +948,4 @@ _formatResultsAsObjects result =
 _rowToObject :: [Text] -> [Value] -> Value
 _rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
+

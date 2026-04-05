@@ -62,6 +62,8 @@ import qualified OS.InterfaceTests
 import qualified OS.IntegrationTests
 -- Import OS Persistence tests
 import qualified OS.PersistenceTests
+-- Import Activation Session tests
+import qualified ActivationSessionTests
 
 main :: IO ()
 main = defaultMain tests
@@ -89,6 +91,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite
+        , ActivationSessionTests.activationSessionTestSuite
         , McpImplementationTests.mcpImplementationTestSuite
         , ToolPortalTests.toolPortalTestSuite
         , LuaToolboxSecurityTests.tests
@@ -286,6 +289,7 @@ agentSerializationTests =
                     , Base.sqliteToolboxDescription = "a set of memories"
                     , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
                     , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.SqliteToolbox sqliteDesc
             let agent = Base.Agent
@@ -315,12 +319,14 @@ agentSerializationTests =
                     , Base.sqliteToolboxDescription = "a set of memories"
                     , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
                     , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    , Base.sqliteToolboxActivation = Nothing
                     }
             let sqliteDesc2 = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "guidelines"
                     , Base.sqliteToolboxDescription = "a set of guidelines"
                     , Base.sqliteToolboxPath = "/path/to/guidelines.sqlite"
                     , Base.sqliteToolboxAccess = Base.SqliteReadOnly
+                    , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolboxes = [Base.SqliteToolbox sqliteDesc1, Base.SqliteToolbox sqliteDesc2]
             let agent = Base.Agent
@@ -353,6 +359,7 @@ agentSerializationTests =
                     , Base.luaToolboxAllowedTools = ["bash", "sqlite"]
                     , Base.luaToolboxAllowedPaths = ["./scripts"]
                     , Base.luaToolboxAllowedHosts = ["localhost"]
+                    , Base.luaToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.LuaToolbox luaDesc
             let agent = Base.Agent
@@ -405,6 +412,7 @@ bashToolboxTests =
                     { Base.fsDirRoot = Nothing
                     , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Nothing
+                    , Base.fsDirActivation = Nothing
                     }
             let json = encode desc
             let mDesc = decode json :: Maybe Base.FileSystemDirectoryDescription
@@ -414,6 +422,7 @@ bashToolboxTests =
                     { Base.fsDirRoot = Nothing
                     , Base.fsDirPath = "./extra-tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
+                    , Base.fsDirActivation = Nothing
                     }
             let json = encode desc
             let mDesc = decode json :: Maybe Base.FileSystemDirectoryDescription
@@ -421,6 +430,7 @@ bashToolboxTests =
         , testCase "SingleTool serialization" $ do
             let desc = Base.SingleToolDescription
                     { Base.singleToolPath = "/path/to/special-tool.sh"
+                    , Base.singleToolActivation = Nothing
                     }
             let json = encode desc
             let mDesc = decode json :: Maybe Base.SingleToolDescription
@@ -430,6 +440,7 @@ bashToolboxTests =
                     { Base.fsDirRoot = Nothing
                     , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
+                    , Base.fsDirActivation = Nothing
                     }
             let wrapped = Base.FileSystemDirectory desc
             let json = encode wrapped
@@ -438,14 +449,15 @@ bashToolboxTests =
         , testCase "BashToolboxDescription SingleTool wrapper" $ do
             let desc = Base.SingleToolDescription
                     { Base.singleToolPath = "/path/to/tool.sh"
+                    , Base.singleToolActivation = Nothing
                     }
             let wrapped = Base.SingleTool desc
             let json = encode wrapped
             let mWrapped = decode json :: Maybe Base.BashToolboxDescription
             mWrapped @?= Just wrapped
         , testCase "agent with bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing
-            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh"
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing Nothing
+            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh" Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"
@@ -468,7 +480,7 @@ bashToolboxTests =
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
         , testCase "agent with both legacy toolDirectory and bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"

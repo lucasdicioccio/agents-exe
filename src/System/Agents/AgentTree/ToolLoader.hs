@@ -125,7 +125,7 @@ loadAgentTools tracer baseDir apiKeysFile agent toolsTVar = do
                 [ loadBashTools (contramap BashToolboxTrace tracer) agent toolsTVar
                 , loadMcpServers (contramap McpToolboxTrace tracer) agent toolsTVar
                 , loadOpenAPIToolboxes (contramap OpenApiToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
-                , loadPostgRESTToolboxes (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
+                , loadPostgRESToolboxes (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
                 , loadBuiltinToolboxes tracer agent toolsTVar
                 , loadSkillsTools agent toolsTVar
                 ]
@@ -143,6 +143,10 @@ Loads tools from:
 
 Note: Relative paths are resolved relative to the execution's current
 working directory.
+
+The activation configuration from each BashToolboxDescription is applied to
+all scripts loaded from that source. This allows per-toolbox activation
+control (e.g., progressive disclosure via on-demand activation).
 -}
 loadBashTools ::
     Tracer IO BashToolbox.Trace ->
@@ -164,8 +168,16 @@ loadBashTools tracer agent toolsTVar = do
                 Left (BashToolbox.LoadingError _msg _errs) -> do
                     pure $ Just $ BashLoadingError "Failed to load some bash tools"
                 Right multiSourceTools -> do
-                    scripts <- BashToolbox.readMultiSourceTools multiSourceTools
-                    let registrations = map ToolReg.registerBashToolInLLM scripts
+                    -- readMultiSourceTools now returns [(Maybe Activation, [ScriptDescription])]
+                    -- where each tuple contains the activation config for that source and its scripts
+                    activationAndScripts <- BashToolbox.readMultiSourceTools multiSourceTools
+
+                    -- Create registrations for each script, applying the source's activation config
+                    let registrations = concatMap makeRegistrations activationAndScripts
+                          where
+                            makeRegistrations (mbActivation, scripts) =
+                                map (ToolReg.registerBashToolInLLM mbActivation) scripts
+
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing
 
@@ -176,7 +188,7 @@ execution's current working directory.
 collectBashDescriptions :: Agent -> [BashToolboxDescription]
 collectBashDescriptions agent =
     let legacyDir = case toolDirectory agent of
-            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing]
+            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing]
             Nothing -> []
         toolboxDescs = fromMaybe [] (bashToolboxes agent)
      in legacyDir ++ toolboxDescs
@@ -194,6 +206,9 @@ mcpInitTimeoutMicros = 30 * 1000 * 1000
 Each MCP server is started and its tools are registered.
 If a server fails to start or times out, an error is returned
 but processing continues for other servers.
+
+The activation from McpSimpleBinaryConfiguration is propagated to the Toolbox
+and applied to all tools from that server via registerMcpToolInLLM.
 -}
 loadMcpServers ::
     Tracer IO McpToolbox.Trace ->
@@ -220,8 +235,8 @@ loadMcpServer ::
 loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
     let proc = System.Process.proc config.executable (map Text.unpack config.args)
 
-    -- Try to initialize the MCP toolbox with exception handling
-    initResult <- try $ McpToolbox.initializeMcpToolbox tracer config.name proc
+    -- Try to initialize the MCP toolbox with activation from config
+    initResult <- try $ McpToolbox.initializeMcpToolbox tracer config.name proc config.mcpActivation
 
     case initResult of
         Left (e :: SomeException) -> do
@@ -241,7 +256,7 @@ loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
                     -- Get discovered tools
                     tools <- readTVarIO $ McpToolbox.toolsList toolbox
 
-                    -- Register each tool
+                    -- Register each tool with activation from toolbox
                     let registrations = map (ToolReg.registerMcpToolInLLM toolbox) tools
                     let (errs, regs) = partitionEithers registrations
 
@@ -262,6 +277,9 @@ loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
 {- | Load OpenAPI toolboxes from the agent configuration.
 
 Each OpenAPI toolbox fetches its spec and registers converted tools.
+
+The activation from OpenAPIServerDescription is propagated to the Toolbox
+and applied to all tools from that toolbox via registerOpenAPITool.
 -}
 loadOpenAPIToolboxes ::
     Tracer IO OpenAPIToolbox.Trace ->
@@ -301,6 +319,7 @@ loadOpenAPIToolbox tracer baseDir apiKeysFile toolsTVar description = do
                 Left err -> pure $ Just $ OpenAPILoadingError (show err)
                 Right toolbox -> do
                     -- Register all tools from the toolbox
+                    -- Activation is extracted from openApiActivation in registerOpenAPITool
                     regResult <- ToolReg.registerOpenAPITools toolbox
 
                     case regResult of
@@ -324,6 +343,7 @@ resolveOpenAPIDescription _baseDir (OpenAPIServer desc) =
                 , OpenAPIToolbox.configToken = openApiToken desc
                 , OpenAPIToolbox.configFilter = openApiFilter desc
                 , OpenAPIToolbox.configSecrets = fromMaybe [] (openApiSecrets desc)
+                , OpenAPIToolbox.configActivation = openApiActivation desc
                 }
 resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
@@ -339,15 +359,18 @@ resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServer
 {- | Load PostgREST toolboxes from the agent configuration.
 
 Each PostgREST toolbox fetches its spec and registers converted tools.
+
+The activation from PostgRESTServerDescription is propagated to the Toolbox
+and applied to all tools from that toolbox via registerPostgRESTool.
 -}
-loadPostgRESTToolboxes ::
+loadPostgRESToolboxes ::
     Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
     FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadPostgRESTToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
+loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes
@@ -378,6 +401,7 @@ loadPostgRESTToolbox tracer baseDir apiKeysFile toolsTVar description = do
                 Left err -> pure $ Just $ PostgRESTLoadingError (show err)
                 Right toolbox -> do
                     -- Register all tools from the toolbox
+                    -- Activation is extracted from postgrestActivation in registerPostgRESTool
                     regResult <- ToolReg.registerPostgRESTools toolbox
 
                     case regResult of
@@ -402,6 +426,7 @@ resolvePostgRESTDescription _baseDir (PostgRESTServer desc) =
                 , PostgRESToolbox.configAllowedMethods = fromMaybe [] (postgrestAllowedMethods desc)
                 , PostgRESToolbox.configFilter = postgrestFilter desc
                 , PostgRESToolbox.configSecrets = fromMaybe [] (postgrestSecrets desc)
+                , PostgRESToolbox.configActivation = postgrestActivation desc
                 }
 resolvePostgRESTDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
@@ -421,6 +446,12 @@ Builtin toolboxes include:
 - System information tools
 - Developer tools
 - Lua sandbox
+
+These toolboxes support activation via their configuration fields:
+- sqliteToolboxActivation
+- systemToolboxActivation
+- developerToolboxActivation
+- luaToolboxActivation
 -}
 loadBuiltinToolboxes ::
     Tracer IO TreeTrace ->
@@ -465,6 +496,7 @@ loadSqliteToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ SqliteLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from sqliteToolboxActivation in registerSqliteTool
             regResult <- ToolReg.registerSqliteTools toolbox
 
             case regResult of
@@ -491,6 +523,7 @@ loadSystemToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ SystemLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from systemToolboxActivation in registerSystemTool
             regResult <- ToolReg.registerSystemTools toolbox
 
             case regResult of
@@ -517,6 +550,7 @@ loadDeveloperToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ DeveloperLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from developerToolboxActivation in registerDeveloperTool
             regResult <- ToolReg.registerDeveloperTools toolbox
 
             case regResult of
@@ -544,6 +578,7 @@ loadLuaToolbox tracer toolsTVar desc = do
         Left err -> pure $ Just $ LuaLoadingError err
         Right toolbox -> do
             -- Register all tools from the toolbox
+            -- Activation is extracted from luaToolboxActivation in registerLuaTool
             regResult <- ToolReg.registerLuaTools toolbox
 
             case regResult of
@@ -649,3 +684,4 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
+

@@ -1,0 +1,344 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
+{- | Tests for the toolbox activation session state system.
+
+This module tests:
+- Session state monoid laws
+- Meta-tool call parsing
+- Progressive disclosure behavior
+- Toolgroup activation/deactivation
+-}
+module ActivationSessionTests where
+
+import qualified Data.Aeson as Aeson
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.UUID as UUID
+import Test.Tasty
+import Test.Tasty.HUnit
+
+import System.Agents.Session.Types
+import System.Agents.Tools.Activation
+import System.Agents.Tools.Activation.Session
+
+-------------------------------------------------------------------------------
+-- Test Suite
+-------------------------------------------------------------------------------
+
+activationSessionTestSuite :: TestTree
+activationSessionTestSuite =
+    testGroup
+        "Activation Session Tests"
+        [ sessionStateMonoidTests
+        , toolCallParsingTests
+        , sessionFoldingTests
+        , progressiveDisclosureTests
+        , stateQueryTests
+        , sessionFileTests
+        ]
+
+-------------------------------------------------------------------------------
+-- Monoid Laws Tests
+-------------------------------------------------------------------------------
+
+sessionStateMonoidTests :: TestTree
+sessionStateMonoidTests =
+    testGroup
+        "Session State Monoid"
+        [ testCase "satisfies right identity" $ do
+            let a = sampleState "group-a" Active
+            (a <> mempty) @?= a
+        , testCase "satisfies left identity" $ do
+            let a = sampleState "group-a" Active
+            (mempty <> a) @?= a
+        , testCase "satisfies associativity" $ do
+            let a = sampleState "group-a" Active
+                b = sampleState "group-b" Inactive
+                c = sampleState "group-c" Active
+            ((a <> b) <> c) @?= (a <> (b <> c))
+        , testCase "later state overrides earlier state for same group" $ do
+            let groupA = "test-group"
+                activated = activateToolgroup groupA
+                deactivated = deactivateToolgroup groupA
+                combined = activated <> deactivated
+            isToolgroupActive combined groupA @?= False
+        , testCase "earlier state preserved for different groups" $ do
+            let groupA = "group-a"
+                groupB = "group-b"
+                stateA = activateToolgroup groupA
+                stateB = activateToolgroup groupB
+                combined = stateA <> stateB
+            isToolgroupActive combined groupA @?= True
+            isToolgroupActive combined groupB @?= True
+        , testCase "union combines different groups" $ do
+            let stateA = activateToolgroup "group-a"
+                stateB = deactivateToolgroup "group-b"
+                combined = stateA <> stateB
+            getActiveToolgroups combined @?= ["group-a"]
+        ]
+
+-- Helper to create a sample state for a toolgroup
+sampleState :: ToolgroupName -> ActivationState -> ToolboxSessionState
+sampleState name state = ToolboxSessionState $ Map.singleton name state
+
+-------------------------------------------------------------------------------
+-- Tool Call Parsing Tests
+-------------------------------------------------------------------------------
+
+toolCallParsingTests :: TestTree
+toolCallParsingTests =
+    testGroup
+        "Tool Call Parsing"
+        [ testCase "extracts function name from tool call" $ do
+            let toolCall = createToolCall "meta_activate_tool" $ Just $ Aeson.object [("toolgroup", Aeson.String "test-group")]
+            extractFromToolCall toolCall @?= activateToolgroup "test-group"
+        , testCase "parses meta_activate_tool with object arguments" $ do
+            let toolCall = createToolCall "meta_activate_tool" $ Just $ Aeson.object [("toolgroup", Aeson.String "filesystem")]
+            isToolgroupActive (extractFromToolCall toolCall) "filesystem" @?= True
+        , testCase "parses meta_deactivate_tool with object arguments" $ do
+            let toolCall = createToolCall "meta_deactivate_tool" $ Just $ Aeson.object [("toolgroup", Aeson.String "filesystem")]
+            isToolgroupActive (extractFromToolCall toolCall) "filesystem" @?= False
+        , testCase "parses meta_activate_tool with JSON-encoded string arguments" $ do
+            -- This is how the LLM API returns tool call arguments - as a JSON-encoded string
+            let argsJson = "{\"toolgroup\":\"ask-user\"}" :: Text
+                toolCall = createToolCallWithStringArgs "meta_activate_tool" argsJson
+            extractFromToolCall toolCall @?= activateToolgroup "ask-user"
+        , testCase "parses meta_deactivate_tool with JSON-encoded string arguments" $ do
+            let argsJson = "{\"toolgroup\":\"ask-user\"}" :: Text
+                toolCall = createToolCallWithStringArgs "meta_deactivate_tool" argsJson
+            extractFromToolCall toolCall @?= deactivateToolgroup "ask-user"
+        , testCase "ignores meta_discover_tools" $ do
+            let toolCall = createToolCall "meta_discover_tools" Nothing
+            extractFromToolCall toolCall @?= mempty
+        , testCase "ignores unknown tool calls" $ do
+            let toolCall = createToolCall "some_other_tool" Nothing
+            extractFromToolCall toolCall @?= mempty
+        , testCase "ignores skill_enable calls" $ do
+            let toolCall = createToolCall "skill_enable_pdf-processing" Nothing
+            extractFromToolCall toolCall @?= mempty
+        , testCase "ignores skill_disable calls" $ do
+            let toolCall = createToolCall "skill_disable_pdf-processing" Nothing
+            extractFromToolCall toolCall @?= mempty
+        , testCase "returns mempty for missing toolgroup argument" $ do
+            let toolCall = createToolCall "meta_activate_tool" $ Just $ Aeson.object [("other_arg", Aeson.String "value")]
+            extractFromToolCall toolCall @?= mempty
+        , testCase "handles empty tool call" $ do
+            let toolCall = LlmToolCall $ Aeson.object []
+            extractFromToolCall toolCall @?= mempty
+        , testCase "handles JSON-encoded string with missing toolgroup field" $ do
+            let argsJson = "{\"other_field\":\"value\"}" :: Text
+                toolCall = createToolCallWithStringArgs "meta_activate_tool" argsJson
+            extractFromToolCall toolCall @?= mempty
+        , testCase "handles invalid JSON in string arguments" $ do
+            -- When JSON parsing fails, should treat the string as the toolgroup name
+            let argsJson = "not-valid-json" :: Text
+                toolCall = createToolCallWithStringArgs "meta_activate_tool" argsJson
+            -- This should return the raw string since it's not valid JSON
+            extractFromToolCall toolCall @?= activateToolgroup "not-valid-json"
+        ]
+
+-- Helper to create a tool call with given function name and arguments
+createToolCall :: Text -> Maybe Aeson.Value -> LlmToolCall
+createToolCall funcName mbArgs =
+    let funcObj = case mbArgs of
+            Just args -> Aeson.object ["name" Aeson..= funcName, "arguments" Aeson..= args]
+            Nothing -> Aeson.object ["name" Aeson..= funcName]
+     in LlmToolCall $ Aeson.object ["function" Aeson..= funcObj]
+
+-- Helper to create a tool call with JSON-encoded string arguments (as returned by LLM API)
+createToolCallWithStringArgs :: Text -> Text -> LlmToolCall
+createToolCallWithStringArgs funcName argsJson =
+    let funcObj = Aeson.object 
+            [ "name" Aeson..= funcName
+            , "arguments" Aeson..= argsJson
+            ]
+     in LlmToolCall $ Aeson.object ["function" Aeson..= funcObj]
+
+-------------------------------------------------------------------------------
+-- Session Folding Tests
+-------------------------------------------------------------------------------
+
+sessionFoldingTests :: TestTree
+sessionFoldingTests =
+    testGroup
+        "Session Folding"
+        [ testCase "empty session produces empty state" $ do
+            let session = createEmptySession
+            foldSession session @?= mempty
+        , testCase "single activate call in session" $ do
+            let session = createSessionWithToolCalls [("meta_activate_tool", "test-group")]
+                state = foldSession session
+            isToolgroupActive state "test-group" @?= True
+        , testCase "single deactivate call in session" $ do
+            let session = createSessionWithToolCalls [("meta_deactivate_tool", "test-group")]
+                state = foldSession session
+            isToolgroupActive state "test-group" @?= False
+        , testCase "multiple activations in session" $ do
+            let session = createSessionWithToolCalls
+                    [ ("meta_activate_tool", "group-a")
+                    , ("meta_activate_tool", "group-b")
+                    ]
+                state = foldSession session
+            isToolgroupActive state "group-a" @?= True
+            isToolgroupActive state "group-b" @?= True
+        , testCase "activation then deactivation of same group" $ do
+            let session = createSessionWithToolCalls
+                    [ ("meta_activate_tool", "test-group")
+                    , ("meta_deactivate_tool", "test-group")
+                    ]
+                state = foldSession session
+            isToolgroupActive state "test-group" @?= False
+        , testCase "deactivation then activation of same group" $ do
+            let session = createSessionWithToolCalls
+                    [ ("meta_deactivate_tool", "test-group")
+                    , ("meta_activate_tool", "test-group")
+                    ]
+                state = foldSession session
+            isToolgroupActive state "test-group" @?= True
+        , testCase "user turns don't affect state" $ do
+            let sessionId = SessionId (UUID.nil)
+                turnId = TurnId (UUID.nil)
+                userContent = UserTurnContent (SystemPrompt "test") [] Nothing []
+                userTurn = UserTurn userContent Nothing
+                session = Session {turns = [userTurn], sessionId = sessionId, forkedFromSessionId = Nothing, turnId = turnId}
+            foldSession session @?= mempty
+        , testCase "session with JSON-encoded string arguments" $ do
+            -- Simulate how the LLM API actually returns tool calls
+            let toolCall = createToolCallWithStringArgs "meta_activate_tool" "{\"toolgroup\":\"test-group\"}"
+                llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [toolCall]
+                llmTurn = LlmTurn llmContent Nothing
+                session = Session 
+                    { turns = [llmTurn]
+                    , sessionId = SessionId UUID.nil
+                    , forkedFromSessionId = Nothing
+                    , turnId = TurnId UUID.nil
+                    }
+                state = foldSession session
+            isToolgroupActive state "test-group" @?= True
+        ]
+
+-- Helper to create an empty session
+createEmptySession :: Session
+createEmptySession =
+    Session
+        { turns = []
+        , sessionId = SessionId UUID.nil
+        , forkedFromSessionId = Nothing
+        , turnId = TurnId UUID.nil
+        }
+
+-- Helper to create a session with a list of (tool_name, toolgroup) pairs
+createSessionWithToolCalls :: [(Text, Text)] -> Session
+createSessionWithToolCalls calls =
+    let toolCalls = map (\(name, group) -> createToolCall name (Just $ Aeson.object [("toolgroup", Aeson.String group)])) calls
+        -- LlmResponse now includes responseTokenUsage as 4th field
+        llmContent = LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) toolCalls
+        llmTurn = LlmTurn llmContent Nothing
+     in Session
+            { turns = [llmTurn]
+            , sessionId = SessionId UUID.nil
+            , forkedFromSessionId = Nothing
+            , turnId = TurnId UUID.nil
+            }
+
+-------------------------------------------------------------------------------
+-- Progressive Disclosure Tests
+-------------------------------------------------------------------------------
+
+progressiveDisclosureTests :: TestTree
+progressiveDisclosureTests =
+    testGroup
+        "Progressive Disclosure"
+        [ testCase "toolgroups inactive by default" $ do
+            let state = mempty :: ToolboxSessionState
+            isToolgroupActive state "any-group" @?= False
+        , testCase "toolgroup becomes active after explicit activation" $ do
+            let state = activateToolgroup "test-group"
+            isToolgroupActive state "test-group" @?= True
+        , testCase "activation only affects specified group" $ do
+            let state = activateToolgroup "group-a"
+            isToolgroupActive state "group-a" @?= True
+            isToolgroupActive state "group-b" @?= False
+        , testCase "activation then deactivation only affects specified group" $ do
+            let state0 = activateToolgroup "group-b" <> activateToolgroup "group-a"
+            isToolgroupActive state0 "group-a" @?= True
+            isToolgroupActive state0 "group-b" @?= True
+            let state1 = state0 <> deactivateToolgroup "group-a"
+            isToolgroupActive state1 "group-a" @?= False
+            isToolgroupActive state1 "group-b" @?= True
+        ]
+
+-------------------------------------------------------------------------------
+-- State Query Tests
+-------------------------------------------------------------------------------
+
+stateQueryTests :: TestTree
+stateQueryTests =
+    testGroup
+        "State Query Functions"
+        [ testCase "getActiveToolgroups returns only active groups" $ do
+            let state = activateToolgroup "active-a" <> deactivateToolgroup "inactive-b" <> activateToolgroup "active-c"
+            let active = getActiveToolgroups state
+            length active @?= 2
+            all (`elem` ["active-a", "active-c"]) active @?= True
+        , testCase "getActiveToolgroups returns empty for all-inactive state" $ do
+            let state = deactivateToolgroup "a" <> deactivateToolgroup "b"
+            getActiveToolgroups state @?= []
+        , testCase "getActiveToolgroups returns empty for empty state" $ do
+            getActiveToolgroups (mempty :: ToolboxSessionState) @?= []
+        , testCase "isToolgroupActive handles untracked groups" $ do
+            let state = activateToolgroup "tracked"
+            isToolgroupActive state "untracked" @?= False
+        ]
+
+-------------------------------------------------------------------------------
+-- Session File Tests
+-------------------------------------------------------------------------------
+
+sessionFileTests :: TestTree
+sessionFileTests =
+    testGroup
+        "Session File Tests"
+        [ testCase "activation-session.json has ask-user active" $ do
+            -- Load the actual session file from test data
+            content <- LByteString.readFile "test/data/activation-session.json"
+            case Aeson.decode content of
+                Nothing -> assertFailure "Failed to parse activation-session.json"
+                Just session -> do
+                    let state = foldSession session
+                    -- The session should have ask-user activated
+                    assertBool "ask-user should be active" (isToolgroupActive state "ask-user")
+        , testCase "activation-session.json parsing extracts correct state" $ do
+            content <- LByteString.readFile "test/data/activation-session.json"
+            case Aeson.decode content of
+                Nothing -> assertFailure "Failed to parse activation-session.json"
+                Just session -> do
+                    -- Count turns
+                    length (turns session) @?= 8
+                    -- Compute activation state
+                    let state = foldSession session
+                    -- Should have ask-user active
+                    getActiveToolgroups state @?= ["ask-user"]
+        ]
+
+-------------------------------------------------------------------------------
+-- Property Test Placeholders
+-------------------------------------------------------------------------------
+
+-- Note: Full property testing would require QuickCheck.
+-- These are manual tests for the monoid laws.
+
+-- | Test that the monoid laws hold for ToolboxSessionState
+prop_monoidRightIdentity :: ToolboxSessionState -> Bool
+prop_monoidRightIdentity a = a <> mempty == a
+
+prop_monoidLeftIdentity :: ToolboxSessionState -> Bool
+prop_monoidLeftIdentity a = mempty <> a == a
+
+prop_monoidAssociativity :: ToolboxSessionState -> ToolboxSessionState -> ToolboxSessionState -> Bool
+prop_monoidAssociativity a b c = (a <> b) <> c == a <> (b <> c)
+

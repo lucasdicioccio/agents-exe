@@ -53,6 +53,8 @@ library agents-lib
                     , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
+                    , System.Agents.Combinators.ProgressiveDisclosure
+                    , System.Agents.Combinators.StoreSessionProgress
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
@@ -86,6 +88,8 @@ library agents-lib
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.Tools
+                    , System.Agents.Tools.Activation
+                    , System.Agents.Tools.Activation.Session
                     , System.Agents.Tools.Context
                     , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.Trace
@@ -260,7 +264,8 @@ test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
-    other-modules:    EndpointPredicateTests
+    other-modules:    ActivationSessionTests
+                    , EndpointPredicateTests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests
                     , LuaToolboxJsonValueTests
@@ -302,6 +307,7 @@ test-suite agents-tests
                       temporary,
                       time,
                       unordered-containers,
+                      uuid,
                       vector
 
 benchmark os-benchmarks
@@ -326,4 +332,5 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
+
 

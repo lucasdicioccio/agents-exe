@@ -158,11 +158,14 @@ data ToolDescription = ToolDescription
 The toolbox maintains:
 * Toolbox name and description
 * List of enabled capabilities
+* The original configuration description used to create this toolbox
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxDescription :: Text
     , toolboxCapabilities :: [DeveloperToolCapability]
+    , toolboxConfig :: DeveloperToolboxDescription
+    -- ^ Original configuration description used to create this toolbox
     }
 
 -- | Result of a tool validation.
@@ -363,6 +366,7 @@ initializeToolbox _tracer desc = do
                         { toolboxName = desc.developerToolboxName
                         , toolboxDescription = desc.developerToolboxDescription
                         , toolboxCapabilities = desc.developerToolboxCapabilities
+                        , toolboxConfig = desc
                         }
             pure $ Right toolbox
 
@@ -1470,3 +1474,4 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
+

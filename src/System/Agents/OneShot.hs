@@ -17,13 +17,20 @@ module System.Agents.OneShot (
 
     -- * Main functions (OS-native)
     nodeToAgent,
-    agentStoreSession,
     fileStoringCallback,
     mainPrintAgent,
     mainOneShotText,
     mainOneShotTextWithThinking,
 
+    -- * Re-export from ProgressiveDisclosure
+    agentEvaluateActiveTools,
+
+    -- * Re-export from StoreSessionProgress
+    agentStoreSession,
+    agentWithSessionProgress,
+
     -- * Utility functions
+    mapProgressiveDisclosureTrace,
     parseModelFlavor,
 ) where
 
@@ -65,6 +72,16 @@ import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+
+-- Re-export agentEvaluateActiveTools from the new module
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
+import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
+
+-- Re-export session storage combinators
+import System.Agents.Combinators.StoreSessionProgress (
+    agentStoreSession,
+    agentWithSessionProgress,
+ )
 
 import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
@@ -129,10 +146,15 @@ runOneShotWithConfig ::
     IO OneShotResult
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId tracer loadedApiKeys node
+    
+    -- Apply dynamic tool filtering based on session activation state
+    -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
+    agent1 <- agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
+    
     let agent =
             agentSetQuery (UserQuery query) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
-                    agent0
+                    agent1
 
     -- Create or use initial session with all required fields including sessionConversationId
     session0 <- case config.initialSession of
@@ -143,6 +165,10 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     (llmTurn, _) <- run convId agent session0
     config.onSessionProgress convId (SessionCompleted session0)
     pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
+
+mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
+mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolRegistrationTrace t) = ToolRegistrationTrace t
+mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolPortalTrace t) = ToolPortalTrace t
 
 {- | Run a one-shot agent with optional file-based session storage.
 
@@ -187,7 +213,7 @@ instance Exception SessionLoadingFailed
 -- | Stopping result type that carries the final response text.
 newtype OneShotResult = OneShotResult Text
 
--- | Extract text content from an LLM response.
+-- | Extract text from an LLM response.
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) = Maybe.fromMaybe "" txt
 
@@ -237,7 +263,7 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
 
     -- Read tools from the OS-native TVar
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
+    allTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
 
     -- Get the API key for this agent and create HTTP runtime
     let apiKeyId = Base.apiKeyId agentCfg
@@ -274,9 +300,12 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                         _ -> pure ()
                     pure action
                 , sysPrompt = pure sPrompt
-                , sysTools = pure sTools
+                , sysTools = pure allTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall
+                                (contramap ToolRegistrationTrace tracer)
+                                (readTVarIO $ osNodeTools node)
+                                (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -351,54 +380,7 @@ fileStoringCallback store convId progress =
         SessionStarted sess -> SessionStore.storeSession store convId sess
         SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
--- | Creates a callback that stores session progress using a SessionStore.
-sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
-sessionStoreCallback store convId progress =
-    case progress of
-        SessionUpdated sess -> storeSessionWithStore sess
-        SessionCompleted sess -> storeSessionWithStore sess
-        SessionStarted sess -> storeSessionWithStore sess
-        SessionFailed sess _ -> storeSessionWithStore sess
-  where
-    storeSessionWithStore sess =
-        SessionStore.storeSession store convId sess
-
-{- | Creates a callback that stores session progress using an extra optional session-path.
-This second is useful in OneShot command where the command-line drives the filename.
--}
-filepathStoreCallback :: Maybe FilePath -> OnSessionProgress
-filepathStoreCallback Nothing _ = pure ()
-filepathStoreCallback (Just path) progress =
-    case progress of
-        SessionUpdated sess -> go sess
-        SessionCompleted sess -> go sess
-        SessionStarted sess -> go sess
-        SessionFailed sess _ -> go sess
-  where
-    go sess =
-        SessionStore.storeSessionToFile sess path
-
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
 
-{- | Wrap an agent to store sessions using a SessionStore.
-The session is stored using the conversation ID from the session.
--}
-agentStoreSession :: forall r. SessionStore -> Maybe FilePath -> ConversationId -> Agent r -> Agent r
-agentStoreSession store mPath convId agent =
-    agentWithSessionProgress handleProgress agent
-  where
-    handleProgress x = do
-        sessionStoreCallback store convId x
-        filepathStoreCallback mPath x
-
--- | Wrap an agent to emit session progress events after each step.
-agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r
-agentWithSessionProgress onProgress agent =
-    agent{step = decorate agent.step}
-  where
-    decorate :: (Session -> IO (Action r)) -> (Session -> IO (Action r))
-    decorate f = \sess -> do
-        onProgress (SessionUpdated sess)
-        f sess

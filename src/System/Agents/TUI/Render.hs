@@ -24,8 +24,9 @@ import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
-import System.Agents.ToolRegistration (ToolRegistration, declareTool)
+import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
+import System.Agents.Tools.Activation (Activation (..))
 
 -------------------------------------------------------------------------------
 -- Attribute Names
@@ -70,6 +71,22 @@ tokenUsageAttr = attrName "tokenUsage"
 -- | Attribute for paused conversation indicator.
 pausedAttr :: AttrName
 pausedAttr = attrName "paused"
+
+-- | Attribute for always-on tool activation marker.
+activationAlwaysAttr :: AttrName
+activationAlwaysAttr = attrName "activationAlways"
+
+-- | Attribute for on-demand tool activation marker.
+activationOnDemandAttr :: AttrName
+activationOnDemandAttr = attrName "activationOnDemand"
+
+-- | Attribute for first-N steps tool activation marker.
+activationFirstNAttr :: AttrName
+activationFirstNAttr = attrName "activationFirstN"
+
+-- | Attribute for default/no activation marker.
+activationDefaultAttr :: AttrName
+activationDefaultAttr = attrName "activationDefault"
 
 -------------------------------------------------------------------------------
 -- Main Draw Function
@@ -307,8 +324,19 @@ render_agentInfo st =
         ]
     renderToolsSection (Just toolz) =
         [ txt "# Tools:"
-        , txt $ Text.unlines ["- " <> (tool.declareTool.toolDescriptionName.getToolName) | tool <- toolz]
+        , vBox $ map renderToolItem toolz
         ]
+    renderToolItem :: ToolRegistration -> Widget N
+    renderToolItem tool =
+        let toolName = tool.declareTool.toolDescriptionName.getToolName
+            activation = toolActivation tool
+            activationMarker = renderActivationMarker activation
+         in hBox [txt "- ", activationMarker, txt $ " " <> toolName]
+    renderActivationMarker :: Maybe Activation -> Widget N
+    renderActivationMarker Nothing = withAttr activationDefaultAttr $ txt "[a]"
+    renderActivationMarker (Just activation) = case activation of
+        AlwaysActivated -> withAttr activationAlwaysAttr $ txt "[A]"
+        OnDemandActivated group -> withAttr activationOnDemandAttr $ txt $ "[D:" <> group <> "]"
     agentPrompt :: Agent -> [Widget N]
     agentPrompt agentCfg =
         [ txt "# System Prompt:"
@@ -610,5 +638,9 @@ tui_appAttrMap _ =
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
+        , (activationAlwaysAttr, BrickUtil.fg Vty.brightGreen)
+        , (activationOnDemandAttr, BrickUtil.fg Vty.yellow)
+        , (activationFirstNAttr, BrickUtil.fg Vty.cyan)
+        , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         ]
 

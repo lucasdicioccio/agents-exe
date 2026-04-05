@@ -126,7 +126,7 @@
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read", "BasenameFilter": ".sh"}},
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/git/read", "BasenameFilter": ".sh"}},
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/gen/graphviz", "BasenameFilter": ".sh"}},
-        {"tag": "SingleTool", "contents": "tools/dev/write/write-file.sh"}
+        {"tag": "SingleTool", "contents": {"Path": "tools/dev/write/write-file.sh"}}
     ]
   }
 }

@@ -29,7 +29,8 @@ import System.Agents.Base (AgentId, AgentSlug, ConversationId, newConversationId
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentStoreSession, parseModelFlavor)
+import System.Agents.OneShot (agentStoreSession, parseModelFlavor, mapProgressiveDisclosureTrace)
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -58,11 +59,13 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ctxConversationId)
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Tools.IO as IOTools
 
 data Trace
     = ToolRegistrationTrace !ToolRegistration.Trace
     | ToolPortalTrace !ToolPortal.Trace
+    | OneShotTrace !OneShot.Trace
     | OpenAITrace !OpenAI.Trace
     deriving (Show)
 
@@ -142,7 +145,11 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
             Nothing -> HttpClient.newRuntime HttpClient.NoToken
 
         -- Create the agent from the OS node
-        sessionAgent <- nodeToAgent store httpRuntime node tracer callerSlug callerId parentConversationId
+        sessionAgent0 <- nodeToAgent store httpRuntime node tracer callerSlug callerId parentConversationId
+
+        -- Apply dynamic tool filtering based on session activation state
+        -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
+        sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent
@@ -205,7 +212,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId _parentConvId = 
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (readTVarIO $ osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
@@ -254,7 +261,7 @@ toolParamsToJson props =
         Aeson.object $
             [ "type" .= paramTypeToString p.propertyType
             , "description" .= p.propertyDescription
-            ]
+                ]
                 ++ case p.propertyType of
                     EnumParamType values -> ["enum" .= values]
                     _ -> []
@@ -280,3 +287,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
+

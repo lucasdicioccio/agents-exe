@@ -62,6 +62,8 @@ data ToolDef
       SkillScriptTool !SkillTypes.SkillName !SkillTypes.ScriptName
     | -- | Skill list tool
       SkillListTool
+    | -- | Meta tool: operation type (activate, deactivate, discover)
+      MetaTool !Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -251,3 +253,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+

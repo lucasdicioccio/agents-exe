@@ -32,6 +32,7 @@ import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Client (LoopProps (..), LoopTrace (..))
 import qualified System.Agents.MCP.Client as McpClient
 import qualified System.Agents.MCP.Client.Runtime as McpClient
+import System.Agents.Tools.Activation (Activation)
 
 -------------------------------------------------------------------------------
 newtype ToolDescription = ToolDescription {getToolDescription :: Mcp.Tool}
@@ -49,8 +50,10 @@ data Toolbox = Toolbox
     , toolsList :: TVar [ToolDescription]
     , callTool :: ToolDescription -> Maybe Aeson.Object -> IO (McpClient.ToolCallResponse)
     , initialDiscoveryDone :: MVar ()
-    {- ^ MVar that is filled when the initial tool discovery completes.
-    Use 'waitForInitialDiscovery' to wait for this event.
+    , mcpActivation :: Maybe Activation
+    {- ^ Activation configuration for progressive disclosure.
+    Stored from the McpSimpleBinaryConfiguration and applied to all tools
+    from this MCP server during registration.
     -}
     }
 
@@ -75,8 +78,9 @@ initializeMcpToolbox ::
     Tracer IO Trace ->
     Text ->
     CreateProcess ->
+    Maybe Activation ->
     IO Toolbox
-initializeMcpToolbox ttracer tname proc = do
+initializeMcpToolbox ttracer tname proc mbActivation = do
     -- tool calls
     chan <- newTBMChanIO 30
     let nextToolCall = atomically $ readTBMChan chan
@@ -104,7 +108,7 @@ initializeMcpToolbox ttracer tname proc = do
     mcpRt <- McpClient.initRuntime rtTracer proc
     let props = LoopProps loopTracer nextToolCall
     ajob <- async (McpClient.runClient clientTracer mcpRt (McpClient.defaultLoop props))
-    pure $ Toolbox tname ajob discoveredTools doCallTool initialDiscoveryMVar
+    pure $ Toolbox tname ajob discoveredTools doCallTool initialDiscoveryMVar mbActivation
 
 {- | Tracer that stores discovered tools in the TVar and signals completion
 via the MVar on the first 'ToolsRefreshed' event.
@@ -135,3 +139,4 @@ storeToolsInDiscoveredValues list discoveryMVar = Tracer f
                     Mcp.tools (McpClient.getListToolsResult rsp)
             g _ = []
          in mconcat $ map g mitems
+

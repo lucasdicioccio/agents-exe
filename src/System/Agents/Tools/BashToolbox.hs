@@ -28,6 +28,7 @@ import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName, (</>))
 
 import System.Agents.Base (BashToolboxDescription (..), FileSystemDirectoryDescription (..), SingleToolDescription (..))
+import System.Agents.Tools.Activation (Activation)
 import qualified System.Agents.Tools.Bash as BashTools
 
 -------------------------------------------------------------------------------
@@ -45,21 +46,26 @@ data Trace
 Tracks the source configuration and the tools loaded from it.
 -}
 data ToolSource
-    = -- | Directory source with filter and full path
-      DirectorySource FilePath (Maybe Text) FilePath
-    | -- | Single executable file
-      SingleSource FilePath
+    = -- | Directory source with filter, full path, and activation config
+      DirectorySource FilePath (Maybe Text) FilePath (Maybe Activation)
+    | -- | Single executable file with activation config
+      SingleSource FilePath (Maybe Activation)
     deriving (Show)
 
 -- | Get the source path for display/tracing.
 sourcePath :: ToolSource -> FilePath
-sourcePath (DirectorySource origPath _ _) = origPath
-sourcePath (SingleSource path) = path
+sourcePath (DirectorySource origPath _ _ _) = origPath
+sourcePath (SingleSource path _) = path
 
 -- | Get the resolved path for loading.
 resolvedPath :: ToolSource -> FilePath
-resolvedPath (DirectorySource _ _ resolved) = resolved
-resolvedPath (SingleSource path) = path
+resolvedPath (DirectorySource _ _ resolved _) = resolved
+resolvedPath (SingleSource path _) = path
+
+-- | Get the activation configuration for this source.
+sourceActivation :: ToolSource -> Maybe Activation
+sourceActivation (DirectorySource _ _ _ activation) = activation
+sourceActivation (SingleSource _ activation) = activation
 
 -------------------------------------------------------------------------------
 
@@ -91,14 +97,14 @@ descriptionToSource (FileSystemDirectory desc) = do
     let fsDir = fromMaybe "" desc.fsDirRoot </> desc.fsDirPath
         resolved = if isRelative fsDir then cwd </> fsDir else desc.fsDirPath
 
-    pure $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved
+    pure $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved desc.fsDirActivation
 descriptionToSource (SingleTool desc) = do
     cwd <- getCurrentDirectory
 
     -- Build the full path
     let resolved = if isRelative desc.singleToolPath then cwd </> desc.singleToolPath else desc.singleToolPath
 
-    pure $ SingleSource resolved
+    pure $ SingleSource resolved desc.singleToolActivation
 
 -- | Check if a path is relative (simple heuristic).
 isRelative :: FilePath -> Bool
@@ -143,8 +149,8 @@ initializeSource ::
     ToolSource ->
     IO (Either LoadingError BackgroundBashTools)
 initializeSource tracer toolSource = case toolSource of
-    DirectorySource _ mFilter path -> initializeDirectorySource tracer mFilter path toolSource
-    SingleSource path -> initializeSingleSource tracer path toolSource
+    DirectorySource _ mFilter path _ -> initializeDirectorySource tracer mFilter path toolSource
+    SingleSource path _ -> initializeSingleSource tracer path toolSource
 
 -- | Initialize a directory source.
 initializeDirectorySource ::
@@ -237,11 +243,16 @@ initializeBackroundToolbox ::
     FilePath ->
     IO (Either LoadingError BackgroundBashTools)
 initializeBackroundToolbox tracer tooldir = do
-    let toolSource = DirectorySource tooldir Nothing tooldir
+    let toolSource = DirectorySource tooldir Nothing tooldir Nothing
     initializeSource tracer toolSource
 
--- | Read all tools from a multi-source toolbox.
-readMultiSourceTools :: MultiSourceBashTools -> IO [BashTools.ScriptDescription]
+-- | Read all tools from a multi-source toolbox along with their activation config.
+readMultiSourceTools :: MultiSourceBashTools -> IO [(Maybe Activation, [BashTools.ScriptDescription])]
 readMultiSourceTools multi = do
-    allTools <- mapM (Background.readBackgroundVal . tools) multi.sources
-    pure $ concat allTools
+    mapM readSourceTools multi.sources
+  where
+    readSourceTools :: BackgroundBashTools -> IO (Maybe Activation, [BashTools.ScriptDescription])
+    readSourceTools bg = do
+        scripts <- Background.readBackgroundVal bg.tools
+        pure (sourceActivation bg.source, scripts)
+

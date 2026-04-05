@@ -76,11 +76,19 @@ import qualified Data.Text as Text
 
 import Prod.Tracer (Tracer, contramap)
 import qualified Prod.Tracer as Prod
-import System.Agents.Base (DeveloperToolCapability (..), LuaToolboxDescription (..), SystemToolCapability (..))
+import System.Agents.Base (
+    DeveloperToolCapability (..),
+    DeveloperToolboxDescription (..),
+    LuaToolboxDescription (..),
+    SqliteToolboxDescription (..),
+    SystemToolCapability (..),
+    SystemToolboxDescription (..),
+ )
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
 import qualified System.Agents.MCP.Client as McpClient
 import System.Agents.ToolSchema
+import System.Agents.Tools.Activation (Activation (..))
 import System.Agents.Tools.Base (
     CallResult (..),
     ToolDef (..),
@@ -95,7 +103,7 @@ import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.LuaToolbox as LuaTools
-import System.Agents.Tools.McpToolbox (callTool)
+import System.Agents.Tools.McpToolbox (callTool, mcpActivation)
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (
     NameMapping (..),
@@ -149,10 +157,18 @@ data ToolRegistration
     { innerTool :: Tool ()
     , declareTool :: ToolDescription
     , findTool :: ToolCall -> Maybe (Tool ToolCall)
+    , toolActivation :: Maybe Activation
     }
 
 instance Show ToolRegistration where
-    show (ToolRegistration d _ _) = Prelude.unwords ["ToolRegistration(", show d.toolDef, ")"]
+    show tr =
+        Prelude.unwords
+            [ "ToolRegistration("
+            , show tr.declareTool.toolDescriptionName
+            , ", activation ="
+            , show tr.toolActivation
+            , ")"
+            ]
 
 -------------------------------------------------------------------------------
 
@@ -227,10 +243,15 @@ mapArg arg =
         , propertyRequired = True
         }
 
+{- | Register a bash tool with the LLM system.
+The activation is passed from the BashToolboxDescription and applied to all
+scripts from that source.
+-}
 registerBashToolInLLM ::
+    Maybe Activation ->
     ScriptDescription ->
     ToolRegistration
-registerBashToolInLLM script =
+registerBashToolInLLM mbActivation script =
     let
         matchName :: ScriptDescription -> ToolCall -> Bool
         matchName bash call = getToolName (bash2LLMName bash) == call.callToolName
@@ -249,7 +270,12 @@ registerBashToolInLLM script =
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
      in
-        ToolRegistration tool (mapToolDescriptionBash2LLM script) find
+        ToolRegistration
+            { innerTool = tool
+            , declareTool = mapToolDescriptionBash2LLM script
+            , findTool = find
+            , toolActivation = mbActivation
+            }
 
 -------------------------------------------------------------------------------
 
@@ -280,13 +306,21 @@ registerIOScriptInLLM script llmProps =
                 , toolDescriptionParamProperties = llmProps
                 }
      in
-        ToolRegistration tool llmTool find
+        ToolRegistration
+            { innerTool = tool
+            , declareTool = llmTool
+            , findTool = find
+            , toolActivation = Nothing
+            }
 
 -------------------------------------------------------------------------------
 
 {- | Register an MCP tool with the LLM system.
 
 Returns 'Left' if the tool's schema cannot be adapted to the LLM format.
+
+The activation is extracted from the toolbox's 'mcpActivation' field,
+allowing per-server progressive disclosure control.
 -}
 registerMcpToolInLLM ::
     McpTools.Toolbox ->
@@ -319,10 +353,19 @@ registerMcpToolInLLM box mcp =
 
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
+
+        -- Extract activation from the toolbox configuration
+        mbActivation = mcpActivation box
      in
         case llmBasedSchema of
             Right schema ->
-                Right $ ToolRegistration tool (mapToolDescriptionMcp2LLM schema) find
+                Right $
+                    ToolRegistration
+                        { innerTool = tool
+                        , declareTool = mapToolDescriptionMcp2LLM schema
+                        , findTool = find
+                        , toolActivation = mbActivation
+                        }
             Left err ->
                 Left err
 
@@ -340,6 +383,9 @@ invalid characters (dots, slashes, etc.) by:
 1. Replacing invalid characters with underscores
 2. Ensuring the name starts with a letter
 3. Using the toolbox's name mapping for bidirectional lookup
+
+The activation is extracted from the toolbox's 'openApiActivation' field,
+allowing per-toolbox progressive disclosure control.
 
 Returns 'Left' if the tool cannot be registered.
 
@@ -403,12 +449,16 @@ registerOpenAPITool toolbox tool =
                         if call.callToolName == getToolName llmName
                             then Just $ mapToolResult (const call) tool'
                             else Nothing
+
+                    -- Extract activation from the toolbox configuration
+                    mbActivation = OpenAPIToolbox.openApiActivation toolbox
                  in
                     Right $
                         ToolRegistration
                             { innerTool = mapToolResult (const ()) tool'
                             , declareTool = toolDescription
                             , findTool = find
+                            , toolActivation = mbActivation
                             }
 
 -- | Find the name mapping for a given original operation ID.
@@ -494,6 +544,9 @@ The tool parameters are structured into groups:
 All parameter groups and their sub-properties are marked as optional,
 allowing the LLM to provide only the parameters it needs.
 
+The activation is extracted from the toolbox's 'postgrestActivation' field,
+allowing per-toolbox progressive disclosure control.
+
 Returns 'Left' if the tool cannot be registered.
 
 Example:
@@ -548,11 +601,15 @@ registerPostgRESTool toolbox tool =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
+
+        -- Extract activation from the toolbox configuration
+        mbActivation = PostgRESToolbox.postgrestActivation toolbox
      in Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = mbActivation
                 }
 
 {- | Build parameter properties for PostgREST tool from structured parameters.
@@ -756,6 +813,9 @@ registerPostgRESToolInLLM = registerPostgRESTool
 
 SQLite tools expose a single 'query' function that accepts SQL.
 The function name includes the toolbox name for uniqueness.
+
+The activation is extracted from the toolbox configuration's
+'sqliteToolboxActivation' field.
 -}
 registerSqliteTool ::
     SqliteTools.Toolbox ->
@@ -792,12 +852,16 @@ registerSqliteTool box =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
+
+        -- Extract activation from toolbox config
+        mbActivation = (SqliteTools.toolboxConfig box).sqliteToolboxActivation
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = mbActivation
                 }
 
 {- | Register all tools from a SQLite toolbox.
@@ -820,6 +884,9 @@ registerSqliteTools box =
 
 System tools expose functions based on configured capabilities.
 The tool accepts a 'capability' parameter to select which information to retrieve.
+
+The activation is extracted from the toolbox configuration's
+'systemToolboxActivation' field.
 -}
 registerSystemTool ::
     SystemTools.Toolbox ->
@@ -855,12 +922,16 @@ registerSystemTool box =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
+
+        -- Extract activation from toolbox config
+        mbActivation = (SystemTools.toolboxConfig box).systemToolboxActivation
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = mbActivation
                 }
 
 -- Helper to convert capability to text
@@ -899,6 +970,9 @@ Developer tools expose functions based on configured capabilities:
 * show-spec: Display specification documentation
 
 The tool accepts a 'capability' parameter to select which operation to perform.
+
+The activation is extracted from the toolbox configuration's
+'developerToolboxActivation' field.
 -}
 registerDeveloperTool ::
     DeveloperTools.Toolbox ->
@@ -976,12 +1050,16 @@ registerDeveloperTool box =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
+
+        -- Extract activation from toolbox config
+        mbActivation = (DeveloperTools.toolboxConfig box).developerToolboxActivation
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = mbActivation
                 }
 
 -- Helper to convert developer capability to text
@@ -1016,6 +1094,9 @@ Lua toolboxes expose:
 * execute: Execute arbitrary Lua code
 
 The 'execute' tool is always available.
+
+The activation is extracted from the toolbox configuration's
+'luaToolboxActivation' field.
 
 Returns 'Left' if the tool cannot be registered.
 -}
@@ -1061,12 +1142,16 @@ registerLuaTool box =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
+
+        -- Extract activation from toolbox config
+        mbActivation = (LuaTools.toolboxConfig box).luaToolboxActivation
      in
         Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
+                , toolActivation = mbActivation
                 }
 
 {- | Register all tools from a Lua toolbox.
@@ -1363,3 +1448,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

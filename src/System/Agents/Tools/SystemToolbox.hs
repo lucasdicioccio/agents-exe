@@ -127,12 +127,15 @@ The toolbox maintains:
 * Toolbox name and description
 * List of enabled capabilities
 * Optional environment variable filter pattern
+* The original configuration description used to create this toolbox
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxDescription :: Text
     , toolboxCapabilities :: [SystemToolCapability]
     , toolboxEnvVarFilter :: Maybe Text
+    , toolboxConfig :: SystemToolboxDescription
+    -- ^ Original configuration description used to create this toolbox
     }
 
 {- | Result of a system information query.
@@ -192,6 +195,7 @@ initializeToolbox _tracer desc = do
                         , toolboxDescription = desc.systemToolboxDescription
                         , toolboxCapabilities = desc.systemToolboxCapabilities
                         , toolboxEnvVarFilter = desc.systemToolboxEnvVarFilter
+                        , toolboxConfig = desc
                         }
             pure $ Right toolbox
 
@@ -563,7 +567,7 @@ with a default toolbox context (no env var filtering).
 -}
 getCapabilityInfo :: SystemToolCapability -> IO (Text, Aeson.Value)
 getCapabilityInfo capability = do
-    let toolbox = Toolbox "" "" [capability] Nothing
+    let toolbox = Toolbox "" "" [capability] Nothing undefined
     result <- getCapabilityInfoWithTimeout capability toolbox
     case result of
         Left err -> pure (capabilityToName capability, String err)
@@ -632,3 +636,4 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
+
