@@ -125,7 +125,7 @@ loadAgentTools tracer baseDir apiKeysFile agent toolsTVar = do
                 [ loadBashTools (contramap BashToolboxTrace tracer) agent toolsTVar
                 , loadMcpServers (contramap McpToolboxTrace tracer) agent toolsTVar
                 , loadOpenAPIToolboxes (contramap OpenApiToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
-                , loadPostgRESTToolboxes (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
+                , loadPostgRESToolboxes (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
                 , loadBuiltinToolboxes tracer agent toolsTVar
                 , loadSkillsTools agent toolsTVar
                 ]
@@ -207,9 +207,8 @@ Each MCP server is started and its tools are registered.
 If a server fails to start or times out, an error is returned
 but processing continues for other servers.
 
-Note: MCP toolbox activation is currently not supported because the
-McpToolbox.Toolbox type does not store the configuration. The activation
-from McpServerDescription would need to be added to the Toolbox type.
+The activation from McpSimpleBinaryConfiguration is propagated to the Toolbox
+and applied to all tools from that server via registerMcpToolInLLM.
 -}
 loadMcpServers ::
     Tracer IO McpToolbox.Trace ->
@@ -236,8 +235,8 @@ loadMcpServer ::
 loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
     let proc = System.Process.proc config.executable (map Text.unpack config.args)
 
-    -- Try to initialize the MCP toolbox with exception handling
-    initResult <- try $ McpToolbox.initializeMcpToolbox tracer config.name proc
+    -- Try to initialize the MCP toolbox with activation from config
+    initResult <- try $ McpToolbox.initializeMcpToolbox tracer config.name proc config.mcpActivation
 
     case initResult of
         Left (e :: SomeException) -> do
@@ -257,7 +256,7 @@ loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
                     -- Get discovered tools
                     tools <- readTVarIO $ McpToolbox.toolsList toolbox
 
-                    -- Register each tool
+                    -- Register each tool with activation from toolbox
                     let registrations = map (ToolReg.registerMcpToolInLLM toolbox) tools
                     let (errs, regs) = partitionEithers registrations
 
@@ -364,14 +363,14 @@ Each PostgREST toolbox fetches its spec and registers converted tools.
 The activation from PostgRESTServerDescription is propagated to the Toolbox
 and applied to all tools from that toolbox via registerPostgRESTool.
 -}
-loadPostgRESTToolboxes ::
+loadPostgRESToolboxes ::
     Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
     FilePath ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadPostgRESTToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
+loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes

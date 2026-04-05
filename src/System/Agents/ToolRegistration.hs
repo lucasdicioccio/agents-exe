@@ -103,7 +103,7 @@ import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.LuaToolbox as LuaTools
-import System.Agents.Tools.McpToolbox (callTool)
+import System.Agents.Tools.McpToolbox (callTool, mcpActivation)
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (
     NameMapping (..),
@@ -319,9 +319,8 @@ registerIOScriptInLLM script llmProps =
 
 Returns 'Left' if the tool's schema cannot be adapted to the LLM format.
 
-Note: MCP toolbox activation is currently not supported because the
-McpToolbox.Toolbox type does not store the configuration. The activation
-from McpServerDescription would need to be added to the Toolbox type.
+The activation is extracted from the toolbox's 'mcpActivation' field,
+allowing per-server progressive disclosure control.
 -}
 registerMcpToolInLLM ::
     McpTools.Toolbox ->
@@ -354,6 +353,9 @@ registerMcpToolInLLM box mcp =
 
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName mcp call then Just (mapToolResult (const call) tool) else Nothing
+
+        -- Extract activation from the toolbox configuration
+        mbActivation = mcpActivation box
      in
         case llmBasedSchema of
             Right schema ->
@@ -362,7 +364,7 @@ registerMcpToolInLLM box mcp =
                         { innerTool = tool
                         , declareTool = mapToolDescriptionMcp2LLM schema
                         , findTool = find
-                        , toolActivation = Nothing
+                        , toolActivation = mbActivation
                         }
             Left err ->
                 Left err
