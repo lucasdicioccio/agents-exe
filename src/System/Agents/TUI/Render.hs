@@ -26,7 +26,7 @@ import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Activation (Activation (..), StickyMode (..))
+import System.Agents.Tools.Activation (Activation (..))
 
 -------------------------------------------------------------------------------
 -- Attribute Names
@@ -337,11 +337,6 @@ render_agentInfo st =
     renderActivationMarker (Just activation) = case activation of
         AlwaysActivated -> withAttr activationAlwaysAttr $ txt "[A]"
         OnDemandActivated group -> withAttr activationOnDemandAttr $ txt $ "[D:" <> group <> "]"
-        FirstNStepsActivated n sticky ->
-            let stickyMarker = case sticky of
-                    StickyIfUsed -> "+"
-                    NonSticky -> ""
-             in withAttr activationFirstNAttr $ txt $ "[N:" <> Text.pack (show n) <> stickyMarker <> "]"
     agentPrompt :: Agent -> [Widget N]
     agentPrompt agentCfg =
         [ txt "# System Prompt:"

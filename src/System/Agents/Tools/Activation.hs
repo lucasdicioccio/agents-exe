@@ -24,9 +24,6 @@ module System.Agents.Tools.Activation (
     -- * Lifetime
     Lifetime (..),
 
-    -- * Sticky Mode
-    StickyMode (..),
-
     -- * Activation
     Activation (..),
 
@@ -81,34 +78,6 @@ instance FromJSON Lifetime where
             _ -> fail $ "Unknown Lifetime: " ++ Text.unpack txt
 
 -------------------------------------------------------------------------------
--- Sticky Mode
--------------------------------------------------------------------------------
-
-{- | Stickiness behavior for first-N activation mode.
-
-Controls whether tools remain active after their initial activation period.
--}
-data StickyMode
-    = -- | Tool remains active if it was used during the initial period
-      StickyIfUsed
-    | -- | Tool becomes inactive after the initial period regardless of use
-      NonSticky
-    deriving (Show, Eq, Ord, Generic)
-
--- | Custom JSON encoding as lowercase kebab-case strings
-instance ToJSON StickyMode where
-    toJSON StickyIfUsed = Aeson.String "sticky-if-used"
-    toJSON NonSticky = Aeson.String "non-sticky"
-
--- | Custom JSON parsing from lowercase kebab-case strings
-instance FromJSON StickyMode where
-    parseJSON = Aeson.withText "StickyMode" $ \txt ->
-        case txt of
-            "sticky-if-used" -> return StickyIfUsed
-            "non-sticky" -> return NonSticky
-            _ -> fail $ "Unknown StickyMode: " ++ Text.unpack txt
-
--------------------------------------------------------------------------------
 -- Activation
 -------------------------------------------------------------------------------
 
@@ -121,8 +90,6 @@ data Activation
       AlwaysActivated
     | -- | Tool is activated on-demand via a toolgroup trigger
       OnDemandActivated !Text
-    | -- | Tool is active for the first N steps, with optional stickiness
-      FirstNStepsActivated !Int !StickyMode
     deriving (Show, Eq, Ord, Generic)
 
 -- | Custom JSON encoding with tagged objects
@@ -133,12 +100,6 @@ instance ToJSON Activation where
             [ "tag" .= ("on-demand" :: Text)
             , "toolgroup" .= toolgroup
             ]
-    toJSON (FirstNStepsActivated steps sticky) =
-        Aeson.object
-            [ "tag" .= ("first-n-steps" :: Text)
-            , "steps" .= steps
-            , "sticky" .= sticky
-            ]
 
 -- | Custom JSON parsing supporting string and tagged object formats
 instance FromJSON Activation where
@@ -147,7 +108,6 @@ instance FromJSON Activation where
         tag <- obj .: "tag"
         case (tag :: Text) of
             "on-demand" -> OnDemandActivated <$> obj .: "toolgroup"
-            "first-n-steps" -> FirstNStepsActivated <$> obj .: "steps" <*> obj .: "sticky"
             _ -> fail $ "Unknown Activation tag: " ++ Text.unpack tag
     parseJSON _ = fail "Activation must be a string \"always\" or a tagged object"
 

@@ -531,8 +531,4 @@ agentEvaluateActiveTools tracer toolsTVar agent = do
             Just (OnDemandActivated toolgroup) -> 
                 -- Check if the toolgroup is active in the session state
                 isToolgroupActive activationState toolgroup
-            Just (FirstNStepsActivated _ _) -> 
-                -- For now, first-N steps activation is treated as always active
-                -- Future: track step count in session state
-                True
 
