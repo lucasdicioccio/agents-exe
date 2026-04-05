@@ -382,6 +382,9 @@ invalid characters (dots, slashes, etc.) by:
 2. Ensuring the name starts with a letter
 3. Using the toolbox's name mapping for bidirectional lookup
 
+The activation is extracted from the toolbox's 'openApiActivation' field,
+allowing per-toolbox progressive disclosure control.
+
 Returns 'Left' if the tool cannot be registered.
 
 Example:
@@ -444,13 +447,16 @@ registerOpenAPITool toolbox tool =
                         if call.callToolName == getToolName llmName
                             then Just $ mapToolResult (const call) tool'
                             else Nothing
+
+                    -- Extract activation from the toolbox configuration
+                    mbActivation = OpenAPIToolbox.openApiActivation toolbox
                  in
                     Right $
                         ToolRegistration
                             { innerTool = mapToolResult (const ()) tool'
                             , declareTool = toolDescription
                             , findTool = find
-                            , toolActivation = Nothing
+                            , toolActivation = mbActivation
                             }
 
 -- | Find the name mapping for a given original operation ID.

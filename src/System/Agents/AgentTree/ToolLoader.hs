@@ -279,9 +279,8 @@ loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
 
 Each OpenAPI toolbox fetches its spec and registers converted tools.
 
-Note: OpenAPI toolbox activation is currently not supported because the
-OpenAPIToolbox.Toolbox type does not store the configuration. The activation
-from OpenAPIServerDescription would need to be added to the Toolbox type.
+The activation from OpenAPIServerDescription is propagated to the Toolbox
+and applied to all tools from that toolbox via registerOpenAPITool.
 -}
 loadOpenAPIToolboxes ::
     Tracer IO OpenAPIToolbox.Trace ->
@@ -321,6 +320,7 @@ loadOpenAPIToolbox tracer baseDir apiKeysFile toolsTVar description = do
                 Left err -> pure $ Just $ OpenAPILoadingError (show err)
                 Right toolbox -> do
                     -- Register all tools from the toolbox
+                    -- Activation is extracted from openApiActivation in registerOpenAPITool
                     regResult <- ToolReg.registerOpenAPITools toolbox
 
                     case regResult of
@@ -344,6 +344,7 @@ resolveOpenAPIDescription _baseDir (OpenAPIServer desc) =
                 , OpenAPIToolbox.configToken = openApiToken desc
                 , OpenAPIToolbox.configFilter = openApiFilter desc
                 , OpenAPIToolbox.configSecrets = fromMaybe [] (openApiSecrets desc)
+                , OpenAPIToolbox.configActivation = openApiActivation desc
                 }
 resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path

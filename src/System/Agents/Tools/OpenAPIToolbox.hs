@@ -45,6 +45,7 @@ main = do
                     , secretSerializer = Header "Authorization" (Just "Bearer {{secret}}")
                     }
                 ]
+            , configActivation = Nothing  -- Use default activation
             }
     result <- OpenAPI.initializeToolbox tracer config
     case result of
@@ -126,6 +127,7 @@ import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
 import System.Agents.Tools.EndpointPredicate (
@@ -219,6 +221,9 @@ data InitializationError
 
 The 'configSecrets' field allows flexible secret management. Secrets are
 resolved at initialization time and applied to all outgoing requests.
+
+The 'configActivation' field controls progressive disclosure for all tools
+from this toolbox. If not specified, defaults to always activated.
 -}
 data Config = Config
     { configUrl :: Text
@@ -235,6 +240,8 @@ data Config = Config
     -}
     , configSecrets :: [Secrets.Secret]
     -- ^ Secrets to resolve and include in requests
+    , configActivation :: Maybe Activation
+    -- ^ Optional activation mode for tools from this toolbox (default: always activated)
     }
     deriving (Show, Eq)
 
@@ -248,6 +255,7 @@ The toolbox maintains:
 * The HTTP runtime for making requests
 * Resolved secrets for authentication
 * Static headers from config
+* Activation configuration for progressive disclosure
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -264,6 +272,8 @@ data Toolbox = Toolbox
     -- ^ Static headers from config
     , toolboxFilter :: Maybe EndpointPredicate
     -- ^ The filter used during initialization (stored for reference)
+    , openApiActivation :: Maybe Activation
+    -- ^ Activation configuration for progressive disclosure
     }
 
 -- -------------------------------------------------------------------------
@@ -386,6 +396,7 @@ initializeToolbox apiKeysFile tracer config = do
                                         , resolvedSecrets = resolvedSecrets
                                         , staticHeaders = config.configHeaders
                                         , toolboxFilter = config.configFilter
+                                        , openApiActivation = config.configActivation
                                         }
   where
     toolboxName = extractToolboxName config.configUrl
@@ -813,3 +824,4 @@ openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
      in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
+
