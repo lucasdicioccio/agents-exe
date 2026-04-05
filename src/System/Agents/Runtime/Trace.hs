@@ -1,8 +1,24 @@
-module System.Agents.Runtime.Trace where
+{- | System.Agents.Runtime.Trace - Compatibility module
+
+This module is deprecated. Use System.Agents.OS.Interfaces directly.
+
+This module is kept for backward compatibility with existing code.
+It re-exports trace types that are now defined in other modules.
+-}
+module System.Agents.Runtime.Trace (
+    -- * Re-exported types (deprecated)
+    Trace (..),
+    ConversationTrace (..),
+
+    -- * Legacy accessors (deprecated)
+    traceAgentSlug,
+    traceAgentId,
+    traceConversationId,
+) where
 
 import Data.Text (Text)
 
-import System.Agents.Base
+import System.Agents.Base (AgentId (..), AgentSlug, ConversationId, StepId (..))
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.ToolPortal as ToolPortal
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
@@ -14,6 +30,10 @@ import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 import qualified System.Agents.Tools.Trace as Tools
 
 -------------------------------------------------------------------------------
+-- Deprecated Trace Types
+-------------------------------------------------------------------------------
+
+{-# DEPRECATED Trace "Use trace types from specific modules instead" #-}
 data Trace
     = AgentTrace_Loading !AgentSlug !AgentId !BashToolbox.Trace
     | AgentTrace_Conversation !AgentSlug !AgentId !ConversationId !ConversationTrace
@@ -29,6 +49,7 @@ data Trace
     | ToolPortalTrace !Text !ToolPortal.Trace
     deriving (Show)
 
+{-# DEPRECATED traceAgentSlug "Use specific trace accessors from module-specific trace types" #-}
 traceAgentSlug :: Trace -> AgentSlug
 traceAgentSlug (AgentTrace_Loading aSlug _ _) = aSlug
 traceAgentSlug (AgentTrace_Conversation aSlug _ _ _) = aSlug
@@ -43,6 +64,7 @@ traceAgentSlug (SkillsToolboxInitError tName _) = tName
 traceAgentSlug (ToolTrace tName _) = tName
 traceAgentSlug (ToolPortalTrace tName _) = tName
 
+{-# DEPRECATED traceAgentId "Use specific trace accessors from module-specific trace types" #-}
 traceAgentId :: Trace -> AgentId
 traceAgentId (AgentTrace_Loading _ aId _) = aId
 traceAgentId (AgentTrace_Conversation _ aId _ _) = aId
@@ -57,6 +79,7 @@ traceAgentId (SkillsToolboxInitError _ _) = AgentId (read "00000000-0000-0000-00
 traceAgentId (ToolTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 traceAgentId (ToolPortalTrace _ _) = AgentId (read "00000000-0000-0000-0000-000000000000")
 
+{-# DEPRECATED traceConversationId "Use specific trace accessors from module-specific trace types" #-}
 traceConversationId :: Trace -> Maybe ConversationId
 traceConversationId (AgentTrace_Loading _ _ _) = Nothing
 traceConversationId (AgentTrace_Conversation _ _ cId _) = Just cId
@@ -71,6 +94,7 @@ traceConversationId (SkillsToolboxInitError _ _) = Nothing
 traceConversationId (ToolTrace _ _) = Nothing
 traceConversationId (ToolPortalTrace _ _) = Nothing
 
+{-# DEPRECATED ConversationTrace "Use SessionProgress from System.Agents.Session.Base instead" #-}
 data ConversationTrace
     = NewConversation
     | WaitingForPrompt
@@ -78,3 +102,4 @@ data ConversationTrace
     | RunToolTrace !StepId !Trace
     | ChildrenTrace !Trace
     deriving (Show)
+

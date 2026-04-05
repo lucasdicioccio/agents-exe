@@ -4,7 +4,7 @@
 {- | Integration tests for OS Interface layer.
 
 These tests verify that the TUI and OneShot interfaces work correctly
-with the RuntimeBridge compatibility layer.
+with the OS-native implementation.
 -}
 module OS.InterfaceTests (
     tests,
@@ -29,23 +29,23 @@ import System.Agents.OS.Interfaces (
 import System.Agents.OS.Interfaces.OneShot (
     OneShotInterfaceConfig (..),
     OneShotPersistence (..),
+    OneShotResult (..),
     defaultOneShotInterfaceConfig,
     executeOneShot,
     extractResultText,
     initOneShotInterface,
  )
 import System.Agents.OS.Interfaces.TUI (
+    LayoutMode (..),
     MultiAgentConfig (..),
     TUIInterfaceConfig (..),
+    TUIInterfaceHandle,
     defaultTUIInterfaceConfig,
     getLayoutMode,
     getRegisteredAgents,
     initTUIInterface,
     registerAgent,
     setLayoutMode,
- )
-import System.Agents.TUI.Types (
-    LayoutMode (..),
  )
 
 -------------------------------------------------------------------------------
@@ -85,15 +85,15 @@ tuiInterfaceTests =
     testGroup
         "TUI Interface"
         [ testCase "can initialize TUI interface" $ do
-            let config = defaultTUIInterfaceConfig
+            config <- defaultTUIInterfaceConfig
             handle <- initTUIInterface config
             -- Interface should be initialized
             agents <- getRegisteredAgents handle
             agents @?= []
         , testCase "can register an agent" $ do
-            let config = defaultTUIInterfaceConfig
+            config <- defaultTUIInterfaceConfig
             handle <- initTUIInterface config
-            (agentId) <- registerAgent handle "test-agent"
+            agentId <- registerAgent handle "test-agent"
             agents <- getRegisteredAgents handle
             length agents @?= 1
             -- Use list index instead of head
@@ -101,10 +101,10 @@ tuiInterfaceTests =
                 (aid, _) : _ -> aid @?= agentId
                 [] -> assertFailure "Expected at least one agent"
         , testCase "can register multiple agents" $ do
-            let config = defaultTUIInterfaceConfig
+            config <- defaultTUIInterfaceConfig
             handle <- initTUIInterface config
-            (agentId1) <- registerAgent handle "test-agent-1"
-            (agentId2) <- registerAgent handle "test-agent-2"
+            agentId1 <- registerAgent handle "test-agent-1"
+            agentId2 <- registerAgent handle "test-agent-2"
             agents <- getRegisteredAgents handle
             length agents @?= 2
             -- Check that both agent IDs are present (order doesn't matter)
@@ -112,12 +112,12 @@ tuiInterfaceTests =
             assertBool "Should contain first agent ID" (agentId1 `elem` agentIds)
             assertBool "Should contain second agent ID" (agentId2 `elem` agentIds)
         , testCase "default layout is SingleAgent" $ do
-            let config = defaultTUIInterfaceConfig
+            config <- defaultTUIInterfaceConfig
             handle <- initTUIInterface config
             layout <- getLayoutMode handle
             layout @?= SingleAgent
         , testCase "can change layout mode" $ do
-            let config = defaultTUIInterfaceConfig
+            config <- defaultTUIInterfaceConfig
             handle <- initTUIInterface config
             setLayoutMode handle SplitVertical
             layout <- getLayoutMode handle
@@ -133,24 +133,24 @@ oneShotInterfaceTests =
     testGroup
         "OneShot Interface"
         [ testCase "can initialize OneShot interface" $ do
-            let config = defaultOneShotInterfaceConfig
+            config <- defaultOneShotInterfaceConfig
             handle <- initOneShotInterface config
             -- Interface should be initialized
             pure ()
         , testCase "default persistence is None" $ do
-            let config = defaultOneShotInterfaceConfig
+            config <- defaultOneShotInterfaceConfig
             config.oscPersistence @?= Persistence_None
         , testCase "default thinking is disabled" $ do
-            let config = defaultOneShotInterfaceConfig
+            config <- defaultOneShotInterfaceConfig
             config.oscEnableThinking @?= False
         , testCase "default mode is OneShot" $ do
-            let config = defaultOneShotInterfaceConfig
+            config <- defaultOneShotInterfaceConfig
             ifcMode (oscBaseConfig config) @?= ModeOneShot
         , testCase "executeOneShot returns placeholder" $ do
-            let config = defaultOneShotInterfaceConfig
+            config <- defaultOneShotInterfaceConfig
             handle <- initOneShotInterface config
             result <- executeOneShot handle Nothing "test query"
-            extractResultText result @?= "OneShot execution not yet fully implemented - use legacy mainOneShotText"
+            extractResultText result @?= "OS-native OneShot not yet fully implemented: test query"
         ]
 
 -------------------------------------------------------------------------------
@@ -162,13 +162,11 @@ multiAgentTests =
     testGroup
         "Multi-Agent Coordination"
         [ testCase "can create multi-agent config" $ do
-            let config =
-                    (defaultTUIInterfaceConfig)
-                        { tuiEnableMultiAgent = True
-                        }
+            baseConfig <- defaultTUIInterfaceConfig
+            let config = baseConfig{tuiEnableMultiAgent = True}
             config.tuiEnableMultiAgent @?= True
         , testCase "multi-agent config defaults to disabled" $ do
-            let config = defaultTUIInterfaceConfig
+            config <- defaultTUIInterfaceConfig
             tuiEnableMultiAgent config @?= False
         ]
 

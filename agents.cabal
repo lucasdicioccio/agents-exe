@@ -75,6 +75,7 @@ library agents-lib
                     , System.Agents.OS.Interfaces
                     , System.Agents.OS.Interfaces.TUI
                     , System.Agents.OS.Interfaces.OneShot
+                    , System.Agents.OS.Interfaces.MCP
                     , System.Agents.OS.Persistence
                     , System.Agents.OS.Persistence.File
                     , System.Agents.OS.Persistence.Schema
@@ -125,9 +126,6 @@ library agents-lib
                     , System.Agents.Tools.SystemToolbox
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
-                    , System.Agents.Runtime
-                    , System.Agents.Runtime.Runtime
-                    , System.Agents.Runtime.Trace
                     , System.Agents.Session.Types
                     , System.Agents.Session.Base
                     , System.Agents.Session.Edit
@@ -140,18 +138,21 @@ library agents-lib
                     , System.Agents.SessionStore
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
-                    , System.Agents.OneShot
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client
                     , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
+                    , System.Agents.Runtime
+                    , System.Agents.Runtime.Runtime
+                    , System.Agents.Runtime.Trace
                     , System.Agents.TUI.Core
                     , System.Agents.TUI.Types
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Event
                     , System.Agents.TraceUtils
                     , System.Agents.ToolSchema
+                    , System.Agents.OneShot
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,

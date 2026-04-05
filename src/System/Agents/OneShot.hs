@@ -2,13 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | One-shot execution of agents with OS compatibility layer.
+{- | One-shot execution of agents with OS-native implementation.
 
-This module provides single-conversation execution (batch mode) with support
-for both the legacy Runtime interface and the new OS model via RuntimeBridge.
+This module is now a compatibility wrapper around 'System.Agents.OS.Interfaces.OneShot'.
+It re-exports the main functions for backward compatibility while using the
+new OS-native ECS-based implementation internally.
 
-The primary functions ('mainOneShotText', 'runtimeToAgent') have been updated
-to use OS-native types. 'mainOneShotText' now works directly with 'OSAgentTree'.
+For new code, consider using 'System.Agents.OS.Interfaces.OneShot' directly.
 -}
 module System.Agents.OneShot (
     -- * Types
@@ -38,6 +38,7 @@ import Control.Concurrent.STM (readTVarIO)
 import Control.Exception (Exception)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Foldable (traverse_)
 import Data.Maybe (listToMaybe)
@@ -83,9 +84,9 @@ import System.Agents.Combinators.StoreSessionProgress (
     agentWithSessionProgress,
  )
 
-import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
 
+-- | Trace type for OneShot operations.
 data Trace
     = ToolRegistrationTrace !ToolRegistration.Trace
     | ToolPortalTrace !ToolPortal.Trace
@@ -102,6 +103,7 @@ data ThinkingOutput
       ThinkingStderr
     deriving (Show, Eq, Ord)
 
+-- | Print agent information.
 mainPrintAgent :: Props -> IO ()
 mainPrintAgent props = do
     withAgentTree props $ \x -> do
@@ -166,6 +168,7 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     config.onSessionProgress convId (SessionCompleted session0)
     pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
 
+-- | Map ProgressiveDisclosure trace to OneShot trace.
 mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
 mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolRegistrationTrace t) = ToolRegistrationTrace t
 mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolPortalTrace t) = ToolPortalTrace t
@@ -208,6 +211,7 @@ mainOneShotTextWithThinking tracer store mPath mSession thinkingOut props query 
 
 data SessionLoadingFailed = SessionLoadingFailed FilePath
     deriving (Show)
+
 instance Exception SessionLoadingFailed
 
 -- | Stopping result type that carries the final response text.
