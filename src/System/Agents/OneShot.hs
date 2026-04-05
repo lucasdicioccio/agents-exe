@@ -17,7 +17,6 @@ module System.Agents.OneShot (
 
     -- * Main functions (OS-native)
     nodeToAgent,
-    agentStoreSession,
     fileStoringCallback,
     mainPrintAgent,
     mainOneShotText,
@@ -25,6 +24,10 @@ module System.Agents.OneShot (
 
     -- * Re-export from ProgressiveDisclosure
     agentEvaluateActiveTools,
+
+    -- * Re-export from StoreSessionProgress
+    agentStoreSession,
+    agentWithSessionProgress,
 
     -- * Utility functions
     mapProgressiveDisclosureTrace,
@@ -73,6 +76,12 @@ import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 -- Re-export agentEvaluateActiveTools from the new module
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
+
+-- Re-export session storage combinators
+import System.Agents.Combinators.StoreSessionProgress (
+    agentStoreSession,
+    agentWithSessionProgress,
+ )
 
 import qualified Data.Aeson.Key as AesonKey
 import qualified System.Agents.ToolPortal as ToolPortal
@@ -371,55 +380,7 @@ fileStoringCallback store convId progress =
         SessionStarted sess -> SessionStore.storeSession store convId sess
         SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
--- | Creates a callback that stores session progress using a SessionStore.
-sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
-sessionStoreCallback store convId progress =
-    case progress of
-        SessionUpdated sess -> storeSessionWithStore sess
-        SessionCompleted sess -> storeSessionWithStore sess
-        SessionStarted sess -> storeSessionWithStore sess
-        SessionFailed sess _ -> storeSessionWithStore sess
-  where
-    storeSessionWithStore sess =
-        SessionStore.storeSession store convId sess
-
-{- | Creates a callback that stores session progress using an extra optional session-path.
-This second is useful in OneShot command where the command-line drives the filename.
--}
-filepathStoreCallback :: Maybe FilePath -> OnSessionProgress
-filepathStoreCallback Nothing _ = pure ()
-filepathStoreCallback (Just path) progress =
-    case progress of
-        SessionUpdated sess -> go sess
-        SessionCompleted sess -> go sess
-        SessionStarted sess -> go sess
-        SessionFailed sess _ -> go sess
-  where
-    go sess =
-        SessionStore.storeSessionToFile sess path
-
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
-
-{- | Wrap an agent to store sessions using a SessionStore.
-The session is stored using the conversation ID from the session.
--}
-agentStoreSession :: forall r. SessionStore -> Maybe FilePath -> ConversationId -> Agent r -> Agent r
-agentStoreSession store mPath convId agent =
-    agentWithSessionProgress handleProgress agent
-  where
-    handleProgress x = do
-        sessionStoreCallback store convId x
-        filepathStoreCallback mPath x
-
--- | Wrap an agent to emit session progress events after each step.
-agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r
-agentWithSessionProgress onProgress agent =
-    agent{step = decorate agent.step}
-  where
-    decorate :: (Session -> IO (Action r)) -> (Session -> IO (Action r))
-    decorate f = \sess -> do
-        onProgress (SessionUpdated sess)
-        f sess
 

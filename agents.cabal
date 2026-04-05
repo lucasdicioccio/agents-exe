@@ -54,6 +54,7 @@ library agents-lib
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
                     , System.Agents.Combinators.ProgressiveDisclosure
+                    , System.Agents.Combinators.StoreSessionProgress
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
@@ -331,6 +332,5 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
-
 
 
