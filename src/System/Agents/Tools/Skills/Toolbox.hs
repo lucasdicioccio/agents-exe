@@ -233,7 +233,8 @@ runScriptTool script _tracer _ctx args = do
     case parseArgsForScript script args of
         Left err ->
             return $ BlobToolSuccess () (Text.encodeUtf8 $ "Argument parsing error: " <> Text.pack err)
-        Right cmdArgs -> do
+        Right argz -> do
+            let cmdArgs = "run" : argz
             -- Execute the script with parsed arguments
             result <- try $ readProcessWithExitCode (siPath script) cmdArgs ""
             case result of
