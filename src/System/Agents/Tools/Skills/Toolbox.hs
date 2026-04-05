@@ -343,3 +343,22 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
+
+-- | Extract command line arguments from the tool call value.
+extractArgsFromValue :: Aeson.Value -> [String]
+extractArgsFromValue val = case val of
+    Aeson.Object obj ->
+        -- Convert object values to string arguments
+        mapMaybe (fmap Text.unpack . valueToText) (KeyMap.elems obj)
+    Aeson.Array arr ->
+        mapMaybe (fmap Text.unpack . valueToText) (toList arr)
+    Aeson.String txt -> [Text.unpack txt]
+    _ -> []
+
+-- | Convert an Aeson value to text.
+valueToText :: Aeson.Value -> Maybe Text
+valueToText val = case val of
+    Aeson.String txt -> Just txt
+    Aeson.Number n -> Just $ Text.pack $ show n
+    Aeson.Bool b -> Just $ Text.pack $ show b
+    _ -> Nothing

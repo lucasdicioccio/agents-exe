@@ -4,7 +4,7 @@
 
 {- | OS-native MCP (Model Context Protocol) interface - SKELETON IMPLEMENTATION.
 
-This module provides the structure for a complete MCP server implementation 
+This module provides the structure for a complete MCP server implementation
 using OS-native ECS primitives. This is currently a skeleton that defines
 the interface structure - full implementation to be completed.
 
@@ -145,4 +145,3 @@ runMCPInterface handle = do
 shutdownMCPInterface :: MCPInterfaceHandle -> IO ()
 shutdownMCPInterface handle = do
     atomically $ writeTVar (mcpShutdown handle) True
-

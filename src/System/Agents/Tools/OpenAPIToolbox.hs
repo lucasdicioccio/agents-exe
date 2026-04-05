@@ -756,3 +756,42 @@ This is used for tool registration when creating unique tool names.
 -}
 getOperationId :: Operation -> Maybe Text
 getOperationId = opOperationId
+
+-- -------------------------------------------------------------------------
+-- Naming helpers
+-- -------------------------------------------------------------------------
+
+{- | Normalize a tool name for LLM compatibility.
+
+This is a re-export of 'normalizeForLLM' for convenience.
+-}
+normalizeToolName :: Text -> Text
+normalizeToolName = normalizeForLLM
+
+{- | Convert an OpenAPI operation ID to an LLM tool name.
+
+Names are prefixed with @openapi_@ and include the normalized toolbox name
+and normalized operation ID to avoid conflicts and ensure LLM compatibility.
+
+The operation ID is normalized to replace invalid characters:
+- Dots (.) become underscores (_)
+- Slashes (/) become underscores (_)
+- Other invalid characters become underscores
+- Names starting with digits are prefixed with 't'
+
+Example:
+
+>>> openapi2LLMName "myApi" "getPet"
+ToolName {getToolName = "openapi_myApi_getPet"}
+
+>>> openapi2LLMName "myApi" "pet.findByStatus"
+ToolName {getToolName = "openapi_myApi_pet_findByStatus"}
+
+>>> openapi2LLMName "myApi" "2.0/getPet"
+ToolName {getToolName = "openapi_myApi_t2_0_getPet"}
+-}
+openapi2LLMName :: Text -> Text -> OpenAI.ToolName
+openapi2LLMName tboxName operationId =
+    let normalizedToolbox = normalizeForLLM tboxName
+        normalizedOpId = normalizeForLLM operationId
+     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)

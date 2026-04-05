@@ -3,7 +3,7 @@
 
 {- | OS-native OneShot interface - SKELETON IMPLEMENTATION.
 
-This module provides the structure for complete one-shot (batch) execution 
+This module provides the structure for complete one-shot (batch) execution
 using OS-native ECS primitives. This is currently a skeleton that defines
 the interface structure - full implementation to be completed.
 
@@ -168,17 +168,17 @@ runOneShotInterface _ = pure ()
 
 -- | Execute a one-shot conversation (skeleton - returns placeholder).
 executeOneShot :: OneShotInterfaceHandle -> Maybe AgentId -> Text -> IO OneShotResult
-executeOneShot _ _ query = pure $
-    OneShotResult
-        { osrText = "OS-native OneShot not yet fully implemented: " <> query
-        , osrThinking = Nothing
-        , osrSession = Nothing
-        , osrSuccess = False
-        , osrError = Just "Skeleton implementation"
-        }
+executeOneShot _ _ query =
+    pure $
+        OneShotResult
+            { osrText = "OS-native OneShot not yet fully implemented: " <> query
+            , osrThinking = Nothing
+            , osrSession = Nothing
+            , osrSuccess = False
+            , osrError = Just "Skeleton implementation"
+            }
 
 -- | Shutdown the OneShot interface.
 shutdownOneShotInterface :: OneShotInterfaceHandle -> IO ()
 shutdownOneShotInterface handle = do
     atomically $ writeTVar (oscShutdown handle) True
-
