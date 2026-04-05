@@ -14,16 +14,8 @@ Activation modes allow tools to be:
 - On-demand (activated via a toolgroup trigger)
 - Available for first N steps only (with optional stickiness)
 
-Lifetime controls how long activation state persists:
-- Program: for the entire program lifetime
-- Root-conversation: for the root conversation
-- Conversation: for the current conversation (default)
-- Tool-call: just for the current tool call
 -}
 module System.Agents.Tools.Activation (
-    -- * Lifetime
-    Lifetime (..),
-
     -- * Activation
     Activation (..),
 
@@ -40,42 +32,6 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
-
--------------------------------------------------------------------------------
--- Lifetime
--------------------------------------------------------------------------------
-
-{- | Lifetime scope for tool activation state.
-
-Controls how long an activation state persists before being reset.
--}
-data Lifetime
-    = -- | Activation state lasts for the entire program lifetime
-      ProgramLifetime
-    | -- | Activation state lasts for the root conversation
-      RootConversationLifetime
-    | -- | Activation state lasts for the current conversation (default)
-      ConversationLifetime
-    | -- | Activation state lasts only for the current tool call
-      ToolCallLifetime
-    deriving (Show, Eq, Ord, Generic)
-
--- | Custom JSON encoding as lowercase kebab-case strings
-instance ToJSON Lifetime where
-    toJSON ProgramLifetime = Aeson.String "program"
-    toJSON RootConversationLifetime = Aeson.String "root-conversation"
-    toJSON ConversationLifetime = Aeson.String "conversation"
-    toJSON ToolCallLifetime = Aeson.String "tool-call"
-
--- | Custom JSON parsing from lowercase kebab-case strings
-instance FromJSON Lifetime where
-    parseJSON = Aeson.withText "Lifetime" $ \txt ->
-        case txt of
-            "program" -> return ProgramLifetime
-            "root-conversation" -> return RootConversationLifetime
-            "conversation" -> return ConversationLifetime
-            "tool-call" -> return ToolCallLifetime
-            _ -> fail $ "Unknown Lifetime: " ++ Text.unpack txt
 
 -------------------------------------------------------------------------------
 -- Activation

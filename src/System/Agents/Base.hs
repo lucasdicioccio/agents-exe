@@ -15,7 +15,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
-import System.Agents.Tools.Activation (Activation, Lifetime)
+import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
@@ -121,7 +121,6 @@ The optional 'basenameFilter' field allows filtering tools by their
 filename. If specified, only executables whose names contain the
 filter string will be loaded.
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 
 Note: Relative paths are resolved relative to the execution's current
@@ -135,8 +134,6 @@ data FileSystemDirectoryDescription
     -- ^ Path to the directory containing bash tools
     , fsDirBasenameFilter :: Maybe Text
     -- ^ Optional filter for tool filenames (e.g., ".sh" to load only .sh files)
-    , fsDirLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , fsDirActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -186,8 +183,6 @@ working directory.
 data SingleToolDescription = SingleToolDescription
     { singleToolPath :: FilePath
     -- ^ Path to the single executable tool
-    , singleToolLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , singleToolActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -310,7 +305,6 @@ The optional 'filter' field allows restricting which endpoints are
 exposed as tools. See 'EndpointPredicate' for the available filter
 predicates. If no filter is specified, all endpoints are included.
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data OpenAPIServerDescription
@@ -327,8 +321,6 @@ data OpenAPIServerDescription
     -- ^ Optional filter to restrict which endpoints are exposed as tools
     , openApiSecrets :: Maybe [Secret]
     -- ^ Optional list of secrets to resolve and include in requests
-    , openApiLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , openApiActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -481,7 +473,6 @@ The optional 'filter' field allows restricting which tables are
 exposed as tools. See 'EndpointPredicate' for the available filter
 predicates. If no filter is specified, all tables are included.
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data PostgRESTServerDescription
@@ -507,8 +498,6 @@ data PostgRESTServerDescription
     -- ^ Optional filter to restrict which tables/endpoints are exposed as tools
     , postgrestSecrets :: Maybe [Secret]
     -- ^ Optional list of secrets to resolve and include in requests
-    , postgrestLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , postgrestActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -671,7 +660,6 @@ the agent should only query data, 'read-write' when the agent
 needs to modify the database directly, and 'snapshot' when you want
 isolated changes per conversation.
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data SqliteToolboxDescription
@@ -684,8 +672,6 @@ data SqliteToolboxDescription
     -- ^ Path to the SQLite database file
     , sqliteToolboxAccess :: SqliteAccessMode
     -- ^ Access mode: read-only, read-write, or snapshot
-    , sqliteToolboxLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , sqliteToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -789,7 +775,6 @@ The 'envVarFilter' field is an optional regex/pattern to filter
 environment variables when the 'env-vars' capability is enabled.
 If not specified, all environment variables are exposed.
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data SystemToolboxDescription
@@ -802,8 +787,6 @@ data SystemToolboxDescription
     -- ^ List of system information capabilities to expose
     , systemToolboxEnvVarFilter :: Maybe Text
     -- ^ Optional regex/pattern to filter environment variables
-    , systemToolboxLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , systemToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -856,7 +839,6 @@ Example configuration:
 }
 @
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data LuaToolboxDescription = LuaToolboxDescription
@@ -874,8 +856,6 @@ data LuaToolboxDescription = LuaToolboxDescription
     -- ^ Whitelist of filesystem paths accessible to Lua scripts
     , luaToolboxAllowedHosts :: [Text]
     -- ^ Whitelist of network hosts accessible to Lua HTTP module
-    , luaToolboxLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , luaToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -970,7 +950,6 @@ Example configuration:
 }
 @
 
-The 'lifetime' field controls resource scoping (default: 'ConversationLifetime').
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data DeveloperToolboxDescription
@@ -981,8 +960,6 @@ data DeveloperToolboxDescription
     -- ^ Human-readable description of the toolbox purpose
     , developerToolboxCapabilities :: [DeveloperToolCapability]
     -- ^ List of developer tool capabilities to expose
-    , developerToolboxLifetime :: Maybe Lifetime
-    -- ^ Optional resource lifetime (default: ConversationLifetime)
     , developerToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -1111,9 +1088,6 @@ Each skill maps to a toolgroup with the same name as the skill.
 MCP servers provide tools via the Model Context Protocol.
 They run as external processes and communicate via JSON-RPC.
 
-The 'lifetime' field controls resource scoping. Note that MCP servers
-CANNOT use 'ToolCallLifetime' - this will result in a validation error.
-
 Example configuration:
 
 @
@@ -1137,10 +1111,6 @@ data McpSimpleBinaryConfiguration
     -- ^ Path to the MCP server executable
     , args :: [Text]
     -- ^ Command-line arguments for the executable
-    , mcpLifetime :: Maybe Lifetime
-    {- ^ Optional resource lifetime (default: ConversationLifetime)
-    NOTE: Cannot be ToolCallLifetime for MCP servers
-    -}
     , mcpActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }

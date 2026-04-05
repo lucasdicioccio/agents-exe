@@ -188,7 +188,7 @@ execution's current working directory.
 collectBashDescriptions :: Agent -> [BashToolboxDescription]
 collectBashDescriptions agent =
     let legacyDir = case toolDirectory agent of
-            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing Nothing]
+            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing]
             Nothing -> []
         toolboxDescs = fromMaybe [] (bashToolboxes agent)
      in legacyDir ++ toolboxDescs

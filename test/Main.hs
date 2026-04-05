@@ -289,7 +289,6 @@ agentSerializationTests =
                     , Base.sqliteToolboxDescription = "a set of memories"
                     , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
                     , Base.sqliteToolboxAccess = Base.SqliteReadWrite
-                    , Base.sqliteToolboxLifetime = Nothing
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.SqliteToolbox sqliteDesc
@@ -320,7 +319,6 @@ agentSerializationTests =
                     , Base.sqliteToolboxDescription = "a set of memories"
                     , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
                     , Base.sqliteToolboxAccess = Base.SqliteReadWrite
-                    , Base.sqliteToolboxLifetime = Nothing
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let sqliteDesc2 = Base.SqliteToolboxDescription
@@ -328,7 +326,6 @@ agentSerializationTests =
                     , Base.sqliteToolboxDescription = "a set of guidelines"
                     , Base.sqliteToolboxPath = "/path/to/guidelines.sqlite"
                     , Base.sqliteToolboxAccess = Base.SqliteReadOnly
-                    , Base.sqliteToolboxLifetime = Nothing
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolboxes = [Base.SqliteToolbox sqliteDesc1, Base.SqliteToolbox sqliteDesc2]
@@ -362,7 +359,6 @@ agentSerializationTests =
                     , Base.luaToolboxAllowedTools = ["bash", "sqlite"]
                     , Base.luaToolboxAllowedPaths = ["./scripts"]
                     , Base.luaToolboxAllowedHosts = ["localhost"]
-                    , Base.luaToolboxLifetime = Nothing
                     , Base.luaToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.LuaToolbox luaDesc
@@ -416,7 +412,6 @@ bashToolboxTests =
                     { Base.fsDirRoot = Nothing
                     , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Nothing
-                    , Base.fsDirLifetime = Nothing
                     , Base.fsDirActivation = Nothing
                     }
             let json = encode desc
@@ -427,7 +422,6 @@ bashToolboxTests =
                     { Base.fsDirRoot = Nothing
                     , Base.fsDirPath = "./extra-tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
-                    , Base.fsDirLifetime = Nothing
                     , Base.fsDirActivation = Nothing
                     }
             let json = encode desc
@@ -436,7 +430,6 @@ bashToolboxTests =
         , testCase "SingleTool serialization" $ do
             let desc = Base.SingleToolDescription
                     { Base.singleToolPath = "/path/to/special-tool.sh"
-                    , Base.singleToolLifetime = Nothing
                     , Base.singleToolActivation = Nothing
                     }
             let json = encode desc
@@ -447,7 +440,6 @@ bashToolboxTests =
                     { Base.fsDirRoot = Nothing
                     , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
-                    , Base.fsDirLifetime = Nothing
                     , Base.fsDirActivation = Nothing
                     }
             let wrapped = Base.FileSystemDirectory desc
@@ -457,7 +449,6 @@ bashToolboxTests =
         , testCase "BashToolboxDescription SingleTool wrapper" $ do
             let desc = Base.SingleToolDescription
                     { Base.singleToolPath = "/path/to/tool.sh"
-                    , Base.singleToolLifetime = Nothing
                     , Base.singleToolActivation = Nothing
                     }
             let wrapped = Base.SingleTool desc
@@ -465,8 +456,8 @@ bashToolboxTests =
             let mWrapped = decode json :: Maybe Base.BashToolboxDescription
             mWrapped @?= Just wrapped
         , testCase "agent with bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing Nothing Nothing
-            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh" Nothing Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing Nothing
+            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh" Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"
@@ -489,7 +480,7 @@ bashToolboxTests =
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
         , testCase "agent with both legacy toolDirectory and bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing Nothing Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"
