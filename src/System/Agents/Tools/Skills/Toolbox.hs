@@ -41,10 +41,9 @@ module System.Agents.Tools.Skills.Toolbox (
 
 import Control.Exception (try)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Foldable (toList)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -179,17 +178,23 @@ makeDescribeTool skill =
 
 Script tools are activated on-demand along with their parent skill via
 the ProgressiveDisclosure framework.
+
+The ScriptInfo (from the script's describe output) is stored in the toolDef
+as SkillScriptTool, similar to how BashTools stores ScriptDescription in BashTool.
 -}
 makeScriptTool :: Skill -> ScriptInfo -> ToolRegistration
 makeScriptTool skill script =
     let llmName = makeScriptToolName (skillMetadata skill).smName script.siName
+        -- Use the description from describe output, with fallback
         llmDesc = fromMaybe "Execute skill script" script.siDescription
+        -- Build parameter properties from the script's describe output (siArgs)
         paramProps = map scriptArgToParam script.siArgs
 
         tool :: Tool ()
         tool =
             ToolBase.Tool
-                { ToolBase.toolDef = MetaTool "skill-script"
+                { -- Store the ScriptInfo (describe result) in toolDef, like BashTool does
+                  ToolBase.toolDef = SkillScriptTool script
                 , ToolBase.toolRun = runScriptTool script
                 }
 
@@ -203,9 +208,15 @@ makeScriptTool skill script =
 {- | Execute a skill script with the provided arguments.
 
 Implements the describe/run protocol:
-1. Parse arguments from the tool call
+1. Parse arguments from the tool call using the script's argument metadata (siArgs from describe)
 2. Execute the script with those arguments
 3. Return the result
+
+Arguments are parsed from the JSON object using the ScriptArgInfo metadata,
+similar to how Bash.runValue handles arguments. This ensures that:
+- Arguments are matched by name from the JSON object
+- Only provided arguments are passed to the script
+- Arguments are passed as positional parameters in order
 -}
 runScriptTool ::
     ScriptInfo ->
@@ -214,25 +225,73 @@ runScriptTool ::
     Aeson.Value ->
     IO (CallResult ())
 runScriptTool script _tracer _ctx args = do
-    -- Convert args to command line arguments
-    let cmdArgs = extractArgsFromValue args
-    -- Execute the script
-    result <- try $ readProcessWithExitCode (siPath script) cmdArgs ""
-    case result of
-        Left (e :: IOError) ->
-            return $ BlobToolSuccess () (Text.encodeUtf8 $ "Script execution error: " <> Text.pack (show e))
-        Right (exitCode, stdout, stderr) -> case exitCode of
-            ExitSuccess ->
-                return $ BlobToolSuccess () (Text.encodeUtf8 $ Text.pack stdout)
-            ExitFailure code ->
-                return $
-                    BlobToolSuccess () $
-                        Text.encodeUtf8 $
-                            Text.unlines
-                                [ "Script failed with exit code " <> Text.pack (show code)
-                                , "stdout: " <> Text.pack stdout
-                                , "stderr: " <> Text.pack stderr
-                                ]
+    -- Parse arguments using the script's argument metadata from describe (like Bash.runValue)
+    case parseArgsForScript script args of
+        Left err ->
+            return $ BlobToolSuccess () (Text.encodeUtf8 $ "Argument parsing error: " <> Text.pack err)
+        Right cmdArgs -> do
+            -- Execute the script with parsed arguments
+            result <- try $ readProcessWithExitCode (siPath script) cmdArgs ""
+            case result of
+                Left (e :: IOError) ->
+                    return $ BlobToolSuccess () (Text.encodeUtf8 $ "Script execution error: " <> Text.pack (show e))
+                Right (exitCode, stdout, stderr) -> case exitCode of
+                    ExitSuccess ->
+                        return $ BlobToolSuccess () (Text.encodeUtf8 $ Text.pack stdout)
+                    ExitFailure code ->
+                        return $
+                            BlobToolSuccess () $
+                                Text.encodeUtf8 $
+                                    Text.unlines
+                                        [ "Script failed with exit code " <> Text.pack (show code)
+                                        , "stdout: " <> Text.pack stdout
+                                        , "stderr: " <> Text.pack stderr
+                                        ]
+
+-------------------------------------------------------------------------------
+-- Argument Parsing (similar to Bash.runValue)
+-------------------------------------------------------------------------------
+
+{- | Parse arguments from JSON value using script argument metadata.
+
+This follows the same pattern as Bash.translateArguments and Bash.parseArgsForValue:
+1. Extract argument values from the JSON object by name
+2. Build command line arguments from provided values
+
+Unlike the Bash implementation, skill scripts use simpler positional argument
+passing without calling modes (stdin, dashdash, etc.).
+-}
+parseArgsForScript :: ScriptInfo -> Aeson.Value -> Either String [String]
+parseArgsForScript script val = do
+    -- Parse arguments from JSON object, matching by name
+    argValues <- Aeson.parseEither (translateArguments script) val
+    -- Flatten to command line arguments (only include provided args)
+    pure $ concatMap argValueToString argValues
+
+{- | Translate JSON object to argument values using ScriptArgInfo metadata.
+
+Parses the JSON object and extracts values for each defined argument by name.
+Returns a list of (argument info, maybe value) pairs.
+-}
+translateArguments :: ScriptInfo -> Aeson.Value -> Aeson.Parser [(ScriptArgInfo, Maybe Text)]
+translateArguments script = Aeson.withObject "Args" $ \obj -> do
+    vals <- traverse (parseArg obj) script.siArgs
+    pure $ zip script.siArgs vals
+  where
+    parseArg :: Aeson.Object -> ScriptArgInfo -> Aeson.Parser (Maybe Text)
+    parseArg obj arg = obj Aeson..:? textToKey (saName arg)
+
+    textToKey :: Text -> Aeson.Key
+    textToKey = read . show
+
+{- | Convert an argument value pair to command line strings.
+
+For skill scripts, arguments are passed positionally in the order defined
+by the script's argument metadata. Only provided (Just) values are included.
+-}
+argValueToString :: (ScriptArgInfo, Maybe Text) -> [String]
+argValueToString (_, Nothing) = []
+argValueToString (_, Just txt) = [Text.unpack txt]
 
 -------------------------------------------------------------------------------
 -- Helper Functions
@@ -280,21 +339,3 @@ makeToolDecl name desc props =
         , toolDescriptionParamProperties = props
         }
 
--- | Extract command line arguments from the tool call value.
-extractArgsFromValue :: Aeson.Value -> [String]
-extractArgsFromValue val = case val of
-    Aeson.Object obj ->
-        -- Convert object values to string arguments
-        mapMaybe (fmap Text.unpack . valueToText) (KeyMap.elems obj)
-    Aeson.Array arr ->
-        mapMaybe (fmap Text.unpack . valueToText) (toList arr)
-    Aeson.String txt -> [Text.unpack txt]
-    _ -> []
-
--- | Convert an Aeson value to text.
-valueToText :: Aeson.Value -> Maybe Text
-valueToText val = case val of
-    Aeson.String txt -> Just txt
-    Aeson.Number n -> Just $ Text.pack $ show n
-    Aeson.Bool b -> Just $ Text.pack $ show b
-    _ -> Nothing

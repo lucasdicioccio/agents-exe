@@ -64,7 +64,7 @@ parseSkillContent skillDir content = do
             case parseFrontmatter frontmatter of
                 Left err -> return $ Left err
                 Right metadata -> do
-                    -- Load scripts and references
+                    -- Load scripts (with describe output) and references
                     scripts <- loadScripts skillDir
                     references <- loadReferences skillDir
                     return $
@@ -111,6 +111,9 @@ parseFrontmatter txt =
 
 Scripts are executable files that follow the describe/run protocol.
 Only files with executable permissions are considered scripts.
+
+Each script is executed with "describe" to get its metadata (description and args),
+similar to how BashTools loads script descriptions.
 -}
 loadScripts :: FilePath -> IO [ScriptInfo]
 loadScripts skillDir = do
@@ -123,7 +126,39 @@ loadScripts skillDir = do
             let scriptPaths = map (scriptsDir </>) entries
             -- Filter to executable files
             execPaths <- filterM isExecutableFile scriptPaths
-            mapM (loadScriptInfo scriptsDir) execPaths
+            -- Load script info and then load describe output for each
+            scriptInfos <- mapM (loadScriptInfo scriptsDir) execPaths
+            -- Eagerly load script descriptions (like BashTools does)
+            mapM loadScriptDescriptionEager scriptInfos
+
+{- | Eagerly load script description by executing the script with "describe".
+
+Unlike the lazy version in loadScriptDescription, this function is called
+during skill loading to ensure all script metadata is available for tool
+registration, matching the behavior of BashTools.loadScript.
+-}
+loadScriptDescriptionEager :: ScriptInfo -> IO ScriptInfo
+loadScriptDescriptionEager script = do
+    result <- try $ readProcessWithExitCode (siPath script) ["describe"] ""
+    case result of
+        Left (_ :: IOError) ->
+            -- On error, return script with default/empty values
+            return script
+        Right (exitCode, stdout, _stderr) -> case exitCode of
+            ExitSuccess ->
+                case Aeson.eitherDecodeStrict (Text.encodeUtf8 $ Text.pack stdout) of
+                    Left _ ->
+                        -- On parse error, return original script
+                        return script
+                    Right desc ->
+                        return $
+                            script
+                                { siDescription = Just (sdDescription desc)
+                                , siArgs = sdArgs desc
+                                }
+            ExitFailure _ ->
+                -- On script failure, return original script
+                return script
 
 {- | Check if a file is executable.
 
@@ -143,7 +178,7 @@ isExecutableFile path = do
 {- | Load information about a single script.
 
 This creates a ScriptInfo with the name and path. The description
-and args are loaded lazily when needed.
+and args are loaded by loadScriptDescriptionEager.
 -}
 loadScriptInfo :: FilePath -> FilePath -> IO ScriptInfo
 loadScriptInfo _scriptsDir scriptPath = do
@@ -159,13 +194,14 @@ loadScriptInfo _scriptsDir scriptPath = do
         ScriptInfo
             { siName = ScriptName name
             , siPath = scriptPath
-            , siDescription = Nothing -- Loaded lazily
-            , siArgs = [] -- Loaded lazily
+            , siDescription = Nothing -- Loaded via loadScriptDescriptionEager
+            , siArgs = [] -- Loaded via loadScriptDescriptionEager
             }
 
 {- | Load script description by executing the script with "describe" argument.
 
 This implements the describe/run protocol for skill scripts.
+Returns Left on error, Right with updated ScriptInfo on success.
 -}
 loadScriptDescription :: ScriptInfo -> IO (Either Text ScriptInfo)
 loadScriptDescription script = do
@@ -287,3 +323,4 @@ partitionEithers = foldr go ([], [])
   where
     go (Left a) (as, bs) = (a : as, bs)
     go (Right b) (as, bs) = (as, b : bs)
+

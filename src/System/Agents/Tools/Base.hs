@@ -19,6 +19,7 @@ import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
+import qualified System.Agents.Tools.Skills.Types as Skills
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
@@ -57,6 +58,8 @@ data ToolDef
       LuaTool !Text
     | -- | Meta tool: operation type (activate, deactivate, discover, skill-describe, skill-script)
       MetaTool !Text
+    | -- | Skill script tool: contains ScriptInfo from describe output
+      SkillScriptTool !Skills.ScriptInfo
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -246,3 +249,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+
