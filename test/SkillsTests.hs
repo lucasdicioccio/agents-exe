@@ -15,11 +15,13 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Prod.Tracer (Tracer, silent)
 import Test.Tasty
 import Test.Tasty.HUnit
 
 import System.Agents.Tools.Skills.Parser
 import System.Agents.Tools.Skills.Types
+import System.Agents.Tools.Skills.Toolbox (ScriptName (..))
 
 -------------------------------------------------------------------------------
 -- Test Suite
@@ -100,7 +102,8 @@ skillFileParsingTests =
     testGroup
         "SKILL.md File Parsing"
         [ testCase "parses test/data/skills-01.md successfully" $ do
-            result <- parseSkillFile "test/data/skills-01.md"
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
+            result <- parseSkillFile tracer "test/data/skills-01.md"
             case result of
                 Left err -> assertFailure $ "Failed to parse skill file: " ++ Text.unpack err
                 Right skill -> do
@@ -113,7 +116,8 @@ skillFileParsingTests =
                     Map.lookup "category" (skill.skillMetadata.smMetadata) @?= Just "development"
                     Map.lookup "version" (skill.skillMetadata.smMetadata) @?= Just "1.0"
         , testCase "skill has instructions content" $ do
-            result <- parseSkillFile "test/data/skills-01.md"
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
+            result <- parseSkillFile tracer "test/data/skills-01.md"
             case result of
                 Left err -> assertFailure $ "Failed to parse skill file: " ++ Text.unpack err
                 Right skill -> do
@@ -124,15 +128,17 @@ skillFileParsingTests =
                     Text.isInfixOf "### Security" instructions @?= True
                     Text.isInfixOf "### Maintainability" instructions @?= True
         , testCase "skill path is set correctly" $ do
-            result <- parseSkillFile "test/data/skills-01.md"
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
+            result <- parseSkillFile tracer "test/data/skills-01.md"
             case result of
                 Left err -> assertFailure $ "Failed to parse skill file: " ++ Text.unpack err
                 Right skill -> do
                     skill.skillPath @?= "test/data"
         , testCase "empty skills directory returns empty list" $ do
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
             -- This tests the directory parsing but doesn't rely on external files
             -- We just verify the function doesn't crash
-            result <- parseSkillDirectory "test/data/nonexistent-dir-for-testing"
+            result <- parseSkillDirectory tracer "test/data/nonexistent-dir-for-testing"
             case result of
                 Left _ -> pure () -- Expected - directory doesn't exist
                 Right skills -> skills @?= []

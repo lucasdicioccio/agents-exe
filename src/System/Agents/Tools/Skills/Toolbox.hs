@@ -22,6 +22,9 @@ module System.Agents.Tools.Skills.Toolbox (
     -- * Trace
     Trace (..),
 
+    -- * Script Name
+    ScriptName (..),
+
     -- * Tool Registration
     skillToToolRegistrations,
     makeDescribeTool,
