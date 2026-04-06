@@ -1,6 +1,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 {- | Skills toolbox with ProgressiveDisclosure framework integration.
 
@@ -43,7 +44,6 @@ import Control.Exception (try)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -51,8 +51,9 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
-
+import System.FilePath (takeBaseName)
 import Prod.Tracer (Tracer)
+
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
@@ -63,9 +64,6 @@ import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.Types
-
--- Import shared script types and translateArguments from ScriptTypes
--- Note: We import ScriptInfo with a qualified name to avoid conflict with Skills.Types.ScriptInfo
 import qualified System.Agents.Tools.ScriptTypes as ST
 
 -------------------------------------------------------------------------------
@@ -94,6 +92,12 @@ data Trace
 -------------------------------------------------------------------------------
 -- Tool Registration
 -------------------------------------------------------------------------------
+
+newtype ScriptName = ScriptName { unScriptName :: FilePath }
+    deriving (Show, Aeson.ToJSON, Aeson.FromJSON)
+
+scriptName :: ST.ScriptDescription -> ScriptName
+scriptName sd = ScriptName $ takeBaseName sd.scriptPath
 
 {- | Convert a skill to its tool registrations with ProgressiveDisclosure activation.
 
@@ -153,8 +157,8 @@ makeDescribeTool skill =
                 , "metadata" Aeson..= (skillMetadata skill).smMetadata
                 , "instructions" Aeson..= skillInstructions skill
                 , "scripts"
-                    Aeson..= [ name
-                             | ScriptInfo{siName = ScriptName name} <- skillScripts skill
+                    Aeson..= [ scriptName sd
+                             | sd <- skillScripts skill
                              ]
                 , "references"
                     Aeson..= [ name
@@ -182,23 +186,20 @@ makeDescribeTool skill =
 
 Script tools are activated on-demand along with their parent skill via
 the ProgressiveDisclosure framework.
-
-The ScriptInfo (from the script's describe output) is stored in the toolDef
-as SkillScriptTool, similar to how BashTools stores ScriptDescription in BashTool.
 -}
-makeScriptTool :: Skill -> ScriptInfo -> ToolRegistration
+makeScriptTool :: Skill -> ST.ScriptDescription -> ToolRegistration
 makeScriptTool skill script =
-    let llmName = makeScriptToolName (skillMetadata skill).smName script.siName
+    let llmName = makeScriptToolName (skillMetadata skill).smName (scriptName script)
         -- Use the description from describe output, with fallback
-        llmDesc = fromMaybe "Execute skill script" script.siDescription
+        llmDesc = script.scriptInfo.scriptDescription
         -- Build parameter properties from the script's describe output (siArgs)
-        paramProps = map scriptArgToParam script.siArgs
+        paramProps = map scriptArgToParam script.scriptInfo.scriptArgs
 
         tool :: Tool ()
         tool =
             ToolBase.Tool
-                { -- Store the ScriptInfo (describe result) in toolDef, like BashTool does
-                  ToolBase.toolDef = SkillScriptTool script
+                { -- Store the ScriptDescription (describe result) in toolDef, like BashTool does
+                  ToolBase.toolDef = SkillScriptTool script.scriptInfo
                 , ToolBase.toolRun = runScriptTool script
                 }
 
@@ -223,7 +224,7 @@ similar to how Bash.runValue handles arguments. This ensures that:
 - Arguments are passed as positional parameters in order
 -}
 runScriptTool ::
-    ScriptInfo ->
+    ST.ScriptDescription ->
     Tracer IO ToolRegistration.Trace ->
     ToolExecutionContext ->
     Aeson.Value ->
@@ -236,7 +237,7 @@ runScriptTool script _tracer _ctx args = do
         Right argz -> do
             let cmdArgs = "run" : argz
             -- Execute the script with parsed arguments
-            result <- try $ readProcessWithExitCode (siPath script) cmdArgs ""
+            result <- try $ readProcessWithExitCode script.scriptPath cmdArgs ""
             case result of
                 Left (e :: IOError) ->
                     return $ BlobToolSuccess () (Text.encodeUtf8 $ "Script execution error: " <> Text.pack (show e))
@@ -266,12 +267,12 @@ This uses translateArguments from ScriptTypes which only requires the argName fi
 Unlike the Bash implementation, skill scripts use simpler positional argument
 passing without calling modes (stdin, dashdash, etc.).
 -}
-parseArgsForScript :: ScriptInfo -> Aeson.Value -> Either String [String]
+parseArgsForScript :: ST.ScriptDescription -> Aeson.Value -> Either String [String]
 parseArgsForScript script val = do
     -- Use translateArguments from ScriptTypes
     -- We create a dummy ScriptInfo for ScriptTypes since translateArguments only uses scriptArgs
     let scriptInfo = ST.ScriptInfo
-            { ST.scriptArgs = siArgs script
+            { ST.scriptArgs = script.scriptInfo.scriptArgs
             , ST.scriptSlug = ""  -- Not used by translateArguments
             , ST.scriptDescription = ""  -- Not used by translateArguments
             , ST.scriptEmptyResultBehavior = Nothing  -- Not used by translateArguments
@@ -309,12 +310,12 @@ skill2LLMName action skillName =
 Format: skill_{skill_name}_{script_name}
 -}
 makeScriptToolName :: SkillName -> ScriptName -> OpenAI.ToolName
-makeScriptToolName skillName scriptName =
+makeScriptToolName skillName name =
     OpenAI.ToolName $
         "skill_"
             <> skillNameToText skillName
             <> "_"
-            <> unScriptName scriptName
+            <> (Text.pack $ unScriptName name)
 
 -- | Convert a script arg to a ParamProperty for schema.
 scriptArgToParam :: ST.ScriptArg -> ParamProperty

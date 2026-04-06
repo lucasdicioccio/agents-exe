@@ -14,12 +14,14 @@ module System.Agents.Tools.ScriptTypes (
     -- * Script Info
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
+    -- * Script located on disk
+    ScriptDescription (..),
     
     -- * Argument Translation
     translateArguments,
 ) where
 
-import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON, ToJSON, (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.List as List
@@ -98,24 +100,23 @@ data ScriptArg
 instance ToJSON ScriptArg where
     toJSON s =
         Aeson.object
-            [ "argName" .= s.argName
-            , "argDescription" .= s.argDescription
-            , "argTypeString" .= s.argTypeString
-            , "argBackingTypeString" .= s.argBackingTypeString
-            , "argTypeArity" .= s.argTypeArity
-            , "argCallingMode" .= s.argCallingMode
+            [ "name" .= s.argName
+            , "description" .= s.argDescription
+            , "type" .= s.argTypeString
+            , "backing_type" .= s.argBackingTypeString
+            , "arity" .= s.argTypeArity
+            , "mode" .= s.argCallingMode
             ]
 
--- | FromJSON instance for ScriptArg (internal format using Haskell field names)
-instance FromJSON ScriptArg where
+instance Aeson.FromJSON ScriptArg where
     parseJSON = Aeson.withObject "ScriptArg" $ \o ->
         ScriptArg
-            <$> o .: "argName"
-            <*> o .: "argDescription"
-            <*> o .: "argTypeString"
-            <*> o .: "argBackingTypeString"
-            <*> o .: "argTypeArity"
-            <*> o .: "argCallingMode"
+            <$> o Aeson..: "name"
+            <*> o Aeson..: "description"
+            <*> o Aeson..: "type"
+            <*> o Aeson..: "backing_type"
+            <*> o Aeson..: "arity"
+            <*> o Aeson..: "mode"
 
 -------------------------------------------------------------------------------
 -- Script Info Types
@@ -143,15 +144,19 @@ data ScriptInfo
 instance ToJSON ScriptInfo where
     toJSON s =
         Aeson.object $
-            [ "scriptArgs" .= s.scriptArgs
-            , "scriptSlug" .= s.scriptSlug
-            , "scriptDescription" .= s.scriptDescription
+            [ "args" .= s.scriptArgs
+            , "slug" .= s.scriptSlug
+            , "description" .= s.scriptDescription
             ]
-                <> maybe [] (\seb -> ["scriptEmptyResultBehavior" .= seb]) s.scriptEmptyResultBehavior
+                <> maybe [] (\seb -> ["empty-result" .= seb]) s.scriptEmptyResultBehavior
 
--- Note: FromJSON instance for ScriptInfo is NOT defined here.
--- Different consumers (Bash tools vs Skills) use different JSON formats for scriptArgs.
--- Each module should define its own parsing logic.
+instance Aeson.FromJSON ScriptInfo where
+    parseJSON = Aeson.withObject "Script" $ \o ->
+        ScriptInfo
+            <$> o Aeson..: "args"
+            <*> o Aeson..: "slug"
+            <*> o Aeson..: "description"
+            <*> o Aeson..:? "empty-result"
 
 -------------------------------------------------------------------------------
 -- Argument Translation
@@ -172,4 +177,24 @@ translateArguments script = Aeson.withObject "Args" $ \v -> do
 
     textToKey :: Text -> Aeson.Key
     textToKey = read . Prelude.show
+
+data ScriptDescription
+    = ScriptDescription
+    { scriptPath :: FilePath
+    , scriptInfo :: ScriptInfo
+    }
+    deriving (Show, Eq, Ord)
+
+instance ToJSON ScriptDescription where
+    toJSON s =
+        Aeson.object $
+            [ "path" .= s.scriptPath
+            , "info" .= s.scriptInfo
+            ]
+
+instance Aeson.FromJSON ScriptDescription where
+    parseJSON = Aeson.withObject "ScriptDescription" $ \o ->
+        ScriptDescription
+            <$> o Aeson..: "path"
+            <*> o Aeson..: "info"
 

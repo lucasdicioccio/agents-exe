@@ -7,6 +7,7 @@ This module handles loading skills from various sources:
 - Git repositories (cloned and then searched)
 -}
 module System.Agents.Tools.Skills.Source (
+    Trace(..),
     loadSkillsFromSource,
     loadSkillsFromSources,
     cloneGitRepo,
@@ -19,9 +20,15 @@ import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process (readProcessWithExitCode)
+import Prod.Tracer (Tracer, contramap)
 
 import System.Agents.Tools.Skills.Parser (parseSkillDirectory)
+import qualified System.Agents.Tools.Skills.Parser as SkillsParser
 import System.Agents.Tools.Skills.Types
+
+data Trace
+  = ParserTrace !SkillsParser.Trace
+  deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Loading from Sources
@@ -32,13 +39,13 @@ import System.Agents.Tools.Skills.Types
 For directories: recursively searches for SKILL.md files.
 For git repos: clones to a temp directory, then searches.
 -}
-loadSkillsFromSource :: SkillSource -> IO (Either Text SkillsStore)
-loadSkillsFromSource (SkillDirectory path) = do
-    result <- parseSkillDirectory path
+loadSkillsFromSource :: Tracer IO Trace -> SkillSource -> IO (Either Text SkillsStore)
+loadSkillsFromSource tracer (SkillDirectory path) = do
+    result <- parseSkillDirectory (contramap ParserTrace tracer) path
     case result of
         Left err -> return $ Left err
         Right skills -> return $ Right $ foldr insertSkill emptySkillsStore skills
-loadSkillsFromSource (SkillGitRepo url mSubdir) = do
+loadSkillsFromSource tracer (SkillGitRepo url mSubdir) = do
     -- Clone to temp directory
     cloneResult <- cloneGitRepo url
     case cloneResult of
@@ -48,7 +55,7 @@ loadSkillsFromSource (SkillGitRepo url mSubdir) = do
             let parseDir = case mSubdir of
                     Nothing -> tempDir
                     Just subdir -> tempDir </> Text.unpack subdir
-            result <- parseSkillDirectory parseDir
+            result <- parseSkillDirectory (contramap ParserTrace tracer) parseDir
             -- Clean up temp directory
             removeDirectoryRecursive tempDir
             case result of
@@ -60,9 +67,9 @@ loadSkillsFromSource (SkillGitRepo url mSubdir) = do
 Skills from later sources override skills from earlier sources if there
 are name conflicts (last write wins).
 -}
-loadSkillsFromSources :: [SkillSource] -> IO (Either Text SkillsStore)
-loadSkillsFromSources sources = do
-    results <- mapM loadSkillsFromSource sources
+loadSkillsFromSources :: Tracer IO Trace -> [SkillSource] -> IO (Either Text SkillsStore)
+loadSkillsFromSources tracer sources = do
+    results <- mapM (loadSkillsFromSource tracer) sources
     let (errors, stores) = partitionEithers results
     if not (null errors)
         then return $ Left $ Text.intercalate "; " errors

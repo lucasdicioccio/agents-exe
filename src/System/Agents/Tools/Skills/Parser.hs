@@ -8,78 +8,38 @@ and markdown body. It also extracts script information from the
 describe/run protocol.
 -}
 module System.Agents.Tools.Skills.Parser (
+    Trace(..),
     parseSkillFile,
     parseSkillDirectory,
-    loadScriptDescription,
 ) where
 
-import Control.Exception (try)
 import qualified Data.Aeson as Aeson
+import Data.ByteString (ByteString)
+import Data.Either (rights)
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Yaml as Yaml
+import Prod.Tracer (Tracer, runTracer)
 import System.Directory (
     doesDirectoryExist,
     doesFileExist,
     listDirectory,
  )
 import System.Exit (ExitCode (..))
-import System.FilePath (dropExtension, takeDirectory, takeExtension, takeFileName, (</>))
-import System.Process (readProcessWithExitCode)
+import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.Process.ByteString (readProcessWithExitCode)
 
 import System.Agents.Tools.Skills.Types
 import System.Agents.Tools.ScriptTypes (
-    ScriptArg (..),
+    ScriptDescription (..),
  )
 
--------------------------------------------------------------------------------
--- Skills-specific JSON Parsing
---
--- Skills scripts use a simpler JSON format than Bash scripts:
--- Skills format: { name, description, type, required (boolean) }
--- Bash format:   { name, description, type, backing_type, arity, mode }
--- Internal format: { argName, argDescription, argTypeString, ... }
---
--- The FromJSON instance for ScriptArg in ScriptTypes handles the internal format.
--- Here we define newtype wrappers to parse the skills external format.
--------------------------------------------------------------------------------
-
--- | Newtype wrapper for parsing ScriptArg from skills external format
-newtype SkillsScriptArg = SkillsScriptArg { unSkillsScriptArg :: ScriptArg }
-
-instance Aeson.FromJSON SkillsScriptArg where
-    parseJSON = Aeson.withObject "ScriptArg" $ \o -> do
-        name <- o Aeson..: "name"
-        desc <- o Aeson..: "description"
-        ty <- o Aeson..: "type"
-        required <- o Aeson..:? "required" Aeson..!= True
-        let arity = if required then Single else Optional
-        SkillsScriptArg <$> (ScriptArg
-            <$> pure name
-            <*> pure desc
-            <*> pure ty
-            <*> pure ty  -- backing_type defaults to type
-            <*> pure arity
-            <*> pure Positional)  -- Skills use positional args
-
--- | Script description from describe output.
--- 
--- Skills scripts use a simpler argument format than Bash scripts:
--- - name, description, type, required (boolean)
--- 
--- We convert this to ScriptArg with sensible defaults for the
--- additional fields (backing_type, arity, mode).
-data ScriptDescriptionOutput = ScriptDescriptionOutput
-    { sdDescription :: Text
-    , sdArgs :: [ScriptArg]
-    }
-
-instance Aeson.FromJSON ScriptDescriptionOutput where
-    parseJSON = Aeson.withObject "ScriptDescriptionOutput" $ \o ->
-        ScriptDescriptionOutput
-            <$> o Aeson..: "description"
-            <*> (map unSkillsScriptArg <$> o Aeson..:? "args" Aeson..!= [])
+data Trace
+    = LoadCommandStart !FilePath [String]
+    | LoadCommandStopped !FilePath [String] !ExitCode !ByteString !ByteString
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- SKILL.md Parsing
@@ -89,15 +49,15 @@ instance Aeson.FromJSON ScriptDescriptionOutput where
 
 Returns the parsed Skill or an error message.
 -}
-parseSkillFile :: FilePath -> IO (Either Text Skill)
-parseSkillFile skillMdPath = do
+parseSkillFile :: Tracer IO Trace -> FilePath -> IO (Either Text Skill)
+parseSkillFile tracer skillMdPath = do
     exists <- doesFileExist skillMdPath
     if not exists
         then return $ Left $ "SKILL.md not found: " <> Text.pack skillMdPath
         else do
             content <- readFile skillMdPath
             let skillDir = takeDirectory skillMdPath
-            parseSkillContent skillDir (Text.pack content)
+            parseSkillContent tracer skillDir (Text.pack content)
 
 {- | Parse skill content from text.
 
@@ -107,8 +67,8 @@ YAML frontmatter
 ---
 Markdown body
 -}
-parseSkillContent :: FilePath -> Text -> IO (Either Text Skill)
-parseSkillContent skillDir content = do
+parseSkillContent :: Tracer IO Trace -> FilePath -> Text -> IO (Either Text Skill)
+parseSkillContent tracer skillDir content = do
     case extractFrontmatter content of
         Left err -> return $ Left err
         Right (frontmatter, body) -> do
@@ -116,7 +76,7 @@ parseSkillContent skillDir content = do
                 Left err -> return $ Left err
                 Right metadata -> do
                     -- Load scripts (with describe output) and references
-                    scripts <- loadScripts skillDir
+                    scripts <- loadScripts tracer skillDir
                     references <- loadReferences skillDir
                     return $
                         Right $
@@ -166,8 +126,8 @@ Only files with executable permissions are considered scripts.
 Each script is executed with "describe" to get its metadata (description and args),
 similar to how BashTools loads script descriptions.
 -}
-loadScripts :: FilePath -> IO [ScriptInfo]
-loadScripts skillDir = do
+loadScripts :: Tracer IO Trace -> FilePath -> IO [ScriptDescription]
+loadScripts tracer skillDir = do
     let scriptsDir = skillDir </> "scripts"
     exists <- doesDirectoryExist scriptsDir
     if not exists
@@ -178,38 +138,9 @@ loadScripts skillDir = do
             -- Filter to executable files
             execPaths <- filterM isExecutableFile scriptPaths
             -- Load script info and then load describe output for each
-            scriptInfos <- mapM (loadScriptInfo scriptsDir) execPaths
+            scriptInfos <- mapM (loadScript tracer) execPaths
             -- Eagerly load script descriptions (like BashTools does)
-            mapM loadScriptDescriptionEager scriptInfos
-
-{- | Eagerly load script description by executing the script with "describe".
-
-Unlike the lazy version in loadScriptDescription, this function is called
-during skill loading to ensure all script metadata is available for tool
-registration, matching the behavior of BashTools.loadScript.
--}
-loadScriptDescriptionEager :: ScriptInfo -> IO ScriptInfo
-loadScriptDescriptionEager script = do
-    result <- try $ readProcessWithExitCode (siPath script) ["describe"] ""
-    case result of
-        Left (_ :: IOError) ->
-            -- On error, return script with default/empty values
-            return script
-        Right (exitCode, stdout, _stderr) -> case exitCode of
-            ExitSuccess ->
-                case Aeson.eitherDecodeStrict (Text.encodeUtf8 $ Text.pack stdout) of
-                    Left _ ->
-                        -- On parse error, return original script
-                        return script
-                    Right desc ->
-                        return $
-                            script
-                                { siDescription = Just (sdDescription desc)
-                                , siArgs = sdArgs desc
-                                }
-            ExitFailure _ ->
-                -- On script failure, return original script
-                return script
+            pure $ rights scriptInfos
 
 {- | Check if a file is executable.
 
@@ -226,57 +157,23 @@ isExecutableFile path = do
             -- A more robust implementation would check executable permissions
             return True
 
-{- | Load information about a single script.
+data InvalidScriptError
+    = InvalidScriptError FilePath ExitCode ByteString
+    | InvalidDescriptionError FilePath String
+    deriving (Show)
 
-This creates a ScriptInfo with the name and path. The description
-and args are loaded by loadScriptDescriptionEager.
--}
-loadScriptInfo :: FilePath -> FilePath -> IO ScriptInfo
-loadScriptInfo _scriptsDir scriptPath = do
-    let baseName = takeFileName scriptPath
-    -- Remove common script extensions
-    let name = case takeExtension baseName of
-            ".sh" -> Text.pack $ dropExtension baseName
-            ".py" -> Text.pack $ dropExtension baseName
-            ".rb" -> Text.pack $ dropExtension baseName
-            ".pl" -> Text.pack $ dropExtension baseName
-            _ -> Text.pack baseName
-    return $
-        ScriptInfo
-            { siName = ScriptName name
-            , siPath = scriptPath
-            , siDescription = Nothing -- Loaded via loadScriptDescriptionEager
-            , siArgs = [] -- Loaded via loadScriptDescriptionEager
-            }
-
-{- | Load script description by executing the script with "describe" argument.
-
-This implements the describe/run protocol for skill scripts.
-Returns Left on error, Right with updated ScriptInfo on success.
--}
-loadScriptDescription :: ScriptInfo -> IO (Either Text ScriptInfo)
-loadScriptDescription script = do
-    result <- try $ readProcessWithExitCode (siPath script) ["describe"] ""
-    case result of
-        Left (e :: IOError) ->
-            return $ Left $ "Failed to execute script describe: " <> Text.pack (show e)
-        Right (exitCode, stdout, _stderr) -> case exitCode of
-            ExitSuccess ->
-                case Aeson.eitherDecodeStrict (Text.encodeUtf8 $ Text.pack stdout) of
-                    Left err ->
-                        return $ Left $ "Invalid describe output for " <> unScriptName (siName script) <> ": " <> Text.pack err
-                    Right desc -> do
-                        let updatedScript =
-                                script
-                                    { siDescription = Just (sdDescription desc)
-                                    , siArgs = sdArgs desc
-                                    }
-                        return $ Right updatedScript
-            ExitFailure code ->
-                return $
-                    Left $
-                        "Script describe failed with exit code "
-                            <> Text.pack (show code)
+-- | Loads a single bash script complying with the describe|run protocol.
+loadScript :: Tracer IO Trace -> FilePath -> IO (Either InvalidScriptError ScriptDescription)
+loadScript tracer path = do
+    let args = ["describe"]
+    runTracer tracer (LoadCommandStart path args)
+    (code, out, err) <- readProcessWithExitCode path args ""
+    runTracer tracer (LoadCommandStopped path args code out err)
+    if code /= ExitSuccess
+        then pure $ Left $ InvalidScriptError path code err
+        else case Aeson.eitherDecode (LByteString.fromStrict out) of
+            Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
+            Right bashInfo -> pure $ Right $ ScriptDescription path bashInfo
 
 -------------------------------------------------------------------------------
 -- Reference Loading
@@ -317,14 +214,14 @@ makeReferenceInfo path =
 
 Recursively searches for SKILL.md files and parses each one.
 -}
-parseSkillDirectory :: FilePath -> IO (Either Text [Skill])
-parseSkillDirectory rootDir = do
+parseSkillDirectory :: Tracer IO Trace -> FilePath -> IO (Either Text [Skill])
+parseSkillDirectory tracer rootDir = do
     exists <- doesDirectoryExist rootDir
     if not exists
         then return $ Left $ "Directory not found: " <> Text.pack rootDir
         else do
             skillMdFiles <- findSkillMdFiles rootDir
-            results <- mapM parseSkillFile skillMdFiles
+            results <- mapM (parseSkillFile tracer) skillMdFiles
             let (errors, skills) = partitionEithers results
             if null errors
                 then return $ Right skills

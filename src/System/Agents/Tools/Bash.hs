@@ -13,7 +13,6 @@ module System.Agents.Tools.Bash (
     -- * Bash-specific types and functions
     LoadTrace (..),
     RunTrace (..),
-    ScriptDescription (..),
     Scripts (..),
     loadDirectory,
     loadScript,
@@ -33,6 +32,8 @@ module System.Agents.Tools.Bash (
     turnIdToString,
     agentIdToString,
     buildToolEnvironment,
+    -- * Re-exports
+    ScriptDescription (..),
 ) where
 
 import Control.Concurrent.Async (mapConcurrently)
@@ -65,6 +66,7 @@ import System.Agents.Tools.ScriptTypes (
     ScriptArg (..),
     ScriptArgArity (..),
     ScriptArgCallingMode (..),
+    ScriptDescription (..),
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
     translateArguments,
@@ -81,40 +83,6 @@ data RunTrace
     | RunCommandStopped !FilePath [String] !ExitCode !ByteString !ByteString
     deriving (Show)
 
--------------------------------------------------------------------------------
--- Bash External JSON Format Parsing
---
--- Bash scripts use a different JSON format than the internal ScriptTypes format:
--- Bash format:   { name, description, type, backing_type, arity, mode }
--- Internal format: { argName, argDescription, argTypeString, ... }
---
--- We use newtype wrappers to parse the Bash external format.
--------------------------------------------------------------------------------
-
--- | Newtype wrapper for parsing ScriptArg from Bash external format
-newtype BashScriptArg = BashScriptArg { unBashScriptArg :: ScriptArg }
-
-instance Aeson.FromJSON BashScriptArg where
-    parseJSON = Aeson.withObject "ScriptArg" $ \o ->
-        BashScriptArg <$> (ScriptArg
-            <$> o Aeson..: "name"
-            <*> o Aeson..: "description"
-            <*> o Aeson..: "type"
-            <*> o Aeson..: "backing_type"
-            <*> o Aeson..: "arity"
-            <*> o Aeson..: "mode")
-
--- | Newtype wrapper for parsing ScriptInfo from Bash external format
-newtype BashScriptInfo = BashScriptInfo { unBashScriptInfo :: ScriptInfo }
-
-instance Aeson.FromJSON BashScriptInfo where
-    parseJSON = Aeson.withObject "Script" $ \o ->
-        BashScriptInfo <$> (ScriptInfo
-            <$> (fmap unBashScriptArg <$> o Aeson..: "args")
-            <*> o Aeson..: "slug"
-            <*> o Aeson..: "description"
-            <*> o Aeson..:? "empty-result")
-
 -- helper function to adjust output
 adjustOutput :: ScriptEmptyResultBehavior -> Text -> Text
 adjustOutput behavior out = case behavior of
@@ -123,13 +91,6 @@ adjustOutput behavior out = case behavior of
         if out == ""
             then msg
             else out
-
-data ScriptDescription
-    = ScriptDescription
-    { scriptPath :: FilePath
-    , scriptInfo :: ScriptInfo
-    }
-    deriving (Show, Eq, Ord)
 
 data Scripts
     = Scripts
@@ -189,7 +150,7 @@ loadScript tracer path = do
         then pure $ Left $ InvalidScriptError path code err
         else case Aeson.eitherDecode (LByteString.fromStrict out) of
             Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
-            Right bashInfo -> pure $ Right $ ScriptDescription path (unBashScriptInfo bashInfo)
+            Right bashInfo -> pure $ Right $ ScriptDescription path bashInfo
 
 data RunScriptError
     = SerializeArgumentErrors FilePath Aeson.Value String

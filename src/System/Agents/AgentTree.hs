@@ -714,7 +714,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
             let agent = node.nodeConfig
             toolLoaderErrors <-
                 ToolLoader.loadAgentTools
-                    props.interactiveTracer
+                    (contramap ToolLoaderTrace props.interactiveTracer)
                     baseDir
                     props.apiKeysFile -- Pass the API keys file path for secret resolution
                     agent

@@ -15,6 +15,7 @@ Note: This module does not import System.Agents.AgentTree to avoid cyclic
 imports.
 -}
 module System.Agents.AgentTree.ToolLoader (
+    Trace(..),
     -- * Tool loading
     loadAgentTools,
 
@@ -34,7 +35,6 @@ import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import qualified System.Process
 
-import System.Agents.AgentTree.Trace (TreeTrace (..))
 import System.Agents.Base (
     Agent (..),
     BashToolboxDescription (..),
@@ -69,6 +69,18 @@ import System.Agents.Tools.Skills.Types (
  )
 import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
+
+data Trace
+   = SkillsSourceTrace !SkillsSource.Trace
+   | BashToolboxTrace !BashToolbox.Trace
+   | McpToolboxTrace !McpToolbox.Trace
+   | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
+   | PostgRESToolboxTrace !PostgRESToolbox.Trace
+   | SqliteToolboxTrace !SqliteToolbox.Trace
+   | SystemToolboxTrace !SystemToolbox.Trace
+   | DeveloperToolboxTrace !DeveloperToolbox.Trace
+   | LuaToolboxTrace LuaToolbox.Trace
+   deriving (Show)
 
 -- | Loading error type
 data LoadingError
@@ -106,7 +118,7 @@ Note: Bash toolboxes and Skills directories are resolved relative to the
 execution's current working directory.
 -}
 loadAgentTools ::
-    Tracer IO TreeTrace ->
+    Tracer IO Trace ->
     -- | Base directory for resolving relative paths (for OpenAPI/PostgREST on-disk configs)
     FilePath ->
     -- | Path to API keys file (for resolving ApiKey secret sources)
@@ -120,12 +132,12 @@ loadAgentTools tracer baseDir apiKeysFile agent toolsTVar = do
     errors <-
         catMaybes
             <$> sequence
-                [ loadBashTools (contramap BashToolboxTrace tracer) agent toolsTVar
-                , loadMcpServers (contramap McpToolboxTrace tracer) agent toolsTVar
-                , loadOpenAPIToolboxes (contramap OpenApiToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
-                , loadPostgRESToolboxes (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile agent toolsTVar
+                [ loadBashTools tracer agent toolsTVar
+                , loadMcpServers tracer agent toolsTVar
+                , loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar
+                , loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar
                 , loadBuiltinToolboxes tracer agent toolsTVar
-                , loadSkillsTools agent toolsTVar
+                , loadSkillsTools tracer agent toolsTVar
                 ]
     pure errors
 
@@ -147,7 +159,7 @@ all scripts loaded from that source. This allows per-toolbox activation
 control (e.g., progressive disclosure via on-demand activation).
 -}
 loadBashTools ::
-    Tracer IO BashToolbox.Trace ->
+    Tracer IO Trace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
@@ -159,7 +171,7 @@ loadBashTools tracer agent toolsTVar = do
         else do
             result <-
                 BashToolbox.initializeMultiSourceToolbox
-                    tracer
+                    (contramap BashToolboxTrace tracer)
                     descriptions
 
             case result of
@@ -209,7 +221,7 @@ The activation from McpSimpleBinaryConfiguration is propagated to the Toolbox
 and applied to all tools from that server via registerMcpToolInLLM.
 -}
 loadMcpServers ::
-    Tracer IO McpToolbox.Trace ->
+    Tracer IO Trace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
@@ -219,7 +231,7 @@ loadMcpServers tracer agent toolsTVar = do
     if null servers
         then pure Nothing
         else do
-            errors <- mapM (loadMcpServer tracer toolsTVar) servers
+            errors <- mapM (loadMcpServer (contramap McpToolboxTrace tracer) toolsTVar) servers
             pure $ collectFirstError errors
 
 {- | Load a single MCP server and register its tools.
@@ -280,7 +292,7 @@ The activation from OpenAPIServerDescription is propagated to the Toolbox
 and applied to all tools from that toolbox via registerOpenAPITool.
 -}
 loadOpenAPIToolboxes ::
-    Tracer IO OpenAPIToolbox.Trace ->
+    Tracer IO Trace ->
     FilePath ->
     FilePath ->
     Agent ->
@@ -292,7 +304,7 @@ loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadOpenAPIToolbox tracer baseDir apiKeysFile toolsTVar) toolboxes
+            errors <- mapM (loadOpenAPIToolbox (contramap OpenAPIToolboxTrace tracer) baseDir apiKeysFile toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single OpenAPI toolbox and register its tools.
@@ -362,7 +374,7 @@ The activation from PostgRESTServerDescription is propagated to the Toolbox
 and applied to all tools from that toolbox via registerPostgRESTool.
 -}
 loadPostgRESToolboxes ::
-    Tracer IO PostgRESToolbox.Trace ->
+    Tracer IO Trace ->
     FilePath ->
     FilePath ->
     Agent ->
@@ -374,7 +386,7 @@ loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadPostgRESTToolbox tracer baseDir apiKeysFile toolsTVar) toolboxes
+            errors <- mapM (loadPostgRESTToolbox (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single PostgREST toolbox and register its tools.
@@ -452,7 +464,7 @@ These toolboxes support activation via their configuration fields:
 - luaToolboxActivation
 -}
 loadBuiltinToolboxes ::
-    Tracer IO TreeTrace ->
+    Tracer IO Trace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
@@ -467,14 +479,14 @@ loadBuiltinToolboxes tracer agent toolsTVar = do
 
 -- | Load a single builtin toolbox.
 loadBuiltinToolbox ::
-    Tracer IO TreeTrace ->
+    Tracer IO Trace ->
     TVar [ToolRegistration] ->
     BuiltinToolboxDescription ->
     IO (Maybe LoadingError)
-loadBuiltinToolbox tracer toolsTVar (SqliteToolbox desc) = loadSqliteToolbox (contramap SqliteToolboxTrace tracer) toolsTVar desc
-loadBuiltinToolbox tracer toolsTVar (SystemToolbox desc) = loadSystemToolbox (contramap SystemToolboxTrace tracer) toolsTVar desc
-loadBuiltinToolbox tracer toolsTVar (DeveloperToolbox desc) = loadDeveloperToolbox (contramap DeveloperToolboxTrace tracer) toolsTVar desc
-loadBuiltinToolbox tracer toolsTVar (LuaToolbox desc) = loadLuaToolbox (contramap LuaToolboxTrace tracer) toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (SqliteToolbox desc) = loadSqliteToolbox tracer toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (SystemToolbox desc) = loadSystemToolbox tracer toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (DeveloperToolbox desc) = loadDeveloperToolbox tracer toolsTVar desc
+loadBuiltinToolbox tracer toolsTVar (LuaToolbox desc) = loadLuaToolbox tracer toolsTVar desc
 
 -------------------------------------------------------------------------------
 -- SQLite Toolbox Loading
@@ -482,13 +494,13 @@ loadBuiltinToolbox tracer toolsTVar (LuaToolbox desc) = loadLuaToolbox (contrama
 
 -- | Load a SQLite toolbox and register its tools.
 loadSqliteToolbox ::
-    Tracer IO SqliteToolbox.Trace ->
+    Tracer IO Trace ->
     TVar [ToolRegistration] ->
     SqliteToolboxDescription ->
     IO (Maybe LoadingError)
 loadSqliteToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox
-    initResult <- SqliteToolbox.initializeToolbox tracer desc
+    initResult <- SqliteToolbox.initializeToolbox (contramap SqliteToolboxTrace tracer) desc
 
     case initResult of
         Left err -> pure $ Just $ SqliteLoadingError err
@@ -509,13 +521,13 @@ loadSqliteToolbox tracer toolsTVar desc = do
 
 -- | Load a System toolbox and register its tools.
 loadSystemToolbox ::
-    Tracer IO SystemToolbox.Trace ->
+    Tracer IO Trace ->
     TVar [ToolRegistration] ->
     SystemToolboxDescription ->
     IO (Maybe LoadingError)
 loadSystemToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox
-    initResult <- SystemToolbox.initializeToolbox tracer desc
+    initResult <- SystemToolbox.initializeToolbox (contramap SystemToolboxTrace tracer) desc
 
     case initResult of
         Left err -> pure $ Just $ SystemLoadingError err
@@ -536,13 +548,13 @@ loadSystemToolbox tracer toolsTVar desc = do
 
 -- | Load a Developer toolbox and register its tools.
 loadDeveloperToolbox ::
-    Tracer IO DeveloperToolbox.Trace ->
+    Tracer IO Trace ->
     TVar [ToolRegistration] ->
     DeveloperToolboxDescription ->
     IO (Maybe LoadingError)
 loadDeveloperToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox
-    initResult <- DeveloperToolbox.initializeToolbox tracer desc
+    initResult <- DeveloperToolbox.initializeToolbox (contramap DeveloperToolboxTrace tracer) desc
 
     case initResult of
         Left err -> pure $ Just $ DeveloperLoadingError err
@@ -563,14 +575,14 @@ loadDeveloperToolbox tracer toolsTVar desc = do
 
 -- | Load a Lua toolbox and register its tools.
 loadLuaToolbox ::
-    Tracer IO LuaToolbox.Trace ->
+    Tracer IO Trace ->
     TVar [ToolRegistration] ->
     LuaToolboxDescription ->
     IO (Maybe LoadingError)
 loadLuaToolbox tracer toolsTVar desc = do
     -- Initialize the toolbox with a dummy portal
     -- The actual portal is passed at execution time
-    initResult <- LuaToolbox.initializeToolbox tracer desc
+    initResult <- LuaToolbox.initializeToolbox (contramap LuaToolboxTrace tracer) desc
 
     case initResult of
         Left err -> pure $ Just $ LuaLoadingError err
@@ -604,10 +616,11 @@ Note: SkillDirectory paths are resolved relative to the execution's current
 working directory.
 -}
 loadSkillsTools ::
+    Tracer IO Trace ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadSkillsTools agent toolsTVar = do
+loadSkillsTools tracer agent toolsTVar = do
     let sources = fromMaybe [] (skillSources agent)
 
     if null sources
@@ -617,7 +630,7 @@ loadSkillsTools agent toolsTVar = do
             resolvedSources <- mapM resolveSkillSource sources
 
             -- Load skills from all sources
-            result <- SkillsSource.loadSkillsFromSources resolvedSources
+            result <- SkillsSource.loadSkillsFromSources (contramap SkillsSourceTrace tracer) resolvedSources
 
             case result of
                 Left err -> pure $ Just $ SkillsLoadingError (Text.unpack err)

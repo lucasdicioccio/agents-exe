@@ -75,6 +75,7 @@ import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
+import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
@@ -106,6 +107,7 @@ data TreeTrace
     | SystemToolboxTrace SystemToolbox.Trace
     | DeveloperToolboxTrace DeveloperToolbox.Trace
     | LuaToolboxTrace LuaToolbox.Trace
+    | ToolLoaderTrace ToolLoader.Trace
     deriving (Show)
 
 -- | Configuration tree from file loading (intermediate structure)

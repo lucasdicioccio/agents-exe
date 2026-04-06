@@ -20,7 +20,6 @@ module System.Agents.Tools.Skills.Types (
     skillNameToText,
 
     -- * Script and Reference Types
-    ScriptName (..),
     ScriptInfo (..),
     -- Re-export ScriptArg from ScriptTypes for argument definitions
     ScriptArg,
@@ -53,11 +52,13 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
 
--- Import shared script types (avoids circular dependency with Bash)
+-- Re-export shared types from ScriptTypes
 import System.Agents.Tools.ScriptTypes (
-    ScriptArg,
+    ScriptArg (..),
     ScriptArgArity (..),
     ScriptArgCallingMode (..),
+    ScriptInfo (..),
+    ScriptDescription (..),
  )
 
 -------------------------------------------------------------------------------
@@ -111,60 +112,6 @@ validateSkillName txt
     | otherwise = Right $ SkillName txt
   where
     isValidChar c = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
-
--------------------------------------------------------------------------------
--- Script Types
--------------------------------------------------------------------------------
-
--- | Name of a script within a skill.
-newtype ScriptName = ScriptName {unScriptName :: Text}
-    deriving stock (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey)
-
--- | Parse ScriptName from a JSON/YAML string.
-instance FromJSON ScriptName where
-    parseJSON = Aeson.withText "ScriptName" $ \txt ->
-        return $ ScriptName txt
-
--- | Serialize ScriptName to a JSON string.
-instance ToJSON ScriptName where
-    toJSON = Aeson.toJSON . unScriptName
-
-{- | Information about a script in the skill's scripts/ directory.
-
-Scripts follow the describe/run protocol:
-- Called with "describe" argument, they output JSON metadata
-- Called with actual arguments, they execute the operation
--}
-data ScriptInfo = ScriptInfo
-    { siName :: ScriptName
-    -- ^ Name of the script (without extension)
-    , siPath :: FilePath
-    -- ^ Full path to the script file
-    , siDescription :: Maybe Text
-    -- ^ Description from script's describe output (loaded lazily)
-    , siArgs :: [ScriptArg]
-    -- ^ Arguments from script's describe output (using ScriptArg from ScriptTypes)
-    }
-    deriving (Show, Eq, Generic)
-
--- Manual JSON instances for ScriptInfo (internal format using Haskell field names)
-instance FromJSON ScriptInfo where
-    parseJSON = Aeson.withObject "ScriptInfo" $ \o ->
-        ScriptInfo
-            <$> o Aeson..: "siName"
-            <*> o Aeson..: "siPath"
-            <*> o Aeson..:? "siDescription"
-            <*> o Aeson..:? "siArgs" Aeson..!= []
-
-instance ToJSON ScriptInfo where
-    toJSON si =
-        Aeson.object
-            [ "siName" Aeson..= siName si
-            , "siPath" Aeson..= siPath si
-            , "siDescription" Aeson..= siDescription si
-            , "siArgs" Aeson..= siArgs si
-            ]
 
 -------------------------------------------------------------------------------
 -- Reference Types
@@ -253,7 +200,7 @@ data Skill = Skill
     -- ^ Markdown body (after frontmatter)
     , skillPath :: FilePath
     -- ^ Path to the skill directory
-    , skillScripts :: [ScriptInfo]
+    , skillScripts :: [ScriptDescription]
     -- ^ Scripts available in scripts/ subdirectory
     , skillReferences :: [ReferenceInfo]
     -- ^ Reference files in references/ subdirectory
@@ -371,4 +318,3 @@ allSkills (SkillsStore m) = Map.elems m
 insertSkill :: Skill -> SkillsStore -> SkillsStore
 insertSkill skill (SkillsStore m) =
     SkillsStore $ Map.insert (skillMetadata skill).smName skill m
-
