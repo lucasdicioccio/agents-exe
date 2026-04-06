@@ -49,8 +49,10 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.Text.Encoding.Error (lenientDecode)
 import System.Exit (ExitCode (..))
-import System.Process (readProcessWithExitCode)
+import System.Process (proc)
+import System.Process.ByteString (readCreateProcessWithExitCode)
 import System.FilePath (takeBaseName)
 import Prod.Tracer (Tracer)
 
@@ -234,61 +236,66 @@ runScriptTool script _tracer _ctx args = do
     case parseArgsForScript script args of
         Left err ->
             return $ BlobToolSuccess () (Text.encodeUtf8 $ "Argument parsing error: " <> Text.pack err)
-        Right argz -> do
-            let cmdArgs = "run" : argz
+        Right (argz,stdin) -> do
+            let cmdArgs = "run" : [Text.unpack arg | arg <- argz]
             -- Execute the script with parsed arguments
-            result <- try $ readProcessWithExitCode script.scriptPath cmdArgs ""
+            {-
+            baseEnv <- getEnvironment
+            let toolEnv = buildToolEnvironment mCtx baseEnv
+            -}
+            let process = (proc script.scriptPath cmdArgs)
+            result <- try $ readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
             case result of
                 Left (e :: IOError) ->
                     return $ BlobToolSuccess () (Text.encodeUtf8 $ "Script execution error: " <> Text.pack (show e))
                 Right (exitCode, stdout, stderr) -> case exitCode of
                     ExitSuccess ->
-                        return $ BlobToolSuccess () (Text.encodeUtf8 $ Text.pack stdout)
+                        return $ BlobToolSuccess () stdout
                     ExitFailure code ->
                         return $
                             BlobToolSuccess () $
                                 Text.encodeUtf8 $
                                     Text.unlines
                                         [ "Script failed with exit code " <> Text.pack (show code)
-                                        , "stdout: " <> Text.pack stdout
-                                        , "stderr: " <> Text.pack stderr
+                                        , "stdout: " <> Text.decodeUtf8With lenientDecode stdout
+                                        , "stderr: " <> Text.decodeUtf8With lenientDecode stderr
                                         ]
 
 -------------------------------------------------------------------------------
 -- Argument Parsing (reuses translateArguments from ScriptTypes)
 -------------------------------------------------------------------------------
 
+flattenArguments :: [(ScriptArg, Maybe Text)] -> [Text]
+flattenArguments = mconcat . fmap flatten1
+  where
+    flatten1 :: (ScriptArg, Maybe Text) -> [Text]
+    flatten1 (_, Nothing) = []
+    flatten1 (arg, Just txt) =
+        case arg.argCallingMode of
+            Stdin -> []
+            Positional -> [txt]
+            DashDashEqual -> [mconcat ["--", arg.argName, "=", txt]]
+            DashDashSpace -> [mconcat ["--", arg.argName], txt]
+
+flattenInput :: [(ScriptArg, Maybe Text)] -> Text
+flattenInput = Text.unlines . mconcat . fmap flatten1
+  where
+    flatten1 :: (ScriptArg, Maybe Text) -> [Text]
+    flatten1 (_, Nothing) = []
+    flatten1 (arg, Just txt) =
+        case arg.argCallingMode of
+            Stdin -> [txt]
+            Positional -> []
+            DashDashEqual -> []
+            DashDashSpace -> []
+
 {- | Parse arguments from JSON value using script argument metadata.
 
-This uses translateArguments from ScriptTypes which only requires the argName field:
-1. Extract argument values from the JSON object by name
-2. Build command line arguments from provided values
-
-Unlike the Bash implementation, skill scripts use simpler positional argument
-passing without calling modes (stdin, dashdash, etc.).
 -}
-parseArgsForScript :: ST.ScriptDescription -> Aeson.Value -> Either String [String]
+parseArgsForScript :: ST.ScriptDescription -> Aeson.Value -> Either String ([Text],Text)
 parseArgsForScript script val = do
-    -- Use translateArguments from ScriptTypes
-    -- We create a dummy ScriptInfo for ScriptTypes since translateArguments only uses scriptArgs
-    let scriptInfo = ST.ScriptInfo
-            { ST.scriptArgs = script.scriptInfo.scriptArgs
-            , ST.scriptSlug = ""  -- Not used by translateArguments
-            , ST.scriptDescription = ""  -- Not used by translateArguments
-            , ST.scriptEmptyResultBehavior = Nothing  -- Not used by translateArguments
-            }
-    argValues <- Aeson.parseEither (ST.translateArguments scriptInfo) val
-    -- Flatten to command line arguments (only include provided args)
-    pure $ concatMap argValueToString argValues
-
-{- | Convert an argument value pair to command line strings.
-
-For skill scripts, arguments are passed positionally in the order defined
-by the script's argument metadata. Only provided (Just) values are included.
--}
-argValueToString :: (ST.ScriptArg, Maybe Text) -> [String]
-argValueToString (_, Nothing) = []
-argValueToString (_, Just txt) = [Text.unpack txt]
+    args <- Aeson.parseEither (ST.translateArguments script.scriptInfo) val
+    pure (flattenArguments args, flattenInput args)
 
 -------------------------------------------------------------------------------
 -- Helper Functions
