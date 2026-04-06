@@ -71,6 +71,7 @@ import qualified System.Agents.FileLoader as FileLoader
 
 -- OS Core imports
 
+import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import qualified System.Agents.Runtime.Trace as Runtime
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
@@ -106,6 +107,7 @@ data TreeTrace
     | SystemToolboxTrace SystemToolbox.Trace
     | DeveloperToolboxTrace DeveloperToolbox.Trace
     | LuaToolboxTrace LuaToolbox.Trace
+    | ToolLoaderTrace ToolLoader.Trace
     deriving (Show)
 
 -- | Configuration tree from file loading (intermediate structure)

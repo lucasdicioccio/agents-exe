@@ -50,3 +50,4 @@ traceUsefulPromptHandle h = Tracer f
         Text.hPutStrLn h $ "Cyclic references warning: " <> Text.pack (show warns)
     f (ReferenceValidationTrace refs) =
         Text.hPutStrLn h $ "Reference validation trace: " <> Text.pack (show refs)
+    f (ToolLoaderTrace x) = Text.hPutStrLn h (Text.pack $ show x)

@@ -1,10 +1,43 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 -- | Defines tools as bash script (or programs) according to a simple convention.
-module System.Agents.Tools.Bash where
+module System.Agents.Tools.Bash (
+    -- * Re-exports from ScriptTypes
+    ScriptArg (..),
+    ScriptArgArity (..),
+    ScriptArgCallingMode (..),
+    ScriptEmptyResultBehavior (..),
+    ScriptInfo (..),
+    translateArguments,
+
+    -- * Bash-specific types and functions
+    LoadTrace (..),
+    RunTrace (..),
+    Scripts (..),
+    loadDirectory,
+    loadScript,
+    InvalidScriptError (..),
+    RunScriptError (..),
+    parseArgsForValue,
+    runValue,
+
+    -- * Environment and context
+    sessionIdEnvVar,
+    conversationIdEnvVar,
+    turnIdEnvVar,
+    agentIdEnvVar,
+    sessionJsonEnvVar,
+    sessionIdToString,
+    conversationIdToString,
+    turnIdToString,
+    agentIdToString,
+    buildToolEnvironment,
+
+    -- * Re-exports
+    ScriptDescription (..),
+) where
 
 import Control.Concurrent.Async (mapConcurrently)
-import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
@@ -16,7 +49,6 @@ import Data.Text as Text
 import Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.UUID (toString)
-import GHC.Generics (Generic)
 import Prod.Tracer (Tracer, runTracer)
 import System.Directory (listDirectory)
 import System.Environment (getEnvironment)
@@ -30,6 +62,17 @@ import System.Agents.Base (AgentId (..), ConversationId (..))
 import System.Agents.Session.Base (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext (..))
 
+-- Re-export shared types from ScriptTypes
+import System.Agents.Tools.ScriptTypes (
+    ScriptArg (..),
+    ScriptArgArity (..),
+    ScriptArgCallingMode (..),
+    ScriptDescription (..),
+    ScriptEmptyResultBehavior (..),
+    ScriptInfo (..),
+    translateArguments,
+ )
+
 -------------------------------------------------------------------------------
 data LoadTrace
     = LoadCommandStart !FilePath [String]
@@ -41,130 +84,6 @@ data RunTrace
     | RunCommandStopped !FilePath [String] !ExitCode !ByteString !ByteString
     deriving (Show)
 
--------------------------------------------------------------------------------
-data ScriptEmptyResultBehavior
-    = DoNothing
-    | AddMessage !Text
-    deriving (Generic, Show, Eq, Ord)
-
-instance ToJSON ScriptEmptyResultBehavior
-
-instance FromJSON ScriptEmptyResultBehavior
-
--------------------------------------------------------------------------------
-data ScriptArgArity
-    = Single
-    | Optional
-    deriving (Show, Eq, Ord)
-
-instance ToJSON ScriptArgArity where
-    toJSON s = case s of
-        Single -> Aeson.String "single"
-        Optional -> Aeson.String "optional"
-
-instance FromJSON ScriptArgArity where
-    parseJSON v = case v of
-        Aeson.String "single" -> pure Single
-        Aeson.String "optional" -> pure Optional
-        _ ->
-            fail $
-                List.unlines
-                    [ "Invalid arity: " <> Prelude.show v
-                    , "allowed values are:"
-                    , "- single"
-                    ]
-
-data ScriptArgCallingMode
-    = Stdin
-    | Positional
-    | DashDashSpace
-    | DashDashEqual
-    deriving (Show, Eq, Ord)
-
-instance ToJSON ScriptArgCallingMode where
-    toJSON s = case s of
-        Stdin -> Aeson.String "stdin"
-        Positional -> Aeson.String "positional"
-        DashDashSpace -> Aeson.String "dashdashspace"
-        DashDashEqual -> Aeson.String "dashdashequal"
-
-instance FromJSON ScriptArgCallingMode where
-    parseJSON v = case v of
-        Aeson.String "stdin" -> pure Stdin
-        Aeson.String "positional" -> pure Positional
-        Aeson.String "dashdashspace" -> pure DashDashSpace
-        Aeson.String "dashdashequal" -> pure DashDashEqual
-        _ ->
-            fail $
-                List.unlines
-                    [ "Invalid mode: " <> Prelude.show v
-                    , "allowed values are:"
-                    , "- positional"
-                    , "- stdin"
-                    , "- dashdashspace"
-                    , "- dashdashequal"
-                    ]
-
-data ScriptArg
-    = ScriptArg
-    { argName :: Text
-    , argDescription :: Text
-    , argTypeString :: Text
-    , argBackingTypeString :: Text
-    , argTypeArity :: ScriptArgArity
-    , argCallingMode :: ScriptArgCallingMode
-    }
-    deriving (Show, Eq, Ord)
-
-instance ToJSON ScriptArg where
-    toJSON s =
-        Aeson.object
-            [ "name" .= s.argName
-            , "description" .= s.argDescription
-            , "type" .= s.argTypeString
-            , "backing_type" .= s.argBackingTypeString
-            , "arity" .= s.argTypeArity
-            , "mode" .= s.argCallingMode
-            ]
-
-instance FromJSON ScriptArg where
-    parseJSON =
-        Aeson.withObject "Arg" $ \v ->
-            ScriptArg
-                <$> v .: "name"
-                <*> v .: "description"
-                <*> v .: "type"
-                <*> v .: "backing_type"
-                <*> v .: "arity"
-                <*> v .: "mode"
-
-data ScriptInfo
-    = ScriptInfo
-    { scriptArgs :: [ScriptArg]
-    , scriptSlug :: Text
-    , scriptDescription :: Text
-    , scriptEmptyResultBehavior :: Maybe ScriptEmptyResultBehavior
-    }
-    deriving (Show, Eq, Ord)
-
-instance ToJSON ScriptInfo where
-    toJSON s =
-        Aeson.object $
-            [ "args" .= s.scriptArgs
-            , "slug" .= s.scriptSlug
-            , "description" .= s.scriptDescription
-            ]
-                <> maybe [] (\seb -> ["empty-result" .= seb]) s.scriptEmptyResultBehavior
-
-instance FromJSON ScriptInfo where
-    parseJSON =
-        Aeson.withObject "Script" $ \v ->
-            ScriptInfo
-                <$> v .: "args"
-                <*> v .: "slug"
-                <*> v .: "description"
-                <*> v Aeson..:? "empty-result"
-
 -- helper function to adjust output
 adjustOutput :: ScriptEmptyResultBehavior -> Text -> Text
 adjustOutput behavior out = case behavior of
@@ -173,13 +92,6 @@ adjustOutput behavior out = case behavior of
         if out == ""
             then msg
             else out
-
-data ScriptDescription
-    = ScriptDescription
-    { scriptPath :: FilePath
-    , scriptInfo :: ScriptInfo
-    }
-    deriving (Show, Eq, Ord)
 
 data Scripts
     = Scripts
@@ -239,24 +151,12 @@ loadScript tracer path = do
         then pure $ Left $ InvalidScriptError path code err
         else case Aeson.eitherDecode (LByteString.fromStrict out) of
             Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
-            Right info -> pure $ Right $ ScriptDescription path info
+            Right bashInfo -> pure $ Right $ ScriptDescription path bashInfo
 
 data RunScriptError
     = SerializeArgumentErrors FilePath Aeson.Value String
     | ScriptExecutionError FilePath ExitCode ByteString
     deriving (Show)
-
--- | Translates arguments by collecting script arguments with their associated values.
-translateArguments :: ScriptInfo -> Aeson.Value -> Aeson.Parser [(ScriptArg, Maybe Text)]
-translateArguments script = Aeson.withObject "Args" $ \v -> do
-    vals <- traverse (parseArg v) script.scriptArgs
-    pure $ List.zip script.scriptArgs vals
-  where
-    parseArg :: Aeson.Object -> ScriptArg -> Aeson.Parser (Maybe Text)
-    parseArg v arg = v .:? (textToKey $ arg.argName)
-
-    textToKey :: Text -> Aeson.Key
-    textToKey = read . Prelude.show
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.
 flattenArguments :: [(ScriptArg, Maybe Text)] -> [Text]

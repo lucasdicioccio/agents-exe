@@ -9,6 +9,9 @@
 This module defines the fundamental types for loading, validating, and
 managing skills in the agent system. Skills provide procedural knowledge
 and executable capabilities via progressive disclosure.
+
+Note: Session state for skill activation is now handled generically by
+System.Agents.Tools.Activation.Session via the ToolboxSessionState type.
 -}
 module System.Agents.Tools.Skills.Types (
     -- * Skill Names and Validation
@@ -17,9 +20,11 @@ module System.Agents.Tools.Skills.Types (
     skillNameToText,
 
     -- * Script and Reference Types
-    ScriptName (..),
     ScriptInfo (..),
-    ScriptArgInfo (..),
+    -- Re-export ScriptArg from ScriptTypes for argument definitions
+    ScriptArg,
+    ScriptArgArity (..),
+    ScriptArgCallingMode (..),
     ReferenceInfo (..),
 
     -- * Skill Metadata and Structure
@@ -37,11 +42,6 @@ module System.Agents.Tools.Skills.Types (
     lookupSkill,
     allSkills,
     insertSkill,
-
-    -- * Skill Script State
-    ScriptState (..),
-    SkillScriptsState,
-    SkillsSessionState (..),
 ) where
 
 import Data.Aeson (FromJSON, FromJSONKey, ToJSON, ToJSONKey)
@@ -51,6 +51,15 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
+
+-- Re-export shared types from ScriptTypes
+import System.Agents.Tools.ScriptTypes (
+    ScriptArg (..),
+    ScriptArgArity (..),
+    ScriptArgCallingMode (..),
+    ScriptDescription (..),
+    ScriptInfo (..),
+ )
 
 -------------------------------------------------------------------------------
 -- Skill Name Validation
@@ -103,74 +112,6 @@ validateSkillName txt
     | otherwise = Right $ SkillName txt
   where
     isValidChar c = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
-
--------------------------------------------------------------------------------
--- Script Types
--------------------------------------------------------------------------------
-
--- | Name of a script within a skill.
-newtype ScriptName = ScriptName {unScriptName :: Text}
-    deriving stock (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey)
-
--- | Parse ScriptName from a JSON/YAML string.
-instance FromJSON ScriptName where
-    parseJSON = Aeson.withText "ScriptName" $ \txt ->
-        return $ ScriptName txt
-
--- | Serialize ScriptName to a JSON string.
-instance ToJSON ScriptName where
-    toJSON = Aeson.toJSON . unScriptName
-
-{- | Information about a script in the skill's scripts/ directory.
-
-Scripts follow the describe/run protocol:
-- Called with "describe" argument, they output JSON metadata
-- Called with actual arguments, they execute the operation
--}
-data ScriptInfo = ScriptInfo
-    { siName :: ScriptName
-    -- ^ Name of the script (without extension)
-    , siPath :: FilePath
-    -- ^ Full path to the script file
-    , siDescription :: Maybe Text
-    -- ^ Description from script's describe output (loaded lazily)
-    , siArgs :: [ScriptArgInfo]
-    -- ^ Arguments from script's describe output
-    }
-    deriving (Show, Eq, Generic)
-
-instance FromJSON ScriptInfo where
-    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
-
-instance ToJSON ScriptInfo where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
-
--- | Information about a script argument from describe output.
-data ScriptArgInfo = ScriptArgInfo
-    { saName :: Text
-    , saDescription :: Text
-    , saType :: Text
-    , saRequired :: Bool
-    }
-    deriving (Show, Eq, Generic)
-
-instance FromJSON ScriptArgInfo where
-    parseJSON = Aeson.withObject "ScriptArgInfo" $ \o ->
-        ScriptArgInfo
-            <$> o Aeson..: "name"
-            <*> o Aeson..: "description"
-            <*> o Aeson..: "type"
-            <*> o Aeson..:? "required" Aeson..!= True
-
-instance ToJSON ScriptArgInfo where
-    toJSON arg =
-        Aeson.object
-            [ "name" Aeson..= saName arg
-            , "description" Aeson..= saDescription arg
-            , "type" Aeson..= saType arg
-            , "required" Aeson..= saRequired arg
-            ]
 
 -------------------------------------------------------------------------------
 -- Reference Types
@@ -259,18 +200,32 @@ data Skill = Skill
     -- ^ Markdown body (after frontmatter)
     , skillPath :: FilePath
     -- ^ Path to the skill directory
-    , skillScripts :: [ScriptInfo]
+    , skillScripts :: [ScriptDescription]
     -- ^ Scripts available in scripts/ subdirectory
     , skillReferences :: [ReferenceInfo]
     -- ^ Reference files in references/ subdirectory
     }
     deriving (Show, Eq, Generic)
 
+-- Manual JSON instances for Skill (internal format using Haskell field names)
 instance FromJSON Skill where
-    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
+    parseJSON = Aeson.withObject "Skill" $ \o ->
+        Skill
+            <$> o Aeson..: "skillMetadata"
+            <*> o Aeson..: "skillInstructions"
+            <*> o Aeson..: "skillPath"
+            <*> o Aeson..:? "skillScripts" Aeson..!= []
+            <*> o Aeson..:? "skillReferences" Aeson..!= []
 
 instance ToJSON Skill where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
+    toJSON skill =
+        Aeson.object
+            [ "skillMetadata" Aeson..= skillMetadata skill
+            , "skillInstructions" Aeson..= skillInstructions skill
+            , "skillPath" Aeson..= skillPath skill
+            , "skillScripts" Aeson..= skillScripts skill
+            , "skillReferences" Aeson..= skillReferences skill
+            ]
 
 -------------------------------------------------------------------------------
 -- Skill Sources
@@ -363,37 +318,3 @@ allSkills (SkillsStore m) = Map.elems m
 insertSkill :: Skill -> SkillsStore -> SkillsStore
 insertSkill skill (SkillsStore m) =
     SkillsStore $ Map.insert (skillMetadata skill).smName skill m
-
--------------------------------------------------------------------------------
--- Session State for Skills
--------------------------------------------------------------------------------
-
-{- | Activation state for individual scripts within a skill.
-
-Scripts start as 'Disabled' and become 'Enabled' when the skill is activated.
--}
-data ScriptState = Enabled | Disabled
-    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
-
--- | Map of script names to their activation state within a skill.
-type SkillScriptsState = Map ScriptName ScriptState
-
-{- | Session state tracking which skills and scripts are enabled.
-
-This is a monoid that can be built by folding over session turns.
-Later state overrides earlier state (last enable/disable wins).
--}
-newtype SkillsSessionState = SkillsSessionState
-    { sssActiveSkills :: Map SkillName SkillScriptsState
-    }
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
-
-instance Semigroup SkillsSessionState where
-    (SkillsSessionState s1) <> (SkillsSessionState s2) =
-        -- Union with later values overriding earlier ones
-        -- For each skill, script states are also unioned with later overriding
-        SkillsSessionState (Map.unionWith (Map.unionWith const) s1 s2)
-
-instance Monoid SkillsSessionState where
-    mempty = SkillsSessionState Map.empty

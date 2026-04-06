@@ -87,6 +87,7 @@ toJsonTrace (AgentTreeTrace x) = case x of
     AgentTree.SystemToolboxTrace _ -> Nothing
     AgentTree.DeveloperToolboxTrace _ -> Nothing
     AgentTree.LuaToolboxTrace _ -> Nothing
+    AgentTree.ToolLoaderTrace _ -> Nothing
   where
     encodeMcpTrace :: McpServerDescription -> McpToolbox.Trace -> Maybe Aeson.Value
     encodeMcpTrace (McpSimpleBinary cfg) tr = do

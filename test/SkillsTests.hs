@@ -4,8 +4,6 @@
 
 This module tests:
 - Skill name validation per agentskills.io spec
-- Session state monoid laws
-- Progressive disclosure behavior
 - SKILL.md file parsing
 -}
 module SkillsTests where
@@ -17,13 +15,13 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Prod.Tracer (Tracer, silent)
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import System.Agents.Session.Types
 import System.Agents.Tools.Skills.Parser
-import System.Agents.Tools.Skills.State
 import System.Agents.Tools.Skills.Types
+import System.Agents.Tools.Skills.Toolbox (ScriptName (..))
 
 -------------------------------------------------------------------------------
 -- Test Suite
@@ -35,8 +33,6 @@ skillsTestSuite =
         "Skills Tests"
         [ skillNameValidationTests
         , skillNameParsingTests
-        , sessionStateMonoidTests
-        , progressiveDisclosureTests
         , skillFileParsingTests
         ]
 
@@ -98,79 +94,6 @@ skillNameParsingTests =
         ]
 
 -------------------------------------------------------------------------------
--- Monoid Laws Tests
--------------------------------------------------------------------------------
-
-sessionStateMonoidTests :: TestTree
-sessionStateMonoidTests =
-    testGroup
-        "Session State Monoid"
-        [ testCase "satisfies right identity" $ do
-            let a = sampleState "skill-a"
-            a <> mempty @?= a
-        , testCase "satisfies left identity" $ do
-            let a = sampleState "skill-a"
-            mempty <> a @?= a
-        , testCase "satisfies associativity" $ do
-            let a = sampleState "skill-a"
-                b = sampleState "skill-b"
-                c = sampleState "skill-c"
-            (a <> b) <> c @?= a <> (b <> c)
-        , testCase "later enable overrides earlier disable" $ do
-            let skillA = SkillName "skill-a"
-                disabled = disableSkill skillA
-                enabled = enableSkill skillA
-                combined = disabled <> enabled
-            getEnabledScripts combined skillA @?= Nothing -- All enabled
-        , testCase "earlier state preserved for different skills" $ do
-            let skillA = SkillName "skill-a"
-                skillB = SkillName "skill-b"
-                stateA = enableSkill skillA
-                stateB = enableSkill skillB
-                combined = stateA <> stateB
-            isScriptEnabled combined skillA (ScriptName "test") @?= True
-            isScriptEnabled combined skillB (ScriptName "test") @?= True
-        ]
-
--- Helper to create a sample state for a skill
-sampleState :: Text -> SkillsSessionState
-sampleState name =
-    case validateSkillName name of
-        Left _ -> mempty
-        Right skillName -> enableSkill skillName
-
--------------------------------------------------------------------------------
--- Progressive Disclosure Tests
--------------------------------------------------------------------------------
-
-progressiveDisclosureTests :: TestTree
-progressiveDisclosureTests =
-    testGroup
-        "Progressive Disclosure"
-        [ testCase "scripts disabled by default" $ do
-            let skillA = SkillName "skill-a"
-                scriptX = ScriptName "script-x"
-                state = mempty :: SkillsSessionState
-            isScriptEnabled state skillA scriptX @?= False
-        , testCase "all scripts enabled after skill enable" $ do
-            let skillA = SkillName "skill-a"
-                scriptX = ScriptName "script-x"
-                scriptY = ScriptName "script-y"
-                state = enableSkill skillA
-            isScriptEnabled state skillA scriptX @?= True
-            isScriptEnabled state skillA scriptY @?= True
-        , testCase "getEnabledScripts returns Nothing for enabled skill" $ do
-            let skillA = SkillName "skill-a"
-                state = enableSkill skillA
-            -- Nothing means "all scripts enabled" (no explicit list)
-            getEnabledScripts state skillA @?= Nothing
-        , testCase "getEnabledScripts returns empty list for disabled skill" $ do
-            let skillA = SkillName "skill-a"
-                state = mempty :: SkillsSessionState
-            getEnabledScripts state skillA @?= Just []
-        ]
-
--------------------------------------------------------------------------------
 -- SKILL.md File Parsing Tests
 -------------------------------------------------------------------------------
 
@@ -179,7 +102,8 @@ skillFileParsingTests =
     testGroup
         "SKILL.md File Parsing"
         [ testCase "parses test/data/skills-01.md successfully" $ do
-            result <- parseSkillFile "test/data/skills-01.md"
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
+            result <- parseSkillFile tracer "test/data/skills-01.md"
             case result of
                 Left err -> assertFailure $ "Failed to parse skill file: " ++ Text.unpack err
                 Right skill -> do
@@ -192,7 +116,8 @@ skillFileParsingTests =
                     Map.lookup "category" (skill.skillMetadata.smMetadata) @?= Just "development"
                     Map.lookup "version" (skill.skillMetadata.smMetadata) @?= Just "1.0"
         , testCase "skill has instructions content" $ do
-            result <- parseSkillFile "test/data/skills-01.md"
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
+            result <- parseSkillFile tracer "test/data/skills-01.md"
             case result of
                 Left err -> assertFailure $ "Failed to parse skill file: " ++ Text.unpack err
                 Right skill -> do
@@ -203,34 +128,19 @@ skillFileParsingTests =
                     Text.isInfixOf "### Security" instructions @?= True
                     Text.isInfixOf "### Maintainability" instructions @?= True
         , testCase "skill path is set correctly" $ do
-            result <- parseSkillFile "test/data/skills-01.md"
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
+            result <- parseSkillFile tracer "test/data/skills-01.md"
             case result of
                 Left err -> assertFailure $ "Failed to parse skill file: " ++ Text.unpack err
                 Right skill -> do
                     skill.skillPath @?= "test/data"
         , testCase "empty skills directory returns empty list" $ do
+            let tracer = silent :: Tracer IO System.Agents.Tools.Skills.Parser.Trace
             -- This tests the directory parsing but doesn't rely on external files
             -- We just verify the function doesn't crash
-            result <- parseSkillDirectory "test/data/nonexistent-dir-for-testing"
+            result <- parseSkillDirectory tracer "test/data/nonexistent-dir-for-testing"
             case result of
                 Left _ -> pure () -- Expected - directory doesn't exist
                 Right skills -> skills @?= []
         ]
-
--------------------------------------------------------------------------------
--- Property Test Placeholders
--------------------------------------------------------------------------------
-
--- Note: Full property testing would require QuickCheck.
--- These are manual tests for the monoid laws.
-
--- | Test that the monoid laws hold for SkillsSessionState
-prop_monoidRightIdentity :: SkillsSessionState -> Bool
-prop_monoidRightIdentity a = a <> mempty == a
-
-prop_monoidLeftIdentity :: SkillsSessionState -> Bool
-prop_monoidLeftIdentity a = mempty <> a == a
-
-prop_monoidAssociativity :: SkillsSessionState -> SkillsSessionState -> SkillsSessionState -> Bool
-prop_monoidAssociativity a b c = (a <> b) <> c == a <> (b <> c)
 
