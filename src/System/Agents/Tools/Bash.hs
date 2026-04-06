@@ -9,7 +9,7 @@ module System.Agents.Tools.Bash (
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
     translateArguments,
-    
+
     -- * Bash-specific types and functions
     LoadTrace (..),
     RunTrace (..),
@@ -20,7 +20,7 @@ module System.Agents.Tools.Bash (
     RunScriptError (..),
     parseArgsForValue,
     runValue,
-    
+
     -- * Environment and context
     sessionIdEnvVar,
     conversationIdEnvVar,
@@ -32,6 +32,7 @@ module System.Agents.Tools.Bash (
     turnIdToString,
     agentIdToString,
     buildToolEnvironment,
+
     -- * Re-exports
     ScriptDescription (..),
 ) where
@@ -306,4 +307,3 @@ runValue tracer script mCtx val = do
                             Nothing -> out
                      in
                         pure $ Right adjusted
-

@@ -7,7 +7,7 @@ This module handles loading skills from various sources:
 - Git repositories (cloned and then searched)
 -}
 module System.Agents.Tools.Skills.Source (
-    Trace(..),
+    Trace (..),
     loadSkillsFromSource,
     loadSkillsFromSources,
     cloneGitRepo,
@@ -15,20 +15,20 @@ module System.Agents.Tools.Skills.Source (
 
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Prod.Tracer (Tracer, contramap)
 import System.Directory (removeDirectoryRecursive)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process (readProcessWithExitCode)
-import Prod.Tracer (Tracer, contramap)
 
 import System.Agents.Tools.Skills.Parser (parseSkillDirectory)
 import qualified System.Agents.Tools.Skills.Parser as SkillsParser
 import System.Agents.Tools.Skills.Types
 
 data Trace
-  = ParserTrace !SkillsParser.Trace
-  deriving (Show)
+    = ParserTrace !SkillsParser.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Loading from Sources

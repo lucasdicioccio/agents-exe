@@ -8,15 +8,15 @@ and markdown body. It also extracts script information from the
 describe/run protocol.
 -}
 module System.Agents.Tools.Skills.Parser (
-    Trace(..),
+    Trace (..),
     parseSkillFile,
     parseSkillDirectory,
 ) where
 
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
-import Data.Either (rights)
 import qualified Data.ByteString.Lazy as LByteString
+import Data.Either (rights)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -31,10 +31,10 @@ import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.Process.ByteString (readProcessWithExitCode)
 
-import System.Agents.Tools.Skills.Types
 import System.Agents.Tools.ScriptTypes (
     ScriptDescription (..),
  )
+import System.Agents.Tools.Skills.Types
 
 data Trace
     = LoadCommandStart !FilePath [String]
@@ -259,4 +259,3 @@ partitionEithers = foldr go ([], [])
   where
     go (Left a) (as, bs) = (a : as, bs)
     go (Right b) (as, bs) = (as, b : bs)
-

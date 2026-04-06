@@ -1,7 +1,7 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 {- | Skills toolbox with ProgressiveDisclosure framework integration.
 
@@ -53,11 +53,11 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
+import Prod.Tracer (Tracer)
 import System.Exit (ExitCode (..))
+import System.FilePath (takeBaseName)
 import System.Process (proc)
 import System.Process.ByteString (readCreateProcessWithExitCode)
-import System.FilePath (takeBaseName)
-import Prod.Tracer (Tracer)
 
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
@@ -67,9 +67,9 @@ import System.Agents.Tools.Activation (Activation (..))
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
+import qualified System.Agents.Tools.ScriptTypes as ST
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.Types
-import qualified System.Agents.Tools.ScriptTypes as ST
 
 -------------------------------------------------------------------------------
 -- Trace Events
@@ -98,7 +98,7 @@ data Trace
 -- Tool Registration
 -------------------------------------------------------------------------------
 
-newtype ScriptName = ScriptName { unScriptName :: FilePath }
+newtype ScriptName = ScriptName {unScriptName :: FilePath}
     deriving (Show, Aeson.ToJSON, Aeson.FromJSON)
 
 scriptName :: ST.ScriptDescription -> ScriptName
@@ -239,7 +239,7 @@ runScriptTool script _tracer _ctx args = do
     case parseArgsForScript script args of
         Left err ->
             return $ BlobToolSuccess () (Text.encodeUtf8 $ "Argument parsing error: " <> Text.pack err)
-        Right (argz,stdin) -> do
+        Right (argz, stdin) -> do
             let cmdArgs = "run" : [Text.unpack arg | arg <- argz]
             -- Execute the script with parsed arguments
             {-
@@ -292,10 +292,8 @@ flattenInput = Text.unlines . mconcat . fmap flatten1
             DashDashEqual -> []
             DashDashSpace -> []
 
-{- | Parse arguments from JSON value using script argument metadata.
-
--}
-parseArgsForScript :: ST.ScriptDescription -> Aeson.Value -> Either String ([Text],Text)
+-- | Parse arguments from JSON value using script argument metadata.
+parseArgsForScript :: ST.ScriptDescription -> Aeson.Value -> Either String ([Text], Text)
 parseArgsForScript script val = do
     args <- Aeson.parseEither (ST.translateArguments script.scriptInfo) val
     pure (flattenArguments args, flattenInput args)
@@ -345,4 +343,3 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
-

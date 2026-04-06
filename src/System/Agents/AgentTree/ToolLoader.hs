@@ -15,7 +15,8 @@ Note: This module does not import System.Agents.AgentTree to avoid cyclic
 imports.
 -}
 module System.Agents.AgentTree.ToolLoader (
-    Trace(..),
+    Trace (..),
+
     -- * Tool loading
     loadAgentTools,
 
@@ -71,16 +72,16 @@ import qualified System.Agents.Tools.SqliteToolbox as SqliteToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemToolbox
 
 data Trace
-   = SkillsSourceTrace !SkillsSource.Trace
-   | BashToolboxTrace !BashToolbox.Trace
-   | McpToolboxTrace !McpToolbox.Trace
-   | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
-   | PostgRESToolboxTrace !PostgRESToolbox.Trace
-   | SqliteToolboxTrace !SqliteToolbox.Trace
-   | SystemToolboxTrace !SystemToolbox.Trace
-   | DeveloperToolboxTrace !DeveloperToolbox.Trace
-   | LuaToolboxTrace LuaToolbox.Trace
-   deriving (Show)
+    = SkillsSourceTrace !SkillsSource.Trace
+    | BashToolboxTrace !BashToolbox.Trace
+    | McpToolboxTrace !McpToolbox.Trace
+    | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
+    | PostgRESToolboxTrace !PostgRESToolbox.Trace
+    | SqliteToolboxTrace !SqliteToolbox.Trace
+    | SystemToolboxTrace !SystemToolbox.Trace
+    | DeveloperToolboxTrace !DeveloperToolbox.Trace
+    | LuaToolboxTrace LuaToolbox.Trace
+    deriving (Show)
 
 -- | Loading error type
 data LoadingError

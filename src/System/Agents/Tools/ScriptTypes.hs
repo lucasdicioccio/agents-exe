@@ -10,13 +10,14 @@ module System.Agents.Tools.ScriptTypes (
     ScriptArgArity (..),
     ScriptArgCallingMode (..),
     ScriptArg (..),
-    
+
     -- * Script Info
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
+
     -- * Script located on disk
     ScriptDescription (..),
-    
+
     -- * Argument Translation
     translateArguments,
 ) where
@@ -197,4 +198,3 @@ instance Aeson.FromJSON ScriptDescription where
         ScriptDescription
             <$> o Aeson..: "path"
             <*> o Aeson..: "info"
-

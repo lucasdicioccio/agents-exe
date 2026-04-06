@@ -57,8 +57,8 @@ import System.Agents.Tools.ScriptTypes (
     ScriptArg (..),
     ScriptArgArity (..),
     ScriptArgCallingMode (..),
-    ScriptInfo (..),
     ScriptDescription (..),
+    ScriptInfo (..),
  )
 
 -------------------------------------------------------------------------------
