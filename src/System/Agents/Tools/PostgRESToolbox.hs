@@ -109,12 +109,6 @@ module System.Agents.Tools.PostgRESToolbox (
     -- * Response handling
     handleResponse,
 
-    -- * Tool lookup
-    getToolByName,
-
-    -- * Naming helpers
-    postgrest2LLMName,
-
     -- * URL helpers
     isFileUrl,
     fileUrlToPath,
@@ -146,7 +140,6 @@ import Numeric (showHex)
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import qualified System.Agents.HttpClient as HttpClient
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
@@ -467,26 +460,6 @@ fetchSpecFromUrl tracer runtime resolvedSecrets url = do
                     pure $ Right body
 
 -- -------------------------------------------------------------------------
--- Tool Lookup
--- -------------------------------------------------------------------------
-
-{- | Get a tool by its name.
-
-This is used during tool execution to find the tool
-when the LLM calls it by name.
-
-Returns 'Nothing' if no tool with that name exists.
--}
-getToolByName ::
-    Toolbox ->
-    Text ->
-    Maybe PostgRESTool
-getToolByName toolbox name =
-    case filter (\t -> prtName t == name) (toolboxTools toolbox) of
-        (t : _) -> Just t
-        [] -> Nothing
-
--- -------------------------------------------------------------------------
 -- Tool Handler Creation
 -- -------------------------------------------------------------------------
 
@@ -772,23 +745,3 @@ handleResponse method url response = do
                 , resultPayload = payload
                 }
             )
-
--- -------------------------------------------------------------------------
--- Naming helpers
--- -------------------------------------------------------------------------
-
-{- | Convert a PostgREST tool name to an LLM tool name.
-
-Names are prefixed with @postgrest_@ and include the normalized toolbox name
-and tool name to avoid conflicts and ensure LLM compatibility.
-
-Example:
-
->>> postgrest2LLMName "mydb" "get_users"
-ToolName {getToolName = "postgrest_mydb_get_users"}
--}
-postgrest2LLMName :: Text -> Text -> OpenAI.ToolName
-postgrest2LLMName toolboxName toolName =
-    let normalizedToolbox = normalizeForLLM toolboxName
-        normalizedTool = normalizeForLLM toolName
-     in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)

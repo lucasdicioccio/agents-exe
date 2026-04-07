@@ -464,7 +464,6 @@ converterTests =
         , test_enumDescription
         , test_requiredParams
         , test_convertOpenAPIToTools
-        , test_toOpenAITool
         ]
 
 -- | Test operation conversion.
@@ -607,21 +606,6 @@ test_convertOpenAPIToTools = testCase "Converts entire spec to tools" $ do
     let names = map toolName tools
     assertBool "Has getPet tool" ("openapi_getPet" `elem` names)
     assertBool "Has createPet tool" ("openapi_createPet" `elem` names)
-
--- | Test OpenAI tool conversion.
-test_toOpenAITool :: TestTree
-test_toOpenAITool = testCase "Converts to OpenAI tool format" $ do
-    let schema = Schema (Just "string") (Just "Pet ID") Nothing Nothing Nothing Nothing Nothing Nothing
-    let param = Parameter "id" ParamInPath Nothing True (Just schema)
-    let op = Operation (Just "testOp") (Just "Test") (Just "A test op") [param] Nothing
-    let apiTool = convertOperation "/test" "GET" op
-    let tool = toToolDescription apiTool
-
-    -- Verify OpenAI.Tool fields
-    toolDescriptionName tool @?= OpenAI.ToolName "openapi_testOp"
-    toolDescriptionText tool @?= "Test:\nA test op"
-    -- Check that parameters are converted
-    assertBool "Has parameter properties" (not $ null $ toolDescriptionParamProperties tool)
 
 -- -------------------------------------------------------------------------
 -- 4. Integration Tests

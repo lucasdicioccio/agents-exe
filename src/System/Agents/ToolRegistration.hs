@@ -18,8 +18,7 @@ It supports registration of various tool types:
 
 For OpenAPI tools, special handling is done for name normalization:
 OpenAPI operation IDs may contain invalid characters (dots, slashes, etc.)
-which are normalized to LLM-safe names. The 'NameMapping' system maintains
-bidirectional mapping between normalized and original names.
+which are normalized to LLM-safe names. The 'NameMapping' system maintains bidirectional mapping between normalized and original names.
 -}
 module System.Agents.ToolRegistration (
     -- * Core types
@@ -106,15 +105,12 @@ import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import System.Agents.Tools.McpToolbox (callTool, mcpActivation)
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (
-    NameMapping (..),
     normalizeForLLM,
-    toToolDescription,
  )
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import System.Agents.Tools.OpenAPI.Types (Schema (..))
 import System.Agents.Tools.OpenAPIToolbox (
     createToolHandler,
-    openapi2LLMName,
  )
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import System.Agents.Tools.PostgREST.Converter (
@@ -184,6 +180,34 @@ bash2LLMName bash = OpenAI.ToolName (mconcat ["bash_", bash.scriptInfo.scriptSlu
 mcp2LLMName :: McpTools.Toolbox -> McpTools.ToolDescription -> OpenAI.ToolName
 mcp2LLMName box mcp =
     OpenAI.ToolName (mconcat ["mcp_", box.name, "_", mcp.getToolDescription.name])
+
+{- | Convert an OpenAPI operation ID to an LLM tool name.
+
+Names are prefixed with @openapi_@ and include the normalized toolbox name
+and normalized operation ID to avoid conflicts and ensure LLM compatibility.
+
+The operation ID is normalized to replace invalid characters:
+- Dots (.) become underscores (_)
+- Slashes (/) become underscores (_)
+- Other invalid characters become underscores
+- Names starting with digits are prefixed with 't'
+
+Example:
+
+>>> openapi2LLMName "myApi" "getPet"
+ToolName {getToolName = "openapi_myApi_getPet"}
+
+>>> openapi2LLMName "myApi" "pet.findByStatus"
+ToolName {getToolName = "openapi_myApi_pet_findByStatus"}
+
+>>> openapi2LLMName "myApi" "2.0/getPet"
+ToolName {getToolName = "openapi_myApi_t2_0_getPet"}
+-}
+openapi2LLMName :: Text -> Text -> OpenAI.ToolName
+openapi2LLMName tboxName operationId =
+    let normalizedToolbox = normalizeForLLM tboxName
+        normalizedOpId = normalizeForLLM operationId
+     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
 
 -- naming policy for PostgREST tools
 postgrest2LLMName :: PostgRESToolbox.Toolbox -> PostgRESTool -> OpenAI.ToolName
@@ -409,67 +433,49 @@ registerOpenAPITool toolbox tool =
                 (OpenAPI.toolName tool)
                 (OpenAPIToolbox.getOperationId (OpenAPI.toolOperation tool))
 
-        -- Get the normalized name from the mapping
-        mNameMapping = findNameMapping toolbox originalOpId
-
         -- Generate LLM name using the normalized operation ID
-        llmName = case mNameMapping of
-            Just nm -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) (nmNormalized nm)
-            Nothing -> openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) originalOpId
-     in
-        case mNameMapping of
-            Nothing -> Left $ "Tool not found in name mapping: " <> Text.unpack originalOpId
-            Just _nameMapping ->
-                let
-                    -- Convert to OpenAI Tool format with normalized name
-                    toolDescription = toToolDescription tool
+        llmName = openapi2LLMName (OpenAPIToolbox.toolboxName toolbox) originalOpId
+        -- Convert to OpenAI Tool format with normalized name
+        toolDescription =
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = OpenAPI.toolDescription tool
+                , toolDescriptionParamProperties = OpenAPI.toolParamProperties tool
+                }
 
-                    -- Create the tool handler that uses the mapping
-                    runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-                    runFunc tracer ctx argz =
-                        createToolHandler toolbox tool (contramap OpenAPIToolboxTrace tracer) ctx argz
+        -- Create the tool handler that uses the mapping
+        runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+        runFunc tracer ctx argz =
+          createToolHandler toolbox tool (contramap OpenAPIToolboxTrace tracer) ctx argz
 
-                    -- Create the Tool
-                    toolDef0 =
-                        IOTool $
-                            IOScriptDescription
-                                { ioSlug = OpenAI.getToolName llmName
-                                , ioDescription = OpenAPI.toolDescription tool
-                                }
+        -- Create the Tool
+        toolDef0 =
+          IOTool $
+            IOScriptDescription
+              { ioSlug = OpenAI.getToolName llmName
+              , ioDescription = OpenAPI.toolDescription tool
+              }
 
-                    tool' =
-                        ToolBase.Tool
-                            { ToolBase.toolDef = toolDef0
-                            , ToolBase.toolRun = runFunc
-                            }
+        tool' =
+          ToolBase.Tool
+            { ToolBase.toolDef = toolDef0
+            , ToolBase.toolRun = runFunc
+            }
 
-                    -- Find function - matches on the normalized LLM name
-                    find :: ToolCall -> Maybe (Tool ToolCall)
-                    find call =
-                        if call.callToolName == getToolName llmName
-                            then Just $ mapToolResult (const call) tool'
-                            else Nothing
-
-                    -- Extract activation from the toolbox configuration
-                    mbActivation = OpenAPIToolbox.openApiActivation toolbox
-                 in
-                    Right $
-                        ToolRegistration
-                            { innerTool = mapToolResult (const ()) tool'
-                            , declareTool = toolDescription
-                            , findTool = find
-                            , toolActivation = mbActivation
-                            }
-
--- | Find the name mapping for a given original operation ID.
-findNameMapping :: OpenAPIToolbox.Toolbox -> Text -> Maybe NameMapping
-findNameMapping toolbox originalOpId =
-    -- Look through the name mapping to find one with matching original name
-    case filter
-        (\nm -> nmOriginal nm == originalOpId)
-        (Map.elems $ OpenAPIToolbox.toolboxNameMapping toolbox) of
-        (nm : _) -> Just nm
-        [] -> Nothing
+        -- Find function - matches on the normalized LLM name
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call =
+                if call.callToolName == getToolName llmName
+                    then Just $ mapToolResult (const call) tool'
+                    else Nothing
+      in
+        Right $
+          ToolRegistration
+            { innerTool = mapToolResult (const ()) tool'
+            , declareTool = toolDescription
+            , findTool = find
+            , toolActivation = OpenAPIToolbox.openApiActivation toolbox
+            }
 
 {- | Register all tools from an OpenAPI toolbox.
 
@@ -579,7 +585,8 @@ registerPostgRESTool toolbox tool =
 
         -- Create the tool handler
         runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-        runFunc tracer ctx argz = PostgRESToolbox.createToolHandler toolbox tool (Prod.contramap PostgRESToolboxTrace tracer) ctx argz
+        runFunc tracer ctx argz =
+          PostgRESToolbox.createToolHandler toolbox tool (Prod.contramap PostgRESToolboxTrace tracer) ctx argz
 
         -- Create the Tool definition
         toolDef0 =
@@ -602,14 +609,12 @@ registerPostgRESTool toolbox tool =
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
 
-        -- Extract activation from the toolbox configuration
-        mbActivation = PostgRESToolbox.postgrestActivation toolbox
      in Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
                 , declareTool = toolDescription
                 , findTool = find
-                , toolActivation = mbActivation
+                , toolActivation = PostgRESToolbox.postgrestActivation toolbox
                 }
 
 {- | Build parameter properties for PostgREST tool from structured parameters.

@@ -56,8 +56,8 @@ module System.Agents.Tools.OpenAPI.Converter (
     findToolByNormalizedName,
     generateUniqueNormalizedName,
 
-    -- * Base conversion
-    toToolDescription,
+    -- * Type Mapping
+    toolParamProperties,
 
     -- * Handler helpers
     defaultHandler,
@@ -74,7 +74,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),
@@ -615,25 +615,8 @@ getRequiredParams op =
 -- Conversion to Internal Tool Format
 -- -------------------------------------------------------------------------
 
-{- | Converts an InternalTool to the internal Tool format.
-
-This allows OpenAPITools to be used directly with the LLM interface.
-
-Note: This uses the original tool name. For LLM registration,
-you typically want to use the normalized name via 'normalizeForLLM'.
-
-Example:
->>> let op = Operation (Just "test") (Just "Test op") (Just "A test") [] Nothing
->>> let apiTool = convertOperation "/test" "GET" op
->>> let tool = toToolDescription apiTool
->>> Base.toolName tool
-ToolName {getToolName = "openapi_test"}
--}
-toToolDescription :: InternalTool -> ToolDescription
-toToolDescription apiTool =
-    ToolDescription
-        (ToolName (toolName apiTool))
-        (toolDescription apiTool)
+toolParamProperties :: InternalTool -> [ParamProperty]
+toolParamProperties apiTool =
         (map (propertyToParamProperty requiredSet) $ Map.toList (paramsProperties (toolParameters apiTool)))
   where
     -- Build a set of required parameter names for O(1) lookup

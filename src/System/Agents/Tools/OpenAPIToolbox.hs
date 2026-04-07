@@ -90,11 +90,6 @@ module System.Agents.Tools.OpenAPIToolbox (
 
     -- * Operation helpers
     getOperationId,
-    getToolByNormalizedName,
-
-    -- * Naming helpers
-    openapi2LLMName,
-    normalizeToolName,
 
     -- * URL helpers
     isFileUrl,
@@ -115,7 +110,6 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.CaseInsensitive as CI
-import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -126,7 +120,6 @@ import qualified Network.HTTP.Client as HttpClient
 import qualified Network.HTTP.Types as HttpTypes
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import qualified System.Agents.HttpClient as HttpClient
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.Tools.Context (ToolExecutionContext)
@@ -140,7 +133,6 @@ import System.Agents.Tools.OpenAPI.Converter (
     NameMapping (..),
     buildToolNameMapping,
     convertOpenAPIToTools,
-    findToolByNormalizedName,
     normalizeForLLM,
  )
 import System.Agents.Tools.OpenAPI.Resolver (dereferenceSpec)
@@ -479,27 +471,6 @@ fetchSpecFromUrl tracer runtime resolvedSecrets url = do
                     pure $ Right body
 
 -- -------------------------------------------------------------------------
--- Tool Lookup
--- -------------------------------------------------------------------------
-
-{- | Get a tool by its normalized LLM name.
-
-This is used during tool execution to find the original tool
-when the LLM calls a tool by its normalized name.
-
-Returns 'Nothing' if no tool with that normalized name exists.
--}
-getToolByNormalizedName ::
-    Toolbox ->
-    Text ->
-    Maybe InternalTool
-getToolByNormalizedName toolbox normalizedName = do
-    -- Look up the original operation ID from the mapping
-    originalOpId <- findToolByNormalizedName (toolboxNameMapping toolbox) normalizedName
-    -- Find the tool with that original operation ID
-    find ((== Just originalOpId) . opOperationId . toolOperation) (toolboxTools toolbox)
-
--- -------------------------------------------------------------------------
 -- Tool Handler Creation
 -- -------------------------------------------------------------------------
 
@@ -785,42 +756,3 @@ This is used for tool registration when creating unique tool names.
 -}
 getOperationId :: Operation -> Maybe Text
 getOperationId = opOperationId
-
--- -------------------------------------------------------------------------
--- Naming helpers
--- -------------------------------------------------------------------------
-
-{- | Normalize a tool name for LLM compatibility.
-
-This is a re-export of 'normalizeForLLM' for convenience.
--}
-normalizeToolName :: Text -> Text
-normalizeToolName = normalizeForLLM
-
-{- | Convert an OpenAPI operation ID to an LLM tool name.
-
-Names are prefixed with @openapi_@ and include the normalized toolbox name
-and normalized operation ID to avoid conflicts and ensure LLM compatibility.
-
-The operation ID is normalized to replace invalid characters:
-- Dots (.) become underscores (_)
-- Slashes (/) become underscores (_)
-- Other invalid characters become underscores
-- Names starting with digits are prefixed with 't'
-
-Example:
-
->>> openapi2LLMName "myApi" "getPet"
-ToolName {getToolName = "openapi_myApi_getPet"}
-
->>> openapi2LLMName "myApi" "pet.findByStatus"
-ToolName {getToolName = "openapi_myApi_pet_findByStatus"}
-
->>> openapi2LLMName "myApi" "2.0/getPet"
-ToolName {getToolName = "openapi_myApi_t2_0_getPet"}
--}
-openapi2LLMName :: Text -> Text -> OpenAI.ToolName
-openapi2LLMName tboxName operationId =
-    let normalizedToolbox = normalizeForLLM tboxName
-        normalizedOpId = normalizeForLLM operationId
-     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
