@@ -54,11 +54,6 @@ module System.Agents.AgentTree (
 
     -- * Utility functions
     readOpenApiKeysFile,
-    augmentMainAgentPromptWithSubAgents,
-
-    -- * Configuration loading helpers
-    loadOpenAPIToolboxDescription,
-    loadPostgRESTToolboxDescription,
 
     -- * Re-export Agent type for field access (without constructor to avoid name shadowing)
     Agent,
@@ -83,8 +78,6 @@ module System.Agents.AgentTree (
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, writeTVar)
 import Control.Monad (unless)
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Either as Either
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -98,30 +91,26 @@ import Data.Semigroup (sconcat)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 
 -- Import ToolLoader qualified to avoid name collisions with LoadingError
 import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
-import System.Agents.ApiKeys
+import System.Agents.AgentTree.Trace
+import System.Agents.ApiKeys (
+    LoadedApiKeys,
+    readOpenApiKeysFile,
+ )
 import System.Agents.Base (
     AgentDescription (..),
     AgentId (..),
     AgentSlug,
     ExtraAgentRef (..),
     FileSystemDirectoryDescription (..),
-    OpenAPIServerDescription (..),
-    OpenAPIServerOnDisk (..),
-    OpenAPIToolboxDescription (..),
-    PostgRESTServerDescription (..),
-    PostgRESTServerOnDisk (..),
-    PostgRESTToolboxDescription (..),
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 -- OS Core imports
 
@@ -130,14 +119,7 @@ import System.Agents.OS.Core.Types (EntityId (..))
 import qualified System.Agents.OS.Core.Types as OSTypes
 import qualified System.Agents.OS.Core.World as OSWorld
 
-import System.Agents.AgentTree.Trace
 import System.Agents.ToolRegistration
-
--------------------------------------------------------------------------------
--- API Keys Type
--------------------------------------------------------------------------------
-
-type LoadedApiKeys = [(Text, OpenAI.ApiKey)]
 
 -------------------------------------------------------------------------------
 -- Agent Registry (OS-Native)
@@ -990,79 +972,3 @@ loadAgentTree props = do
 withAgentTree :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTree props continue = do
     loadAgentTree props >>= continue
-
--------------------------------------------------------------------------------
--- Toolbox Loading Helpers
--------------------------------------------------------------------------------
-
-{- | Load an OpenAPI toolbox description, resolving on-disk references if needed.
-
-For 'OpenAPIServer' descriptions, returns the configuration directly.
-For 'OpenAPIServerOnDisk' descriptions, loads the configuration from the specified file.
--}
-loadOpenAPIToolboxDescription ::
-    -- | Base directory for resolving relative paths
-    FilePath ->
-    OpenAPIToolboxDescription ->
-    IO (Either LoadingError OpenAPIServerDescription)
-loadOpenAPIToolboxDescription _baseDir (AgentsBase.OpenAPIServer desc) =
-    pure $ Right desc
-loadOpenAPIToolboxDescription baseDir (AgentsBase.OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
-    let fullPath = if FilePath.isRelative path then baseDir </> path else path
-    result <- Aeson.eitherDecodeFileStrict' fullPath
-    case result of
-        Left err -> pure $ Left $ ConfigFileError fullPath err
-        Right desc -> pure $ Right desc
-
-{- | Load a PostgREST toolbox description, resolving on-disk references if needed.
-
-For 'PostgRESTServer' descriptions, returns the configuration directly.
-For 'PostgRESTServerOnDisk' descriptions, loads the configuration from the specified file.
--}
-loadPostgRESTToolboxDescription ::
-    -- | Base directory for resolving relative paths
-    FilePath ->
-    PostgRESTToolboxDescription ->
-    IO (Either LoadingError PostgRESTServerDescription)
-loadPostgRESTToolboxDescription _baseDir (AgentsBase.PostgRESTServer desc) =
-    pure $ Right desc
-loadPostgRESTToolboxDescription baseDir (AgentsBase.PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
-    let fullPath = if FilePath.isRelative path then baseDir </> path else path
-    result <- Aeson.eitherDecodeFileStrict' fullPath
-    case result of
-        Left err -> pure $ Left $ ConfigFileError fullPath err
-        Right desc -> pure $ Right desc
-
--------------------------------------------------------------------------------
--- Utility Functions
--------------------------------------------------------------------------------
-
-augmentMainAgentPromptWithSubAgents :: [OSAgentNode] -> Text -> Text
-augmentMainAgentPromptWithSubAgents [] base = base
-augmentMainAgentPromptWithSubAgents agents base =
-    Text.unlines
-        [ base
-        , ""
-        , "==="
-        , "The helper agents you can query using json tools are as follows:"
-        , Text.unlines $
-            Maybe.mapMaybe declareAgent agents
-        , ""
-        , "If an helper agent fails, do not retry and abdicate"
-        ]
-  where
-    declareAgent :: OSAgentNode -> Maybe Text
-    declareAgent node =
-        Just $ Text.unwords ["*", slug (osNodeConfig node), ":", announce (osNodeConfig node)]
-
-readOpenApiKeysFile :: FilePath -> IO LoadedApiKeys
-readOpenApiKeysFile keysPath =
-    maybe [] flattenOpenAIKeys <$> readApiKeys keysPath
-  where
-    flattenOpenAIKeys :: ApiKeys -> [(Text, OpenAI.ApiKey)]
-    flattenOpenAIKeys (ApiKeys keys) =
-        [(k.apiKeyId, OpenAI.ApiKey $ TextEncoding.encodeUtf8 (k.apiKeyValue)) | k <- keys]
-
-    readApiKeys :: FilePath -> IO (Maybe ApiKeys)
-    readApiKeys path =
-        Aeson.decode <$> LByteString.readFile path

@@ -94,8 +94,6 @@ llmCallTool tracer registrations ctx call =
                 Maybe.mapMaybe (\r -> r.findTool call) registrations
         spec = (,) <$> script <*> pure call.callArgs
      in do
-        print call
-        print [ reg.declareTool | reg <- registrations]
         case spec of
             Nothing -> pure $ ToolNotFound call
             Just (t, v) -> do
