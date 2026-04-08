@@ -7,7 +7,7 @@ module System.Agents.TUI.Render where
 import Brick
 import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
-import Brick.Widgets.Border (borderWithLabel)
+import Brick.Widgets.Border (borderWithLabel, hBorder)
 import Brick.Widgets.Edit (renderEditor)
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
@@ -88,6 +88,14 @@ activationFirstNAttr = attrName "activationFirstN"
 activationDefaultAttr :: AttrName
 activationDefaultAttr = attrName "activationDefault"
 
+-- | Attribute for the active tab in the tab bar.
+activeTabAttr :: AttrName
+activeTabAttr = attrName "activeTab"
+
+-- | Attribute for inactive tabs in the tab bar.
+inactiveTabAttr :: AttrName
+inactiveTabAttr = attrName "inactiveTab"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -112,16 +120,33 @@ render_ui st
 -- Layout Components
 -------------------------------------------------------------------------------
 
--- | Main layout with sidebar and content area.
+-- | Main layout with tab bar, sidebar, and content area.
 render_mainLayout :: TuiState -> Widget N
 render_mainLayout st =
     vBox
-        [ hBox
+        [ renderTabBar (st ^. tuiUI . currentTab)
+        , hBox
             [ render_sidebar st
             , render_contentArea st
             ]
         , render_statusBar (st ^. tuiUI . statusMessage)
         ]
+
+-- | Render the tab bar with all tabs, highlighting the active one.
+renderTabBar :: Tab -> Widget N
+renderTabBar activeTab =
+    let tabs = [AgentsTab, ChatsTab, HistoryTab, HelpTab]
+        renderTab tab =
+            let tabName = case tab of
+                    AgentsTab -> " Agents "
+                    ChatsTab -> " Chats "
+                    HistoryTab -> " History "
+                    HelpTab -> " Help "
+                tabAttr = if tab == activeTab then activeTabAttr else inactiveTabAttr
+             in withAttr tabAttr $ txt tabName
+        tabWidgets = map renderTab tabs
+        separator = withAttr inactiveTabAttr $ txt "│"
+     in hBorder <=> hBox (intersperse separator tabWidgets)
 
 -- | Sidebar with agent and conversation lists.
 render_sidebar :: TuiState -> Widget N
@@ -133,18 +158,46 @@ render_sidebar st =
             , render_sessionList st
             ]
 
--- | Content area showing either agent info or conversation.
+-- | Content area showing content based on the current tab.
 render_contentArea :: TuiState -> Widget N
 render_contentArea st =
+    case st ^. tuiUI . currentTab of
+        AgentsTab -> renderAgentsTab st
+        ChatsTab -> renderChatsTab st
+        HistoryTab -> renderHistoryTab st
+        HelpTab -> renderHelpTab st
+
+-- | Render the Agents tab content.
+renderAgentsTab :: TuiState -> Widget N
+renderAgentsTab st =
     case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
         Just AgentListWidget -> render_agentDetail st
         Just AgentInfoWidget -> render_agentDetail st
-        Just SessionsListWidget -> render_sessionArea st
-        Just SessionViewWidget -> render_sessionArea st
+        _ -> render_agentDetail st
+
+-- | Render the Chats tab content (conversation area).
+renderChatsTab :: TuiState -> Widget N
+renderChatsTab st =
+    case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
         Just MessageEditorWidget -> render_conversationArea st
         Just ConversationListWidget -> render_conversationArea st
         Just ConversationViewWidget -> render_conversationArea st
-        Nothing -> txt "hello"
+        _ -> render_conversationArea st
+
+-- | Render the History tab content (sessions view).
+renderHistoryTab :: TuiState -> Widget N
+renderHistoryTab st =
+    case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
+        Just SessionsListWidget -> render_sessionArea st
+        Just SessionViewWidget -> render_sessionArea st
+        _ -> render_sessionArea st
+
+-- | Render the Help tab content.
+renderHelpTab :: TuiState -> Widget N
+renderHelpTab st =
+    borderWithLabel (txt " Help ") $
+        viewport AgentInfoWidget Both $
+            vBox $ map txt (st ^. tuiUI . helpContent)
 
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
@@ -642,4 +695,7 @@ tui_appAttrMap _ =
         , (activationOnDemandAttr, BrickUtil.fg Vty.yellow)
         , (activationFirstNAttr, BrickUtil.fg Vty.cyan)
         , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (activeTabAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
+        , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
         ]
+

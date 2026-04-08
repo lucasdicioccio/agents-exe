@@ -23,6 +23,7 @@ module System.Agents.TUI.Core (
     UIState (..),
     TuiState (..),
     SessionConfig (..),
+    Tab (..),
     initUIState,
     initCore,
     updateConversationSession,
@@ -45,6 +46,8 @@ module System.Agents.TUI.Core (
     tuiCore,
     tuiUI,
     eventChan,
+    currentTab,
+    helpContent,
 
     -- * Re-exports from Render
     tui_appDraw,
@@ -55,6 +58,12 @@ module System.Agents.TUI.Core (
 
     -- * Re-exports from Event
     tui_appHandleEvent,
+    cycleTabForward,
+    cycleTabBackward,
+    nextTab,
+    prevTab,
+    defaultHelpContent,
+    initHelpContent,
 
     -- * Session loading
     loadSessionFiles,
@@ -96,6 +105,15 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
 import System.Agents.TUI.Event
+    ( Trace (..)
+    , cycleTabBackward
+    , cycleTabForward
+    , defaultHelpContent
+    , initHelpContent
+    , nextTab
+    , prevTab
+    , tui_appHandleEvent
+    )
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
 
@@ -222,7 +240,8 @@ runTUIWithConfig tracer config props = do
     coreTVar <- newTVarIO core0
 
     -- Create UI state with loaded sessions and collected tools
-    let ui0 =
+    -- Also initialize help content with keyboard shortcuts
+    let ui0 = initHelpContent $
             (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
                 { _coreAgentTools = agentTools
                 }
@@ -244,3 +263,4 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+

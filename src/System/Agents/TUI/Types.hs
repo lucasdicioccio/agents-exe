@@ -49,6 +49,18 @@ data WidgetName
 type N = WidgetName
 
 -------------------------------------------------------------------------------
+-- Tab Types
+-------------------------------------------------------------------------------
+
+-- | Tabs available in the TUI interface.
+data Tab
+    = AgentsTab
+    | ChatsTab
+    | HistoryTab
+    | HelpTab
+    deriving (Show, Eq)
+
+-------------------------------------------------------------------------------
 -- Status Message Types
 -------------------------------------------------------------------------------
 
@@ -319,6 +331,10 @@ data UIState = UIState
     , _coreAgentTools :: [(AgentId, [ToolRegistration])]
     , _statusMessage :: Maybe StatusMessage
     -- ^ Current status message to display (if any)
+    , _currentTab :: Tab
+    -- ^ Currently active tab in the TUI
+    , _helpContent :: [Text]
+    -- ^ Help text content for the Help tab
     }
 
 makeLenses ''UIState
@@ -365,6 +381,8 @@ initUIState agents loadedSessions =
         , _auxiliaryTasks = []
         , _coreAgentTools = []
         , _statusMessage = Nothing
+        , _currentTab = AgentsTab
+        , _helpContent = []
         }
 
 -- | Create initial Core state.
@@ -386,3 +404,4 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+

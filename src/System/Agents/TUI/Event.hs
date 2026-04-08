@@ -49,6 +49,50 @@ import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types
+    ( AppEvent (..)
+    , AuxiliaryTask (..)
+    , Conversation (..)
+    , ConversationStatus (..)
+    , Core (..)
+    , N
+    , StatusMessage (..)
+    , StatusSeverity (..)
+    , SessionConfig (..)
+    , Tab (..)
+    , TuiAgent (..)
+    , TuiState
+    , UIState (..)
+    , WidgetName (..)
+    , agentList
+    , auxiliaryTasks
+    , conversationId
+    , conversationList
+    , conversationName
+    , conversationSession
+    , conversationStatus
+    , coreAgentTools
+    , coreBufferedMessages
+    , coreConversations
+    , corePausedConversations
+    , currentTab
+    , eventChan
+    , messageEditor
+    , ongoingConversations
+    , selectedAgentInfo
+    , sessionConfig
+    , sessionList
+    , statusMessage
+    , tuiAgentId
+    , tuiCore
+    , tuiNode
+    , tuiSlug
+    , tuiTree
+    , tuiUI
+    , uiFocusRing
+    , unreadConversations
+    , updateConversationSession
+    , zoomed
+    )
 
 -- Import Tracer for creating a no-op tracer
 import Prod.Tracer (Tracer (..), contramap)
@@ -57,6 +101,68 @@ data Trace
     = RuntimeTrace !Runtime.Trace
     | OneShotTrace !OneShot.Trace
     deriving (Show)
+
+-------------------------------------------------------------------------------
+-- Help Content
+-------------------------------------------------------------------------------
+
+-- | Default keyboard shortcuts help content.
+defaultHelpContent :: [Text.Text]
+defaultHelpContent =
+    [ "Keyboard Shortcuts:"
+    , ""
+    , "Navigation:"
+    , "  Tab          - Cycle focus forward through widgets"
+    , "  Shift+Tab    - Cycle focus backward through widgets"
+    , "  Ctrl+Z       - Toggle zoom mode for current widget"
+    , ""
+    , "Tabs:"
+    , "  Ctrl+[       - Switch to previous tab"
+    , "  Ctrl+]       - Switch to next tab"
+    , ""
+    , "Conversations:"
+    , "  Ctrl+N       - Start new conversation with selected agent"
+    , "  Ctrl+C       - Continue restored session"
+    , "  Meta+Enter   - Send message"
+    , "  Ctrl+E       - Pause/unpause conversation"
+    , ""
+    , "Session Export:"
+    , "  Ctrl+P       - Export session to markdown file"
+    , "  Ctrl+T       - View session in external viewer (chronological)"
+    , "  Ctrl+R       - View session in external viewer (reverse)"
+    , ""
+    , "Other:"
+    , "  F5           - Refresh tools for selected agent"
+    , "  Esc, Ctrl+Q  - Quit application"
+    ]
+
+-------------------------------------------------------------------------------
+-- Tab Cycling Functions
+-------------------------------------------------------------------------------
+
+-- | Get the next tab in the cycle.
+nextTab :: Tab -> Tab
+nextTab AgentsTab = ChatsTab
+nextTab ChatsTab = HistoryTab
+nextTab HistoryTab = HelpTab
+nextTab HelpTab = AgentsTab
+
+-- | Get the previous tab in the cycle.
+prevTab :: Tab -> Tab
+prevTab AgentsTab = HelpTab
+prevTab ChatsTab = AgentsTab
+prevTab HistoryTab = ChatsTab
+prevTab HelpTab = HistoryTab
+
+-- | Cycle to the next tab forward.
+cycleTabForward :: EventM N TuiState ()
+cycleTabForward = do
+    tuiUI . currentTab %= nextTab
+
+-- | Cycle to the previous tab backward.
+cycleTabBackward :: EventM N TuiState ()
+cycleTabBackward = do
+    tuiUI . currentTab %= prevTab
 
 -------------------------------------------------------------------------------
 -- Main Event Handler
@@ -79,6 +185,11 @@ tui_appHandleEvent tracer ev = do
             handleShowStatus severity text
         AppEvent AppEvent_ClearStatus ->
             handleClearStatus
+        -- Tab switching
+        VtyEvent (Vty.EvKey (Vty.KChar '[') [Vty.MCtrl]) ->
+            cycleTabBackward
+        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) ->
+            cycleTabForward
         -- VTY events
         VtyEvent (Vty.EvKey Vty.KEsc _) ->
             halt
@@ -728,3 +839,12 @@ handleSendMessage = do
                 -- Always clear the editor - user can type more messages
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
             Nothing -> pure ()
+
+-------------------------------------------------------------------------------
+-- Help Content Initialization
+-------------------------------------------------------------------------------
+
+-- | Initialize help content in UIState.
+initHelpContent :: UIState -> UIState
+initHelpContent uiState = uiState { _helpContent = defaultHelpContent }
+

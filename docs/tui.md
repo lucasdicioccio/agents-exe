@@ -1,35 +1,81 @@
 # Terminal UI (TUI)
 
-The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, and visual feedback.
+The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, and a tabbed interface for organizing different views.
 
 ## Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Agents TUI                                          [agents: 3] │
+│ Agents │ Chats │ History │ Help                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Agents                                                         │
+│  ─────────────────────────────────────────────────────────────  │
+│  file-assistant                                                 │
+│  code-reviewer                                                  │
+│  documenter                                                     │
+│                                                                 │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  🤖 file-assistant                                              │
-│  ─────────────────────────────────────────────────────────────  │
-│  > List all Python files in the current directory               │
+│  # Slug: file-assistant                                         │
+│  # Announce: A helpful file assistant                           │
+│  # Model: claude-sonnet-4-20250514                              │
 │                                                                 │
-│  I'll help you list all Python files.                           │
-│                                                                 │
-│  [Calling tool: list_files]                                     │
-│  ✓ list_files completed (0.2s)                                  │
-│                                                                 │
-│  Found 3 Python files:                                          │
-│  - main.py                                                      │
-│  - utils.py                                                     │
-│  - test_main.py                                                 │
-│                                                                 │
-│  ─────────────────────────────────────────────────────────────  │
-│  > _                                                              │
+│  # Tools:                                                       │
+│  - [A] read_file                                               │
+│  - [A] write_file                                              │
+│  - [D:bash] bash_command                                       │
 │                                                                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ [Tab] Switch  [Enter] Send  [Ctrl+C] Quit  [Ctrl+[r|t]] View MD │
+│ [Tab] Switch  [Enter] Send  [Ctrl+C] Quit  [Ctrl+[|]] Prev/Next │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Tabbed Interface
+
+The TUI now features a tabbed interface with four main tabs:
+
+| Tab | Description | Content |
+|-----|-------------|---------|
+| **Agents** | Browse and select agents | Agent list and detailed agent information |
+| **Chats** | Active conversations | Conversation list and message interface |
+| **History** | Past sessions | Session list and history view |
+| **Help** | Keyboard shortcuts | Command reference and key bindings |
+
+### Tab Navigation
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+[` | Switch to previous tab |
+| `Ctrl+]` | Switch to next tab |
+
+### Agents Tab
+
+The Agents tab displays:
+- **Left sidebar**: List of available agents
+- **Main area**: Detailed agent information including:
+  - Slug and announce text
+  - Model name
+  - Tools with activation status
+  - System prompt
+
+### Chats Tab
+
+The Chats tab is for active conversations:
+- **Left sidebar**: List of ongoing conversations with status indicators:
+  - `⟳` - Active (agent is processing)
+  - `●` - Waiting for input (unread)
+  - `⏸` - Paused
+- **Main area**: Message editor and conversation history
+
+### History Tab
+
+The History tab shows saved sessions:
+- **Left sidebar**: List of saved sessions from the session store
+- **Main area**: Session content viewer
+
+### Help Tab
+
+The Help tab displays keyboard shortcuts and command reference for quick access to all TUI functionality.
 
 ## Architecture
 
@@ -55,224 +101,130 @@ The Terminal UI provides an interactive, real-time interface for agent conversat
 
 ```haskell
 -- TUI.Types
+data Tab
+    = AgentsTab
+    | ChatsTab
+    | HistoryTab
+    | HelpTab
+    deriving (Show, Eq)
+
+data UIState = UIState
+    { _uiFocusRing :: FocusRing WidgetName
+    , _currentTab :: Tab           -- Current active tab
+    , _helpContent :: [Text]       -- Help text lines
+    , ...
+    }
+
 data TUIState = TUIState
-    { agents :: [AgentState]
-    , currentAgentIndex :: Int
-    , inputBuffer :: Text
-    , messages :: [Message]
-    , scrollOffset :: Int
-    , status :: Status
+    { _tuiCore :: TVar Core
+    , _tuiUI :: UIState
+    , _eventChan :: BChan AppEvent
+    , _sessionConfig :: SessionConfig
     }
-
-data AgentState = AgentState
-    { agentProps :: AgentTree.Props
-    , agentRuntime :: Maybe Runtime
-    , conversation :: [ConversationItem]
-    , isStreaming :: Bool
-    }
-
-data ConversationItem
-    = UserInput Text
-    | AgentOutput Text
-    | ToolCallStart Text
-    | ToolCallEnd Text Value
-    | SystemMessage Text
 ```
 
 ## Rendering
 
-### Screen Layout
+### Tab Bar Rendering
 
 ```haskell
 -- TUI.Render
-render :: TUIState -> Widget ()
-render state = 
-    vBox
-        [ renderHeader state
-        , renderAgentTabs state
-        , renderConversation state
-        , renderInput state
-        , renderFooter state
-        ]
-
-renderHeader :: TUIState -> Widget ()
-renderHeader state = 
-    withAttr headerAttr $ 
-        hBox
-            [ str " Agents TUI "
-            , fill ' '
-            , str $ " [agents: " ++ show (length $ agents state) ++ "]"
-            ]
-
-renderAgentTabs :: TUIState -> Widget ()
-renderAgentTabs state = 
-    hBox $ intersperse (str " | ") $
-        zipWith renderTab [0..] (agents state)
-  where
-    renderTab idx agent =
-        if idx == currentAgentIndex state
-            then withAttr activeTabAttr $ str $ agentName agent
-            else str $ agentName agent
+renderTabBar :: Tab -> Widget N
+renderTabBar activeTab =
+    let tabs = [AgentsTab, ChatsTab, HistoryTab, HelpTab]
+        renderTab tab =
+            let tabName = case tab of
+                    AgentsTab -> " Agents "
+                    ChatsTab -> " Chats "
+                    HistoryTab -> " History "
+                    HelpTab -> " Help "
+                tabAttr = if tab == activeTab 
+                          then activeTabAttr 
+                          else inactiveTabAttr
+             in withAttr tabAttr $ txt tabName
+     in hBox (intersperse separator $ map renderTab tabs)
 ```
 
-### Message Rendering
+### Tab-Specific Content
 
 ```haskell
-renderConversation :: TUIState -> Widget ()
-renderConversation state =
-    viewport ScrollVertical $ 
-        vBox $ map renderItem $ reverse $ take 50 $ conversation currentAgent
-  where
-    currentAgent = agents state !! currentAgentIndex state
-    
-    renderItem :: ConversationItem -> Widget ()
-    renderItem (UserInput text) =
-        withAttr userAttr $ str "> " <+> txtWrap text
-    renderItem (AgentOutput text) =
-        withAttr agentAttr $ txtWrap text
-    renderItem (ToolCallStart name) =
-        withAttr toolAttr $ str $ "[Calling tool: " ++ unpack name ++ "]"
-    renderItem (ToolCallEnd name result) =
-        withAttr toolSuccessAttr $ str $ "✓ " ++ unpack name ++ " completed"
+render_contentArea :: TuiState -> Widget N
+render_contentArea st =
+    case st ^. tuiUI . currentTab of
+        AgentsTab -> renderAgentsTab st
+        ChatsTab -> renderChatsTab st
+        HistoryTab -> renderHistoryTab st
+        HelpTab -> renderHelpTab st
 ```
 
 ## Event Handling
 
-### Input Processing
+### Tab Switching
 
 ```haskell
 -- TUI.Event
-handleEvent :: TUIState -> BrickEvent () CustomEvent -> EventM () (Next TUIState)
-handleEvent state (VtyEvent ev) = case ev of
-    -- Quit
-    EvKey (KChar 'c') [MCtrl] -> halt state
-    
-    -- Switch agents
-    EvKey KTab [] -> continue $ nextAgent state
-    EvKey KBackTab [] -> continue $ prevAgent state
-    
-    -- Scroll
-    EvKey KUp [] -> continue $ scrollUp state
-    EvKey KDown [] -> continue $ scrollDown state
-    EvKey KPageUp [] -> continue $ scrollPageUp state
-    EvKey KPageDown [] -> continue $ scrollPageDown state
-    
-    -- Send message
-    EvKey KEnter [] -> do
-        let text = inputBuffer state
-        if T.null text
-            then continue state
-            else do
-                liftIO $ sendToAgent state text
-                continue $ clearInput $ addUserMessage state text
-    
-    -- Character input
-    EvKey (KChar c) [] -> 
-        continue $ state { inputBuffer = inputBuffer state <> T.singleton c }
-    EvKey KBS [] -> 
-        continue $ state { inputBuffer = T.init (inputBuffer state) }
-    
-    _ -> continue state
+tui_appHandleEvent tracer ev = do
+    case ev of
+        -- Tab switching
+        VtyEvent (Vty.EvKey (Vty.KChar '[') [Vty.MCtrl]) ->
+            cycleTabBackward
+        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) ->
+            cycleTabForward
+        -- ...
+
+cycleTabForward :: EventM N TuiState ()
+cycleTabForward = tuiUI . currentTab %= nextTab
+
+cycleTabBackward :: EventM N TuiState ()
+cycleTabBackward = tuiUI . currentTab %= prevTab
+
+nextTab :: Tab -> Tab
+nextTab AgentsTab = ChatsTab
+nextTab ChatsTab = HistoryTab
+nextTab HistoryTab = HelpTab
+nextTab HelpTab = AgentsTab
 ```
 
-### Custom Events
+## Keyboard Shortcuts
 
-```haskell
-data CustomEvent
-    = AgentResponse AgentIndex Text
-    | ToolStarted AgentIndex Text
-    | ToolCompleted AgentIndex Text Value
-    | AgentError AgentIndex Text
-    | StreamChunk AgentIndex Text
-    | StreamComplete AgentIndex
+### Navigation
 
-eventChannel :: BChan CustomEvent
-eventChannel = newBChan 100
-```
+| Key | Action |
+|-----|--------|
+| `Tab` | Cycle focus forward through widgets |
+| `Shift+Tab` | Cycle focus backward through widgets |
+| `Ctrl+Z` | Toggle zoom mode for current widget |
 
-## Streaming Responses
+### Tabs
 
-### Real-time Updates
+| Key | Action |
+|-----|--------|
+| `Ctrl+[` | Switch to previous tab |
+| `Ctrl+]` | Switch to next tab |
 
-```haskell
-streamAgentResponse :: 
-    AgentState -> 
-    Text -> 
-    BChan CustomEvent -> 
-    IO ()
-streamAgentResponse agent prompt chan = do
-    let runtime = fromJust $ agentRuntime agent
-    
-    -- Start streaming
-    writeBChan chan $ ToolStarted idx "llm-call"
-    
-    -- Stream chunks
-    streamLLM runtime prompt $ \chunk -> do
-        writeBChan chan $ StreamChunk idx chunk
-    
-    -- Complete
-    writeBChan chan $ StreamComplete idx
-  where
-    idx = agentIndex agent
-```
+### Conversations
 
-### Handling Stream Chunks
+| Key | Action |
+|-----|--------|
+| `Ctrl+N` | Start new conversation with selected agent |
+| `Ctrl+C` | Continue restored session |
+| `Meta+Enter` | Send message |
+| `Ctrl+E` | Pause/unpause conversation |
 
-```haskell
-handleCustomEvent :: TUIState -> CustomEvent -> EventM () (Next TUIState)
-handleCustomEvent state (StreamChunk idx chunk) =
-    continue $ updateAgent idx (appendToCurrentResponse chunk) state
+### Session Export
 
-handleCustomEvent state (StreamComplete idx) =
-    continue $ updateAgent idx (finalizeResponse >> setStreaming False) state
+| Key | Action |
+|-----|--------|
+| `Ctrl+P` | Export session to markdown file |
+| `Ctrl+T` | View session in external viewer (chronological) |
+| `Ctrl+R` | View session in external viewer (reverse) |
 
-handleCustomEvent state (ToolStarted idx name) =
-    continue $ updateAgent idx (addConversationItem $ ToolCallStart name) state
+### Other
 
-handleCustomEvent state (ToolCompleted idx name result) =
-    continue $ updateAgent idx (addConversationItem $ ToolCallEnd name result) state
-```
-
-## Multi-Agent Support
-
-### Agent Selection
-
-```haskell
-nextAgent :: TUIState -> TUIState
-nextAgent state = state 
-    { currentAgentIndex = (currentAgentIndex state + 1) `mod` length (agents state) }
-
-prevAgent :: TUIState -> TUIState
-prevAgent state = state
-    { currentAgentIndex = (currentAgentIndex state - 1) `mod` length (agents state) }
-
--- Send to specific agent
-sendToAgent :: TUIState -> Text -> IO ()
-sendToAgent state text = do
-    let agent = agents state !! currentAgentIndex state
-    streamAgentResponse agent text eventChannel
-```
-
-### Agent Initialization
-
-```haskell
-initializeAgents :: [AgentTree.Props] -> IO [AgentState]
-initializeAgents propsList = do
-    forM propsList $ \props -> do
-        result <- AgentTree.withAgentTreeRuntime props $ \case
-            AgentTree.Initialized tree -> do
-                runtime <- AgentTree.getMainRuntime tree
-                return $ Right AgentState
-                    { agentProps = props
-                    , agentRuntime = Just runtime
-                    , conversation = []
-                    , isStreaming = False
-                    }
-            AgentTree.Errors errs -> return $ Left (show errs)
-        case result of
-            Right state -> return state
-            Left err -> error err
-```
+| Key | Action |
+|-----|--------|
+| `F5` | Refresh tools for selected agent |
+| `Esc`, `Ctrl+Q` | Quit application |
 
 ## Session Export and Viewing
 
@@ -353,38 +305,51 @@ Use cases:
 
 ```haskell
 -- TUI.Core
-runTUI :: SessionStore -> [AgentTree.Props] -> IO ()
-runTUI store propsList = do
-    -- Initialize agents
-    agents <- initializeAgents propsList
-    
-    -- Create initial state
-    let initialState = TUIState
-            { agents = agents
-            , currentAgentIndex = 0
-            , inputBuffer = ""
-            , scrollOffset = 0
-            , status = Ready
-            }
-    
+runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
+runTUI tracer store apiKeys propsList = do
+    let config = fileSessionConfig store apiKeys
+    runTUIWithConfig tracer config propsList
+
+runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
+runTUIWithConfig tracer config props = do
+    -- Load agent trees and create TuiAgents
+    trees <- traverse loadAgentTree props
+    let itrees = [tree | Initialized tree <- trees]
+
+    -- Create TUI agents from OS-native trees
+    let tuiAgents = map createTuiAgent itrees
+
+    -- Load existing session files
+    loadedSessions <- loadSessionFiles config.sessionStore
+
+    -- Collect tools from all agents
+    agentTools <- collectAgentTools tuiAgents
+
     -- Create event channel
-    chan <- newBChan 10
-    
-    -- Build application
+    evChan <- newBChan 100
+
+    -- Create core state
+    core0 <- initCore tuiAgents
+    coreTVar <- newTVarIO core0
+
+    -- Create UI state with help content initialized
+    let ui0 = initHelpContent $
+            (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
+                { _coreAgentTools = agentTools }
+
+    -- Create TUI state
+    let st = TuiState coreTVar ui0 evChan config
+
+    -- Build and run the app
     let app = App
-            { appDraw = render
-            , appChooseCursor = neverShowCursor
-            , appHandleEvent = handleEvent
-            , appStartEvent = return
-            , appAttrMap = const attributeMap
+            { appDraw = tui_appDraw
+            , appChooseCursor = tui_appChooseCursor
+            , appHandleEvent = tui_appHandleEvent tracer
+            , appStartEvent = tui_appStartEvent
+            , appAttrMap = tui_appAttrMap
             }
-    
-    -- Run
-    void $ customMain 
-        (V.mkVty V.defaultConfig) 
-        (Just chan) 
-        app 
-        initialState
+
+    void $ customMainWithDefaultVty (Just evChan) app st
 ```
 
 ## Styling
@@ -392,57 +357,36 @@ runTUI store propsList = do
 ### Attributes
 
 ```haskell
-attributeMap :: AttrMap
-attributeMap = attrMap V.defAttr
-    [ (headerAttr, fg white `on` blue)
-    , (activeTabAttr, fg black `on` yellow)
-    , (inactiveTabAttr, fg white)
-    , (userAttr, fg cyan)
-    , (agentAttr, fg green)
-    , (toolAttr, fg yellow)
-    , (toolSuccessAttr, fg green)
-    , (toolErrorAttr, fg red)
-    , (systemAttr, fg magenta)
-    , (inputAttr, fg white)
-    ]
+tui_appAttrMap :: TuiState -> AttrMap
+tui_appAttrMap _ =
+    attrMap Vty.defAttr
+        [ (headerAttr, fg white `on` blue)
+        , (activeTabAttr, fg black `on` brightWhite `withStyle` bold)
+        , (inactiveTabAttr, fg white `on` blue)
+        , (userAttr, fg cyan)
+        , (agentAttr, fg green)
+        , (toolAttr, fg yellow)
+        , (toolSuccessAttr, fg green)
+        , (toolErrorAttr, fg red)
+        , (systemAttr, fg magenta)
+        , (inputAttr, fg white)
+        ]
 ```
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch to next agent |
-| `Shift+Tab` | Switch to previous agent |
-| `Enter` | Send message |
-| `Ctrl+C` | Quit |
-| `Ctrl+R` | Refresh tools |
-| `Ctrl+P` | Export session to markdown file |
-| `Ctrl+T` | View session in chronological order (oldest first) |
-| `Ctrl+R` | View session in antichronological order (newest first) |
-| `Up/Down` | Scroll conversation |
-| `PageUp/PageDown` | Scroll by page |
-| `Home` | Scroll to top |
-| `End` | Scroll to bottom |
 
 ## Status Bar
 
 ```haskell
-renderFooter :: TUIState -> Widget ()
-renderFooter state = 
-    withAttr footerAttr $ 
-        hBox
-            [ str $ show (status state)
-            , fill ' '
-            , str "[Tab] Switch  [Enter] Send  [Ctrl+C] Quit"
-            ]
+render_statusBar :: Maybe StatusMessage -> Widget N
+render_statusBar Nothing = emptyWidget
+render_statusBar (Just msg) =
+    withAttr (statusAttr msg.statusSeverity) $
+        txt $ " " <> statusText msg
 
-data Status = Ready | Streaming | ToolRunning Text | Error Text
-
-instance Show Status where
-    show Ready = "Ready"
-    show Streaming = "Streaming..."
-    show (ToolRunning name) = "Running: " ++ unpack name
-    show (Error msg) = "Error: " ++ unpack msg
+data StatusSeverity
+    = StatusInfo
+    | StatusWarning
+    | StatusError
+    deriving (Show, Eq)
 ```
 
 ## Best Practices
@@ -458,6 +402,7 @@ instance Show Status where
 1. **Visual feedback**: Show typing indicators and tool calls
 2. **Error handling**: Display errors without crashing
 3. **Help text**: Always show keyboard shortcuts
+4. **Tab organization**: Group related functionality into logical tabs
 
 ### Multi-Agent UI
 
@@ -476,11 +421,11 @@ customHandleEvent state ev = case ev of
     VtyEvent (EvKey (KChar 's') [MCtrl]) -> do
         liftIO $ saveSession state
         continue $ state { status = Ready }
-    
+
     VtyEvent (EvKey (KChar 'l') [MCtrl]) -> do
         newState <- liftIO $ loadSession state
         continue newState
-    
+
     _ -> handleEvent state ev  -- Fall through to default
 ```
 
@@ -488,7 +433,7 @@ customHandleEvent state ev = case ev of
 
 ```haskell
 customProgressBar :: Float -> Widget ()
-customProgressBar progress = 
+customProgressBar progress =
     let width = 20
         filled = round (progress * fromIntegral width)
         bar = replicate filled '█' ++ replicate (width - filled) '░'
