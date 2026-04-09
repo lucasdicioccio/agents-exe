@@ -202,7 +202,8 @@ renderHelpTab :: TuiState -> Widget N
 renderHelpTab st =
     borderWithLabel (txt " Help ") $
         viewport AgentInfoWidget Both $
-            vBox $ map txt (st ^. tuiUI . helpContent)
+            vBox $
+                map txt (st ^. tuiUI . helpContent)
 
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
@@ -735,4 +736,3 @@ tui_appAttrMap _ =
         , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
         , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
         ]
-

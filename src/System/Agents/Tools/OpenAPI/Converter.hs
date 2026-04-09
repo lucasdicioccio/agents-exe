@@ -617,7 +617,7 @@ getRequiredParams op =
 
 toolParamProperties :: InternalTool -> [ParamProperty]
 toolParamProperties apiTool =
-        (map (propertyToParamProperty requiredSet) $ Map.toList (paramsProperties (toolParameters apiTool)))
+    (map (propertyToParamProperty requiredSet) $ Map.toList (paramsProperties (toolParameters apiTool)))
   where
     -- Build a set of required parameter names for O(1) lookup
     requiredSet :: Set Text
