@@ -141,6 +141,15 @@ defaultPresets =
                 , presetApiKeyId = "ollama-key"
                 }
             )
+        ,
+            ( "kimi-k2.5"
+            , ModelPreset
+                { presetFlavor = "KimiV1"
+                , presetModelUrl = "https://api.moonshot.ai/v1"
+                , presetModelName = "kimi-k2.5"
+                , presetApiKeyId = "kimi-key"
+                }
+            )
         ]
 
 {- | Get a formatted list of available presets for help text
@@ -485,3 +494,4 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
+
