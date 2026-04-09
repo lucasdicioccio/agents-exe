@@ -54,4 +54,3 @@ readOpenApiKeysFile keysPath =
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
-

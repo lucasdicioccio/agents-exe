@@ -104,16 +104,16 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
-import System.Agents.TUI.Event
-    ( Trace (..)
-    , cycleTabBackward
-    , cycleTabForward
-    , defaultHelpContent
-    , initHelpContent
-    , nextTab
-    , prevTab
-    , tui_appHandleEvent
-    )
+import System.Agents.TUI.Event (
+    Trace (..),
+    cycleTabBackward,
+    cycleTabForward,
+    defaultHelpContent,
+    initHelpContent,
+    nextTab,
+    prevTab,
+    tui_appHandleEvent,
+ )
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
 
@@ -241,10 +241,11 @@ runTUIWithConfig tracer config props = do
 
     -- Create UI state with loaded sessions and collected tools
     -- Also initialize help content with keyboard shortcuts
-    let ui0 = initHelpContent $
-            (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
-                { _coreAgentTools = agentTools
-                }
+    let ui0 =
+            initHelpContent $
+                (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
+                    { _coreAgentTools = agentTools
+                    }
 
     -- Create TUI state with session configuration
     let st = TuiState coreTVar ui0 evChan config
@@ -263,4 +264,3 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-

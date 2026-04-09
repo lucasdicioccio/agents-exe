@@ -48,51 +48,52 @@ import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (.
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.TUI.Types
-    ( AppEvent (..)
-    , AuxiliaryTask (..)
-    , Conversation (..)
-    , ConversationStatus (..)
-    , Core (..)
-    , N
-    , StatusMessage (..)
-    , StatusSeverity (..)
-    , SessionConfig (..)
-    , Tab (..)
-    , TuiAgent (..)
-    , TuiState
-    , UIState (..)
-    , WidgetName (..)
-    , agentList
-    , auxiliaryTasks
-    , conversationId
-    , conversationList
-    , conversationName
-    , conversationSession
-    , conversationStatus
-    , coreAgentTools
-    , coreBufferedMessages
-    , coreConversations
-    , corePausedConversations
-    , currentTab
-    , eventChan
-    , messageEditor
-    , ongoingConversations
-    , selectedAgentInfo
-    , sessionConfig
-    , sessionList
-    , statusMessage
-    , tuiAgentId
-    , tuiCore
-    , tuiNode
-    , tuiSlug
-    , tuiTree
-    , tuiUI
-    , uiFocusRing
-    , unreadConversations
-    , updateConversationSession
-    , zoomed
-    )
+import System.Agents.TUI.Types (
+    AppEvent (..),
+    AuxiliaryTask (..),
+    Conversation (..),
+    ConversationStatus (..),
+    Core (..),
+    N,
+    SessionConfig (..),
+    StatusMessage (..),
+    StatusSeverity (..),
+    Tab (..),
+    TuiAgent (..),
+    TuiState,
+    UIState (..),
+    WidgetName (..),
+    agentList,
+    auxiliaryTasks,
+    conversationId,
+    conversationList,
+    conversationName,
+    conversationSession,
+    conversationStatus,
+    coreAgentTools,
+    coreBufferedMessages,
+    coreConversations,
+    corePausedConversations,
+    currentTab,
+    eventChan,
+    messageEditor,
+    ongoingConversations,
+    selectedAgentInfo,
+    sessionConfig,
+    sessionList,
+    statusMessage,
+    tuiAgentId,
+    tuiCore,
+    tuiNode,
+    tuiSlug,
+    tuiTree,
+    tuiUI,
+    uiBufferedMessages,
+    uiFocusRing,
+    unreadConversations,
+    updateConversationSession,
+    zoomed,
+ )
 
 -- Import Tracer for creating a no-op tracer
 import Prod.Tracer (Tracer (..), contramap)
@@ -498,6 +499,10 @@ handleHeartbeat = do
         Just agent -> refreshToolsForAgent agent
         Nothing -> pure ()
 
+    -- Sync buffered messages from Core to UIState for rendering
+    buffered <- liftIO $ readTVarIO (coreBufferedMessages coreState)
+    tuiUI . uiBufferedMessages .= buffered
+
     -- Auto-clear status messages after 5 seconds
     mStatus <- use (tuiUI . statusMessage)
     case mStatus of
@@ -846,5 +851,4 @@ handleSendMessage = do
 
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
-initHelpContent uiState = uiState { _helpContent = defaultHelpContent }
-
+initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
