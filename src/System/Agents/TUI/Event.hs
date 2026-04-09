@@ -88,6 +88,7 @@ import System.Agents.TUI.Types
     , tuiSlug
     , tuiTree
     , tuiUI
+    , uiBufferedMessages
     , uiFocusRing
     , unreadConversations
     , updateConversationSession
@@ -497,6 +498,10 @@ handleHeartbeat = do
     case selectedAgent of
         Just agent -> refreshToolsForAgent agent
         Nothing -> pure ()
+
+    -- Sync buffered messages from Core to UIState for rendering
+    buffered <- liftIO $ readTVarIO (coreBufferedMessages coreState)
+    tuiUI . uiBufferedMessages .= buffered
 
     -- Auto-clear status messages after 5 seconds
     mStatus <- use (tuiUI . statusMessage)

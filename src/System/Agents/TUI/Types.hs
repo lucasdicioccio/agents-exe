@@ -335,6 +335,8 @@ data UIState = UIState
     -- ^ Currently active tab in the TUI
     , _helpContent :: [Text]
     -- ^ Help text content for the Help tab
+    , _uiBufferedMessages :: Map ConversationId [Text]
+    -- ^ Copy of buffered messages from Core for UI rendering
     }
 
 makeLenses ''UIState
@@ -383,6 +385,7 @@ initUIState agents loadedSessions =
         , _statusMessage = Nothing
         , _currentTab = AgentsTab
         , _helpContent = []
+        , _uiBufferedMessages = Map.empty
         }
 
 -- | Create initial Core state.
