@@ -12,6 +12,7 @@ import Brick.Widgets.Edit (renderEditor)
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.List (intersperse)
+import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -96,6 +97,10 @@ activeTabAttr = attrName "activeTab"
 inactiveTabAttr :: AttrName
 inactiveTabAttr = attrName "inactiveTab"
 
+-- | Attribute for queued messages.
+queuedMessageAttr :: AttrName
+queuedMessageAttr = attrName "queuedMessage"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -151,7 +156,7 @@ renderTabBar activeTab =
 -- | Sidebar with agent and conversation lists.
 render_sidebar :: TuiState -> Widget N
 render_sidebar st =
-    hLimit 25 $
+    hLimit 30 $
         vBox
             [ render_agentList st
             , render_conversationList st
@@ -197,7 +202,8 @@ renderHelpTab :: TuiState -> Widget N
 renderHelpTab st =
     borderWithLabel (txt " Help ") $
         viewport AgentInfoWidget Both $
-            vBox $ map txt (st ^. tuiUI . helpContent)
+            vBox $
+                map txt (st ^. tuiUI . helpContent)
 
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
@@ -313,7 +319,10 @@ render_conversationItem st _ conv =
             Nothing -> 0
             Just session -> length session.turns
         turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        fullText = baseText <> turnSuffix
+        -- Add queued message count if any
+        queueCount = getQueuedMessageCount st conv
+        queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
+        fullText = baseText <> turnSuffix <> queueSuffix
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
                 withAttr pausedAttr $ txt $ " " <> fullText
@@ -321,6 +330,14 @@ render_conversationItem st _ conv =
      in widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
+
+-- | Get the number of queued messages for a conversation.
+getQueuedMessageCount :: TuiState -> Conversation -> Int
+getQueuedMessageCount st conv =
+    let buffered = st ^. tuiUI . uiBufferedMessages
+     in case Map.lookup (conversationId conv) buffered of
+            Nothing -> 0
+            Just msgs -> length msgs
 
 -- | Render the sessions list.
 render_sessionList :: TuiState -> Widget N
@@ -426,7 +443,16 @@ render_conversationView st =
         case listSelectedElement (st ^. tuiUI . conversationList) of
             Nothing -> txt "No conversation selected"
             Just (_, conv) ->
-                viewport ConversationViewWidget Both $ render_session (conversationSession conv) (st ^. tuiUI . ongoingConversations)
+                let queuedMsgs = getQueuedMessages st conv
+                 in viewport ConversationViewWidget Both $ render_session (conversationSession conv) (st ^. tuiUI . ongoingConversations) queuedMsgs
+
+-- | Get the list of queued messages for a conversation.
+getQueuedMessages :: TuiState -> Conversation -> [Text]
+getQueuedMessages st conv =
+    let buffered = st ^. tuiUI . uiBufferedMessages
+     in case Map.lookup (conversationId conv) buffered of
+            Nothing -> []
+            Just msgs -> reverse msgs -- Reverse to show oldest first
 
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
@@ -437,16 +463,27 @@ render_sessionView st =
         case listSelectedElement (st ^. tuiUI . sessionList) of
             Nothing -> txt "No session selected"
             Just (_, session) ->
-                viewport SessionViewWidget Both $ render_session (Just session) (st ^. tuiUI . ongoingConversations)
+                viewport SessionViewWidget Both $ render_session (Just session) (st ^. tuiUI . ongoingConversations) []
 
 -- | Render a session's turns.
-render_session :: Maybe Session -> Set ConversationId -> Widget N
-render_session Nothing _ =
+render_session :: Maybe Session -> Set ConversationId -> [Text] -> Widget N
+render_session Nothing _ _ =
     vBox $ [txt "session not started yet"]
-render_session (Just session) _ongoingConvs =
+render_session (Just session) _ongoingConvs queuedMsgs =
     vBox $
-        [render_session_usage session]
+        [render_queued_messages queuedMsgs]
+            ++ [render_session_usage session]
             ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+
+-- | Render queued messages for a conversation.
+render_queued_messages :: [Text] -> Widget N
+render_queued_messages [] = emptyWidget
+render_queued_messages msgs =
+    withAttr queuedMessageAttr $
+        vBox $
+            [txt "Queued messages:"]
+                ++ map (\m -> txt $ "  ▶ " <> Text.take 60 m) msgs
+                ++ [txt ""]
 
 -- | Render total session usage (tokens if available, else bytes) and turn count.
 render_session_usage :: Session -> Widget N
@@ -697,5 +734,5 @@ tui_appAttrMap _ =
         , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (activeTabAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
         , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
+        , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
         ]
-

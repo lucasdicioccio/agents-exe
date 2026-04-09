@@ -446,36 +446,36 @@ registerOpenAPITool toolbox tool =
         -- Create the tool handler that uses the mapping
         runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
         runFunc tracer ctx argz =
-          createToolHandler toolbox tool (contramap OpenAPIToolboxTrace tracer) ctx argz
+            createToolHandler toolbox tool (contramap OpenAPIToolboxTrace tracer) ctx argz
 
         -- Create the Tool
         toolDef0 =
-          IOTool $
-            IOScriptDescription
-              { ioSlug = OpenAI.getToolName llmName
-              , ioDescription = OpenAPI.toolDescription tool
-              }
+            IOTool $
+                IOScriptDescription
+                    { ioSlug = OpenAI.getToolName llmName
+                    , ioDescription = OpenAPI.toolDescription tool
+                    }
 
         tool' =
-          ToolBase.Tool
-            { ToolBase.toolDef = toolDef0
-            , ToolBase.toolRun = runFunc
-            }
+            ToolBase.Tool
+                { ToolBase.toolDef = toolDef0
+                , ToolBase.toolRun = runFunc
+                }
 
         -- Find function - matches on the normalized LLM name
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-                if call.callToolName == getToolName llmName
-                    then Just $ mapToolResult (const call) tool'
-                    else Nothing
-      in
+            if call.callToolName == getToolName llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+     in
         Right $
-          ToolRegistration
-            { innerTool = mapToolResult (const ()) tool'
-            , declareTool = toolDescription
-            , findTool = find
-            , toolActivation = OpenAPIToolbox.openApiActivation toolbox
-            }
+            ToolRegistration
+                { innerTool = mapToolResult (const ()) tool'
+                , declareTool = toolDescription
+                , findTool = find
+                , toolActivation = OpenAPIToolbox.openApiActivation toolbox
+                }
 
 {- | Register all tools from an OpenAPI toolbox.
 
@@ -586,7 +586,7 @@ registerPostgRESTool toolbox tool =
         -- Create the tool handler
         runFunc :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
         runFunc tracer ctx argz =
-          PostgRESToolbox.createToolHandler toolbox tool (Prod.contramap PostgRESToolboxTrace tracer) ctx argz
+            PostgRESToolbox.createToolHandler toolbox tool (Prod.contramap PostgRESToolboxTrace tracer) ctx argz
 
         -- Create the Tool definition
         toolDef0 =
@@ -608,7 +608,6 @@ registerPostgRESTool toolbox tool =
             if call.callToolName == getToolName llmName
                 then Just $ mapToolResult (const call) tool'
                 else Nothing
-
      in Right $
             ToolRegistration
                 { innerTool = mapToolResult (const ()) tool'
