@@ -943,6 +943,13 @@ parseSpecOptions =
 parseNewCommand :: Parser Command
 parseNewCommand = New <$> parseNewOptions
 
+-- | Help footer for the new command listing available presets
+newCommandFooter :: String
+newCommandFooter =
+    "Available presets for 'new agent': "
+        ++ NewCmd.formatPresetListHelp
+        ++ ". The preset configures the provider URL, default model, and API key reference."
+
 parseNewOptions :: Parser NewCmd.NewOptions
 parseNewOptions =
     NewCmd.NewOptions
@@ -1138,7 +1145,9 @@ parseProgOptions argparserargs =
                     "new"
                     ( info
                         parseNewCommand
-                        (progDesc "Create new agent or tool scaffolding")
+                        (progDesc "Create new agent or tool scaffolding"
+                            <> footer newCommandFooter
+                        )
                     )
                 <> command
                     "tool-call"
@@ -1283,3 +1292,4 @@ makeHttpJsonTrace baseTracer url = do
 maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
+
