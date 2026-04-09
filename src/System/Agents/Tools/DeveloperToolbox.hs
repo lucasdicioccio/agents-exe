@@ -1128,20 +1128,22 @@ executeShowSpec toolbox specName = do
 
 -- | Default developer toolbox configuration for agent templates.
 defaultDeveloperToolboxDescription :: BuiltinToolboxDescription
-defaultDeveloperToolboxDescription = DeveloperToolbox $ DeveloperToolboxDescription
-    { developerToolboxName = "developer"
-    , developerToolboxDescription = "Tools for developing agents and tools"
-    , developerToolboxCapabilities =
-        [ DevToolValidateTool
-        , DevToolScaffoldAgent
-        , DevToolScaffoldTool
-        , DevToolShowSpec
-        , DevToolValidateAgent
-        , DevToolCreateAgent
-        , DevToolCreateTool
-        ]
-    , developerToolboxActivation = Nothing  -- Uses default: AlwaysActivated
-    }
+defaultDeveloperToolboxDescription =
+    DeveloperToolbox $
+        DeveloperToolboxDescription
+            { developerToolboxName = "developer"
+            , developerToolboxDescription = "Tools for developing agents and tools"
+            , developerToolboxCapabilities =
+                [ DevToolValidateTool
+                , DevToolScaffoldAgent
+                , DevToolScaffoldTool
+                , DevToolShowSpec
+                , DevToolValidateAgent
+                , DevToolCreateAgent
+                , DevToolCreateTool
+                ]
+            , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
+            }
 
 -- | Create an agent from a template
 makeAgentTemplate :: Text -> Text -> Agent
@@ -1491,4 +1493,3 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
-

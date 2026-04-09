@@ -42,26 +42,28 @@ import System.Agents.Base (
     Agent (..),
     AgentDescription (..),
     BuiltinToolboxDescription (..),
-    DeveloperToolboxDescription (..),
     DeveloperToolCapability (..),
+    DeveloperToolboxDescription (..),
  )
 
 -- | Default developer toolbox configuration for new agents.
 defaultDeveloperToolbox :: BuiltinToolboxDescription
-defaultDeveloperToolbox = DeveloperToolbox $ DeveloperToolboxDescription
-    { developerToolboxName = "developer"
-    , developerToolboxDescription = "Tools for developing agents and tools"
-    , developerToolboxCapabilities =
-        [ DevToolValidateTool
-        , DevToolScaffoldAgent
-        , DevToolScaffoldTool
-        , DevToolShowSpec
-        , DevToolValidateAgent
-        , DevToolCreateAgent
-        , DevToolCreateTool
-        ]
-    , developerToolboxActivation = Nothing  -- Uses default: AlwaysActivated
-    }
+defaultDeveloperToolbox =
+    DeveloperToolbox $
+        DeveloperToolboxDescription
+            { developerToolboxName = "developer"
+            , developerToolboxDescription = "Tools for developing agents and tools"
+            , developerToolboxCapabilities =
+                [ DevToolValidateTool
+                , DevToolScaffoldAgent
+                , DevToolScaffoldTool
+                , DevToolShowSpec
+                , DevToolValidateAgent
+                , DevToolCreateAgent
+                , DevToolCreateTool
+                ]
+            , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
+            }
 
 -- | Model preset configurations
 data ModelPreset = ModelPreset
@@ -517,4 +519,3 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
-
