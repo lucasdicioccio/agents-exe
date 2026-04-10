@@ -43,6 +43,8 @@ data WidgetName
     | ConversationViewWidget
     | SessionViewWidget
     | AgentInfoWidget
+    | -- | For viewport scrolling during turn navigation
+      TurnNavigationWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -78,6 +80,23 @@ data StatusMessage = StatusMessage
     , statusTimestamp :: UTCTime
     }
     deriving (Show)
+
+-------------------------------------------------------------------------------
+-- Turn Navigation Types
+-------------------------------------------------------------------------------
+
+-- | State for turn-by-turn navigation
+data TurnNavigationState = TurnNavigationState
+    { _navSession :: Session
+    -- ^ The session being navigated
+    , _navSelectedTurnIndex :: Int
+    -- ^ Currently selected turn index (0-based)
+    , _navTotalTurns :: Int
+    -- ^ Total number of turns for display
+    }
+    deriving (Show)
+
+makeLenses ''TurnNavigationState
 
 -------------------------------------------------------------------------------
 -- Application Events
@@ -339,6 +358,8 @@ data UIState = UIState
     -- ^ Copy of buffered messages from Core for UI rendering
     , _quitConfirmationPending :: Bool
     -- ^ Whether the user has pressed Ctrl+Q once and needs to confirm
+    , _turnNavigation :: Maybe TurnNavigationState
+    -- ^ When Just, we are in turn navigation mode
     }
 
 makeLenses ''UIState
@@ -368,7 +389,7 @@ initUIState agents loadedSessions =
         { _uiFocusRing =
             focusRing
                 [ AgentListWidget
-                , ConversationListWidget
+                , AgentInfoWidget
                 , SessionsListWidget
                 , MessageEditorWidget
                 , SessionViewWidget
@@ -389,6 +410,7 @@ initUIState agents loadedSessions =
         , _helpContent = []
         , _uiBufferedMessages = Map.empty
         , _quitConfirmationPending = False
+        , _turnNavigation = Nothing
         }
 
 -- | Create initial Core state.

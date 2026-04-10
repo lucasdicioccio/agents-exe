@@ -11,14 +11,14 @@ module System.Agents.TUI.Event where
 
 import Brick
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
-import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusSetCurrent)
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusSetCurrent, focusRing)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens (to, use, (%=), (.=))
+import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Map.Strict (Map)
@@ -60,6 +60,7 @@ import System.Agents.TUI.Types (
     Tab (..),
     TuiAgent (..),
     TuiState,
+    TurnNavigationState (..),
     UIState (..),
     WidgetName (..),
     agentList,
@@ -76,6 +77,9 @@ import System.Agents.TUI.Types (
     currentTab,
     eventChan,
     messageEditor,
+    navSelectedTurnIndex,
+    navSession,
+    navTotalTurns,
     ongoingConversations,
     quitConfirmationPending,
     selectedAgentInfo,
@@ -88,6 +92,7 @@ import System.Agents.TUI.Types (
     tuiSlug,
     tuiTree,
     tuiUI,
+    turnNavigation,
     uiBufferedMessages,
     uiFocusRing,
     unreadConversations,
@@ -134,6 +139,12 @@ defaultHelpContent =
     , "  Meta+Enter   - Send message"
     , "  Ctrl+E       - Pause/unpause conversation"
     , ""
+    , "Session Navigation & Forking:"
+    , "  Enter        - Enter turn navigation mode (when on conversation)"
+    , "  Up/Down      - Navigate between turns (in navigation mode)"
+    , "  F            - Fork conversation at selected turn"
+    , "  Enter/Esc    - Exit turn navigation mode"
+    , ""
     , "Session Export:"
     , "  Ctrl+P       - Export session to markdown file"
     , "  Ctrl+T       - View session in external viewer (chronological)"
@@ -143,6 +154,77 @@ defaultHelpContent =
     , "  F5           - Refresh tools for selected agent"
     , "  Ctrl+Q       - Quit application (press twice to confirm)"
     ]
+
+-------------------------------------------------------------------------------
+-- Focus Ring Management
+-------------------------------------------------------------------------------
+
+-- | The base widgets that are always present in the focus ring.
+-- These correspond to the main navigation lists.
+baseFocusWidgets :: [WidgetName]
+baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
+
+-- | Get the extra tab-specific widgets for a given tab.
+-- These widgets are added to the focus ring when the corresponding tab is active.
+tabSpecificWidgets :: Tab -> [WidgetName]
+tabSpecificWidgets AgentsTab = [AgentInfoWidget]
+tabSpecificWidgets ChatsTab = [MessageEditorWidget, ConversationViewWidget]
+tabSpecificWidgets HistoryTab = [SessionViewWidget]
+tabSpecificWidgets HelpTab = []
+
+-- | Build a focus ring for a given tab.
+-- The ring includes base widgets plus tab-specific widgets inserted appropriately.
+-- The focus ring order is designed so that pressing Tab from a base widget
+-- will first visit the tab-specific widget(s) before moving to the next base widget.
+buildFocusRingForTab :: Tab -> FocusRing WidgetName
+buildFocusRingForTab tab =
+    -- Order: base widget, then its tab-specific widget(s), then next base widget, etc.
+    case tab of
+        AgentsTab ->
+            focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
+        ChatsTab ->
+            focusRing [ConversationListWidget, MessageEditorWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+        HistoryTab ->
+            -- SessionsListWidget -> AgentInfoWidget -> AgentListWidget -> ConversationListWidget
+            focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
+        HelpTab ->
+            -- Just base widgets in default order
+            focusRing baseFocusWidgets
+
+-- | Get the default (entry) widget for a tab.
+-- This is the widget that should receive focus when switching to this tab.
+tabEntryWidget :: Tab -> WidgetName
+tabEntryWidget AgentsTab = AgentListWidget
+tabEntryWidget ChatsTab = ConversationListWidget
+tabEntryWidget HistoryTab = SessionsListWidget
+tabEntryWidget HelpTab = AgentListWidget  -- Default to agent list for help
+
+-- | Build a focus ring for a tab, attempting to preserve the current focus if valid.
+-- If the current focus is not in the new tab's focus ring, falls back to the tab's entry widget.
+buildFocusRingForTabPreserving :: Tab -> Maybe WidgetName -> FocusRing WidgetName
+buildFocusRingForTabPreserving tab mCurrentFocus =
+    let newRing = buildFocusRingForTab tab
+        -- Check if current focus is valid in the new ring
+        validFocus = case mCurrentFocus of
+            Just wf | wf `elem` focusRingElements newRing -> Just wf
+            _ -> Nothing
+        -- Start with either the preserved focus or the tab's entry widget
+        startFocus = case validFocus of
+            Just wf -> wf
+            Nothing -> tabEntryWidget tab
+    in focusSetCurrent startFocus newRing
+
+-- | Get all elements in a focus ring.
+focusRingElements :: FocusRing WidgetName -> [WidgetName]
+focusRingElements fr = 
+    -- FocusRing is a circular structure, we extract elements by iterating
+    go (focusSetCurrent (tabEntryWidget AgentsTab) fr) []
+  where
+    go ring acc =
+        case focusGetCurrent ring of
+            Just w | w `elem` acc -> reverse acc  -- Completed a cycle
+            Just w -> go (focusNext ring) (w : acc)
+            Nothing -> reverse acc
 
 -------------------------------------------------------------------------------
 -- Tab Cycling Functions
@@ -163,27 +245,40 @@ prevTab HistoryTab = ChatsTab
 prevTab HelpTab = HistoryTab
 
 -- | Cycle to the next tab forward.
+-- Also updates the focus ring to match the new tab's widgets.
 cycleTabForward :: EventM N TuiState ()
 cycleTabForward = do
-    tuiUI . currentTab %= nextTab
+    current <- use (tuiUI . currentTab)
+    let next = nextTab current
+    tuiUI . currentTab .= next
+    -- Update focus ring for the new tab
+    mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
 
 -- | Cycle to the previous tab backward.
+-- Also updates the focus ring to match the new tab's widgets.
 cycleTabBackward :: EventM N TuiState ()
 cycleTabBackward = do
-    tuiUI . currentTab %= prevTab
+    current <- use (tuiUI . currentTab)
+    let prev = prevTab current
+    tuiUI . currentTab .= prev
+    -- Update focus ring for the new tab
+    mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    tuiUI . uiFocusRing .= buildFocusRingForTabPreserving prev mCurrentFocus
 
 -------------------------------------------------------------------------------
 -- Navigation Helpers
 -------------------------------------------------------------------------------
 
--- | Switch to the Chats tab and focus the message editor.
--- This is used when starting or opening a conversation.
+{- | Switch to the Chats tab and focus the message editor.
+This is used when starting or opening a conversation.
+-}
 switchToChatsAndFocusMessage :: EventM N TuiState ()
 switchToChatsAndFocusMessage = do
     -- Switch to Chats tab
     tuiUI . currentTab .= ChatsTab
-    -- Focus the message editor
-    tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
+    -- Build focus ring for ChatsTab and set focus to MessageEditorWidget
+    tuiUI . uiFocusRing .= focusSetCurrent MessageEditorWidget (buildFocusRingForTab ChatsTab)
     -- Ensure zoom mode is off for better visibility
     tuiUI . zoomed .= False
 
@@ -215,6 +310,109 @@ resetQuitConfirmation = do
 -- | Main event handler for the TUI application.
 tui_appHandleEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
 tui_appHandleEvent tracer ev = do
+    -- Check if we're in turn navigation mode
+    mNavState <- use (tuiUI . turnNavigation)
+    case mNavState of
+        Just navState -> handleTurnNavigationEvent tracer navState ev
+        Nothing -> handleNormalEvent tracer ev
+
+-- | Handle events when in turn navigation mode.
+handleTurnNavigationEvent :: Tracer IO Trace -> TurnNavigationState -> BrickEvent N AppEvent -> EventM N TuiState ()
+handleTurnNavigationEvent tracer navState ev =
+    case ev of
+        -- Application events pass through
+        AppEvent AppEvent_Heartbeat ->
+            handleHeartbeat
+        AppEvent (AppEvent_AgentStepProgrress convId sess) ->
+            handleConversationUpdated convId sess
+        AppEvent (AppEvent_AgentNeedsInput convId) ->
+            handleConversationNeedsInput convId
+        AppEvent (AppEvent_AgentTrace _) ->
+            pure ()
+        AppEvent (AppEvent_ShowStatus severity text) ->
+            handleShowStatus severity text
+        AppEvent AppEvent_ClearStatus ->
+            handleClearStatus
+        -- Exit navigation mode with Enter
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            tuiUI . turnNavigation .= Nothing
+            showStatus StatusInfo "Exited turn navigation"
+            resetQuitConfirmation
+
+        -- Also allow Esc to exit
+        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
+            tuiUI . turnNavigation .= Nothing
+            showStatus StatusInfo "Exited turn navigation"
+            resetQuitConfirmation
+
+        -- Navigate up (to earlier turns)
+        VtyEvent (Vty.EvKey Vty.KUp []) -> do
+            let currentIdx = navState ^. navSelectedTurnIndex
+                newIdx = max 0 (currentIdx - 1)
+            tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
+
+        -- Navigate down (to later turns)
+        VtyEvent (Vty.EvKey Vty.KDown []) -> do
+            let currentIdx = navState ^. navSelectedTurnIndex
+                maxIdx = (navState ^. navTotalTurns) - 1
+                newIdx = min maxIdx (currentIdx + 1)
+            tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
+
+        -- Fork at current turn
+        VtyEvent (Vty.EvKey (Vty.KChar 'f') []) -> do
+            handleForkAtTurn tracer navState
+
+        -- Fork at current turn (uppercase F)
+        VtyEvent (Vty.EvKey (Vty.KChar 'F') []) -> do
+            handleForkAtTurn tracer navState
+
+        -- Ignore other events in navigation mode
+        _ -> pure ()
+
+-- | Fork a new conversation at the selected turn.
+handleForkAtTurn :: Tracer IO Trace -> TurnNavigationState -> EventM N TuiState ()
+handleForkAtTurn tracer navState = do
+    let session = navState ^. navSession
+        selectedIdx = navState ^. navSelectedTurnIndex
+        originalSessionId = session.sessionId
+
+    -- Create forked session with dropping unwanted turns
+    let turnsToKeep = drop selectedIdx session.turns
+
+    -- Generate new session ID and turn ID
+    newSessionId' <- liftIO newSessionId
+    newTurnId' <- liftIO newTurnId
+
+    let forkedSession =
+            Session
+                { turns = turnsToKeep
+                , sessionId = newSessionId'
+                , forkedFromSessionId = Just originalSessionId
+                , turnId = newTurnId'
+                }
+
+    -- Create a new conversation with this session
+    mAgent <- use (tuiUI . agentList . to listSelectedElement)
+    case mAgent of
+        Just (_, baseTuiAgent) -> do
+            -- Start conversation with forked session
+            runConversation tracer baseTuiAgent forkedSession
+
+            -- Show status
+            showStatus StatusInfo $
+                "Forked at turn "
+                    <> Text.pack (show selectedIdx)
+                    <> " - New conversation @"
+                    <> tuiSlug baseTuiAgent
+
+            -- Exit navigation mode
+            tuiUI . turnNavigation .= Nothing
+        Nothing ->
+            showStatus StatusError "No agent selected for forked conversation"
+
+-- | Handle normal (non-navigation) events.
+handleNormalEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
+handleNormalEvent tracer ev = do
     case ev of
         -- Application events
         AppEvent AppEvent_Heartbeat ->
@@ -287,9 +485,9 @@ tui_appHandleEvent tracer ev = do
                 Just MessageEditorWidget ->
                     handleMessageEditorEvent ev
                 Just ConversationViewWidget ->
-                    handleConversationViewEvent vtyEv
+                    handleConversationViewEvent tracer vtyEv
                 Just SessionViewWidget ->
-                    handleSessionViewEvent vtyEv
+                    handleSessionViewEvent tracer vtyEv
                 Just AgentInfoWidget ->
                     handleAgentInfoEvent vtyEv
                 _ ->
@@ -353,9 +551,25 @@ handleMessageEditorEvent ev = do
         _ -> pure ()
 
 -- | Handle conversation view scrolling.
-handleSessionViewEvent :: Vty.Event -> EventM N TuiState ()
-handleSessionViewEvent ev =
+handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleSessionViewEvent _tracer ev =
     case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState =
+                            TurnNavigationState
+                                { _navSession = session
+                                , _navSelectedTurnIndex = 0 -- Start at most recent (turns are anti-chronological)
+                                , _navTotalTurns = length session.turns
+                                }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ ->
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Normal scrolling
         Vty.EvKey Vty.KUp _ ->
             vScrollBy (viewportScroll SessionViewWidget) (-1)
         Vty.EvKey Vty.KDown _ ->
@@ -371,9 +585,25 @@ handleSessionViewEvent ev =
         _ -> pure ()
 
 -- | Handle conversation view scrolling.
-handleConversationViewEvent :: Vty.Event -> EventM N TuiState ()
-handleConversationViewEvent ev =
+handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleConversationViewEvent _tracer ev =
     case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState =
+                            TurnNavigationState
+                                { _navSession = session
+                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
+                                , _navTotalTurns = length session.turns
+                                }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ ->
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Normal scrolling
         Vty.EvKey Vty.KUp _ ->
             vScrollBy (viewportScroll ConversationViewWidget) (-1)
         Vty.EvKey Vty.KDown _ ->
@@ -429,7 +659,10 @@ getFocusedSession = do
                     -- If not cached, try to read from session store
                     config <- use sessionConfig
                     liftIO $ SessionStore.readSession config.sessionStore (conversationId conv)
-        Nothing -> pure Nothing
+        Nothing -> do
+            -- Try session list
+            mSession <- use (tuiUI . sessionList . to listSelectedElement)
+            pure $ fmap snd mSession
 
 -- | Get the conversation ID of the currently focused conversation.
 getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
@@ -515,17 +748,48 @@ handleViewSessionWithExternalViewer orderPref = do
 -- Focus Management
 -------------------------------------------------------------------------------
 
+-- | Get the corresponding Tab for a WidgetName.
+-- Returns Nothing if the widget doesn't have an associated tab.
+widgetToTab :: WidgetName -> Maybe Tab
+widgetToTab AgentListWidget = Just AgentsTab
+widgetToTab ConversationListWidget = Just ChatsTab
+widgetToTab SessionsListWidget = Just HistoryTab
+widgetToTab _ = Nothing
+
+-- | Update the current tab based on the focused widget.
+-- When the focus changes to a widget associated with a different tab,
+-- this function updates both the tab and the focus ring to match.
+updateTabFromFocus :: EventM N TuiState ()
+updateTabFromFocus = do
+    mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    case mFocus >>= widgetToTab of
+        Just tab -> do
+            currentTab' <- use (tuiUI . currentTab)
+            -- Only update if the tab is actually changing
+            when (tab /= currentTab') $ do
+                tuiUI . currentTab .= tab
+                -- Rebuild focus ring for the new tab, preserving current focus
+                mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+                tuiUI . uiFocusRing .= buildFocusRingForTabPreserving tab mCurrentFocus
+        Nothing -> pure ()
+
 -- | Cycle focus forward through widgets.
+-- After cycling, updates the active tab based on the new focus.
 cycleFocusForward :: EventM N TuiState ()
 cycleFocusForward = do
     tuiUI . uiFocusRing %= focusNext
     tuiUI . zoomed .= False
+    -- Also update the active tab based on the new focus
+    updateTabFromFocus
 
 -- | Cycle focus backward through widgets.
+-- After cycling, updates the active tab based on the new focus.
 cycleFocusBackward :: EventM N TuiState ()
 cycleFocusBackward = do
     tuiUI . uiFocusRing %= focusPrev
     tuiUI . zoomed .= False
+    -- Also update the active tab based on the new focus
+    updateTabFromFocus
 
 -- | Toggle zoom mode for current widget.
 toggleZoom :: EventM N TuiState ()
