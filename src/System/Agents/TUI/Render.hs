@@ -101,6 +101,10 @@ inactiveTabAttr = attrName "inactiveTab"
 queuedMessageAttr :: AttrName
 queuedMessageAttr = attrName "queuedMessage"
 
+-- | Attribute for selected queued messages.
+queuedMessageSelectedAttr :: AttrName
+queuedMessageSelectedAttr = attrName "queuedMessageSelected"
+
 -- | Attribute for selected turn in navigation mode.
 selectedTurnAttr :: AttrName
 selectedTurnAttr = attrName "selectedTurn"
@@ -227,9 +231,10 @@ render_conversationArea st =
                 [ txt "Select or create a conversation (Ctrl+n)"
                 , render_messageEditor st
                 ]
-        Just _ ->
+        Just (_, conv) ->
             vBox
                 [ render_messageEditor st
+                , render_queued_messages_manager st conv
                 , render_conversationView st
                 , render_shortcutsHelp
                 ]
@@ -437,6 +442,51 @@ render_messageEditor st =
         )
 
 -------------------------------------------------------------------------------
+-- Queued Messages Management Rendering
+-------------------------------------------------------------------------------
+
+{- | Render the queued messages management panel.
+This is only shown when the conversation is paused and has queued messages.
+-}
+render_queued_messages_manager :: TuiState -> Conversation -> Widget N
+render_queued_messages_manager st conv =
+    -- Only show queue management when conversation is paused
+    if conversationStatus conv /= ConversationStatus_Paused
+        then emptyWidget
+        else
+            let queuedMsgs = getQueuedMessages st conv
+                count = length queuedMsgs
+             in if count == 0
+                    then emptyWidget
+                    else render_queue_panel st count queuedMsgs
+
+-- | Render the queue management UI panel.
+render_queue_panel :: TuiState -> Int -> [Text] -> Widget N
+render_queue_panel st count msgs =
+    borderWithLabel (txt $ " Queued Messages (" <> Text.pack (show count) <> ") ") $
+        vBox
+            [ txt "Ctrl+D: clear all | Del/Backspace: delete selected | Up/Down: select"
+            , txt ""
+            , render_queued_message_list selectedIdx msgs
+            ]
+  where
+    selectedIdx = st ^. tuiUI . queuedMessagesFocus
+
+-- | Render the list of queued messages with selection.
+render_queued_message_list :: Maybe Int -> [Text] -> Widget N
+render_queued_message_list selectedIdx msgs =
+    vBox $ zipWith (render_queued_item selectedIdx) [0 ..] msgs
+
+-- | Render a single queued message item.
+render_queued_item :: Maybe Int -> Int -> Text -> Widget N
+render_queued_item selectedIdx idx msg =
+    let isSelected = selectedIdx == Just idx
+        marker = if isSelected then "▶ " else "  "
+        truncated = Text.take 60 msg <> if Text.length msg > 60 then "..." else ""
+        attr = if isSelected then queuedMessageSelectedAttr else queuedMessageAttr
+     in withAttr attr $ txt $ marker <> truncated
+
+-------------------------------------------------------------------------------
 -- Conversation View Rendering
 -------------------------------------------------------------------------------
 
@@ -452,12 +502,12 @@ render_conversationView st =
                 let queuedMsgs = getQueuedMessages st conv
                     mNavState = st ^. tuiUI . turnNavigation
                  in render_session
-                            st
-                            ConversationViewWidget
-                            (conversationSession conv)
-                            (st ^. tuiUI . ongoingConversations)
-                            queuedMsgs
-                            mNavState
+                        st
+                        ConversationViewWidget
+                        (conversationSession conv)
+                        (st ^. tuiUI . ongoingConversations)
+                        queuedMsgs
+                        mNavState
 
 -- | Get the list of queued messages for a conversation.
 getQueuedMessages :: TuiState -> Conversation -> [Text]
@@ -489,10 +539,11 @@ render_session st w (Just session) _ongoingConvs queuedMsgs mNavState =
         Nothing ->
             -- Normal mode: render as before
             borderWithFocus st w "Session" $
-              viewport w Both $ vBox $
-                [render_queued_messages queuedMsgs]
-                    ++ [render_session_usage session]
-                    ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+                viewport w Both $
+                    vBox $
+                        [render_queued_messages queuedMsgs]
+                            ++ [render_session_usage session]
+                            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
             render_turn_navigation session navState
@@ -506,7 +557,7 @@ render_turn_navigation session navState =
         turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
         shownTurns = drop selectedIdx turnsWithIndices
      in borderWithLabel (txt headerText) $
-          viewport TurnNavigationWidget Both $
+            viewport TurnNavigationWidget Both $
                 vBox $
                     [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
                     , txt ""
@@ -525,7 +576,7 @@ render_navigable_turn selectedIdx (idx, turn) =
                     hBox [txt selectionMarker, turnWidget]
             else hBox [txt selectionMarker, turnWidget]
 
--- | Render queued messages for a conversation.
+-- | Render queued messages for a conversation (legacy inline display).
 render_queued_messages :: [Text] -> Widget N
 render_queued_messages [] = emptyWidget
 render_queued_messages msgs =
@@ -785,5 +836,7 @@ tui_appAttrMap _ =
         , (activeTabAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
         , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
         , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
+        , (queuedMessageSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         ]
+

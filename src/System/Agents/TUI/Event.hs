@@ -81,6 +81,7 @@ import System.Agents.TUI.Types (
     navSession,
     navTotalTurns,
     ongoingConversations,
+    queuedMessagesFocus,
     quitConfirmationPending,
     selectedAgentInfo,
     sessionConfig,
@@ -138,6 +139,11 @@ defaultHelpContent =
     , "  Ctrl+C       - Continue restored session"
     , "  Meta+Enter   - Send message"
     , "  Ctrl+E       - Pause/unpause conversation"
+    , ""
+    , "Queue Management (when paused):"
+    , "  Ctrl+D       - Clear all queued messages"
+    , "  Del/Backspace- Delete selected queued message"
+    , "  Up/Down      - Select queued message"
     , ""
     , "Session Navigation & Forking:"
     , "  Enter        - Enter turn navigation mode (when on conversation)"
@@ -462,6 +468,7 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleTogglePauseConversation
+        -- Session export
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleDumpSessionToMarkdown
@@ -471,6 +478,10 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleViewSessionWithExternalViewer Antichronological
+        -- Queue management: Ctrl+D to clear all queued messages
+        VtyEvent (Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleClearQueuedMessages
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
             resetQuitConfirmation
@@ -550,7 +561,63 @@ handleMessageEditorEvent ev = do
             | Vty.MCtrl `elem` mods -> handleSendMessage
         _ -> pure ()
 
--- | Handle conversation view scrolling.
+-- | Handle conversation view scrolling and queue management.
+handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleConversationViewEvent _tracer ev = do
+    -- Check if we have a paused conversation with queued messages
+    mConv <- getFocusedConversation
+    hasQueuedMessages <- case mConv of
+        Just conv -> do
+            buffered <- use (tuiUI . uiBufferedMessages)
+            pure $ case Map.lookup (conversationId conv) buffered of
+                Just msgs | conversationStatus conv == ConversationStatus_Paused -> not (null msgs)
+                _ -> False
+        Nothing -> pure False
+
+    case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState =
+                            TurnNavigationState
+                                { _navSession = session
+                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
+                                , _navTotalTurns = length session.turns
+                                }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ ->
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Queue management: Up arrow for navigation (only when paused with queued messages)
+        Vty.EvKey Vty.KUp [] | hasQueuedMessages -> do
+            handleQueueNavigation (-1)
+        -- Queue management: Down arrow for navigation (only when paused with queued messages)
+        Vty.EvKey Vty.KDown [] | hasQueuedMessages -> do
+            handleQueueNavigation 1
+        -- Queue management: Delete key to delete selected message
+        Vty.EvKey Vty.KDel [] | hasQueuedMessages -> do
+            handleDeleteSelectedMessage
+        -- Queue management: Backspace key to delete selected message
+        Vty.EvKey Vty.KBS [] | hasQueuedMessages -> do
+            handleDeleteSelectedMessage
+        -- Normal scrolling (when not in queue management mode)
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll ConversationViewWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll ConversationViewWidget) 1
+        Vty.EvKey Vty.KLeft _ ->
+            hScrollBy (viewportScroll ConversationViewWidget) (-1)
+        Vty.EvKey Vty.KRight _ ->
+            hScrollBy (viewportScroll ConversationViewWidget) 1
+        Vty.EvKey Vty.KPageUp _ ->
+            vScrollPage (viewportScroll ConversationViewWidget) Up
+        Vty.EvKey Vty.KPageDown _ ->
+            vScrollPage (viewportScroll ConversationViewWidget) Down
+        _ -> pure ()
+
+-- | Handle session view scrolling.
 handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
 handleSessionViewEvent _tracer ev =
     case ev of
@@ -582,40 +649,6 @@ handleSessionViewEvent _tracer ev =
             vScrollPage (viewportScroll SessionViewWidget) Up
         Vty.EvKey Vty.KPageDown _ ->
             vScrollPage (viewportScroll SessionViewWidget) Down
-        _ -> pure ()
-
--- | Handle conversation view scrolling.
-handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
-handleConversationViewEvent _tracer ev =
-    case ev of
-        -- Enter key enters turn navigation mode
-        Vty.EvKey Vty.KEnter [] -> do
-            mSession <- getFocusedSession
-            case mSession of
-                Just session | not (null session.turns) -> do
-                    let navState =
-                            TurnNavigationState
-                                { _navSession = session
-                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
-                                , _navTotalTurns = length session.turns
-                                }
-                    tuiUI . turnNavigation .= Just navState
-                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
-                _ ->
-                    showStatus StatusWarning "No session or empty session to navigate"
-        -- Normal scrolling
-        Vty.EvKey Vty.KUp _ ->
-            vScrollBy (viewportScroll ConversationViewWidget) (-1)
-        Vty.EvKey Vty.KDown _ ->
-            vScrollBy (viewportScroll ConversationViewWidget) 1
-        Vty.EvKey Vty.KLeft _ ->
-            hScrollBy (viewportScroll ConversationViewWidget) (-1)
-        Vty.EvKey Vty.KRight _ ->
-            hScrollBy (viewportScroll ConversationViewWidget) 1
-        Vty.EvKey Vty.KPageUp _ ->
-            vScrollPage (viewportScroll ConversationViewWidget) Up
-        Vty.EvKey Vty.KPageDown _ ->
-            vScrollPage (viewportScroll ConversationViewWidget) Down
         _ -> pure ()
 
 -- | Handle agent info scrolling.
@@ -663,6 +696,12 @@ getFocusedSession = do
             -- Try session list
             mSession <- use (tuiUI . sessionList . to listSelectedElement)
             pure $ fmap snd mSession
+
+-- | Get the currently focused conversation, if any.
+getFocusedConversation :: EventM N TuiState (Maybe Conversation)
+getFocusedConversation = do
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    pure $ fmap snd mConv
 
 -- | Get the conversation ID of the currently focused conversation.
 getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
@@ -1003,6 +1042,8 @@ handleTogglePauseConversation = do
                     liftIO $ atomically $ modifyTVar coreRef $ \c ->
                         c{corePausedConversations = Set.delete convId (corePausedConversations c)}
                     updateConversationStatus convId ConversationStatus_WaitingForInput
+                    -- Clear queue selection when unpausing
+                    tuiUI . queuedMessagesFocus .= Nothing
                     showStatus StatusInfo $ "Unpaused: " <> conversationName conv
                 else do
                     -- Pause: add to paused set and update status
@@ -1014,6 +1055,102 @@ handleTogglePauseConversation = do
 -- | Check if a conversation is currently paused.
 isConversationPaused :: ConversationId -> Core -> Bool
 isConversationPaused convId core = Set.member convId (corePausedConversations core)
+
+-------------------------------------------------------------------------------
+-- Queue Management
+-------------------------------------------------------------------------------
+
+-- | Clear all queued messages for the current conversation.
+-- Only works when the conversation is paused.
+handleClearQueuedMessages :: EventM N TuiState ()
+handleClearQueuedMessages = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            -- Only allow clearing when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then showStatus StatusWarning "Can only clear queued messages when paused (Ctrl+E)"
+                else do
+                    let convId = conversationId conv
+                    coreRef <- use tuiCore
+
+                    -- Get the Core's buffered messages TVar and clear it for this conversation
+                    core <- liftIO $ readTVarIO coreRef
+                    liftIO $ atomically $ 
+                        modifyTVar (coreBufferedMessages core) $ 
+                            Map.insert convId []
+
+                    -- Clear in UI
+                    tuiUI . uiBufferedMessages %= Map.insert convId []
+                    tuiUI . queuedMessagesFocus .= Nothing
+                    showStatus StatusInfo "All queued messages cleared"
+
+-- | Delete the currently selected queued message.
+handleDeleteSelectedMessage :: EventM N TuiState ()
+handleDeleteSelectedMessage = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            -- Only allow deletion when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then showStatus StatusWarning "Can only delete messages when paused (Ctrl+E)"
+                else do
+                    let convId = conversationId conv
+                    mSelectedIdx <- use (tuiUI . queuedMessagesFocus)
+                    case mSelectedIdx of
+                        Nothing -> showStatus StatusWarning "Select a message first (use Up/Down arrows)"
+                        Just idx -> do
+                            -- Get current messages
+                            buffered <- use (tuiUI . uiBufferedMessages)
+                            case Map.lookup convId buffered of
+                                Nothing -> pure ()
+                                Just msgs ->
+                                    if idx < 0 || idx >= length msgs
+                                        then pure ()
+                                        else do
+                                            -- Remove message at index
+                                            let newMsgs = deleteAt idx msgs
+                                            -- Update Core
+                                            coreRef <- use tuiCore
+                                            core <- liftIO $ readTVarIO coreRef
+                                            liftIO $ atomically $ 
+                                                modifyTVar (coreBufferedMessages core) $ 
+                                                    Map.insert convId newMsgs
+                                            -- Update UI
+                                            tuiUI . uiBufferedMessages %= Map.insert convId newMsgs
+                                            -- Adjust selection
+                                            let newIdx = if null newMsgs then Nothing else Just (min idx (length newMsgs - 1))
+                                            tuiUI . queuedMessagesFocus .= newIdx
+                                            showStatus StatusInfo "Message deleted"
+
+-- | Delete an element at a specific index.
+deleteAt :: Int -> [a] -> [a]
+deleteAt idx xs = take idx xs ++ drop (idx + 1) xs
+
+-- | Navigate through queued messages.
+handleQueueNavigation :: Int -> EventM N TuiState ()
+handleQueueNavigation direction = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure ()
+        Just conv -> do
+            let convId = conversationId conv
+            buffered <- use (tuiUI . uiBufferedMessages)
+            case Map.lookup convId buffered of
+                Nothing -> pure ()
+                Just msgs -> do
+                    let count = length msgs
+                    current <- use (tuiUI . queuedMessagesFocus)
+                    let newIdx = case current of
+                            Nothing -> if direction > 0 then 0 else count - 1
+                            Just idx -> max 0 $ min (count - 1) (idx + direction)
+                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+-------------------------------------------------------------------------------
+-- Session Progress Callback
+-------------------------------------------------------------------------------
 
 {- | Build the progress callback for a conversation.
 Combines the global session config with TUI-specific notification needs.
@@ -1057,6 +1194,10 @@ readAndClearBufferedMessages convId core = do
 addBufferedMessage :: ConversationId -> Core -> Text.Text -> IO ()
 addBufferedMessage convId core msg =
     atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
+
+-------------------------------------------------------------------------------
+-- Run Conversation
+-------------------------------------------------------------------------------
 
 runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
 runConversation tracer baseTuiAgent session = do
