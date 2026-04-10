@@ -63,14 +63,14 @@ defaultSearchIndexConfig store =
 
 -- | Status of the search index.
 data SearchIndexStatus
-    = IndexCurrent
-    -- ^ Index is up to date
-    | IndexStale Int Int
-    -- ^ Index is stale: (sessions needing update, total sessions)
-    | IndexMissing
-    -- ^ Index does not exist
-    | IndexError Text
-    -- ^ Error checking index status
+    = -- | Index is up to date
+      IndexCurrent
+    | -- | Index is stale: (sessions needing update, total sessions)
+      IndexStale Int Int
+    | -- | Index does not exist
+      IndexMissing
+    | -- | Error checking index status
+      IndexError Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -79,12 +79,12 @@ data SearchIndexStatus
 
 -- | Date filter for search queries.
 data DateFilter
-    = AfterDate UTCTime
-    -- ^ Sessions after a specific date
-    | BeforeDate UTCTime
-    -- ^ Sessions before a specific date
-    | BetweenDates UTCTime UTCTime
-    -- ^ Sessions between two dates
+    = -- | Sessions after a specific date
+      AfterDate UTCTime
+    | -- | Sessions before a specific date
+      BeforeDate UTCTime
+    | -- | Sessions between two dates
+      BetweenDates UTCTime UTCTime
     deriving (Show, Eq)
 
 {- | Options for session search queries.
@@ -187,21 +187,20 @@ instance ToJSON SearchResult
 
 -- | Mode for building/updating the index.
 data IndexBuildMode
-    = BuildFull
-    -- ^ Full rebuild of the index
-    | BuildIncremental
-    -- ^ Incremental update of changed sessions only
+    = -- | Full rebuild of the index
+      BuildFull
+    | -- | Incremental update of changed sessions only
+      BuildIncremental
     deriving (Show, Eq)
 
 -- | Operations for the session-index command.
 data IndexOperation
-    = IndexBuild
-    -- ^ Build the search index from scratch
-    | IndexUpdate
-    -- ^ Incrementally update the search index
-    | IndexStatus
-    -- ^ Show index status
-    | IndexClean
-    -- ^ Remove the search index
+    = -- | Build the search index from scratch
+      IndexBuild
+    | -- | Incrementally update the search index
+      IndexUpdate
+    | -- | Show index status
+      IndexStatus
+    | -- | Remove the search index
+      IndexClean
     deriving (Show, Eq)
-

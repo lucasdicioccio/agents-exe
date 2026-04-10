@@ -11,7 +11,7 @@ module System.Agents.TUI.Event where
 
 import Brick
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
-import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusSetCurrent, focusRing)
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing, focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
@@ -159,23 +159,26 @@ defaultHelpContent =
 -- Focus Ring Management
 -------------------------------------------------------------------------------
 
--- | The base widgets that are always present in the focus ring.
--- These correspond to the main navigation lists.
+{- | The base widgets that are always present in the focus ring.
+These correspond to the main navigation lists.
+-}
 baseFocusWidgets :: [WidgetName]
 baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
 
--- | Get the extra tab-specific widgets for a given tab.
--- These widgets are added to the focus ring when the corresponding tab is active.
+{- | Get the extra tab-specific widgets for a given tab.
+These widgets are added to the focus ring when the corresponding tab is active.
+-}
 tabSpecificWidgets :: Tab -> [WidgetName]
 tabSpecificWidgets AgentsTab = [AgentInfoWidget]
 tabSpecificWidgets ChatsTab = [MessageEditorWidget, ConversationViewWidget]
 tabSpecificWidgets HistoryTab = [SessionViewWidget]
 tabSpecificWidgets HelpTab = []
 
--- | Build a focus ring for a given tab.
--- The ring includes base widgets plus tab-specific widgets inserted appropriately.
--- The focus ring order is designed so that pressing Tab from a base widget
--- will first visit the tab-specific widget(s) before moving to the next base widget.
+{- | Build a focus ring for a given tab.
+The ring includes base widgets plus tab-specific widgets inserted appropriately.
+The focus ring order is designed so that pressing Tab from a base widget
+will first visit the tab-specific widget(s) before moving to the next base widget.
+-}
 buildFocusRingForTab :: Tab -> FocusRing WidgetName
 buildFocusRingForTab tab =
     -- Order: base widget, then its tab-specific widget(s), then next base widget, etc.
@@ -191,16 +194,18 @@ buildFocusRingForTab tab =
             -- Just base widgets in default order
             focusRing baseFocusWidgets
 
--- | Get the default (entry) widget for a tab.
--- This is the widget that should receive focus when switching to this tab.
+{- | Get the default (entry) widget for a tab.
+This is the widget that should receive focus when switching to this tab.
+-}
 tabEntryWidget :: Tab -> WidgetName
 tabEntryWidget AgentsTab = AgentListWidget
 tabEntryWidget ChatsTab = ConversationListWidget
 tabEntryWidget HistoryTab = SessionsListWidget
-tabEntryWidget HelpTab = AgentListWidget  -- Default to agent list for help
+tabEntryWidget HelpTab = AgentListWidget -- Default to agent list for help
 
--- | Build a focus ring for a tab, attempting to preserve the current focus if valid.
--- If the current focus is not in the new tab's focus ring, falls back to the tab's entry widget.
+{- | Build a focus ring for a tab, attempting to preserve the current focus if valid.
+If the current focus is not in the new tab's focus ring, falls back to the tab's entry widget.
+-}
 buildFocusRingForTabPreserving :: Tab -> Maybe WidgetName -> FocusRing WidgetName
 buildFocusRingForTabPreserving tab mCurrentFocus =
     let newRing = buildFocusRingForTab tab
@@ -212,17 +217,17 @@ buildFocusRingForTabPreserving tab mCurrentFocus =
         startFocus = case validFocus of
             Just wf -> wf
             Nothing -> tabEntryWidget tab
-    in focusSetCurrent startFocus newRing
+     in focusSetCurrent startFocus newRing
 
 -- | Get all elements in a focus ring.
 focusRingElements :: FocusRing WidgetName -> [WidgetName]
-focusRingElements fr = 
+focusRingElements fr =
     -- FocusRing is a circular structure, we extract elements by iterating
     go (focusSetCurrent (tabEntryWidget AgentsTab) fr) []
   where
     go ring acc =
         case focusGetCurrent ring of
-            Just w | w `elem` acc -> reverse acc  -- Completed a cycle
+            Just w | w `elem` acc -> reverse acc -- Completed a cycle
             Just w -> go (focusNext ring) (w : acc)
             Nothing -> reverse acc
 
@@ -244,8 +249,9 @@ prevTab ChatsTab = AgentsTab
 prevTab HistoryTab = ChatsTab
 prevTab HelpTab = HistoryTab
 
--- | Cycle to the next tab forward.
--- Also updates the focus ring to match the new tab's widgets.
+{- | Cycle to the next tab forward.
+Also updates the focus ring to match the new tab's widgets.
+-}
 cycleTabForward :: EventM N TuiState ()
 cycleTabForward = do
     current <- use (tuiUI . currentTab)
@@ -255,8 +261,9 @@ cycleTabForward = do
     mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
     tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
 
--- | Cycle to the previous tab backward.
--- Also updates the focus ring to match the new tab's widgets.
+{- | Cycle to the previous tab backward.
+Also updates the focus ring to match the new tab's widgets.
+-}
 cycleTabBackward :: EventM N TuiState ()
 cycleTabBackward = do
     current <- use (tuiUI . currentTab)
@@ -748,17 +755,19 @@ handleViewSessionWithExternalViewer orderPref = do
 -- Focus Management
 -------------------------------------------------------------------------------
 
--- | Get the corresponding Tab for a WidgetName.
--- Returns Nothing if the widget doesn't have an associated tab.
+{- | Get the corresponding Tab for a WidgetName.
+Returns Nothing if the widget doesn't have an associated tab.
+-}
 widgetToTab :: WidgetName -> Maybe Tab
 widgetToTab AgentListWidget = Just AgentsTab
 widgetToTab ConversationListWidget = Just ChatsTab
 widgetToTab SessionsListWidget = Just HistoryTab
 widgetToTab _ = Nothing
 
--- | Update the current tab based on the focused widget.
--- When the focus changes to a widget associated with a different tab,
--- this function updates both the tab and the focus ring to match.
+{- | Update the current tab based on the focused widget.
+When the focus changes to a widget associated with a different tab,
+this function updates both the tab and the focus ring to match.
+-}
 updateTabFromFocus :: EventM N TuiState ()
 updateTabFromFocus = do
     mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
@@ -773,8 +782,9 @@ updateTabFromFocus = do
                 tuiUI . uiFocusRing .= buildFocusRingForTabPreserving tab mCurrentFocus
         Nothing -> pure ()
 
--- | Cycle focus forward through widgets.
--- After cycling, updates the active tab based on the new focus.
+{- | Cycle focus forward through widgets.
+After cycling, updates the active tab based on the new focus.
+-}
 cycleFocusForward :: EventM N TuiState ()
 cycleFocusForward = do
     tuiUI . uiFocusRing %= focusNext
@@ -782,8 +792,9 @@ cycleFocusForward = do
     -- Also update the active tab based on the new focus
     updateTabFromFocus
 
--- | Cycle focus backward through widgets.
--- After cycling, updates the active tab based on the new focus.
+{- | Cycle focus backward through widgets.
+After cycling, updates the active tab based on the new focus.
+-}
 cycleFocusBackward :: EventM N TuiState ()
 cycleFocusBackward = do
     tuiUI . uiFocusRing %= focusPrev
@@ -1185,4 +1196,3 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
-

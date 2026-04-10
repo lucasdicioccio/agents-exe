@@ -62,11 +62,11 @@ import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.OneShot as OneShot
+import System.Agents.Session.Search.Types (DateFilter (..), IndexOperation (..))
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.Session.Search.Types (IndexOperation (..), DateFilter (..))
 
 import System.Agents.CLI (Trace (..), toJsonTrace)
 
@@ -1361,4 +1361,3 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
-

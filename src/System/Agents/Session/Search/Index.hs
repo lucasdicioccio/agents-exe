@@ -36,7 +36,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (UTCTime, getCurrentTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds, posixSecondsToUTCTime)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Database.SQLite.Simple (
     Connection,
     Query (..),
@@ -47,19 +47,19 @@ import Database.SQLite.Simple (
     query_,
  )
 import Database.SQLite.Simple.QQ (sql)
-import System.Directory (doesFileExist, getModificationTime, removeFile, createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getModificationTime, removeFile)
 import System.FilePath (takeDirectory)
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Session.Base (Session (..), Turn (..), UserTurnContent (..), LlmTurnContent (..))
+import System.Agents.Session.Base (LlmTurnContent (..), Session (..), Turn (..), UserTurnContent (..))
+import System.Agents.Session.Search.Types
 import System.Agents.Session.Types (
     LlmResponse (..),
     LlmToolCall (..),
+    SystemPrompt (..),
     UserQuery (..),
     UserToolResponse (..),
-    SystemPrompt (..),
  )
-import System.Agents.Session.Search.Types
 import qualified System.Agents.SessionStore as SessionStore
 
 -------------------------------------------------------------------------------
@@ -236,22 +236,21 @@ checkIndexStatus config = do
     exists <- doesFileExist config.indexDbPath
     if not exists
         then pure IndexMissing
-        else
-            handle (\e -> pure $ IndexError $ Text.pack $ show (e :: IOError)) $ do
-                bracket (open config.indexDbPath) close $ \conn -> do
-                    -- Get all sessions from store
-                    sessions <- SessionStore.listSessions config.indexSessionStore
-                    let totalSessions = length sessions
+        else handle (\e -> pure $ IndexError $ Text.pack $ show (e :: IOError)) $ do
+            bracket (open config.indexDbPath) close $ \conn -> do
+                -- Get all sessions from store
+                sessions <- SessionStore.listSessions config.indexSessionStore
+                let totalSessions = length sessions
 
-                    -- Get indexed mtimes
-                    indexedMtimes <- getIndexedMtimes conn
+                -- Get indexed mtimes
+                indexedMtimes <- getIndexedMtimes conn
 
-                    -- Count stale sessions
-                    staleCount <- countStaleSessions sessions indexedMtimes
+                -- Count stale sessions
+                staleCount <- countStaleSessions sessions indexedMtimes
 
-                    if staleCount == 0
-                        then pure IndexCurrent
-                        else pure $ IndexStale staleCount totalSessions
+                if staleCount == 0
+                    then pure IndexCurrent
+                    else pure $ IndexStale staleCount totalSessions
 
 -- | Remove the search index.
 removeSearchIndex :: SearchIndexConfig -> IO ()
@@ -430,7 +429,7 @@ extractLlmToolCalls calls =
 
 -- | Convert JSON value to searchable text.
 jsonToText :: Value -> Text
-jsonToText = 
+jsonToText =
     Text.replace "\\n" " "
         . Text.replace "\\t" " "
         . Text.decodeUtf8
@@ -563,4 +562,3 @@ countStaleSessions sessions indexedMtimes = do
             Just indexedMtime
                 | mtime > indexedMtime -> countStale (acc + 1) rest indexedMap
                 | otherwise -> countStale acc rest indexedMap
-

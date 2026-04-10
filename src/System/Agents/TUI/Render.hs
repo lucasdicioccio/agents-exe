@@ -452,12 +452,12 @@ render_conversationView st =
                 let queuedMsgs = getQueuedMessages st conv
                     mNavState = st ^. tuiUI . turnNavigation
                  in render_session
-                            st
-                            ConversationViewWidget
-                            (conversationSession conv)
-                            (st ^. tuiUI . ongoingConversations)
-                            queuedMsgs
-                            mNavState
+                        st
+                        ConversationViewWidget
+                        (conversationSession conv)
+                        (st ^. tuiUI . ongoingConversations)
+                        queuedMsgs
+                        mNavState
 
 -- | Get the list of queued messages for a conversation.
 getQueuedMessages :: TuiState -> Conversation -> [Text]
@@ -489,10 +489,11 @@ render_session st w (Just session) _ongoingConvs queuedMsgs mNavState =
         Nothing ->
             -- Normal mode: render as before
             borderWithFocus st w "Session" $
-              viewport w Both $ vBox $
-                [render_queued_messages queuedMsgs]
-                    ++ [render_session_usage session]
-                    ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+                viewport w Both $
+                    vBox $
+                        [render_queued_messages queuedMsgs]
+                            ++ [render_session_usage session]
+                            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
             render_turn_navigation session navState
@@ -506,7 +507,7 @@ render_turn_navigation session navState =
         turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
         shownTurns = drop selectedIdx turnsWithIndices
      in borderWithLabel (txt headerText) $
-          viewport TurnNavigationWidget Both $
+            viewport TurnNavigationWidget Both $
                 vBox $
                     [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
                     , txt ""
