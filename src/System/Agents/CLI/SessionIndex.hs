@@ -43,16 +43,13 @@ handleSessionIndex opts = do
             Text.putStrLn "Building search index..."
             createSearchIndex config
             Text.putStrLn "Index built successfully."
-
         IndexUpdate -> do
             Text.putStrLn "Updating search index..."
             updateSearchIndex config
             Text.putStrLn "Index updated successfully."
-
         IndexStatus -> do
             status <- checkIndexStatus config
             displayStatus status
-
         IndexClean -> do
             Text.putStrLn "Removing search index..."
             removeSearchIndex config
@@ -81,4 +78,3 @@ displayStatus status = case status of
     IndexError err -> do
         Text.hPutStrLn stderr $ "Error checking index status: " <> err
         exitFailure
-

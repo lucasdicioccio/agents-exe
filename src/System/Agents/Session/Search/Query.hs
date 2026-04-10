@@ -21,6 +21,7 @@ module System.Agents.Session.Search.Query (
 import Control.Exception (handle)
 import Control.Monad (when)
 import Data.Aeson.Encode.Pretty (encodePretty)
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -32,12 +33,11 @@ import Database.SQLite.Simple (
     query,
  )
 import Database.SQLite.Simple.QQ (sql)
-import qualified Data.ByteString.Lazy.Char8 as BSL
 import System.Exit (exitFailure)
 import System.IO (stderr)
 
-import System.Agents.Session.Search.Types
 import System.Agents.Session.Search.Index
+import System.Agents.Session.Search.Types
 
 -------------------------------------------------------------------------------
 -- Search Execution
@@ -74,32 +74,35 @@ executeSearchWithOptions config opts = do
 -- | Execute a search query against the index.
 executeSearch :: SearchIndexConfig -> SearchOptions -> IO SearchResult
 executeSearch config opts = do
-    handle (\e -> do
-        let err = Text.pack $ "Search error: " ++ show (e :: IOError)
-        Text.hPutStrLn stderr err
-        exitFailure) $ do
+    handle
+        ( \e -> do
+            let err = Text.pack $ "Search error: " ++ show (e :: IOError)
+            Text.hPutStrLn stderr err
+            exitFailure
+        )
+        $ do
+            withSearchIndex config $ \conn -> do
+                -- Build and execute FTS5 query
+                rawResults <- querySearchContent conn opts
 
-        withSearchIndex config $ \conn -> do
-            -- Build and execute FTS5 query
-            rawResults <- querySearchContent conn opts
+                -- Apply metadata filters
+                filteredResults <- filterResults conn opts rawResults
 
-            -- Apply metadata filters
-            filteredResults <- filterResults conn opts rawResults
+                -- Build result items with previews
+                items <- mapM (buildResultItem conn opts) filteredResults
 
-            -- Build result items with previews
-            items <- mapM (buildResultItem conn opts) filteredResults
+                -- Apply limit
+                let limitedItems = case opts.searchLimit of
+                        Nothing -> items
+                        Just n -> take n items
 
-            -- Apply limit
-            let limitedItems = case opts.searchLimit of
-                    Nothing -> items
-                    Just n -> take n items
-
-            pure $ SearchResult
-                { resultItems = limitedItems
-                , resultTotalMatches = length filteredResults
-                , resultQueryTimeMs = 0 -- Will be set by executeSearchWithOptions
-                , resultIndexWasUpdated = False
-                }
+                pure $
+                    SearchResult
+                        { resultItems = limitedItems
+                        , resultTotalMatches = length filteredResults
+                        , resultQueryTimeMs = 0 -- Will be set by executeSearchWithOptions
+                        , resultIndexWasUpdated = False
+                        }
 
 -------------------------------------------------------------------------------
 -- Query Building
@@ -109,7 +112,8 @@ executeSearch config opts = do
 querySearchContent ::
     Connection ->
     SearchOptions ->
-    IO [(Text, Text, Double)] -- ^ (session_id, content, rank)
+    -- | (session_id, content, rank)
+    IO [(Text, Text, Double)]
 querySearchContent conn opts = do
     let searchTerm = sanitizeSearchTerm opts.searchQuery
 
@@ -144,7 +148,7 @@ sanitizeSearchTerm =
             else word
 
     quote = Text.pack "\""
-    
+
     isSpecialChar c = c `elem` ['"', '*', '(', ')', '-', '~', '^']
 
 -- | Filter results by tool usage.
@@ -154,11 +158,11 @@ filterByTools conn tools results = do
 
     -- Query tool_index for each tool and collect matching sessions
     matchingPerTool <- mapM (queryToolSessions conn sessionIds) tools
-    
+
     -- A session matches if it has ANY of the requested tools (OR logic within tools)
     let allMatching = concat matchingPerTool
     let matchingSet = map (\(Only sid) -> sid :: Text) allMatching
-    
+
     pure $ filter (\(sid, _, _) -> sid `elem` matchingSet) results
 
 -- | Query sessions that have a specific tool.
@@ -168,7 +172,7 @@ queryToolSessions conn sessionIds tool = do
     -- We use individual queries to avoid IN clause complexity with lists
     concat <$> mapM (queryOneSession tool) sessionIds
   where
-    queryOneSession t sid = 
+    queryOneSession t sid =
         query conn [sql| SELECT session_id FROM tool_index WHERE tool_name = ? AND session_id = ? |] (t, sid)
 
 -- | Filter results by date.
@@ -197,11 +201,12 @@ buildResultItem conn opts (sessionId, content, rank) = do
     -- Extract matched terms
     let matchedTerms = extractMatchedTerms opts.searchQuery content
 
-    pure $ SearchResultItem
-        { resultMetadata = metadata
-        , resultPreview = preview
-        , resultMatchedTerms = matchedTerms
-        }
+    pure $
+        SearchResultItem
+            { resultMetadata = metadata
+            , resultPreview = preview
+            , resultMatchedTerms = matchedTerms
+            }
 
 -- | Get metadata for a session.
 getSessionMetadata :: Connection -> Text -> Text -> Double -> IO SearchResultMetadata
@@ -218,25 +223,27 @@ getSessionMetadata conn sessionId _content rank = do
 
     case results of
         [(path, agent, turns, first, lastTurn)] ->
-            pure $ SearchResultMetadata
-                { resultSessionId = sessionId
-                , resultFilePath = path
-                , resultAgentSlug = agent
-                , resultTurnCount = turns
-                , resultFirstTurnAt = first
-                , resultLastTurnAt = lastTurn
-                , resultRank = rank
-                }
+            pure $
+                SearchResultMetadata
+                    { resultSessionId = sessionId
+                    , resultFilePath = path
+                    , resultAgentSlug = agent
+                    , resultTurnCount = turns
+                    , resultFirstTurnAt = first
+                    , resultLastTurnAt = lastTurn
+                    , resultRank = rank
+                    }
         _ ->
-            pure $ SearchResultMetadata
-                { resultSessionId = sessionId
-                , resultFilePath = ""
-                , resultAgentSlug = Nothing
-                , resultTurnCount = 0
-                , resultFirstTurnAt = Nothing
-                , resultLastTurnAt = Nothing
-                , resultRank = rank
-                }
+            pure $
+                SearchResultMetadata
+                    { resultSessionId = sessionId
+                    , resultFilePath = ""
+                    , resultAgentSlug = Nothing
+                    , resultTurnCount = 0
+                    , resultFirstTurnAt = Nothing
+                    , resultLastTurnAt = Nothing
+                    , resultRank = rank
+                    }
 
 -- | Generate a preview showing context around matches.
 generatePreview :: SearchOptions -> Text -> Text -> IO (Maybe Text)
@@ -313,7 +320,8 @@ formatResultAsText :: SearchOptions -> SearchResultItem -> Text
 formatResultAsText _opts item =
     let meta = resultMetadata item
      in Text.unlines $
-            filter (not . Text.null)
+            filter
+                (not . Text.null)
                 [ "─────────────────────────────────────────"
                 , "Session: " <> resultSessionId meta
                 , "File: " <> Text.pack (resultFilePath meta)
@@ -331,7 +339,7 @@ filterResults :: Connection -> SearchOptions -> [(Text, Text, Double)] -> IO [(T
 filterResults conn opts results = do
     -- Get metadata for all sessions first
     allMetadata <- queryAllSessionMetadata conn (map (\(sid, _, _) -> sid) results)
-    
+
     -- Apply date filters
     let dateFiltered = case opts.searchDateFilter of
             Nothing -> results
@@ -369,10 +377,11 @@ queryAllSessionMetadata conn sessionIds = do
 -- | Build SQL WHERE clause from search options.
 _buildWhereClause :: SearchOptions -> Text
 _buildWhereClause opts =
-    Text.intercalate " AND " $ catMaybes
-        [ dateFilterClause opts.searchDateFilter
-        , agentFilterClause opts.searchAgent
-        ]
+    Text.intercalate " AND " $
+        catMaybes
+            [ dateFilterClause opts.searchDateFilter
+            , agentFilterClause opts.searchAgent
+            ]
   where
     dateFilterClause :: Maybe DateFilter -> Maybe Text
     dateFilterClause Nothing = Nothing
@@ -389,4 +398,3 @@ _buildWhereClause opts =
     agentFilterClause :: Maybe Text -> Maybe Text
     agentFilterClause Nothing = Nothing
     agentFilterClause (Just agent) = Just $ "agent_slug = '" <> agent <> "'"
-

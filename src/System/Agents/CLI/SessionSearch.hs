@@ -106,4 +106,3 @@ _parseRelativeDate _str =
     -- TODO: Implement relative date parsing
     -- For now, return Nothing to indicate not supported
     Nothing
-
