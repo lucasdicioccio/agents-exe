@@ -479,7 +479,7 @@ handleSessionViewEvent _tracer ev =
                     let navState =
                             TurnNavigationState
                                 { _navSession = session
-                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
+                                , _navSelectedTurnIndex = 0 -- Start at most recent (turns are anti-chronological)
                                 , _navTotalTurns = length session.turns
                                 }
                     tuiUI . turnNavigation .= Just navState

@@ -476,8 +476,7 @@ render_sessionView st =
             Nothing -> txt "No session selected"
             Just (_, session) ->
                 let mNavState = st ^. tuiUI . turnNavigation
-                 in viewport SessionViewWidget Both $
-                        render_session (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
+                 in render_session (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
 
 -- | Render a session's turns.
 render_session :: Maybe Session -> Set ConversationId -> [Text] -> Maybe TurnNavigationState -> Widget N
@@ -487,13 +486,14 @@ render_session (Just session) _ongoingConvs queuedMsgs mNavState =
     case mNavState of
         Nothing ->
             -- Normal mode: render as before
-            vBox $
+            viewport SessionViewWidget Both $ vBox $
                 [render_queued_messages queuedMsgs]
                     ++ [render_session_usage session]
                     ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
-            render_turn_navigation session navState
+            viewport TurnNavigationWidget Both $
+                render_turn_navigation session navState
 
 -- | Render session in turn navigation mode.
 render_turn_navigation :: Session -> TurnNavigationState -> Widget N
@@ -503,9 +503,9 @@ render_turn_navigation session navState =
         headerText = "Turn Navigation (" <> Text.pack (show (selectedIdx + 1)) <> "/" <> Text.pack (show totalTurns) <> ") [Enter:exit F:fork]"
         turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
      in borderWithLabel (txt headerText) $
-            viewport TurnNavigationWidget Both $
                 vBox $
                     [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
+                    , txt $ Text.pack (show selectedIdx <> "/" <> show totalTurns)
                     , txt ""
                     ]
                         ++ map (render_navigable_turn selectedIdx) turnsWithIndices
