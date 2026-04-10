@@ -110,15 +110,16 @@ tui_appDraw :: TuiState -> [Widget N]
 tui_appDraw st = [render_ui st]
 
 -- | Render the main UI based on current state.
+-- When zoomed, the content displayed is based on the current tab rather than
+-- the currently focused widget.
 render_ui :: TuiState -> Widget N
 render_ui st
     | st ^. tuiUI . zoomed =
-        case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
-            Just MessageEditorWidget -> render_messageEditor st
-            Just ConversationViewWidget -> render_conversationView st
-            Just SessionViewWidget -> render_sessionView st
-            Just AgentInfoWidget -> render_agentInfo st
-            _ -> render_mainLayout st
+        case st ^. tuiUI . currentTab of
+            AgentsTab -> render_agentInfo st
+            ChatsTab -> render_conversationView st
+            HistoryTab -> render_sessionView st
+            HelpTab -> renderHelpTab st
     | otherwise = render_mainLayout st
 
 -------------------------------------------------------------------------------
@@ -736,3 +737,4 @@ tui_appAttrMap _ =
         , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
         , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
         ]
+

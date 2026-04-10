@@ -11,7 +11,7 @@ module System.Agents.TUI.Event where
 
 import Brick
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
-import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusRingModify, focusSetCurrent)
+import Brick.Focus (focusGetCurrent, focusNext, focusPrev, focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
@@ -21,7 +21,6 @@ import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, read
 import Control.Lens (to, use, (%=), (.=))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.CircularList as CList
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -121,6 +120,7 @@ defaultHelpContent =
     , "Tabs:"
     , "  Ctrl+[       - Switch to previous tab"
     , "  Ctrl+]       - Switch to next tab"
+    , "  Enter        - Open selected conversation (from Conversations list)"
     , ""
     , "Conversations:"
     , "  Ctrl+N       - Start new conversation with selected agent"
@@ -165,6 +165,21 @@ cycleTabForward = do
 cycleTabBackward :: EventM N TuiState ()
 cycleTabBackward = do
     tuiUI . currentTab %= prevTab
+
+-------------------------------------------------------------------------------
+-- Navigation Helpers
+-------------------------------------------------------------------------------
+
+-- | Switch to the Chats tab and focus the message editor.
+-- This is used when starting or opening a conversation.
+switchToChatsAndFocusMessage :: EventM N TuiState ()
+switchToChatsAndFocusMessage = do
+    -- Switch to Chats tab
+    tuiUI . currentTab .= ChatsTab
+    -- Focus the message editor
+    tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
+    -- Ensure zoom mode is off for better visibility
+    tuiUI . zoomed .= False
 
 -------------------------------------------------------------------------------
 -- Quit Confirmation
@@ -294,14 +309,27 @@ handleAgentListEvent ev = do
 
 -- | Handle conversation list navigation.
 handleConversationListEvent :: Vty.Event -> EventM N TuiState ()
-handleConversationListEvent ev = do
-    zoom (tuiUI . conversationList) $ handleListEvent ev
-    -- Mark conversation as read when selected
-    selected <- use (tuiUI . conversationList . to listSelectedElement)
-    case selected of
-        Just (_, conv) ->
-            tuiUI . unreadConversations %= Set.delete (conversationId conv)
-        Nothing -> pure ()
+handleConversationListEvent ev =
+    case ev of
+        -- Enter key opens the selected conversation (switches to Chats tab and focuses message)
+        Vty.EvKey Vty.KEnter [] -> do
+            mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+            case mSelected of
+                Just (_, conv) -> do
+                    -- Switch to Chats tab and focus message editor
+                    switchToChatsAndFocusMessage
+                    -- Mark conversation as read
+                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                Nothing -> pure ()
+        -- Normal navigation
+        _ -> do
+            zoom (tuiUI . conversationList) $ handleListEvent ev
+            -- Mark conversation as read when selected
+            selected <- use (tuiUI . conversationList . to listSelectedElement)
+            case selected of
+                Just (_, conv) ->
+                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                Nothing -> pure ()
 
 -- | Handle sessions list navigation.
 handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
@@ -838,8 +866,8 @@ runConversation tracer baseTuiAgent session = do
     -- Update UI
     tuiUI . conversationList %= listInsert 0 conv
     tuiUI . conversationList . listSelectedL .= Just 0
-    tuiUI . uiFocusRing %= focusRingModify (CList.insertR ConversationViewWidget)
-    tuiUI . uiFocusRing %= focusSetCurrent MessageEditorWidget
+    -- Switch to Chats tab and focus the message editor
+    switchToChatsAndFocusMessage
 
 {- | Send a message in the current conversation.
 Messages are now buffered if the conversation is being processed by the agent,
@@ -887,3 +915,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+
