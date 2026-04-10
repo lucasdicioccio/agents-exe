@@ -42,7 +42,6 @@ import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import System.Agents.OneShot (mapProgressiveDisclosureTrace, nodeToAgent)
 import qualified System.Agents.OneShot as OneShot
-import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
@@ -104,8 +103,7 @@ import System.Agents.TUI.Types (
 import Prod.Tracer (Tracer (..), contramap)
 
 data Trace
-    = RuntimeTrace !Runtime.Trace
-    | OneShotTrace !OneShot.Trace
+    = OneShotTrace !OneShot.Trace
     deriving (Show)
 
 -------------------------------------------------------------------------------

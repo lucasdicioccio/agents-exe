@@ -745,23 +745,3 @@ handleResponse method url response = do
                 , resultPayload = payload
                 }
             )
-
--- -------------------------------------------------------------------------
--- Naming helpers
--- -------------------------------------------------------------------------
-
-{- | Convert a PostgREST tool name to an LLM tool name.
-
-Names are prefixed with @postgrest_@ and include the normalized toolbox name
-and tool name to avoid conflicts and ensure LLM compatibility.
-
-Example:
-
->>> postgrest2LLMName "mydb" "get_users"
-ToolName {getToolName = "postgrest_mydb_get_users"}
--}
-postgrest2LLMName :: Text -> Text -> OpenAI.ToolName
-postgrest2LLMName toolboxName toolName =
-    let normalizedToolbox = normalizeForLLM toolboxName
-        normalizedTool = normalizeForLLM toolName
-     in OpenAI.ToolName ("postgrest_" <> normalizedToolbox <> "_" <> normalizedTool)
