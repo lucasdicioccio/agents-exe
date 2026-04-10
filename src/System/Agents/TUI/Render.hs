@@ -443,7 +443,7 @@ render_messageEditor st =
 -- | Render the conversation history view.
 render_conversationView :: TuiState -> Widget N
 render_conversationView st =
-    borderWithFocus st ConversationViewWidget "Conversation" content
+    content
   where
     content =
         case listSelectedElement (st ^. tuiUI . conversationList) of
@@ -451,8 +451,9 @@ render_conversationView st =
             Just (_, conv) ->
                 let queuedMsgs = getQueuedMessages st conv
                     mNavState = st ^. tuiUI . turnNavigation
-                 in viewport ConversationViewWidget Both $
-                        render_session
+                 in render_session
+                            st
+                            ConversationViewWidget
                             (conversationSession conv)
                             (st ^. tuiUI . ongoingConversations)
                             queuedMsgs
@@ -469,31 +470,32 @@ getQueuedMessages st conv =
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
 render_sessionView st =
-    borderWithFocus st SessionViewWidget "Sessions" content
+    content
   where
     content =
         case listSelectedElement (st ^. tuiUI . sessionList) of
-            Nothing -> txt "No session selected"
+            Nothing -> do
+                txt "No session selected"
             Just (_, session) ->
                 let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
+                 in render_session st SessionViewWidget (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
 
 -- | Render a session's turns.
-render_session :: Maybe Session -> Set ConversationId -> [Text] -> Maybe TurnNavigationState -> Widget N
-render_session Nothing _ _ _ =
+render_session :: TuiState -> WidgetName -> Maybe Session -> Set ConversationId -> [Text] -> Maybe TurnNavigationState -> Widget N
+render_session _ _ Nothing _ _ _ =
     vBox $ [txt "session not started yet"]
-render_session (Just session) _ongoingConvs queuedMsgs mNavState =
+render_session st w (Just session) _ongoingConvs queuedMsgs mNavState =
     case mNavState of
         Nothing ->
             -- Normal mode: render as before
-            viewport SessionViewWidget Both $ vBox $
+            borderWithFocus st w "Session" $
+              viewport w Both $ vBox $
                 [render_queued_messages queuedMsgs]
                     ++ [render_session_usage session]
                     ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
-            viewport TurnNavigationWidget Both $
-                render_turn_navigation session navState
+            render_turn_navigation session navState
 
 -- | Render session in turn navigation mode.
 render_turn_navigation :: Session -> TurnNavigationState -> Widget N
@@ -502,13 +504,14 @@ render_turn_navigation session navState =
         totalTurns = navState ^. navTotalTurns
         headerText = "Turn Navigation (" <> Text.pack (show (selectedIdx + 1)) <> "/" <> Text.pack (show totalTurns) <> ") [Enter:exit F:fork]"
         turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
+        shownTurns = drop selectedIdx turnsWithIndices
      in borderWithLabel (txt headerText) $
+          viewport TurnNavigationWidget Both $
                 vBox $
                     [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
-                    , txt $ Text.pack (show selectedIdx <> "/" <> show totalTurns)
                     , txt ""
                     ]
-                        ++ map (render_navigable_turn selectedIdx) turnsWithIndices
+                        ++ map (render_navigable_turn selectedIdx) shownTurns
 
 -- | Render a single turn with selection indicator.
 render_navigable_turn :: Int -> (Int, Turn) -> Widget N

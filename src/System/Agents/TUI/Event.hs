@@ -293,8 +293,8 @@ handleForkAtTurn tracer navState = do
         selectedIdx = navState ^. navSelectedTurnIndex
         originalSessionId = session.sessionId
 
-    -- Create forked session with only turns 0 to selectedIdx-1
-    let turnsToKeep = take selectedIdx session.turns
+    -- Create forked session with dropping unwanted turns
+    let turnsToKeep = drop selectedIdx session.turns
 
     -- Generate new session ID and turn ID
     newSessionId' <- liftIO newSessionId
@@ -665,17 +665,37 @@ handleViewSessionWithExternalViewer orderPref = do
 -- Focus Management
 -------------------------------------------------------------------------------
 
+-- | Get the corresponding Tab for a WidgetName.
+-- Returns Nothing if the widget doesn't have an associated tab.
+widgetToTab :: WidgetName -> Maybe Tab
+widgetToTab AgentListWidget = Just AgentsTab
+widgetToTab ConversationListWidget = Just ChatsTab
+widgetToTab SessionsListWidget = Just HistoryTab
+widgetToTab _ = Nothing
+
+-- | Update the current tab based on the focused widget.
+updateTabFromFocus :: EventM N TuiState ()
+updateTabFromFocus = do
+    mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    case mFocus >>= widgetToTab of
+        Just tab -> tuiUI . currentTab .= tab
+        Nothing -> pure ()
+
 -- | Cycle focus forward through widgets.
 cycleFocusForward :: EventM N TuiState ()
 cycleFocusForward = do
     tuiUI . uiFocusRing %= focusNext
     tuiUI . zoomed .= False
+    -- Also update the active tab based on the new focus
+    updateTabFromFocus
 
 -- | Cycle focus backward through widgets.
 cycleFocusBackward :: EventM N TuiState ()
 cycleFocusBackward = do
     tuiUI . uiFocusRing %= focusPrev
     tuiUI . zoomed .= False
+    -- Also update the active tab based on the new focus
+    updateTabFromFocus
 
 -- | Toggle zoom mode for current widget.
 toggleZoom :: EventM N TuiState ()
@@ -1071,3 +1091,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+
