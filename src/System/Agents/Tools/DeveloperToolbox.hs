@@ -80,7 +80,7 @@ import System.Agents.Base (
     Agent (..),
     AgentDescription (..),
     BashToolboxDescription,
-    BuiltinToolboxDescription,
+    BuiltinToolboxDescription (..),
     DeveloperToolCapability (..),
     DeveloperToolboxDescription (..),
     ExtraAgentRef,
@@ -1126,6 +1126,25 @@ executeShowSpec toolbox specName = do
 -- Agent Templates
 -------------------------------------------------------------------------------
 
+-- | Default developer toolbox configuration for agent templates.
+defaultDeveloperToolboxDescription :: BuiltinToolboxDescription
+defaultDeveloperToolboxDescription =
+    DeveloperToolbox $
+        DeveloperToolboxDescription
+            { developerToolboxName = "developer"
+            , developerToolboxDescription = "Tools for developing agents and tools"
+            , developerToolboxCapabilities =
+                [ DevToolValidateTool
+                , DevToolScaffoldAgent
+                , DevToolScaffoldTool
+                , DevToolShowSpec
+                , DevToolValidateAgent
+                , DevToolCreateAgent
+                , DevToolCreateTool
+                ]
+            , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
+            }
+
 -- | Create an agent from a template
 makeAgentTemplate :: Text -> Text -> Agent
 makeAgentTemplate templateName agentSlug = case templateName of
@@ -1147,7 +1166,7 @@ makeAgentTemplate templateName agentSlug = case templateName of
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
+            , builtinToolboxes = Just [defaultDeveloperToolboxDescription]
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing
@@ -1170,7 +1189,7 @@ makeAgentTemplate templateName agentSlug = case templateName of
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
+            , builtinToolboxes = Just [defaultDeveloperToolboxDescription]
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing
@@ -1194,7 +1213,7 @@ makeAgentTemplate templateName agentSlug = case templateName of
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
+            , builtinToolboxes = Just [defaultDeveloperToolboxDescription]
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing

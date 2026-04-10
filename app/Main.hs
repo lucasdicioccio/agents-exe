@@ -1145,7 +1145,7 @@ parseProgOptions argparserargs =
                     "new"
                     ( info
                         parseNewCommand
-                        (progDesc "Create new agent or tool scaffolding"
+                        ( progDesc "Create new agent or tool scaffolding"
                             <> footer newCommandFooter
                         )
                     )
@@ -1292,4 +1292,3 @@ makeHttpJsonTrace baseTracer url = do
 maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
-

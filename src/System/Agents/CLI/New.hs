@@ -38,7 +38,32 @@ import System.FilePath (takeDirectory, (<.>), (</>))
 import System.IO (stderr)
 import System.Posix.Files (ownerExecuteMode, ownerReadMode, ownerWriteMode, setFileMode, unionFileModes)
 
-import System.Agents.Base (Agent (..), AgentDescription (..))
+import System.Agents.Base (
+    Agent (..),
+    AgentDescription (..),
+    BuiltinToolboxDescription (..),
+    DeveloperToolCapability (..),
+    DeveloperToolboxDescription (..),
+ )
+
+-- | Default developer toolbox configuration for new agents.
+defaultDeveloperToolbox :: BuiltinToolboxDescription
+defaultDeveloperToolbox =
+    DeveloperToolbox $
+        DeveloperToolboxDescription
+            { developerToolboxName = "developer"
+            , developerToolboxDescription = "Tools for developing agents and tools"
+            , developerToolboxCapabilities =
+                [ DevToolValidateTool
+                , DevToolScaffoldAgent
+                , DevToolScaffoldTool
+                , DevToolShowSpec
+                , DevToolValidateAgent
+                , DevToolCreateAgent
+                , DevToolCreateTool
+                ]
+            , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
+            }
 
 -- | Model preset configurations
 data ModelPreset = ModelPreset
@@ -189,7 +214,7 @@ buildAgentConfig opts = do
             , mcpServers = Just []
             , openApiToolboxes = Nothing
             , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just []
+            , builtinToolboxes = Just [defaultDeveloperToolbox]
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing
@@ -494,4 +519,3 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
-

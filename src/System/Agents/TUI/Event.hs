@@ -170,8 +170,9 @@ cycleTabBackward = do
 -- Quit Confirmation
 -------------------------------------------------------------------------------
 
--- | Handle Ctrl+Q with confirmation.
--- First press shows confirmation message, second press actually quits.
+{- | Handle Ctrl+Q with confirmation.
+First press shows confirmation message, second press actually quits.
+-}
 handleQuit :: EventM N TuiState ()
 handleQuit = do
     pending <- use (tuiUI . quitConfirmationPending)
@@ -886,4 +887,3 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
-
