@@ -463,8 +463,11 @@ render_queued_messages_manager st conv =
 -- | Render the queue management UI panel.
 render_queue_panel :: TuiState -> Int -> [Text] -> Widget N
 render_queue_panel st count msgs =
-    borderWithLabel (txt $ " Queued Messages (" <> Text.pack (show count) <> ") ") $
-        vBox
+    borderWithFocus
+        st
+        QueuedMessageListWidget
+        (" Queued Messages (" <> Text.pack (show count) <> ") ")
+        $ vBox
             [ txt "Ctrl+D: clear all | Del/Backspace: delete selected | Up/Down: select"
             , txt ""
             , render_queued_message_list selectedIdx msgs
@@ -499,14 +502,12 @@ render_conversationView st =
         case listSelectedElement (st ^. tuiUI . conversationList) of
             Nothing -> txt "No conversation selected"
             Just (_, conv) ->
-                let queuedMsgs = getQueuedMessages st conv
-                    mNavState = st ^. tuiUI . turnNavigation
+                let mNavState = st ^. tuiUI . turnNavigation
                  in render_session
                         st
                         ConversationViewWidget
                         (conversationSession conv)
                         (st ^. tuiUI . ongoingConversations)
-                        queuedMsgs
                         mNavState
 
 -- | Get the list of queued messages for a conversation.
@@ -528,22 +529,21 @@ render_sessionView st =
                 txt "No session selected"
             Just (_, session) ->
                 let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
+                 in render_session st SessionViewWidget (Just session) (st ^. tuiUI . ongoingConversations) mNavState
 
 -- | Render a session's turns.
-render_session :: TuiState -> WidgetName -> Maybe Session -> Set ConversationId -> [Text] -> Maybe TurnNavigationState -> Widget N
-render_session _ _ Nothing _ _ _ =
+render_session :: TuiState -> WidgetName -> Maybe Session -> Set ConversationId -> Maybe TurnNavigationState -> Widget N
+render_session _ _ Nothing _ _ =
     vBox $ [txt "session not started yet"]
-render_session st w (Just session) _ongoingConvs queuedMsgs mNavState =
+render_session st w (Just session) _ongoingConvs mNavState =
     case mNavState of
         Nothing ->
             -- Normal mode: render as before
             borderWithFocus st w "Session" $
                 viewport w Both $
                     vBox $
-                        [render_queued_messages queuedMsgs]
-                            ++ [render_session_usage session]
-                            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+                        [render_session_usage session]
+                        ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
             render_turn_navigation session navState

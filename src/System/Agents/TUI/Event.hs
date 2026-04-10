@@ -171,14 +171,6 @@ These correspond to the main navigation lists.
 baseFocusWidgets :: [WidgetName]
 baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
 
-{- | Get the extra tab-specific widgets for a given tab.
-These widgets are added to the focus ring when the corresponding tab is active.
--}
-tabSpecificWidgets :: Tab -> [WidgetName]
-tabSpecificWidgets AgentsTab = [AgentInfoWidget]
-tabSpecificWidgets ChatsTab = [MessageEditorWidget, ConversationViewWidget]
-tabSpecificWidgets HistoryTab = [SessionViewWidget]
-tabSpecificWidgets HelpTab = []
 
 {- | Build a focus ring for a given tab.
 The ring includes base widgets plus tab-specific widgets inserted appropriately.
@@ -192,7 +184,7 @@ buildFocusRingForTab tab =
         AgentsTab ->
             focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
         ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+            focusRing [ConversationListWidget, MessageEditorWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
         HistoryTab ->
             -- SessionsListWidget -> AgentInfoWidget -> AgentListWidget -> ConversationListWidget
             focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
@@ -508,6 +500,8 @@ handleNormalEvent tracer ev = do
                     handleSessionViewEvent tracer vtyEv
                 Just AgentInfoWidget ->
                     handleAgentInfoEvent vtyEv
+                Just QueuedMessageListWidget ->
+                    handleQueuedMessageListEvent vtyEv
                 _ ->
                     pure ()
         _ -> pure ()
@@ -671,6 +665,57 @@ handleAgentInfoEvent ev =
         Vty.EvKey Vty.KRight _ ->
             hScrollBy (viewportScroll AgentInfoWidget) 1
         _ -> pure ()
+
+-- | Handle queued message list events (selection and deletion).
+handleQueuedMessageListEvent :: Vty.Event -> EventM N TuiState ()
+handleQueuedMessageListEvent ev = do
+    -- Check if we have a paused conversation with queued messages
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure () -- No conversation, ignore events
+        Just conv -> do
+            -- Only allow queue management when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then pure ()
+                else do
+                    let convId = conversationId conv
+                    buffered <- use (tuiUI . uiBufferedMessages)
+                    case Map.lookup convId buffered of
+                        Nothing -> pure () -- No queued messages
+                        Just msgs -> do
+                            case ev of
+                                -- Up arrow - navigate to previous message
+                                Vty.EvKey Vty.KUp [] -> do
+                                    current <- use (tuiUI . queuedMessagesFocus)
+                                    let count = length msgs
+                                        newIdx = case current of
+                                            Nothing -> count - 1 -- Start at last message
+                                            Just idx -> max 0 (idx - 1)
+                                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+                                -- Down arrow - navigate to next message
+                                Vty.EvKey Vty.KDown [] -> do
+                                    current <- use (tuiUI . queuedMessagesFocus)
+                                    let count = length msgs
+                                        newIdx = case current of
+                                            Nothing -> 0 -- Start at first message
+                                            Just idx -> min (count - 1) (idx + 1)
+                                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+                                -- Delete key - delete selected message
+                                Vty.EvKey Vty.KDel [] -> do
+                                    handleDeleteSelectedMessage
+
+                                -- Backspace key - delete selected message
+                                Vty.EvKey Vty.KBS [] -> do
+                                    handleDeleteSelectedMessage
+
+                                -- Ctrl+D - clear all messages
+                                Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> do
+                                    handleClearQueuedMessages
+
+                                -- Ignore other events
+                                _ -> pure ()
 
 -------------------------------------------------------------------------------
 -- Status Message Helpers
@@ -1340,3 +1385,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+
