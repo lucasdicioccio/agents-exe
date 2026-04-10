@@ -18,7 +18,7 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens (to, use, (%=), (.=))
+import Control.Lens ((^.), to, use, (%=), (.=))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Map.Strict (Map)
@@ -60,6 +60,7 @@ import System.Agents.TUI.Types (
     Tab (..),
     TuiAgent (..),
     TuiState,
+    TurnNavigationState (..),
     UIState (..),
     WidgetName (..),
     agentList,
@@ -76,6 +77,9 @@ import System.Agents.TUI.Types (
     currentTab,
     eventChan,
     messageEditor,
+    navSelectedTurnIndex,
+    navSession,
+    navTotalTurns,
     ongoingConversations,
     quitConfirmationPending,
     selectedAgentInfo,
@@ -88,6 +92,7 @@ import System.Agents.TUI.Types (
     tuiSlug,
     tuiTree,
     tuiUI,
+    turnNavigation,
     uiBufferedMessages,
     uiFocusRing,
     unreadConversations,
@@ -127,6 +132,12 @@ defaultHelpContent =
     , "  Ctrl+C       - Continue restored session"
     , "  Meta+Enter   - Send message"
     , "  Ctrl+E       - Pause/unpause conversation"
+    , ""
+    , "Session Navigation & Forking:"
+    , "  Enter        - Enter turn navigation mode (when on conversation)"
+    , "  Up/Down      - Navigate between turns (in navigation mode)"
+    , "  F            - Fork conversation at selected turn"
+    , "  Enter/Esc    - Exit turn navigation mode"
     , ""
     , "Session Export:"
     , "  Ctrl+P       - Export session to markdown file"
@@ -209,6 +220,108 @@ resetQuitConfirmation = do
 -- | Main event handler for the TUI application.
 tui_appHandleEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
 tui_appHandleEvent tracer ev = do
+    -- Check if we're in turn navigation mode
+    mNavState <- use (tuiUI . turnNavigation)
+    case mNavState of
+        Just navState -> handleTurnNavigationEvent tracer navState ev
+        Nothing -> handleNormalEvent tracer ev
+
+-- | Handle events when in turn navigation mode.
+handleTurnNavigationEvent :: Tracer IO Trace -> TurnNavigationState -> BrickEvent N AppEvent -> EventM N TuiState ()
+handleTurnNavigationEvent tracer navState ev =
+    case ev of
+        -- Application events pass through
+        AppEvent AppEvent_Heartbeat ->
+            handleHeartbeat
+        AppEvent (AppEvent_AgentStepProgrress convId sess) ->
+            handleConversationUpdated convId sess
+        AppEvent (AppEvent_AgentNeedsInput convId) ->
+            handleConversationNeedsInput convId
+        AppEvent (AppEvent_AgentTrace _) ->
+            pure ()
+        AppEvent (AppEvent_ShowStatus severity text) ->
+            handleShowStatus severity text
+        AppEvent AppEvent_ClearStatus ->
+            handleClearStatus
+            
+        -- Exit navigation mode with Enter
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            tuiUI . turnNavigation .= Nothing
+            showStatus StatusInfo "Exited turn navigation"
+            resetQuitConfirmation
+        
+        -- Also allow Esc to exit
+        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
+            tuiUI . turnNavigation .= Nothing
+            showStatus StatusInfo "Exited turn navigation"
+            resetQuitConfirmation
+        
+        -- Navigate up (to earlier turns)
+        VtyEvent (Vty.EvKey Vty.KUp []) -> do
+            let currentIdx = navState ^. navSelectedTurnIndex
+                newIdx = max 0 (currentIdx - 1)
+            tuiUI . turnNavigation .= Just (navState { _navSelectedTurnIndex = newIdx })
+        
+        -- Navigate down (to later turns)
+        VtyEvent (Vty.EvKey Vty.KDown []) -> do
+            let currentIdx = navState ^. navSelectedTurnIndex
+                maxIdx = (navState ^. navTotalTurns) - 1
+                newIdx = min maxIdx (currentIdx + 1)
+            tuiUI . turnNavigation .= Just (navState { _navSelectedTurnIndex = newIdx })
+        
+        -- Fork at current turn
+        VtyEvent (Vty.EvKey (Vty.KChar 'f') []) -> do
+            handleForkAtTurn tracer navState
+        
+        -- Fork at current turn (uppercase F)
+        VtyEvent (Vty.EvKey (Vty.KChar 'F') []) -> do
+            handleForkAtTurn tracer navState
+        
+        -- Ignore other events in navigation mode
+        _ -> pure ()
+
+-- | Fork a new conversation at the selected turn.
+handleForkAtTurn :: Tracer IO Trace -> TurnNavigationState -> EventM N TuiState ()
+handleForkAtTurn tracer navState = do
+    let session = navState ^. navSession
+        selectedIdx = navState ^. navSelectedTurnIndex
+        originalSessionId = session.sessionId
+        
+    -- Create forked session with only turns 0 to selectedIdx-1
+    let turnsToKeep = take selectedIdx session.turns
+    
+    -- Generate new session ID and turn ID
+    newSessionId' <- liftIO newSessionId
+    newTurnId' <- liftIO newTurnId
+    
+    let forkedSession = Session
+            { turns = turnsToKeep
+            , sessionId = newSessionId'
+            , forkedFromSessionId = Just originalSessionId
+            , turnId = newTurnId'
+            }
+    
+    -- Create a new conversation with this session
+    mAgent <- use (tuiUI . agentList . to listSelectedElement)
+    case mAgent of
+        Just (_, baseTuiAgent) -> do
+            -- Start conversation with forked session
+            runConversation tracer baseTuiAgent forkedSession
+            
+            -- Show status
+            showStatus StatusInfo $ 
+                "Forked at turn " <> Text.pack (show selectedIdx) <> 
+                " - New conversation @" <> tuiSlug baseTuiAgent
+            
+            -- Exit navigation mode
+            tuiUI . turnNavigation .= Nothing
+            
+        Nothing -> 
+            showStatus StatusError "No agent selected for forked conversation"
+
+-- | Handle normal (non-navigation) events.
+handleNormalEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
+handleNormalEvent tracer ev = do
     case ev of
         -- Application events
         AppEvent AppEvent_Heartbeat ->
@@ -281,9 +394,9 @@ tui_appHandleEvent tracer ev = do
                 Just MessageEditorWidget ->
                     handleMessageEditorEvent ev
                 Just ConversationViewWidget ->
-                    handleConversationViewEvent vtyEv
+                    handleConversationViewEvent tracer vtyEv
                 Just SessionViewWidget ->
-                    handleSessionViewEvent vtyEv
+                    handleSessionViewEvent tracer vtyEv
                 Just AgentInfoWidget ->
                     handleAgentInfoEvent vtyEv
                 _ ->
@@ -347,9 +460,24 @@ handleMessageEditorEvent ev = do
         _ -> pure ()
 
 -- | Handle conversation view scrolling.
-handleSessionViewEvent :: Vty.Event -> EventM N TuiState ()
-handleSessionViewEvent ev =
+handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleSessionViewEvent _tracer ev =
     case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState = TurnNavigationState
+                            { _navSession = session
+                            , _navSelectedTurnIndex = length session.turns - 1  -- Start at most recent
+                            , _navTotalTurns = length session.turns
+                            }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ -> 
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Normal scrolling
         Vty.EvKey Vty.KUp _ ->
             vScrollBy (viewportScroll SessionViewWidget) (-1)
         Vty.EvKey Vty.KDown _ ->
@@ -365,9 +493,24 @@ handleSessionViewEvent ev =
         _ -> pure ()
 
 -- | Handle conversation view scrolling.
-handleConversationViewEvent :: Vty.Event -> EventM N TuiState ()
-handleConversationViewEvent ev =
+handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleConversationViewEvent _tracer ev =
     case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState = TurnNavigationState
+                            { _navSession = session
+                            , _navSelectedTurnIndex = length session.turns - 1  -- Start at most recent
+                            , _navTotalTurns = length session.turns
+                            }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ -> 
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Normal scrolling
         Vty.EvKey Vty.KUp _ ->
             vScrollBy (viewportScroll ConversationViewWidget) (-1)
         Vty.EvKey Vty.KDown _ ->
@@ -423,7 +566,10 @@ getFocusedSession = do
                     -- If not cached, try to read from session store
                     config <- use sessionConfig
                     liftIO $ SessionStore.readSession config.sessionStore (conversationId conv)
-        Nothing -> pure Nothing
+        Nothing -> do
+            -- Try session list
+            mSession <- use (tuiUI . sessionList . to listSelectedElement)
+            pure $ fmap snd mSession
 
 -- | Get the conversation ID of the currently focused conversation.
 getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
