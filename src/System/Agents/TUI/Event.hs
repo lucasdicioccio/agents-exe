@@ -171,7 +171,6 @@ These correspond to the main navigation lists.
 baseFocusWidgets :: [WidgetName]
 baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
 
-
 {- | Build a focus ring for a given tab.
 The ring includes base widgets plus tab-specific widgets inserted appropriately.
 The focus ring order is designed so that pressing Tab from a base widget
@@ -1385,4 +1384,3 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
-

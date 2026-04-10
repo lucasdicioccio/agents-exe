@@ -49,6 +49,8 @@ library agents-lib
                     , System.Agents.CLI.ReplayToolCall
                     , System.Agents.CLI.SelfDescribe
                     , System.Agents.CLI.SessionEdit
+                    , System.Agents.CLI.SessionIndex
+                    , System.Agents.CLI.SessionSearch
                     , System.Agents.CLI.Spec
                     , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
@@ -135,6 +137,9 @@ library agents-lib
                     , System.Agents.Session.OpenAI
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
+                    , System.Agents.Session.Search.Types
+                    , System.Agents.Session.Search.Index
+                    , System.Agents.Session.Search.Query
                     , System.Agents.SessionPrint
                     , System.Agents.SessionPrint.Inject
                     , System.Agents.SessionStore
