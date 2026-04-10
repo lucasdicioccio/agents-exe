@@ -113,9 +113,10 @@ selectedTurnAttr = attrName "selectedTurn"
 tui_appDraw :: TuiState -> [Widget N]
 tui_appDraw st = [render_ui st]
 
--- | Render the main UI based on current state.
--- When zoomed, the content displayed is based on the current tab rather than
--- the currently focused widget.
+{- | Render the main UI based on current state.
+When zoomed, the content displayed is based on the current tab rather than
+the currently focused widget.
+-}
 render_ui :: TuiState -> Widget N
 render_ui st
     | st ^. tuiUI . zoomed =
@@ -450,11 +451,12 @@ render_conversationView st =
             Just (_, conv) ->
                 let queuedMsgs = getQueuedMessages st conv
                     mNavState = st ^. tuiUI . turnNavigation
-                 in viewport ConversationViewWidget Both $ 
-                    render_session (conversationSession conv) 
-                                   (st ^. tuiUI . ongoingConversations) 
-                                   queuedMsgs
-                                   mNavState
+                 in viewport ConversationViewWidget Both $
+                        render_session
+                            (conversationSession conv)
+                            (st ^. tuiUI . ongoingConversations)
+                            queuedMsgs
+                            mNavState
 
 -- | Get the list of queued messages for a conversation.
 getQueuedMessages :: TuiState -> Conversation -> [Text]
@@ -474,8 +476,8 @@ render_sessionView st =
             Nothing -> txt "No session selected"
             Just (_, session) ->
                 let mNavState = st ^. tuiUI . turnNavigation
-                 in viewport SessionViewWidget Both $ 
-                    render_session (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
+                 in viewport SessionViewWidget Both $
+                        render_session (Just session) (st ^. tuiUI . ongoingConversations) [] mNavState
 
 -- | Render a session's turns.
 render_session :: Maybe Session -> Set ConversationId -> [Text] -> Maybe TurnNavigationState -> Widget N
@@ -483,11 +485,12 @@ render_session Nothing _ _ _ =
     vBox $ [txt "session not started yet"]
 render_session (Just session) _ongoingConvs queuedMsgs mNavState =
     case mNavState of
-        Nothing -> 
+        Nothing ->
             -- Normal mode: render as before
-            vBox $ [render_queued_messages queuedMsgs]
-                ++ [render_session_usage session]
-                ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+            vBox $
+                [render_queued_messages queuedMsgs]
+                    ++ [render_session_usage session]
+                    ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
             render_turn_navigation session navState
@@ -498,14 +501,14 @@ render_turn_navigation session navState =
     let selectedIdx = navState ^. navSelectedTurnIndex
         totalTurns = navState ^. navTotalTurns
         headerText = "Turn Navigation (" <> Text.pack (show (selectedIdx + 1)) <> "/" <> Text.pack (show totalTurns) <> ") [Enter:exit F:fork]"
-        turnsWithIndices = zip [0..] session.turns  -- Maintain chronological order
+        turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
      in borderWithLabel (txt headerText) $
-        viewport TurnNavigationWidget Both $
-        vBox $ 
-            [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
-            , txt ""
-            ]
-            ++ map (render_navigable_turn selectedIdx) turnsWithIndices
+            viewport TurnNavigationWidget Both $
+                vBox $
+                    [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
+                    , txt ""
+                    ]
+                        ++ map (render_navigable_turn selectedIdx) turnsWithIndices
 
 -- | Render a single turn with selection indicator.
 render_navigable_turn :: Int -> (Int, Turn) -> Widget N
@@ -514,8 +517,9 @@ render_navigable_turn selectedIdx (idx, turn) =
         selectionMarker = if isSelected then "▶ " else "  "
         turnWidget = render_turn (idx, turn)
      in if isSelected
-            then withAttr selectedTurnAttr $ 
-                hBox [txt selectionMarker, turnWidget]
+            then
+                withAttr selectedTurnAttr $
+                    hBox [txt selectionMarker, turnWidget]
             else hBox [txt selectionMarker, turnWidget]
 
 -- | Render queued messages for a conversation.
@@ -780,4 +784,3 @@ tui_appAttrMap _ =
         , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
         , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         ]
-
