@@ -45,8 +45,8 @@ data WidgetName
     | AgentInfoWidget
     | -- | For viewport scrolling during turn navigation
       TurnNavigationWidget
-    | QueuedMessageListWidget
-    -- ^ For focusing the queued messages list
+    | -- | For focusing the queued messages list
+      QueuedMessageListWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -437,4 +437,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-

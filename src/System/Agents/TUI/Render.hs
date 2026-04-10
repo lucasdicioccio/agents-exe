@@ -839,4 +839,3 @@ tui_appAttrMap _ =
         , (queuedMessageSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         ]
-
