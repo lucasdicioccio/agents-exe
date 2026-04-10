@@ -43,8 +43,8 @@ data WidgetName
     | ConversationViewWidget
     | SessionViewWidget
     | AgentInfoWidget
-    | TurnNavigationWidget
-    -- ^ For viewport scrolling during turn navigation
+    | -- | For viewport scrolling during turn navigation
+      TurnNavigationWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -432,4 +432,3 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
-
