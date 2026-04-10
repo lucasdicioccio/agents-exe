@@ -23,6 +23,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
+import Data.Time (UTCTime, defaultTimeLocale, parseTimeM)
 import GHC.Generics (Generic)
 import Options.Applicative
 import qualified Prod.Tracer as Prod
@@ -52,6 +53,8 @@ import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
 import qualified System.Agents.CLI.ReplayToolCall as ReplayToolCallCmd
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
+import qualified System.Agents.CLI.SessionIndex as SessionIndexCmd
+import qualified System.Agents.CLI.SessionSearch as SessionSearchCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.CLI.ToolCall as ToolCallCmd
@@ -63,6 +66,7 @@ import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.Session.Search.Types (IndexOperation (..), DateFilter (..))
 
 import System.Agents.CLI (Trace (..), toJsonTrace)
 
@@ -409,6 +413,8 @@ data Command
     | McpServer
     | SessionPrint SessionPrint.SessionPrintOptions
     | SessionEdit SessionEditCmd.SessionEditOptions
+    | SessionIndex SessionIndexCmd.SessionIndexOptions
+    | SessionSearch SessionSearchCmd.SessionSearchOptions
     | Paths PathsCmd.PathsOptions
     | Cowsay CowsayCmd.CowsayOptions
     | Spec SpecCmd.SpecOptions
@@ -429,6 +435,8 @@ instance Show Command where
     show McpServer = "McpServer"
     show (SessionPrint _) = "SessionPrint"
     show (SessionEdit _) = "SessionEdit"
+    show (SessionIndex _) = "SessionIndex"
+    show (SessionSearch _) = "SessionSearch"
     show (Paths _) = "Paths"
     show (Cowsay _) = "Cowsay"
     show (Spec _) = "Spec"
@@ -901,6 +909,54 @@ parseSessionEditOp = asum [parseTake, parseTakeTail, parseDrop, parseDropTail, p
     parseCensorThinking = flag' SessionEditCmd.SessionEditCensorThinking (long "censor-thinking" <> help "Remove all thinking content from the session")
     parseCountOption = option auto (long "count" <> short 'n' <> metavar "N" <> help "Number of turns" <> value 1 <> showDefault)
 
+-- | Parse the session-index command
+parseSessionIndexCommand :: SessionStore.SessionStore -> Parser Command
+parseSessionIndexCommand sessionStore = SessionIndex <$> parseSessionIndexOptions sessionStore
+
+parseSessionIndexOptions :: SessionStore.SessionStore -> Parser SessionIndexCmd.SessionIndexOptions
+parseSessionIndexOptions sessionStore =
+    SessionIndexCmd.SessionIndexOptions
+        <$> parseIndexOperation
+        <*> optional (strOption (long "db-path" <> metavar "PATH" <> help "Path to search index database"))
+        <*> pure sessionStore
+        <*> switch (long "include-tool-outputs" <> help "Include tool outputs in the index")
+
+parseIndexOperation :: Parser IndexOperation
+parseIndexOperation =
+    asum
+        [ flag' IndexBuild (long "build" <> help "Build the search index from scratch")
+        , flag' IndexUpdate (long "update" <> help "Incrementally update the search index")
+        , flag' IndexStatus (long "status" <> help "Show index status")
+        , flag' IndexClean (long "clean" <> help "Remove the search index")
+        , pure IndexStatus -- Default to status
+        ]
+
+-- | Parse the session-search command
+parseSessionSearchCommand :: SessionStore.SessionStore -> Parser Command
+parseSessionSearchCommand sessionStore = SessionSearch <$> parseSessionSearchOptions sessionStore
+
+parseSessionSearchOptions :: SessionStore.SessionStore -> Parser SessionSearchCmd.SessionSearchOptions
+parseSessionSearchOptions sessionStore =
+    SessionSearchCmd.SessionSearchOptions
+        <$> strArgument (metavar "QUERY" <> help "Search query text")
+        <*> optional (strOption (long "db-path" <> metavar "PATH" <> help "Path to search index database"))
+        <*> pure sessionStore
+        <*> optional parseDateFilter
+        <*> many (strOption (long "tool" <> metavar "TOOL" <> help "Filter by tool name (can be specified multiple times)"))
+        <*> optional (strOption (long "agent" <> metavar "AGENT" <> help "Filter by agent slug"))
+        <*> switch (long "include-tool-outputs" <> help "Include tool outputs in search")
+        <*> switch (long "json" <> help "Output results as JSON")
+        <*> option auto (long "preview" <> metavar "N" <> help "Show N lines of context" <> value 0 <> showDefault)
+        <*> optional (option auto (long "limit" <> metavar "N" <> help "Limit to N results"))
+        <*> switch (long "auto" <> help "Auto-update index if stale before searching")
+
+parseDateFilter :: Parser DateFilter
+parseDateFilter =
+    asum
+        [ AfterDate <$> option (maybeReader parseDate) (long "after" <> metavar "DATE" <> help "Filter sessions after date (YYYY-MM-DD)")
+        , BeforeDate <$> option (maybeReader parseDate) (long "before" <> metavar "DATE" <> help "Filter sessions before date (YYYY-MM-DD)")
+        ]
+
 parseCowsayCommand :: Parser Command
 parseCowsayCommand = Cowsay <$> parseCowsayOptions
 
@@ -1123,6 +1179,8 @@ parseProgOptions argparserargs =
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
                 <> command "session-edit" (info parseSessionEditCommand (progDesc "Edit a session file (reads JSON from STDIN, writes JSON to STDOUT)"))
+                <> command "session-index" (info (parseSessionIndexCommand sessionStore) (progDesc "Manage the session search index"))
+                <> command "session-search" (info (parseSessionSearchCommand sessionStore) (progDesc "Search session files with fuzzy matching"))
                 <> command
                     "paths"
                     ( info
@@ -1156,6 +1214,9 @@ parseProgOptions argparserargs =
                         (progDesc "Call a tool from the first loaded agent with JSON payload from stdin")
                     )
             )
+  where
+    -- Session store for session-index and session-search commands
+    sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore argparserargs.defaultLogSesionsJsonPrefix
 
 -------------------------------------------------------------------------------
 -- Main Entry Point
@@ -1268,6 +1329,10 @@ runCommand pargs baseTracer sessionStore files =
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
             SessionEditCmd.handleSessionEdit opts
+        SessionIndex opts ->
+            SessionIndexCmd.handleSessionIndex opts
+        SessionSearch opts ->
+            SessionSearchCmd.handleSessionSearch opts
         Paths opts ->
             PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile pargs.sessionsJsonPrefix
         Cowsay opts ->
@@ -1292,3 +1357,8 @@ makeHttpJsonTrace baseTracer url = do
 maybeToEither :: Maybe a -> Either () a
 maybeToEither Nothing = Left ()
 maybeToEither (Just v) = Right v
+
+-- | Parse a date string in YYYY-MM-DD format
+parseDate :: String -> Maybe UTCTime
+parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
+
