@@ -78,6 +78,7 @@ import System.Agents.TUI.Types (
     eventChan,
     messageEditor,
     ongoingConversations,
+    quitConfirmationPending,
     selectedAgentInfo,
     sessionConfig,
     sessionList,
@@ -134,7 +135,7 @@ defaultHelpContent =
     , ""
     , "Other:"
     , "  F5           - Refresh tools for selected agent"
-    , "  Esc, Ctrl+Q  - Quit application"
+    , "  Ctrl+Q       - Quit application (press twice to confirm)"
     ]
 
 -------------------------------------------------------------------------------
@@ -166,6 +167,26 @@ cycleTabBackward = do
     tuiUI . currentTab %= prevTab
 
 -------------------------------------------------------------------------------
+-- Quit Confirmation
+-------------------------------------------------------------------------------
+
+-- | Handle Ctrl+Q with confirmation.
+-- First press shows confirmation message, second press actually quits.
+handleQuit :: EventM N TuiState ()
+handleQuit = do
+    pending <- use (tuiUI . quitConfirmationPending)
+    if pending
+        then halt
+        else do
+            tuiUI . quitConfirmationPending .= True
+            showStatus StatusWarning "Are you sure? Press Ctrl+Q again to quit"
+
+-- | Reset quit confirmation state (call when user performs other actions).
+resetQuitConfirmation :: EventM N TuiState ()
+resetQuitConfirmation = do
+    tuiUI . quitConfirmationPending .= False
+
+-------------------------------------------------------------------------------
 -- Main Event Handler
 -------------------------------------------------------------------------------
 
@@ -187,39 +208,52 @@ tui_appHandleEvent tracer ev = do
         AppEvent AppEvent_ClearStatus ->
             handleClearStatus
         -- Tab switching
-        VtyEvent (Vty.EvKey (Vty.KChar '[') [Vty.MCtrl]) ->
+        -- Note: Ctrl+[ sends KEsc in Vty (ASCII 27), not KChar '[' with MCtrl
+        VtyEvent (Vty.EvKey Vty.KEsc [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             cycleTabBackward
-        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             cycleTabForward
         -- VTY events
-        VtyEvent (Vty.EvKey Vty.KEsc _) ->
-            halt
         VtyEvent (Vty.EvKey (Vty.KChar 'q') [Vty.MCtrl]) ->
-            halt
-        VtyEvent (Vty.EvKey (Vty.KChar '\t') _) ->
+            handleQuit
+        VtyEvent (Vty.EvKey (Vty.KChar '\t') _) -> do
+            resetQuitConfirmation
             cycleFocusForward
-        VtyEvent (Vty.EvKey Vty.KBackTab _) ->
+        VtyEvent (Vty.EvKey Vty.KBackTab _) -> do
+            resetQuitConfirmation
             cycleFocusBackward
-        VtyEvent (Vty.EvKey (Vty.KFun 5) _) ->
+        VtyEvent (Vty.EvKey (Vty.KFun 5) _) -> do
+            resetQuitConfirmation
             handleRefreshTools
-        VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             toggleZoom
-        VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             handleNewConversationFromEditor tracer
-        VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             handleRestoredConversation tracer
-        VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) ->
+        VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) -> do
+            resetQuitConfirmation
             handleSendMessage
-        VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             handleTogglePauseConversation
-        VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             handleDumpSessionToMarkdown
-        VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             handleViewSessionWithExternalViewer Chronological
-        VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) ->
+        VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
             handleViewSessionWithExternalViewer Antichronological
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
+            resetQuitConfirmation
             currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
             case currentFocus of
                 Just AgentListWidget ->
@@ -852,3 +886,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+

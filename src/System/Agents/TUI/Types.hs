@@ -337,6 +337,8 @@ data UIState = UIState
     -- ^ Help text content for the Help tab
     , _uiBufferedMessages :: Map ConversationId [Text]
     -- ^ Copy of buffered messages from Core for UI rendering
+    , _quitConfirmationPending :: Bool
+    -- ^ Whether the user has pressed Ctrl+Q once and needs to confirm
     }
 
 makeLenses ''UIState
@@ -386,6 +388,7 @@ initUIState agents loadedSessions =
         , _currentTab = AgentsTab
         , _helpContent = []
         , _uiBufferedMessages = Map.empty
+        , _quitConfirmationPending = False
         }
 
 -- | Create initial Core state.
@@ -407,3 +410,4 @@ updateConversationSession convId newSession =
 updateConversation :: Conversation -> [Conversation] -> [Conversation]
 updateConversation conv =
     map (\c -> if conversationId c == conversationId conv then conv else c)
+
