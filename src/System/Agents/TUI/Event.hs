@@ -11,7 +11,7 @@ module System.Agents.TUI.Event where
 
 import Brick
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
-import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusSetCurrent, focusRing)
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing, focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
@@ -81,6 +81,7 @@ import System.Agents.TUI.Types (
     navSession,
     navTotalTurns,
     ongoingConversations,
+    queuedMessagesFocus,
     quitConfirmationPending,
     selectedAgentInfo,
     sessionConfig,
@@ -139,6 +140,11 @@ defaultHelpContent =
     , "  Meta+Enter   - Send message"
     , "  Ctrl+E       - Pause/unpause conversation"
     , ""
+    , "Queue Management (when paused):"
+    , "  Ctrl+D       - Clear all queued messages"
+    , "  Del/Backspace- Delete selected queued message"
+    , "  Up/Down      - Select queued message"
+    , ""
     , "Session Navigation & Forking:"
     , "  Enter        - Enter turn navigation mode (when on conversation)"
     , "  Up/Down      - Navigate between turns (in navigation mode)"
@@ -159,23 +165,18 @@ defaultHelpContent =
 -- Focus Ring Management
 -------------------------------------------------------------------------------
 
--- | The base widgets that are always present in the focus ring.
--- These correspond to the main navigation lists.
+{- | The base widgets that are always present in the focus ring.
+These correspond to the main navigation lists.
+-}
 baseFocusWidgets :: [WidgetName]
 baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
 
--- | Get the extra tab-specific widgets for a given tab.
--- These widgets are added to the focus ring when the corresponding tab is active.
-tabSpecificWidgets :: Tab -> [WidgetName]
-tabSpecificWidgets AgentsTab = [AgentInfoWidget]
-tabSpecificWidgets ChatsTab = [MessageEditorWidget, ConversationViewWidget]
-tabSpecificWidgets HistoryTab = [SessionViewWidget]
-tabSpecificWidgets HelpTab = []
 
--- | Build a focus ring for a given tab.
--- The ring includes base widgets plus tab-specific widgets inserted appropriately.
--- The focus ring order is designed so that pressing Tab from a base widget
--- will first visit the tab-specific widget(s) before moving to the next base widget.
+{- | Build a focus ring for a given tab.
+The ring includes base widgets plus tab-specific widgets inserted appropriately.
+The focus ring order is designed so that pressing Tab from a base widget
+will first visit the tab-specific widget(s) before moving to the next base widget.
+-}
 buildFocusRingForTab :: Tab -> FocusRing WidgetName
 buildFocusRingForTab tab =
     -- Order: base widget, then its tab-specific widget(s), then next base widget, etc.
@@ -183,7 +184,7 @@ buildFocusRingForTab tab =
         AgentsTab ->
             focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
         ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+            focusRing [ConversationListWidget, MessageEditorWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
         HistoryTab ->
             -- SessionsListWidget -> AgentInfoWidget -> AgentListWidget -> ConversationListWidget
             focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
@@ -191,16 +192,18 @@ buildFocusRingForTab tab =
             -- Just base widgets in default order
             focusRing baseFocusWidgets
 
--- | Get the default (entry) widget for a tab.
--- This is the widget that should receive focus when switching to this tab.
+{- | Get the default (entry) widget for a tab.
+This is the widget that should receive focus when switching to this tab.
+-}
 tabEntryWidget :: Tab -> WidgetName
 tabEntryWidget AgentsTab = AgentListWidget
 tabEntryWidget ChatsTab = ConversationListWidget
 tabEntryWidget HistoryTab = SessionsListWidget
-tabEntryWidget HelpTab = AgentListWidget  -- Default to agent list for help
+tabEntryWidget HelpTab = AgentListWidget -- Default to agent list for help
 
--- | Build a focus ring for a tab, attempting to preserve the current focus if valid.
--- If the current focus is not in the new tab's focus ring, falls back to the tab's entry widget.
+{- | Build a focus ring for a tab, attempting to preserve the current focus if valid.
+If the current focus is not in the new tab's focus ring, falls back to the tab's entry widget.
+-}
 buildFocusRingForTabPreserving :: Tab -> Maybe WidgetName -> FocusRing WidgetName
 buildFocusRingForTabPreserving tab mCurrentFocus =
     let newRing = buildFocusRingForTab tab
@@ -212,17 +215,17 @@ buildFocusRingForTabPreserving tab mCurrentFocus =
         startFocus = case validFocus of
             Just wf -> wf
             Nothing -> tabEntryWidget tab
-    in focusSetCurrent startFocus newRing
+     in focusSetCurrent startFocus newRing
 
 -- | Get all elements in a focus ring.
 focusRingElements :: FocusRing WidgetName -> [WidgetName]
-focusRingElements fr = 
+focusRingElements fr =
     -- FocusRing is a circular structure, we extract elements by iterating
     go (focusSetCurrent (tabEntryWidget AgentsTab) fr) []
   where
     go ring acc =
         case focusGetCurrent ring of
-            Just w | w `elem` acc -> reverse acc  -- Completed a cycle
+            Just w | w `elem` acc -> reverse acc -- Completed a cycle
             Just w -> go (focusNext ring) (w : acc)
             Nothing -> reverse acc
 
@@ -244,8 +247,9 @@ prevTab ChatsTab = AgentsTab
 prevTab HistoryTab = ChatsTab
 prevTab HelpTab = HistoryTab
 
--- | Cycle to the next tab forward.
--- Also updates the focus ring to match the new tab's widgets.
+{- | Cycle to the next tab forward.
+Also updates the focus ring to match the new tab's widgets.
+-}
 cycleTabForward :: EventM N TuiState ()
 cycleTabForward = do
     current <- use (tuiUI . currentTab)
@@ -255,8 +259,9 @@ cycleTabForward = do
     mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
     tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
 
--- | Cycle to the previous tab backward.
--- Also updates the focus ring to match the new tab's widgets.
+{- | Cycle to the previous tab backward.
+Also updates the focus ring to match the new tab's widgets.
+-}
 cycleTabBackward :: EventM N TuiState ()
 cycleTabBackward = do
     current <- use (tuiUI . currentTab)
@@ -462,6 +467,7 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleTogglePauseConversation
+        -- Session export
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleDumpSessionToMarkdown
@@ -471,6 +477,10 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleViewSessionWithExternalViewer Antichronological
+        -- Queue management: Ctrl+D to clear all queued messages
+        VtyEvent (Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleClearQueuedMessages
         -- Delegate to focused widget
         VtyEvent vtyEv -> do
             resetQuitConfirmation
@@ -490,6 +500,8 @@ handleNormalEvent tracer ev = do
                     handleSessionViewEvent tracer vtyEv
                 Just AgentInfoWidget ->
                     handleAgentInfoEvent vtyEv
+                Just QueuedMessageListWidget ->
+                    handleQueuedMessageListEvent vtyEv
                 _ ->
                     pure ()
         _ -> pure ()
@@ -550,7 +562,63 @@ handleMessageEditorEvent ev = do
             | Vty.MCtrl `elem` mods -> handleSendMessage
         _ -> pure ()
 
--- | Handle conversation view scrolling.
+-- | Handle conversation view scrolling and queue management.
+handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleConversationViewEvent _tracer ev = do
+    -- Check if we have a paused conversation with queued messages
+    mConv <- getFocusedConversation
+    hasQueuedMessages <- case mConv of
+        Just conv -> do
+            buffered <- use (tuiUI . uiBufferedMessages)
+            pure $ case Map.lookup (conversationId conv) buffered of
+                Just msgs | conversationStatus conv == ConversationStatus_Paused -> not (null msgs)
+                _ -> False
+        Nothing -> pure False
+
+    case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState =
+                            TurnNavigationState
+                                { _navSession = session
+                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
+                                , _navTotalTurns = length session.turns
+                                }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ ->
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Queue management: Up arrow for navigation (only when paused with queued messages)
+        Vty.EvKey Vty.KUp [] | hasQueuedMessages -> do
+            handleQueueNavigation (-1)
+        -- Queue management: Down arrow for navigation (only when paused with queued messages)
+        Vty.EvKey Vty.KDown [] | hasQueuedMessages -> do
+            handleQueueNavigation 1
+        -- Queue management: Delete key to delete selected message
+        Vty.EvKey Vty.KDel [] | hasQueuedMessages -> do
+            handleDeleteSelectedMessage
+        -- Queue management: Backspace key to delete selected message
+        Vty.EvKey Vty.KBS [] | hasQueuedMessages -> do
+            handleDeleteSelectedMessage
+        -- Normal scrolling (when not in queue management mode)
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll ConversationViewWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll ConversationViewWidget) 1
+        Vty.EvKey Vty.KLeft _ ->
+            hScrollBy (viewportScroll ConversationViewWidget) (-1)
+        Vty.EvKey Vty.KRight _ ->
+            hScrollBy (viewportScroll ConversationViewWidget) 1
+        Vty.EvKey Vty.KPageUp _ ->
+            vScrollPage (viewportScroll ConversationViewWidget) Up
+        Vty.EvKey Vty.KPageDown _ ->
+            vScrollPage (viewportScroll ConversationViewWidget) Down
+        _ -> pure ()
+
+-- | Handle session view scrolling.
 handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
 handleSessionViewEvent _tracer ev =
     case ev of
@@ -584,40 +652,6 @@ handleSessionViewEvent _tracer ev =
             vScrollPage (viewportScroll SessionViewWidget) Down
         _ -> pure ()
 
--- | Handle conversation view scrolling.
-handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
-handleConversationViewEvent _tracer ev =
-    case ev of
-        -- Enter key enters turn navigation mode
-        Vty.EvKey Vty.KEnter [] -> do
-            mSession <- getFocusedSession
-            case mSession of
-                Just session | not (null session.turns) -> do
-                    let navState =
-                            TurnNavigationState
-                                { _navSession = session
-                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
-                                , _navTotalTurns = length session.turns
-                                }
-                    tuiUI . turnNavigation .= Just navState
-                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
-                _ ->
-                    showStatus StatusWarning "No session or empty session to navigate"
-        -- Normal scrolling
-        Vty.EvKey Vty.KUp _ ->
-            vScrollBy (viewportScroll ConversationViewWidget) (-1)
-        Vty.EvKey Vty.KDown _ ->
-            vScrollBy (viewportScroll ConversationViewWidget) 1
-        Vty.EvKey Vty.KLeft _ ->
-            hScrollBy (viewportScroll ConversationViewWidget) (-1)
-        Vty.EvKey Vty.KRight _ ->
-            hScrollBy (viewportScroll ConversationViewWidget) 1
-        Vty.EvKey Vty.KPageUp _ ->
-            vScrollPage (viewportScroll ConversationViewWidget) Up
-        Vty.EvKey Vty.KPageDown _ ->
-            vScrollPage (viewportScroll ConversationViewWidget) Down
-        _ -> pure ()
-
 -- | Handle agent info scrolling.
 handleAgentInfoEvent :: Vty.Event -> EventM N TuiState ()
 handleAgentInfoEvent ev =
@@ -631,6 +665,57 @@ handleAgentInfoEvent ev =
         Vty.EvKey Vty.KRight _ ->
             hScrollBy (viewportScroll AgentInfoWidget) 1
         _ -> pure ()
+
+-- | Handle queued message list events (selection and deletion).
+handleQueuedMessageListEvent :: Vty.Event -> EventM N TuiState ()
+handleQueuedMessageListEvent ev = do
+    -- Check if we have a paused conversation with queued messages
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure () -- No conversation, ignore events
+        Just conv -> do
+            -- Only allow queue management when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then pure ()
+                else do
+                    let convId = conversationId conv
+                    buffered <- use (tuiUI . uiBufferedMessages)
+                    case Map.lookup convId buffered of
+                        Nothing -> pure () -- No queued messages
+                        Just msgs -> do
+                            case ev of
+                                -- Up arrow - navigate to previous message
+                                Vty.EvKey Vty.KUp [] -> do
+                                    current <- use (tuiUI . queuedMessagesFocus)
+                                    let count = length msgs
+                                        newIdx = case current of
+                                            Nothing -> count - 1 -- Start at last message
+                                            Just idx -> max 0 (idx - 1)
+                                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+                                -- Down arrow - navigate to next message
+                                Vty.EvKey Vty.KDown [] -> do
+                                    current <- use (tuiUI . queuedMessagesFocus)
+                                    let count = length msgs
+                                        newIdx = case current of
+                                            Nothing -> 0 -- Start at first message
+                                            Just idx -> min (count - 1) (idx + 1)
+                                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+                                -- Delete key - delete selected message
+                                Vty.EvKey Vty.KDel [] -> do
+                                    handleDeleteSelectedMessage
+
+                                -- Backspace key - delete selected message
+                                Vty.EvKey Vty.KBS [] -> do
+                                    handleDeleteSelectedMessage
+
+                                -- Ctrl+D - clear all messages
+                                Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> do
+                                    handleClearQueuedMessages
+
+                                -- Ignore other events
+                                _ -> pure ()
 
 -------------------------------------------------------------------------------
 -- Status Message Helpers
@@ -663,6 +748,12 @@ getFocusedSession = do
             -- Try session list
             mSession <- use (tuiUI . sessionList . to listSelectedElement)
             pure $ fmap snd mSession
+
+-- | Get the currently focused conversation, if any.
+getFocusedConversation :: EventM N TuiState (Maybe Conversation)
+getFocusedConversation = do
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    pure $ fmap snd mConv
 
 -- | Get the conversation ID of the currently focused conversation.
 getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
@@ -748,17 +839,19 @@ handleViewSessionWithExternalViewer orderPref = do
 -- Focus Management
 -------------------------------------------------------------------------------
 
--- | Get the corresponding Tab for a WidgetName.
--- Returns Nothing if the widget doesn't have an associated tab.
+{- | Get the corresponding Tab for a WidgetName.
+Returns Nothing if the widget doesn't have an associated tab.
+-}
 widgetToTab :: WidgetName -> Maybe Tab
 widgetToTab AgentListWidget = Just AgentsTab
 widgetToTab ConversationListWidget = Just ChatsTab
 widgetToTab SessionsListWidget = Just HistoryTab
 widgetToTab _ = Nothing
 
--- | Update the current tab based on the focused widget.
--- When the focus changes to a widget associated with a different tab,
--- this function updates both the tab and the focus ring to match.
+{- | Update the current tab based on the focused widget.
+When the focus changes to a widget associated with a different tab,
+this function updates both the tab and the focus ring to match.
+-}
 updateTabFromFocus :: EventM N TuiState ()
 updateTabFromFocus = do
     mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
@@ -773,8 +866,9 @@ updateTabFromFocus = do
                 tuiUI . uiFocusRing .= buildFocusRingForTabPreserving tab mCurrentFocus
         Nothing -> pure ()
 
--- | Cycle focus forward through widgets.
--- After cycling, updates the active tab based on the new focus.
+{- | Cycle focus forward through widgets.
+After cycling, updates the active tab based on the new focus.
+-}
 cycleFocusForward :: EventM N TuiState ()
 cycleFocusForward = do
     tuiUI . uiFocusRing %= focusNext
@@ -782,8 +876,9 @@ cycleFocusForward = do
     -- Also update the active tab based on the new focus
     updateTabFromFocus
 
--- | Cycle focus backward through widgets.
--- After cycling, updates the active tab based on the new focus.
+{- | Cycle focus backward through widgets.
+After cycling, updates the active tab based on the new focus.
+-}
 cycleFocusBackward :: EventM N TuiState ()
 cycleFocusBackward = do
     tuiUI . uiFocusRing %= focusPrev
@@ -1003,6 +1098,8 @@ handleTogglePauseConversation = do
                     liftIO $ atomically $ modifyTVar coreRef $ \c ->
                         c{corePausedConversations = Set.delete convId (corePausedConversations c)}
                     updateConversationStatus convId ConversationStatus_WaitingForInput
+                    -- Clear queue selection when unpausing
+                    tuiUI . queuedMessagesFocus .= Nothing
                     showStatus StatusInfo $ "Unpaused: " <> conversationName conv
                 else do
                     -- Pause: add to paused set and update status
@@ -1014,6 +1111,105 @@ handleTogglePauseConversation = do
 -- | Check if a conversation is currently paused.
 isConversationPaused :: ConversationId -> Core -> Bool
 isConversationPaused convId core = Set.member convId (corePausedConversations core)
+
+-------------------------------------------------------------------------------
+-- Queue Management
+-------------------------------------------------------------------------------
+
+{- | Clear all queued messages for the current conversation.
+Only works when the conversation is paused.
+-}
+handleClearQueuedMessages :: EventM N TuiState ()
+handleClearQueuedMessages = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            -- Only allow clearing when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then showStatus StatusWarning "Can only clear queued messages when paused (Ctrl+E)"
+                else do
+                    let convId = conversationId conv
+                    coreRef <- use tuiCore
+
+                    -- Get the Core's buffered messages TVar and clear it for this conversation
+                    core <- liftIO $ readTVarIO coreRef
+                    liftIO $
+                        atomically $
+                            modifyTVar (coreBufferedMessages core) $
+                                Map.insert convId []
+
+                    -- Clear in UI
+                    tuiUI . uiBufferedMessages %= Map.insert convId []
+                    tuiUI . queuedMessagesFocus .= Nothing
+                    showStatus StatusInfo "All queued messages cleared"
+
+-- | Delete the currently selected queued message.
+handleDeleteSelectedMessage :: EventM N TuiState ()
+handleDeleteSelectedMessage = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            -- Only allow deletion when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then showStatus StatusWarning "Can only delete messages when paused (Ctrl+E)"
+                else do
+                    let convId = conversationId conv
+                    mSelectedIdx <- use (tuiUI . queuedMessagesFocus)
+                    case mSelectedIdx of
+                        Nothing -> showStatus StatusWarning "Select a message first (use Up/Down arrows)"
+                        Just idx -> do
+                            -- Get current messages
+                            buffered <- use (tuiUI . uiBufferedMessages)
+                            case Map.lookup convId buffered of
+                                Nothing -> pure ()
+                                Just msgs ->
+                                    if idx < 0 || idx >= length msgs
+                                        then pure ()
+                                        else do
+                                            -- Remove message at index
+                                            let newMsgs = deleteAt idx msgs
+                                            -- Update Core
+                                            coreRef <- use tuiCore
+                                            core <- liftIO $ readTVarIO coreRef
+                                            liftIO $
+                                                atomically $
+                                                    modifyTVar (coreBufferedMessages core) $
+                                                        Map.insert convId newMsgs
+                                            -- Update UI
+                                            tuiUI . uiBufferedMessages %= Map.insert convId newMsgs
+                                            -- Adjust selection
+                                            let newIdx = if null newMsgs then Nothing else Just (min idx (length newMsgs - 1))
+                                            tuiUI . queuedMessagesFocus .= newIdx
+                                            showStatus StatusInfo "Message deleted"
+
+-- | Delete an element at a specific index.
+deleteAt :: Int -> [a] -> [a]
+deleteAt idx xs = take idx xs ++ drop (idx + 1) xs
+
+-- | Navigate through queued messages.
+handleQueueNavigation :: Int -> EventM N TuiState ()
+handleQueueNavigation direction = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure ()
+        Just conv -> do
+            let convId = conversationId conv
+            buffered <- use (tuiUI . uiBufferedMessages)
+            case Map.lookup convId buffered of
+                Nothing -> pure ()
+                Just msgs -> do
+                    let count = length msgs
+                    current <- use (tuiUI . queuedMessagesFocus)
+                    let newIdx = case current of
+                            Nothing -> if direction > 0 then 0 else count - 1
+                            Just idx -> max 0 $ min (count - 1) (idx + direction)
+                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+-------------------------------------------------------------------------------
+-- Session Progress Callback
+-------------------------------------------------------------------------------
 
 {- | Build the progress callback for a conversation.
 Combines the global session config with TUI-specific notification needs.
@@ -1057,6 +1253,10 @@ readAndClearBufferedMessages convId core = do
 addBufferedMessage :: ConversationId -> Core -> Text.Text -> IO ()
 addBufferedMessage convId core msg =
     atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
+
+-------------------------------------------------------------------------------
+-- Run Conversation
+-------------------------------------------------------------------------------
 
 runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
 runConversation tracer baseTuiAgent session = do

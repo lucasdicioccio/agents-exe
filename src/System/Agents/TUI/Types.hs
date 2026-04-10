@@ -45,6 +45,8 @@ data WidgetName
     | AgentInfoWidget
     | -- | For viewport scrolling during turn navigation
       TurnNavigationWidget
+    | -- | For focusing the queued messages list
+      QueuedMessageListWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -360,6 +362,8 @@ data UIState = UIState
     -- ^ Whether the user has pressed Ctrl+Q once and needs to confirm
     , _turnNavigation :: Maybe TurnNavigationState
     -- ^ When Just, we are in turn navigation mode
+    , _queuedMessagesFocus :: Maybe Int
+    -- ^ Index of currently selected queued message (Nothing = none selected)
     }
 
 makeLenses ''UIState
@@ -411,6 +415,7 @@ initUIState agents loadedSessions =
         , _uiBufferedMessages = Map.empty
         , _quitConfirmationPending = False
         , _turnNavigation = Nothing
+        , _queuedMessagesFocus = Nothing
         }
 
 -- | Create initial Core state.
