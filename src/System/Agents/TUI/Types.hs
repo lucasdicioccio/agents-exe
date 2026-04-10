@@ -389,7 +389,7 @@ initUIState agents loadedSessions =
         { _uiFocusRing =
             focusRing
                 [ AgentListWidget
-                , ConversationListWidget
+                , AgentInfoWidget
                 , SessionsListWidget
                 , MessageEditorWidget
                 , SessionViewWidget
