@@ -53,6 +53,12 @@ import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (.
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.TUI.Clipboard (
+    ContentAction (..),
+    analyzeContent,
+    detectClipboardContent,
+    hasClipboardSupport,
+ )
 import System.Agents.TUI.Types (
     AppEvent (..),
     AttachmentDialogState (..),
@@ -154,6 +160,7 @@ defaultHelpContent =
     , "Attachments:"
     , "  Ctrl+F       - Attach file (opens path input dialog)"
     , "  Ctrl+Shift+F - Clear all attachments"
+    , "  Ctrl+V       - Paste from clipboard (images/files)"
     , "  Del/Backspace- Remove selected attachment"
     , "  Up/Down      - Select attachment"
     , ""
@@ -577,6 +584,9 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
             resetQuitConfirmation
             handleClearAllAttachments
+        VtyEvent (Vty.EvKey (Vty.KChar 'v') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleClipboardPaste tracer
         -- Session export
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
             resetQuitConfirmation
@@ -915,6 +925,57 @@ handleClearAllAttachments = do
                     tuiUI . attachedFiles %= Map.delete convId
                     tuiUI . selectedAttachmentIndex .= Nothing
                     showStatus StatusInfo $ "Cleared " <> Text.pack (show $ length atts) <> " attachment(s)"
+
+-- | Handle Ctrl+Shift+V for clipboard paste.
+handleClipboardPaste :: Tracer IO Trace -> EventM N TuiState ()
+handleClipboardPaste _tracer = do
+    hasSupport <- liftIO hasClipboardSupport
+    if not hasSupport
+        then showStatus StatusError "Clipboard not available - install xclip, wl-clipboard, or pbpaste"
+        else do
+            mContent <- liftIO detectClipboardContent
+            case mContent of
+                Nothing ->
+                    showStatus StatusWarning "Clipboard is empty or inaccessible"
+                Just content -> do
+                    action <- liftIO $ analyzeContent content
+                    case action of
+                        IgnoreContent ->
+                            showStatus StatusWarning "No attachable content in clipboard"
+                        PasteAsText text -> do
+                            editorContents <- use (tuiUI . messageEditor . editContentsL)
+                            let newContents = TextZipper.insertMany text editorContents
+                            tuiUI . messageEditor . editContentsL .= newContents
+                            showStatus StatusInfo "Text pasted from clipboard"
+                        AttachAsMedia attachment -> do
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                                    let filename = maybe "unnamed" id attachment.mediaFilename
+                                    showStatus StatusInfo $ "Attached from clipboard: " <> filename
+                        AttachMultipleFiles attachments -> do
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId attachments
+                                    showStatus StatusInfo $ "Attached " <> Text.pack (show $ length attachments) <> " files from clipboard"
+
+-- | Open the attachment dialog.
+handleOpenAttachmentDialog :: EventM N TuiState ()
+handleOpenAttachmentDialog = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusError "No conversation selected"
+        Just _ -> do
+            tuiUI . attachmentDialogState .= AttachmentDialogPathInput
+            -- Set focus to file path input
+            tuiUI . uiFocusRing %= focusSetCurrent FilePathInputWidget
+
 
 -------------------------------------------------------------------------------
 -- Status Message Helpers

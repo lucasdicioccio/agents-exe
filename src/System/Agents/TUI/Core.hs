@@ -9,7 +9,8 @@ This module re-exports functionality from the submodules and provides
 the main initialization and application runner using OS-native structures.
 -}
 module System.Agents.TUI.Core (
-    Trace (..),
+    -- Re-export Trace from Runtime.Trace
+    Trace,
 
     -- * Re-exports from Types
     WidgetName (..),
@@ -111,7 +112,7 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
 import System.Agents.TUI.Event (
-    Trace (..),
+    Trace(..),
     cycleTabBackward,
     cycleTabForward,
     defaultHelpContent,
