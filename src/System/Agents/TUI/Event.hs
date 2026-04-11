@@ -160,7 +160,7 @@ defaultHelpContent =
     , "Attachments:"
     , "  Ctrl+F       - Attach file (opens path input dialog)"
     , "  Ctrl+Shift+F - Clear all attachments"
-    , "  Ctrl+Shift+V - Paste from clipboard (images/files)"
+    , "  Ctrl+V       - Paste from clipboard (images/files)"
     , "  Del/Backspace- Remove selected attachment"
     , "  Up/Down      - Select attachment"
     , ""
@@ -584,7 +584,7 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
             resetQuitConfirmation
             handleClearAllAttachments
-        VtyEvent (Vty.EvKey (Vty.KChar 'o') [Vty.MCtrl]) -> do
+        VtyEvent (Vty.EvKey (Vty.KChar 'v') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleClipboardPaste tracer
         -- Session export
