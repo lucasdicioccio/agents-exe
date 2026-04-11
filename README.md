@@ -537,3 +537,76 @@ Absent this file, agents load from `~/.config/agents-exe/default`.
 - [ ] Web API foundation
 - [ ] Distributed OS (multi-node support)
 
+# Credits
+
+Agents-exe is built on the shoulders of giants. We are grateful to the maintainers and contributors of the following open-source libraries:
+
+## Core & Data
+- **[base](https://hackage.haskell.org/package/base)** - The Haskell standard library
+- **[bytestring](https://hackage.haskell.org/package/bytestring)** - Fast, compact binary strings
+- **[text](https://hackage.haskell.org/package/text)** - Efficient Unicode text handling
+- **[containers](https://hackage.haskell.org/package/containers)** - Maps, sets, and sequences
+- **[vector](https://hackage.haskell.org/package/vector)** - Efficient arrays
+- **[unordered-containers](https://hackage.haskell.org/package/unordered-containers)** - Hash-based containers
+- **[hashable](https://hackage.haskell.org/package/hashable)** - Hashing for data types
+
+## JSON & Serialization
+- **[aeson](https://hackage.haskell.org/package/aeson)** - JSON parsing and generation
+- **[aeson-pretty](https://hackage.haskell.org/package/aeson-pretty)** - Pretty-printing JSON
+- **[yaml](https://hackage.haskell.org/package/yaml)** - YAML parsing
+- **[scientific](https://hackage.haskell.org/package/scientific)** - Arbitrary precision numbers
+
+## Concurrency & STM
+- **[async](https://hackage.haskell.org/package/async)** - Asynchronous operations
+- **[stm](https://hackage.haskell.org/package/stm)** - Software Transactional Memory
+- **[stm-chans](https://hackage.haskell.org/package/stm-chans)** - STM channels
+- **[stm-conduit](https://hackage.haskell.org/package/stm-conduit)** - STM with streaming
+- **[unliftio](https://hackage.haskell.org/package/unliftio)** - Unlifted IO operations
+
+## HTTP & Networking
+- **[http-client](https://hackage.haskell.org/package/http-client)** - HTTP client engine
+- **[http-client-tls](https://hackage.haskell.org/package/http-client-tls)** - TLS support for http-client
+- **[http-types](https://hackage.haskell.org/package/http-types)** - HTTP types
+- **[network-uri](https://hackage.haskell.org/package/network-uri)** - URI parsing
+
+## Database & Storage
+- **[sqlite-simple](https://hackage.haskell.org/package/sqlite-simple)** - SQLite bindings
+- **[direct-sqlite](https://hackage.haskell.org/package/direct-sqlite)** - Low-level SQLite interface
+- **[resource-pool](https://hackage.haskell.org/package/resource-pool)** - Connection pooling
+
+## Terminal UI
+- **[brick](https://hackage.haskell.org/package/brick)** - Terminal UI framework
+- **[vty](https://hackage.haskell.org/package/vty)** - Terminal interaction
+- **[text-zipper](https://hackage.haskell.org/package/text-zipper)** - Text editing for TUI
+
+## Lua Integration
+- **[hslua](https://hackage.haskell.org/package/hslua)** - Lua bindings for Haskell
+- **[hslua-marshalling](https://hackage.haskell.org/package/hslua-marshalling)** - Lua marshalling utilities
+
+## Streaming
+- **[conduit](https://hackage.haskell.org/package/conduit)** - Streaming data library
+- **[conduit-extra](https://hackage.haskell.org/package/conduit-extra)** - Additional conduit utilities
+
+## CLI & Command Line
+- **[optparse-applicative](https://hackage.haskell.org/package/optparse-applicative)** - Command-line option parsing
+
+## Functional Programming
+- **[lens](https://hackage.haskell.org/package/lens)** - Functional references
+- **[mtl](https://hackage.haskell.org/package/mtl)** - Monad transformer library
+- **[free](https://hackage.haskell.org/package/free)** - Free monads
+- **[contravariant](https://hackage.haskell.org/package/contravariant)** - Contravariant functors
+
+## Utilities
+- **[filepath](https://hackage.haskell.org/package/filepath)** - File path handling
+- **[directory](https://hackage.haskell.org/package/directory)** - Directory operations
+- **[process](https://hackage.haskell.org/package/process)** - Process spawning
+- **[temporary](https://hackage.haskell.org/package/temporary)** - Temporary files
+- **[uuid](https://hackage.haskell.org/package/uuid)** - UUID generation
+- **[time](https://hackage.haskell.org/package/time)** - Time handling
+- **[base64-bytestring](https://hackage.haskell.org/package/base64-bytestring)** - Base64 encoding
+- **[regex-tdfa](https://hackage.haskell.org/package/regex-tdfa)** - Regular expressions
+
+## Testing & Benchmarking
+- **[tasty](https://hackage.haskell.org/package/tasty)** - Testing framework
+- **[tasty-hunit](https://hackage.haskell.org/package/tasty-hunit)** - HUnit integration for tasty
+- **[criterion](https://hackage.haskell.org/package/criterion)** - Benchmarking framework

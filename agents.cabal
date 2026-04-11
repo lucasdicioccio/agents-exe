@@ -179,7 +179,6 @@ library agents-lib
                       formatting,
                       free,
                       hashable,
-                      haskeline,
                       hslua,
                       hslua-marshalling,
                       http-client,
