@@ -523,7 +523,7 @@ turnRoundTripTests =
             let userContent = UserTurnContent
                     { userPrompt = SystemPrompt "You are helpful"
                     , userTools = []
-                    , userQuery = Just (UserQuery "Hello")
+                    , userQuery = Just (UserQuery "Hello" [])
                     , userToolResponses = []
                     }
             let turn = UserTurn userContent Nothing
@@ -534,7 +534,7 @@ turnRoundTripTests =
             let userContent = UserTurnContent
                     { userPrompt = SystemPrompt "You are helpful"
                     , userTools = []
-                    , userQuery = Just (UserQuery "Hello")
+                    , userQuery = Just (UserQuery "Hello" [])
                     , userToolResponses = []
                     }
             let byteUsage = StepByteUsage 1000 500 300 100 100 Nothing
@@ -611,7 +611,7 @@ turnRoundTripTests =
                     (UserTurnContent
                         { userPrompt = SystemPrompt "You are helpful"
                         , userTools = []
-                        , userQuery = Just (UserQuery "First query")
+                        , userQuery = Just (UserQuery "First query" [])
                         , userToolResponses = []
                         })
                     Nothing
@@ -632,7 +632,7 @@ turnRoundTripTests =
                     (UserTurnContent
                         { userPrompt = SystemPrompt "You are helpful"
                         , userTools = []
-                        , userQuery = Just (UserQuery "Second query")
+                        , userQuery = Just (UserQuery "Second query" [])
                         , userToolResponses = []
                         })
                     Nothing

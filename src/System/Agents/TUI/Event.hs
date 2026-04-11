@@ -1308,7 +1308,7 @@ runConversation tracer baseTuiAgent session = do
                     buffered <- readAndClearBufferedMessages convId core
                     case buffered of
                         Nothing -> notifyNeedInput >> readBChan inChan
-                        Just buftxt -> pure (Just $ UserQuery buftxt)
+                        Just buftxt -> pure (Just $ UserQuery buftxt [])
                 }
 
     -- \* wrap in Conversation
@@ -1370,7 +1370,7 @@ handleSendMessage = do
                         showStatus StatusInfo "Message buffered - will be sent with tool responses"
                     else do
                         -- Conversation is waiting for input - send directly via channel
-                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText)
+                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText [])
                         -- Mark as ongoing since we're starting agent processing
                         tuiUI . ongoingConversations %= Set.insert (conversationId conv)
 
@@ -1385,3 +1385,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+

@@ -79,7 +79,7 @@ formatTurn verbosity idx turn =
 formatUserTurn :: SessionVerbosity -> Int -> Session.UserTurnContent -> Text
 formatUserTurn _verbosity idx content =
     let querySection = case content.userQuery of
-            Just (Session.UserQuery q) -> "**User:** " <> q <> "\n\n"
+            Just (Session.UserQuery q _) -> "**User:** " <> q <> "\n\n"
             Nothing -> ""
         toolRespSection = case content.userToolResponses of
             [] -> ""
@@ -165,3 +165,4 @@ formatStatisticsSection session =
             <> "- Total tool calls: "
             <> Text.pack (show (toolCalls :: Int))
             <> "\n\n"
+

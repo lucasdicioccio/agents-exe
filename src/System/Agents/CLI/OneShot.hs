@@ -26,10 +26,11 @@ module System.Agents.CLI.OneShot (
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
-import Control.Monad (forM_)
+import Control.Monad (forM_, unless)
 import Data.Map (Map)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Text.IO as Text.IO
 
 import qualified Prod.Tracer as Prod
@@ -40,12 +41,16 @@ import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
 import System.Agents.Base (AgentId)
-import System.Agents.ToolRegistration (ToolRegistration)
-
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.PromptScript (MediaReference (..), PromptScript, interpretPromptScript, resolveMediaType)
+import System.Agents.Media.Types (MediaAttachment (..))
+import System.Agents.ToolRegistration (ToolRegistration)
 import System.Exit (exitFailure)
 import System.IO (stderr)
+
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Base64 as Base64
+import System.FilePath (takeFileName)
 
 data Trace
     = AgentTreeTrace !AgentTree.TreeTrace
@@ -104,13 +109,23 @@ listOneShotAgentTools :: OneShotAgent -> IO [ToolRegistration]
 listOneShotAgentTools agent =
     readTVarIO (osNodeTools agent.oneShotNode)
 
--- | Validate media references and report any errors
-validateMediaReferences :: [MediaReference] -> IO (Either Text [Text])
-validateMediaReferences refs = do
-    let results = map resolveMediaType refs
-    case sequence results of
-        Left err -> pure $ Left $ Text.pack err
-        Right mimeTypes -> pure $ Right mimeTypes
+-- | Load media files from references and create MediaAttachments.
+-- Returns Left with error message if any file cannot be loaded.
+loadMediaAttachments :: [MediaReference] -> IO (Either Text [MediaAttachment])
+loadMediaAttachments refs = do
+    results <- mapM loadMedia refs
+    pure $ sequence results
+  where
+    loadMedia :: MediaReference -> IO (Either Text MediaAttachment)
+    loadMedia ref = do
+        case resolveMediaType ref of
+            Left err -> pure $ Left $ Text.pack err
+            Right mimeType -> do
+                -- Try to read the file
+                fileContent <- ByteString.readFile (mediaFilePath ref)
+                let base64Data = Text.Encoding.decodeUtf8 $ Base64.encode fileContent
+                let filename = Just $ Text.pack $ takeFileName (mediaFilePath ref)
+                pure $ Right $ MediaAttachment mimeType base64Data filename
 
 -- | Handle the one-shot run command
 handleOneShot ::
@@ -128,22 +143,32 @@ handleOneShot ::
     OneShotOptions ->
     IO ()
 handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
-    -- Validate media files first
-    mediaResult <- validateMediaReferences opts.mediaFiles
+    -- Load and validate media files first
+    mediaResult <- loadMediaAttachments opts.mediaFiles
     case mediaResult of
         Left err -> do
             Text.IO.hPutStrLn stderr $ "Error: " <> err
             exitFailure
-        Right mimeTypes -> do
-            -- Log media attachments (for debugging)
-            mapM_ (\(ref, mime) -> Text.IO.hPutStrLn stderr $ "Attaching media: " <> Text.pack (mediaFilePath ref) <> " [" <> mime <> "]") (zip opts.mediaFiles mimeTypes)
-            
+        Right mediaAttachments -> do
+            -- Log media attachments
+            unless (null mediaAttachments) $ do
+                Text.IO.hPutStrLn stderr $ "Attaching " <> Text.pack (show $ length mediaAttachments) <> " media file(s):"
+                mapM_ (\m -> Text.IO.hPutStrLn stderr $ "  - " <> m.mediaMimeType <> ": " <> maybe "unnamed" id m.mediaFilename) mediaAttachments
+
             apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
             forM_ (take 1 agentFiles) $ \agentFilePath -> do
                 promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
                 mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
                 -- Use OS-native agent loading (no registry needed)
-                let oneShot text props = OneShot.mainOneShotTextWithThinking (Prod.contramap OneShotTrace tracer) sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+                let oneShot text props = OneShot.mainOneShotTextWithThinking 
+                        (Prod.contramap OneShotTrace tracer) 
+                        sessionStore 
+                        opts.sessionFile 
+                        mSession 
+                        opts.thinkingOutput 
+                        mediaAttachments  -- Pass media to the one-shot handler
+                        props 
+                        text
                 oneShot promptContents $
                     AgentTree.Props
                         { AgentTree.apiKeys = apiKeys

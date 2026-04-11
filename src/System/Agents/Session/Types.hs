@@ -233,9 +233,36 @@ instance ToJSON SystemToolDefinition
 newtype SystemTool = SystemTool SystemToolDefinition
     deriving (Show, Ord, Eq, FromJSON, ToJSON)
 
--- | User query.
-newtype UserQuery = UserQuery Text
-    deriving (Show, Ord, Eq, FromJSON, ToJSON)
+-- | User query - can include text and media attachments.
+data UserQuery = UserQuery
+    { queryText :: Text
+    -- ^ The text query/prompt
+    , queryMedia :: [MediaAttachment]
+    -- ^ Optional media attachments (images, audio, video, etc.)
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom ToJSON for UserQuery with backward compatibility.
+-- Legacy format was just a text string.
+instance ToJSON UserQuery where
+    toJSON (UserQuery text []) = Aeson.toJSON text
+    toJSON (UserQuery text media) =
+        Aeson.object
+            [ "text" .= text
+            , "media" .= media
+            ]
+
+-- | Custom FromJSON for UserQuery with backward compatibility.
+instance FromJSON UserQuery where
+    parseJSON v = parseNewFormat v <|> parseLegacyFormat v
+      where
+        parseNewFormat = Aeson.withObject "UserQuery" $ \obj -> do
+            text <- obj .: "text"
+            media <- obj .:? "media" >>= pure . maybe [] id
+            pure $ UserQuery text media
+        parseLegacyFormat val = do
+            text <- Aeson.parseJSON val
+            pure $ UserQuery text []
 
 -------------------------------------------------------------------------------
 -- UserToolResponse - Multi-modal response type
@@ -422,7 +449,7 @@ instance FromJSON Turn where
                     pure $ UserTurn contents byteUsage
                 "LlmTurn" -> do
                     contents <- obj .: "contents"
-                    byteUsage <- obj .:? "byteUsage"
+                    byteUsage <- obj .: "byteUsage"
                     pure $ LlmTurn contents byteUsage
                 _ -> fail $ "Unknown Turn tag: " ++ show tag
 
@@ -479,3 +506,4 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
+

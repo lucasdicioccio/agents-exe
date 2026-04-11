@@ -40,6 +40,7 @@ import Data.Text (Text)
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Re-export all session types from Session.Types for backward compatibility
+import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Types
 
 -------------------------------------------------------------------------------
@@ -52,13 +53,15 @@ data MissingUserPrompt = MissingUserPrompt
     }
     deriving (Show, Eq, Ord)
 
--- todo: medias
+-- | LLM completion request with optional media attachments.
 data LlmCompletion = LlmCompletion
     { completePrompt :: SystemPrompt
     , completeTools :: [SystemTool]
     , completeQuery :: Maybe UserQuery
     , completeToolResponses :: [(LlmToolCall, UserToolResponse)]
     , completeConversationHistory :: [Turn]
+    , completeMedia :: [MediaAttachment]
+    -- ^ Additional media attachments for multi-modal LLMs
     }
     deriving (Show, Eq, Ord)
 
@@ -143,3 +146,4 @@ type OnSessionProgress = SessionProgress -> IO ()
 -- | A no-op session progress handler for when tracking is not needed.
 ignoreSessionProgress :: OnSessionProgress
 ignoreSessionProgress = const (pure ())
+

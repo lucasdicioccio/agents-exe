@@ -138,7 +138,7 @@ propertyBytes _ = 50 -- Rough estimate per property
 -- | Calculate bytes for user query.
 userQueryBytes :: Maybe UserQuery -> Int
 userQueryBytes Nothing = 0
-userQueryBytes (Just (UserQuery txt)) = Text.length txt * 4
+userQueryBytes (Just (UserQuery txt _)) = Text.length txt * 4
 
 -- | Calculate bytes for a tool call.
 toolCallBytes :: LlmToolCall -> Int
@@ -176,7 +176,7 @@ naiveStep sess0 = do
                         let sTools0 = userTurn.userTools
                         let uQuery0 = userTurn.userQuery
                         let tAnswers0 = userTurn.userToolResponses
-                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist)
+                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [])
 
 -- | Step function that stops when the LLM returns no tool calls.
 naiveTilNoToolCallStep :: Session -> IO (Action (LlmTurnContent, Session))
@@ -193,7 +193,7 @@ naiveTilNoToolCallStep sess = do
                     let sTools0 = userTurn.userTools
                     let uQuery0 = userTurn.userQuery
                     let tAnswers0 = userTurn.userToolResponses
-                    pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist)
+                    pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [])
                 LlmTurn llmTurn _mUsage ->
                     -- Last turn was LLM turn
                     if null llmTurn.llmToolCalls
@@ -203,3 +203,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+

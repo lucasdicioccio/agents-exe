@@ -429,7 +429,7 @@ extractSystemPrompt (SystemPrompt txt) = txt
 
 -- | Extract user query text.
 extractUserQuery :: UserQuery -> Text
-extractUserQuery (UserQuery txt) = txt
+extractUserQuery (UserQuery txt _) = txt
 
 -- | Extract tool responses.
 extractToolResponses :: [(LlmToolCall, UserToolResponse)] -> Text
@@ -585,3 +585,4 @@ countStaleSessions sessions indexedMtimes = do
             Just indexedMtime
                 | mtime > indexedMtime -> countStale (acc + 1) rest indexedMap
                 | otherwise -> countStale acc rest indexedMap
+

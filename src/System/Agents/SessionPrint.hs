@@ -213,7 +213,7 @@ elideLines leadingCount trailingCount content =
                     trailing = drop (totalLines - actualTrailing) lines'
                     elidedCount = totalLines - actualLeading - actualTrailing
                  in Text.intercalate "\n" leading
-                        <> "\n... ("
+                        <> "\n...("
                         <> Text.pack (show elidedCount)
                         <> " line"
                         <> (if elidedCount == 1 then "" else "s")
@@ -236,7 +236,7 @@ elideChars leadingCount trailingCount content =
                     trailing = Text.drop (totalChars - actualTrailing) content
                     elidedCount = totalChars - actualLeading - actualTrailing
                  in leading
-                        <> "... (elided "
+                        <> "...(elided "
                         <> Text.pack (show elidedCount)
                         <> " char"
                         <> (if elidedCount == 1 then "" else "s")
@@ -415,7 +415,7 @@ calculateByteCounts turns =
     textBytes = BS.length . Text.encodeUtf8
 
     unwrapQuery :: Session.UserQuery -> Text.Text
-    unwrapQuery (Session.UserQuery q) = q
+    unwrapQuery (Session.UserQuery q _) = q
 
     -- Calculate bytes for a UserToolResponse
     userToolResponseBytes :: UserToolResponse -> Int
@@ -621,7 +621,7 @@ formatUserTurn opts isFirstTurn content =
                     "### 📝 System Prompt\n\n```\n" <> sp <> "```\n"
             _ -> ""
         querySection = case content.userQuery of
-            Just (Session.UserQuery q) -> "\n### 💬 User Query\n\n" <> q <> "\n"
+            Just (Session.UserQuery q _) -> "\n### 💬 User Query\n\n" <> q <> "\n"
             Nothing -> ""
         -- Show tools if repeatTools is True, or if it's the first turn (and tools exist)
         toolsSection =
@@ -845,3 +845,4 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
+
