@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 {- | Module for the 'run' command handler (one-shot mode).
 
 The run command executes a single prompt against an agent and outputs
@@ -8,6 +5,9 @@ the response. This is the non-interactive mode for agents-exe.
 
 This module uses OS-native structures for agent management.
 -}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module System.Agents.CLI.OneShot (
     Trace (..),
 
@@ -29,6 +29,8 @@ import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_)
 import Data.Map (Map)
 import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text.IO
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
@@ -41,7 +43,9 @@ import System.Agents.Base (AgentId)
 import System.Agents.ToolRegistration (ToolRegistration)
 
 import System.Agents.CLI.Aliases (AliasDefinition)
-import System.Agents.CLI.PromptScript (PromptScript, interpretPromptScript)
+import System.Agents.CLI.PromptScript (MediaReference (..), PromptScript, interpretPromptScript, resolveMediaType)
+import System.Exit (exitFailure)
+import System.IO (stderr)
 
 data Trace
     = AgentTreeTrace !AgentTree.TreeTrace
@@ -54,6 +58,7 @@ data OneShotOptions = OneShotOptions
     { sessionFile :: Maybe FilePath
     , thinkingOutput :: OneShot.ThinkingOutput
     , promptScript :: PromptScript
+    , mediaFiles :: [MediaReference]
     }
     deriving (Show)
 
@@ -99,6 +104,14 @@ listOneShotAgentTools :: OneShotAgent -> IO [ToolRegistration]
 listOneShotAgentTools agent =
     readTVarIO (osNodeTools agent.oneShotNode)
 
+-- | Validate media references and report any errors
+validateMediaReferences :: [MediaReference] -> IO (Either Text [Text])
+validateMediaReferences refs = do
+    let results = map resolveMediaType refs
+    case sequence results of
+        Left err -> pure $ Left $ Text.pack err
+        Right mimeTypes -> pure $ Right mimeTypes
+
 -- | Handle the one-shot run command
 handleOneShot ::
     -- | Base tracer for logging
@@ -115,17 +128,28 @@ handleOneShot ::
     OneShotOptions ->
     IO ()
 handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
-    apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
-    forM_ (take 1 agentFiles) $ \agentFilePath -> do
-        promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
-        mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
-        -- Use OS-native agent loading (no registry needed)
-        let oneShot text props = OneShot.mainOneShotTextWithThinking (Prod.contramap OneShotTrace tracer) sessionStore opts.sessionFile mSession opts.thinkingOutput props text
-        oneShot promptContents $
-            AgentTree.Props
-                { AgentTree.apiKeys = apiKeys
-                , AgentTree.apiKeysFile = apiKeysFile
-                , AgentTree.rootAgentFile = agentFilePath
-                , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
-                }
+    -- Validate media files first
+    mediaResult <- validateMediaReferences opts.mediaFiles
+    case mediaResult of
+        Left err -> do
+            Text.IO.hPutStrLn stderr $ "Error: " <> err
+            exitFailure
+        Right mimeTypes -> do
+            -- Log media attachments (for debugging)
+            mapM_ (\(ref, mime) -> Text.IO.hPutStrLn stderr $ "Attaching media: " <> Text.pack (mediaFilePath ref) <> " [" <> mime <> "]") (zip opts.mediaFiles mimeTypes)
+            
+            apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
+            forM_ (take 1 agentFiles) $ \agentFilePath -> do
+                promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
+                mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
+                -- Use OS-native agent loading (no registry needed)
+                let oneShot text props = OneShot.mainOneShotTextWithThinking (Prod.contramap OneShotTrace tracer) sessionStore opts.sessionFile mSession opts.thinkingOutput props text
+                oneShot promptContents $
+                    AgentTree.Props
+                        { AgentTree.apiKeys = apiKeys
+                        , AgentTree.apiKeysFile = apiKeysFile
+                        , AgentTree.rootAgentFile = agentFilePath
+                        , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
+                        , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
+                        }
+

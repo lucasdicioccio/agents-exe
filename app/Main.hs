@@ -1,13 +1,13 @@
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 {- | Main entry point for the agents-exe executable.
 
 This module handles command-line argument parsing and dispatches to
 the appropriate command handlers. The actual command logic is implemented
 in separate modules under 'System.Agents.CLI'.
 -}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import Control.Monad (unless, when)
@@ -49,7 +49,7 @@ import qualified System.Agents.CLI.McpServer as McpServerCmd
 import qualified System.Agents.CLI.New as NewCmd
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
-import System.Agents.CLI.PromptScript (PromptScript, PromptScriptDirective (..))
+import System.Agents.CLI.PromptScript (MediaReference (..), PromptScript, PromptScriptDirective (..), parseMediaReference)
 import qualified System.Agents.CLI.ReplayToolCall as ReplayToolCallCmd
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
@@ -600,6 +600,20 @@ parseThinkingOption =
     showThinking OneShot.ThinkingStdout = "stdout"
     showThinking OneShot.ThinkingStderr = "stderr"
 
+-- | Parse a media reference option.
+-- Supports formats:
+-- - image/png;/path/to/image.png (explicit MIME type)
+-- - /path/to/image.png (inferred from extension)
+parseMediaOption :: Parser MediaReference
+parseMediaOption =
+    option
+        (eitherReader parseMediaReference)
+        ( long "media"
+            <> short 'm'
+            <> metavar "MEDIA"
+            <> help "Attach a media file. Format: [mime/type;]/path/to/file (can be specified multiple times)"
+        )
+
 parseOneShotOptions :: Parser OneShotCmd.OneShotOptions
 parseOneShotOptions =
     OneShotCmd.OneShotOptions
@@ -612,6 +626,7 @@ parseOneShotOptions =
             )
         <*> parseThinkingOption
         <*> parsePromptScriptInput
+        <*> many parseMediaOption
 
 parseEchoPromptOptions :: Parser EchoPromptCmd.EchoPromptOptions
 parseEchoPromptOptions =
@@ -1361,3 +1376,4 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
+
