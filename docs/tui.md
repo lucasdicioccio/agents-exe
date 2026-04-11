@@ -32,7 +32,7 @@ The Terminal UI provides an interactive, real-time interface for agent conversat
 
 ## Tabbed Interface
 
-The TUI now features a tabbed interface with four main tabs:
+The TUI features a tabbed interface with four main tabs:
 
 | Tab | Description | Content |
 |-----|-------------|---------|
@@ -65,7 +65,7 @@ The Chats tab is for active conversations:
   - `⟳` - Active (agent is processing)
   - `●` - Waiting for input (unread)
   - `⏸` - Paused
-- **Main area**: Message editor and conversation history
+- **Main area**: Message editor, queued messages (when paused), and conversation history
 
 ### History Tab
 
@@ -112,6 +112,10 @@ data UIState = UIState
     { _uiFocusRing :: FocusRing WidgetName
     , _currentTab :: Tab           -- Current active tab
     , _helpContent :: [Text]       -- Help text lines
+    , _turnNavigation :: Maybe TurnNavigationState
+    -- ^ When Just, we are in turn navigation mode
+    , _queuedMessagesFocus :: Maybe Int
+    -- ^ Index of currently selected queued message
     , ...
     }
 
@@ -173,16 +177,147 @@ tui_appHandleEvent tracer ev = do
         -- ...
 
 cycleTabForward :: EventM N TuiState ()
-cycleTabForward = tuiUI . currentTab %= nextTab
+cycleTabForward = do
+    current <- use (tuiUI . currentTab)
+    let next = nextTab current
+    tuiUI . currentTab .= next
+    -- Update focus ring for the new tab
+    mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
+```
 
-cycleTabBackward :: EventM N TuiState ()
-cycleTabBackward = tuiUI . currentTab %= prevTab
+## Turn Navigation
 
-nextTab :: Tab -> Tab
-nextTab AgentsTab = ChatsTab
-nextTab ChatsTab = HistoryTab
-nextTab HistoryTab = HelpTab
-nextTab HelpTab = AgentsTab
+Turn navigation allows you to browse through conversation history turn-by-turn and fork new conversations from any point.
+
+### Entering Navigation Mode
+
+Press `Enter` when focused on the Conversation view or Session view to enter turn navigation mode:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Conversation - Turn Navigation (3/8) [Enter:exit F:fork]    │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ -----------------------                                 │ │
+│ │▶ < What is the best approach for...      ← SELECTED    │ │
+│ │  + ...                                                  │ │
+│ │                                                         │ │
+│ │ -----------------------                                 │ │
+│ │  < You could consider using...                          │ │
+│ └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Navigation Controls
+
+| Key | Action |
+|-----|--------|
+| `Up` | Navigate to earlier turn |
+| `Down` | Navigate to later turn |
+| `F` | Fork conversation at selected turn |
+| `Enter` | Exit navigation mode |
+| `Esc` | Exit navigation mode |
+
+### Forking Conversations
+
+Forking creates a new conversation starting from the selected turn, preserving only the turns before it:
+
+```
+Turn 0: User - "Hello!"
+Turn 1: Assistant - "Hi there!"
+Turn 2: User - "How do I..." ← Selected for fork
+Turn 3: Assistant - "You can..."
+
+Forking at Turn 2 creates new conversation with:
+Turn 0: User - "Hello!"
+Turn 1: Assistant - "Hi there!"
+(New conversation starts here)
+```
+
+The original session remains untouched. The forked session has `forkedFromSessionId` set to the original session's ID.
+
+### Turn Navigation Types
+
+```haskell
+-- | State for turn-by-turn navigation
+data TurnNavigationState = TurnNavigationState
+    { _navSession :: Session
+    -- ^ The session being navigated
+    , _navSelectedTurnIndex :: Int
+    -- ^ Currently selected turn index (0-based)
+    , _navTotalTurns :: Int
+    -- ^ Total number of turns for display
+    }
+
+-- | Widget name for turn navigation viewport
+data WidgetName
+    = ...
+    | TurnNavigationWidget
+    -- ^ For viewport scrolling during turn navigation
+```
+
+## Message Queue Management
+
+When a conversation is paused, you can manage queued messages - messages typed while the agent was processing.
+
+### Queue Management UI
+
+When paused with queued messages, the Chats tab shows a queue management panel:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Message                                                      │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ User's typed message...                                 │ │
+│ └─────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│ Queued Messages (2) - Ctrl+D: clear  Del: delete selected │ │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ ▶ First queued message text...                          │ │
+│ │   Second queued message that is longer...               │ │
+│ └─────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│ Conversation                                                 │
+│ ...existing conversation content...                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Queue Management Controls
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+D` | Clear all queued messages |
+| `Del` / `Backspace` | Delete selected message |
+| `Up` | Select previous message |
+| `Down` | Select next message |
+
+### Activation
+
+Queue management is only available when:
+- The conversation status is `ConversationStatus_Paused`
+- There are queued messages in the buffer
+
+To pause/unpause a conversation, press `Ctrl+E`.
+
+### Queue State
+
+```haskell
+data UIState = UIState
+    { ...
+    , _uiBufferedMessages :: Map ConversationId [Text]
+    -- ^ Copy of buffered messages from Core for UI rendering
+    , _queuedMessagesFocus :: Maybe Int
+    -- ^ Index of currently selected queued message (Nothing = none selected)
+    }
+
+-- The Core also maintains the source of truth
+data Core = Core
+    { ...
+    , coreBufferedMessages :: TVar (Map ConversationId [Text])
+    -- ^ Buffered messages per conversation
+    , corePausedConversations :: Set ConversationId
+    -- ^ Set of paused conversation IDs
+    }
 ```
 
 ## Keyboard Shortcuts
@@ -210,6 +345,23 @@ nextTab HelpTab = AgentsTab
 | `Ctrl+C` | Continue restored session |
 | `Meta+Enter` | Send message |
 | `Ctrl+E` | Pause/unpause conversation |
+
+### Turn Navigation
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Enter turn navigation mode (when on conversation) |
+| `Up/Down` | Navigate between turns (in navigation mode) |
+| `F` | Fork conversation at selected turn |
+| `Enter/Esc` | Exit turn navigation mode |
+
+### Queue Management (when paused)
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+D` | Clear all queued messages |
+| `Del` / `Backspace` | Delete selected queued message |
+| `Up/Down` | Select queued message |
 
 ### Session Export
 
@@ -370,6 +522,9 @@ tui_appAttrMap _ =
         , (toolErrorAttr, fg red)
         , (systemAttr, fg magenta)
         , (inputAttr, fg white)
+        , (queuedMessageAttr, fg yellow)
+        , (queuedMessageSelectedAttr, bg blue `withStyle` bold)
+        , (selectedTurnAttr, bg blue `withStyle` bold)
         ]
 ```
 
@@ -403,12 +558,20 @@ data StatusSeverity
 2. **Error handling**: Display errors without crashing
 3. **Help text**: Always show keyboard shortcuts
 4. **Tab organization**: Group related functionality into logical tabs
+5. **Pause before queue management**: Queue management only works when paused to prevent accidental modifications
 
 ### Multi-Agent UI
 
 1. **Clear indicators**: Show which agent is active
 2. **Separate contexts**: Each agent maintains its own conversation
 3. **Easy switching**: Tab between agents quickly
+
+### Conversation Forking
+
+1. **Non-destructive**: Original session always preserved
+2. **Clear lineage**: Forked sessions track their origin
+3. **Agent selection**: Current agent selection used for fork
+4. **Navigation mode**: Enter navigation to review before forking
 
 ## Customization
 

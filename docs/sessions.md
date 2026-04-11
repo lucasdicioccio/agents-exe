@@ -439,7 +439,7 @@ agents-exe session-edit --drop-tail --count 1 session.json < input.json > output
 # Remove all tool calls
 agents-exe session-edit --censor-tool-calls session.json < input.json > output.json
 
-# Remove all thinking content
+# Remove thinking content
 agents-exe session-edit --censor-thinking session.json < input.json > output.json
 ```
 
@@ -462,6 +462,261 @@ applyEdit (SessionEditDrop n) session =
 applyEdit SessionEditCensorToolCalls session =
     session { turns = map removeToolCalls (turns session) }
 -- etc.
+```
+
+## Session Search (`System.Agents.Session.Search`)
+
+The Session Search subsystem provides fast fuzzy text search across session files using SQLite FTS5. It enables searching through conversation history with trigram-based fuzzy matching and metadata filtering.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Session Search                            │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │    Types    │  │    Index    │  │    Query    │         │
+│  │  (config)   │  │  (SQLite)   │  │  (search)   │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+│        ▲                ▲                ▲                  │
+│        └────────────────┴────────────────┘                  │
+│                    CLI Handlers                              │
+│              (session-index, session-search)                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Core Types (`System.Agents.Session.Search.Types`)
+
+```haskell
+-- | Configuration for the search index.
+data SearchIndexConfig = SearchIndexConfig
+    { indexDbPath :: FilePath
+    -- ^ Path to the SQLite index database (default: .agents-search.db)
+    , indexSessionStore :: SessionStore
+    -- ^ Session store to index
+    , indexIncludeToolOutputs :: Bool
+    -- ^ Whether to include tool outputs in the index
+    }
+
+-- | Options for session search queries.
+data SearchOptions = SearchOptions
+    { searchQuery :: Text
+    -- ^ Fuzzy search query text
+    , searchDateFilter :: Maybe DateFilter
+    -- ^ Optional date filter
+    , searchTools :: [Text]
+    -- ^ Filter by tools used (any of these)
+    , searchAgent :: Maybe Text
+    -- ^ Filter by agent slug
+    , searchIncludeToolOutputs :: Bool
+    -- ^ Include tool outputs in search
+    , searchJsonOutput :: Bool
+    -- ^ Output results as JSON
+    , searchPreviewLines :: Int
+    -- ^ Number of context lines to show
+    , searchLimit :: Maybe Int
+    -- ^ Maximum number of results
+    , searchAutoUpdate :: Bool
+    -- ^ Auto-update index if stale before searching
+    }
+
+-- | Date filter for search queries.
+data DateFilter
+    = AfterDate UTCTime
+    | BeforeDate UTCTime
+    | BetweenDates UTCTime UTCTime
+
+-- | Status of the search index.
+data SearchIndexStatus
+    = IndexCurrent
+    | IndexStale Int Int  -- (stale sessions, total sessions)
+    | IndexMissing
+    | IndexError Text
+```
+
+### Search Result Types
+
+```haskell
+-- | Complete search results.
+data SearchResult = SearchResult
+    { resultItems :: [SearchResultItem]
+    , resultTotalMatches :: Int
+    , resultQueryTimeMs :: Double
+    , resultIndexWasUpdated :: Bool
+    }
+
+-- | A single search result item.
+data SearchResultItem = SearchResultItem
+    { resultMetadata :: SearchResultMetadata
+    , resultPreview :: Maybe Text
+    , resultMatchedTerms :: [Text]
+    }
+
+-- | Metadata about a search result.
+data SearchResultMetadata = SearchResultMetadata
+    { resultSessionId :: Text
+    , resultFilePath :: FilePath
+    , resultAgentSlug :: Maybe Text
+    , resultTurnCount :: Int
+    , resultFirstTurnAt :: Maybe UTCTime
+    , resultLastTurnAt :: Maybe UTCTime
+    , resultRank :: Double
+    }
+```
+
+### Index Schema (`System.Agents.Session.Search.Index`)
+
+The search index uses SQLite with FTS5 (Full-Text Search version 5):
+
+```sql
+-- Session metadata cache
+CREATE TABLE session_index (
+    session_id TEXT PRIMARY KEY,
+    file_path TEXT NOT NULL,
+    mtime INTEGER NOT NULL,
+    agent_slug TEXT,
+    turn_count INTEGER,
+    first_turn_at TIMESTAMP,
+    last_turn_at TIMESTAMP
+);
+
+-- FTS5 virtual table for trigram search
+CREATE VIRTUAL TABLE search_content USING fts5(
+    session_id,
+    content,
+    tokenize='trigram'
+);
+
+-- Tool call index for filtering
+CREATE TABLE tool_index (
+    session_id TEXT REFERENCES session_index(session_id),
+    tool_name TEXT NOT NULL,
+    call_count INTEGER DEFAULT 1,
+    PRIMARY KEY (session_id, tool_name)
+);
+
+-- Index metadata
+CREATE TABLE index_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+```
+
+### Index Operations
+
+```haskell
+-- | Create a new search index, replacing any existing index.
+createSearchIndex :: SearchIndexConfig -> IO ()
+
+-- | Incrementally update the search index.
+updateSearchIndex :: SearchIndexConfig -> IO ()
+
+-- | Check the status of the search index.
+checkIndexStatus :: SearchIndexConfig -> IO SearchIndexStatus
+
+-- | Remove the search index.
+removeSearchIndex :: SearchIndexConfig -> IO ()
+```
+
+### Search Execution (`System.Agents.Session.Search.Query`)
+
+```haskell
+-- | Execute a search query with the given options.
+executeSearchWithOptions :: SearchIndexConfig -> SearchOptions -> IO SearchResult
+
+-- | Execute a search query against the index.
+executeSearch :: SearchIndexConfig -> SearchOptions -> IO SearchResult
+
+-- | Format search results for display.
+formatResults :: SearchOptions -> SearchResult -> IO ()
+```
+
+### Fuzzy Matching
+
+The search uses SQLite FTS5 with trigram tokenization:
+
+- **Trigram tokenization**: Breaks text into 3-character sequences
+- **Fuzzy matching**: "error" matches "errors", "erroring", "terror"
+- **Prefix matching**: "data" matches "database", "datagram"
+- **Typo tolerance**: Small changes in query still find matches
+
+Example:
+```sql
+-- Find sessions with fuzzy match to "error"
+SELECT session_id, rank 
+FROM search_content 
+WHERE content MATCH 'error'
+ORDER BY rank;
+```
+
+### CLI: session-index Command
+
+```bash
+# Build the search index
+agents-exe session-index --build
+
+# Check index status
+agents-exe session-index --status
+
+# Update index incrementally
+agents-exe session-index --update
+
+# Remove the index
+agents-exe session-index --clean
+
+# Build with tool outputs included
+agents-exe session-index --build --include-tool-outputs
+```
+
+### CLI: session-search Command
+
+```bash
+# Basic fuzzy search
+agents-exe session-search "database error"
+
+# Search with auto-update
+agents-exe session-search "migration" --auto
+
+# Include tool outputs in search
+agents-exe session-search "config.yaml" --include-tool-outputs
+
+# Filter by date and tool
+agents-exe session-search "auth" --after 2024-01-01 --tool write-file
+
+# Filter by agent
+agents-exe session-search "refactor" --agent my-coder
+
+# JSON output for scripting
+agents-exe session-search "TODO" --json
+
+# Show context lines
+agents-exe session-search "deploy" --preview 5
+
+# Combined filters
+agents-exe session-search "fix" \
+  --after 2024-01-01 \
+  --before 2024-12-31 \
+  --tool bash_write-file \
+  --json
+```
+
+### Search Workflow Example
+
+```bash
+# 1. Build the initial index
+agents-exe session-index --build
+
+# 2. Search for sessions about errors
+agents-exe session-search "error" --json | jq '.resultItems[] | .resultMetadata.resultFilePath'
+
+# 3. Find sessions using specific tools
+agents-exe session-search "database" --tool write-file --tool read-file
+
+# 4. Update index after new sessions
+agents-exe session-index --update
+
+# 5. Search with date filter
+agents-exe session-search "config" --after 2024-06-01 --preview 3
 ```
 
 ## Context Window Management
@@ -549,6 +804,15 @@ memorySessionStore = do
 1. **Lazy loading**: Don't load full history unless needed
 2. **Pagination**: For long sessions, load turns in chunks
 3. **Compression**: Consider gzip for large session files
+4. **Search indexing**: Build index periodically for fast searching
+
+### Search Best Practices
+
+1. **Regular index updates**: Run `session-index --update` periodically
+2. **Include tool outputs**: Use `--include-tool-outputs` for comprehensive search
+3. **Use filters**: Combine text search with `--tool`, `--agent`, or date filters
+4. **JSON output**: Use `--json` for scripting and automation
+5. **Auto-update**: Use `--auto` flag to ensure fresh results
 
 ## Example: Session Analysis
 
@@ -574,6 +838,35 @@ errorTurns session =
           , any (isLeft . toolOutput) (toolCalls turn)]
 ```
 
+## Example: Search Integration
+
+```haskell
+import System.Agents.Session.Search.Types
+import System.Agents.Session.Search.Index
+import System.Agents.Session.Search.Query
+
+-- Search for sessions with specific patterns
+searchSessions :: Text -> IO SearchResult
+searchSessions query = do
+    let config = defaultSearchIndexConfig defaultSessionStore
+    let opts = (defaultSearchOptions query)
+            { searchJsonOutput = False
+            , searchPreviewLines = 3
+            , searchLimit = Just 20
+            }
+    executeSearchWithOptions config opts
+
+-- Find sessions that used specific tools
+findToolUsage :: [Text] -> IO SearchResult
+findToolUsage tools = do
+    let config = defaultSearchIndexConfig defaultSessionStore
+    let opts = (defaultSearchOptions "")
+            { searchTools = tools
+            , searchJsonOutput = True
+            }
+    executeSearchWithOptions config opts
+```
+
 ## Related Modules
 
 | Module | Purpose |
@@ -584,6 +877,9 @@ errorTurns session =
 | `System.Agents.Session.Step` | Single turn execution |
 | `System.Agents.Session.Edit` | Session editing operations |
 | `System.Agents.Session.OpenAI` | OpenAI-specific session handling |
+| `System.Agents.Session.Search.Types` | Search configuration types |
+| `System.Agents.Session.Search.Index` | Index building and maintenance |
+| `System.Agents.Session.Search.Query` | Search query execution |
 | `System.Agents.SessionStore` | Persistent storage |
 | `System.Agents.SessionPrint` | Markdown printing and statistics |
 | `System.Agents.SessionPrint.Inject` | Session content injection |
