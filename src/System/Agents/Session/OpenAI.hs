@@ -20,6 +20,7 @@ import Prod.Tracer (Tracer)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 
+import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.ToolSchema
 
@@ -212,19 +213,60 @@ mkOpenAICompletion config completion = do
 
     -- Convert a tool call/response pair to OpenAI message format
     toolResponseToMessages :: (LlmToolCall, UserToolResponse) -> [Aeson.Value]
-    toolResponseToMessages (LlmToolCall callVal, UserToolResponse rspVal) =
+    toolResponseToMessages (LlmToolCall callVal, response) =
         -- Extract tool_call_id from the call if available
         let toolCallId = case callVal of
                 Aeson.Object obj -> case KeyMap.lookup "id" obj of
                     Just (Aeson.String tid) -> tid
                     _ -> ""
                 _ -> ""
-         in [ Aeson.object
-                [ "role" .= ("tool" :: Text)
-                , "tool_call_id" .= toolCallId
-                , "content" .= case rspVal of
-                    Aeson.String s -> s
-                    other -> Text.decodeUtf8 $ BSL.toStrict $ Aeson.encode other
+         in case response of
+                TextResponse txt ->
+                    [ Aeson.object
+                        [ "role" .= ("tool" :: Text)
+                        , "tool_call_id" .= toolCallId
+                        , "content" .= txt
+                        ]
+                    ]
+                JsonResponse val ->
+                    [ Aeson.object
+                        [ "role" .= ("tool" :: Text)
+                        , "tool_call_id" .= toolCallId
+                        , "content" .= Text.decodeUtf8 (BSL.toStrict $ Aeson.encode val)
+                        ]
+                    ]
+                MediaResponse media ->
+                    [ Aeson.object
+                        [ "role" .= ("tool" :: Text)
+                        , "tool_call_id" .= toolCallId
+                        , "content" .= Aeson.object
+                            [ "type" .= ("image_url" :: Text)
+                            , "image_url" .= Aeson.object
+                                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                ]
+                            ]
+                        ]
+                    ]
+                MixedResponse parts ->
+                    [ Aeson.object
+                        [ "role" .= ("tool" :: Text)
+                        , "tool_call_id" .= toolCallId
+                        , "content" .= map contentPartToOpenAI parts
+                        ]
+                    ]
+
+    -- Convert a ContentPart to OpenAI format
+    contentPartToOpenAI :: ContentPart -> Aeson.Value
+    contentPartToOpenAI (TextPart txt) =
+        Aeson.object
+            [ "type" .= ("text" :: Text)
+            , "text" .= txt
+            ]
+    contentPartToOpenAI (MediaPart media) =
+        Aeson.object
+            [ "type" .= ("image_url" :: Text)
+            , "image_url" .= Aeson.object
+                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
                 ]
             ]
 
@@ -295,3 +337,4 @@ parseToolCall_openAI val =
                                     }
                         _ -> Nothing
                 _ -> Nothing
+

@@ -11,6 +11,7 @@ import qualified Data.Text as Text
 import Data.Void (Void)
 
 import System.Agents.Base (ConversationId)
+import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
@@ -145,7 +146,15 @@ toolCallBytes (LlmToolCall val) = fromIntegral (LByteString.length (Aeson.encode
 
 -- | Calculate bytes for a user tool response.
 userToolResponseBytes :: UserToolResponse -> Int
-userToolResponseBytes (UserToolResponse val) = fromIntegral (LByteString.length (Aeson.encode val))
+userToolResponseBytes (TextResponse txt) = Text.length txt * 4 -- UTF-8 max bytes per char
+userToolResponseBytes (JsonResponse val) = fromIntegral $ LByteString.length $ Aeson.encode val
+userToolResponseBytes (MediaResponse media) = Text.length media.mediaBase64Data -- Already base64 = ASCII
+userToolResponseBytes (MixedResponse parts) = sum (map contentPartBytes parts)
+
+-- | Calculate bytes for a content part.
+contentPartBytes :: ContentPart -> Int
+contentPartBytes (TextPart txt) = Text.length txt * 4
+contentPartBytes (MediaPart media) = Text.length media.mediaBase64Data
 
 -- Naive action selection function that merely parrots the least surprising
 -- thing: it never evolves or stops the agent, always ask for a user query or a prompt.
@@ -194,3 +203,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+

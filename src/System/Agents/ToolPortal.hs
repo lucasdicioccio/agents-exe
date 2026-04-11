@@ -101,7 +101,7 @@ The portal allows tools to invoke other registered tools. Each invocation:
 1. Looks up the tool by name
 2. Checks against the allowed tools whitelist
 3. Constructs a synthetic OpenAI ToolCall for the lookup mechanism
-4. Executes the tool with a minimal context (no nested portal)
+4. Executes the tool with a minimal context (no nested portal to prevent loops)
 5. Returns the result as a ToolResult
 
 Example:
@@ -250,7 +250,7 @@ Different tool types have different result shapes, so we normalize them
 to JSON for the portal interface.
 -}
 callResultToJson :: forall a. CallResult a -> Aeson.Value
-callResultToJson (BlobToolSuccess _ bs) =
+callResultToJson (BlobToolSuccess _ bs _) =
     Aeson.object
         [ "type" .= ("blob" :: Text)
         , "data" .= decodeUtf8 bs
@@ -380,3 +380,4 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
+

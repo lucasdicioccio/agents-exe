@@ -132,12 +132,24 @@ instance ToJSON ScriptEmptyResultBehavior
 
 instance FromJSON ScriptEmptyResultBehavior
 
+{- | Script metadata from the describe command.
+
+Contains information about the script's arguments, slug, description,
+and optional behaviors like empty result handling and output media type.
+
+The 'scriptOutputMediaType' field allows tools to declare that they output
+binary media (e.g., images, audio) rather than text. This enables proper
+handling of binary content in LLM interactions.
+-}
 data ScriptInfo
     = ScriptInfo
     { scriptArgs :: [ScriptArg]
     , scriptSlug :: Text
     , scriptDescription :: Text
     , scriptEmptyResultBehavior :: Maybe ScriptEmptyResultBehavior
+    , scriptOutputMediaType :: Maybe Text
+    -- ^ Optional MIME type for binary output (e.g., "image/png", "application/pdf")
+    -- When set, the tool's output is treated as base64-encoded binary data.
     }
     deriving (Show, Eq, Ord)
 
@@ -150,6 +162,7 @@ instance ToJSON ScriptInfo where
             , "description" .= s.scriptDescription
             ]
                 <> maybe [] (\seb -> ["empty-result" .= seb]) s.scriptEmptyResultBehavior
+                <> maybe [] (\mime -> ["output-media-type" .= mime]) s.scriptOutputMediaType
 
 instance Aeson.FromJSON ScriptInfo where
     parseJSON = Aeson.withObject "Script" $ \o ->
@@ -158,6 +171,7 @@ instance Aeson.FromJSON ScriptInfo where
             <*> o Aeson..: "slug"
             <*> o Aeson..: "description"
             <*> o Aeson..:? "empty-result"
+            <*> o Aeson..:? "output-media-type"
 
 -------------------------------------------------------------------------------
 -- Argument Translation
@@ -198,3 +212,4 @@ instance Aeson.FromJSON ScriptDescription where
         ScriptDescription
             <$> o Aeson..: "path"
             <*> o Aeson..: "info"
+

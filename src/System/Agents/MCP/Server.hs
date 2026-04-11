@@ -332,8 +332,8 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , contextConfig = defaultContextConfig
                 }
 
-    -- Create initial session
-    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+    -- Create initial session with media support (version 1)
+    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
 
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)
@@ -472,3 +472,4 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
+

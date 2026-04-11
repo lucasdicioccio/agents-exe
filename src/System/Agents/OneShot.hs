@@ -156,10 +156,10 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
                 agentWithSessionProgress (config.onSessionProgress convId) $
                     agent1
 
-    -- Create or use initial session with all required fields including sessionConversationId
+    -- Create or use initial session with media support (version 1)
     session0 <- case config.initialSession of
         Just s -> pure s
-        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
 
     config.onSessionProgress convId (SessionStarted session0)
     (llmTurn, _) <- run convId agent session0
@@ -384,3 +384,4 @@ fileStoringCallback store convId progress =
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
+

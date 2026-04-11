@@ -46,12 +46,16 @@ module System.Agents.Session.Types (
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Types as Aeson.Types
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
+import System.Agents.Media.Types (ContentPart, MediaAttachment (..))
 import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
@@ -233,9 +237,113 @@ newtype SystemTool = SystemTool SystemToolDefinition
 newtype UserQuery = UserQuery Text
     deriving (Show, Ord, Eq, FromJSON, ToJSON)
 
--- | Tool response given.
-newtype UserToolResponse = UserToolResponse Aeson.Value
-    deriving (Show, Ord, Eq, FromJSON, ToJSON)
+-------------------------------------------------------------------------------
+-- UserToolResponse - Multi-modal response type
+-------------------------------------------------------------------------------
+
+{- | Tool response from the user/agent system to the LLM.
+
+This type supports multi-modal responses with four variants:
+
+* 'TextResponse' - Plain UTF-8 text (most common case)
+* 'JsonResponse' - Structured JSON data from API tools, SQLite, etc.
+* 'MediaResponse' - Single binary media item (base64-encoded)
+* 'MixedResponse' - Multi-modal: alternating text and media parts
+
+Design principles:
+* LLM-agnostic core representation
+* Backwards compatible JSON serialization
+* Explicit type tags for clarity
+-}
+data UserToolResponse
+    = TextResponse Text
+    -- ^ Plain UTF-8 text response
+    | JsonResponse Aeson.Value
+    -- ^ Structured JSON data
+    | MediaResponse MediaAttachment
+    -- ^ Single binary media (base64-encoded)
+    | MixedResponse [ContentPart]
+    -- ^ Multi-modal: alternating text and media parts
+    deriving (Show, Ord, Eq, Generic)
+
+{- | Custom ToJSON for UserToolResponse.
+
+New format uses explicit type tags:
+* {"type": "text", "content": "..."}
+* {"type": "json", "content": {...}}
+* {"type": "media", "mimeType": "...", "base64Data": "...", ...}
+* {"type": "mixed", "parts": [...]}
+
+Legacy format (newtype wrapper) is no longer produced, but can still be parsed.
+-}
+instance ToJSON UserToolResponse where
+    toJSON (TextResponse txt) =
+        Aeson.object
+            [ "type" .= ("text" :: Text)
+            , "content" .= txt
+            ]
+    toJSON (JsonResponse val) =
+        Aeson.object
+            [ "type" .= ("json" :: Text)
+            , "content" .= val
+            ]
+    toJSON (MediaResponse media) =
+        Aeson.object $
+            [ "type" .= ("media" :: Text)
+            , "mimeType" .= media.mediaMimeType
+            , "base64Data" .= media.mediaBase64Data
+            ]
+                ++ ["filename" .= fname | Just fname <- [media.mediaFilename]]
+    toJSON (MixedResponse parts) =
+        Aeson.object
+            [ "type" .= ("mixed" :: Text)
+            , "parts" .= parts
+            ]
+
+{- | Custom FromJSON for UserToolResponse with backwards compatibility.
+
+Handles both:
+* New format: {"type": "text", "content": "..."}
+* Legacy format: {"_userToolResponse": <any json>} or plain values
+
+Legacy sessions stored UserToolResponse as a newtype wrapper around Aeson.Value.
+These are now converted to TextResponse or JsonResponse based on content.
+-}
+instance FromJSON UserToolResponse where
+    parseJSON v = parseNewFormat v <|> parseLegacyFormat v
+      where
+        -- New format with explicit type tags
+        parseNewFormat = Aeson.withObject "UserToolResponse" $ \obj -> do
+            typeTag <- obj .: "type"
+            case typeTag :: Text of
+                "text" -> TextResponse <$> obj .: "content"
+                "json" -> JsonResponse <$> obj .: "content"
+                "media" ->
+                    MediaResponse
+                        <$> ( MediaAttachment
+                                <$> obj .: "mimeType"
+                                <*> obj .: "base64Data"
+                                <*> obj .:? "filename"
+                            )
+                "mixed" -> MixedResponse <$> obj .: "parts"
+                _ -> fail $ "Unknown UserToolResponse type: " <> Text.unpack typeTag
+
+        -- Legacy format: try to parse as the old newtype wrapper
+        parseLegacyFormat val =
+            case val of
+                Aeson.Object obj ->
+                    -- Check for legacy wrapper field
+                    case KeyMap.lookup "_userToolResponse" obj of
+                        Just innerVal -> parseLegacyValue innerVal
+                        Nothing -> parseLegacyValue val
+                _ -> parseLegacyValue val
+
+        -- Convert legacy Aeson.Value to appropriate response type
+        parseLegacyValue :: Aeson.Value -> Aeson.Types.Parser UserToolResponse
+        parseLegacyValue val =
+            case val of
+                Aeson.String txt -> pure $ TextResponse txt
+                other -> pure $ JsonResponse other
 
 -------------------------------------------------------------------------------
 -- Turn and Session types
@@ -325,13 +433,49 @@ instance FromJSON Turn where
                 UserTurn_v0 content -> pure $ UserTurn content Nothing
                 LlmTurn_v0 content -> pure $ LlmTurn content Nothing
 
+-------------------------------------------------------------------------------
+-- Session with versioning
+-------------------------------------------------------------------------------
+
+{- | A session representing a conversation with the LLM.
+
+Sessions track the conversation history (turns), identifiers for correlation,
+and an optional version field for feature compatibility.
+
+Version history:
+* Nothing / missing - Legacy session (pre-media support)
+* Just 1 - Media support enabled (base64-encoded binary content)
+-}
 data Session
     = Session
     { turns :: [Turn]
     , sessionId :: SessionId
     , forkedFromSessionId :: Maybe SessionId
     , turnId :: TurnId
+    , sessionVersion :: Maybe Int
+    -- ^ Optional session version for feature compatibility:
+    --   Nothing = legacy (pre-media), Just 1 = media support
     }
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON Session
-instance ToJSON Session
+
+-- | Custom ToJSON for Session that omits version when Nothing.
+instance ToJSON Session where
+    toJSON s =
+        Aeson.object $
+            [ "turns" .= s.turns
+            , "sessionId" .= s.sessionId
+            , "forkedFromSessionId" .= s.forkedFromSessionId
+            , "turnId" .= s.turnId
+            ]
+                ++ ["sessionVersion" .= v | Just v <- [s.sessionVersion]]
+
+-- | Custom FromJSON for Session that handles missing version field.
+instance FromJSON Session where
+    parseJSON = Aeson.withObject "Session" $ \v ->
+        Session
+            <$> v .: "turns"
+            <*> v .: "sessionId"
+            <*> v .:? "forkedFromSessionId"
+            <*> v .: "turnId"
+            <*> v .:? "sessionVersion"
+

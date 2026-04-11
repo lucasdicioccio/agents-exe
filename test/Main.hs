@@ -147,7 +147,6 @@ agentSerializationTests =
     testGroup
         "Agent JSON serialization"
         [ testCase "backward compatibility - agent without extra-agents" $ do
-            -- This JSON format should still work with existing agent.json files
             let json = Text.unlines
                     [ "{"
                     , "  \"slug\": \"test-agent\","
@@ -384,13 +383,11 @@ agentSerializationTests =
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
         , testCase "SqliteAccessMode round-trip" $ do
-            -- Test read-only mode round-trip
             let readOnly = Base.SqliteReadOnly
             let jsonRO = encode readOnly
             let mReadOnly = decode jsonRO :: Maybe Base.SqliteAccessMode
             mReadOnly @?= Just Base.SqliteReadOnly
             
-            -- Test read-write mode round-trip
             let readWrite = Base.SqliteReadWrite
             let jsonRW = encode readWrite
             let mReadWrite = decode jsonRW :: Maybe Base.SqliteAccessMode
@@ -398,10 +395,6 @@ agentSerializationTests =
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
-
--------------------------------------------------------------------------------
--- Bash Toolbox Tests
--------------------------------------------------------------------------------
 
 bashToolboxTests :: TestTree
 bashToolboxTests =
@@ -504,10 +497,6 @@ bashToolboxTests =
             mAgent @?= Just agent
         ]
 
--------------------------------------------------------------------------------
--- Turn Retro-compatibility Tests
--------------------------------------------------------------------------------
-
 turnRetroCompatibilityTests :: TestTree
 turnRetroCompatibilityTests =
     testGroup
@@ -518,19 +507,13 @@ turnRetroCompatibilityTests =
             case mSession of
                 Nothing -> assertFailure "Failed to parse turn-v0.001.json - retro-compatibility broken"
                 Just session -> do
-                    -- Check that the session has 2 turns
                     length (turns session) @?= 2
-                    -- Both turns should have Nothing for byteUsage (old format)
                     mapM_ (\turn -> turnByteUsage turn @?= Nothing) (turns session)
         ]
   where
     turnByteUsage :: Turn -> Maybe ()
     turnByteUsage (UserTurn _ usage) = fmap (const ()) usage
     turnByteUsage (LlmTurn _ usage) = fmap (const ()) usage
-
--------------------------------------------------------------------------------
--- Turn Round-trip Tests
--------------------------------------------------------------------------------
 
 turnRoundTripTests :: TestTree
 turnRoundTripTests =
@@ -592,7 +575,7 @@ turnRoundTripTests =
             mDecoded @?= Just turn
         , testCase "UserTurn with tool responses round-trip" $ do
             let toolCall = LlmToolCall (object ["id" .= ("call-1" :: Text)])
-            let toolResponse = UserToolResponse (object ["result" .= ("success" :: Text)])
+            let toolResponse = JsonResponse (object ["result" .= ("success" :: Text)])
             let userContent = UserTurnContent
                     { userPrompt = SystemPrompt "You are helpful"
                     , userTools = []
@@ -659,6 +642,7 @@ turnRoundTripTests =
                     , sessionId = sessionId
                     , forkedFromSessionId = Nothing
                     , turnId = turnId'
+                    , sessionVersion = Nothing
                     }
             
             let json = encode session
@@ -674,6 +658,7 @@ turnRoundTripTests =
                     , sessionId = origSessionId
                     , forkedFromSessionId = Just forkedFromId
                     , turnId = turnId'
+                    , sessionVersion = Nothing
                     }
             
             let json = encode session
@@ -689,7 +674,6 @@ turnRoundTripTests =
             let turn = UserTurn userContent (Just (StepByteUsage 100 50 30 10 10 Nothing))
             let json = encode turn
             let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
-            -- Check that the JSON has the expected structure
             assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
             assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
             assertBool "JSON should contain byteUsage field" ("\"byteUsage\"" `Text.isInfixOf` Text.pack jsonStr)
@@ -704,11 +688,8 @@ turnRoundTripTests =
             let turn = UserTurn userContent Nothing
             let json = encode turn
             let jsonStr = Text.unpack . Text.decodeUtf8 . LBS.toStrict $ json
-            -- Check that the JSON has the expected structure
             assertBool "JSON should contain tag field" ("\"tag\"" `Text.isInfixOf` Text.pack jsonStr)
             assertBool "JSON should contain contents field" ("\"contents\"" `Text.isInfixOf` Text.pack jsonStr)
-            -- The encoded JSON should not contain byteUsage when it's Nothing
-            -- Note: aeson may still include it as null, so we check the structure is valid
             let mDecoded = decode json :: Maybe Turn
             assertBool "Should decode successfully" (isJust mDecoded)
         , testCase "decode from new format produces correct Turn" $ do

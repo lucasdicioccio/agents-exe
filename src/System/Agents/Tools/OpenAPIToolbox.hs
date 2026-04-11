@@ -493,7 +493,7 @@ createToolHandler toolbox tool tracer _ctx args = do
             runTracer tracer (ToolExecutionErrorTrace err)
             pure $ IOToolError () (ScriptExecutionError (Text.unpack err))
         Right (textResult, _toolResult) -> do
-            pure $ BlobToolSuccess () (ByteString.pack $ Text.unpack textResult)
+            pure $ BlobToolSuccess () (ByteString.pack $ Text.unpack textResult) Nothing
 
 {- | Handle a tool call by executing the HTTP request.
 
@@ -756,3 +756,4 @@ This is used for tool registration when creating unique tool names.
 -}
 getOperationId :: Operation -> Maybe Text
 getOperationId = opOperationId
+

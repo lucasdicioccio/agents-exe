@@ -154,8 +154,8 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query) sessionAgent
 
-        -- Create a fresh session
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+        -- Create a fresh session with media support (version 1)
+        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
 
         -- Generate a conversation ID for this execution
         convId <- newConversationId
@@ -287,3 +287,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
+

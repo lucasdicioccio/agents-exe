@@ -393,6 +393,7 @@ handleForkAtTurn tracer navState = do
                 , sessionId = newSessionId'
                 , forkedFromSessionId = Just originalSessionId
                 , turnId = newTurnId'
+                , sessionVersion = Just 1 -- Media support enabled
                 }
 
     -- Create a new conversation with this session
@@ -1061,7 +1062,7 @@ handleNewConversationFromEditor tracer = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId)
+            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1))
             runConversation tracer baseTuiAgent session
         _ ->
             pure ()
@@ -1384,3 +1385,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+

@@ -177,7 +177,7 @@ makeDescribeTool skill =
             ToolBase.Tool
                 { ToolBase.toolDef = MetaTool "skill-describe"
                 , ToolBase.toolRun = \_tracer _ctx _args ->
-                    pure $ BlobToolSuccess () responseBytes
+                    pure $ BlobToolSuccess () responseBytes Nothing
                 }
 
         find :: ToolCall -> Maybe (Tool ToolCall)
@@ -238,7 +238,7 @@ runScriptTool script _tracer _ctx args = do
     -- Parse arguments using the script's argument metadata from describe (like Bash.runValue)
     case parseArgsForScript script args of
         Left err ->
-            return $ BlobToolSuccess () (Text.encodeUtf8 $ "Argument parsing error: " <> Text.pack err)
+            return $ BlobToolSuccess () (Text.encodeUtf8 $ "Argument parsing error: " <> Text.pack err) Nothing
         Right (argz, stdin) -> do
             let cmdArgs = "run" : [Text.unpack arg | arg <- argz]
             -- Execute the script with parsed arguments
@@ -250,19 +250,18 @@ runScriptTool script _tracer _ctx args = do
             result <- try $ readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
             case result of
                 Left (e :: IOError) ->
-                    return $ BlobToolSuccess () (Text.encodeUtf8 $ "Script execution error: " <> Text.pack (show e))
+                    return $ BlobToolSuccess () (Text.encodeUtf8 $ "Script execution error: " <> Text.pack (show e)) Nothing
                 Right (exitCode, stdout, stderr) -> case exitCode of
                     ExitSuccess ->
-                        return $ BlobToolSuccess () stdout
+                        return $ BlobToolSuccess () stdout Nothing
                     ExitFailure code ->
-                        return $
-                            BlobToolSuccess () $
-                                Text.encodeUtf8 $
-                                    Text.unlines
-                                        [ "Script failed with exit code " <> Text.pack (show code)
-                                        , "stdout: " <> Text.decodeUtf8With lenientDecode stdout
-                                        , "stderr: " <> Text.decodeUtf8With lenientDecode stderr
-                                        ]
+                        let errorOutput = Text.encodeUtf8 $
+                                Text.unlines
+                                    [ "Script failed with exit code " <> Text.pack (show code)
+                                    , "stdout: " <> Text.decodeUtf8With lenientDecode stdout
+                                    , "stderr: " <> Text.decodeUtf8With lenientDecode stderr
+                                    ]
+                        in return $ BlobToolSuccess () errorOutput Nothing
 
 -------------------------------------------------------------------------------
 -- Argument Parsing (reuses translateArguments from ScriptTypes)
@@ -343,3 +342,4 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
+

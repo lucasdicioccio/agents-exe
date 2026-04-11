@@ -87,7 +87,7 @@ mkSessionWithToolCalls = Session.Session
             , Session.userQuery = Nothing
             , Session.userToolResponses =
                 [ ( Session.LlmToolCall $ Aeson.object ["name" .= ("tool1" :: Text)]
-                  , Session.UserToolResponse $ Aeson.object ["result" .= ("done" :: Text)]
+                  , Session.JsonResponse $ Aeson.object ["result" .= ("done" :: Text)]
                   )
                 ]
             }) Nothing
