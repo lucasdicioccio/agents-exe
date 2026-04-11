@@ -61,8 +61,8 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as BSL
 import Data.Char (isSpace)
-import Data.List (isPrefixOf)
-import Data.Maybe (fromMaybe)
+import Data.List (isInfixOf, isPrefixOf)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
@@ -179,16 +179,16 @@ detectLinuxBackend = do
     hasXsel <- hasCommand "xsel"
 
     if
-        | waylandDisplay /= Nothing && hasWlPaste ->
-            pure WaylandBackend
         | x11Display /= Nothing && (hasXclip || hasXsel) ->
             pure X11Backend
-        | hasWlPaste ->
-            -- wl-paste available but no WAYLAND_DISPLAY - might work anyway
-            pure WaylandBackend
         | hasXclip || hasXsel ->
             -- X11 tool available but no DISPLAY - might work anyway
             pure X11Backend
+        | waylandDisplay /= Nothing && hasWlPaste ->
+            pure WaylandBackend
+        | hasWlPaste ->
+            -- wl-paste available but no WAYLAND_DISPLAY - might work anyway
+            pure WaylandBackend
         | otherwise ->
             pure NoBackend
 
@@ -246,16 +246,55 @@ readClipboard MacOSBackend = readMacOSClipboard
 readClipboard WindowsBackend = readWindowsClipboard
 
 -- | Read from X11 clipboard using xclip or xsel.
+-- Uses TARGETS to detect image formats first, falling back to default text.
 readX11Clipboard :: IO (Maybe ByteString)
 readX11Clipboard = do
     hasXclip <- hasCommand "xclip"
     if hasXclip
-        then readWithTool "xclip" ["-selection", "clipboard", "-o"]
+        then readX11WithXclip
         else do
             hasXsel <- hasCommand "xsel"
             if hasXsel
                 then readWithTool "xsel" ["--clipboard", "--output"]
                 else pure Nothing
+
+-- | Read X11 clipboard using xclip with image target detection.
+-- First queries available TARGETS, then prioritizes image targets.
+readX11WithXclip :: IO (Maybe ByteString)
+readX11WithXclip = do
+    -- Query available targets
+    mTargets <- readX11Targets
+    case mTargets of
+        Just targets -> do
+            -- Look for image targets
+            let imageTarget = findImageTarget targets
+            case imageTarget of
+                Just target -> readWithTool "xclip" ["-selection", "clipboard", "-o", "-target", target]
+                Nothing -> readWithTool "xclip" ["-selection", "clipboard", "-o"]
+        Nothing -> readWithTool "xclip" ["-selection", "clipboard", "-o"]
+
+-- | Query available X11 clipboard targets using xclip.
+-- Returns a list of available target strings.
+readX11Targets :: IO (Maybe [String])
+readX11Targets = do
+    result <- readProcessWithExitCode "xclip" ["-selection", "clipboard", "-o", "-target", "TARGETS"] ""
+    case result of
+        (ExitSuccess, stdout, _) -> do
+            let targets = filter (not . null) $ lines stdout
+            pure $ Just targets
+        _ -> pure Nothing
+
+-- | Find an image target from the list of available targets.
+-- Prioritizes common image formats like image/png, image/jpeg, etc.
+findImageTarget :: [String] -> Maybe String
+findImageTarget targets =
+    -- Priority order for image formats
+    let preferredOrder = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp"]
+        -- First check preferred order
+        preferred = listToMaybe $ filter (`elem` targets) preferredOrder
+        -- Then check any target containing "image"
+        anyImage = listToMaybe $ filter ("image" `isInfixOf`) targets
+     in preferred <|> anyImage
 
 -- | Read from Wayland clipboard using wl-paste.
 readWaylandClipboard :: IO (Maybe ByteString)
@@ -666,3 +705,4 @@ cleanupClipboardTempFiles = handle (\(_ :: IOException) -> pure ()) $ do
     tempDir <- getTemporaryDirectory
     let clipDir = tempDir </> clipboardTempDir
     removeFile clipDir
+

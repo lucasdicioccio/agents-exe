@@ -105,7 +105,6 @@ import System.Agents.AgentTree (
  )
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
-import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
@@ -113,6 +112,7 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
 import System.Agents.TUI.Event (
+    Trace(..),
     cycleTabBackward,
     cycleTabForward,
     defaultHelpContent,

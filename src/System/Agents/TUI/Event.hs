@@ -1,212 +1,930 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Event handling for the TUI application.
-module System.Agents.TUI.Event (
-    -- Re-export Trace from Runtime.Trace
-    Trace,
-    tui_appHandleEvent,
-    cycleTabForward,
-    cycleTabBackward,
-    nextTab,
-    prevTab,
-    defaultHelpContent,
-    initHelpContent,
-) where
+{- | Event handling for the TUI application.
+
+This module handles all user input and application events for the TUI.
+During migration to the OS model, tool operations use the RuntimeBridge
+which synchronizes tools between the legacy Runtime and OS Core.
+-}
+module System.Agents.TUI.Event where
 
 import Brick
-import Brick.Focus (focusGetCurrent)
-import qualified Brick.Focus as Focus
-import Brick.Widgets.Edit (
-    editContentsL,
-    handleEditorEvent,
- )
-import Brick.Widgets.List (listElementsL, listSelectedElement, listSelectedL)
-import Control.Concurrent (killThread)
-import Control.Concurrent.STM (
-    atomically,
-    modifyTVar',
-    readTVar,
-    readTVarIO,
- )
-import Control.Lens (use, (%=), (.=), (^.), _Just)
-import Control.Monad (forM_, unless, when)
+import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing, focusSetCurrent)
+import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
+import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
+import qualified Brick.Widgets.List as List
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (async, poll)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
+import Control.Lens (to, use, (%=), (.=), (^.))
+import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
-import Data.Time (getCurrentTime)
-import Data.UUID.V4 (nextRandom)
+import Data.Time (diffUTCTime, getCurrentTime)
 import qualified Data.Vector as Vector
-import Graphics.Vty (Event (..), Key (..), Modifier (..))
-import Prod.Tracer (Tracer)
+import qualified Graphics.Vty as Vty
+import System.Environment (lookupEnv)
+import System.Exit (ExitCode (..))
+import System.FilePath (takeFileName, (<.>))
+import System.IO (hPutStrLn, stderr)
+import System.IO.Temp (writeSystemTempFile)
+import System.Process (readProcessWithExitCode)
 
-import System.Agents.Base (ConversationId (..))
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Base64 as Base64
+import qualified Data.Text.Encoding as TextEncoding
+
+import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
+import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
+import System.Agents.CLI.PromptScript (parseMediaReference, resolveMediaType)
+import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Runtime.Trace (Trace)
-import System.Agents.Session.Base
+import System.Agents.OneShot (mapProgressiveDisclosureTrace, nodeToAgent)
+import qualified System.Agents.OneShot as OneShot
+import qualified System.Agents.Runtime.Trace as Runtime
+import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
+import qualified System.Agents.Session.Loop as Loop
+import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Clipboard (
     ContentAction (..),
     analyzeContent,
     detectClipboardContent,
     hasClipboardSupport,
  )
-import System.Agents.TUI.Types
+import System.Agents.TUI.Types (
+    AppEvent (..),
+    AttachmentDialogState (..),
+    AuxiliaryTask (..),
+    Conversation (..),
+    ConversationStatus (..),
+    Core (..),
+    N,
+    SessionConfig (..),
+    StatusMessage (..),
+    StatusSeverity (..),
+    Tab (..),
+    TuiAgent (..),
+    TuiState,
+    TurnNavigationState (..),
+    UIState (..),
+    WidgetName (..),
+    agentList,
+    attachedFiles,
+    attachmentDialogState,
+    auxiliaryTasks,
+    conversationId,
+    conversationList,
+    conversationName,
+    conversationSession,
+    conversationStatus,
+    coreAgentTools,
+    coreBufferedMessages,
+    coreConversations,
+    corePausedConversations,
+    currentTab,
+    eventChan,
+    filePathInput,
+    messageEditor,
+    navSelectedTurnIndex,
+    navSession,
+    navTotalTurns,
+    ongoingConversations,
+    queuedMessagesFocus,
+    quitConfirmationPending,
+    selectedAgentInfo,
+    selectedAttachmentIndex,
+    sessionConfig,
+    sessionList,
+    statusMessage,
+    tuiAgentId,
+    tuiCore,
+    tuiNode,
+    tuiSlug,
+    tuiTree,
+    tuiUI,
+    turnNavigation,
+    uiBufferedMessages,
+    uiFocusRing,
+    unreadConversations,
+    updateConversationSession,
+    zoomed,
+ )
+
+-- Import Tracer for creating a no-op tracer
+import Prod.Tracer (Tracer (..), contramap)
+
+data Trace
+    = RuntimeTrace !Runtime.Trace
+    | OneShotTrace !OneShot.Trace
+    deriving (Show)
 
 -------------------------------------------------------------------------------
--- Event Handlers
+-- Help Content
+-------------------------------------------------------------------------------
+
+-- | Default keyboard shortcuts help content.
+defaultHelpContent :: [Text.Text]
+defaultHelpContent =
+    [ "Keyboard Shortcuts:"
+    , ""
+    , "Navigation:"
+    , "  Tab          - Cycle focus forward through widgets"
+    , "  Shift+Tab    - Cycle focus backward through widgets"
+    , "  Ctrl+Z       - Toggle zoom mode (based on current tab)"
+    , ""
+    , "Zoom Mode (Ctrl+Z):"
+    , "  Agents  tab  - Zooms the agent description panel"
+    , "  Chats   tab  - Zooms the conversation panel"
+    , "  History tab  - Zooms the session panel"
+    , "  Help    tab  - Zooms the help content"
+    , ""
+    , "Tabs:"
+    , "  Ctrl+[       - Switch to previous tab"
+    , "  Ctrl+]       - Switch to next tab"
+    , "  Enter        - Open selected conversation (from Conversations list)"
+    , ""
+    , "Conversations:"
+    , "  Ctrl+N       - Start new conversation with selected agent"
+    , "  Ctrl+C       - Continue restored session"
+    , "  Meta+Enter   - Send message"
+    , "  Ctrl+E       - Pause/unpause conversation"
+    , ""
+    , "Attachments:"
+    , "  Ctrl+F       - Attach file (opens path input dialog)"
+    , "  Ctrl+Shift+F - Clear all attachments"
+    , "  Ctrl+Shift+V - Paste from clipboard (images/files)"
+    , "  Del/Backspace- Remove selected attachment"
+    , "  Up/Down      - Select attachment"
+    , ""
+    , "Queue Management (when paused):"
+    , "  Ctrl+D       - Clear all queued messages"
+    , "  Del/Backspace- Delete selected queued message"
+    , "  Up/Down      - Select queued message"
+    , ""
+    , "Session Navigation & Forking:"
+    , "  Enter        - Enter turn navigation mode (when on conversation)"
+    , "  Up/Down      - Navigate between turns (in navigation mode)"
+    , "  F            - Fork conversation at selected turn"
+    , "  Enter/Esc    - Exit turn navigation mode"
+    , ""
+    , "Session Export:"
+    , "  Ctrl+P       - Export session to markdown file"
+    , "  Ctrl+T       - View session in external viewer (chronological)"
+    , "  Ctrl+R       - View session in external viewer (reverse)"
+    , ""
+    , "Other:"
+    , "  F5           - Refresh tools for selected agent"
+    , "  Ctrl+Q       - Quit application (press twice to confirm)"
+    ]
+
+-------------------------------------------------------------------------------
+-- Focus Ring Management
+-------------------------------------------------------------------------------
+
+{- | The base widgets that are always present in the focus ring.
+These correspond to the main navigation lists.
+-}
+baseFocusWidgets :: [WidgetName]
+baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
+
+{- | Build a focus ring for a given tab.
+The ring includes base widgets plus tab-specific widgets inserted appropriately.
+The focus ring order is designed so that pressing Tab from a base widget
+will first visit the tab-specific widget(s) before moving to the next base widget.
+-}
+buildFocusRingForTab :: Tab -> FocusRing WidgetName
+buildFocusRingForTab tab =
+    -- Order: base widget, then its tab-specific widget(s), then next base widget, etc.
+    case tab of
+        AgentsTab ->
+            focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
+        ChatsTab ->
+            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+        HistoryTab ->
+            -- SessionsListWidget -> AgentInfoWidget -> AgentListWidget -> ConversationListWidget
+            focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
+        HelpTab ->
+            -- Just base widgets in default order
+            focusRing baseFocusWidgets
+
+{- | Get the default (entry) widget for a tab.
+This is the widget that should receive focus when switching to this tab.
+-}
+tabEntryWidget :: Tab -> WidgetName
+tabEntryWidget AgentsTab = AgentListWidget
+tabEntryWidget ChatsTab = ConversationListWidget
+tabEntryWidget HistoryTab = SessionsListWidget
+tabEntryWidget HelpTab = AgentListWidget -- Default to agent list for help
+
+{- | Build a focus ring for a tab, attempting to preserve the current focus if valid.
+If the current focus is not in the new tab's focus ring, falls back to the tab's entry widget.
+-}
+buildFocusRingForTabPreserving :: Tab -> Maybe WidgetName -> FocusRing WidgetName
+buildFocusRingForTabPreserving tab mCurrentFocus =
+    let newRing = buildFocusRingForTab tab
+        -- Check if current focus is valid in the new ring
+        validFocus = case mCurrentFocus of
+            Just wf | wf `elem` focusRingElements newRing -> Just wf
+            _ -> Nothing
+        -- Start with either the preserved focus or the tab's entry widget
+        startFocus = case validFocus of
+            Just wf -> wf
+            Nothing -> tabEntryWidget tab
+     in focusSetCurrent startFocus newRing
+
+-- | Get all elements in a focus ring.
+focusRingElements :: FocusRing WidgetName -> [WidgetName]
+focusRingElements fr =
+    -- FocusRing is a circular structure, we extract elements by iterating
+    go (focusSetCurrent (tabEntryWidget AgentsTab) fr) []
+  where
+    go ring acc =
+        case focusGetCurrent ring of
+            Just w | w `elem` acc -> reverse acc -- Completed a cycle
+            Just w -> go (focusNext ring) (w : acc)
+            Nothing -> reverse acc
+
+-------------------------------------------------------------------------------
+-- Tab Cycling Functions
+-------------------------------------------------------------------------------
+
+-- | Get the next tab in the cycle.
+nextTab :: Tab -> Tab
+nextTab AgentsTab = ChatsTab
+nextTab ChatsTab = HistoryTab
+nextTab HistoryTab = HelpTab
+nextTab HelpTab = AgentsTab
+
+-- | Get the previous tab in the cycle.
+prevTab :: Tab -> Tab
+prevTab AgentsTab = HelpTab
+prevTab ChatsTab = AgentsTab
+prevTab HistoryTab = ChatsTab
+prevTab HelpTab = HistoryTab
+
+{- | Cycle to the next tab forward.
+Also updates the focus ring to match the new tab's widgets.
+-}
+cycleTabForward :: EventM N TuiState ()
+cycleTabForward = do
+    current <- use (tuiUI . currentTab)
+    let next = nextTab current
+    tuiUI . currentTab .= next
+    -- Update focus ring for the new tab
+    mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
+
+{- | Cycle to the previous tab backward.
+Also updates the focus ring to match the new tab's widgets.
+-}
+cycleTabBackward :: EventM N TuiState ()
+cycleTabBackward = do
+    current <- use (tuiUI . currentTab)
+    let prev = prevTab current
+    tuiUI . currentTab .= prev
+    -- Update focus ring for the new tab
+    mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    tuiUI . uiFocusRing .= buildFocusRingForTabPreserving prev mCurrentFocus
+
+-------------------------------------------------------------------------------
+-- Navigation Helpers
+-------------------------------------------------------------------------------
+
+{- | Switch to the Chats tab and focus the message editor.
+This is used when starting or opening a conversation.
+-}
+switchToChatsAndFocusMessage :: EventM N TuiState ()
+switchToChatsAndFocusMessage = do
+    -- Switch to Chats tab
+    tuiUI . currentTab .= ChatsTab
+    -- Build focus ring for ChatsTab and set focus to MessageEditorWidget
+    tuiUI . uiFocusRing .= focusSetCurrent MessageEditorWidget (buildFocusRingForTab ChatsTab)
+    -- Ensure zoom mode is off for better visibility
+    tuiUI . zoomed .= False
+
+-------------------------------------------------------------------------------
+-- Quit Confirmation
+-------------------------------------------------------------------------------
+
+{- | Handle Ctrl+Q with confirmation.
+First press shows confirmation message, second press actually quits.
+-}
+handleQuit :: EventM N TuiState ()
+handleQuit = do
+    pending <- use (tuiUI . quitConfirmationPending)
+    if pending
+        then halt
+        else do
+            tuiUI . quitConfirmationPending .= True
+            showStatus StatusWarning "Are you sure? Press Ctrl+Q again to quit"
+
+-- | Reset quit confirmation state (call when user performs other actions).
+resetQuitConfirmation :: EventM N TuiState ()
+resetQuitConfirmation = do
+    tuiUI . quitConfirmationPending .= False
+
+-------------------------------------------------------------------------------
+-- Main Event Handler
 -------------------------------------------------------------------------------
 
 -- | Main event handler for the TUI application.
 tui_appHandleEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
 tui_appHandleEvent tracer ev = do
-    -- Check if we're in the attachment dialog
+    -- Check if attachment dialog is open
     dialogState <- use (tuiUI . attachmentDialogState)
     case dialogState of
-        AttachmentDialogPathInput -> handleAttachmentDialogEvent tracer ev
-        AttachmentDialogClosed -> handleMainEvent tracer ev
+        AttachmentDialogPathInput -> handleFilePathDialogEvent ev
+        AttachmentDialogClosed -> do
+            -- Check if we're in turn navigation mode
+            mNavState <- use (tuiUI . turnNavigation)
+            case mNavState of
+                Just navState -> handleTurnNavigationEvent tracer navState ev
+                Nothing -> handleNormalEvent tracer ev
 
--- | Handle events when the attachment dialog is open.
-handleAttachmentDialogEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
-handleAttachmentDialogEvent _tracer = \case
-    VtyEvent (EvKey KEsc []) -> do
-        -- Cancel the dialog
-        tuiUI . attachmentDialogState .= AttachmentDialogClosed
-        tuiUI . filePathInput . editContentsL .= TextZipper.textZipper [] (Just 1)
-    VtyEvent (EvKey KEnter []) -> do
-        -- Confirm the file path
-        contents <- use (tuiUI . filePathInput . editContentsL)
-        let paths = Text.lines $ Text.unlines $ TextZipper.getText contents
-        forM_ paths $ \path -> do
-            unless (Text.null path) $ do
-                -- Parse the path - can be "mime/type;path" or just "path"
-                let (mimeType, filePath) = case Text.breakOn ";" path of
-                        (m, "") -> ("application/octet-stream", Text.unpack m)
-                        (m, p) -> (m, Text.unpack $ Text.drop 1 p)
-                mConv <- getFocusedConversation
-                case mConv of
-                    Nothing -> showStatus StatusError "No conversation selected"
-                    Just conv -> do
-                        let convId = conversationId conv
-                        -- Update UI state directly
-                        let att = MediaAttachment mimeType "" (Just $ Text.pack $ takeFileName filePath)
-                        tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [att]
-                        showStatus StatusInfo $ "Attached: " <> Text.pack (takeFileName filePath)
-        -- Close the dialog
-        tuiUI . attachmentDialogState .= AttachmentDialogClosed
-        tuiUI . filePathInput . editContentsL .= TextZipper.textZipper [] (Just 1)
-    VtyEvent ev -> do
-        -- Pass other events to the editor
-        zoom (tuiUI . filePathInput) $ handleEditorEvent (VtyEvent ev)
-    _ -> pure ()
-  where
-    takeFileName :: FilePath -> FilePath
-    takeFileName path = case reverse $ dropWhile (== '/') $ reverse path of
-        "" -> path
-        cleaned -> case dropWhile (/= '/') cleaned of
-            '/' : fname -> fname
-            _ -> cleaned
+-- | Handle events when file path dialog is open.
+handleFilePathDialogEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
+handleFilePathDialogEvent ev =
+    case ev of
+        -- Confirm with Enter
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            handleConfirmFileAttachment
+        -- Cancel with Esc
+        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
+            closeFilePathDialog
+            showStatus StatusInfo "Attachment cancelled"
+        -- Handle typing in the editor
+        VtyEvent vtyEv -> do
+            zoom (tuiUI . filePathInput) $ handleEditorEvent (VtyEvent vtyEv)
+        _ -> pure ()
 
--- | Handle main application events.
-handleMainEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
-handleMainEvent tracer = \case
-    VtyEvent ev -> handleVtyEvent tracer ev
-    AppEvent appEv -> handleAppEvent tracer appEv
-    _ -> pure ()
+-- | Confirm file attachment from path input.
+handleConfirmFileAttachment :: EventM N TuiState ()
+handleConfirmFileAttachment = do
+    pathLines <- use (tuiUI . filePathInput . to getEditContents)
+    let pathText = Text.strip $ Text.unlines pathLines
 
--- | Handle Vty (terminal) events.
-handleVtyEvent :: Tracer IO Trace -> Event -> EventM N TuiState ()
-handleVtyEvent tracer = \case
-    EvKey (KChar 'c') [MCtrl] -> handleResumeSession tracer
-    EvKey (KChar 'n') [MCtrl] -> handleNewConversation tracer
-    EvKey (KChar 'q') [MCtrl] -> handleQuit
-    EvKey (KChar 'e') [MCtrl] -> handlePauseConversation tracer
-    EvKey (KChar 'p') [MCtrl] -> handleExportSession tracer
-    EvKey (KChar 'r') [MCtrl] -> handleViewSession tracer
-    EvKey (KChar 't') [MCtrl] -> handleViewSession tracer
-    EvKey (KChar 'f') [MCtrl] -> handleOpenAttachmentDialog
-    EvKey (KChar 'F') [MCtrl, MShift] -> handleClearAttachments tracer
-    EvKey (KChar 'd') [MCtrl, MShift] -> handleClearQueuedMessages tracer
-    EvKey (KChar 'v') [MCtrl, MShift] -> handleClipboardPaste tracer
-    EvKey KBackTab [] -> handleFocusPrev
-    EvKey (KChar '\t') [MCtrl] -> handleFocusNext
-    EvKey (KChar 'j') [MCtrl] -> handleScrollDown
-    EvKey (KChar 'k') [MCtrl] -> handleScrollUp
-    EvKey (KChar 'h') [MCtrl] -> handleScrollLeft
-    EvKey (KChar 'l') [MCtrl] -> handleScrollRight
-    EvKey (KChar 'n') [MCtrl, MShift] -> handleNextConversation tracer
-    EvKey (KChar 'p') [MCtrl, MShift] -> handlePrevConversation tracer
-    EvKey KPageUp [] -> handlePageUp tracer
-    EvKey KPageDown [] -> handlePageDown tracer
-    EvKey KLeft [MCtrl] -> cycleTabBackward
-    EvKey KRight [MCtrl] -> cycleTabForward
-    EvKey (KChar '1') [MCtrl] -> switchTab AgentsTab
-    EvKey (KChar '2') [MCtrl] -> switchTab ChatsTab
-    EvKey (KChar '3') [MCtrl] -> switchTab HistoryTab
-    EvKey (KChar '4') [MCtrl] -> switchTab HelpTab
-    EvKey KEnter [] -> handleEnter tracer
-    EvKey (KChar 'N') [MCtrl, MShift] -> handleTurnNavigation tracer
-    EvKey (KChar 'a') [MCtrl, MShift] -> handleAttachmentSelection tracer
-    EvKey KUp [] -> handleUp
-    EvKey KDown [] -> handleDown
-    EvKey KLeft [] -> handleLeft
-    EvKey KRight [] -> handleRight
-    EvKey KDel [] -> handleDelete
-    EvKey KBS [] -> handleBackspace
-    ev -> do
-        -- Pass to editor if focused
-        focus <- use (tuiUI . uiFocusRing)
-        case focusGetCurrent focus of
-            Just MessageEditorWidget -> zoom (tuiUI . messageEditor) $ handleEditorEvent (VtyEvent ev)
-            _ -> pure ()
+    if Text.null pathText
+        then do
+            closeFilePathDialog
+            showStatus StatusWarning "No file path entered"
+        else do
+            -- Try to load the media attachment
+            result <- liftIO $ loadMediaAttachment (Text.unpack pathText)
+            case result of
+                Left err -> do
+                    closeFilePathDialog
+                    showStatus StatusError $ Text.pack err
+                Right attachment -> do
+                    mConv <- getFocusedConversation
+                    case mConv of
+                        Nothing -> do
+                            closeFilePathDialog
+                            showStatus StatusError "No conversation selected"
+                        Just conv -> do
+                            let convId = conversationId conv
+                            -- Add attachment to the conversation
+                            tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                            closeFilePathDialog
+                            showStatus StatusInfo $ "Attached: " <> maybe "unnamed" id attachment.mediaFilename
 
--- | Handle application events.
-handleAppEvent :: Tracer IO Trace -> AppEvent -> EventM N TuiState ()
-handleAppEvent _tracer = \case
-    AppEvent_Heartbeat -> do
-        -- Update UI state based on core state
-        pure ()
-    AppEvent_AgentStepProgrress convId session -> do
-        -- Update the conversation session
-        coreTVar <- use tuiCore
-        liftIO $ atomically $ modifyTVar' coreTVar $ \core ->
-            core{coreConversations = updateConversationSession convId session (coreConversations core)}
-        -- Also update in UI state
-        tuiUI . conversationList . listElementsL
-            %= Vector.map
-                ( \conv ->
-                    if conversationId conv == convId
-                        then conv{conversationSession = Just session}
-                        else conv
-                )
-    AppEvent_AgentNeedsInput convId -> do
-        -- Mark conversation as waiting for input
-        coreTVar <- use tuiCore
-        liftIO $ atomically $ modifyTVar' coreTVar $ \core ->
-            let updatedConvs =
-                    map
-                        ( \conv ->
-                            if conversationId conv == convId
-                                then conv{conversationStatus = ConversationStatus_WaitingForInput}
-                                else conv
-                        )
-                        (coreConversations core)
-             in core{coreConversations = updatedConvs}
-    AppEvent_AgentTrace _trace -> do
-        -- Display trace in status
-        pure ()
-    AppEvent_ShowStatus severity msg -> do
-        showStatus severity msg
-    AppEvent_ClearStatus -> do
-        tuiUI . statusMessage .= Nothing
+{- | Load a media attachment from a file path.
+Supports explicit MIME type via "mime/type;path" format or auto-detection.
+-}
+loadMediaAttachment :: FilePath -> IO (Either String MediaAttachment)
+loadMediaAttachment input = do
+    -- Parse the input (handles both "path" and "mime/type;path" formats)
+    case parseMediaReference input of
+        Left err -> pure $ Left err
+        Right mediaRef -> do
+            -- Resolve the MIME type
+            case resolveMediaType mediaRef of
+                Left err -> pure $ Left err
+                Right mimeType -> do
+                    -- Try to read the file
+                    let filePath = case Text.breakOn ";" (Text.pack input) of
+                            (_, "") -> input
+                            (_, rest) -> Text.unpack $ Text.drop 1 rest
+                    fileContent <- ByteString.readFile filePath
+                    let base64Data = TextEncoding.decodeUtf8 $ Base64.encode fileContent
+                    let filename = Just $ Text.pack $ takeFileName filePath
+                    pure $ Right $ MediaAttachment mimeType base64Data filename
+
+-- | Close the file path dialog and reset input.
+closeFilePathDialog :: EventM N TuiState ()
+closeFilePathDialog = do
+    tuiUI . attachmentDialogState .= AttachmentDialogClosed
+    tuiUI . filePathInput . editContentsL .= TextZipper.textZipper [] Nothing
+
+-- | Open the file path dialog.
+openFilePathDialog :: EventM N TuiState ()
+openFilePathDialog = do
+    tuiUI . attachmentDialogState .= AttachmentDialogPathInput
+    -- Pre-fill with a helpful example
+    tuiUI . filePathInput . editContentsL .= TextZipper.textZipper ["/path/to/file.png"] (Just 1)
+
+-- | Handle events when in turn navigation mode.
+handleTurnNavigationEvent :: Tracer IO Trace -> TurnNavigationState -> BrickEvent N AppEvent -> EventM N TuiState ()
+handleTurnNavigationEvent tracer navState ev =
+    case ev of
+        -- Application events pass through
+        AppEvent AppEvent_Heartbeat ->
+            handleHeartbeat
+        AppEvent (AppEvent_AgentStepProgrress convId sess) ->
+            handleConversationUpdated convId sess
+        AppEvent (AppEvent_AgentNeedsInput convId) ->
+            handleConversationNeedsInput convId
+        AppEvent (AppEvent_AgentTrace _) ->
+            pure ()
+        AppEvent (AppEvent_ShowStatus severity text) ->
+            handleShowStatus severity text
+        AppEvent AppEvent_ClearStatus ->
+            handleClearStatus
+        -- Exit navigation mode with Enter
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            tuiUI . turnNavigation .= Nothing
+            showStatus StatusInfo "Exited turn navigation"
+            resetQuitConfirmation
+
+        -- Also allow Esc to exit
+        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
+            tuiUI . turnNavigation .= Nothing
+            showStatus StatusInfo "Exited turn navigation"
+            resetQuitConfirmation
+
+        -- Navigate up (to earlier turns)
+        VtyEvent (Vty.EvKey Vty.KUp []) -> do
+            let currentIdx = navState ^. navSelectedTurnIndex
+                newIdx = max 0 (currentIdx - 1)
+            tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
+
+        -- Navigate down (to later turns)
+        VtyEvent (Vty.EvKey Vty.KDown []) -> do
+            let currentIdx = navState ^. navSelectedTurnIndex
+                maxIdx = (navState ^. navTotalTurns) - 1
+                newIdx = min maxIdx (currentIdx + 1)
+            tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
+
+        -- Fork at current turn
+        VtyEvent (Vty.EvKey (Vty.KChar 'f') []) -> do
+            handleForkAtTurn tracer navState
+
+        -- Fork at current turn (uppercase F)
+        VtyEvent (Vty.EvKey (Vty.KChar 'F') []) -> do
+            handleForkAtTurn tracer navState
+
+        -- Ignore other events in navigation mode
+        _ -> pure ()
+
+-- | Fork a new conversation at the selected turn.
+handleForkAtTurn :: Tracer IO Trace -> TurnNavigationState -> EventM N TuiState ()
+handleForkAtTurn tracer navState = do
+    let session = navState ^. navSession
+        selectedIdx = navState ^. navSelectedTurnIndex
+        originalSessionId = session.sessionId
+
+    -- Create forked session with dropping unwanted turns
+    let turnsToKeep = drop selectedIdx session.turns
+
+    -- Generate new session ID and turn ID
+    newSessionId' <- liftIO newSessionId
+    newTurnId' <- liftIO newTurnId
+
+    let forkedSession =
+            Session
+                { turns = turnsToKeep
+                , sessionId = newSessionId'
+                , forkedFromSessionId = Just originalSessionId
+                , turnId = newTurnId'
+                , sessionVersion = Just 1 -- Media support enabled
+                }
+
+    -- Create a new conversation with this session
+    mAgent <- use (tuiUI . agentList . to listSelectedElement)
+    case mAgent of
+        Just (_, baseTuiAgent) -> do
+            -- Start conversation with forked session
+            runConversation tracer baseTuiAgent forkedSession
+
+            -- Show status
+            showStatus StatusInfo $
+                "Forked at turn "
+                    <> Text.pack (show selectedIdx)
+                    <> " - New conversation @"
+                    <> tuiSlug baseTuiAgent
+
+            -- Exit navigation mode
+            tuiUI . turnNavigation .= Nothing
+        Nothing ->
+            showStatus StatusError "No agent selected for forked conversation"
+
+-- | Handle normal (non-navigation) events.
+handleNormalEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
+handleNormalEvent tracer ev = do
+    case ev of
+        -- Application events
+        AppEvent AppEvent_Heartbeat ->
+            handleHeartbeat
+        AppEvent (AppEvent_AgentStepProgrress convId sess) ->
+            handleConversationUpdated convId sess
+        AppEvent (AppEvent_AgentNeedsInput convId) ->
+            handleConversationNeedsInput convId
+        AppEvent (AppEvent_AgentTrace _) ->
+            pure () -- todo: handle traces made by the app
+        AppEvent (AppEvent_ShowStatus severity text) ->
+            handleShowStatus severity text
+        AppEvent AppEvent_ClearStatus ->
+            handleClearStatus
+        -- Tab switching
+        -- Note: Ctrl+[ sends KEsc in Vty (ASCII 27), not KChar '[' with MCtrl
+        VtyEvent (Vty.EvKey Vty.KEsc [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            cycleTabBackward
+        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            cycleTabForward
+        -- VTY events
+        VtyEvent (Vty.EvKey (Vty.KChar 'q') [Vty.MCtrl]) ->
+            handleQuit
+        VtyEvent (Vty.EvKey (Vty.KChar '\t') _) -> do
+            resetQuitConfirmation
+            cycleFocusForward
+        VtyEvent (Vty.EvKey Vty.KBackTab _) -> do
+            resetQuitConfirmation
+            cycleFocusBackward
+        VtyEvent (Vty.EvKey (Vty.KFun 5) _) -> do
+            resetQuitConfirmation
+            handleRefreshTools
+        VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            toggleZoom
+        VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleNewConversationFromEditor tracer
+        VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleRestoredConversation tracer
+        VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) -> do
+            resetQuitConfirmation
+            handleSendMessage
+        VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleTogglePauseConversation
+        -- Attachment handling
+        VtyEvent (Vty.EvKey (Vty.KChar 'f') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            openFilePathDialog
+        VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
+            resetQuitConfirmation
+            handleClearAllAttachments
+        VtyEvent (Vty.EvKey (Vty.KChar 'o') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleClipboardPaste tracer
+        -- Session export
+        VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleDumpSessionToMarkdown
+        VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleViewSessionWithExternalViewer Chronological
+        VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleViewSessionWithExternalViewer Antichronological
+        -- Queue management: Ctrl+D to clear all queued messages
+        VtyEvent (Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            handleClearQueuedMessages
+        -- Delegate to focused widget
+        VtyEvent vtyEv -> do
+            resetQuitConfirmation
+            currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+            case currentFocus of
+                Just AgentListWidget ->
+                    handleAgentListEvent vtyEv
+                Just SessionsListWidget ->
+                    handleSessionsListEvent vtyEv
+                Just ConversationListWidget ->
+                    handleConversationListEvent vtyEv
+                Just MessageEditorWidget ->
+                    handleMessageEditorEvent ev
+                Just ConversationViewWidget ->
+                    handleConversationViewEvent tracer vtyEv
+                Just SessionViewWidget ->
+                    handleSessionViewEvent tracer vtyEv
+                Just AgentInfoWidget ->
+                    handleAgentInfoEvent vtyEv
+                Just QueuedMessageListWidget ->
+                    handleQueuedMessageListEvent vtyEv
+                Just AttachmentListWidget ->
+                    handleAttachmentListEvent vtyEv
+                _ ->
+                    pure ()
+        _ -> pure ()
 
 -------------------------------------------------------------------------------
--- Key Handler Implementations
+-- Widget-Specific Event Handlers
 -------------------------------------------------------------------------------
+
+-- | Handle agent list navigation.
+handleAgentListEvent :: Vty.Event -> EventM N TuiState ()
+handleAgentListEvent ev = do
+    zoom (tuiUI . agentList) $ handleListEvent ev
+    -- Update selected agent info when selection changes
+    selected <- use (tuiUI . agentList . to listSelectedElement)
+    case selected of
+        Just (_, agent) -> do
+            tuiUI . selectedAgentInfo .= Just agent
+            -- Refresh tools for the newly selected agent
+            refreshToolsForAgent agent
+        Nothing -> pure ()
+
+-- | Handle conversation list navigation.
+handleConversationListEvent :: Vty.Event -> EventM N TuiState ()
+handleConversationListEvent ev =
+    case ev of
+        -- Enter key opens the selected conversation (switches to Chats tab and focuses message)
+        Vty.EvKey Vty.KEnter [] -> do
+            mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+            case mSelected of
+                Just (_, conv) -> do
+                    -- Switch to Chats tab and focus message editor
+                    switchToChatsAndFocusMessage
+                    -- Mark conversation as read
+                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                Nothing -> pure ()
+        -- Normal navigation
+        _ -> do
+            zoom (tuiUI . conversationList) $ handleListEvent ev
+            -- Mark conversation as read when selected
+            selected <- use (tuiUI . conversationList . to listSelectedElement)
+            case selected of
+                Just (_, conv) ->
+                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                Nothing -> pure ()
+
+-- | Handle sessions list navigation.
+handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
+handleSessionsListEvent ev = do
+    zoom (tuiUI . sessionList) $ handleListEvent ev
+
+-- | Handle message editor events.
+handleMessageEditorEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
+handleMessageEditorEvent ev = do
+    zoom (tuiUI . messageEditor) $ handleEditorEvent ev
+    -- Check for special key combinations
+    case ev of
+        VtyEvent (Vty.EvKey Vty.KEnter mods)
+            | Vty.MCtrl `elem` mods -> handleSendMessage
+        _ -> pure ()
+
+-- | Handle conversation view scrolling and queue management.
+handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleConversationViewEvent _tracer ev = do
+    -- Check if we have a paused conversation with queued messages
+    mConv <- getFocusedConversation
+    hasQueuedMessages <- case mConv of
+        Just conv -> do
+            buffered <- use (tuiUI . uiBufferedMessages)
+            pure $ case Map.lookup (conversationId conv) buffered of
+                Just msgs | conversationStatus conv == ConversationStatus_Paused -> not (null msgs)
+                _ -> False
+        Nothing -> pure False
+
+    case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState =
+                            TurnNavigationState
+                                { _navSession = session
+                                , _navSelectedTurnIndex = length session.turns - 1 -- Start at most recent
+                                , _navTotalTurns = length session.turns
+                                }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ ->
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Queue management: Up arrow for navigation (only when paused with queued messages)
+        Vty.EvKey Vty.KUp [] | hasQueuedMessages -> do
+            handleQueueNavigation (-1)
+        -- Queue management: Down arrow for navigation (only when paused with queued messages)
+        Vty.EvKey Vty.KDown [] | hasQueuedMessages -> do
+            handleQueueNavigation 1
+        -- Queue management: Delete key to delete selected message
+        Vty.EvKey Vty.KDel [] | hasQueuedMessages -> do
+            handleDeleteSelectedMessage
+        -- Queue management: Backspace key to delete selected message
+        Vty.EvKey Vty.KBS [] | hasQueuedMessages -> do
+            handleDeleteSelectedMessage
+        -- Normal scrolling (when not in queue management mode)
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll ConversationViewWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll ConversationViewWidget) 1
+        Vty.EvKey Vty.KLeft _ ->
+            hScrollBy (viewportScroll ConversationViewWidget) (-1)
+        Vty.EvKey Vty.KRight _ ->
+            hScrollBy (viewportScroll ConversationViewWidget) 1
+        Vty.EvKey Vty.KPageUp _ ->
+            vScrollPage (viewportScroll ConversationViewWidget) Up
+        Vty.EvKey Vty.KPageDown _ ->
+            vScrollPage (viewportScroll ConversationViewWidget) Down
+        _ -> pure ()
+
+-- | Handle session view scrolling.
+handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
+handleSessionViewEvent _tracer ev =
+    case ev of
+        -- Enter key enters turn navigation mode
+        Vty.EvKey Vty.KEnter [] -> do
+            mSession <- getFocusedSession
+            case mSession of
+                Just session | not (null session.turns) -> do
+                    let navState =
+                            TurnNavigationState
+                                { _navSession = session
+                                , _navSelectedTurnIndex = 0 -- Start at most recent (turns are anti-chronological)
+                                , _navTotalTurns = length session.turns
+                                }
+                    tuiUI . turnNavigation .= Just navState
+                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                _ ->
+                    showStatus StatusWarning "No session or empty session to navigate"
+        -- Normal scrolling
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll SessionViewWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll SessionViewWidget) 1
+        Vty.EvKey Vty.KLeft _ ->
+            hScrollBy (viewportScroll SessionViewWidget) (-1)
+        Vty.EvKey Vty.KRight _ ->
+            hScrollBy (viewportScroll SessionViewWidget) 1
+        Vty.EvKey Vty.KPageUp _ ->
+            vScrollPage (viewportScroll SessionViewWidget) Up
+        Vty.EvKey Vty.KPageDown _ ->
+            vScrollPage (viewportScroll SessionViewWidget) Down
+        _ -> pure ()
+
+-- | Handle agent info scrolling.
+handleAgentInfoEvent :: Vty.Event -> EventM N TuiState ()
+handleAgentInfoEvent ev =
+    case ev of
+        Vty.EvKey Vty.KUp _ ->
+            vScrollBy (viewportScroll AgentInfoWidget) (-1)
+        Vty.EvKey Vty.KDown _ ->
+            vScrollBy (viewportScroll AgentInfoWidget) 1
+        Vty.EvKey Vty.KLeft _ ->
+            hScrollBy (viewportScroll AgentInfoWidget) (-1)
+        Vty.EvKey Vty.KRight _ ->
+            hScrollBy (viewportScroll AgentInfoWidget) 1
+        _ -> pure ()
+
+-- | Handle queued message list events (selection and deletion).
+handleQueuedMessageListEvent :: Vty.Event -> EventM N TuiState ()
+handleQueuedMessageListEvent ev = do
+    -- Check if we have a paused conversation with queued messages
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure () -- No conversation, ignore events
+        Just conv -> do
+            -- Only allow queue management when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then pure ()
+                else do
+                    let convId = conversationId conv
+                    buffered <- use (tuiUI . uiBufferedMessages)
+                    case Map.lookup convId buffered of
+                        Nothing -> pure () -- No queued messages
+                        Just msgs -> do
+                            case ev of
+                                -- Up arrow - navigate to previous message
+                                Vty.EvKey Vty.KUp [] -> do
+                                    current <- use (tuiUI . queuedMessagesFocus)
+                                    let count = length msgs
+                                        newIdx = case current of
+                                            Nothing -> count - 1 -- Start at last message
+                                            Just idx -> max 0 (idx - 1)
+                                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+                                -- Down arrow - navigate to next message
+                                Vty.EvKey Vty.KDown [] -> do
+                                    current <- use (tuiUI . queuedMessagesFocus)
+                                    let count = length msgs
+                                        newIdx = case current of
+                                            Nothing -> 0 -- Start at first message
+                                            Just idx -> min (count - 1) (idx + 1)
+                                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+                                -- Delete key - delete selected message
+                                Vty.EvKey Vty.KDel [] -> do
+                                    handleDeleteSelectedMessage
+
+                                -- Backspace key - delete selected message
+                                Vty.EvKey Vty.KBS [] -> do
+                                    handleDeleteSelectedMessage
+
+                                -- Ctrl+D - clear all messages
+                                Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> do
+                                    handleClearQueuedMessages
+
+                                -- Ignore other events
+                                _ -> pure ()
+
+-- | Handle attachment list events.
+handleAttachmentListEvent :: Vty.Event -> EventM N TuiState ()
+handleAttachmentListEvent ev = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure () -- No conversation, ignore events
+        Just conv -> do
+            let convId = conversationId conv
+            attachments <- use (tuiUI . attachedFiles)
+            case Map.lookup convId attachments of
+                Nothing -> pure () -- No attachments
+                Just atts -> do
+                    case ev of
+                        -- Up arrow - navigate to previous attachment
+                        Vty.EvKey Vty.KUp [] -> do
+                            current <- use (tuiUI . selectedAttachmentIndex)
+                            let count = length atts
+                                newIdx = case current of
+                                    Nothing -> count - 1 -- Start at last attachment
+                                    Just idx -> max 0 (idx - 1)
+                            tuiUI . selectedAttachmentIndex .= Just newIdx
+
+                        -- Down arrow - navigate to next attachment
+                        Vty.EvKey Vty.KDown [] -> do
+                            current <- use (tuiUI . selectedAttachmentIndex)
+                            let count = length atts
+                                newIdx = case current of
+                                    Nothing -> 0 -- Start at first attachment
+                                    Just idx -> min (count - 1) (idx + 1)
+                            tuiUI . selectedAttachmentIndex .= Just newIdx
+
+                        -- Delete key - remove selected attachment
+                        Vty.EvKey Vty.KDel [] -> do
+                            handleRemoveSelectedAttachment
+
+                        -- Backspace key - remove selected attachment
+                        Vty.EvKey Vty.KBS [] -> do
+                            handleRemoveSelectedAttachment
+
+                        -- Ignore other events
+                        _ -> pure ()
+
+-- | Remove the currently selected attachment.
+handleRemoveSelectedAttachment :: EventM N TuiState ()
+handleRemoveSelectedAttachment = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            let convId = conversationId conv
+            mSelectedIdx <- use (tuiUI . selectedAttachmentIndex)
+            case mSelectedIdx of
+                Nothing -> showStatus StatusWarning "Select an attachment first (use Up/Down arrows)"
+                Just idx -> do
+                    -- Get current attachments
+                    attachments <- use (tuiUI . attachedFiles)
+                    case Map.lookup convId attachments of
+                        Nothing -> pure ()
+                        Just atts ->
+                            if idx < 0 || idx >= length atts
+                                then pure ()
+                                else do
+                                    -- Remove attachment at index
+                                    let newAtts = deleteAt idx atts
+                                    -- Update attachments
+                                    tuiUI . attachedFiles %= Map.insert convId newAtts
+                                    -- Adjust selection
+                                    let newIdx = if null newAtts then Nothing else Just (min idx (length newAtts - 1))
+                                    tuiUI . selectedAttachmentIndex .= newIdx
+                                    showStatus StatusInfo "Attachment removed"
+
+-- | Clear all attachments for the current conversation.
+handleClearAllAttachments :: EventM N TuiState ()
+handleClearAllAttachments = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            let convId = conversationId conv
+            attachments <- use (tuiUI . attachedFiles)
+            case Map.lookup convId attachments of
+                Nothing -> showStatus StatusInfo "No attachments to clear"
+                Just atts -> do
+                    tuiUI . attachedFiles %= Map.delete convId
+                    tuiUI . selectedAttachmentIndex .= Nothing
+                    showStatus StatusInfo $ "Cleared " <> Text.pack (show $ length atts) <> " attachment(s)"
 
 -- | Handle Ctrl+Shift+V for clipboard paste.
 handleClipboardPaste :: Tracer IO Trace -> EventM N TuiState ()
@@ -256,517 +974,683 @@ handleOpenAttachmentDialog = do
         Just _ -> do
             tuiUI . attachmentDialogState .= AttachmentDialogPathInput
             -- Set focus to file path input
-            tuiUI . uiFocusRing %= Focus.focusSetCurrent FilePathInputWidget
+            tuiUI . uiFocusRing %= focusSetCurrent FilePathInputWidget
 
--- | Clear all attachments for the current conversation.
-handleClearAttachments :: Tracer IO Trace -> EventM N TuiState ()
-handleClearAttachments _tracer = do
-    mConv <- getFocusedConversation
-    case mConv of
-        Nothing -> showStatus StatusError "No conversation selected"
-        Just conv -> do
-            let convId = conversationId conv
-            tuiUI . attachedFiles %= Map.delete convId
-            showStatus StatusInfo "All attachments cleared"
 
--- | Clear all queued messages for the current conversation.
-handleClearQueuedMessages :: Tracer IO Trace -> EventM N TuiState ()
-handleClearQueuedMessages _tracer = do
-    mConv <- getFocusedConversation
-    case mConv of
-        Nothing -> showStatus StatusError "No conversation selected"
-        Just conv -> do
-            let convId = conversationId conv
-            coreTVar <- use tuiCore
-            -- Use atomically with proper STM actions
-            liftIO $ atomically $ do
-                core <- readTVar coreTVar
-                let bufferedVar = coreBufferedMessages core
-                modifyTVar' bufferedVar $ Map.delete convId
-            tuiUI . uiBufferedMessages %= Map.delete convId
-            showStatus StatusInfo "All queued messages cleared"
+-------------------------------------------------------------------------------
+-- Status Message Helpers
+-------------------------------------------------------------------------------
 
--- | Handle attachment selection mode.
-handleAttachmentSelection :: Tracer IO Trace -> EventM N TuiState ()
-handleAttachmentSelection _tracer = do
-    mConv <- getFocusedConversation
-    case mConv of
-        Nothing -> showStatus StatusError "No conversation selected"
-        Just conv -> do
-            attachments <- getAttachmentsForConversation conv
-            if null attachments
-                then showStatus StatusWarning "No attachments to select"
-                else do
-                    currentIdx <- use (tuiUI . selectedAttachmentIndex)
-                    case currentIdx of
-                        Nothing -> do
-                            -- Enter selection mode
-                            tuiUI . selectedAttachmentIndex .= Just 0
-                            showStatus StatusInfo "Attachment selection mode (Del/Backspace: remove, Esc: exit)"
-                        Just idx -> do
-                            -- Cycle to next attachment
-                            let nextIdx = (idx + 1) `mod` length attachments
-                            tuiUI . selectedAttachmentIndex .= Just nextIdx
+-- | Show a status message in the TUI.
+showStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
+showStatus severity text = do
+    chan <- use eventChan
+    liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
 
--- | Handle delete/backspace key (for attachments and queued messages).
-handleDelete :: EventM N TuiState ()
-handleDelete = handleBackspace
+-------------------------------------------------------------------------------
+-- Markdown Export Handlers
+-------------------------------------------------------------------------------
 
-handleBackspace :: EventM N TuiState ()
-handleBackspace = do
-    -- Check if we're in attachment selection mode
-    mAttachmentIdx <- use (tuiUI . selectedAttachmentIndex)
-    case mAttachmentIdx of
-        Just idx -> do
-            mConv <- getFocusedConversation
-            case mConv of
-                Nothing -> pure ()
-                Just conv -> do
-                    attachments <- getAttachmentsForConversation conv
-                    when (idx < length attachments) $ do
-                        let convId = conversationId conv
-                            newAttachments = take idx attachments ++ drop (idx + 1) attachments
-                        if null newAttachments
-                            then do
-                                tuiUI . attachedFiles %= Map.delete convId
-                                tuiUI . selectedAttachmentIndex .= Nothing
-                            else do
-                                tuiUI . attachedFiles %= Map.insert convId newAttachments
-                                -- Adjust index if needed
-                                when (idx >= length newAttachments) $ do
-                                    tuiUI . selectedAttachmentIndex .= if null newAttachments then Nothing else Just (length newAttachments - 1)
-                        showStatus StatusInfo "Attachment removed"
-        Nothing -> do
-            -- Check if we're in queued message selection mode
-            mQueueIdx <- use (tuiUI . queuedMessagesFocus)
-            case mQueueIdx of
-                Just idx -> do
-                    mConv <- getFocusedConversation
-                    case mConv of
-                        Nothing -> pure ()
-                        Just conv -> do
-                            msgs <- getQueuedMessagesForConversation conv
-                            when (idx < length msgs) $ do
-                                let convId = conversationId conv
-                                    newMsgs = take idx msgs ++ drop (idx + 1) msgs
-                                coreTVar <- use tuiCore
-                                -- Use atomically with proper STM actions
-                                liftIO $ atomically $ do
-                                    core <- readTVar coreTVar
-                                    let bufferedVar = coreBufferedMessages core
-                                    modifyTVar' bufferedVar $ Map.insert convId newMsgs
-                                tuiUI . uiBufferedMessages %= Map.insert convId newMsgs
-                                -- Adjust index
-                                when (idx >= length newMsgs) $ do
-                                    tuiUI . queuedMessagesFocus .= if null newMsgs then Nothing else Just (length newMsgs - 1)
-                                showStatus StatusInfo "Queued message removed"
-                Nothing -> pure ()
-
--- | Handle Ctrl+Shift+N for turn navigation mode.
-handleTurnNavigation :: Tracer IO Trace -> EventM N TuiState ()
-handleTurnNavigation _tracer = do
-    mNavState <- use (tuiUI . turnNavigation)
-    case mNavState of
-        Nothing -> do
-            -- Enter navigation mode if there's a selected session
-            mSession <- getFocusedSession
-            case mSession of
-                Nothing -> showStatus StatusError "No session selected for navigation"
-                Just session -> do
-                    let totalTurns = length session.turns
-                    if totalTurns == 0
-                        then showStatus StatusWarning "Session has no turns to navigate"
-                        else do
-                            tuiUI . turnNavigation
-                                .= Just
-                                    TurnNavigationState
-                                        { _navSession = session
-                                        , _navSelectedTurnIndex = totalTurns - 1 -- Start at latest turn
-                                        , _navTotalTurns = totalTurns
-                                        }
-                            showStatus StatusInfo "Turn navigation mode (Up/Down: navigate, Enter: exit, F: fork)"
-        Just _navState -> do
-            -- Exit navigation mode
-            tuiUI . turnNavigation .= Nothing
-            showStatus StatusInfo "Exited turn navigation mode"
-
--- | Handle navigation keys.
-handleUp :: EventM N TuiState ()
-handleUp = do
-    mNavState <- use (tuiUI . turnNavigation)
-    case mNavState of
-        Just navState -> do
-            let currentIdx = navState ^. navSelectedTurnIndex
-            when (currentIdx > 0) $ do
-                tuiUI . turnNavigation . _Just . navSelectedTurnIndex .= currentIdx - 1
-        Nothing -> do
-            mQueueIdx <- use (tuiUI . queuedMessagesFocus)
-            case mQueueIdx of
-                Just idx | idx > 0 -> tuiUI . queuedMessagesFocus .= Just (idx - 1)
-                _ -> handleFocusPrev
-
-handleDown :: EventM N TuiState ()
-handleDown = do
-    mNavState <- use (tuiUI . turnNavigation)
-    case mNavState of
-        Just navState -> do
-            let currentIdx = navState ^. navSelectedTurnIndex
-                total = navState ^. navTotalTurns
-            when (currentIdx < total - 1) $ do
-                tuiUI . turnNavigation . _Just . navSelectedTurnIndex .= currentIdx + 1
-        Nothing -> do
-            mConv <- getFocusedConversation
-            case mConv of
-                Nothing -> handleFocusNext
-                Just conv -> do
-                    msgs <- getQueuedMessagesForConversation conv
-                    mQueueIdx <- use (tuiUI . queuedMessagesFocus)
-                    case mQueueIdx of
-                        Just idx | idx < length msgs - 1 -> tuiUI . queuedMessagesFocus .= Just (idx + 1)
-                        Nothing | not (null msgs) -> tuiUI . queuedMessagesFocus .= Just 0
-                        _ -> handleFocusNext
-
-handleLeft :: EventM N TuiState ()
-handleLeft = handleFocusPrev
-
-handleRight :: EventM N TuiState ()
-handleRight = handleFocusNext
-
--- | Handle scrolling.
-handleScrollDown :: EventM N TuiState ()
-handleScrollDown = vScrollBy (viewportScroll ConversationViewWidget) 3
-
-handleScrollUp :: EventM N TuiState ()
-handleScrollUp = vScrollBy (viewportScroll ConversationViewWidget) (-3)
-
-handleScrollLeft :: EventM N TuiState ()
-handleScrollLeft = hScrollBy (viewportScroll ConversationViewWidget) (-3)
-
-handleScrollRight :: EventM N TuiState ()
-handleScrollRight = hScrollBy (viewportScroll ConversationViewWidget) 3
-
-handlePageUp :: Tracer IO Trace -> EventM N TuiState ()
-handlePageUp _tracer = do
-    let vpScroll = viewportScroll ConversationViewWidget
-    vScrollBy vpScroll (-10)
-
-handlePageDown :: Tracer IO Trace -> EventM N TuiState ()
-handlePageDown _tracer = do
-    let vpScroll = viewportScroll ConversationViewWidget
-    vScrollBy vpScroll 10
-
--- | Handle Enter key (send message or exit turn navigation).
-handleEnter :: Tracer IO Trace -> EventM N TuiState ()
-handleEnter tracer = do
-    mNavState <- use (tuiUI . turnNavigation)
-    case mNavState of
-        Just _navState -> do
-            -- In turn navigation mode - exit
-            tuiUI . turnNavigation .= Nothing
-        Nothing -> do
-            -- Normal mode - send message
-            handleSendMessage tracer
-
--- | Handle sending a message.
-handleSendMessage :: Tracer IO Trace -> EventM N TuiState ()
-handleSendMessage _tracer = do
-    mConv <- getFocusedConversation
-    case mConv of
-        Nothing -> showStatus StatusError "No conversation selected"
-        Just conv -> do
-            contents <- use (tuiUI . messageEditor . editContentsL)
-            let msgText = Text.strip $ Text.unlines $ TextZipper.getText contents
-            attachments <- getAttachmentsForConversation conv
-
-            if Text.null msgText && null attachments
-                then showStatus StatusWarning "Cannot send empty message"
-                else do
-                    -- Get or create conversation channel
-                    let convId = conversationId conv
-
-                    -- Queue the message in buffered messages
-                    coreTVar <- use tuiCore
-                    liftIO $ atomically $ do
-                        core <- readTVar coreTVar
-                        let bufferedVar = coreBufferedMessages core
-                        bufferedMap <- readTVar bufferedVar
-                        let currentMsgs = fromMaybe [] $ Map.lookup convId bufferedMap
-                        modifyTVar' bufferedVar $ const $ Map.insert convId (currentMsgs ++ [msgText]) bufferedMap
-
-                    -- Clear editor and attachments
-                    tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] (Just 1)
-                    tuiUI . attachedFiles %= Map.delete convId
-                    tuiUI . selectedAttachmentIndex .= Nothing
-
-                    -- Mark conversation as active
-                    liftIO $ atomically $ modifyTVar' coreTVar $ \core ->
-                        let updatedConvs =
-                                map
-                                    ( \c ->
-                                        if conversationId c == convId
-                                            then c{conversationStatus = ConversationStatus_Active}
-                                            else c
-                                    )
-                                    (coreConversations core)
-                         in core{coreConversations = updatedConvs}
-
-                    showStatus StatusInfo "Message sent"
-
--- | Get the focused conversation.
-getFocusedConversation :: EventM N TuiState (Maybe Conversation)
-getFocusedConversation = do
-    convList <- use (tuiUI . conversationList)
-    pure $ fmap snd $ listSelectedElement convList
-
--- | Get the focused session.
+-- | Get the currently focused session, if any.
 getFocusedSession :: EventM N TuiState (Maybe Session)
 getFocusedSession = do
-    sessList <- use (tuiUI . sessionList)
-    pure $ fmap snd $ listSelectedElement sessList
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    case mConv of
+        Just (_, conv) -> do
+            -- First try to get the session from the conversation's cached session
+            case conversationSession conv of
+                Just sess -> pure (Just sess)
+                Nothing -> do
+                    -- If not cached, try to read from session store
+                    config <- use sessionConfig
+                    liftIO $ SessionStore.readSession config.sessionStore (conversationId conv)
+        Nothing -> do
+            -- Try session list
+            mSession <- use (tuiUI . sessionList . to listSelectedElement)
+            pure $ fmap snd mSession
 
--- | Get attachments for a conversation.
-getAttachmentsForConversation :: Conversation -> EventM N TuiState [MediaAttachment]
-getAttachmentsForConversation conv = do
-    attachments <- use (tuiUI . attachedFiles)
-    pure $ fromMaybe [] $ Map.lookup (conversationId conv) attachments
+-- | Get the currently focused conversation, if any.
+getFocusedConversation :: EventM N TuiState (Maybe Conversation)
+getFocusedConversation = do
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    pure $ fmap snd mConv
 
--- | Get queued messages for a conversation.
-getQueuedMessagesForConversation :: Conversation -> EventM N TuiState [Text]
-getQueuedMessagesForConversation conv = do
-    buffered <- use (tuiUI . uiBufferedMessages)
-    pure $ fromMaybe [] $ Map.lookup (conversationId conv) buffered
+-- | Get the conversation ID of the currently focused conversation.
+getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)
+getFocusedConversationId = do
+    mConv <- use (tuiUI . conversationList . to listSelectedElement)
+    pure $ fmap (conversationId . snd) mConv
 
--- | Switch to a specific tab.
-switchTab :: Tab -> EventM N TuiState ()
-switchTab tab = do
-    tuiUI . currentTab .= tab
+-- | Format a session as markdown with the specified order preference.
+formatSessionMarkdown :: OrderPreference -> Session -> Text.Text
+formatSessionMarkdown orderPref session =
+    let opts =
+            SessionPrintOptions
+                { sessionPrintFile = "" -- Not used for in-memory formatting
+                , showToolCallResults = ShownFull
+                , showToolCallArguments = ShownFull
+                , nTurns = Nothing
+                , repeatSystemPrompt = False
+                , repeatTools = False
+                , orderPreference = orderPref
+                , noFunnyStamp = True -- Skip ASCII art in TUI exports for cleaner output
+                }
+     in formatSessionAsMarkdown opts session
 
--- | Handle Ctrl+Q - quit with confirmation.
-handleQuit :: EventM N TuiState ()
-handleQuit = do
-    pending <- use (tuiUI . quitConfirmationPending)
-    if pending
-        then halt
-        else do
-            tuiUI . quitConfirmationPending .= True
-            showStatus StatusWarning "Press Ctrl+Q again to quit"
-
--- | Handle Ctrl+C - resume a session.
-handleResumeSession :: Tracer IO Trace -> EventM N TuiState ()
-handleResumeSession tracer = do
+{- | Handle Ctrl+m: Dump the currently focused session to a markdown file.
+The file is named `<conversation-id>.md`.
+-}
+handleDumpSessionToMarkdown :: EventM N TuiState ()
+handleDumpSessionToMarkdown = do
     mSession <- getFocusedSession
-    case mSession of
-        Nothing -> showStatus StatusError "No session selected"
-        Just session -> do
-            -- Resume the session as a new conversation
-            agents <- use (tuiUI . agentList)
-            case listSelectedElement agents of
-                Nothing -> showStatus StatusError "No agent selected"
-                Just (_, agent) -> do
-                    coreTVar <- use tuiCore
+    mConvId <- getFocusedConversationId
+    case (mSession, mConvId) of
+        (Just session, Just (ConversationId cid)) -> do
+            let markdown = formatSessionMarkdown Chronological session
+                fileName = "conv." <> show cid <.> "md"
+            liftIO $ TextIO.writeFile fileName markdown
+            showStatus StatusInfo $ "Exported to " <> Text.pack fileName
+        (Just session, Nothing) -> do
+            let markdown = formatSessionMarkdown Chronological session
+                fileName = "sess." <> show session.sessionId <.> "md"
+            liftIO $ TextIO.writeFile fileName markdown
+            showStatus StatusInfo $ "Exported to " <> Text.pack fileName
+        _ -> do
+            showStatus StatusWarning "No session or conversation selected"
 
-                    -- Create a new conversation with the session
-                    liftIO $ do
-                        conv <- createConversation tracer agent
-                        atomically $ modifyTVar' coreTVar $ \core ->
-                            core{coreConversations = coreConversations core ++ [conv{conversationSession = Just session}]}
+{- | Handle Ctrl+t or Ctrl+r: Display the currently focused session with an external viewer.
+Uses the AGENT_MD_VIEWER environment variable if set.
+The viewer is executed asynchronously and tracked as an auxiliary task.
 
-                    showStatus StatusInfo "Session resumed"
+Ctrl+t uses Chronological order (oldest first).
+Ctrl+r uses Antichronological order (newest first).
+-}
+handleViewSessionWithExternalViewer :: OrderPreference -> EventM N TuiState ()
+handleViewSessionWithExternalViewer orderPref = do
+    mViewer <- liftIO $ lookupEnv "AGENT_MD_VIEWER"
+    case mViewer of
+        Just viewerCmd -> do
+            mSession <- getFocusedSession
+            mConvId <- getFocusedConversationId
+            case (mSession, mConvId) of
+                (Just session, Just convId) -> do
+                    let markdown = formatSessionMarkdown orderPref session
+                    -- Create a temporary file with the markdown content
+                    tempFile <- liftIO $ writeSystemTempFile "session-view-" (Text.unpack markdown)
+                    -- Spawn the viewer process asynchronously
+                    viewerAsync <- liftIO $ async $ do
+                        result <- readProcessWithExitCode viewerCmd [tempFile] ""
+                        case result of
+                            (ExitFailure code, _, err) ->
+                                hPutStrLn stderr $ "AGENT_MD_VIEWER failed with exit code " ++ show code ++ ": " ++ err
+                            _ -> pure ()
+                    -- Track the async task
+                    let task = Viewer viewerAsync convId session.sessionId
+                    tuiUI . auxiliaryTasks %= (task :)
+                    showStatus StatusInfo $ "Opening with " <> Text.pack viewerCmd
+                (Just _, Nothing) -> do
+                    showStatus StatusWarning "No conversation selected"
+                (Nothing, _) -> do
+                    showStatus StatusWarning "No session selected"
+        Nothing -> do
+            showStatus StatusWarning "AGENT_MD_VIEWER not set"
 
--- | Create a new conversation.
-createConversation :: Tracer IO Trace -> TuiAgent -> IO Conversation
-createConversation _tracer agent = do
-    -- Generate a unique conversation ID
-    convId <- ConversationId <$> nextRandom
-    pure $
-        Conversation
-            { conversationId = convId
-            , conversationAgent = agent
-            , conversationThreadId = Nothing
-            , conversationSession = Nothing
-            , conversationName = "New conversation"
-            , conversationChan = undefined -- Would be properly initialized
-            , conversationStatus = ConversationStatus_WaitingForInput
-            , conversationOnProgress = ignoreSessionProgress
+-------------------------------------------------------------------------------
+-- Focus Management
+-------------------------------------------------------------------------------
+
+{- | Get the corresponding Tab for a WidgetName.
+Returns Nothing if the widget doesn't have an associated tab.
+-}
+widgetToTab :: WidgetName -> Maybe Tab
+widgetToTab AgentListWidget = Just AgentsTab
+widgetToTab ConversationListWidget = Just ChatsTab
+widgetToTab SessionsListWidget = Just HistoryTab
+widgetToTab _ = Nothing
+
+{- | Update the current tab based on the focused widget.
+When the focus changes to a widget associated with a different tab,
+this function updates both the tab and the focus ring to match.
+-}
+updateTabFromFocus :: EventM N TuiState ()
+updateTabFromFocus = do
+    mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    case mFocus >>= widgetToTab of
+        Just tab -> do
+            currentTab' <- use (tuiUI . currentTab)
+            -- Only update if the tab is actually changing
+            when (tab /= currentTab') $ do
+                tuiUI . currentTab .= tab
+                -- Rebuild focus ring for the new tab, preserving current focus
+                mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+                tuiUI . uiFocusRing .= buildFocusRingForTabPreserving tab mCurrentFocus
+        Nothing -> pure ()
+
+{- | Cycle focus forward through widgets.
+After cycling, updates the active tab based on the new focus.
+-}
+cycleFocusForward :: EventM N TuiState ()
+cycleFocusForward = do
+    tuiUI . uiFocusRing %= focusNext
+    tuiUI . zoomed .= False
+    -- Also update the active tab based on the new focus
+    updateTabFromFocus
+
+{- | Cycle focus backward through widgets.
+After cycling, updates the active tab based on the new focus.
+-}
+cycleFocusBackward :: EventM N TuiState ()
+cycleFocusBackward = do
+    tuiUI . uiFocusRing %= focusPrev
+    tuiUI . zoomed .= False
+    -- Also update the active tab based on the new focus
+    updateTabFromFocus
+
+-- | Toggle zoom mode for current widget.
+toggleZoom :: EventM N TuiState ()
+toggleZoom = tuiUI . zoomed %= not
+
+-------------------------------------------------------------------------------
+-- Application Event Handlers
+-------------------------------------------------------------------------------
+
+{- | Handle heartbeat - refresh UI state and auto-clear expired status messages.
+Preserves the currently selected conversation when refreshing the list.
+
+During migration, this also:
+1. Refreshes tools for the selected agent via RuntimeBridge
+2. Synchronizes tool state between legacy Runtime and OS Core
+-}
+handleHeartbeat :: EventM N TuiState ()
+handleHeartbeat = do
+    -- Save the currently selected conversation ID before refreshing
+    mSelectedConvId <- getFocusedConversationId
+
+    -- Refresh conversations from core
+    coreRef <- use tuiCore
+    coreState <- liftIO $ readTVarIO coreRef
+    let convs = coreConversations coreState
+    tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList convs) 1
+
+    -- Restore the selection if the conversation still exists
+    case mSelectedConvId of
+        Just selectedConvId -> do
+            let newConvs = Vector.fromList convs
+            case Vector.findIndex (\c -> conversationId c == selectedConvId) newConvs of
+                Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
+                Nothing -> pure () -- Conversation was removed, keep no selection
+        Nothing -> pure ()
+
+    -- Refresh tools for the currently selected agent
+    selectedAgent <- use (tuiUI . selectedAgentInfo)
+    case selectedAgent of
+        Just agent -> refreshToolsForAgent agent
+        Nothing -> pure ()
+
+    -- Sync buffered messages from Core to UIState for rendering
+    buffered <- liftIO $ readTVarIO (coreBufferedMessages coreState)
+    tuiUI . uiBufferedMessages .= buffered
+
+    -- Auto-clear status messages after 5 seconds
+    mStatus <- use (tuiUI . statusMessage)
+    case mStatus of
+        Just status -> do
+            now <- liftIO getCurrentTime
+            when (diffUTCTime now status.statusTimestamp > 5) $
+                tuiUI . statusMessage .= Nothing
+        Nothing -> pure ()
+
+    -- Cleanup completed auxiliary tasks
+    cleanupAuxiliaryTasks
+
+-- | Remove completed auxiliary tasks from the state.
+cleanupAuxiliaryTasks :: EventM N TuiState ()
+cleanupAuxiliaryTasks = do
+    tasks <- use (tuiUI . auxiliaryTasks)
+    -- Filter out completed tasks (poll returns Just)
+    activeTasks <- liftIO $ filterM isTaskActive tasks
+    tuiUI . auxiliaryTasks .= activeTasks
+  where
+    isTaskActive :: AuxiliaryTask -> IO Bool
+    isTaskActive (Viewer asyncHandle _ _) = do
+        mResult <- poll asyncHandle
+        pure $ case mResult of
+            Nothing -> True -- Still running
+            Just _ -> False -- Completed (success or failure)
+
+-- | Show a status message with the given severity.
+handleShowStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
+handleShowStatus severity text = do
+    now <- liftIO getCurrentTime
+    tuiUI . statusMessage .= Just (StatusMessage text severity now)
+
+-- | Clear the current status message.
+handleClearStatus :: EventM N TuiState ()
+handleClearStatus =
+    tuiUI . statusMessage .= Nothing
+
+-- | Handle new conversation event.
+handleNewConversation :: ConversationId -> EventM N TuiState ()
+handleNewConversation convId = do
+    -- Find and select the new conversation
+    convs <- use (tuiUI . conversationList . to listElements)
+    case Vector.findIndex (\c -> conversationId c == convId) convs of
+        Just idx -> do
+            tuiUI . conversationList . listSelectedL .= Just idx
+            tuiUI . unreadConversations %= Set.delete convId
+        Nothing -> pure ()
+
+-- | Handle needs input update event.
+handleConversationNeedsInput :: ConversationId -> EventM N TuiState ()
+handleConversationNeedsInput convId = do
+    tuiUI . ongoingConversations %= Set.delete convId
+
+    -- Also update the conversation status in core
+    updateConversationStatus convId ConversationStatus_WaitingForInput
+
+-- | Update conversation status in core.
+updateConversationStatus :: ConversationId -> ConversationStatus -> EventM N TuiState ()
+updateConversationStatus convId newStatus = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c
+            { coreConversations =
+                map
+                    ( \conv ->
+                        if conversationId conv == convId
+                            then conv{conversationStatus = newStatus}
+                            else conv
+                    )
+                    (coreConversations c)
             }
 
--- | Handle Ctrl+N - new conversation.
-handleNewConversation :: Tracer IO Trace -> EventM N TuiState ()
-handleNewConversation tracer = do
-    agents <- use (tuiUI . agentList)
-    case listSelectedElement agents of
-        Nothing -> showStatus StatusError "No agent selected"
-        Just (_, agent) -> do
-            coreTVar <- use tuiCore
+-- | Handle conversation update event.
+handleConversationUpdated :: ConversationId -> Session -> EventM N TuiState ()
+handleConversationUpdated convId sess = do
+    -- Updates the conversation's view of the Session
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c{coreConversations = updateConversationSession convId sess (coreConversations c)}
 
-            liftIO $ do
-                conv <- createConversation tracer agent
-                atomically $ modifyTVar' coreTVar $ \core ->
-                    core{coreConversations = coreConversations core ++ [conv]}
+    -- Mark as unread if not currently selected
+    selected <- use (tuiUI . conversationList . to listSelectedElement)
+    case selected of
+        Just (_, conv)
+            | conversationId conv /= convId ->
+                tuiUI . unreadConversations %= Set.insert convId
+        _ -> pure ()
+    -- Refresh from core
+    handleHeartbeat
 
-            showStatus StatusInfo "New conversation created"
+{- | Refresh tools for the given agent.
 
--- | Handle Ctrl+E - pause/resume conversation.
-handlePauseConversation :: Tracer IO Trace -> EventM N TuiState ()
-handlePauseConversation _tracer = do
-    mConv <- getFocusedConversation
-    case mConv of
-        Nothing -> showStatus StatusError "No conversation selected"
-        Just conv -> do
-            coreTVar <- use tuiCore
-            core <- liftIO $ readTVarIO coreTVar
+This function reads tools from the OS-native TVar and updates the UI state.
+-}
+refreshToolsForAgent :: TuiAgent -> EventM N TuiState ()
+refreshToolsForAgent agent = do
+    -- Read tools from the OS-native TVar
+    tools <- liftIO $ readTVarIO (osNodeTools $ tuiNode agent)
+    tuiUI . coreAgentTools %= updateAgentTools (tuiAgentId agent) tools
+  where
+    updateAgentTools :: AgentId -> [a] -> [(AgentId, [a])] -> [(AgentId, [a])]
+    updateAgentTools aid newTools =
+        ((aid, newTools) :) . filter ((/= aid) . fst)
 
+-- | Handle F5 key: Refresh tools for selected agent.
+handleRefreshTools :: EventM N TuiState ()
+handleRefreshTools = do
+    selected <- use (tuiUI . selectedAgentInfo)
+    case selected of
+        Just agent -> do
+            -- Read tools from the OS-native TVar
+            tools <- liftIO $ readTVarIO (osNodeTools $ tuiNode agent)
+            tuiUI . coreAgentTools %= updateAgentTools (tuiAgentId agent) tools
+            showStatus StatusInfo $ "Refreshed " <> Text.pack (show $ length tools) <> " tools"
+        Nothing -> showStatus StatusWarning "No agent selected"
+  where
+    updateAgentTools :: AgentId -> [a] -> [(AgentId, [a])] -> [(AgentId, [a])]
+    updateAgentTools aid newTools =
+        ((aid, newTools) :) . filter ((/= aid) . fst)
+
+-------------------------------------------------------------------------------
+-- Conversation Management
+-------------------------------------------------------------------------------
+
+-- | Create a new conversation from the selected agent.
+handleNewConversationFromEditor :: Tracer IO Trace -> EventM N TuiState ()
+handleNewConversationFromEditor tracer = do
+    selected <- use (tuiUI . agentList . to listSelectedElement)
+    case selected of
+        Just (_, baseTuiAgent) -> do
+            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1))
+            runConversation tracer baseTuiAgent session
+        _ ->
+            pure ()
+
+{- | Continue a session restored from storage.
+This starts the agent loop with the restored session.
+-}
+handleRestoredConversation :: Tracer IO Trace -> EventM N TuiState ()
+handleRestoredConversation tracer = do
+    mSession <- use (tuiUI . sessionList . to listSelectedElement)
+    mAgent <- use (tuiUI . agentList . to listSelectedElement)
+    case (,) <$> mSession <*> mAgent of
+        Just ((_, session), (_, baseTuiAgent)) -> do
+            runConversation tracer baseTuiAgent session
+        _ ->
+            pure ()
+
+{- | Toggle pause/unpause for the currently selected conversation.
+Ctrl+E pauses/unpauses the conversation, blocking the step iteration.
+-}
+handleTogglePauseConversation :: EventM N TuiState ()
+handleTogglePauseConversation = do
+    mSelectedConv <- use (tuiUI . conversationList . to listSelectedElement)
+    case mSelectedConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just (_, conv) -> do
             let convId = conversationId conv
-                isPaused = Set.member convId (corePausedConversations core)
-
+            coreRef <- use tuiCore
+            isPaused <- Set.member convId . corePausedConversations <$> liftIO (readTVarIO coreRef)
             if isPaused
                 then do
-                    -- Unpause - kill the thread and let it restart
-                    case conversationThreadId conv of
-                        Nothing -> pure ()
-                        Just tid -> liftIO $ killThread tid
-                    liftIO $ atomically $ modifyTVar' coreTVar $ \c ->
+                    -- Unpause: remove from paused set and update status
+                    liftIO $ atomically $ modifyTVar coreRef $ \c ->
                         c{corePausedConversations = Set.delete convId (corePausedConversations c)}
-                    showStatus StatusInfo "Conversation unpaused"
+                    updateConversationStatus convId ConversationStatus_WaitingForInput
+                    -- Clear queue selection when unpausing
+                    tuiUI . queuedMessagesFocus .= Nothing
+                    showStatus StatusInfo $ "Unpaused: " <> conversationName conv
                 else do
-                    -- Pause
-                    case conversationThreadId conv of
-                        Nothing -> pure ()
-                        Just tid -> liftIO $ killThread tid
-                    liftIO $ atomically $ modifyTVar' coreTVar $ \c ->
+                    -- Pause: add to paused set and update status
+                    liftIO $ atomically $ modifyTVar coreRef $ \c ->
                         c{corePausedConversations = Set.insert convId (corePausedConversations c)}
-                    showStatus StatusInfo "Conversation paused"
+                    updateConversationStatus convId ConversationStatus_Paused
+                    showStatus StatusInfo $ "Paused: " <> conversationName conv
 
--- | Handle Ctrl+P - export session to markdown.
-handleExportSession :: Tracer IO Trace -> EventM N TuiState ()
-handleExportSession _tracer = do
-    mSession <- getFocusedSession
-    case mSession of
-        Nothing -> showStatus StatusError "No session selected"
-        Just _session -> do
-            -- Export session to markdown file
-            showStatus StatusInfo "Session exported"
+-- | Check if a conversation is currently paused.
+isConversationPaused :: ConversationId -> Core -> Bool
+isConversationPaused convId core = Set.member convId (corePausedConversations core)
 
--- | Handle Ctrl+R/T - view session.
-handleViewSession :: Tracer IO Trace -> EventM N TuiState ()
-handleViewSession _tracer = do
-    mSession <- getFocusedSession
-    case mSession of
-        Nothing -> showStatus StatusError "No session selected"
-        Just _session -> do
-            -- Launch external viewer
-            showStatus StatusInfo "Launching session viewer..."
+-------------------------------------------------------------------------------
+-- Queue Management
+-------------------------------------------------------------------------------
 
--- | Handle focus navigation.
-handleFocusNext :: EventM N TuiState ()
-handleFocusNext = do
-    tuiUI . uiFocusRing %= Focus.focusNext
-    tuiUI . quitConfirmationPending .= False
+{- | Clear all queued messages for the current conversation.
+Only works when the conversation is paused.
+-}
+handleClearQueuedMessages :: EventM N TuiState ()
+handleClearQueuedMessages = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            -- Only allow clearing when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then showStatus StatusWarning "Can only clear queued messages when paused (Ctrl+E)"
+                else do
+                    let convId = conversationId conv
+                    coreRef <- use tuiCore
 
-handleFocusPrev :: EventM N TuiState ()
-handleFocusPrev = do
-    tuiUI . uiFocusRing %= Focus.focusPrev
-    tuiUI . quitConfirmationPending .= False
+                    -- Get the Core's buffered messages TVar and clear it for this conversation
+                    core <- liftIO $ readTVarIO coreRef
+                    liftIO $
+                        atomically $
+                            modifyTVar (coreBufferedMessages core) $
+                                Map.insert convId []
 
--- | Handle next/prev conversation navigation.
-handleNextConversation :: Tracer IO Trace -> EventM N TuiState ()
-handleNextConversation _tracer = do
-    tuiUI . conversationList . listSelectedL %= fmap (+ 1)
-    tuiUI . quitConfirmationPending .= False
+                    -- Clear in UI
+                    tuiUI . uiBufferedMessages %= Map.insert convId []
+                    tuiUI . queuedMessagesFocus .= Nothing
+                    showStatus StatusInfo "All queued messages cleared"
 
-handlePrevConversation :: Tracer IO Trace -> EventM N TuiState ()
-handlePrevConversation _tracer = do
-    tuiUI . conversationList . listSelectedL %= fmap (\n -> max 0 (n - 1))
-    tuiUI . quitConfirmationPending .= False
+-- | Delete the currently selected queued message.
+handleDeleteSelectedMessage :: EventM N TuiState ()
+handleDeleteSelectedMessage = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            -- Only allow deletion when paused
+            if conversationStatus conv /= ConversationStatus_Paused
+                then showStatus StatusWarning "Can only delete messages when paused (Ctrl+E)"
+                else do
+                    let convId = conversationId conv
+                    mSelectedIdx <- use (tuiUI . queuedMessagesFocus)
+                    case mSelectedIdx of
+                        Nothing -> showStatus StatusWarning "Select a message first (use Up/Down arrows)"
+                        Just idx -> do
+                            -- Get current messages
+                            buffered <- use (tuiUI . uiBufferedMessages)
+                            case Map.lookup convId buffered of
+                                Nothing -> pure ()
+                                Just msgs ->
+                                    if idx < 0 || idx >= length msgs
+                                        then pure ()
+                                        else do
+                                            -- Remove message at index
+                                            let newMsgs = deleteAt idx msgs
+                                            -- Update Core
+                                            coreRef <- use tuiCore
+                                            core <- liftIO $ readTVarIO coreRef
+                                            liftIO $
+                                                atomically $
+                                                    modifyTVar (coreBufferedMessages core) $
+                                                        Map.insert convId newMsgs
+                                            -- Update UI
+                                            tuiUI . uiBufferedMessages %= Map.insert convId newMsgs
+                                            -- Adjust selection
+                                            let newIdx = if null newMsgs then Nothing else Just (min idx (length newMsgs - 1))
+                                            tuiUI . queuedMessagesFocus .= newIdx
+                                            showStatus StatusInfo "Message deleted"
 
--- | Show a status message.
-showStatus :: StatusSeverity -> Text -> EventM N TuiState ()
-showStatus severity msg = do
-    now <- liftIO getCurrentTime
-    tuiUI . statusMessage
-        .= Just
-            StatusMessage
-                { statusText = msg
-                , statusSeverity = severity
-                , statusTimestamp = now
+-- | Delete an element at a specific index.
+deleteAt :: Int -> [a] -> [a]
+deleteAt idx xs = take idx xs ++ drop (idx + 1) xs
+
+-- | Navigate through queued messages.
+handleQueueNavigation :: Int -> EventM N TuiState ()
+handleQueueNavigation direction = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure ()
+        Just conv -> do
+            let convId = conversationId conv
+            buffered <- use (tuiUI . uiBufferedMessages)
+            case Map.lookup convId buffered of
+                Nothing -> pure ()
+                Just msgs -> do
+                    let count = length msgs
+                    current <- use (tuiUI . queuedMessagesFocus)
+                    let newIdx = case current of
+                            Nothing -> if direction > 0 then 0 else count - 1
+                            Just idx -> max 0 $ min (count - 1) (idx + direction)
+                    tuiUI . queuedMessagesFocus .= Just newIdx
+
+-------------------------------------------------------------------------------
+-- Session Progress Callback
+-------------------------------------------------------------------------------
+
+{- | Build the progress callback for a conversation.
+Combines the global session config with TUI-specific notification needs.
+-}
+buildOnProgress :: ConversationId -> BChan AppEvent -> OnSessionProgress
+buildOnProgress convId outChan progress = do
+    -- Notify TUI of progress updates
+    case progress of
+        SessionUpdated sess -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+        SessionCompleted sess -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+        SessionStarted sess -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+        SessionFailed sess _ -> do
+            writeBChan outChan (AppEvent_AgentStepProgrress convId sess)
+
+{- | STM operation to read and clear buffered messages for a conversation.
+Returns the messages that were buffered (if any).
+-}
+readAndClearBufferedMessagesSTM :: ConversationId -> TVar (Map ConversationId [Text.Text]) -> STM [Text.Text]
+readAndClearBufferedMessagesSTM convId bufferVar = do
+    buffers <- readTVar bufferVar
+    case Map.lookup convId buffers of
+        Nothing -> pure []
+        Just msgs -> do
+            writeTVar bufferVar (Map.insert convId [] buffers)
+            pure msgs
+
+{- | Read and clear buffered messages for a conversation.
+Returns the concatenated messages (if any) that were buffered.
+-}
+readAndClearBufferedMessages :: ConversationId -> Core -> IO (Maybe Text.Text)
+readAndClearBufferedMessages convId core = do
+    msgs <- atomically $ readAndClearBufferedMessagesSTM convId core.coreBufferedMessages
+    pure $ case msgs of
+        [] -> Nothing
+        _ -> Just $ Text.unlines $ reverse msgs -- Reverse to maintain order (oldest first)
+
+-- | Add a message to the buffer for a conversation.
+addBufferedMessage :: ConversationId -> Core -> Text.Text -> IO ()
+addBufferedMessage convId core msg =
+    atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
+
+-------------------------------------------------------------------------------
+-- Run Conversation
+-------------------------------------------------------------------------------
+
+runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
+runConversation tracer baseTuiAgent session = do
+    -- Get session configuration (includes API keys)
+    config <- use sessionConfig
+
+    -- Generate conversation ID
+    convId <- liftIO $ newConversationId
+
+    outChan <- use eventChan
+    inChan <- liftIO $ newBChan 100
+
+    -- Build the progress callback
+    let notifyProgress = buildOnProgress convId outChan
+
+    let node = tuiNode baseTuiAgent
+
+    -- Create the agent with the progress callback
+    -- Use the agent's OSAgentNode through the TuiAgent
+    -- Pass API keys from the session config
+    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
+    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
+
+    -- Get reference to core state for pause checking and message buffering
+    coreRef <- use tuiCore
+
+    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+    let a =
+            agent1
+                { step = \sess -> do
+                    -- Check if conversation is paused and block until unpaused
+                    let waitIfPaused = do
+                            core <- readTVarIO coreRef
+                            when (isConversationPaused convId core) $ do
+                                threadDelay 200000 -- Check every 200ms
+                                waitIfPaused
+                    waitIfPaused
+
+                    notifyProgress (SessionUpdated sess)
+                    ret <- agent1.step sess
+                    case ret of
+                        Stop _r ->
+                            -- smoll hack to reuse the naive step from nodeToAgent
+                            pure $ AskUserPrompt (MissingUserPrompt True [])
+                        _ -> pure ret
+                , usrQuery = do
+                    -- First check for buffered messages
+                    core <- readTVarIO coreRef
+                    buffered <- readAndClearBufferedMessages convId core
+                    case buffered of
+                        Nothing -> notifyNeedInput >> readBChan inChan
+                        Just buftxt -> pure (Just $ UserQuery buftxt [])
                 }
 
+    -- \* wrap in Conversation
+    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiTree baseTuiAgent) (tuiNode baseTuiAgent) (tuiSlug baseTuiAgent)
+    threadId <- liftIO $ forkIO $ do
+        notifyProgress (SessionStarted session)
+        -- Loop.run now requires convId as first parameter
+        void $ Loop.run convId a session
+        notifyProgress (SessionCompleted session)
+    let conv =
+            Conversation
+                { conversationId = convId
+                , conversationAgent = tuiAgent
+                , conversationThreadId = Just threadId
+                , conversationSession = Nothing
+                , conversationName = "@" <> tuiSlug baseTuiAgent
+                , conversationChan = inChan
+                , conversationStatus = ConversationStatus_WaitingForInput
+                , conversationOnProgress = notifyProgress
+                }
+
+    -- Add to core
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c{coreConversations = conv : coreConversations c}
+    -- Update UI
+    tuiUI . conversationList %= listInsert 0 conv
+    tuiUI . conversationList . listSelectedL .= Just 0
+    -- Switch to Chats tab and focus the message editor
+    switchToChatsAndFocusMessage
+
+{- | Send a message in the current conversation.
+Messages are now buffered if the conversation is being processed by an agent,
+allowing users to "interrupt" or provide additional context while the agent
+is executing tool calls.
+-}
+handleSendMessage :: EventM N TuiState ()
+handleSendMessage = do
+    -- Get message text
+    msgLines <- use (tuiUI . messageEditor . to getEditContents)
+    let msgText = Text.strip $ Text.unlines msgLines
+
+    -- Get current attachments
+    mConv <- getFocusedConversation
+    attachments <- case mConv of
+        Just conv -> do
+            atts <- use (tuiUI . attachedFiles)
+            pure $ Map.findWithDefault [] (conversationId conv) atts
+        Nothing -> pure []
+
+    -- Only send non-empty messages (or messages with attachments)
+    when (not (Text.null msgText) || not (null attachments)) $ do
+        case mConv of
+            Just conv -> do
+                -- Get core reference for message buffering
+                coreRef <- use tuiCore
+                core <- liftIO $ readTVarIO coreRef
+
+                -- Check if conversation is already being processed
+                ongoing <- use (tuiUI . ongoingConversations)
+                let isOngoing = Set.member (conversationId conv) ongoing
+
+                if isOngoing
+                    then do
+                        -- Buffer the message - agent will pick it up when collecting tool responses
+                        liftIO $ addBufferedMessage (conversationId conv) core msgText
+                        showStatus StatusInfo "Message buffered - will be sent with tool responses"
+                    else do
+                        -- Conversation is waiting for input - send directly via channel
+                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText attachments)
+                        -- Mark as ongoing since we're starting agent processing
+                        tuiUI . ongoingConversations %= Set.insert (conversationId conv)
+
+                -- Clear the editor and attachments
+                tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                tuiUI . attachedFiles %= Map.delete (conversationId conv)
+                tuiUI . selectedAttachmentIndex .= Nothing
+            Nothing -> pure ()
+
 -------------------------------------------------------------------------------
--- Tab Navigation
+-- Help Content Initialization
 -------------------------------------------------------------------------------
 
--- | Cycle to the next tab.
-cycleTabForward :: EventM N TuiState ()
-cycleTabForward = do
-    current <- use (tuiUI . currentTab)
-    tuiUI . currentTab .= nextTab current
-
--- | Cycle to the previous tab.
-cycleTabBackward :: EventM N TuiState ()
-cycleTabBackward = do
-    current <- use (tuiUI . currentTab)
-    tuiUI . currentTab .= prevTab current
-
--- | Get the next tab.
-nextTab :: Tab -> Tab
-nextTab AgentsTab = ChatsTab
-nextTab ChatsTab = HistoryTab
-nextTab HistoryTab = HelpTab
-nextTab HelpTab = AgentsTab
-
--- | Get the previous tab.
-prevTab :: Tab -> Tab
-prevTab AgentsTab = HelpTab
-prevTab ChatsTab = AgentsTab
-prevTab HistoryTab = ChatsTab
-prevTab HelpTab = HistoryTab
-
--------------------------------------------------------------------------------
--- Help Content
--------------------------------------------------------------------------------
-
--- | Default help content with keyboard shortcuts.
-defaultHelpContent :: [Text]
-defaultHelpContent =
-    [ "Keyboard Shortcuts:"
-    , ""
-    , "Navigation:"
-    , "  Tab / Ctrl+Tab    - Move focus forward"
-    , "  Shift+Tab         - Move focus backward"
-    , "  Ctrl+j/k/h/l      - Scroll content"
-    , "  PageUp/PageDown   - Scroll by page"
-    , "  Ctrl+Left/Right   - Switch tabs"
-    , "  Ctrl+1/2/3/4      - Jump to tab"
-    , "  Ctrl+Shift+n/p    - Next/previous conversation"
-    , ""
-    , "Conversations:"
-    , "  Ctrl+n            - New conversation"
-    , "  Ctrl+c            - Resume selected session"
-    , "  Ctrl+e            - Pause/resume conversation"
-    , "  Enter             - Send message"
-    , ""
-    , "Attachments:"
-    , "  Ctrl+f            - Attach file"
-    , "  Ctrl+Shift+F      - Clear all attachments"
-    , "  Ctrl+Shift+V      - Paste from clipboard (images/files)"
-    , "  Ctrl+Shift+a      - Enter attachment selection mode"
-    , "  Del/Backspace     - Remove selected attachment"
-    , ""
-    , "Sessions:"
-    , "  Ctrl+p            - Export session to markdown"
-    , "  Ctrl+r / Ctrl+t   - View session in external viewer"
-    , "  Ctrl+N            - Turn navigation mode"
-    , "  F (in nav mode)   - Fork from selected turn"
-    , ""
-    , "Queued Messages:"
-    , "  Ctrl+Shift+d      - Clear all queued messages"
-    , "  Up/Down           - Navigate queued messages"
-    , "  Del/Backspace     - Delete selected queued message"
-    , ""
-    , "Other:"
-    , "  Ctrl+q            - Quit (press twice to confirm)"
-    ]
-
--- | Initialize help content in the UI state.
+-- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
-initHelpContent st = st{_helpContent = defaultHelpContent}
+initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
