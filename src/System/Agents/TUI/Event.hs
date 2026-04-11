@@ -22,7 +22,7 @@ import Brick.Widgets.Edit (
     editContentsL,
     handleEditorEvent,
  )
-import Brick.Widgets.List (listSelectedElement, listElementsL, listSelectedL)
+import Brick.Widgets.List (listElementsL, listSelectedElement, listSelectedL)
 import Control.Concurrent (killThread)
 import Control.Concurrent.STM (
     atomically,
@@ -30,7 +30,7 @@ import Control.Concurrent.STM (
     readTVar,
     readTVarIO,
  )
-import Control.Lens ((%=), (.=), (^.), use, _Just)
+import Control.Lens (use, (%=), (.=), (^.), _Just)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
@@ -39,9 +39,9 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Zipper as TextZipper
-import qualified Data.Vector as Vector
 import Data.Time (getCurrentTime)
 import Data.UUID.V4 (nextRandom)
+import qualified Data.Vector as Vector
 import Graphics.Vty (Event (..), Key (..), Modifier (..))
 import Prod.Tracer (Tracer)
 
@@ -108,7 +108,7 @@ handleAttachmentDialogEvent _tracer = \case
     takeFileName path = case reverse $ dropWhile (== '/') $ reverse path of
         "" -> path
         cleaned -> case dropWhile (/= '/') cleaned of
-            '/':fname -> fname
+            '/' : fname -> fname
             _ -> cleaned
 
 -- | Handle main application events.
@@ -174,21 +174,28 @@ handleAppEvent _tracer = \case
         -- Update the conversation session
         coreTVar <- use tuiCore
         liftIO $ atomically $ modifyTVar' coreTVar $ \core ->
-            core { coreConversations = updateConversationSession convId session (coreConversations core) }
+            core{coreConversations = updateConversationSession convId session (coreConversations core)}
         -- Also update in UI state
-        tuiUI . conversationList . listElementsL %= Vector.map (\conv ->
-            if conversationId conv == convId
-            then conv { conversationSession = Just session }
-            else conv)
+        tuiUI . conversationList . listElementsL
+            %= Vector.map
+                ( \conv ->
+                    if conversationId conv == convId
+                        then conv{conversationSession = Just session}
+                        else conv
+                )
     AppEvent_AgentNeedsInput convId -> do
         -- Mark conversation as waiting for input
         coreTVar <- use tuiCore
         liftIO $ atomically $ modifyTVar' coreTVar $ \core ->
-            let updatedConvs = map (\conv ->
-                    if conversationId conv == convId
-                    then conv { conversationStatus = ConversationStatus_WaitingForInput }
-                    else conv) (coreConversations core)
-            in core { coreConversations = updatedConvs }
+            let updatedConvs =
+                    map
+                        ( \conv ->
+                            if conversationId conv == convId
+                                then conv{conversationStatus = ConversationStatus_WaitingForInput}
+                                else conv
+                        )
+                        (coreConversations core)
+             in core{coreConversations = updatedConvs}
     AppEvent_AgentTrace _trace -> do
         -- Display trace in status
         pure ()
@@ -370,11 +377,13 @@ handleTurnNavigation _tracer = do
                     if totalTurns == 0
                         then showStatus StatusWarning "Session has no turns to navigate"
                         else do
-                            tuiUI . turnNavigation .= Just TurnNavigationState
-                                { _navSession = session
-                                , _navSelectedTurnIndex = totalTurns - 1  -- Start at latest turn
-                                , _navTotalTurns = totalTurns
-                                }
+                            tuiUI . turnNavigation
+                                .= Just
+                                    TurnNavigationState
+                                        { _navSession = session
+                                        , _navSelectedTurnIndex = totalTurns - 1 -- Start at latest turn
+                                        , _navTotalTurns = totalTurns
+                                        }
                             showStatus StatusInfo "Turn navigation mode (Up/Down: navigate, Enter: exit, F: fork)"
         Just _navState -> do
             -- Exit navigation mode
@@ -468,13 +477,13 @@ handleSendMessage _tracer = do
             contents <- use (tuiUI . messageEditor . editContentsL)
             let msgText = Text.strip $ Text.unlines $ TextZipper.getText contents
             attachments <- getAttachmentsForConversation conv
-            
+
             if Text.null msgText && null attachments
                 then showStatus StatusWarning "Cannot send empty message"
                 else do
                     -- Get or create conversation channel
                     let convId = conversationId conv
-                    
+
                     -- Queue the message in buffered messages
                     coreTVar <- use tuiCore
                     liftIO $ atomically $ do
@@ -483,20 +492,24 @@ handleSendMessage _tracer = do
                         bufferedMap <- readTVar bufferedVar
                         let currentMsgs = fromMaybe [] $ Map.lookup convId bufferedMap
                         modifyTVar' bufferedVar $ const $ Map.insert convId (currentMsgs ++ [msgText]) bufferedMap
-                    
+
                     -- Clear editor and attachments
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] (Just 1)
                     tuiUI . attachedFiles %= Map.delete convId
                     tuiUI . selectedAttachmentIndex .= Nothing
-                    
+
                     -- Mark conversation as active
                     liftIO $ atomically $ modifyTVar' coreTVar $ \core ->
-                        let updatedConvs = map (\c ->
-                                if conversationId c == convId
-                                then c { conversationStatus = ConversationStatus_Active }
-                                else c) (coreConversations core)
-                        in core { coreConversations = updatedConvs }
-                    
+                        let updatedConvs =
+                                map
+                                    ( \c ->
+                                        if conversationId c == convId
+                                            then c{conversationStatus = ConversationStatus_Active}
+                                            else c
+                                    )
+                                    (coreConversations core)
+                         in core{coreConversations = updatedConvs}
+
                     showStatus StatusInfo "Message sent"
 
 -- | Get the focused conversation.
@@ -551,13 +564,13 @@ handleResumeSession tracer = do
                 Nothing -> showStatus StatusError "No agent selected"
                 Just (_, agent) -> do
                     coreTVar <- use tuiCore
-                    
+
                     -- Create a new conversation with the session
                     liftIO $ do
                         conv <- createConversation tracer agent
                         atomically $ modifyTVar' coreTVar $ \core ->
-                            core { coreConversations = coreConversations core ++ [conv { conversationSession = Just session }] }
-                    
+                            core{coreConversations = coreConversations core ++ [conv{conversationSession = Just session}]}
+
                     showStatus StatusInfo "Session resumed"
 
 -- | Create a new conversation.
@@ -565,16 +578,17 @@ createConversation :: Tracer IO Trace -> TuiAgent -> IO Conversation
 createConversation _tracer agent = do
     -- Generate a unique conversation ID
     convId <- ConversationId <$> nextRandom
-    pure $ Conversation
-        { conversationId = convId
-        , conversationAgent = agent
-        , conversationThreadId = Nothing
-        , conversationSession = Nothing
-        , conversationName = "New conversation"
-        , conversationChan = undefined  -- Would be properly initialized
-        , conversationStatus = ConversationStatus_WaitingForInput
-        , conversationOnProgress = ignoreSessionProgress
-        }
+    pure $
+        Conversation
+            { conversationId = convId
+            , conversationAgent = agent
+            , conversationThreadId = Nothing
+            , conversationSession = Nothing
+            , conversationName = "New conversation"
+            , conversationChan = undefined -- Would be properly initialized
+            , conversationStatus = ConversationStatus_WaitingForInput
+            , conversationOnProgress = ignoreSessionProgress
+            }
 
 -- | Handle Ctrl+N - new conversation.
 handleNewConversation :: Tracer IO Trace -> EventM N TuiState ()
@@ -584,12 +598,12 @@ handleNewConversation tracer = do
         Nothing -> showStatus StatusError "No agent selected"
         Just (_, agent) -> do
             coreTVar <- use tuiCore
-            
+
             liftIO $ do
                 conv <- createConversation tracer agent
                 atomically $ modifyTVar' coreTVar $ \core ->
-                    core { coreConversations = coreConversations core ++ [conv] }
-            
+                    core{coreConversations = coreConversations core ++ [conv]}
+
             showStatus StatusInfo "New conversation created"
 
 -- | Handle Ctrl+E - pause/resume conversation.
@@ -601,10 +615,10 @@ handlePauseConversation _tracer = do
         Just conv -> do
             coreTVar <- use tuiCore
             core <- liftIO $ readTVarIO coreTVar
-            
+
             let convId = conversationId conv
                 isPaused = Set.member convId (corePausedConversations core)
-            
+
             if isPaused
                 then do
                     -- Unpause - kill the thread and let it restart
@@ -612,7 +626,7 @@ handlePauseConversation _tracer = do
                         Nothing -> pure ()
                         Just tid -> liftIO $ killThread tid
                     liftIO $ atomically $ modifyTVar' coreTVar $ \c ->
-                        c { corePausedConversations = Set.delete convId (corePausedConversations c) }
+                        c{corePausedConversations = Set.delete convId (corePausedConversations c)}
                     showStatus StatusInfo "Conversation unpaused"
                 else do
                     -- Pause
@@ -620,7 +634,7 @@ handlePauseConversation _tracer = do
                         Nothing -> pure ()
                         Just tid -> liftIO $ killThread tid
                     liftIO $ atomically $ modifyTVar' coreTVar $ \c ->
-                        c { corePausedConversations = Set.insert convId (corePausedConversations c) }
+                        c{corePausedConversations = Set.insert convId (corePausedConversations c)}
                     showStatus StatusInfo "Conversation paused"
 
 -- | Handle Ctrl+P - export session to markdown.
@@ -669,11 +683,13 @@ handlePrevConversation _tracer = do
 showStatus :: StatusSeverity -> Text -> EventM N TuiState ()
 showStatus severity msg = do
     now <- liftIO getCurrentTime
-    tuiUI . statusMessage .= Just StatusMessage
-        { statusText = msg
-        , statusSeverity = severity
-        , statusTimestamp = now
-        }
+    tuiUI . statusMessage
+        .= Just
+            StatusMessage
+                { statusText = msg
+                , statusSeverity = severity
+                , statusTimestamp = now
+                }
 
 -------------------------------------------------------------------------------
 -- Tab Navigation
@@ -753,5 +769,4 @@ defaultHelpContent =
 
 -- | Initialize help content in the UI state.
 initHelpContent :: UIState -> UIState
-initHelpContent st = st { _helpContent = defaultHelpContent }
-
+initHelpContent st = st{_helpContent = defaultHelpContent}

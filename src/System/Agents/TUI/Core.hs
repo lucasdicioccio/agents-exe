@@ -272,4 +272,3 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-

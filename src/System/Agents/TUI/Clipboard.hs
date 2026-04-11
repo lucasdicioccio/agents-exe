@@ -71,11 +71,11 @@ import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDi
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeBaseName, takeExtension, (<.>), (</>))
-import System.Info (os)
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (emptyTempFile)
-import System.Process.ByteString.Lazy (readCreateProcessWithExitCode)
+import System.Info (os)
 import System.Process (proc, readProcessWithExitCode)
+import System.Process.ByteString.Lazy (readCreateProcessWithExitCode)
 
 import System.Agents.Media.Types (MediaAttachment (..))
 
@@ -95,8 +95,7 @@ clipboardTempDir = "agents-exe-clipboard"
 -- Clipboard Content Types
 -------------------------------------------------------------------------------
 
-{- | Represents the different types of content that can be in the clipboard.
--}
+-- | Represents the different types of content that can be in the clipboard.
 data ClipboardContent
     = -- | Binary image data with detected MIME type
       ClipboardImage ByteString Text
@@ -110,8 +109,7 @@ data ClipboardContent
       ClipboardUnknown
     deriving (Show, Eq)
 
-{- | Action to take based on clipboard content analysis.
--}
+-- | Action to take based on clipboard content analysis.
 data ContentAction
     = -- | Attach as media attachment
       AttachAsMedia MediaAttachment
@@ -123,8 +121,7 @@ data ContentAction
       IgnoreContent
     deriving (Show, Eq)
 
-{- | File drop event from terminal drag-and-drop.
--}
+-- | File drop event from terminal drag-and-drop.
 data FileDropEvent = FileDropEvent
     { dropFilename :: FilePath
     -- ^ Filename of the dropped file
@@ -139,8 +136,7 @@ data FileDropEvent = FileDropEvent
 -- Clipboard Backend Types
 -------------------------------------------------------------------------------
 
-{- | Platform-specific clipboard backend.
--}
+-- | Platform-specific clipboard backend.
 data ClipboardBackend
     = X11Backend
     | WaylandBackend
@@ -304,9 +300,10 @@ readWindowsClipboard = do
         | c >= 'A' && c <= 'F' = Just $ fromEnum c - fromEnum 'A' + 10
         | otherwise = Nothing
 
--- | Read from OSC 52 clipboard (terminal-integrated).
--- Note: This requires terminal support for reading clipboard via OSC 52,
--- which is less common than writing. Most terminals only support OSC 52 write.
+{- | Read from OSC 52 clipboard (terminal-integrated).
+Note: This requires terminal support for reading clipboard via OSC 52,
+which is less common than writing. Most terminals only support OSC 52 write.
+-}
 readOSC52Clipboard :: IO (Maybe ByteString)
 readOSC52Clipboard = do
     -- OSC 52 read is not widely supported, return Nothing for now
@@ -315,14 +312,15 @@ readOSC52Clipboard = do
 
 -- | Helper to read clipboard using an external tool.
 readWithTool :: String -> [String] -> IO (Maybe ByteString)
-readWithTool tool args = do
-    (exitCode, stdout, _) <- readCreateProcessWithExitCode (proc tool args) BSL.empty
-    case exitCode of
-        ExitSuccess ->
-            pure $ Just $ BSL.toStrict stdout
-        ExitFailure _ ->
-            pure Nothing
-    `catch` \(_ :: IOException) -> pure Nothing
+readWithTool tool args =
+    do
+        (exitCode, stdout, _) <- readCreateProcessWithExitCode (proc tool args) BSL.empty
+        case exitCode of
+            ExitSuccess ->
+                pure $ Just $ BSL.toStrict stdout
+            ExitFailure _ ->
+                pure Nothing
+        `catch` \(_ :: IOException) -> pure Nothing
 
 -------------------------------------------------------------------------------
 -- Content Detection
@@ -363,9 +361,10 @@ classifyContent content
             then do
                 let path = Text.unpack (Text.strip text)
                 exists <- doesFileExist path
-                pure $ if exists
-                    then ClipboardFilePath path
-                    else ClipboardText text
+                pure $
+                    if exists
+                        then ClipboardFilePath path
+                        else ClipboardText text
             else do
                 -- Check if it's multiple file paths (one per line)
                 let paths = map Text.unpack (Text.lines text)
@@ -385,11 +384,11 @@ isImageData bs
             gifMagic1 = BS.pack [0x47, 0x49, 0x46, 0x38, 0x37, 0x61] -- GIF87a
             gifMagic2 = BS.pack [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] -- GIF89a
             webpMagic = BS.pack [0x52, 0x49, 0x46, 0x46] -- RIFF (WebP)
-        in  BS.isPrefixOf pngMagic bs
-            || BS.isPrefixOf jpegMagic bs
-            || BS.isPrefixOf gifMagic1 bs
-            || BS.isPrefixOf gifMagic2 bs
-            || BS.isPrefixOf webpMagic bs
+         in BS.isPrefixOf pngMagic bs
+                || BS.isPrefixOf jpegMagic bs
+                || BS.isPrefixOf gifMagic1 bs
+                || BS.isPrefixOf gifMagic2 bs
+                || BS.isPrefixOf webpMagic bs
 
 -- | Detect image format from magic bytes.
 detectImageFormat :: ByteString -> Text
@@ -401,31 +400,32 @@ detectImageFormat bs
             gifMagic1 = BS.pack [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]
             gifMagic2 = BS.pack [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]
             webpMagic = BS.pack [0x52, 0x49, 0x46, 0x46]
-        in if
-            | BS.isPrefixOf pngMagic bs -> "image/png"
-            | BS.isPrefixOf jpegMagic bs -> "image/jpeg"
-            | BS.isPrefixOf gifMagic1 bs -> "image/gif"
-            | BS.isPrefixOf gifMagic2 bs -> "image/gif"
-            | BS.isPrefixOf webpMagic bs -> "image/webp"
-            | otherwise -> "application/octet-stream"
+         in if
+                | BS.isPrefixOf pngMagic bs -> "image/png"
+                | BS.isPrefixOf jpegMagic bs -> "image/jpeg"
+                | BS.isPrefixOf gifMagic1 bs -> "image/gif"
+                | BS.isPrefixOf gifMagic2 bs -> "image/gif"
+                | BS.isPrefixOf webpMagic bs -> "image/webp"
+                | otherwise -> "application/octet-stream"
 
 -- | Check if content appears to be text (no null bytes in first 1KB).
 isTextContent :: ByteString -> Bool
 isTextContent bs =
     let sample = BS.take 1024 bs
-    in not (BS.elem 0 sample)
+     in not (BS.elem 0 sample)
 
 -- | Check if text is a single file path.
 isSingleFilePath :: Text -> Bool
 isSingleFilePath txt =
     let stripped = Text.strip txt
         textLines = Text.lines stripped
-    in  length textLines == 1
-        && not (Text.null stripped)
-        && (Text.isPrefixOf "/" stripped
-            || Text.isPrefixOf "~" stripped
-            || Text.isPrefixOf "." stripped
-            || Text.isPrefixOf "file://" stripped)
+     in length textLines == 1
+            && not (Text.null stripped)
+            && ( Text.isPrefixOf "/" stripped
+                    || Text.isPrefixOf "~" stripped
+                    || Text.isPrefixOf "." stripped
+                    || Text.isPrefixOf "file://" stripped
+               )
 
 -------------------------------------------------------------------------------
 -- Content Analysis
@@ -531,7 +531,7 @@ detectMimeFromPath path =
             , (".json", "application/json")
             , (".xml", "application/xml")
             ]
-    in fromMaybe "application/octet-stream" (lookup ext mimeMap)
+     in fromMaybe "application/octet-stream" (lookup ext mimeMap)
 
 -------------------------------------------------------------------------------
 -- File Drop Support
@@ -549,8 +549,7 @@ enableFileDropMode = do
     -- Kitty keyboard protocol (if supported)
     putStr "\ESC[>1u"
 
-{- | Disable file drop mode in the terminal.
--}
+-- | Disable file drop mode in the terminal.
 disableFileDropMode :: IO ()
 disableFileDropMode = do
     -- iTerm2 file drop protocol disable
@@ -573,8 +572,9 @@ parseTerminalSequence txt =
         <|> parseKittyFileDrop txt
         <|> parseGenericFileDrop txt
 
--- | Parse iTerm2 file drop sequence.
--- Format: \033]1337;File=name=filename;size=N;inline=1:base64data\007
+{- | Parse iTerm2 file drop sequence.
+Format: \033]1337;File=name=filename;size=N;inline=1:base64data\007
+-}
 parseITerm2FileDrop :: Text -> Maybe FileDropEvent
 parseITerm2FileDrop txt = do
     -- Check for iTerm2 file protocol prefix
@@ -592,18 +592,21 @@ parseITerm2FileDrop txt = do
 
             -- Check if inline content is present
             let hasInline = "inline=1" `Text.isInfixOf` params
-                content = if hasInline && not (Text.null data_)
-                    then Just $ Base64.decodeLenient $ Text.Encoding.encodeUtf8 data_
-                    else Nothing
+                content =
+                    if hasInline && not (Text.null data_)
+                        then Just $ Base64.decodeLenient $ Text.Encoding.encodeUtf8 data_
+                        else Nothing
 
-            pure $ FileDropEvent
-                { dropFilename = Text.unpack filename
-                , dropContent = content
-                , dropMimeType = extractParam "type=" params
-                }
+            pure $
+                FileDropEvent
+                    { dropFilename = Text.unpack filename
+                    , dropContent = content
+                    , dropMimeType = extractParam "type=" params
+                    }
 
--- | Parse Kitty graphics protocol file drop.
--- Format: \033_Ga=T,f=100,t=d,d=base64data\033\\
+{- | Parse Kitty graphics protocol file drop.
+Format: \033_Ga=T,f=100,t=d,d=base64data\033\\
+-}
 parseKittyFileDrop :: Text -> Maybe FileDropEvent
 parseKittyFileDrop txt = do
     let prefix = "\033_G"
@@ -615,11 +618,13 @@ parseKittyFileDrop txt = do
                 filename = Text.takeWhile (/= '\033') rest
             if Text.null filename
                 then Nothing
-                else pure $ FileDropEvent
-                    { dropFilename = Text.unpack filename
-                    , dropContent = Nothing
-                    , dropMimeType = Nothing
-                    }
+                else
+                    pure $
+                        FileDropEvent
+                            { dropFilename = Text.unpack filename
+                            , dropContent = Nothing
+                            , dropMimeType = Nothing
+                            }
 
 -- | Parse generic file drop (file:// URL format).
 parseGenericFileDrop :: Text -> Maybe FileDropEvent
@@ -630,21 +635,22 @@ parseGenericFileDrop txt = do
         else do
             let path = Text.drop (Text.length filePrefix) txt
                 filename = Text.takeWhile (/= '\n') path
-            pure $ FileDropEvent
-                { dropFilename = Text.unpack filename
-                , dropContent = Nothing
-                , dropMimeType = Nothing
-                }
+            pure $
+                FileDropEvent
+                    { dropFilename = Text.unpack filename
+                    , dropContent = Nothing
+                    , dropMimeType = Nothing
+                    }
 
 -- | Extract a parameter value from a semicolon-separated list.
 extractParam :: Text -> Text -> Maybe Text
 extractParam key params =
     let parts = Text.splitOn ";" params
         findValue [] = Nothing
-        findValue (p:ps)
+        findValue (p : ps)
             | key `Text.isPrefixOf` p = Just $ Text.drop (Text.length key) p
             | otherwise = findValue ps
-    in findValue parts
+     in findValue parts
 
 -------------------------------------------------------------------------------
 -- Cleanup
@@ -660,4 +666,3 @@ cleanupClipboardTempFiles = handle (\(_ :: IOException) -> pure ()) $ do
     tempDir <- getTemporaryDirectory
     let clipDir = tempDir </> clipboardTempDir
     removeFile clipDir
-
