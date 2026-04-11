@@ -12,7 +12,7 @@ It supports registration of various tool types:
 * OpenAPI tools - Tools generated from OpenAPI specifications
 * PostgREST tools - Tools generated from PostgREST database APIs
 * SQLite tools - Tools for executing SQL queries against SQLite databases
-* System tools - Tools for gathering system information
+* System tools - Tools for gathering system information and file attachment
 * Developer tools - Tools for writing/validating agents and tools
 * Lua tools - Sandboxed Lua scripts for tool orchestration
 
@@ -66,6 +66,7 @@ module System.Agents.ToolRegistration (
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Map.Strict as Map
@@ -887,7 +888,8 @@ registerSqliteTools box =
 {- | Register a SystemToolbox tool with the LLM system.
 
 System tools expose functions based on configured capabilities.
-The tool accepts a 'capability' parameter to select which information to retrieve.
+The tool accepts a 'capability' parameter to select which information to retrieve,
+and an optional 'filepath' parameter for the 'attach-file' capability.
 
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
@@ -900,7 +902,7 @@ registerSystemTool box =
         tName = "system_info"
         llmName = system2LLMName box tName
 
-        -- Single parameter: the capability to query
+        -- Parameters: capability (required) and filepath (optional, for attach-file)
         paramProps =
             [ ParamProperty
                 { propertyKey = "capability"
@@ -908,12 +910,18 @@ registerSystemTool box =
                 , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
                 , propertyRequired = True
                 }
+            , ParamProperty
+                { propertyKey = "filepath"
+                , propertyType = StringParamType
+                , propertyDescription = "For attach-file: Absolute path to the file to attach"
+                , propertyRequired = False
+                }
             ]
 
         toolDescription =
             ToolDescription
                 { toolDescriptionName = llmName
-                , toolDescriptionText = "Provides system information: " <> box.toolboxDescription
+                , toolDescriptionText = "Provides system information and file attachment: " <> box.toolboxDescription
                 , toolDescriptionParamProperties = paramProps
                 }
 
@@ -948,6 +956,7 @@ capabilityToText SystemToolHostname = "hostname"
 capabilityToText SystemToolWorkingDirectory = "working-directory"
 capabilityToText SystemToolProcessInfo = "process-info"
 capabilityToText SystemToolUptime = "uptime"
+capabilityToText SystemToolAttachFile = "attach-file"
 
 {- | Register all tools from a System toolbox.
 
@@ -1328,13 +1337,34 @@ systemTool box =
     run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery (Prod.contramap SystemToolsTrace tracer) box cap
-                case result of
-                    Left err -> pure $ SystemToolError call err
-                    Right rsp -> pure $ SystemToolResult call rsp
+                -- Check if this is the attach-file capability
+                if cap == "attach-file"
+                    then handleAttachFile tracer v
+                    else do
+                        result <- SystemTools.executeQuery (Prod.contramap SystemToolsTrace tracer) box cap
+                        case result of
+                            Left err -> pure $ SystemToolError call err
+                            Right rsp -> pure $ SystemToolResult call rsp
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
+
+    -- Handle the attach-file capability
+    handleAttachFile :: Tracer IO Trace -> Aeson.Object -> IO (CallResult ())
+    handleAttachFile tracer params = do
+        case KeyMap.lookup (AesonKey.fromText "filepath") params of
+            Just (Aeson.String filePath) -> do
+                result <- SystemTools.executeAttachFile (Prod.contramap SystemToolsTrace tracer) box (Text.unpack filePath)
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right _attachResult -> do
+                        -- Convert AttachFileResult to MediaAttachment and return as BlobToolSuccess
+                        let mediaType = SystemTools.detectMediaType (Text.unpack filePath)
+                        case mediaType of
+                            Nothing -> pure $ SystemToolError call (SystemTools.SystemInfoError "Could not detect media type")
+                            Just mt -> do
+                                pure $ BlobToolSuccess call BS.empty (Just mt)
+            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'filepath' parameter for attach-file capability")
 
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
@@ -1452,3 +1482,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

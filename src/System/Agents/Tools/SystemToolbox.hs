@@ -7,6 +7,7 @@
 This module implements the system toolbox functionality, including:
 
 * System information gathering (date, OS info, environment variables, etc.)
+* File attachment capability for multi-modal LLM interactions
 * Capability-based access control
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
@@ -46,16 +47,22 @@ module System.Agents.Tools.SystemToolbox (
     ToolDescription (..),
     QueryError (..),
     QueryResult (..),
+    AttachFileResult (..),
 
     -- * Initialization
     initializeToolbox,
 
     -- * Query execution
     executeQuery,
+    executeAttachFile,
     getCapabilityInfo,
 
     -- * Result formatting
     formatResults,
+
+    -- * Media type detection
+    detectMediaType,
+    getFileExtension,
 ) where
 
 import Control.Concurrent (threadDelay)
@@ -67,6 +74,7 @@ import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isInfixOf)
 import Data.Maybe (catMaybes)
@@ -76,14 +84,16 @@ import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
 import qualified Data.Time as Time
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Directory (getCurrentDirectory)
+import System.Directory (getCurrentDirectory, doesFileExist)
 import System.Environment (getEnvironment, lookupEnv)
+import System.FilePath (takeExtension)
 import System.IO.Error (isDoesNotExistError)
 import System.Posix.Process (getParentProcessID, getProcessID)
 import System.Posix.User (getEffectiveGroupID, getEffectiveUserID, getUserEntryForID, homeDirectory, userName, userShell)
 import qualified System.Process as Process
 
 import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..))
+import System.Agents.Media.Types (MediaType (..), ImageType (..), AudioType (..), VideoType (..), ApplicationType (..), TextSubtype (..))
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -93,6 +103,7 @@ import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (
 
 These events allow tracking of:
 * System info requests
+* File attachment requests
 * Query execution progress
 * System info retrieval timing
 * Capability errors
@@ -100,6 +111,12 @@ These events allow tracking of:
 data Trace
     = -- | System information was requested for a capability
       SystemInfoRequestedTrace !Text
+    | -- | File attachment was requested
+      FileAttachRequestedTrace !FilePath
+    | -- | File was successfully attached
+      FileAttachSuccessTrace !FilePath !MediaType !Int
+    | -- | File attachment failed
+      FileAttachErrorTrace !FilePath !Text
     | -- | System information was retrieved successfully
       SystemInfoRetrievedTrace !Text !NominalDiffTime
     | -- | Error occurred while retrieving system information
@@ -161,12 +178,44 @@ instance ToJSON QueryResult where
             , "executionTime" .= formatExecutionTime (resultExecutionTime result)
             ]
 
+{- | Result of a file attachment operation.
+
+Contains:
+* File path
+* MIME type
+* Base64-encoded file content
+* File size in bytes
+-}
+data AttachFileResult = AttachFileResult
+    { attachFilePath :: FilePath
+    , attachMimeType :: Text
+    , attachBase64Data :: Text
+    , attachFileSize :: Int
+    }
+    deriving (Show)
+
+-- | JSON serialization for AttachFileResult.
+instance ToJSON AttachFileResult where
+    toJSON result =
+        Aeson.object
+            [ "path" .= attachFilePath result
+            , "mimeType" .= attachMimeType result
+            , "base64Data" .= attachBase64Data result
+            , "size" .= attachFileSize result
+            ]
+
 -- | Errors that can occur during system info queries.
 data QueryError
     = -- | The requested capability is not enabled in the toolbox
       CapabilityNotEnabledError !Text
     | -- | Error occurred while gathering system information
       SystemInfoError !Text
+    | -- | File not found for attach-file
+      FileNotFoundError !FilePath
+    | -- | File too large for attachment
+      FileTooLargeError !FilePath !Int
+    | -- | Unsupported file type
+      UnsupportedFileTypeError !FilePath !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -200,6 +249,156 @@ initializeToolbox _tracer desc = do
             pure $ Right toolbox
 
 -------------------------------------------------------------------------------
+-- Media Type Detection
+-------------------------------------------------------------------------------
+
+{- | Detect media type from file extension.
+
+Returns Nothing if the file type is not recognized as a supported media type.
+-}
+detectMediaType :: FilePath -> Maybe MediaType
+detectMediaType path =
+    case Text.toLower $ Text.pack $ takeExtension path of
+        -- Images
+        ".png" -> Just $ MediaImage ImagePNG
+        ".jpg" -> Just $ MediaImage ImageJPEG
+        ".jpeg" -> Just $ MediaImage ImageJPEG
+        ".gif" -> Just $ MediaImage ImageGIF
+        ".webp" -> Just $ MediaImage ImageWebP
+        ".svg" -> Just $ MediaImage ImageSVG
+        -- Audio
+        ".mp3" -> Just $ MediaAudio AudioMP3
+        ".wav" -> Just $ MediaAudio AudioWAV
+        ".ogg" -> Just $ MediaAudio AudioOGG
+        ".aac" -> Just $ MediaAudio AudioAAC
+        ".flac" -> Just $ MediaAudio AudioFLAC
+        -- Video
+        ".mp4" -> Just $ MediaVideo VideoMP4
+        ".webm" -> Just $ MediaVideo VideoWebM
+        ".mov" -> Just $ MediaVideo VideoMOV
+        ".avi" -> Just $ MediaVideo VideoAVI
+        -- Documents
+        ".pdf" -> Just $ MediaApplication AppPDF
+        ".json" -> Just $ MediaApplication AppJSON
+        ".xml" -> Just $ MediaApplication AppXML
+        ".zip" -> Just $ MediaApplication AppZip
+        -- Text files (as octet-stream for generic handling)
+        ".txt" -> Just $ MediaApplication AppOctetStream
+        ".md" -> Just $ MediaApplication AppOctetStream
+        ".csv" -> Just $ MediaApplication AppOctetStream
+        -- Unknown
+        _ -> Nothing
+
+-- | Get file extension helper.
+getFileExtension :: FilePath -> Text
+getFileExtension = Text.toLower . Text.pack . takeExtension
+
+-- | Convert MediaType to MIME type string.
+mediaTypeToMime :: MediaType -> Text
+mediaTypeToMime (MediaImage ImagePNG) = "image/png"
+mediaTypeToMime (MediaImage ImageJPEG) = "image/jpeg"
+mediaTypeToMime (MediaImage ImageGIF) = "image/gif"
+mediaTypeToMime (MediaImage ImageWebP) = "image/webp"
+mediaTypeToMime (MediaImage ImageSVG) = "image/svg+xml"
+mediaTypeToMime (MediaAudio AudioMP3) = "audio/mp3"
+mediaTypeToMime (MediaAudio AudioWAV) = "audio/wav"
+mediaTypeToMime (MediaAudio AudioOGG) = "audio/ogg"
+mediaTypeToMime (MediaAudio AudioAAC) = "audio/aac"
+mediaTypeToMime (MediaAudio AudioFLAC) = "audio/flac"
+mediaTypeToMime (MediaAudio AudioMPEG) = "audio/mpeg"
+mediaTypeToMime (MediaVideo VideoMP4) = "video/mp4"
+mediaTypeToMime (MediaVideo VideoWebM) = "video/webm"
+mediaTypeToMime (MediaVideo VideoMOV) = "video/quicktime"
+mediaTypeToMime (MediaVideo VideoAVI) = "video/avi"
+mediaTypeToMime (MediaVideo VideoOGG) = "video/ogg"
+mediaTypeToMime (MediaApplication AppPDF) = "application/pdf"
+mediaTypeToMime (MediaApplication AppJSON) = "application/json"
+mediaTypeToMime (MediaApplication AppXML) = "application/xml"
+mediaTypeToMime (MediaApplication AppOctetStream) = "application/octet-stream"
+mediaTypeToMime (MediaApplication AppZip) = "application/zip"
+mediaTypeToMime (MediaText TextPlain) = "text/plain"
+mediaTypeToMime (MediaText TextHTML) = "text/html"
+mediaTypeToMime (MediaText TextCSS) = "text/css"
+mediaTypeToMime (MediaText TextCSV) = "text/csv"
+mediaTypeToMime (MediaText TextMarkdown) = "text/markdown"
+
+-------------------------------------------------------------------------------
+-- File Attachment
+-------------------------------------------------------------------------------
+
+-- | Maximum file size for attachment (50MB)
+maxFileSize :: Int
+maxFileSize = 50 * 1024 * 1024
+
+{- | Execute file attachment.
+
+This function reads a file from disk and returns it as a base64-encoded
+attachment suitable for multi-modal LLM interactions.
+
+Returns:
+* 'Right AttachFileResult' on successful attachment
+* 'Left QueryError' if capability not enabled, file not found, or file too large
+-}
+executeAttachFile ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    IO (Either QueryError AttachFileResult)
+executeAttachFile tracer toolbox filePath = do
+    runTracer tracer (FileAttachRequestedTrace filePath)
+
+    -- Check if capability is enabled
+    if SystemToolAttachFile `notElem` toolboxCapabilities toolbox
+        then do
+            let err = CapabilityNotEnabledError "attach-file"
+            runTracer tracer (FileAttachErrorTrace filePath "Capability not enabled")
+            pure $ Left err
+        else do
+            -- Check if file exists
+            fileExists <- doesFileExist filePath
+            if not fileExists
+                then do
+                    let err = FileNotFoundError filePath
+                    runTracer tracer (FileAttachErrorTrace filePath "File not found")
+                    pure $ Left err
+                else do
+                    -- Read file
+                    result <- try $ BS.readFile filePath
+                    case result of
+                        Left (e :: SomeException) -> do
+                            let errMsg = Text.pack $ show e
+                            runTracer tracer (FileAttachErrorTrace filePath errMsg)
+                            pure $ Left $ SystemInfoError $ "Failed to read file: " <> errMsg
+                        Right content -> do
+                            let fileSize = BS.length content
+
+                            -- Check file size
+                            if fileSize > maxFileSize
+                                then do
+                                    runTracer tracer (FileAttachErrorTrace filePath "File too large")
+                                    pure $ Left $ FileTooLargeError filePath maxFileSize
+                                else do
+                                    -- Detect media type
+                                    case detectMediaType filePath of
+                                        Nothing -> do
+                                            let errMsg = "Unsupported file type: " <> getFileExtension filePath
+                                            runTracer tracer (FileAttachErrorTrace filePath errMsg)
+                                            pure $ Left $ UnsupportedFileTypeError filePath (getFileExtension filePath)
+                                        Just mediaType -> do
+                                            let mimeType = mediaTypeToMime mediaType
+                                            let base64Data = Text.decodeUtf8 $ B64.encode content
+
+                                            runTracer tracer (FileAttachSuccessTrace filePath mediaType fileSize)
+
+                                            pure $ Right $
+                                                AttachFileResult
+                                                    { attachFilePath = filePath
+                                                    , attachMimeType = mimeType
+                                                    , attachBase64Data = base64Data
+                                                    , attachFileSize = fileSize
+                                                    }
+
+-------------------------------------------------------------------------------
 -- Query Execution
 -------------------------------------------------------------------------------
 
@@ -213,6 +412,8 @@ This function:
 Returns:
 * 'Right QueryResult' on successful execution
 * 'Left QueryError' if capability is not enabled or system info cannot be gathered
+
+Note: For the 'attach-file' capability, use 'executeAttachFile' instead.
 -}
 executeQuery :: Tracer IO Trace -> Toolbox -> Text -> IO (Either QueryError QueryResult)
 executeQuery tracer toolbox capabilityName = do
@@ -260,6 +461,7 @@ capabilityFromName name = case name of
     "working-directory" -> Just SystemToolWorkingDirectory
     "process-info" -> Just SystemToolProcessInfo
     "uptime" -> Just SystemToolUptime
+    "attach-file" -> Just SystemToolAttachFile
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -272,6 +474,7 @@ capabilityToName SystemToolHostname = "hostname"
 capabilityToName SystemToolWorkingDirectory = "working-directory"
 capabilityToName SystemToolProcessInfo = "process-info"
 capabilityToName SystemToolUptime = "uptime"
+capabilityToName SystemToolAttachFile = "attach-file"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -313,6 +516,7 @@ getCapabilityInfoInternal capability toolbox = do
             SystemToolWorkingDirectory -> getWorkingDirectoryInfo
             SystemToolProcessInfo -> getProcessInfo
             SystemToolUptime -> getUptimeInfo
+            SystemToolAttachFile -> error "Use executeAttachFile for attach-file capability"
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
@@ -636,3 +840,4 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
+

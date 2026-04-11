@@ -5,7 +5,7 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
@@ -722,6 +722,8 @@ data SystemToolCapability
       SystemToolProcessInfo
     | -- | System uptime
       SystemToolUptime
+    | -- | Attach a file to the conversation
+      SystemToolAttachFile
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -734,6 +736,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolWorkingDirectory = Aeson.String "working-directory"
     toJSON SystemToolProcessInfo = Aeson.String "process-info"
     toJSON SystemToolUptime = Aeson.String "uptime"
+    toJSON SystemToolAttachFile = Aeson.String "attach-file"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -747,7 +750,8 @@ instance FromJSON SystemToolCapability where
             "working-directory" -> return SystemToolWorkingDirectory
             "process-info" -> return SystemToolProcessInfo
             "uptime" -> return SystemToolUptime
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime."
+            "attach-file" -> return SystemToolAttachFile
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file."
 
 {- | Configuration for the system toolbox.
 
@@ -1259,3 +1263,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+
