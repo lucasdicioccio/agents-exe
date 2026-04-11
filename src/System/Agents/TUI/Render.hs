@@ -245,8 +245,7 @@ renderHelpTab st =
     -- Separate logo lines from the rest of the help content
     -- Logo is 9 lines: 6 for ASCII art + 1 blank + 2 for tagline/version
     logoLines = take 9 allHelpContent
-    restContent = drop 10 allHelpContent  -- Skip the blank line after separator
-
+    restContent = drop 10 allHelpContent -- Skip the blank line after separator
     renderLogoSection :: Widget N
     renderLogoSection =
         center $ withAttr logoAttr $ vBox $ map txt logoLines
@@ -1000,4 +999,3 @@ tui_appAttrMap _ =
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
         , (logoAttr, BrickUtil.fg Vty.brightCyan `Vty.withStyle` Vty.bold)
         ]
-
