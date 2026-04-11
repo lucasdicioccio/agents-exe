@@ -55,3 +55,4 @@ handleSelfDescribe opts _apiKeysFile = do
                 slug
                 description
                 (Just $ AddMessage "--no output--")
+                Nothing -- No output media type (text output)

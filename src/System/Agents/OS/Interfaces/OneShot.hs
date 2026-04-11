@@ -209,8 +209,8 @@ executeOneShot ::
     -- | Result
     IO OneShotResult
 executeOneShot handle mAgentId _query = do
-    -- Create session
-    session <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+    -- Create session with media support (version 1)
+    session <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
     executeOneShotWithSession handle mAgentId session
 
 {- | Execute a one-shot conversation with an existing session.

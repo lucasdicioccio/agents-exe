@@ -43,8 +43,9 @@ import qualified Data.Text.Lazy.Encoding as TextLazyEncoding
 import System.IO (stderr)
 
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
+import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import qualified System.Agents.Session.Base as Session
-import System.Agents.Session.Types (StepByteUsage (..))
+import System.Agents.Session.Types (StepByteUsage (..), UserToolResponse (..))
 
 -- | Preference for ordering session steps.
 data OrderPreference
@@ -212,7 +213,7 @@ elideLines leadingCount trailingCount content =
                     trailing = drop (totalLines - actualTrailing) lines'
                     elidedCount = totalLines - actualLeading - actualTrailing
                  in Text.intercalate "\n" leading
-                        <> "\n... ("
+                        <> "\n...("
                         <> Text.pack (show elidedCount)
                         <> " line"
                         <> (if elidedCount == 1 then "" else "s")
@@ -235,7 +236,7 @@ elideChars leadingCount trailingCount content =
                     trailing = Text.drop (totalChars - actualTrailing) content
                     elidedCount = totalChars - actualLeading - actualTrailing
                  in leading
-                        <> "... (elided "
+                        <> "...(elided "
                         <> Text.pack (show elidedCount)
                         <> " char"
                         <> (if elidedCount == 1 then "" else "s")
@@ -402,7 +403,7 @@ calculateByteCounts turns =
         let userBytes = textBytes $ case utc.userPrompt of
                 Session.SystemPrompt sp -> sp
             queryBytes = maybe 0 (textBytes . unwrapQuery) utc.userQuery
-            toolRespBytes = sum [textBytes $ formatJsonAsText r | (_, Session.UserToolResponse r) <- utc.userToolResponses]
+            toolRespBytes = sum [userToolResponseBytes r | (_, r) <- utc.userToolResponses]
          in (inp + userBytes + queryBytes + toolRespBytes, out, reas)
     countTurn (Session.LlmTurn ltc _mUsage) (inp, out, reas) =
         let response = ltc.llmResponse
@@ -414,7 +415,19 @@ calculateByteCounts turns =
     textBytes = BS.length . Text.encodeUtf8
 
     unwrapQuery :: Session.UserQuery -> Text.Text
-    unwrapQuery (Session.UserQuery q) = q
+    unwrapQuery (Session.UserQuery q _) = q
+
+    -- Calculate bytes for a UserToolResponse
+    userToolResponseBytes :: UserToolResponse -> Int
+    userToolResponseBytes (TextResponse txt) = Text.length txt * 4
+    userToolResponseBytes (JsonResponse val) = fromIntegral (BSL.length (Aeson.encode val))
+    userToolResponseBytes (MediaResponse media) = Text.length (media.mediaBase64Data)
+    userToolResponseBytes (MixedResponse parts) = sum (map contentPartBytes parts)
+
+    -- Calculate bytes for a ContentPart
+    contentPartBytes :: ContentPart -> Int
+    contentPartBytes (TextPart txt) = Text.length txt * 4
+    contentPartBytes (MediaPart media) = Text.length (media.mediaBase64Data)
 
 -- | Format statistics as markdown.
 formatStatistics :: SessionStatistics -> Text.Text
@@ -608,7 +621,7 @@ formatUserTurn opts isFirstTurn content =
                     "### 📝 System Prompt\n\n```\n" <> sp <> "```\n"
             _ -> ""
         querySection = case content.userQuery of
-            Just (Session.UserQuery q) -> "\n### 💬 User Query\n\n" <> q <> "\n"
+            Just (Session.UserQuery q _) -> "\n### 💬 User Query\n\n" <> q <> "\n"
             Nothing -> ""
         -- Show tools if repeatTools is True, or if it's the first turn (and tools exist)
         toolsSection =
@@ -772,20 +785,47 @@ formatJsonValuePretty val =
     TextLazy.toStrict $ TextLazyEncoding.decodeUtf8 $ AesonPretty.encodePretty val
 
 -- | Format tool responses.
-formatToolResponses :: PrintVisibility -> [(Session.LlmToolCall, Session.UserToolResponse)] -> Text.Text
+formatToolResponses :: PrintVisibility -> [(Session.LlmToolCall, UserToolResponse)] -> Text.Text
 formatToolResponses visibility responses =
     Text.intercalate "\n\n" $ map (formatToolResponse visibility) responses
 
 -- | Format a single tool response.
-formatToolResponse :: PrintVisibility -> (Session.LlmToolCall, Session.UserToolResponse) -> Text.Text
-formatToolResponse visibility (call, Session.UserToolResponse response) =
+formatToolResponse :: PrintVisibility -> (Session.LlmToolCall, UserToolResponse) -> Text.Text
+formatToolResponse visibility (call, response) =
     let callName = extractToolCallName call
-        formatted = formatJsonValuePretty response
-        elided = applyVisibility visibility formatted
-        byteCount = BS.length $ Text.encodeUtf8 formatted
-     in if Text.null elided
-            then ""
-            else "**" <> callName <> "** response:\n```json\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
+     in case response of
+            TextResponse txt ->
+                let elided = applyVisibility visibility txt
+                    byteCount = BS.length $ Text.encodeUtf8 txt
+                 in if Text.null elided
+                        then ""
+                        else "**" <> callName <> "** response:\n```\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
+            JsonResponse val ->
+                let formatted = formatJsonValuePretty val
+                    elided = applyVisibility visibility formatted
+                    byteCount = BS.length $ Text.encodeUtf8 formatted
+                 in if Text.null elided
+                        then ""
+                        else "**" <> callName <> "** response:\n```json\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
+            MediaResponse media ->
+                let filename = maybe "" (\f -> ", " <> f) (media.mediaFilename)
+                    bytes = Text.length media.mediaBase64Data
+                 in "**" <> callName <> "** response:\n```\n[Media: " <> media.mediaMimeType <> filename <> ", " <> formatBytes bytes <> "]\n```"
+            MixedResponse parts ->
+                let formatted = Text.intercalate "\n" $ map formatContentPart parts
+                    elided = applyVisibility visibility formatted
+                    byteCount = BS.length $ Text.encodeUtf8 formatted
+                 in if Text.null elided
+                        then ""
+                        else "**" <> callName <> "** response:\n```\n" <> elided <> "\n```\n_(" <> formatBytes byteCount <> ")_"
+
+-- | Format a content part for display.
+formatContentPart :: ContentPart -> Text.Text
+formatContentPart (TextPart txt) = txt
+formatContentPart (MediaPart media) =
+    let filename = maybe "" (\f -> ", " <> f) (media.mediaFilename)
+        bytes = Text.length media.mediaBase64Data
+     in "[Media: " <> media.mediaMimeType <> filename <> ", " <> formatBytes bytes <> "]"
 
 -- | Extract tool name from a tool call.
 extractToolCallName :: Session.LlmToolCall -> Text.Text
@@ -805,3 +845,4 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
+

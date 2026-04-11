@@ -1230,7 +1230,7 @@ bashTool script =
         ret <- BashTools.runValue (contramap BashToolsRunTrace tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
-            Right rsp -> pure $ BlobToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp Nothing
 
 -- | Builder for a tool based on an MCP toolbox tool.
 mcpTool ::
@@ -1257,8 +1257,8 @@ mcpTool toolbox desc =
 
 -- | Builder for a tool based on an IO-tool script-description.
 ioTool ::
-    (Aeson.FromJSON llmArg) =>
-    IOScript llmArg ByteString ->
+    (Aeson.FromJSON a) =>
+    IOScript a ByteString ->
     Tool ()
 ioTool script =
     ToolBase.Tool
@@ -1272,7 +1272,7 @@ ioTool script =
         ret <- IOTools.runValue (contramap adaptTrace tracer) script ctx v
         case ret of
             Left err -> pure $ IOToolError call err
-            Right rsp -> pure $ BlobToolSuccess call rsp
+            Right rsp -> pure $ BlobToolSuccess call rsp Nothing
 
 -- | Builder for a tool based on a SQLite toolbox.
 sqliteTool ::

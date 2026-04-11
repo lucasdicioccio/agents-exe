@@ -1,7 +1,3 @@
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 {- | One-shot execution of agents with OS compatibility layer.
 
 This module provides single-conversation execution (batch mode) with support
@@ -10,6 +6,10 @@ for both the legacy Runtime interface and the new OS model via RuntimeBridge.
 The primary functions ('mainOneShotText', 'runtimeToAgent') have been updated
 to use OS-native types. 'mainOneShotText' now works directly with 'OSAgentTree'.
 -}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module System.Agents.OneShot (
     -- * Types
     Trace (..),
@@ -61,6 +61,7 @@ import System.Agents.Base (ConversationId, newConversationId)
 import qualified System.Agents.Base as Base
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Base
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop
@@ -119,6 +120,8 @@ data OneShotConfig = OneShotConfig
     -- ^ Optional final session store path
     , thinkingOutput :: ThinkingOutput
     -- ^ Where to output thinking content (defaults to 'ThinkingNone')
+    , mediaAttachments :: [MediaAttachment]
+    -- ^ Optional media attachments for multi-modal LLM queries
     }
 
 -- | Creates a configuration that optionally persists sessions to a file on top of the SessionStore.
@@ -129,6 +132,7 @@ fileStoringConfig store mSession mPath =
         , initialSession = mSession
         , extraSavePath = mPath
         , thinkingOutput = ThinkingNone
+        , mediaAttachments = []
         }
 
 -- | Run a one-shot agent with the given configuration.
@@ -145,21 +149,21 @@ runOneShotWithConfig ::
     Text ->
     IO OneShotResult
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
-    agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput convId tracer loadedApiKeys node
+    agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
 
     -- Apply dynamic tool filtering based on session activation state
     -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
     agent1 <- agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
 
     let agent =
-            agentSetQuery (UserQuery query) $
+            agentSetQuery (UserQuery query []) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
                     agent1
 
-    -- Create or use initial session with all required fields including sessionConversationId
+    -- Create or use initial session with media support (version 1)
     session0 <- case config.initialSession of
         Just s -> pure s
-        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId
+        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
 
     config.onSessionProgress convId (SessionStarted session0)
     (llmTurn, _) <- run convId agent session0
@@ -183,25 +187,30 @@ mainOneShotText ::
     Text ->
     IO ()
 mainOneShotText tracer store mPath mSession props query = do
-    mainOneShotTextWithThinking tracer store mPath mSession ThinkingNone props query
+    mainOneShotTextWithThinking tracer store mPath mSession ThinkingNone [] props query
 
--- | Run a one-shot agent with configurable thinking output.
+-- | Run a one-shot agent with configurable thinking output and media attachments.
 mainOneShotTextWithThinking ::
     Tracer IO Trace ->
     SessionStore ->
     Maybe FilePath ->
     Maybe Session ->
     ThinkingOutput ->
+    -- | Media attachments for multi-modal queries
+    [MediaAttachment] ->
     Props ->
     Text ->
     IO ()
-mainOneShotTextWithThinking tracer store mPath mSession thinkingOut props query = do
+mainOneShotTextWithThinking tracer store mPath mSession thinkingOut mediaAttachs props query = do
     convId <- newConversationId
     withAgentTree props $ \x -> do
         case x of
             Errors errs -> traverse_ print errs
             Initialized tree -> do
-                let config = (fileStoringConfig store mSession mPath){thinkingOutput = thinkingOut}
+                let config = (fileStoringConfig store mSession mPath)
+                        { thinkingOutput = thinkingOut
+                        , mediaAttachments = mediaAttachs
+                        }
                 let node = osTreeRoot tree
                 OneShotResult result <- runOneShotWithConfig store config convId tracer (apiKeys props) node query
                 Text.putStrLn result
@@ -244,13 +253,15 @@ nodeToAgent ::
     OSAgentNode ->
     IO (Agent (LlmTurnContent, Session))
 nodeToAgent store mPath convId tracer loadedApiKeys node =
-    nodeToAgentWithThinking store mPath ThinkingNone convId tracer loadedApiKeys node
+    nodeToAgentWithThinking store mPath ThinkingNone [] convId tracer loadedApiKeys node
 
--- | Converts an OSAgentNode into an Agent with configurable thinking output.
+-- | Converts an OSAgentNode into an Agent with configurable thinking output and media support.
 nodeToAgentWithThinking ::
     SessionStore ->
     Maybe FilePath ->
     ThinkingOutput ->
+    -- | Media attachments for multi-modal queries
+    [MediaAttachment] ->
     ConversationId ->
     -- | The tracer for logging
     Tracer IO Trace ->
@@ -258,7 +269,7 @@ nodeToAgentWithThinking ::
     LoadedApiKeys ->
     OSAgentNode ->
     IO (Agent (LlmTurnContent, Session))
-nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node = do
+nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loadedApiKeys node = do
     let agentCfg = osNodeConfig node
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
 
@@ -308,7 +319,10 @@ nodeToAgentWithThinking store mPath thinkingOut convId tracer loadedApiKeys node
                         (readTVarIO $ osNodeTools node)
                         (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
-                , complete = completeF
+                , complete = \completion -> do
+                    -- Inject media attachments into the completion
+                    let completionWithMedia = completion { completeMedia = mediaAttachs }
+                    completeF completionWithMedia
                 , contextConfig = defaultContextConfig
                 }
 
@@ -384,3 +398,4 @@ fileStoringCallback store convId progress =
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
+

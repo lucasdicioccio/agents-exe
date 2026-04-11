@@ -39,7 +39,7 @@ mkTestSession n = Session.Session
         [ Session.UserTurn (Session.UserTurnContent
             { Session.userPrompt = Session.SystemPrompt "System prompt"
             , Session.userTools = []
-            , Session.userQuery = Just $ Session.UserQuery "User query"
+            , Session.userQuery = Just $ Session.UserQuery "User query" []
             , Session.userToolResponses = []
             }) Nothing
         , Session.LlmTurn (Session.LlmTurnContent
@@ -55,6 +55,7 @@ mkTestSession n = Session.Session
     , Session.sessionId = Session.SessionId undefined  -- Use undefined for tests
     , Session.forkedFromSessionId = Nothing
     , Session.turnId = Session.TurnId undefined  -- Use undefined for tests
+    , Session.sessionVersion = Just 1
     }
 
 -- | Create a test session with tool calls
@@ -64,7 +65,7 @@ mkSessionWithToolCalls = Session.Session
         [ Session.UserTurn (Session.UserTurnContent
             { Session.userPrompt = Session.SystemPrompt "System"
             , Session.userTools = []
-            , Session.userQuery = Just $ Session.UserQuery "Hello"
+            , Session.userQuery = Just $ Session.UserQuery "Hello" []
             , Session.userToolResponses = []
             }) Nothing
         , Session.LlmTurn (Session.LlmTurnContent
@@ -87,7 +88,7 @@ mkSessionWithToolCalls = Session.Session
             , Session.userQuery = Nothing
             , Session.userToolResponses =
                 [ ( Session.LlmToolCall $ Aeson.object ["name" .= ("tool1" :: Text)]
-                  , Session.UserToolResponse $ Aeson.object ["result" .= ("done" :: Text)]
+                  , Session.JsonResponse $ Aeson.object ["result" .= ("done" :: Text)]
                   )
                 ]
             }) Nothing
@@ -95,6 +96,7 @@ mkSessionWithToolCalls = Session.Session
     , Session.sessionId = Session.SessionId undefined
     , Session.forkedFromSessionId = Nothing
     , Session.turnId = Session.TurnId undefined
+    , Session.sessionVersion = Just 1
     }
 
 -------------------------------------------------------------------------------
@@ -275,7 +277,7 @@ censorToolCallsTests = testGroup "sessionEditCensorToolCalls"
         -- Check first UserTurn still has query
         case result.turns of
             (Session.UserTurn utc _ : _) -> do
-                Session.userQuery utc @?= Just (Session.UserQuery "Hello")
+                Session.userQuery utc @?= Just (Session.UserQuery "Hello" [])
             _ -> assertFailure "Expected UserTurn with preserved query"
 
     , testCase "handles empty session" $ do
@@ -311,7 +313,7 @@ censorThinkingTests = testGroup "sessionEditCensorThinking"
         let result = SessionEdit.sessionEditCensorThinking session
         case result.turns of
             (Session.UserTurn utc _ : _) ->
-                Session.userQuery utc @?= Just (Session.UserQuery "Hello")
+                Session.userQuery utc @?= Just (Session.UserQuery "Hello" [])
             _ -> assertFailure "Expected preserved UserTurn"
 
     , testCase "handles session without thinking" $ do

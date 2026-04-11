@@ -710,7 +710,7 @@ render_turn (k, turn) =
                 vBox
                     [ txt "-----------------------"
                     , case userQuery userTurn of
-                        Just (UserQuery q) ->
+                        Just (UserQuery q _) ->
                             vBox
                                 [ txt $ "< " <> q
                                 , txt ""
@@ -839,3 +839,4 @@ tui_appAttrMap _ =
         , (queuedMessageSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         ]
+

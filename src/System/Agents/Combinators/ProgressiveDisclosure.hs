@@ -95,7 +95,7 @@ agentEvaluateActiveTools tracer toolsTVar agent = do
     -- Use nil UUIDs for initial empty session
     let emptySessionId = SessionId nilUUID
     let emptyTurnId = TurnId nilUUID
-    let emptySession = Session [] emptySessionId Nothing emptyTurnId
+    let emptySession = Session [] emptySessionId Nothing emptyTurnId (Just 1)
     sessionRef <- newIORef emptySession
 
     let rTools = filterTools sessionRef toolsTVar

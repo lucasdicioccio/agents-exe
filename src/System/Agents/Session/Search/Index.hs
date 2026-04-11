@@ -51,6 +51,7 @@ import System.Directory (createDirectoryIfMissing, doesFileExist, getModificatio
 import System.FilePath (takeDirectory)
 
 import System.Agents.Base (ConversationId (..))
+import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base (LlmTurnContent (..), Session (..), Turn (..), UserTurnContent (..))
 import System.Agents.Session.Search.Types
 import System.Agents.Session.Types (
@@ -428,15 +429,19 @@ extractSystemPrompt (SystemPrompt txt) = txt
 
 -- | Extract user query text.
 extractUserQuery :: UserQuery -> Text
-extractUserQuery (UserQuery txt) = txt
+extractUserQuery (UserQuery txt _) = txt
 
 -- | Extract tool responses.
 extractToolResponses :: [(LlmToolCall, UserToolResponse)] -> Text
 extractToolResponses responses =
     Text.unlines $ map extractResponse responses
   where
-    extractResponse (_, UserToolResponse val) =
-        jsonToText val
+    extractResponse :: (LlmToolCall, UserToolResponse) -> Text
+    extractResponse (_, response) = case response of
+        TextResponse txt -> txt
+        JsonResponse val -> jsonToText val
+        MediaResponse media -> "[Media: " <> media.mediaMimeType <> "]"
+        MixedResponse parts -> "[Mixed content with " <> Text.pack (show (length parts)) <> " parts]"
 
 -- | Extract LLM tool calls.
 extractLlmToolCalls :: [LlmToolCall] -> Text
@@ -580,3 +585,4 @@ countStaleSessions sessions indexedMtimes = do
             Just indexedMtime
                 | mtime > indexedMtime -> countStale (acc + 1) rest indexedMap
                 | otherwise -> countStale acc rest indexedMap
+

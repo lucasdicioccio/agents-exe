@@ -290,11 +290,11 @@ makeActivateTool toolgroups =
                     case extractToolgroupFromArgs args of
                         Just tg
                             | tg `Set.member` toolgroups ->
-                                pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' activated")
+                                pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' activated") Nothing
                         Just tg ->
-                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups)
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups) Nothing
                         Nothing ->
-                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Missing 'toolgroup' parameter. Available: " <> availableGroups)
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Missing 'toolgroup' parameter. Available: " <> availableGroups) Nothing
                 }
 
         find :: ToolCall -> Maybe (Tool ToolCall)
@@ -331,11 +331,11 @@ makeDeactivateTool toolgroups =
                     case extractToolgroupFromArgs args of
                         Just tg
                             | tg `Set.member` toolgroups ->
-                                pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' deactivated")
+                                pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Toolgroup '" <> tg <> "' deactivated") Nothing
                         Just tg ->
-                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups)
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Unknown toolgroup '" <> tg <> "'. Available: " <> availableGroups) Nothing
                         Nothing ->
-                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Missing 'toolgroup' parameter. Available: " <> availableGroups)
+                            pure $ BlobToolSuccess () (Text.encodeUtf8 $ "Error: Missing 'toolgroup' parameter. Available: " <> availableGroups) Nothing
                 }
 
         find :: ToolCall -> Maybe (Tool ToolCall)
@@ -362,7 +362,7 @@ makeDiscoverTools toolgroups =
             ToolBase.Tool
                 { ToolBase.toolDef = MetaTool "discover"
                 , ToolBase.toolRun = \_tracer _ctx _args ->
-                    pure $ BlobToolSuccess () responseBytes
+                    pure $ BlobToolSuccess () responseBytes Nothing
                 }
 
         find :: ToolCall -> Maybe (Tool ToolCall)

@@ -113,7 +113,7 @@ portalExecutionTests =
                 Left err -> assertFailure $ "Expected success, got error: " ++ show err
                 Right callResult -> do
                     case callResult of
-                        BlobToolSuccess toolCall output -> output @?= "mock output"
+                        BlobToolSuccess toolCall output _ -> output @?= "mock output"
                         other -> assertFailure $ "Expected BlobToolSuccess, got: " ++ show other
         ]
 
@@ -366,7 +366,7 @@ makeMockRegistration name =
                 }
             , toolRun = \_tracer _ctx _args -> do
                 -- Return a simple blob success
-                pure $ BlobToolSuccess () "mock output"
+                pure $ BlobToolSuccess () "mock output" Nothing
             }
         
         -- Mock OpenAI tool declaration
@@ -408,7 +408,7 @@ makeTracingMockRegistration name =
                 runTracer tracer $ IOToolsTrace $ IOTools.IOScriptStarted desc $ object ["phase" .= ("start" :: Text)]
                 runTracer tracer $ IOToolsTrace $ IOTools.IOScriptStarted desc $ object ["phase" .= ("end" :: Text)]
                 -- Return success
-                pure $ BlobToolSuccess () "traced output"
+                pure $ BlobToolSuccess () "traced output" Nothing
             }
         
         -- Mock OpenAI tool declaration
@@ -431,4 +431,5 @@ makeTracingMockRegistration name =
         , findTool = find
         , toolActivation = Nothing
         }
+
 

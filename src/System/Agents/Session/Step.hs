@@ -11,6 +11,7 @@ import qualified Data.Text as Text
 import Data.Void (Void)
 
 import System.Agents.Base (ConversationId)
+import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
@@ -137,7 +138,7 @@ propertyBytes _ = 50 -- Rough estimate per property
 -- | Calculate bytes for user query.
 userQueryBytes :: Maybe UserQuery -> Int
 userQueryBytes Nothing = 0
-userQueryBytes (Just (UserQuery txt)) = Text.length txt * 4
+userQueryBytes (Just (UserQuery txt _)) = Text.length txt * 4
 
 -- | Calculate bytes for a tool call.
 toolCallBytes :: LlmToolCall -> Int
@@ -145,7 +146,15 @@ toolCallBytes (LlmToolCall val) = fromIntegral (LByteString.length (Aeson.encode
 
 -- | Calculate bytes for a user tool response.
 userToolResponseBytes :: UserToolResponse -> Int
-userToolResponseBytes (UserToolResponse val) = fromIntegral (LByteString.length (Aeson.encode val))
+userToolResponseBytes (TextResponse txt) = Text.length txt * 4 -- UTF-8 max bytes per char
+userToolResponseBytes (JsonResponse val) = fromIntegral $ LByteString.length $ Aeson.encode val
+userToolResponseBytes (MediaResponse media) = Text.length media.mediaBase64Data -- Already base64 = ASCII
+userToolResponseBytes (MixedResponse parts) = sum (map contentPartBytes parts)
+
+-- | Calculate bytes for a content part.
+contentPartBytes :: ContentPart -> Int
+contentPartBytes (TextPart txt) = Text.length txt * 4
+contentPartBytes (MediaPart media) = Text.length media.mediaBase64Data
 
 -- Naive action selection function that merely parrots the least surprising
 -- thing: it never evolves or stops the agent, always ask for a user query or a prompt.
@@ -167,7 +176,7 @@ naiveStep sess0 = do
                         let sTools0 = userTurn.userTools
                         let uQuery0 = userTurn.userQuery
                         let tAnswers0 = userTurn.userToolResponses
-                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist)
+                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [])
 
 -- | Step function that stops when the LLM returns no tool calls.
 naiveTilNoToolCallStep :: Session -> IO (Action (LlmTurnContent, Session))
@@ -184,7 +193,7 @@ naiveTilNoToolCallStep sess = do
                     let sTools0 = userTurn.userTools
                     let uQuery0 = userTurn.userQuery
                     let tAnswers0 = userTurn.userToolResponses
-                    pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist)
+                    pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [])
                 LlmTurn llmTurn _mUsage ->
                     -- Last turn was LLM turn
                     if null llmTurn.llmToolCalls
@@ -194,3 +203,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+

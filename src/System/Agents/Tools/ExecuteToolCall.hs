@@ -19,7 +19,6 @@ module System.Agents.Tools.ExecuteToolCall (
     executeLlmToolCall,
 ) where
 
-import qualified Data.Aeson as Aeson
 import qualified Data.Maybe as Maybe
 import Prod.Tracer (Tracer (..))
 
@@ -66,7 +65,7 @@ executeLlmToolCall ::
     IO UserToolResponse
 executeLlmToolCall tracer getTools (adaptTc, adaptCr) toolCtx llmToolCall =
     case adaptTc llmToolCall of
-        Nothing -> pure $ UserToolResponse $ Aeson.String "Failed to parse tool call"
+        Nothing -> pure $ TextResponse "Failed to parse tool call"
         Just tc -> do
             regs <- getTools
             result <- llmCallTool tracer regs toolCtx tc
