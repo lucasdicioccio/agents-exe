@@ -32,14 +32,20 @@ import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath ((<.>))
+import System.FilePath ((<.>), takeFileName)
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
 
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Base64 as Base64
+import qualified Data.Text.Encoding as TextEncoding
+
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
+import System.Agents.CLI.PromptScript (parseMediaReference, resolveMediaType)
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
+import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.OneShot (mapProgressiveDisclosureTrace, nodeToAgent)
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
@@ -49,6 +55,7 @@ import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), S
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Types (
     AppEvent (..),
+    AttachmentDialogState (..),
     AuxiliaryTask (..),
     Conversation (..),
     ConversationStatus (..),
@@ -64,6 +71,8 @@ import System.Agents.TUI.Types (
     UIState (..),
     WidgetName (..),
     agentList,
+    attachedFiles,
+    attachmentDialogState,
     auxiliaryTasks,
     conversationId,
     conversationList,
@@ -76,6 +85,7 @@ import System.Agents.TUI.Types (
     corePausedConversations,
     currentTab,
     eventChan,
+    filePathInput,
     messageEditor,
     navSelectedTurnIndex,
     navSession,
@@ -84,6 +94,7 @@ import System.Agents.TUI.Types (
     queuedMessagesFocus,
     quitConfirmationPending,
     selectedAgentInfo,
+    selectedAttachmentIndex,
     sessionConfig,
     sessionList,
     statusMessage,
@@ -140,6 +151,12 @@ defaultHelpContent =
     , "  Meta+Enter   - Send message"
     , "  Ctrl+E       - Pause/unpause conversation"
     , ""
+    , "Attachments:"
+    , "  Ctrl+F       - Attach file (opens path input dialog)"
+    , "  Ctrl+Shift+F - Clear all attachments"
+    , "  Del/Backspace- Remove selected attachment"
+    , "  Up/Down      - Select attachment"
+    , ""
     , "Queue Management (when paused):"
     , "  Ctrl+D       - Clear all queued messages"
     , "  Del/Backspace- Delete selected queued message"
@@ -183,7 +200,7 @@ buildFocusRingForTab tab =
         AgentsTab ->
             focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
         ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
         HistoryTab ->
             -- SessionsListWidget -> AgentInfoWidget -> AgentListWidget -> ConversationListWidget
             focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
@@ -314,11 +331,96 @@ resetQuitConfirmation = do
 -- | Main event handler for the TUI application.
 tui_appHandleEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
 tui_appHandleEvent tracer ev = do
-    -- Check if we're in turn navigation mode
-    mNavState <- use (tuiUI . turnNavigation)
-    case mNavState of
-        Just navState -> handleTurnNavigationEvent tracer navState ev
-        Nothing -> handleNormalEvent tracer ev
+    -- Check if attachment dialog is open
+    dialogState <- use (tuiUI . attachmentDialogState)
+    case dialogState of
+        AttachmentDialogPathInput -> handleFilePathDialogEvent ev
+        AttachmentDialogClosed -> do
+            -- Check if we're in turn navigation mode
+            mNavState <- use (tuiUI . turnNavigation)
+            case mNavState of
+                Just navState -> handleTurnNavigationEvent tracer navState ev
+                Nothing -> handleNormalEvent tracer ev
+
+-- | Handle events when file path dialog is open.
+handleFilePathDialogEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
+handleFilePathDialogEvent ev =
+    case ev of
+        -- Confirm with Enter
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            handleConfirmFileAttachment
+        -- Cancel with Esc
+        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
+            closeFilePathDialog
+            showStatus StatusInfo "Attachment cancelled"
+        -- Handle typing in the editor
+        VtyEvent vtyEv -> do
+            zoom (tuiUI . filePathInput) $ handleEditorEvent (VtyEvent vtyEv)
+        _ -> pure ()
+
+-- | Confirm file attachment from path input.
+handleConfirmFileAttachment :: EventM N TuiState ()
+handleConfirmFileAttachment = do
+    pathLines <- use (tuiUI . filePathInput . to getEditContents)
+    let pathText = Text.strip $ Text.unlines pathLines
+
+    if Text.null pathText
+        then do
+            closeFilePathDialog
+            showStatus StatusWarning "No file path entered"
+        else do
+            -- Try to load the media attachment
+            result <- liftIO $ loadMediaAttachment (Text.unpack pathText)
+            case result of
+                Left err -> do
+                    closeFilePathDialog
+                    showStatus StatusError $ Text.pack err
+                Right attachment -> do
+                    mConv <- getFocusedConversation
+                    case mConv of
+                        Nothing -> do
+                            closeFilePathDialog
+                            showStatus StatusError "No conversation selected"
+                        Just conv -> do
+                            let convId = conversationId conv
+                            -- Add attachment to the conversation
+                            tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                            closeFilePathDialog
+                            showStatus StatusInfo $ "Attached: " <> maybe "unnamed" id attachment.mediaFilename
+
+-- | Load a media attachment from a file path.
+-- Supports explicit MIME type via "mime/type;path" format or auto-detection.
+loadMediaAttachment :: FilePath -> IO (Either String MediaAttachment)
+loadMediaAttachment input = do
+    -- Parse the input (handles both "path" and "mime/type;path" formats)
+    case parseMediaReference input of
+        Left err -> pure $ Left err
+        Right mediaRef -> do
+            -- Resolve the MIME type
+            case resolveMediaType mediaRef of
+                Left err -> pure $ Left err
+                Right mimeType -> do
+                    -- Try to read the file
+                    let filePath = case Text.breakOn ";" (Text.pack input) of
+                            (_, "") -> input
+                            (_, rest) -> Text.unpack $ Text.drop 1 rest
+                    fileContent <- ByteString.readFile filePath
+                    let base64Data = TextEncoding.decodeUtf8 $ Base64.encode fileContent
+                    let filename = Just $ Text.pack $ takeFileName filePath
+                    pure $ Right $ MediaAttachment mimeType base64Data filename
+
+-- | Close the file path dialog and reset input.
+closeFilePathDialog :: EventM N TuiState ()
+closeFilePathDialog = do
+    tuiUI . attachmentDialogState .= AttachmentDialogClosed
+    tuiUI . filePathInput . editContentsL .= TextZipper.textZipper [] Nothing
+
+-- | Open the file path dialog.
+openFilePathDialog :: EventM N TuiState ()
+openFilePathDialog = do
+    tuiUI . attachmentDialogState .= AttachmentDialogPathInput
+    -- Pre-fill with a helpful example
+    tuiUI . filePathInput . editContentsL .= TextZipper.textZipper ["/path/to/file.png"] (Just 1)
 
 -- | Handle events when in turn navigation mode.
 handleTurnNavigationEvent :: Tracer IO Trace -> TurnNavigationState -> BrickEvent N AppEvent -> EventM N TuiState ()
@@ -467,6 +569,13 @@ handleNormalEvent tracer ev = do
         VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) -> do
             resetQuitConfirmation
             handleTogglePauseConversation
+        -- Attachment handling
+        VtyEvent (Vty.EvKey (Vty.KChar 'f') [Vty.MCtrl]) -> do
+            resetQuitConfirmation
+            openFilePathDialog
+        VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
+            resetQuitConfirmation
+            handleClearAllAttachments
         -- Session export
         VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
             resetQuitConfirmation
@@ -502,6 +611,8 @@ handleNormalEvent tracer ev = do
                     handleAgentInfoEvent vtyEv
                 Just QueuedMessageListWidget ->
                     handleQueuedMessageListEvent vtyEv
+                Just AttachmentListWidget ->
+                    handleAttachmentListEvent vtyEv
                 _ ->
                     pure ()
         _ -> pure ()
@@ -716,6 +827,93 @@ handleQueuedMessageListEvent ev = do
 
                                 -- Ignore other events
                                 _ -> pure ()
+
+-- | Handle attachment list events.
+handleAttachmentListEvent :: Vty.Event -> EventM N TuiState ()
+handleAttachmentListEvent ev = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> pure () -- No conversation, ignore events
+        Just conv -> do
+            let convId = conversationId conv
+            attachments <- use (tuiUI . attachedFiles)
+            case Map.lookup convId attachments of
+                Nothing -> pure () -- No attachments
+                Just atts -> do
+                    case ev of
+                        -- Up arrow - navigate to previous attachment
+                        Vty.EvKey Vty.KUp [] -> do
+                            current <- use (tuiUI . selectedAttachmentIndex)
+                            let count = length atts
+                                newIdx = case current of
+                                    Nothing -> count - 1 -- Start at last attachment
+                                    Just idx -> max 0 (idx - 1)
+                            tuiUI . selectedAttachmentIndex .= Just newIdx
+
+                        -- Down arrow - navigate to next attachment
+                        Vty.EvKey Vty.KDown [] -> do
+                            current <- use (tuiUI . selectedAttachmentIndex)
+                            let count = length atts
+                                newIdx = case current of
+                                    Nothing -> 0 -- Start at first attachment
+                                    Just idx -> min (count - 1) (idx + 1)
+                            tuiUI . selectedAttachmentIndex .= Just newIdx
+
+                        -- Delete key - remove selected attachment
+                        Vty.EvKey Vty.KDel [] -> do
+                            handleRemoveSelectedAttachment
+
+                        -- Backspace key - remove selected attachment
+                        Vty.EvKey Vty.KBS [] -> do
+                            handleRemoveSelectedAttachment
+
+                        -- Ignore other events
+                        _ -> pure ()
+
+-- | Remove the currently selected attachment.
+handleRemoveSelectedAttachment :: EventM N TuiState ()
+handleRemoveSelectedAttachment = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            let convId = conversationId conv
+            mSelectedIdx <- use (tuiUI . selectedAttachmentIndex)
+            case mSelectedIdx of
+                Nothing -> showStatus StatusWarning "Select an attachment first (use Up/Down arrows)"
+                Just idx -> do
+                    -- Get current attachments
+                    attachments <- use (tuiUI . attachedFiles)
+                    case Map.lookup convId attachments of
+                        Nothing -> pure ()
+                        Just atts ->
+                            if idx < 0 || idx >= length atts
+                                then pure ()
+                                else do
+                                    -- Remove attachment at index
+                                    let newAtts = deleteAt idx atts
+                                    -- Update attachments
+                                    tuiUI . attachedFiles %= Map.insert convId newAtts
+                                    -- Adjust selection
+                                    let newIdx = if null newAtts then Nothing else Just (min idx (length newAtts - 1))
+                                    tuiUI . selectedAttachmentIndex .= newIdx
+                                    showStatus StatusInfo "Attachment removed"
+
+-- | Clear all attachments for the current conversation.
+handleClearAllAttachments :: EventM N TuiState ()
+handleClearAllAttachments = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            let convId = conversationId conv
+            attachments <- use (tuiUI . attachedFiles)
+            case Map.lookup convId attachments of
+                Nothing -> showStatus StatusInfo "No attachments to clear"
+                Just atts -> do
+                    tuiUI . attachedFiles %= Map.delete convId
+                    tuiUI . selectedAttachmentIndex .= Nothing
+                    showStatus StatusInfo $ "Cleared " <> Text.pack (show $ length atts) <> " attachment(s)"
 
 -------------------------------------------------------------------------------
 -- Status Message Helpers
@@ -1340,7 +1538,7 @@ runConversation tracer baseTuiAgent session = do
     switchToChatsAndFocusMessage
 
 {- | Send a message in the current conversation.
-Messages are now buffered if the conversation is being processed by the agent,
+Messages are now buffered if the conversation is being processed by an agent,
 allowing users to "interrupt" or provide additional context while the agent
 is executing tool calls.
 -}
@@ -1350,11 +1548,18 @@ handleSendMessage = do
     msgLines <- use (tuiUI . messageEditor . to getEditContents)
     let msgText = Text.strip $ Text.unlines msgLines
 
-    -- Only send non-empty messages
-    when (not $ Text.null msgText) $ do
-        selected <- use (tuiUI . conversationList . to listSelectedElement)
-        case selected of
-            Just (_idx, conv) -> do
+    -- Get current attachments
+    mConv <- getFocusedConversation
+    attachments <- case mConv of
+        Just conv -> do
+            atts <- use (tuiUI . attachedFiles)
+            pure $ Map.findWithDefault [] (conversationId conv) atts
+        Nothing -> pure []
+
+    -- Only send non-empty messages (or messages with attachments)
+    when (not (Text.null msgText) || not (null attachments)) $ do
+        case mConv of
+            Just conv -> do
                 -- Get core reference for message buffering
                 coreRef <- use tuiCore
                 core <- liftIO $ readTVarIO coreRef
@@ -1370,12 +1575,14 @@ handleSendMessage = do
                         showStatus StatusInfo "Message buffered - will be sent with tool responses"
                     else do
                         -- Conversation is waiting for input - send directly via channel
-                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText [])
+                        liftIO $ writeBChan conv.conversationChan (Just $ UserQuery msgText attachments)
                         -- Mark as ongoing since we're starting agent processing
                         tuiUI . ongoingConversations %= Set.insert (conversationId conv)
 
-                -- Always clear the editor - user can type more messages
+                -- Clear the editor and attachments
                 tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                tuiUI . attachedFiles %= Map.delete (conversationId conv)
+                tuiUI . selectedAttachmentIndex .= Nothing
             Nothing -> pure ()
 
 -------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import Brick
 import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel, hBorder)
+import Brick.Widgets.Center (center)
 import Brick.Widgets.Edit (renderEditor)
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
@@ -22,6 +23,7 @@ import qualified Graphics.Vty as Vty
 import System.Agents.AgentTree (OSAgentNode (..))
 import System.Agents.Base (Agent (..), ConversationId)
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
+import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
 import System.Agents.TUI.Types
@@ -109,13 +111,32 @@ queuedMessageSelectedAttr = attrName "queuedMessageSelected"
 selectedTurnAttr :: AttrName
 selectedTurnAttr = attrName "selectedTurn"
 
+-- | Attribute for attachment items.
+attachmentAttr :: AttrName
+attachmentAttr = attrName "attachment"
+
+-- | Attribute for selected attachment items.
+attachmentSelectedAttr :: AttrName
+attachmentSelectedAttr = attrName "attachmentSelected"
+
+-- | Attribute for attachment file size.
+attachmentSizeAttr :: AttrName
+attachmentSizeAttr = attrName "attachmentSize"
+
+-- | Attribute for dialog overlays.
+dialogAttr :: AttrName
+dialogAttr = attrName "dialog"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
 
 -- | Main application draw function.
 tui_appDraw :: TuiState -> [Widget N]
-tui_appDraw st = [render_ui st]
+tui_appDraw st =
+    case st ^. tuiUI . attachmentDialogState of
+        AttachmentDialogPathInput -> [renderFilePathDialog st, render_ui st]
+        AttachmentDialogClosed -> [render_ui st]
 
 {- | Render the main UI based on current state.
 When zoomed, the content displayed is based on the current tab rather than
@@ -197,6 +218,7 @@ renderChatsTab st =
         Just MessageEditorWidget -> render_conversationArea st
         Just ConversationListWidget -> render_conversationArea st
         Just ConversationViewWidget -> render_conversationArea st
+        Just AttachmentListWidget -> render_conversationArea st
         _ -> render_conversationArea st
 
 -- | Render the History tab content (sessions view).
@@ -233,7 +255,8 @@ render_conversationArea st =
                 ]
         Just (_, conv) ->
             vBox
-                [ render_messageEditor st
+                [ render_messageEditorWithAttachments st conv
+                , render_attachmentList st conv
                 , render_queued_messages_manager st conv
                 , render_conversationView st
                 , render_shortcutsHelp
@@ -244,7 +267,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md"
+            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file"
             ]
 
 -- | Conversation area with message input and conversation history.
@@ -330,10 +353,13 @@ render_conversationItem st _ conv =
             Nothing -> 0
             Just session -> length session.turns
         turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
+        -- Add attachment count if any
+        attachmentCount = getAttachmentCount st conv
+        attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
         -- Add queued message count if any
         queueCount = getQueuedMessageCount st conv
         queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
-        fullText = baseText <> turnSuffix <> queueSuffix
+        fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
                 withAttr pausedAttr $ txt $ " " <> fullText
@@ -349,6 +375,14 @@ getQueuedMessageCount st conv =
      in case Map.lookup (conversationId conv) buffered of
             Nothing -> 0
             Just msgs -> length msgs
+
+-- | Get the number of attachments for a conversation.
+getAttachmentCount :: TuiState -> Conversation -> Int
+getAttachmentCount st conv =
+    let attachments = st ^. tuiUI . attachedFiles
+     in case Map.lookup (conversationId conv) attachments of
+            Nothing -> 0
+            Just atts -> length atts
 
 -- | Render the sessions list.
 render_sessionList :: TuiState -> Widget N
@@ -440,6 +474,110 @@ render_messageEditor st =
             (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
             (st ^. tuiUI . messageEditor)
         )
+
+-- | Render the message editor with attachment count in the label.
+render_messageEditorWithAttachments :: TuiState -> Conversation -> Widget N
+render_messageEditorWithAttachments st conv =
+    let attachmentCount = getAttachmentCount st conv
+        labelText =
+            if attachmentCount > 0
+                then "Message [" <> Text.pack (show attachmentCount) <> " 📎]"
+                else "Message"
+     in borderWithLabel
+            ( if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget
+                then withAttr focusedAttr (txt labelText)
+                else txt labelText
+            )
+            $ renderEditor
+                (txt . Text.unlines)
+                (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
+                (st ^. tuiUI . messageEditor)
+
+-------------------------------------------------------------------------------
+-- Attachment List Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the attachment list for a conversation.
+render_attachmentList :: TuiState -> Conversation -> Widget N
+render_attachmentList st conv =
+    let attachments = getAttachments st conv
+     in if null attachments
+            then emptyWidget
+            else render_attachmentPanel st attachments
+
+-- | Get attachments for a conversation.
+getAttachments :: TuiState -> Conversation -> [MediaAttachment]
+getAttachments st conv =
+    let atts = st ^. tuiUI . attachedFiles
+     in case Map.lookup (conversationId conv) atts of
+            Nothing -> []
+            Just xs -> xs
+
+-- | Render the attachment panel.
+render_attachmentPanel :: TuiState -> [MediaAttachment] -> Widget N
+render_attachmentPanel st attachments =
+    borderWithFocus
+        st
+        AttachmentListWidget
+        (" Attachments (" <> Text.pack (show $ length attachments) <> ") ")
+        $ vBox
+            [ txt "Del/Backspace: remove | Ctrl+Shift+F: clear all"
+            , txt ""
+            , vBox $ zipWith (render_attachment_item selectedIdx) [0 ..] attachments
+            ]
+  where
+    selectedIdx = st ^. tuiUI . selectedAttachmentIndex
+
+-- | Render a single attachment item.
+render_attachment_item :: Maybe Int -> Int -> MediaAttachment -> Widget N
+render_attachment_item selectedIdx idx att =
+    let isSelected = selectedIdx == Just idx
+        marker = if isSelected then "▶ " else "  "
+        filename = maybe "unnamed" id att.mediaFilename
+        mimeType = att.mediaMimeType
+        sizeStr = formatAttachmentSize att.mediaBase64Data
+        attr = if isSelected then attachmentSelectedAttr else attachmentAttr
+     in withAttr attr $
+            hBox
+                [ txt marker
+                , txt "📎 "
+                , txt filename
+                , txt " ("
+                , withAttr attachmentSizeAttr $ txt mimeType
+                , txt ", "
+                , withAttr attachmentSizeAttr $ txt sizeStr
+                , txt ")"
+                ]
+
+-- | Format attachment size based on base64 data length.
+formatAttachmentSize :: Text -> Text
+formatAttachmentSize base64Data =
+    -- Base64 encoding is ~4/3 of original size, so we estimate original
+    let base64Len = Text.length base64Data
+        originalBytes = (base64Len * 3) `div` 4
+     in formatBytes originalBytes
+
+-------------------------------------------------------------------------------
+-- File Path Dialog Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the file path input dialog overlay.
+renderFilePathDialog :: TuiState -> Widget N
+renderFilePathDialog st =
+    center $
+        withAttr dialogAttr $
+            borderWithLabel (txt " Attach File (Ctrl+F) ") $
+                vBox
+                    [ txt "Enter file path (or mime/type;path for explicit type):"
+                    , txt ""
+                    , hLimit 60 $
+                        renderEditor
+                            (txt . Text.unlines)
+                            True
+                            (st ^. tuiUI . filePathInput)
+                    , txt ""
+                    , txt "Enter: confirm  Esc: cancel"
+                    ]
 
 -------------------------------------------------------------------------------
 -- Queued Messages Management Rendering
@@ -838,5 +976,9 @@ tui_appAttrMap _ =
         , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
         , (queuedMessageSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
+        , (attachmentAttr, BrickUtil.fg Vty.cyan)
+        , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
+        , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
         ]
 
