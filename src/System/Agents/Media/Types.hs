@@ -300,15 +300,16 @@ mimeToMediaType mime =
         <|> (MediaText <$> parseTextSubtype mime)
 
 parseImageType :: Text -> Maybe MediaType
-parseImageType mime = MediaImage <$> case Text.toLower mime of
-    "image/png" -> Just ImagePNG
-    "image/jpeg" -> Just ImageJPEG
-    "image/jpg" -> Just ImageJPEG
-    "image/gif" -> Just ImageGIF
-    "image/webp" -> Just ImageWebP
-    "image/svg" -> Just ImageSVG
-    "image/svg+xml" -> Just ImageSVG
-    _ -> Nothing
+parseImageType mime =
+    MediaImage <$> case Text.toLower mime of
+        "image/png" -> Just ImagePNG
+        "image/jpeg" -> Just ImageJPEG
+        "image/jpg" -> Just ImageJPEG
+        "image/gif" -> Just ImageGIF
+        "image/webp" -> Just ImageWebP
+        "image/svg" -> Just ImageSVG
+        "image/svg+xml" -> Just ImageSVG
+        _ -> Nothing
 
 parseAudioType :: Text -> Maybe AudioType
 parseAudioType mime = case Text.toLower mime of
@@ -370,4 +371,3 @@ extractContentType headers = do
     parseMimeType contentTypeText
   where
     isContentTypeHeader (name, _) = CI.foldedCase name == "content-type"
-

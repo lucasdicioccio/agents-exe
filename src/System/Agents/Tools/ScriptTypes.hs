@@ -148,8 +148,9 @@ data ScriptInfo
     , scriptDescription :: Text
     , scriptEmptyResultBehavior :: Maybe ScriptEmptyResultBehavior
     , scriptOutputMediaType :: Maybe Text
-    -- ^ Optional MIME type for binary output (e.g., "image/png", "application/pdf")
-    -- When set, the tool's output is treated as base64-encoded binary data.
+    {- ^ Optional MIME type for binary output (e.g., "image/png", "application/pdf")
+    When set, the tool's output is treated as base64-encoded binary data.
+    -}
     }
     deriving (Show, Eq, Ord)
 
@@ -212,4 +213,3 @@ instance Aeson.FromJSON ScriptDescription where
         ScriptDescription
             <$> o Aeson..: "path"
             <*> o Aeson..: "info"
-

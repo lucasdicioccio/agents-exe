@@ -239,12 +239,14 @@ mkOpenAICompletion config completion = do
                     [ Aeson.object
                         [ "role" .= ("tool" :: Text)
                         , "tool_call_id" .= toolCallId
-                        , "content" .= Aeson.object
-                            [ "type" .= ("image_url" :: Text)
-                            , "image_url" .= Aeson.object
-                                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                        , "content"
+                            .= Aeson.object
+                                [ "type" .= ("image_url" :: Text)
+                                , "image_url"
+                                    .= Aeson.object
+                                        [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                        ]
                                 ]
-                            ]
                         ]
                     ]
                 MixedResponse parts ->
@@ -265,9 +267,10 @@ mkOpenAICompletion config completion = do
     contentPartToOpenAI (MediaPart media) =
         Aeson.object
             [ "type" .= ("image_url" :: Text)
-            , "image_url" .= Aeson.object
-                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                ]
+            , "image_url"
+                .= Aeson.object
+                    [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                    ]
             ]
 
     -- Add flavor-specific fields to the payload
@@ -337,4 +340,3 @@ parseToolCall_openAI val =
                                     }
                         _ -> Nothing
                 _ -> Nothing
-

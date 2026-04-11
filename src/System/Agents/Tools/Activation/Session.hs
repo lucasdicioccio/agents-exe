@@ -398,4 +398,3 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
-

@@ -845,4 +845,3 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
-

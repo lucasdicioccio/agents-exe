@@ -99,4 +99,3 @@ llmCallTool tracer registrations ctx call =
                 Just (t, v) -> do
                     ret <- t.toolRun tracer ctx v
                     pure $ mapCallResult (const call) ret
-

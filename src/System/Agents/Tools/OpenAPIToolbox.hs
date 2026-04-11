@@ -756,4 +756,3 @@ This is used for tool registration when creating unique tool names.
 -}
 getOperationId :: Operation -> Maybe Text
 getOperationId = opOperationId
-

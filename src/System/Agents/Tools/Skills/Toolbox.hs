@@ -255,13 +255,14 @@ runScriptTool script _tracer _ctx args = do
                     ExitSuccess ->
                         return $ BlobToolSuccess () stdout Nothing
                     ExitFailure code ->
-                        let errorOutput = Text.encodeUtf8 $
-                                Text.unlines
-                                    [ "Script failed with exit code " <> Text.pack (show code)
-                                    , "stdout: " <> Text.decodeUtf8With lenientDecode stdout
-                                    , "stderr: " <> Text.decodeUtf8With lenientDecode stderr
-                                    ]
-                        in return $ BlobToolSuccess () errorOutput Nothing
+                        let errorOutput =
+                                Text.encodeUtf8 $
+                                    Text.unlines
+                                        [ "Script failed with exit code " <> Text.pack (show code)
+                                        , "stdout: " <> Text.decodeUtf8With lenientDecode stdout
+                                        , "stderr: " <> Text.decodeUtf8With lenientDecode stderr
+                                        ]
+                         in return $ BlobToolSuccess () errorOutput Nothing
 
 -------------------------------------------------------------------------------
 -- Argument Parsing (reuses translateArguments from ScriptTypes)
@@ -342,4 +343,3 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
-

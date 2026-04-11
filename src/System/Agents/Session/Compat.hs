@@ -9,14 +9,14 @@ import Control.Applicative ((<|>))
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
-import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base64 as B64
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 
-import System.Agents.Media.Types (MediaAttachment (..), mediaTypeToMime)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Media.Types (MediaAttachment (..), mediaTypeToMime)
 import qualified System.Agents.Session.OpenAI as OpenAI
 import System.Agents.Session.Types (LlmToolCall (..), UserToolResponse (..))
 import System.Agents.ToolSchema (ToolName (..))
@@ -125,4 +125,3 @@ callResultToUserToolResponse _ result =
 -- | Base64 encode ByteString to Text.
 base64Encode :: BS.ByteString -> Text
 base64Encode = Text.decodeUtf8 . B64.encode
-

@@ -259,4 +259,3 @@ executeOneShotWithSession handle mAgentId session = do
 -- | Extract just the result text from a OneShotResult.
 extractResultText :: OneShotResult -> Text
 extractResultText = osrText
-

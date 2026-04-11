@@ -256,14 +256,14 @@ Design principles:
 * Explicit type tags for clarity
 -}
 data UserToolResponse
-    = TextResponse Text
-    -- ^ Plain UTF-8 text response
-    | JsonResponse Aeson.Value
-    -- ^ Structured JSON data
-    | MediaResponse MediaAttachment
-    -- ^ Single binary media (base64-encoded)
-    | MixedResponse [ContentPart]
-    -- ^ Multi-modal: alternating text and media parts
+    = -- | Plain UTF-8 text response
+      TextResponse Text
+    | -- | Structured JSON data
+      JsonResponse Aeson.Value
+    | -- | Single binary media (base64-encoded)
+      MediaResponse MediaAttachment
+    | -- | Multi-modal: alternating text and media parts
+      MixedResponse [ContentPart]
     deriving (Show, Ord, Eq, Generic)
 
 {- | Custom ToJSON for UserToolResponse.
@@ -453,8 +453,9 @@ data Session
     , forkedFromSessionId :: Maybe SessionId
     , turnId :: TurnId
     , sessionVersion :: Maybe Int
-    -- ^ Optional session version for feature compatibility:
-    --   Nothing = legacy (pre-media), Just 1 = media support
+    {- ^ Optional session version for feature compatibility:
+    Nothing = legacy (pre-media), Just 1 = media support
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -478,4 +479,3 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
-

@@ -380,4 +380,3 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
-

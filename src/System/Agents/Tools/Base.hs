@@ -12,12 +12,12 @@ import qualified Data.Text as Text
 import Prod.Tracer (Tracer)
 
 import qualified System.Agents.MCP.Base as Mcp
+import System.Agents.Media.Types (MediaType)
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolExecutionContext)
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
-import System.Agents.Media.Types (MediaType)
 import System.Agents.Tools.OpenAPI.Types (ToolResult)
 import qualified System.Agents.Tools.PostgREST.Types as PostgRESTypes
 import qualified System.Agents.Tools.Skills.Types as Skills
@@ -250,4 +250,3 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
-

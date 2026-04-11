@@ -56,4 +56,3 @@ handleSelfDescribe opts _apiKeysFile = do
                 description
                 (Just $ AddMessage "--no output--")
                 Nothing -- No output media type (text output)
-
