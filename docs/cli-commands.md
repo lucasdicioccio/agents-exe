@@ -129,12 +129,17 @@ agents-exe tui [--agent-file FILE...]
 - Multiple agent support (Tab to switch)
 - Tool call visualization
 - Session persistence
+- Turn navigation and forking
+- Message queue management
 
 **Keyboard Shortcuts:**
 - `Tab` / `Shift+Tab` - Switch between agents
 - `Enter` - Send message
 - `Ctrl+C` - Quit
 - `Up/Down` - Scroll history
+- `Ctrl+[` / `Ctrl+]` - Previous/Next tab
+- `Ctrl+E` - Pause/unpause conversation
+- `Ctrl+D` (when paused) - Clear queued messages
 
 **Examples:**
 
@@ -269,6 +274,143 @@ agents-exe session-edit --censor-tool-calls < session.json > no-tools.json
 
 # Remove thinking content
 agents-exe session-edit --censor-thinking < session.json > no-thinking.json
+```
+
+### session-index
+
+Manage the SQLite FTS5 search index for session files.
+
+```bash
+agents-exe session-index [OPTIONS]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--build` | Build the search index from scratch |
+| `--update` | Incrementally update the search index |
+| `--status` | Show index status (default) |
+| `--clean` | Remove the search index |
+| `--db-path PATH` | Path to search index database (default: `.agents-search.db`) |
+| `--include-tool-outputs` | Include tool outputs in the index |
+
+**Description:**
+The `session-index` command manages a SQLite FTS5-based search index for fast fuzzy text search across session files. The index uses trigram tokenization to enable fuzzy matching (e.g., "error" matches "errors", "erroring").
+
+**Index Schema:**
+- `session_index` - Session metadata cache (path, mtime, agent, turn count)
+- `search_content` - FTS5 virtual table with trigram tokenizer
+- `tool_index` - Tool call index for filtering by tool name
+
+**Examples:**
+
+```bash
+# Build the search index
+agents-exe session-index --build
+
+# Check index status
+agents-exe session-index --status
+
+# Update index incrementally
+agents-exe session-index --update
+
+# Remove the index
+agents-exe session-index --clean
+
+# Build with tool outputs included
+agents-exe session-index --build --include-tool-outputs
+
+# Custom database location
+agents-exe session-index --build --db-path ~/.config/agents-exe/search.db
+```
+
+### session-search
+
+Search session files with fuzzy text matching and filtering.
+
+```bash
+agents-exe session-search [OPTIONS] "QUERY"
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `QUERY` | Search query text (supports fuzzy matching) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--db-path PATH` | Path to search index database |
+| `--after DATE` | Filter sessions after date (YYYY-MM-DD) |
+| `--before DATE` | Filter sessions before date (YYYY-MM-DD) |
+| `--tool TOOLNAME` | Filter by tool name (can specify multiple) |
+| `--agent SLUG` | Filter by agent slug |
+| `--include-tool-outputs` | Include tool outputs in search |
+| `--json` | Output results as JSON |
+| `--preview N` | Show N lines of context around matches |
+| `--limit N` | Limit to N results |
+| `--auto` | Auto-update index if stale before searching |
+
+**Description:**
+Performs fast fuzzy text search across session files using an SQLite FTS5 index. The search supports trigram-based fuzzy matching, allowing queries like "error" to match "errors", "erroring", "terror", etc.
+
+**Search Features:**
+- **Fuzzy matching**: Trigram tokenizer handles typos and variations
+- **Metadata filtering**: Filter by date, tool usage, or agent
+- **Incremental indexing**: Only re-indexes changed sessions
+- **JSON output**: Machine-readable format for scripting
+
+**Examples:**
+
+```bash
+# Basic fuzzy search
+agents-exe session-search "database error"
+
+# Search with auto-update
+agents-exe session-search "migration" --auto
+
+# Include tool outputs in search
+agents-exe session-search "config.yaml" --include-tool-outputs
+
+# Filter by date and tool
+agents-exe session-search "auth" --after 2024-01-01 --tool write-file
+
+# Filter by agent
+agents-exe session-search "refactor" --agent my-coder
+
+# JSON output for scripting
+agents-exe session-search "TODO" --json
+
+# Show context lines
+agents-exe session-search "deploy" --preview 5
+
+# Combined filters
+agents-exe session-search "fix" --after 2024-01-01 --before 2024-12-31 --tool bash_write-file --json
+```
+
+**JSON Output Format:**
+```json
+{
+  "resultItems": [
+    {
+      "resultMetadata": {
+        "resultSessionId": "550e8400-e29b-41d4-a716-446655440000",
+        "resultFilePath": "/path/to/session.json",
+        "resultAgentSlug": "my-agent",
+        "resultTurnCount": 15,
+        "resultRank": 0.5
+      },
+      "resultPreview": "...context around match...",
+      "resultMatchedTerms": ["error", "database"]
+    }
+  ],
+  "resultTotalMatches": 42,
+  "resultQueryTimeMs": 15.3,
+  "resultIndexWasUpdated": false
+}
 ```
 
 ### list-tool-calls
@@ -1079,6 +1221,25 @@ agents-exe run \
     --agent-file ./my-agent.json \
     --session-file ./session.json \
     --prompt "Where were we?"
+```
+
+### Session Search Workflow
+
+```bash
+# Build the search index
+agents-exe session-index --build
+
+# Search for error-related sessions
+agents-exe session-search "error" --json
+
+# Find sessions using specific tool after a date
+agents-exe session-search "config" --after 2024-01-01 --tool write-file
+
+# Search with context preview
+agents-exe session-search "TODO" --preview 3
+
+# Auto-update index before searching
+agents-exe session-search "refactor" --auto --limit 10
 ```
 
 ### Automation

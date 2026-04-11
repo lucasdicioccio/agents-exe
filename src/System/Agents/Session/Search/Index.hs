@@ -263,10 +263,11 @@ removeSearchIndex config = do
 -- Session Indexing
 -------------------------------------------------------------------------------
 
--- | Index a single session.
---
--- Note: FTS5 virtual tables don't support ON CONFLICT DO UPDATE, so we use
--- INSERT OR REPLACE which deletes the old row and inserts a new one.
+{- | Index a single session.
+
+Note: FTS5 virtual tables don't support ON CONFLICT DO UPDATE, so we use
+INSERT OR REPLACE which deletes the old row and inserts a new one.
+-}
 indexSession ::
     Connection ->
     SearchIndexConfig ->
@@ -348,11 +349,12 @@ indexTools conn sessionIdText session = do
             |]
             (sessionIdText, toolName, count)
 
--- | Remove sessions that no longer exist.
--- 
--- This function deletes all index entries for sessions whose IDs are not
--- in the provided currentIds list. Since SQLite doesn't support array
--- parameters directly, we use a temporary table approach for efficiency.
+{- | Remove sessions that no longer exist.
+
+This function deletes all index entries for sessions whose IDs are not
+in the provided currentIds list. Since SQLite doesn't support array
+parameters directly, we use a temporary table approach for efficiency.
+-}
 removeStaleSessions :: Connection -> [Text] -> IO ()
 removeStaleSessions _conn [] = do
     -- If no current sessions, nothing to do (all sessions would be stale,
@@ -362,27 +364,33 @@ removeStaleSessions conn currentIds = do
     -- Create temporary table to hold current session IDs
     execute_ conn "CREATE TEMP TABLE IF NOT EXISTS temp_current_ids (session_id TEXT PRIMARY KEY)"
     execute_ conn "DELETE FROM temp_current_ids"
-    
+
     -- Insert current IDs into temp table
     forM_ currentIds $ \sid -> do
         execute conn "INSERT OR IGNORE INTO temp_current_ids (session_id) VALUES (?)" [sid]
-    
+
     -- Delete stale entries from all index tables
-    execute_ conn [sql|
+    execute_
+        conn
+        [sql|
         DELETE FROM tool_index 
         WHERE session_id NOT IN (SELECT session_id FROM temp_current_ids)
     |]
-    
-    execute_ conn [sql|
+
+    execute_
+        conn
+        [sql|
         DELETE FROM search_content 
         WHERE session_id NOT IN (SELECT session_id FROM temp_current_ids)
     |]
-    
-    execute_ conn [sql|
+
+    execute_
+        conn
+        [sql|
         DELETE FROM session_index 
         WHERE session_id NOT IN (SELECT session_id FROM temp_current_ids)
     |]
-    
+
     -- Clean up temp table
     execute_ conn "DROP TABLE IF EXISTS temp_current_ids"
 
@@ -572,4 +580,3 @@ countStaleSessions sessions indexedMtimes = do
             Just indexedMtime
                 | mtime > indexedMtime -> countStale (acc + 1) rest indexedMap
                 | otherwise -> countStale acc rest indexedMap
-
