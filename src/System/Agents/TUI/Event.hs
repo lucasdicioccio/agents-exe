@@ -124,10 +124,28 @@ data Trace
 -- Help Content
 -------------------------------------------------------------------------------
 
+-- | ASCII art logo for the Help tab banner.
+helpLogo :: [Text.Text]
+helpLogo =
+    [ "     ___   _____ _____ _____ _____ _____"
+    , "    / _ \\ |  __ \\_   _/ ____|_   _/ ____|"
+    , "   / /_\\ \\| |  | || || |  __  | || (___  "
+    , "   |  _  || |  | || || | |_ | | | \\___ \\ "
+    , "   | | | || |__| || || |__| |_| |_ ____) |"
+    , "   \\_| |_/|_____/_____\\_____|_____|_____/ "
+    , ""
+    , "       AI Agent Framework for Haskell"
+    , "              Version 0.1.0.0"
+    ]
+
 -- | Default keyboard shortcuts help content.
 defaultHelpContent :: [Text.Text]
 defaultHelpContent =
-    [ "Keyboard Shortcuts:"
+    helpLogo ++
+    [ ""
+    , "===================================================="
+    , ""
+    , "Keyboard Shortcuts:"
     , ""
     , "Navigation:"
     , "  Tab          - Cycle focus forward through widgets"
@@ -1593,3 +1611,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+

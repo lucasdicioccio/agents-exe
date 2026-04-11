@@ -127,6 +127,10 @@ attachmentSizeAttr = attrName "attachmentSize"
 dialogAttr :: AttrName
 dialogAttr = attrName "dialog"
 
+-- | Attribute for the ASCII logo in the Help tab.
+logoAttr :: AttrName
+logoAttr = attrName "logo"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -229,13 +233,27 @@ renderHistoryTab st =
         Just SessionViewWidget -> render_sessionArea st
         _ -> render_sessionArea st
 
--- | Render the Help tab content.
+-- | Render the Help tab content with centered ASCII logo.
 renderHelpTab :: TuiState -> Widget N
 renderHelpTab st =
     borderWithLabel (txt " Help ") $
         viewport AgentInfoWidget Both $
-            vBox $
-                map txt (st ^. tuiUI . helpContent)
+            vBox [renderLogoSection, txt "", renderShortcutsSection]
+  where
+    allHelpContent = st ^. tuiUI . helpContent
+
+    -- Separate logo lines from the rest of the help content
+    -- Logo is 9 lines: 6 for ASCII art + 1 blank + 2 for tagline/version
+    logoLines = take 9 allHelpContent
+    restContent = drop 10 allHelpContent  -- Skip the blank line after separator
+
+    renderLogoSection :: Widget N
+    renderLogoSection =
+        center $ withAttr logoAttr $ vBox $ map txt logoLines
+
+    renderShortcutsSection :: Widget N
+    renderShortcutsSection =
+        vBox $ map txt restContent
 
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N
@@ -980,4 +998,6 @@ tui_appAttrMap _ =
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
+        , (logoAttr, BrickUtil.fg Vty.brightCyan `Vty.withStyle` Vty.bold)
         ]
+
