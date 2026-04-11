@@ -32,7 +32,7 @@ import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath ((<.>), takeFileName)
+import System.FilePath (takeFileName, (<.>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
@@ -388,8 +388,9 @@ handleConfirmFileAttachment = do
                             closeFilePathDialog
                             showStatus StatusInfo $ "Attached: " <> maybe "unnamed" id attachment.mediaFilename
 
--- | Load a media attachment from a file path.
--- Supports explicit MIME type via "mime/type;path" format or auto-detection.
+{- | Load a media attachment from a file path.
+Supports explicit MIME type via "mime/type;path" format or auto-detection.
+-}
 loadMediaAttachment :: FilePath -> IO (Either String MediaAttachment)
 loadMediaAttachment input = do
     -- Parse the input (handles both "path" and "mime/type;path" formats)
@@ -1592,4 +1593,3 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
-

@@ -146,4 +146,3 @@ type OnSessionProgress = SessionProgress -> IO ()
 -- | A no-op session progress handler for when tracking is not needed.
 ignoreSessionProgress :: OnSessionProgress
 ignoreSessionProgress = const (pure ())
-

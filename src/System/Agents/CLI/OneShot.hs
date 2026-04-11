@@ -1,3 +1,6 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 {- | Module for the 'run' command handler (one-shot mode).
 
 The run command executes a single prompt against an agent and outputs
@@ -5,9 +8,6 @@ the response. This is the non-interactive mode for agents-exe.
 
 This module uses OS-native structures for agent management.
 -}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module System.Agents.CLI.OneShot (
     Trace (..),
 
@@ -109,8 +109,9 @@ listOneShotAgentTools :: OneShotAgent -> IO [ToolRegistration]
 listOneShotAgentTools agent =
     readTVarIO (osNodeTools agent.oneShotNode)
 
--- | Load media files from references and create MediaAttachments.
--- Returns Left with error message if any file cannot be loaded.
+{- | Load media files from references and create MediaAttachments.
+Returns Left with error message if any file cannot be loaded.
+-}
 loadMediaAttachments :: [MediaReference] -> IO (Either Text [MediaAttachment])
 loadMediaAttachments refs = do
     results <- mapM loadMedia refs
@@ -160,15 +161,16 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                 promptContents <- interpretPromptScript aliases opts.promptScript opts.sessionFile
                 mSession <- maybe (pure Nothing) SessionStore.readSessionFromFile opts.sessionFile
                 -- Use OS-native agent loading (no registry needed)
-                let oneShot text props = OneShot.mainOneShotTextWithThinking 
-                        (Prod.contramap OneShotTrace tracer) 
-                        sessionStore 
-                        opts.sessionFile 
-                        mSession 
-                        opts.thinkingOutput 
-                        mediaAttachments  -- Pass media to the one-shot handler
-                        props 
-                        text
+                let oneShot text props =
+                        OneShot.mainOneShotTextWithThinking
+                            (Prod.contramap OneShotTrace tracer)
+                            sessionStore
+                            opts.sessionFile
+                            mSession
+                            opts.thinkingOutput
+                            mediaAttachments -- Pass media to the one-shot handler
+                            props
+                            text
                 oneShot promptContents $
                     AgentTree.Props
                         { AgentTree.apiKeys = apiKeys
@@ -177,4 +179,3 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                         , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
                         , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
                         }
-

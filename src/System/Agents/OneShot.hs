@@ -1,3 +1,7 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 {- | One-shot execution of agents with OS compatibility layer.
 
 This module provides single-conversation execution (batch mode) with support
@@ -6,10 +10,6 @@ for both the legacy Runtime interface and the new OS model via RuntimeBridge.
 The primary functions ('mainOneShotText', 'runtimeToAgent') have been updated
 to use OS-native types. 'mainOneShotText' now works directly with 'OSAgentTree'.
 -}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 module System.Agents.OneShot (
     -- * Types
     Trace (..),
@@ -207,10 +207,11 @@ mainOneShotTextWithThinking tracer store mPath mSession thinkingOut mediaAttachs
         case x of
             Errors errs -> traverse_ print errs
             Initialized tree -> do
-                let config = (fileStoringConfig store mSession mPath)
-                        { thinkingOutput = thinkingOut
-                        , mediaAttachments = mediaAttachs
-                        }
+                let config =
+                        (fileStoringConfig store mSession mPath)
+                            { thinkingOutput = thinkingOut
+                            , mediaAttachments = mediaAttachs
+                            }
                 let node = osTreeRoot tree
                 OneShotResult result <- runOneShotWithConfig store config convId tracer (apiKeys props) node query
                 Text.putStrLn result
@@ -321,7 +322,7 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                 , toolPortal = tp
                 , complete = \completion -> do
                     -- Inject media attachments into the completion
-                    let completionWithMedia = completion { completeMedia = mediaAttachs }
+                    let completionWithMedia = completion{completeMedia = mediaAttachs}
                     completeF completionWithMedia
                 , contextConfig = defaultContextConfig
                 }
@@ -398,4 +399,3 @@ fileStoringCallback store convId progress =
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
-

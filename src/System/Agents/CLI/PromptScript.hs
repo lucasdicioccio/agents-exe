@@ -1,12 +1,12 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 {- | Module for prompt script functionality.
 
 Prompt scripts allow composing prompts from multiple sources: strings,
 files, shell commands, session contents, and media files. This module handles parsing
 and interpreting prompt script directives.
 -}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module System.Agents.CLI.PromptScript (
     -- * Types
     PromptScriptDirective (..),
@@ -48,13 +48,14 @@ import qualified System.Agents.SessionPrint.Inject as SessionInject
 -- Types
 -------------------------------------------------------------------------------
 
--- | A media reference for attaching files to LLM queries.
---
--- Can be specified either with an explicit MIME type:
--- @image/png;/path/to/image.png@
---
--- Or without (type will be inferred from extension):
--- @/path/to/image.png@
+{- | A media reference for attaching files to LLM queries.
+
+Can be specified either with an explicit MIME type:
+@image/png;/path/to/image.png@
+
+Or without (type will be inferred from extension):
+@/path/to/image.png@
+-}
 data MediaReference = MediaReference
     { mediaMimeType :: !(Maybe Text)
     -- ^ Optional MIME type (e.g., "image/png"). If Nothing, will be inferred from file extension.
@@ -81,14 +82,15 @@ type PromptScript = [PromptScriptDirective]
 -- Media Reference Parsing
 -------------------------------------------------------------------------------
 
--- | Parse a media reference string.
---
--- Supports formats:
--- - @image/png;/path/to/image.png@ (explicit MIME type)
--- - @/path/to/image.png@ (inferred from extension)
---
--- The semicolon separates the MIME type from the path.
--- If no semicolon is present, the entire string is treated as a file path.
+{- | Parse a media reference string.
+
+Supports formats:
+- @image/png;/path/to/image.png@ (explicit MIME type)
+- @/path/to/image.png@ (inferred from extension)
+
+The semicolon separates the MIME type from the path.
+If no semicolon is present, the entire string is treated as a file path.
+-}
 parseMediaReference :: String -> Either String MediaReference
 parseMediaReference input =
     let txt = Text.pack input
@@ -107,8 +109,9 @@ parseMediaReference input =
                             then Left "Media reference has MIME type but no file path"
                             else Right $ MediaReference (Just mimeType) path
 
--- | Infer MIME type from file extension.
--- Returns Nothing if the extension is not recognized.
+{- | Infer MIME type from file extension.
+Returns Nothing if the extension is not recognized.
+-}
 inferMediaTypeFromPath :: FilePath -> Maybe Text
 inferMediaTypeFromPath path =
     let ext = Text.toLower $ Text.pack $ takeExtension path
@@ -149,9 +152,10 @@ inferMediaTypeFromPath path =
             -- Unknown
             _ -> Nothing
 
--- | Resolve the MIME type for a media reference.
--- Uses the explicitly provided type if available, otherwise attempts to infer from path.
--- Returns Left with error message if type cannot be determined.
+{- | Resolve the MIME type for a media reference.
+Uses the explicitly provided type if available, otherwise attempts to infer from path.
+Returns Left with error message if type cannot be determined.
+-}
 resolveMediaType :: MediaReference -> Either String Text
 resolveMediaType ref = case mediaMimeType ref of
     Just mime -> Right mime
@@ -227,4 +231,3 @@ resolveAlias def mSessionFile = do
                 c <- Text.getContents
                 pure (c, Nothing)
     pure $ substituteTemplate (aliasTemplate def) content mActualFile
-

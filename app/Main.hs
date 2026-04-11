@@ -1,13 +1,13 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 {- | Main entry point for the agents-exe executable.
 
 This module handles command-line argument parsing and dispatches to
 the appropriate command handlers. The actual command logic is implemented
 in separate modules under 'System.Agents.CLI'.
 -}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main where
 
 import Control.Monad (unless, when)
@@ -600,10 +600,11 @@ parseThinkingOption =
     showThinking OneShot.ThinkingStdout = "stdout"
     showThinking OneShot.ThinkingStderr = "stderr"
 
--- | Parse a media reference option.
--- Supports formats:
--- - image/png;/path/to/image.png (explicit MIME type)
--- - /path/to/image.png (inferred from extension)
+{- | Parse a media reference option.
+Supports formats:
+- image/png;/path/to/image.png (explicit MIME type)
+- /path/to/image.png (inferred from extension)
+-}
 parseMediaOption :: Parser MediaReference
 parseMediaOption =
     option
@@ -1376,4 +1377,3 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
-

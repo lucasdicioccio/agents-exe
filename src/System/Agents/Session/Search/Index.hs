@@ -585,4 +585,3 @@ countStaleSessions sessions indexedMtimes = do
             Just indexedMtime
                 | mtime > indexedMtime -> countStale (acc + 1) rest indexedMap
                 | otherwise -> countStale acc rest indexedMap
-
