@@ -156,6 +156,7 @@ library agents-lib
                     , System.Agents.TUI.Types
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Event
+                    , System.Agents.TUI.Clipboard
                     , System.Agents.TraceUtils
                     , System.Agents.ToolSchema
     build-depends:    base  >=4.18.3.0,

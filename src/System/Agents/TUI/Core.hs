@@ -9,7 +9,8 @@ This module re-exports functionality from the submodules and provides
 the main initialization and application runner using OS-native structures.
 -}
 module System.Agents.TUI.Core (
-    Trace (..),
+    -- Re-export Trace from Runtime.Trace
+    Trace,
 
     -- * Re-exports from Types
     WidgetName (..),
@@ -104,6 +105,7 @@ import System.Agents.AgentTree (
  )
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
+import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
@@ -111,7 +113,6 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
 import System.Agents.TUI.Event (
-    Trace (..),
     cycleTabBackward,
     cycleTabForward,
     defaultHelpContent,
@@ -271,3 +272,4 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+
