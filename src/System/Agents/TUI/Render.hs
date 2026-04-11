@@ -543,7 +543,7 @@ render_session st w (Just session) _ongoingConvs mNavState =
                 viewport w Both $
                     vBox $
                         [render_session_usage session]
-                        ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+                            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             -- Navigation mode: render with selection highlight
             render_turn_navigation session navState
