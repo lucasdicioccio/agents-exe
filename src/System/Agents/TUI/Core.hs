@@ -15,13 +15,14 @@ module System.Agents.TUI.Core (
     WidgetName (..),
     N,
     AppEvent (..),
+    AttachmentDialogState (..),
     TuiAgent (..),
     Conversation (..),
     ConversationStatus (..),
     AuxiliaryTask (..),
     Core,
     UIState (..),
-    TuiState (..),
+    TuiState,
     SessionConfig (..),
     Tab (..),
     initUIState,
@@ -39,6 +40,11 @@ module System.Agents.TUI.Core (
     unreadConversations,
     ongoingConversations,
     auxiliaryTasks,
+    coreAgentTools,
+    attachedFiles,
+    attachmentDialogState,
+    filePathInput,
+    selectedAttachmentIndex,
     coreAgents,
     coreConversations,
     corePausedConversations,
@@ -126,6 +132,7 @@ tui_appChooseCursor :: TuiState -> [CursorLocation N] -> Maybe (CursorLocation N
 tui_appChooseCursor st locs =
     case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
         Just MessageEditorWidget -> showCursorNamed MessageEditorWidget locs
+        Just FilePathInputWidget -> showCursorNamed FilePathInputWidget locs
         _ -> Nothing
 
 -- | Start event (no-op).

@@ -25,6 +25,7 @@ import qualified Data.Vector as Vector
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode, OSAgentTree)
 import System.Agents.Base (AgentId, ConversationId (..))
+import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
@@ -47,6 +48,10 @@ data WidgetName
       TurnNavigationWidget
     | -- | For focusing the queued messages list
       QueuedMessageListWidget
+    | -- | For the attachment list below the message editor
+      AttachmentListWidget
+    | -- | For the file path input dialog
+      FilePathInputWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -99,6 +104,18 @@ data TurnNavigationState = TurnNavigationState
     deriving (Show)
 
 makeLenses ''TurnNavigationState
+
+-------------------------------------------------------------------------------
+-- Attachment Dialog State
+-------------------------------------------------------------------------------
+
+-- | State for the file attachment dialog
+data AttachmentDialogState
+    = -- | No dialog is open
+      AttachmentDialogClosed
+    | -- | Path input dialog is open
+      AttachmentDialogPathInput
+    deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
 -- Application Events
@@ -364,6 +381,14 @@ data UIState = UIState
     -- ^ When Just, we are in turn navigation mode
     , _queuedMessagesFocus :: Maybe Int
     -- ^ Index of currently selected queued message (Nothing = none selected)
+    , _attachedFiles :: Map ConversationId [MediaAttachment]
+    -- ^ Media attachments per conversation (not persisted across restarts)
+    , _attachmentDialogState :: AttachmentDialogState
+    -- ^ Current state of the attachment dialog
+    , _filePathInput :: Editor Text WidgetName
+    -- ^ Editor for file path input (Ctrl+F dialog)
+    , _selectedAttachmentIndex :: Maybe Int
+    -- ^ Index of currently selected attachment in the list (Nothing = none selected)
     }
 
 makeLenses ''UIState
@@ -416,6 +441,10 @@ initUIState agents loadedSessions =
         , _quitConfirmationPending = False
         , _turnNavigation = Nothing
         , _queuedMessagesFocus = Nothing
+        , _attachedFiles = Map.empty
+        , _attachmentDialogState = AttachmentDialogClosed
+        , _filePathInput = editorText FilePathInputWidget (Just 1) ""
+        , _selectedAttachmentIndex = Nothing
         }
 
 -- | Create initial Core state.

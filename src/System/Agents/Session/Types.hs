@@ -242,8 +242,9 @@ data UserQuery = UserQuery
     }
     deriving (Show, Ord, Eq, Generic)
 
--- | Custom ToJSON for UserQuery with backward compatibility.
--- Legacy format was just a text string.
+{- | Custom ToJSON for UserQuery with backward compatibility.
+Legacy format was just a text string.
+-}
 instance ToJSON UserQuery where
     toJSON (UserQuery text []) = Aeson.toJSON text
     toJSON (UserQuery text media) =
@@ -506,4 +507,3 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
-

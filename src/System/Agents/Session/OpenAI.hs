@@ -179,7 +179,7 @@ mkOpenAICompletion config completion = do
                     ]
             mQuery = comp.completeQuery
             -- Include media from both the query and the completion attachments
-            mediaAttachments = 
+            mediaAttachments =
                 case mQuery of
                     Nothing -> comp.completeMedia
                     Just (UserQuery _ userMedia) -> userMedia ++ comp.completeMedia
@@ -215,22 +215,23 @@ mkOpenAICompletion config completion = do
     userQueryToMessages :: Maybe UserQuery -> [MediaAttachment] -> [Aeson.Value]
     userQueryToMessages mQuery mediaAttachments = case mQuery of
         Nothing -> []
-        Just (UserQuery text []) | null mediaAttachments ->
-            -- Text-only query with no media
-            [ Aeson.object
-                [ "role" .= ("user" :: Text)
-                , "content" .= text
+        Just (UserQuery text [])
+            | null mediaAttachments ->
+                -- Text-only query with no media
+                [ Aeson.object
+                    [ "role" .= ("user" :: Text)
+                    , "content" .= text
+                    ]
                 ]
-            ]
         Just (UserQuery text userMedia) ->
             -- Multi-modal query with text and media
             let allMedia = userMedia ++ mediaAttachments
                 contentParts = buildContentParts text allMedia
-            in [ Aeson.object
-                [ "role" .= ("user" :: Text)
-                , "content" .= contentParts
+             in [ Aeson.object
+                    [ "role" .= ("user" :: Text)
+                    , "content" .= contentParts
+                    ]
                 ]
-            ]
 
     -- Build content parts array for multi-modal messages
     -- The text part comes first, followed by all media attachments
@@ -241,30 +242,30 @@ mkOpenAICompletion config completion = do
             , "text" .= text
             ]
         ]
-        ++ map mediaAttachmentToContentPart media
+            ++ map mediaAttachmentToContentPart media
 
     -- Convert a MediaAttachment to OpenAI content part format
     mediaAttachmentToContentPart :: MediaAttachment -> Aeson.Value
     mediaAttachmentToContentPart media =
         let isPdf = "application/pdf" `Text.isPrefixOf` media.mediaMimeType
          in if isPdf
-            then -- PDF files use file_data format
-                Aeson.object
-                    [ "type" .= ("file" :: Text)
-                    , "file"
-                        .= Aeson.object
-                            [ "filename" .= maybe "document.pdf" id media.mediaFilename
-                            , "file_data" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                            ]
-                    ]
-            else -- Images and other media use image_url format
-                Aeson.object
-                    [ "type" .= ("image_url" :: Text)
-                    , "image_url"
-                        .= Aeson.object
-                            [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                            ]
-                    ]
+                then -- PDF files use file_data format
+                    Aeson.object
+                        [ "type" .= ("file" :: Text)
+                        , "file"
+                            .= Aeson.object
+                                [ "filename" .= maybe "document.pdf" id media.mediaFilename
+                                , "file_data" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                ]
+                        ]
+                else -- Images and other media use image_url format
+                    Aeson.object
+                        [ "type" .= ("image_url" :: Text)
+                        , "image_url"
+                            .= Aeson.object
+                                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                ]
+                        ]
 
     -- Convert a tool call/response pair to OpenAI message format
     toolResponseToMessages :: (LlmToolCall, UserToolResponse) -> [Aeson.Value]
@@ -322,23 +323,23 @@ mkOpenAICompletion config completion = do
     contentPartToOpenAI (MediaPart media) =
         let isPdf = "application/pdf" `Text.isPrefixOf` media.mediaMimeType
          in if isPdf
-            then -- PDF files use file_data format
-                Aeson.object
-                    [ "type" .= ("file" :: Text)
-                    , "file"
-                        .= Aeson.object
-                            [ "filename" .= maybe "document.pdf" id media.mediaFilename
-                            , "file_data" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                            ]
-                    ]
-            else -- Images and other media use image_url format
-                Aeson.object
-                    [ "type" .= ("image_url" :: Text)
-                    , "image_url"
-                        .= Aeson.object
-                            [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                            ]
-                    ]
+                then -- PDF files use file_data format
+                    Aeson.object
+                        [ "type" .= ("file" :: Text)
+                        , "file"
+                            .= Aeson.object
+                                [ "filename" .= maybe "document.pdf" id media.mediaFilename
+                                , "file_data" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                ]
+                        ]
+                else -- Images and other media use image_url format
+                    Aeson.object
+                        [ "type" .= ("image_url" :: Text)
+                        , "image_url"
+                            .= Aeson.object
+                                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                ]
+                        ]
 
     -- Add flavor-specific fields to the payload
     flavorSpecificFields :: OpenAI.ModelFlavor -> [(Aeson.Key, Aeson.Value)]
@@ -407,4 +408,3 @@ parseToolCall_openAI val =
                                     }
                         _ -> Nothing
                 _ -> Nothing
-
