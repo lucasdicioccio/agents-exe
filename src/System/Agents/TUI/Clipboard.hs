@@ -245,8 +245,9 @@ readClipboard WaylandBackend = readWaylandClipboard
 readClipboard MacOSBackend = readMacOSClipboard
 readClipboard WindowsBackend = readWindowsClipboard
 
--- | Read from X11 clipboard using xclip or xsel.
--- Uses TARGETS to detect image formats first, falling back to default text.
+{- | Read from X11 clipboard using xclip or xsel.
+Uses TARGETS to detect image formats first, falling back to default text.
+-}
 readX11Clipboard :: IO (Maybe ByteString)
 readX11Clipboard = do
     hasXclip <- hasCommand "xclip"
@@ -258,8 +259,9 @@ readX11Clipboard = do
                 then readWithTool "xsel" ["--clipboard", "--output"]
                 else pure Nothing
 
--- | Read X11 clipboard using xclip with image target detection.
--- First queries available TARGETS, then prioritizes image targets.
+{- | Read X11 clipboard using xclip with image target detection.
+First queries available TARGETS, then prioritizes image targets.
+-}
 readX11WithXclip :: IO (Maybe ByteString)
 readX11WithXclip = do
     -- Query available targets
@@ -273,8 +275,9 @@ readX11WithXclip = do
                 Nothing -> readWithTool "xclip" ["-selection", "clipboard", "-o"]
         Nothing -> readWithTool "xclip" ["-selection", "clipboard", "-o"]
 
--- | Query available X11 clipboard targets using xclip.
--- Returns a list of available target strings.
+{- | Query available X11 clipboard targets using xclip.
+Returns a list of available target strings.
+-}
 readX11Targets :: IO (Maybe [String])
 readX11Targets = do
     result <- readProcessWithExitCode "xclip" ["-selection", "clipboard", "-o", "-target", "TARGETS"] ""
@@ -284,8 +287,9 @@ readX11Targets = do
             pure $ Just targets
         _ -> pure Nothing
 
--- | Find an image target from the list of available targets.
--- Prioritizes common image formats like image/png, image/jpeg, etc.
+{- | Find an image target from the list of available targets.
+Prioritizes common image formats like image/png, image/jpeg, etc.
+-}
 findImageTarget :: [String] -> Maybe String
 findImageTarget targets =
     -- Priority order for image formats
@@ -705,4 +709,3 @@ cleanupClipboardTempFiles = handle (\(_ :: IOException) -> pure ()) $ do
     tempDir <- getTemporaryDirectory
     let clipDir = tempDir </> clipboardTempDir
     removeFile clipDir
-

@@ -72,9 +72,9 @@ import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Base64 as B64
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isInfixOf)
 import Data.Maybe (catMaybes)
@@ -84,7 +84,7 @@ import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
 import qualified Data.Time as Time
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Directory (getCurrentDirectory, doesFileExist)
+import System.Directory (doesFileExist, getCurrentDirectory)
 import System.Environment (getEnvironment, lookupEnv)
 import System.FilePath (takeExtension)
 import System.IO.Error (isDoesNotExistError)
@@ -93,7 +93,7 @@ import System.Posix.User (getEffectiveGroupID, getEffectiveUserID, getUserEntryF
 import qualified System.Process as Process
 
 import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..))
-import System.Agents.Media.Types (MediaType (..), ImageType (..), AudioType (..), VideoType (..), ApplicationType (..), TextSubtype (..))
+import System.Agents.Media.Types (ApplicationType (..), AudioType (..), ImageType (..), MediaType (..), TextSubtype (..), VideoType (..))
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -390,13 +390,14 @@ executeAttachFile tracer toolbox filePath = do
 
                                             runTracer tracer (FileAttachSuccessTrace filePath mediaType fileSize)
 
-                                            pure $ Right $
-                                                AttachFileResult
-                                                    { attachFilePath = filePath
-                                                    , attachMimeType = mimeType
-                                                    , attachBase64Data = base64Data
-                                                    , attachFileSize = fileSize
-                                                    }
+                                            pure $
+                                                Right $
+                                                    AttachFileResult
+                                                        { attachFilePath = filePath
+                                                        , attachMimeType = mimeType
+                                                        , attachBase64Data = base64Data
+                                                        , attachFileSize = fileSize
+                                                        }
 
 -------------------------------------------------------------------------------
 -- Query Execution
@@ -840,4 +841,3 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
-

@@ -66,13 +66,14 @@ module System.Agents.ToolRegistration (
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Base64 as B64
 import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 
 import Prod.Tracer (Tracer, contramap)
 import qualified Prod.Tracer as Prod
@@ -1357,13 +1358,19 @@ systemTool box =
                 result <- SystemTools.executeAttachFile (Prod.contramap SystemToolsTrace tracer) box (Text.unpack filePath)
                 case result of
                     Left err -> pure $ SystemToolError call err
-                    Right _attachResult -> do
+                    Right attachResult -> do
                         -- Convert AttachFileResult to MediaAttachment and return as BlobToolSuccess
                         let mediaType = SystemTools.detectMediaType (Text.unpack filePath)
                         case mediaType of
                             Nothing -> pure $ SystemToolError call (SystemTools.SystemInfoError "Could not detect media type")
                             Just mt -> do
-                                pure $ BlobToolSuccess call BS.empty (Just mt)
+                                -- Decode base64 data back to raw bytes for BlobToolSuccess
+                                let base64Data = SystemTools.attachBase64Data attachResult
+                                case B64.decode (Text.encodeUtf8 base64Data) of
+                                    Left err ->
+                                        pure $ SystemToolError call (SystemTools.SystemInfoError $ "Failed to decode base64: " <> Text.pack err)
+                                    Right bytes ->
+                                        pure $ BlobToolSuccess call bytes (Just mt)
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'filepath' parameter for attach-file capability")
 
 -- | Builder for a DeveloperToolbox-based tool.
@@ -1482,4 +1489,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-

@@ -976,7 +976,6 @@ handleOpenAttachmentDialog = do
             -- Set focus to file path input
             tuiUI . uiFocusRing %= focusSetCurrent FilePathInputWidget
 
-
 -------------------------------------------------------------------------------
 -- Status Message Helpers
 -------------------------------------------------------------------------------

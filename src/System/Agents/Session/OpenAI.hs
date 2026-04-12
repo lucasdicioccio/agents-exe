@@ -296,13 +296,14 @@ mkOpenAICompletion config completion = do
                         [ "role" .= ("tool" :: Text)
                         , "tool_call_id" .= toolCallId
                         , "content"
-                            .= Aeson.object
-                                [ "type" .= ("image_url" :: Text)
-                                , "image_url"
-                                    .= Aeson.object
-                                        [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                                        ]
-                                ]
+                            .= [ Aeson.object
+                                    [ "type" .= ("image_url" :: Text)
+                                    , "image_url"
+                                        .= Aeson.object
+                                            [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
+                                            ]
+                                    ]
+                               ]
                         ]
                     ]
                 MixedResponse parts ->
