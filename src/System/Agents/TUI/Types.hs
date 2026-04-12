@@ -8,6 +8,7 @@ module System.Agents.TUI.Types where
 import Brick.BChan (BChan)
 import Brick.Focus (FocusRing, focusRing)
 import Brick.Widgets.Edit (Editor, editorText)
+import Brick.Widgets.FileBrowser (FileBrowser)
 import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
@@ -113,8 +114,10 @@ makeLenses ''TurnNavigationState
 data AttachmentDialogState
     = -- | No dialog is open
       AttachmentDialogClosed
-    | -- | Path input dialog is open
+    | -- | Path input dialog is open (legacy text input)
       AttachmentDialogPathInput
+    | -- | FileBrowser widget dialog is open
+      AttachmentDialogFileBrowser
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -386,7 +389,9 @@ data UIState = UIState
     , _attachmentDialogState :: AttachmentDialogState
     -- ^ Current state of the attachment dialog
     , _filePathInput :: Editor Text WidgetName
-    -- ^ Editor for file path input (Ctrl+F dialog)
+    -- ^ Editor for file path input (Ctrl+F dialog) - legacy fallback
+    , _fileBrowser :: Maybe (FileBrowser WidgetName)
+    -- ^ FileBrowser widget state for file selection
     , _selectedAttachmentIndex :: Maybe Int
     -- ^ Index of currently selected attachment in the list (Nothing = none selected)
     }
@@ -444,6 +449,7 @@ initUIState agents loadedSessions =
         , _attachedFiles = Map.empty
         , _attachmentDialogState = AttachmentDialogClosed
         , _filePathInput = editorText FilePathInputWidget (Just 1) ""
+        , _fileBrowser = Nothing
         , _selectedAttachmentIndex = Nothing
         }
 

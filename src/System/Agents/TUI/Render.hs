@@ -10,6 +10,15 @@ import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel, hBorder)
 import Brick.Widgets.Center (center)
 import Brick.Widgets.Edit (renderEditor)
+import Brick.Widgets.FileBrowser (
+    fileBrowserAttr,
+    fileBrowserCurrentDirectoryAttr,
+    fileBrowserDirectoryAttr,
+    fileBrowserRegularFileAttr,
+    fileBrowserSelectedAttr,
+    fileBrowserSelectionInfoAttr,
+    renderFileBrowser,
+ )
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.List (intersperse)
@@ -136,6 +145,7 @@ tui_appDraw :: TuiState -> [Widget N]
 tui_appDraw st =
     case st ^. tuiUI . attachmentDialogState of
         AttachmentDialogPathInput -> [renderFilePathDialog st, render_ui st]
+        AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
 
 {- | Render the main UI based on current state.
@@ -211,7 +221,7 @@ renderAgentsTab st =
         Just AgentInfoWidget -> render_agentDetail st
         _ -> render_agentDetail st
 
--- | Render the Chats tab content (conversation area).
+-- | Render the Chats tab content.
 renderChatsTab :: TuiState -> Widget N
 renderChatsTab st =
     case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
@@ -558,7 +568,7 @@ formatAttachmentSize base64Data =
      in formatBytes originalBytes
 
 -------------------------------------------------------------------------------
--- File Path Dialog Rendering
+-- File Path Dialog Rendering (Legacy)
 -------------------------------------------------------------------------------
 
 -- | Render the file path input dialog overlay.
@@ -578,6 +588,27 @@ renderFilePathDialog st =
                     , txt ""
                     , txt "Enter: confirm  Esc: cancel"
                     ]
+
+-------------------------------------------------------------------------------
+-- File Browser Dialog Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the file browser dialog overlay.
+renderFileBrowserDialog :: TuiState -> Widget N
+renderFileBrowserDialog st =
+    case st ^. tuiUI . fileBrowser of
+        Nothing -> renderFilePathDialog st -- Fallback to text input if browser not initialized
+        Just fb ->
+            center $
+                withAttr dialogAttr $
+                    borderWithLabel (txt " Attach File (Ctrl+F) ") $
+                        vBox
+                            [ hLimit 80 $
+                                vLimit 20 $
+                                    renderFileBrowser True fb -- True = has focus
+                            , txt ""
+                            , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
+                            ]
 
 -------------------------------------------------------------------------------
 -- Queued Messages Management Rendering
@@ -980,4 +1011,11 @@ tui_appAttrMap _ =
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
+        , -- FileBrowser attributes
+          (fileBrowserAttr, Vty.defAttr)
+        , (fileBrowserCurrentDirectoryAttr, BrickUtil.fg Vty.cyan)
+        , (fileBrowserSelectionInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (fileBrowserSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
+        , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
+        , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]

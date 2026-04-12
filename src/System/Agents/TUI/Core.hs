@@ -45,6 +45,7 @@ module System.Agents.TUI.Core (
     attachedFiles,
     attachmentDialogState,
     filePathInput,
+    fileBrowser,
     selectedAttachmentIndex,
     coreAgents,
     coreConversations,
