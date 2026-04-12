@@ -62,6 +62,8 @@ data LlmCompletion = LlmCompletion
     , completeConversationHistory :: [Turn]
     , completeMedia :: [MediaAttachment]
     -- ^ Additional media attachments for multi-modal LLMs
+    , completeSessionId :: Maybe SessionId
+    -- ^ Optional session ID for prompt caching (used as prompt_cache_key)
     }
     deriving (Show, Eq, Ord)
 
@@ -146,3 +148,4 @@ type OnSessionProgress = SessionProgress -> IO ()
 -- | A no-op session progress handler for when tracking is not needed.
 ignoreSessionProgress :: OnSessionProgress
 ignoreSessionProgress = const (pure ())
+

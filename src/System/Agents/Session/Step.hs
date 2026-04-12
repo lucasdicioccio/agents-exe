@@ -176,7 +176,7 @@ naiveStep sess0 = do
                         let sTools0 = userTurn.userTools
                         let uQuery0 = userTurn.userQuery
                         let tAnswers0 = userTurn.userToolResponses
-                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [])
+                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
 
 -- | Step function that stops when the LLM returns no tool calls.
 naiveTilNoToolCallStep :: Session -> IO (Action (LlmTurnContent, Session))
@@ -193,7 +193,7 @@ naiveTilNoToolCallStep sess = do
                     let sTools0 = userTurn.userTools
                     let uQuery0 = userTurn.userQuery
                     let tAnswers0 = userTurn.userToolResponses
-                    pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [])
+                    pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
                 LlmTurn llmTurn _mUsage ->
                     -- Last turn was LLM turn
                     if null llmTurn.llmToolCalls
@@ -203,3 +203,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+
