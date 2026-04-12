@@ -71,6 +71,7 @@ agents-exe run [OPTIONS]
 |--------|-------------|
 | `--session-file FILE` | Resume from existing session |
 | `--thinking TARGET` | Output thinking: `none`, `stdout`, `stderr` (default: `none`) |
+| `-m, --media MEDIA` | Attach media file (can be specified multiple times) |
 | `--prompt TEXT` | Initial prompt text |
 | `--file FILE` | Read prompt from file |
 | `--shell COMMAND` | Use shell command output as prompt |
@@ -82,6 +83,29 @@ agents-exe run [OPTIONS]
 | `--session-m FILE` | Inject session at medium verbosity |
 | `--session-l FILE` | Inject session at high verbosity |
 | `--session-xl FILE` | Inject session at maximum verbosity |
+
+**Media Attachment Format:**
+
+The `-m, --media` option accepts file paths with optional MIME type:
+
+```bash
+# Auto-detect MIME type from extension
+agents-exe run -m /path/to/image.png --prompt "Describe this image"
+
+# Explicit MIME type (semicolon separator)
+agents-exe run -m "image/jpeg;/path/to/photo.jpg" --prompt "Analyze this photo"
+```
+
+**Supported Media Types:**
+
+| Category | Extensions | MIME Types |
+|----------|------------|------------|
+| **Images** | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg` | `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml` |
+| **Documents** | `.pdf`, `.txt`, `.md`, `.json`, `.xml` | `application/pdf`, `text/plain`, `text/markdown`, `application/json`, `application/xml` |
+| **Audio** | `.mp3`, `.wav`, `.ogg`, `.aac`, `.flac` | `audio/mp3`, `audio/wav`, `audio/ogg`, `audio/aac`, `audio/flac` |
+| **Video** | `.mp4`, `.webm`, `.mov`, `.avi` | `video/mp4`, `video/webm`, `video/quicktime`, `video/avi` |
+
+**Size Limit:** 50MB per file
 
 **Examples:**
 
@@ -114,6 +138,34 @@ agents-exe run \
   --agent-file agent.json \
   --session-m previous-session.json \
   --prompt "Continue from where we left off"
+
+# Attach single image
+agents-exe run \
+  --agent-file vision-agent.json \
+  -m ./screenshot.png \
+  --prompt "What do you see in this image?"
+
+# Attach multiple images
+agents-exe run \
+  --agent-file vision-agent.json \
+  -m ./image1.png \
+  -m ./image2.jpg \
+  -m "image/gif;./animation.gif" \
+  --prompt "Compare these images"
+
+# Attach document for analysis
+agents-exe run \
+  --agent-file document-agent.json \
+  -m ./report.pdf \
+  --prompt "Summarize the key findings"
+
+# Combine media with text from file
+agents-exe run \
+  --agent-file multimodal-agent.json \
+  --prompt "Analyze this diagram and code:" \
+  -m ./diagram.png \
+  --sep4 "----" \
+  --file ./source-code.py
 ```
 
 ### tui
@@ -131,6 +183,8 @@ agents-exe tui [--agent-file FILE...]
 - Session persistence
 - Turn navigation and forking
 - Message queue management
+- File attachments (Ctrl+F)
+- Clipboard paste support (Ctrl+V)
 
 **Keyboard Shortcuts:**
 - `Tab` / `Shift+Tab` - Switch between agents
@@ -140,6 +194,9 @@ agents-exe tui [--agent-file FILE...]
 - `Ctrl+[` / `Ctrl+]` - Previous/Next tab
 - `Ctrl+E` - Pause/unpause conversation
 - `Ctrl+D` (when paused) - Clear queued messages
+- `Ctrl+F` - Attach file
+- `Ctrl+Shift+F` - Clear all attachments
+- `Ctrl+V` - Paste from clipboard
 
 **Examples:**
 
@@ -1131,6 +1188,7 @@ Project-level configuration in `agents-exe.cfg.json`:
 | `AGENTS_API_KEY` | Default API key (overrides file) |
 | `AGENTS_CONFIG_DIR` | Config directory path |
 | `AGENTS_LOG_LEVEL` | Logging verbosity |
+| `AGENT_MD_VIEWER` | External markdown viewer for TUI session viewing |
 
 ## Exit Codes
 
@@ -1203,7 +1261,7 @@ agents-exe run \
 agents-exe session-print ./session.json
 
 # List all tool calls from the session
-agents-exe list-tool-calls ./session.json
+agents-exe list-tool-calls ~/.config/agents-exe/sessions/session-*.json
 
 # Replay a specific tool call for debugging
 agents-exe replay-tool-call \
@@ -1242,6 +1300,38 @@ agents-exe session-search "TODO" --preview 3
 agents-exe session-search "refactor" --auto --limit 10
 ```
 
+### Multi-Modal Workflow
+
+```bash
+# Analyze a screenshot with a vision-capable agent
+agents-exe run \
+    --agent-file ./vision-agent.json \
+    -m ./screenshot.png \
+    --prompt "What UI issues do you see in this screenshot?"
+
+# Analyze multiple images
+agents-exe run \
+    --agent-file ./design-agent.json \
+    -m ./mockup-v1.png \
+    -m ./mockup-v2.png \
+    --prompt "Compare these two design mockups and recommend which to use"
+
+# Analyze a PDF document
+agents-exe run \
+    --agent-file ./document-agent.json \
+    -m ./report.pdf \
+    --prompt "Summarize the key findings and recommendations"
+
+# Combine image with code for debugging
+agents-exe run \
+    --agent-file ./debug-agent.json \
+    --prompt "This error appears in the UI:" \
+    -m ./error-screenshot.png \
+    --sep4 "----" \
+    --prompt "Here's the relevant code:" \
+    --file ./src/Main.hs
+```
+
 ### Automation
 
 ```bash
@@ -1265,6 +1355,12 @@ agents-exe run \
     --agent-file ./summarizer.json \
     --shell "cat /var/log/app.log | tail -100" \
     --prompt "Summarize any errors or warnings"
+
+# Automated image analysis with timestamp
+agents-exe run \
+    --agent-file ./monitor-agent.json \
+    -m ./screenshots/$(date +%Y%m%d-%H%M%S).png \
+    --prompt "Check for any alerts or errors in this status dashboard"
 ```
 
 ### Developer Workflow
@@ -1288,6 +1384,12 @@ echo '{"input": "test"}' | agents-exe tool-call my-validator
 agents-exe new agent dev-assistant
 # (add DeveloperToolbox to builtinToolboxes)
 # Now the agent can validate tools and scaffold new ones!
+
+# Create a tool that outputs media
+agents-exe new tool chart-generator bash ./tools/chart-gen
+# Add to describe output:
+#   "output-media-type": "image/png"
+# Now the tool's output is treated as a PNG image
 ```
 
 ### Debugging Tool Calls
@@ -1315,4 +1417,11 @@ agents-exe replay-tool-call \
   --tool-call 0 \
   --tool ./tools/read-file.sh
 ```
+
+## Related Documentation
+
+- [tools.md](tools.md) - Tool system details
+- [tui.md](tui.md) - Terminal UI documentation
+- [sessions.md](sessions.md) - Session management
+- [architecture.md](architecture.md) - System architecture
 
