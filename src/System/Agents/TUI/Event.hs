@@ -25,7 +25,7 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens (_Just, to, use, (%=), (.=), (^.))
+import Control.Lens (to, use, (%=), (.=), (^.), _Just)
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (toLower)
@@ -1812,4 +1812,3 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
-

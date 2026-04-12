@@ -603,8 +603,9 @@ renderFileBrowserDialog st =
                 withAttr dialogAttr $
                     borderWithLabel (txt " Attach File (Ctrl+F) ") $
                         vBox
-                            [ hLimit 80 $ vLimit 20 $
-                                renderFileBrowser True fb -- True = has focus
+                            [ hLimit 80 $
+                                vLimit 20 $
+                                    renderFileBrowser True fb -- True = has focus
                             , txt ""
                             , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
                             ]
@@ -1010,12 +1011,11 @@ tui_appAttrMap _ =
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
-        -- FileBrowser attributes
-        , (fileBrowserAttr, Vty.defAttr)
+        , -- FileBrowser attributes
+          (fileBrowserAttr, Vty.defAttr)
         , (fileBrowserCurrentDirectoryAttr, BrickUtil.fg Vty.cyan)
         , (fileBrowserSelectionInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (fileBrowserSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
-
