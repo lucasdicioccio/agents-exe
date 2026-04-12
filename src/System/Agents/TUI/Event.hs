@@ -13,14 +13,22 @@ import Brick
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing, focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
+import Brick.Widgets.FileBrowser (
+    fileBrowserCursor,
+    fileInfoFilePath,
+    handleFileBrowserEvent,
+    newFileBrowser,
+    selectNonDirectories,
+ )
 import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens (to, use, (%=), (.=), (^.))
+import Control.Lens (_Just, to, use, (%=), (.=), (^.))
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Char (toLower)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -32,7 +40,7 @@ import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath (takeFileName, (<.>))
+import System.FilePath (takeExtension, takeFileName, (<.>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
@@ -91,6 +99,7 @@ import System.Agents.TUI.Types (
     corePausedConversations,
     currentTab,
     eventChan,
+    fileBrowser,
     filePathInput,
     messageEditor,
     navSelectedTurnIndex,
@@ -158,7 +167,7 @@ defaultHelpContent =
     , "  Ctrl+E       - Pause/unpause conversation"
     , ""
     , "Attachments:"
-    , "  Ctrl+F       - Attach file (opens path input dialog)"
+    , "  Ctrl+F       - Attach file (opens file browser)"
     , "  Ctrl+Shift+F - Clear all attachments"
     , "  Ctrl+V       - Paste from clipboard (images/files)"
     , "  Del/Backspace- Remove selected attachment"
@@ -342,12 +351,17 @@ tui_appHandleEvent tracer ev = do
     dialogState <- use (tuiUI . attachmentDialogState)
     case dialogState of
         AttachmentDialogPathInput -> handleFilePathDialogEvent ev
+        AttachmentDialogFileBrowser -> handleFileBrowserDialogEvent ev
         AttachmentDialogClosed -> do
             -- Check if we're in turn navigation mode
             mNavState <- use (tuiUI . turnNavigation)
             case mNavState of
                 Just navState -> handleTurnNavigationEvent tracer navState ev
                 Nothing -> handleNormalEvent tracer ev
+
+-------------------------------------------------------------------------------
+-- File Path Dialog Event Handler (Legacy)
+-------------------------------------------------------------------------------
 
 -- | Handle events when file path dialog is open.
 handleFilePathDialogEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
@@ -395,6 +409,138 @@ handleConfirmFileAttachment = do
                             closeFilePathDialog
                             showStatus StatusInfo $ "Attached: " <> maybe "unnamed" id attachment.mediaFilename
 
+-------------------------------------------------------------------------------
+-- File Browser Dialog Event Handler
+-------------------------------------------------------------------------------
+
+-- | Handle events when file browser dialog is open.
+handleFileBrowserDialogEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
+handleFileBrowserDialogEvent ev =
+    case ev of
+        -- Cancel with Esc
+        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
+            closeFileBrowserDialog
+            showStatus StatusInfo "Attachment cancelled"
+        -- Confirm selection with Enter
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            handleFileBrowserSelection
+        -- Handle FileBrowser-specific events (navigation, search, etc.)
+        VtyEvent vtyEv -> do
+            mFb <- use (tuiUI . fileBrowser)
+            case mFb of
+                Nothing -> pure () -- Should not happen
+                Just _ -> do
+                    -- Handle file browser events (navigation, search, etc.)
+                    -- Note: handleFileBrowserEvent works in EventM and modifies the browser state
+                    zoom (tuiUI . fileBrowser . _Just) $ handleFileBrowserEvent vtyEv
+        _ -> pure ()
+
+-- | Handle file selection from FileBrowser.
+handleFileBrowserSelection :: EventM N TuiState ()
+handleFileBrowserSelection = do
+    mFb <- use (tuiUI . fileBrowser)
+    case mFb of
+        Nothing -> do
+            closeFileBrowserDialog
+            showStatus StatusError "File browser not initialized"
+        Just fb -> do
+            -- Get selected file from cursor position
+            case fileBrowserCursor fb of
+                Nothing -> do
+                    closeFileBrowserDialog
+                    showStatus StatusWarning "No file selected"
+                Just fileInfo -> do
+                    let filePath = fileInfoFilePath fileInfo
+                    -- Load the file as MediaAttachment
+                    result <- liftIO $ loadFileAsAttachment filePath
+                    case result of
+                        Left err -> do
+                            closeFileBrowserDialog
+                            showStatus StatusError $ Text.pack err
+                        Right attachment -> do
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> do
+                                    closeFileBrowserDialog
+                                    showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                                    closeFileBrowserDialog
+                                    showStatus StatusInfo $ "Attached: " <> maybe "unnamed" id attachment.mediaFilename
+
+-- | Load file as MediaAttachment.
+loadFileAsAttachment :: FilePath -> IO (Either String MediaAttachment)
+loadFileAsAttachment filePath = do
+    -- Detect MIME type from extension
+    let mimeType = detectMimeType filePath
+    -- Read file content
+    fileContent <- ByteString.readFile filePath
+    let base64Data = TextEncoding.decodeUtf8 $ Base64.encode fileContent
+    let filename = Just $ Text.pack $ takeFileName filePath
+    pure $ Right $ MediaAttachment mimeType base64Data filename
+
+-- | Simple MIME type detection from file extension.
+detectMimeType :: FilePath -> Text.Text
+detectMimeType fp =
+    let lowerFp = map toLower fp
+        ext = takeExtension lowerFp
+     in case ext of
+            ".png" -> "image/png"
+            ".jpg" -> "image/jpeg"
+            ".jpeg" -> "image/jpeg"
+            ".gif" -> "image/gif"
+            ".webp" -> "image/webp"
+            ".svg" -> "image/svg+xml"
+            ".bmp" -> "image/bmp"
+            ".tiff" -> "image/tiff"
+            ".mp3" -> "audio/mpeg"
+            ".wav" -> "audio/wav"
+            ".ogg" -> "audio/ogg"
+            ".mp4" -> "video/mp4"
+            ".webm" -> "video/webm"
+            ".mov" -> "video/quicktime"
+            ".pdf" -> "application/pdf"
+            ".json" -> "application/json"
+            ".xml" -> "application/xml"
+            ".zip" -> "application/zip"
+            ".gz" -> "application/gzip"
+            ".tar" -> "application/x-tar"
+            ".txt" -> "text/plain"
+            ".md" -> "text/markdown"
+            ".html" -> "text/html"
+            ".css" -> "text/css"
+            ".js" -> "text/javascript"
+            ".py" -> "text/x-python"
+            ".hs" -> "text/x-haskell"
+            ".c" -> "text/x-c"
+            ".cpp" -> "text/x-c++"
+            ".rs" -> "text/x-rust"
+            ".go" -> "text/x-go"
+            ".sh" -> "text/x-shellscript"
+            ".yaml" -> "text/yaml"
+            ".yml" -> "text/yaml"
+            _ -> "application/octet-stream"
+
+-- | Close file browser dialog and cleanup.
+closeFileBrowserDialog :: EventM N TuiState ()
+closeFileBrowserDialog = do
+    tuiUI . attachmentDialogState .= AttachmentDialogClosed
+    tuiUI . fileBrowser .= Nothing
+
+-- | Open file browser dialog.
+openFileBrowserDialog :: EventM N TuiState ()
+openFileBrowserDialog = do
+    -- Create new file browser with "select non-directories" predicate
+    -- This allows navigation into directories but only files are "selectable"
+    fb <- liftIO $ newFileBrowser selectNonDirectories FilePathInputWidget Nothing
+    tuiUI . fileBrowser .= Just fb
+    tuiUI . attachmentDialogState .= AttachmentDialogFileBrowser
+
+-------------------------------------------------------------------------------
+-- Media Loading
+-------------------------------------------------------------------------------
+
 {- | Load a media attachment from a file path.
 Supports explicit MIME type via "mime/type;path" format or auto-detection.
 -}
@@ -417,18 +563,27 @@ loadMediaAttachment input = do
                     let filename = Just $ Text.pack $ takeFileName filePath
                     pure $ Right $ MediaAttachment mimeType base64Data filename
 
--- | Close the file path dialog and reset input.
+-- | Close the file path dialog (legacy) and reset input.
 closeFilePathDialog :: EventM N TuiState ()
 closeFilePathDialog = do
     tuiUI . attachmentDialogState .= AttachmentDialogClosed
     tuiUI . filePathInput . editContentsL .= TextZipper.textZipper [] Nothing
 
--- | Open the file path dialog.
-openFilePathDialog :: EventM N TuiState ()
-openFilePathDialog = do
+-- | Open the file path dialog (legacy) - kept for potential future use.
+openFilePathDialogLegacy :: EventM N TuiState ()
+openFilePathDialogLegacy = do
     tuiUI . attachmentDialogState .= AttachmentDialogPathInput
     -- Pre-fill with a helpful example
     tuiUI . filePathInput . editContentsL .= TextZipper.textZipper ["/path/to/file.png"] (Just 1)
+
+-- | Open the file browser dialog (replaces legacy text input).
+openFilePathDialog :: EventM N TuiState ()
+openFilePathDialog = do
+    openFileBrowserDialog
+
+-------------------------------------------------------------------------------
+-- Turn Navigation Event Handler
+-------------------------------------------------------------------------------
 
 -- | Handle events when in turn navigation mode.
 handleTurnNavigationEvent :: Tracer IO Trace -> TurnNavigationState -> BrickEvent N AppEvent -> EventM N TuiState ()
@@ -524,6 +679,10 @@ handleForkAtTurn tracer navState = do
             tuiUI . turnNavigation .= Nothing
         Nothing ->
             showStatus StatusError "No agent selected for forked conversation"
+
+-------------------------------------------------------------------------------
+-- Normal Event Handler
+-------------------------------------------------------------------------------
 
 -- | Handle normal (non-navigation) events.
 handleNormalEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
@@ -1653,3 +1812,4 @@ handleSendMessage = do
 -- | Initialize help content in UIState.
 initHelpContent :: UIState -> UIState
 initHelpContent uiState = uiState{_helpContent = defaultHelpContent}
+

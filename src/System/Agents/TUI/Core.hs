@@ -45,6 +45,7 @@ module System.Agents.TUI.Core (
     attachedFiles,
     attachmentDialogState,
     filePathInput,
+    fileBrowser,
     selectedAttachmentIndex,
     coreAgents,
     coreConversations,
@@ -272,3 +273,4 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+
