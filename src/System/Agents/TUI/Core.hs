@@ -112,7 +112,7 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
 import System.Agents.TUI.Event (
-    Trace(..),
+    Trace (..),
     cycleTabBackward,
     cycleTabForward,
     defaultHelpContent,
