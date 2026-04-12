@@ -1,6 +1,6 @@
 # Terminal UI (TUI)
 
-The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, and a tabbed interface for organizing different views.
+The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, and a tabbed interface for organizing different views.
 
 ## Overview
 
@@ -65,13 +65,14 @@ The Chats tab is for active conversations:
   - `⟳` - Active (agent is processing)
   - `●` - Waiting for input (unread)
   - `⏸` - Paused
-- **Main area**: Message editor, queued messages (when paused), and conversation history
+  - `📎` - Has file attachments
+- **Main area**: Message editor, attachment list, queued messages (when paused), and conversation history
 
 ### History Tab
 
 The History tab shows saved sessions:
 - **Left sidebar**: List of saved sessions from the session store
-- **Main area**: Session content viewer
+- **Main area**: Session content viewer with search functionality
 
 ### Help Tab
 
@@ -116,6 +117,14 @@ data UIState = UIState
     -- ^ When Just, we are in turn navigation mode
     , _queuedMessagesFocus :: Maybe Int
     -- ^ Index of currently selected queued message
+    , _attachedFiles :: Map ConversationId [MediaAttachment]
+    -- ^ Media attachments per conversation
+    , _attachmentDialogState :: AttachmentDialogState
+    -- ^ File attachment dialog state
+    , _filePathInput :: Editor Text WidgetName
+    -- ^ Editor for file path input
+    , _selectedAttachmentIndex :: Maybe Int
+    -- ^ Selected attachment index
     , ...
     }
 
@@ -126,6 +135,210 @@ data TUIState = TUIState
     , _sessionConfig :: SessionConfig
     }
 ```
+
+## File Attachments
+
+The TUI supports attaching files to messages for multi-modal LLM interactions.
+
+### Attaching Files
+
+**Via File Path Input:**
+- Press `Ctrl+F` to open the file path input dialog
+- Type or paste the absolute path to the file
+- Press `Enter` to attach, `Esc` to cancel
+
+**Supported file path formats:**
+```
+/path/to/image.png                    # Auto-detect MIME type
+image/png;/path/to/image.png          # Explicit MIME type
+```
+
+### Attachment Display
+
+Attached files are displayed below the message editor:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Message [2 attachments]                                     │
+├─────────────────────────────────────────────────────────────┤
+│ > Your message here...                                      │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Attachments (2) - Del/Backspace: remove | Ctrl+Shift+F: clear all│
+│   📎 screenshot.png (image/png, 245KB)                     │
+│ ▶ 📎 report.pdf (application/pdf, 1.2MB)                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Managing Attachments
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+F` | Open file path input dialog |
+| `Ctrl+Shift+F` | Clear all attachments |
+| `Del` / `Backspace` | Remove selected attachment |
+| `Up` / `Down` | Select attachment (when focus is on attachment list) |
+
+### Supported File Types
+
+The TUI can attach any file type. MIME type detection is automatic based on file extension:
+
+| Category | Extensions | MIME Types |
+|----------|------------|------------|
+| **Images** | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg` | `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml` |
+| **Documents** | `.pdf`, `.txt`, `.md`, `.json`, `.xml` | `application/pdf`, `text/plain`, `text/markdown`, `application/json`, `application/xml` |
+| **Audio** | `.mp3`, `.wav`, `.ogg`, `.aac`, `.flac` | `audio/mp3`, `audio/wav`, `audio/ogg`, `audio/aac`, `audio/flac` |
+| **Video** | `.mp4`, `.webm`, `.mov`, `.avi` | `video/mp4`, `video/webm`, `video/quicktime`, `video/avi` |
+| **Archives** | `.zip` | `application/zip` |
+
+**Size Limit:** 50MB per file
+
+### Attachment State
+
+```haskell
+-- Attachments are stored per conversation
+type AttachedFiles = Map ConversationId [MediaAttachment]
+
+data MediaAttachment = MediaAttachment
+    { mediaMimeType :: Text        -- e.g., "image/png"
+    , mediaBase64Data :: Text      -- Base64-encoded content
+    , mediaFilename :: Maybe Text  -- Original filename
+    }
+
+-- Dialog state for file attachment
+data AttachmentDialogState
+    = AttachmentDialogClosed
+    | AttachmentDialogPathInput
+```
+
+### Attachment Flow
+
+```
+User presses Ctrl+F
+       │
+       ▼
+┌──────────────────┐
+│ Open path dialog │
+│ (text input)     │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ User enters path │
+│ Presses Enter    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Load file        │
+│ Detect MIME type │
+│ Base64 encode    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Add to           │
+│ attachedFiles    │
+│ map              │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Render in        │
+│ attachment list  │
+└──────────────────┘
+```
+
+## Clipboard Integration
+
+The TUI supports pasting content from the system clipboard, including images, file paths, and text.
+
+### Clipboard Pasting
+
+Press `Ctrl+V` to paste from clipboard:
+
+| Content Type | Action |
+|--------------|--------|
+| **Image** | Save to temp file and attach |
+| **File path** | Attach the file |
+| **Multiple file paths** | Attach all valid files |
+| **Text** | Insert into message editor |
+
+### Platform Support
+
+| Platform | Backend | Required Tools |
+|----------|---------|----------------|
+| **Linux (X11)** | `xclip` or `xsel` | `xclip` or `xsel` |
+| **Linux (Wayland)** | `wl-clipboard` | `wl-paste` |
+| **macOS** | Built-in | `pbpaste` (included) |
+| **Windows** | PowerShell | `powershell.exe` |
+
+### Smart Content Detection
+
+The clipboard module automatically detects content type:
+
+```haskell
+data ClipboardContent
+    = ClipboardImage ByteString Text    -- Image data with MIME type
+    | ClipboardFilePath FilePath        -- Single file path
+    | ClipboardText Text                -- Plain text
+    | ClipboardFilePaths [FilePath]     -- Multiple file paths
+    | ClipboardUnknown                  -- Unsupported content
+```
+
+Detection order:
+1. Check for image data (via magic bytes: PNG `[0m[32m\x89PNG`, JPEG `[0m[32m\xFF\xD8\xFF`, GIF `GIF87a/GIF89a`, WebP `RIFF`)
+2. Check for file paths (valid paths that exist)
+3. Check for multiple file paths (one per line)
+4. Fall back to plain text
+
+### Clipboard Module
+
+```haskell
+-- System.Agents.TUI.Clipboard
+
+-- Detect available backend
+detectBackend :: IO ClipboardBackend
+
+-- Read clipboard content
+readClipboard :: ClipboardBackend -> IO (Maybe ByteString)
+
+-- Detect content type
+detectClipboardContent :: IO (Maybe ClipboardContent)
+
+-- Analyze and convert to action
+analyzeContent :: ClipboardContent -> IO ContentAction
+
+data ContentAction
+    = AttachAsMedia MediaAttachment
+    | PasteAsText Text
+    | AttachMultipleFiles [MediaAttachment]
+    | IgnoreContent
+```
+
+### Image Pasting from Clipboard
+
+When an image is pasted from clipboard:
+
+1. Detect image format from magic bytes
+2. Save to temporary file with appropriate extension
+3. Create `MediaAttachment` with detected MIME type
+4. Attach to current conversation
+5. Show status: "Attached from clipboard: image.png"
+
+**Temporary file location:** `$TMPDIR/agents-exe-clipboard/clipboard-*.png`
+
+**Size limit:** 50MB for clipboard images
+
+### File Drop Support (Terminal Protocols)
+
+The clipboard module also supports file drop events from modern terminals:
+
+| Protocol | Terminal | Support |
+|----------|----------|---------|
+| iTerm2 File Drop | iTerm2 (macOS) | ✅ Supported |
+| Kitty Graphics | Kitty | ✅ Supported |
+| OSC 52 | Various | ✅ Read support |
 
 ## Rendering
 
@@ -161,6 +374,40 @@ render_contentArea st =
         HelpTab -> renderHelpTab st
 ```
 
+### Attachment List Rendering
+
+```haskell
+render_attachmentPanel :: TuiState -> [MediaAttachment] -> Widget N
+render_attachmentPanel st attachments =
+    borderWithFocus
+        st
+        AttachmentListWidget
+        (" Attachments (" <> Text.pack (show $ length attachments) <> ") ")
+        $ vBox
+            [ txt "Del/Backspace: remove | Ctrl+Shift+F: clear all"
+            , txt ""
+            , vBox $ zipWith (render_attachment_item selectedIdx) [0 ..] attachments
+            ]
+
+render_attachment_item :: Maybe Int -> Int -> MediaAttachment -> Widget N
+render_attachment_item selectedIdx idx att =
+    let isSelected = selectedIdx == Just idx
+        marker = if isSelected then "▶ " else "  "
+        filename = maybe "unnamed" id att.mediaFilename
+        mimeType = att.mediaMimeType
+        sizeStr = formatAttachmentSize att.mediaBase64Data
+     in hBox
+         [ txt marker
+         , txt "📎 "
+         , txt filename
+         , txt " ("
+         , withAttr attachmentSizeAttr $ txt mimeType
+         , txt ", "
+         , withAttr attachmentSizeAttr $ txt sizeStr
+         , txt ")"
+         ]
+```
+
 ## Event Handling
 
 ### Tab Switching
@@ -184,6 +431,70 @@ cycleTabForward = do
     -- Update focus ring for the new tab
     mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
     tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
+```
+
+### Attachment Event Handling
+
+```haskell
+-- Handle Ctrl+F for file attachment
+VtyEvent (Vty.EvKey (Vty.KChar 'f') [Vty.MCtrl]) -> do
+    resetQuitConfirmation
+    openFilePathDialog
+
+-- Handle Ctrl+Shift+F to clear all attachments
+VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
+    resetQuitConfirmation
+    handleClearAllAttachments
+
+-- Handle clipboard paste
+VtyEvent (Vty.EvKey (Vty.KChar 'v') [Vty.MCtrl]) -> do
+    resetQuitConfirmation
+    handleClipboardPaste tracer
+```
+
+### Clipboard Paste Handler
+
+```haskell
+handleClipboardPaste :: Tracer IO Trace -> EventM N TuiState ()
+handleClipboardPaste _tracer = do
+    hasSupport <- liftIO hasClipboardSupport
+    if not hasSupport
+        then showStatus StatusError "Clipboard not available - install xclip, wl-clipboard, or pbpaste"
+        else do
+            mContent <- liftIO detectClipboardContent
+            case mContent of
+                Nothing ->
+                    showStatus StatusWarning "Clipboard is empty or inaccessible"
+                Just content -> do
+                    action <- liftIO $ analyzeContent content
+                    case action of
+                        IgnoreContent ->
+                            showStatus StatusWarning "No attachable content in clipboard"
+                        PasteAsText text -> do
+                            -- Insert text into editor
+                            editorContents <- use (tuiUI . messageEditor . editContentsL)
+                            let newContents = TextZipper.insertMany text editorContents
+                            tuiUI . messageEditor . editContentsL .= newContents
+                            showStatus StatusInfo "Text pasted from clipboard"
+                        AttachAsMedia attachment -> do
+                            -- Attach to current conversation
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                                    let filename = maybe "unnamed" id attachment.mediaFilename
+                                    showStatus StatusInfo $ "Attached from clipboard: " <> filename
+                        AttachMultipleFiles attachments -> do
+                            -- Attach multiple files
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId attachments
+                                    showStatus StatusInfo $ "Attached " <> Text.pack (show $ length attachments) <> " files from clipboard"
 ```
 
 ## Turn Navigation
@@ -267,11 +578,11 @@ When paused with queued messages, the Chats tab shows a queue management panel:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Message                                                      │
-│ ┌─────────────────────────────────────────────────────────┐ │
-│ │ User's typed message...                                 │ │
-│ └─────────────────────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────────────────────┤
-│ Queued Messages (2) - Ctrl+D: clear  Del: delete selected │ │
+│ > User's typed message...                                   │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Queued Messages (2) - Ctrl+D: clear  Del: delete selected │
 │ ┌─────────────────────────────────────────────────────────┐ │
 │ │ ▶ First queued message text...                          │ │
 │ │   Second queued message that is longer...               │ │
@@ -287,7 +598,7 @@ When paused with queued messages, the Chats tab shows a queue management panel:
 | Key | Action |
 |-----|--------|
 | `Ctrl+D` | Clear all queued messages |
-| `Del` / `Backspace` | Delete selected message |
+| `Del` / `Backspace` | Delete selected queued message |
 | `Up` | Select previous message |
 | `Down` | Select next message |
 
@@ -346,6 +657,21 @@ data Core = Core
 | `Meta+Enter` | Send message |
 | `Ctrl+E` | Pause/unpause conversation |
 
+### File Attachments
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+F` | Open file path input dialog |
+| `Ctrl+Shift+F` | Clear all attachments |
+| `Del` / `Backspace` | Remove selected attachment |
+| `Up` / `Down` | Select attachment (when focused) |
+
+### Clipboard
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+V` | Paste from clipboard (images, files, text) |
+
 ### Turn Navigation
 
 | Key | Action |
@@ -370,6 +696,15 @@ data Core = Core
 | `Ctrl+P` | Export session to markdown file |
 | `Ctrl+T` | View session in external viewer (chronological) |
 | `Ctrl+R` | View session in external viewer (reverse) |
+
+### Session Search (History Tab)
+
+| Key | Action |
+|-----|--------|
+| `/` | Start search |
+| `n` | Next result |
+| `N` | Previous result |
+| `Esc` | Clear search |
 
 ### Other
 
@@ -451,6 +786,33 @@ Use cases:
 - **Chronological (`Ctrl+t`)**: Best for reviewing the full conversation from start to finish
 - **Antichronological (`Ctrl+r`)**: Best when you care about recent changes and want to see the most recent messages first
 
+## Session Search
+
+The History tab includes session search functionality for finding past conversations.
+
+### Search Interface
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Sessions                                [Search: database] │
+│ ─────────────────────────────────────────────────────────  │
+│  ▶ 2024-01-15 10:30 - database migration                  │
+│    2024-01-14 15:20 - api design                          │
+│  ▶ 2024-01-13 09:00 - database schema review              │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Session View                                                 │
+│ ...selected session content...                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Search Features
+
+- **Real-time filtering**: Sessions are filtered as you type
+- **Full-text search**: Searches across session content
+- **Highlighting**: Matching terms are highlighted
+- **Keyboard navigation**: `n`/`N` to jump between results
+
 ## Running the TUI
 
 ### Main Entry Point
@@ -525,6 +887,9 @@ tui_appAttrMap _ =
         , (queuedMessageAttr, fg yellow)
         , (queuedMessageSelectedAttr, bg blue `withStyle` bold)
         , (selectedTurnAttr, bg blue `withStyle` bold)
+        , (attachmentAttr, fg cyan)
+        , (attachmentSelectedAttr, bg blue `withStyle` bold)
+        , (attachmentSizeAttr, fg white `withStyle` dim)
         ]
 ```
 
@@ -573,6 +938,20 @@ data StatusSeverity
 3. **Agent selection**: Current agent selection used for fork
 4. **Navigation mode**: Enter navigation to review before forking
 
+### File Attachments
+
+1. **Size limits**: Warn users about large files
+2. **MIME detection**: Automatic type detection from extensions
+3. **Visual feedback**: Show attachment count in UI
+4. **Temporary cleanup**: Clipboard images are temporary files
+
+### Clipboard Integration
+
+1. **Graceful degradation**: Handle missing clipboard tools gracefully
+2. **Security**: Validate file paths before attachment
+3. **Size limits**: Prevent memory issues with large clipboard content
+4. **Platform detection**: Auto-detect best clipboard backend
+
 ## Customization
 
 ### Custom Event Handlers
@@ -602,4 +981,16 @@ customProgressBar progress =
         bar = replicate filled '█' ++ replicate (width - filled) '░'
     in withAttr progressAttr $ str $ "[" ++ bar ++ "]"
 ```
+
+## Related Modules
+
+| Module | Purpose |
+|--------|---------|
+| `System.Agents.TUI.Core` | Main TUI application |
+| `System.Agents.TUI.Types` | TUI state and types |
+| `System.Agents.TUI.Render` | Rendering functions |
+| `System.Agents.TUI.Event` | Event handling |
+| `System.Agents.TUI.Clipboard` | Clipboard and drag-and-drop support |
+| `System.Agents.Media.Types` | Media attachment types |
+| `System.Agents.SessionPrint` | Session formatting |
 

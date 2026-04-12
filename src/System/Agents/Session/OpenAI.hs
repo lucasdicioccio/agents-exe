@@ -15,6 +15,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
+import qualified Data.UUID as UUID
 
 import Prod.Tracer (Tracer)
 import qualified System.Agents.HttpClient as HttpClient
@@ -58,12 +59,17 @@ mkOpenAICompletion config completion = do
         let
             tools = map systemToolToOpenAI comp.completeTools
             messages = buildMessages comp
+            -- Convert session ID to text for prompt_cache_key
+            promptCacheKey = case comp.completeSessionId of
+                Just (SessionId uuid) -> Just $ Text.pack $ UUID.toString uuid
+                Nothing -> Nothing
          in
             Aeson.object $
                 [ "model" .= config.cfgModelName
                 , "messages" .= messages
                 ]
                     ++ ["tools" .= tools | not (null tools)]
+                    ++ ["prompt_cache_key" .= key | Just key <- [promptCacheKey]]
                     ++ flavorSpecificFields config.cfgModelFlavor
 
     -- Convert SystemTool (which contains JSON text) to OpenAI Tool.

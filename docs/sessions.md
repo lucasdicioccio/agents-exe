@@ -1,14 +1,15 @@
 # Session Management
 
-Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption and history analysis.
+Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support.
 
 ## Overview
 
 Sessions represent complete conversations between users and agents, including:
 
-- **Session metadata**: IDs, timestamps, agent references
+- **Session metadata**: IDs, timestamps, agent references, version info
 - **Turn history**: Complete conversation turns
 - **Tool calls**: Records of tool invocations and results
+- **Media attachments**: Base64-encoded images, documents, audio, video
 - **Context**: Full conversation state for resumption
 
 ```
@@ -18,17 +19,20 @@ Sessions represent complete conversations between users and agents, including:
 │  SessionId: "uuid"                                          │
 │  ConversationId: "uuid"                                     │
 │  AgentSlug: "my-agent"                                      │
+│  SessionVersion: 1                                          │
 ├─────────────────────────────────────────────────────────────┤
 │  Turns:                                                      │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ Turn 1                                              │   │
 │  │   User: "Hello!"                                    │   │
+│  │   [📎 image.png]                                    │   │
 │  │   Assistant: "Hi there!"                            │   │
 │  └─────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ Turn 2                                              │   │
 │  │   User: "List files"                                │   │
 │  │   Tool: list_files -> ["a.txt", "b.txt"]            │   │
+│  │   [📎 screenshot.png]                               │   │
 │  │   Assistant: "Found 2 files..."                     │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -42,39 +46,180 @@ Sessions represent complete conversations between users and agents, including:
 newtype SessionId = SessionId UUID
 newtype TurnId = TurnId UUID
 
+-- | User query - can include text and media attachments.
+data UserQuery = UserQuery
+    { queryText :: Text
+    -- ^ The text query/prompt
+    , queryMedia :: [MediaAttachment]
+    -- ^ Optional media attachments (images, audio, video, etc.)
+    }
+
+-- | Tool response from the user/agent system to the LLM.
+data UserToolResponse
+    = TextResponse Text                    -- Plain UTF-8 text
+    | JsonResponse Aeson.Value             -- Structured JSON data
+    | MediaResponse MediaAttachment        -- Single binary media (base64-encoded)
+    | MixedResponse [ContentPart]          -- Multi-modal: alternating text and media
+
+-- | Individual part of a mixed multi-modal response.
+data ContentPart
+    = TextPart Text
+    | MediaPart MediaAttachment
+
+-- | A media attachment containing base64-encoded binary data.
+data MediaAttachment = MediaAttachment
+    { mediaMimeType :: Text        -- ^ MIME type (e.g., "image/png")
+    , mediaBase64Data :: Text      -- ^ Base64-encoded content
+    , mediaFilename :: Maybe Text  -- ^ Optional filename
+    }
+
+-- | Session with versioning for backwards compatibility.
 data Session = Session
     { sessionId :: SessionId
-    , conversationId :: ConversationId
-    , agentSlug :: AgentSlug
+    , forkedFromSessionId :: Maybe SessionId  -- ^ For conversation forking
+    , turnId :: TurnId
     , turns :: [Turn]
+    , sessionVersion :: Maybe Int
+    -- ^ Optional session version:
+    --   Nothing = legacy (pre-media)
+    --   Just 1 = media support enabled
     }
 
-data Turn = Turn
-    { turnId :: TurnId
-    , userMessage :: Message
-    , assistantMessage :: Message
-    , toolCalls :: [ToolCallRecord]
-    , timestamp :: UTCTime
+-- | User turn content including possible media.
+data UserTurnContent = UserTurnContent
+    { userPrompt :: SystemPrompt
+    , userTools :: [SystemTool]
+    , userQuery :: Maybe UserQuery
+    -- ^ Query with optional media attachments
+    , userToolResponses :: [(LlmToolCall, UserToolResponse)]
+    -- ^ Tool responses with multi-modal support
     }
+
+data Turn
+    = UserTurn UserTurnContent (Maybe StepByteUsage)
+    | LlmTurn LlmTurnContent (Maybe StepByteUsage)
 ```
 
-### Message Types
+### Media Types (`System.Agents.Media.Types`)
 
 ```haskell
-data Message = Message
-    { role :: Role
-    , content :: Text
-    }
+-- | High-level media type classification.
+data MediaType
+    = MediaImage ImageType
+    | MediaAudio AudioType
+    | MediaVideo VideoType
+    | MediaApplication ApplicationType
+    | MediaText TextSubtype
 
-data Role = System | User | Assistant
+data ImageType = ImagePNG | ImageJPEG | ImageGIF | ImageWebP | ImageSVG
+data AudioType = AudioMPEG | AudioWAV | AudioOGG | AudioMP3 | AudioAAC | AudioFLAC
+data VideoType = VideoMP4 | VideoWebM | VideoOGG | VideoAVI | VideoMOV
+data ApplicationType = AppPDF | AppJSON | AppXML | AppOctetStream | AppZip
+data TextSubtype = TextPlain | TextHTML | TextCSS | TextCSV | TextMarkdown
+```
 
-data ToolCallRecord = ToolCallRecord
-    { toolCallId :: Text
-    , toolName :: Text
-    , toolInput :: Value
-    , toolOutput :: Either Text Value
-    , toolDuration :: NominalDiffTime
-    }
+## Session Versioning
+
+Sessions include a version field for backwards compatibility:
+
+| Version | Description |
+|---------|-------------|
+| `Nothing` / missing | Legacy session (pre-media support) |
+| `Just 1` | Full media support enabled |
+
+### Backwards Compatibility
+
+```haskell
+-- JSON serialization handles both old and new formats
+instance FromJSON Session where
+    parseJSON = Aeson.withObject "Session" $ \v -> do
+        mVersion <- v .:? "sessionVersion"
+        Session
+            <$> v .: "turns"
+            <*> v .: "sessionId"
+            <*> v .:? "forkedFromSessionId"
+            <*> v .: "turnId"
+            <*> pure mVersion
+
+instance ToJSON Session where
+    toJSON s = Aeson.object $
+        [ "turns" .= s.turns
+        , "sessionId" .= s.sessionId
+        , "forkedFromSessionId" .= s.forkedFromSessionId
+        , "turnId" .= s.turnId
+        ]
+        ++ ["sessionVersion" .= v | Just v <- [s.sessionVersion]]
+```
+
+## Media Attachments
+
+### Supported Media Types
+
+| Category | Extensions | MIME Types |
+|----------|------------|------------|
+| **Images** | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg` | `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml` |
+| **Documents** | `.pdf`, `.txt`, `.md`, `.json`, `.xml` | `application/pdf`, `text/plain`, `text/markdown`, `application/json`, `application/xml` |
+| **Audio** | `.mp3`, `.wav`, `.ogg`, `.aac`, `.flac` | `audio/mp3`, `audio/wav`, `audio/ogg`, `audio/aac`, `audio/flac` |
+| **Video** | `.mp4`, `.webm`, `.mov`, `.avi` | `video/mp4`, `video/webm`, `video/quicktime`, `video/avi` |
+
+### Creating Media Attachments
+
+```haskell
+import qualified Data.ByteString.Base64 as B64
+import qualified Data.Text.Encoding as Text
+
+-- Create a media attachment from file
+createMediaAttachment :: FilePath -> IO (Either String MediaAttachment)
+createMediaAttachment path = do
+    content <- BS.readFile path
+    let mimeType = detectMimeType path
+    let base64Data = Text.decodeUtf8 $ B64.encode content
+    return $ Right $ MediaAttachment
+        { mediaMimeType = mimeType
+        , mediaBase64Data = base64Data
+        , mediaFilename = Just $ Text.pack $ takeFileName path
+        }
+
+-- Detect MIME type from file extension
+detectMimeType :: FilePath -> Text
+detectMimeType path = case takeExtension path of
+    ".png" -> "image/png"
+    ".jpg" -> "image/jpeg"
+    ".jpeg" -> "image/jpeg"
+    ".pdf" -> "application/pdf"
+    -- ... etc
+```
+
+### Using Media in Queries
+
+```haskell
+-- Create a query with media attachments
+let query = UserQuery
+        { queryText = "Describe this image"
+        , queryMedia = [imageAttachment, documentAttachment]
+        }
+
+-- The query is sent to the LLM with media included
+```
+
+### Tool Responses with Media
+
+Tools can return media responses:
+
+```haskell
+-- Tool returns an image
+let toolResponse = MediaResponse $ MediaAttachment
+        { mediaMimeType = "image/png"
+        , mediaBase64Data = base64EncodedImageData
+        , mediaFilename = Just "chart.png"
+        }
+
+-- Tool returns mixed text and media
+let toolResponse = MixedResponse
+        [ TextPart "Here's the analysis chart:"
+        , MediaPart chartAttachment
+        , TextPart "As you can see, the trend is increasing."
+        ]
 ```
 
 ## Session Store
@@ -120,28 +265,28 @@ newSession :: AgentSlug -> IO Session
 newSession slug = do
     sid <- SessionId <$> UUID.nextRandom
     cid <- ConversationId <$> UUID.nextRandom
+    tid <- TurnId <$> UUID.nextRandom
     return Session
         { sessionId = sid
-        , conversationId = cid
-        , agentSlug = slug
+        , forkedFromSessionId = Nothing
+        , turnId = tid
         , turns = []
+        , sessionVersion = Just 1  -- New sessions use version 1
         }
 ```
 
 ### Adding a Turn
 
 ```haskell
-addTurn :: Session -> Message -> Message -> [ToolCallRecord] -> IO Session
-addTurn session userMsg assistantMsg calls = do
-    tid <- TurnId <$> UUID.nextRandom
-    now <- getCurrentTime
-    let turn = Turn
-            { turnId = tid
-            , userMessage = userMsg
-            , assistantMessage = assistantMsg
-            , toolCalls = calls
-            , timestamp = now
+addUserTurn :: Session -> UserQuery -> [ToolCallRecord] -> IO Session
+addUserTurn session query calls = do
+    let userContent = UserTurnContent
+            { userPrompt = currentPrompt
+            , userTools = availableTools
+            , userQuery = Just query
+            , userToolResponses = calls
             }
+    let turn = UserTurn userContent Nothing
     return session { turns = turns session ++ [turn] }
 ```
 
@@ -154,21 +299,19 @@ conversationLoop ::
     Session -> 
     IO ()
 conversationLoop store runtime session = do
-    -- Get user input
-    input <- getUserInput
+    -- Get user input (possibly with media)
+    (input, media) <- getUserInput
+    let query = UserQuery input media
     
-    -- Call LLM with session context
+    -- Call LLM with session context and media
     let messages = sessionToMessages session
-    response <- callLLM runtime messages input
+    response <- callLLM runtime messages query
     
     -- Execute any tool calls
     toolResults <- executeToolCalls runtime (toolCalls response)
     
     -- Update session
-    let userMsg = Message User input
-    let assistantMsg = Message Assistant (responseText response)
-    let callRecords = makeToolRecords toolResults
-    newSession <- addTurn session userMsg assistantMsg callRecords
+    newSession <- addTurn session query toolResults
     
     -- Persist
     writeSession store newSession
@@ -184,30 +327,76 @@ conversationLoop store runtime session = do
 ```json
 {
   "sessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "conversationId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-  "agentSlug": "file-assistant",
+  "turnId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+  "forkedFromSessionId": null,
   "turns": [
     {
-      "turnId": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
-      "userMessage": {
-        "role": "user",
-        "content": "List all files"
+      "tag": "UserTurn",
+      "contents": {
+        "userPrompt": {"systemPrompt": "You are helpful..."},
+        "userTools": [...],
+        "userQuery": {
+          "text": "What's in this image?",
+          "media": [
+            {
+              "mimeType": "image/png",
+              "base64Data": "iVBORw0KGgoAAAANSUhEUgAA...",
+              "filename": "screenshot.png"
+            }
+          ]
+        },
+        "userToolResponses": []
       },
-      "assistantMessage": {
-        "role": "assistant",
-        "content": "I found 3 files..."
-      },
-      "toolCalls": [
-        {
-          "toolCallId": "call_abc123",
-          "toolName": "list_files",
-          "toolInput": {"directory": "."},
-          "toolOutput": {"right": ["a.txt", "b.txt", "c.txt"]},
-          "toolDuration": 0.123
-        }
-      ],
-      "timestamp": "2024-01-15T10:30:00Z"
+      "byteUsage": {
+        "inputBytes": 1234,
+        "outputBytes": 567,
+        "reasoningBytes": 0,
+        "totalBytes": 1801
+      }
+    },
+    {
+      "tag": "LlmTurn",
+      "contents": {
+        "llmResponse": "I can see a chart showing...",
+        "llmThinking": null,
+        "llmToolCalls": []
+      }
     }
+  ],
+  "sessionVersion": 1
+}
+```
+
+### UserToolResponse JSON Formats
+
+```json
+// TextResponse
+{
+  "type": "text",
+  "content": "The file contains..."
+}
+
+// JsonResponse
+{
+  "type": "json",
+  "content": {"status": "ok", "count": 42}
+}
+
+// MediaResponse
+{
+  "type": "media",
+  "mimeType": "image/png",
+  "base64Data": "iVBORw0KGgoAAAANSUhEUgAA...",
+  "filename": "chart.png"
+}
+
+// MixedResponse
+{
+  "type": "mixed",
+  "parts": [
+    {"type": "text", "text": "Here's the chart:"},
+    {"type": "media", "mimeType": "image/png", "base64Data": "..."},
+    {"type": "text", "text": "As you can see..."}
   ]
 }
 ```
@@ -228,8 +417,9 @@ mainOneShot ::
     Maybe Session ->   -- Pre-loaded session
     Props -> 
     Text ->            -- Prompt
+    [MediaAttachment] -> -- Media attachments
     IO ()
-mainOneShot store mPath mSession props prompt = do
+mainOneShot store mPath mSession props prompt media = do
     -- Load or create session
     session <- case mSession of
         Just s -> return s
@@ -237,6 +427,9 @@ mainOneShot store mPath mSession props prompt = do
             Just path -> fromMaybe (newSession props.agentSlug) 
                                    <$> readSessionFromFile path
             Nothing -> newSession props.agentSlug
+    
+    -- Create query with media
+    let query = UserQuery prompt media
     
     -- Run conversation
     ...
@@ -247,7 +440,7 @@ mainOneShot store mPath mSession props prompt = do
 
 ## Session Printing (`System.Agents.SessionPrint`)
 
-The `SessionPrint` module provides rich markdown formatting for session files, including statistics visualization and configurable content display.
+The `SessionPrint` module provides rich markdown formatting for session files, including statistics visualization and configurable content display with media support.
 
 ### Session Print Types
 
@@ -291,6 +484,7 @@ data SessionStatistics = SessionStatistics
     , statOutputBytes :: Int
     , statReasoningBytes :: Int
     , statTotalBytes :: Int
+    , statMediaAttachments :: Int  -- NEW: Count of media attachments
     }
 ```
 
@@ -325,6 +519,24 @@ agents-exe session-print --repeat-system-prompt --repeat-tools session.json
 agents-exe session-print --no-funny-stamp session.json
 ```
 
+### Formatting Media Attachments
+
+```haskell
+formatToolResponse :: UserToolResponse -> Text
+formatToolResponse (TextResponse txt) = txt
+formatToolResponse (JsonResponse val) = 
+    Text.decodeUtf8 $ LByteString.toStrict $ Aeson.encodePretty val
+formatToolResponse (MediaResponse media) = 
+    "[Media: " <> media.mediaMimeType <> 
+    maybe "" (", " <>) media.mediaFilename <> 
+    ", " <> formatBytes (Text.length media.mediaBase64Data `div` 4 * 3) <> "]"
+formatToolResponse (MixedResponse parts) = 
+    Text.intercalate "\n" $ map formatContentPart parts
+  where
+    formatContentPart (TextPart t) = t
+    formatContentPart (MediaPart m) = formatToolResponse (MediaResponse m)
+```
+
 ### Content Elision
 
 The `elideDocument` function intelligently handles content that's too long:
@@ -347,6 +559,7 @@ Session print includes visual bar charts for:
 
 1. **Tool usage**: Bar chart showing which tools were called most
 2. **Byte usage**: Input, output, and reasoning token breakdown
+3. **Media attachments**: Count and types of media
 
 ```
 📊 Statistics
@@ -365,7 +578,9 @@ Total Tool Calls: 15
 `Output   `      5 KiB   ████████████████████████████████████████████████
 `Reasoning`      1 KiB   ████████████
 
-Total: 8 KiB
+`Media    `     50 KiB   ████████████████████████████████████████████████████████████████████████████████████████████████████
+
+Total: 58 KiB
 ```
 
 ## Session Content Injection (`System.Agents.SessionPrint.Inject`)
@@ -735,6 +950,27 @@ manageContext maxTokens session
     | otherwise = manageContext maxTokens (pruneOldestTurn session)
 ```
 
+## Byte Usage Tracking
+
+Sessions track byte usage for monitoring:
+
+```haskell
+-- | Calculate bytes for all response types
+userToolResponseBytes :: UserToolResponse -> Int
+userToolResponseBytes (TextResponse txt) = 
+    Text.length txt * 4  -- UTF-8 max bytes per char
+userToolResponseBytes (JsonResponse val) = 
+    fromIntegral $ LByteString.length $ Aeson.encode val
+userToolResponseBytes (MediaResponse media) = 
+    Text.length media.mediaBase64Data  -- Already base64 = ASCII
+userToolResponseBytes (MixedResponse parts) = 
+    sum (map contentPartBytes parts)
+
+contentPartBytes :: ContentPart -> Int
+contentPartBytes (TextPart txt) = Text.length txt * 4
+contentPartBytes (MediaPart media) = Text.length media.mediaBase64Data
+```
+
 ## Tool Execution Context
 
 Sessions provide context for tool execution:
@@ -753,6 +989,7 @@ This allows tools to:
 - Access conversation history
 - Store tool-specific state
 - Make context-aware decisions
+- Return media responses
 
 ## Session Store Backends
 
@@ -814,6 +1051,13 @@ memorySessionStore = do
 4. **JSON output**: Use `--json` for scripting and automation
 5. **Auto-update**: Use `--auto` flag to ensure fresh results
 
+### Media Best Practices
+
+1. **Size limits**: Keep media attachments under 50MB
+2. **MIME types**: Always declare correct MIME types
+3. **Base64 encoding**: Use proper encoding for binary data
+4. **Mixed responses**: Use `MixedResponse` for rich multi-modal output
+
 ## Example: Session Analysis
 
 ```haskell
@@ -836,6 +1080,14 @@ errorTurns :: Session -> [Turn]
 errorTurns session =
     [turn | turn <- turns session
           , any (isLeft . toolOutput) (toolCalls turn)]
+
+-- Count media attachments
+mediaAttachmentStats :: Session -> (Int, Map Text Int)
+mediaAttachmentStats session =
+    let attachments = collectAttachments session
+        byType = Map.fromListWith (+) 
+            [(mediaMimeType m, 1) | m <- attachments]
+    in (length attachments, byType)
 ```
 
 ## Example: Search Integration
@@ -871,12 +1123,14 @@ findToolUsage tools = do
 
 | Module | Purpose |
 |--------|---------|
+| `System.Agents.Media.Types` | Media type definitions |
 | `System.Agents.Session.Types` | Core session types |
 | `System.Agents.Session.Base` | Session operations |
 | `System.Agents.Session.Loop` | Conversation loop |
 | `System.Agents.Session.Step` | Single turn execution |
 | `System.Agents.Session.Edit` | Session editing operations |
 | `System.Agents.Session.OpenAI` | OpenAI-specific session handling |
+| `System.Agents.Session.Compat` | Backwards compatibility |
 | `System.Agents.Session.Search.Types` | Search configuration types |
 | `System.Agents.Session.Search.Index` | Index building and maintenance |
 | `System.Agents.Session.Search.Query` | Search query execution |

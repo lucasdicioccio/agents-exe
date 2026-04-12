@@ -44,6 +44,89 @@ The framework supports multiple tool types:
 | **Lua Tools** | Lua scripts | Embedded scripting |
 | **Skills** | Progressive disclosure | Procedural knowledge |
 
+## Media Types and Multi-Modal Support
+
+The framework supports media attachments and multi-modal responses for LLM interactions.
+
+### Media Type Classification
+
+```haskell
+-- System.Agents.Media.Types
+data MediaType
+    = MediaImage ImageType
+    | MediaAudio AudioType
+    | MediaVideo VideoType
+    | MediaApplication ApplicationType
+    | MediaText TextSubtype
+
+data ImageType = ImagePNG | ImageJPEG | ImageGIF | ImageWebP | ImageSVG
+data AudioType = AudioMPEG | AudioWAV | AudioOGG | AudioMP3 | AudioAAC | AudioFLAC
+data VideoType = VideoMP4 | VideoWebM | VideoOGG | VideoAVI | VideoMOV
+data ApplicationType = AppPDF | AppJSON | AppXML | AppOctetStream | AppZip
+data TextSubtype = TextPlain | TextHTML | TextCSS | TextCSV | TextMarkdown
+```
+
+### Media Attachments
+
+```haskell
+data MediaAttachment = MediaAttachment
+    { mediaMimeType :: Text        -- e.g., "image/png"
+    , mediaBase64Data :: Text      -- Base64-encoded content
+    , mediaFilename :: Maybe Text  -- Optional filename
+    }
+```
+
+### Content Parts for Mixed Responses
+
+```haskell
+data ContentPart
+    = TextPart Text
+    | MediaPart MediaAttachment
+```
+
+### Declaring Media Output in Scripts
+
+Tools can declare their output media type in the describe output:
+
+```bash
+#!/bin/bash
+
+if [ "$1" == "describe" ]; then
+    echo '{
+        "slug": "generate_chart",
+        "description": "Generates a chart image",
+        "args": [...],
+        "output-media-type": "image/png"
+    }'
+    exit 0
+fi
+
+# Generate and output PNG image to stdout
+./generate-chart "$@"
+```
+
+Supported media types:
+- **Images**: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml`
+- **Audio**: `audio/mpeg`, `audio/wav`, `audio/ogg`, `audio/mp3`, `audio/aac`, `audio/flac`
+- **Video**: `video/mp4`, `video/webm`, `video/ogg`, `video/avi`, `video/quicktime`
+- **Documents**: `application/pdf`, `application/json`, `application/xml`, `application/zip`
+- **Generic**: `application/octet-stream`
+
+### Tool Result Types with Media
+
+```haskell
+data CallResult call
+    = -- | Successful execution with optional media type hint
+      BlobToolSuccess call ByteString (Maybe MediaType)
+    | -- ... other constructors
+
+data UserToolResponse
+    = TextResponse Text                    -- Plain UTF-8 text
+    | JsonResponse Aeson.Value             -- Structured JSON data
+    | MediaResponse MediaAttachment        -- Single binary media
+    | MixedResponse [ContentPart]          -- Multi-modal content
+```
+
 ## Tool Registration
 
 All tools are registered using the `ToolRegistration` type:
@@ -106,6 +189,7 @@ data ScriptInfo = ScriptInfo
     , scriptSlug :: Text
     , scriptDescription :: Text
     , scriptEmptyResultBehavior :: Maybe EmptyResultBehavior
+    , scriptOutputMediaType :: Maybe Text  -- NEW: Media type for binary output
     }
 
 data ScriptArg = ScriptArg
@@ -403,6 +487,7 @@ The System Toolbox provides agents with contextual information about the running
 | `working-directory` | Current working directory |
 | `process-info` | Process ID, parent PID, process name |
 | `uptime` | System uptime |
+| `attach-file` | Attach a file to the conversation (NEW) |
 
 ### Configuration
 
@@ -414,13 +499,38 @@ The System Toolbox provides agents with contextual information about the running
       "contents": {
         "name": "system",
         "description": "System context and information",
-        "capabilities": ["date", "operating-system", "running-user", "hostname"],
+        "capabilities": ["date", "operating-system", "running-user", "hostname", "attach-file"],
         "envVarFilter": null
       }
     }
   ]
 }
 ```
+
+### Attach-File Capability
+
+The `attach-file` capability allows the agent to attach files to the conversation for multi-modal LLM interactions:
+
+```haskell
+-- Tool accepts:
+{
+  "capability": "attach-file",
+  "filepath": "/path/to/image.png"
+}
+
+-- Returns:
+-- MediaAttachment with base64-encoded content
+```
+
+**Supported file types:**
+- **Images**: PNG, JPEG, GIF, WEBP, SVG
+- **Audio**: MP3, WAV, OGG, AAC, FLAC
+- **Video**: MP4, WEBM, MOV, AVI
+- **Documents**: PDF, JSON, XML
+- **Generic**: Any file (as octet-stream)
+
+**Limits:**
+- Maximum file size: 50MB
 
 ### Configuration Fields
 
@@ -1240,7 +1350,7 @@ Prevents infinite loops by tracking call depth and failing when `maxDepth` is ex
 
 ```haskell
 data CallResult call
-    = BlobToolSuccess call ByteString
+    = BlobToolSuccess call ByteString (Maybe MediaType)
     | JsonToolSuccess call Aeson.Value
     | ToolSkipped call
     | BashToolError call BashError
@@ -1403,6 +1513,9 @@ data OpenAPIError
 data QueryError
     = CapabilityNotEnabledError Text
     | SystemInfoError Text
+    | FileNotFoundError FilePath
+    | FileTooLargeError FilePath Int
+    | UnsupportedFileTypeError FilePath Text
 ```
 
 ### Developer Toolbox Errors
@@ -1449,6 +1562,8 @@ data PortalError
 10. **Portal safety**: Always whitelist tools for portal access
 11. **Recursive agents**: When using LRM pattern, set appropriate maxDepth to prevent infinite recursion
 12. **Lua security**: Always specify allowedTools, allowedPaths, and allowedHosts - empty means no access
+13. **Media output**: Declare `output-media-type` for tools that produce binary content
+14. **Mixed responses**: Use `MixedResponse` for rich multi-modal tool outputs
 
 ## Example: Complete Tool Configuration
 
@@ -1458,9 +1573,9 @@ data PortalError
   "apiKeyId": "openai",
   "flavor": "openai",
   "modelUrl": "https://api.openai.com/v1",
-  "modelName": "gpt-4",
-  "announce": "A file management assistant",
-  "systemPrompt": ["You help users manage files."],
+  "modelName": "gpt-4o",
+  "announce": "A file management assistant with vision",
+  "systemPrompt": ["You help users manage and analyze files."],
   "toolDirectory": "tools",
   "bashToolboxes": [
     { "path": "./extra-tools", "name": "extras" }
@@ -1509,7 +1624,7 @@ data PortalError
       "contents": {
         "name": "system",
         "description": "System context",
-        "capabilities": ["date", "hostname", "working-directory"],
+        "capabilities": ["date", "hostname", "working-directory", "attach-file"],
         "envVarFilter": null
       }
     },
@@ -1528,7 +1643,7 @@ data PortalError
         "description": "Lua scripting tools",
         "maxMemoryMB": 256,
         "maxExecutionTimeSeconds": 300,
-        "allowedTools": ["bash_read_file", "sqlite_analytics_query"],
+        "allowedTools": ["bash_read_file", "sqlite_analytics_query", "system_system_attach_file"],
         "allowedPaths": ["./scripts", "./data"],
         "allowedHosts": ["localhost"]
       }
@@ -1548,6 +1663,7 @@ data PortalError
 
 | Module | Purpose |
 |--------|---------|
+| `System.Agents.Media.Types` | Media types for multi-modal support |
 | `System.Agents.Tools.Base` | Core tool types |
 | `System.Agents.Tools.Context` | Tool execution context |
 | `System.Agents.Tools.Bash` | Bash script execution |
