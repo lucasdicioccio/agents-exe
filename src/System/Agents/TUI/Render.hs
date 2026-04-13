@@ -804,13 +804,14 @@ renderSignalSummary (Just signals) =
         is = trajInteraction signals
         es = trajExecution signals
         -- Compact display: score + key indicators
-        indicators = concat
-            [ if sigDisengagementDetected is then ["⚠️ disengage"] else []
-            , if sigLoopDetected es then ["🔴 loop"] else []
-            , if sigFailureCount es > 0 then ["⚡" <> Text.pack (show (sigFailureCount es)) <> " fails"] else []
-            , if sigMisalignmentCount is > 0 then ["🔄" <> Text.pack (show (sigMisalignmentCount is)) <> " misalign"] else []
-            , if sigStagnationCount is > 0 then ["⏸️ " <> Text.pack (show (sigStagnationCount is)) <> " stagn"] else []
-            ]
+        indicators =
+            concat
+                [ if sigDisengagementDetected is then ["⚠️ disengage"] else []
+                , if sigLoopDetected es then ["🔴 loop"] else []
+                , if sigFailureCount es > 0 then ["⚡" <> Text.pack (show (sigFailureCount es)) <> " fails"] else []
+                , if sigMisalignmentCount is > 0 then ["🔄" <> Text.pack (show (sigMisalignmentCount is)) <> " misalign"] else []
+                , if sigStagnationCount is > 0 then ["⏸️ " <> Text.pack (show (sigStagnationCount is)) <> " stagn"] else []
+                ]
         scoreText = "Signals: " <> Text.pack (show score) <> "/100"
         indicatorsText = if null indicators then "" else " | " <> Text.intercalate " | " indicators
      in withAttr signalMetricsAttr $ txt $ scoreText <> indicatorsText
@@ -1058,4 +1059,3 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
-

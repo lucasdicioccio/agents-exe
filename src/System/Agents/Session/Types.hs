@@ -119,12 +119,13 @@ instance ToJSON InteractionSignals
 
 -- | Default empty interaction signals.
 defaultInteractionSignals :: InteractionSignals
-defaultInteractionSignals = InteractionSignals
-    { sigMisalignmentCount = 0
-    , sigStagnationCount = 0
-    , sigDisengagementDetected = False
-    , sigSatisfactionDetected = False
-    }
+defaultInteractionSignals =
+    InteractionSignals
+        { sigMisalignmentCount = 0
+        , sigStagnationCount = 0
+        , sigDisengagementDetected = False
+        , sigSatisfactionDetected = False
+        }
 
 {- | Execution signals derived from structured runtime events (tool calls, API responses).
 
@@ -147,11 +148,12 @@ instance ToJSON ExecutionSignals
 
 -- | Default empty execution signals.
 defaultExecutionSignals :: ExecutionSignals
-defaultExecutionSignals = ExecutionSignals
-    { sigFailureCount = 0
-    , sigLoopDetected = False
-    , sigLoopToolSequence = []
-    }
+defaultExecutionSignals =
+    ExecutionSignals
+        { sigFailureCount = 0
+        , sigLoopDetected = False
+        , sigLoopToolSequence = []
+        }
 
 {- | Environment signals for system-level boundary conditions.
 
@@ -171,10 +173,11 @@ instance ToJSON EnvironmentSignals
 
 -- | Default empty environment signals.
 defaultEnvironmentSignals :: EnvironmentSignals
-defaultEnvironmentSignals = EnvironmentSignals
-    { sigExhaustionCount = 0
-    , sigExhaustionTypes = []
-    }
+defaultEnvironmentSignals =
+    EnvironmentSignals
+        { sigExhaustionCount = 0
+        , sigExhaustionTypes = []
+        }
 
 {- | Combined trajectory signals for a session.
 
@@ -186,9 +189,10 @@ data TrajectorySignals = TrajectorySignals
     { trajInteraction :: InteractionSignals
     , trajExecution :: ExecutionSignals
     , trajEnvironment :: EnvironmentSignals
-    -- | Composite informativeness score (0-100)
-    -- Higher = more likely to contain actionable insights
     , trajInformativenessScore :: Int
+    {- ^ Composite informativeness score (0-100)
+    Higher = more likely to contain actionable insights
+    -}
     }
     deriving (Show, Eq, Generic)
 
@@ -197,12 +201,13 @@ instance ToJSON TrajectorySignals
 
 -- | Default empty trajectory signals.
 defaultTrajectorySignals :: TrajectorySignals
-defaultTrajectorySignals = TrajectorySignals
-    { trajInteraction = defaultInteractionSignals
-    , trajExecution = defaultExecutionSignals
-    , trajEnvironment = defaultEnvironmentSignals
-    , trajInformativenessScore = 0
-    }
+defaultTrajectorySignals =
+    TrajectorySignals
+        { trajInteraction = defaultInteractionSignals
+        , trajExecution = defaultExecutionSignals
+        , trajEnvironment = defaultEnvironmentSignals
+        , trajInformativenessScore = 0
+        }
 
 {- | Per-step signal tracking.
 
@@ -650,4 +655,3 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
-

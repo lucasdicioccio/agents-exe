@@ -509,29 +509,33 @@ formatInteractionSignals is =
         <> " | "
         <> if sigMisalignmentCount is > 0
             then Text.pack (show (sigMisalignmentCount is)) <> " instances detected"
-            else "None detected"
-        <> " |\n"
-        <> "| Stagnation | "
-        <> showCount (sigStagnationCount is)
-        <> " | "
-        <> if sigStagnationCount is > 0
-            then Text.pack (show (sigStagnationCount is)) <> " instances detected"
-            else "None detected"
-        <> " |\n"
-        <> "| Disengagement | "
-        <> showBool (sigDisengagementDetected is)
-        <> " | "
-        <> if sigDisengagementDetected is
-            then "⚠️ Exit/withdrawal markers found"
-            else "Not detected"
-        <> " |\n"
-        <> "| Satisfaction | "
-        <> showBool (sigSatisfactionDetected is)
-        <> " | "
-        <> if sigSatisfactionDetected is
-            then "✓ Success markers found"
-            else "Not detected"
-        <> " |"
+            else
+                "None detected"
+                    <> " |\n"
+                    <> "| Stagnation | "
+                    <> showCount (sigStagnationCount is)
+                    <> " | "
+                    <> if sigStagnationCount is > 0
+                        then Text.pack (show (sigStagnationCount is)) <> " instances detected"
+                        else
+                            "None detected"
+                                <> " |\n"
+                                <> "| Disengagement | "
+                                <> showBool (sigDisengagementDetected is)
+                                <> " | "
+                                <> if sigDisengagementDetected is
+                                    then "⚠️ Exit/withdrawal markers found"
+                                    else
+                                        "Not detected"
+                                            <> " |\n"
+                                            <> "| Satisfaction | "
+                                            <> showBool (sigSatisfactionDetected is)
+                                            <> " | "
+                                            <> if sigSatisfactionDetected is
+                                                then "✓ Success markers found"
+                                                else
+                                                    "Not detected"
+                                                        <> " |"
 
 -- | Format execution signals as markdown table.
 formatExecutionSignals :: ExecutionSignals -> Text.Text
@@ -543,15 +547,17 @@ formatExecutionSignals es =
         <> " | "
         <> if sigFailureCount es > 0
             then Text.pack (show (sigFailureCount es)) <> " tool/action failures"
-            else "No failures detected"
-        <> " |\n"
-        <> "| Loop | "
-        <> showBool (sigLoopDetected es)
-        <> " | "
-        <> if sigLoopDetected es
-            then "🔴 Loop detected: " <> Text.intercalate " → " (sigLoopToolSequence es)
-            else "No loops detected"
-        <> " |"
+            else
+                "No failures detected"
+                    <> " |\n"
+                    <> "| Loop | "
+                    <> showBool (sigLoopDetected es)
+                    <> " | "
+                    <> if sigLoopDetected es
+                        then "🔴 Loop detected: " <> Text.intercalate " → " (sigLoopToolSequence es)
+                        else
+                            "No loops detected"
+                                <> " |"
 
 -- | Format environment signals as markdown table.
 formatEnvironmentSignals :: EnvironmentSignals -> Text.Text
@@ -566,8 +572,9 @@ formatEnvironmentSignals env =
                 Text.pack (show (sigExhaustionCount env))
                     <> " resource boundary hits: "
                     <> Text.intercalate ", " (sigExhaustionTypes env)
-            else "No resource exhaustion detected"
-        <> " |"
+            else
+                "No resource exhaustion detected"
+                    <> " |"
 
 -- | Show count with visual indicator.
 showCount :: Int -> Text.Text
@@ -968,4 +975,3 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
-

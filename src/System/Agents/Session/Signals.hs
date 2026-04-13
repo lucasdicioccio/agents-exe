@@ -74,8 +74,8 @@ import System.Agents.Session.Types (
     TrajectorySignals (..),
     Turn (..),
     UserQuery (..),
-    UserTurnContent (..),
     UserToolResponse (..),
+    UserTurnContent (..),
     defaultExecutionSignals,
     defaultInteractionSignals,
  )
@@ -103,8 +103,7 @@ calculateTrajectorySignals session =
             , trajInformativenessScore = score
             }
 
-{- | Alias for calculateTrajectorySignals for backward compatibility naming.
--}
+-- | Alias for calculateTrajectorySignals for backward compatibility naming.
 calculateSessionSignals :: Session -> TrajectorySignals
 calculateSessionSignals = calculateTrajectorySignals
 
@@ -344,11 +343,13 @@ Looks for:
 -}
 detectStagnationPatterns :: [Text] -> Int
 detectStagnationPatterns texts =
-    let -- Check for near-duplicate detection within window of 3
+    let
+        -- Check for near-duplicate detection within window of 3
         duplicates = countNearDuplicates 3 texts
         -- Count explicit stagnation markers
         markers = sum $ map countStagnationMarkers texts
-     in duplicates + markers
+     in
+        duplicates + markers
 
 -- | Count stagnation markers in a single text.
 countStagnationMarkers :: Text -> Int
@@ -399,7 +400,8 @@ Analyzes tool call sequences to detect:
 -}
 detectExecutionSignals :: [Turn] -> ExecutionSignals
 detectExecutionSignals turnList =
-    let -- Collect all tool calls in order
+    let
+        -- Collect all tool calls in order
         allToolCalls = concatMap extractTurnToolCalls turnList
 
         -- Detect failures from tool responses
@@ -410,7 +412,8 @@ detectExecutionSignals turnList =
         (loopDetected, loopTools) = case loopInfo of
             Just (tools, _) -> (True, tools)
             Nothing -> (False, [])
-     in ExecutionSignals
+     in
+        ExecutionSignals
             { sigFailureCount = failureCount
             , sigLoopDetected = loopDetected
             , sigLoopToolSequence = loopTools
@@ -424,9 +427,11 @@ detectTurnExecutionSignals :: Turn -> ExecutionSignals
 detectTurnExecutionSignals turn =
     case turn of
         UserTurn utc _ ->
-            let -- Count failures in tool responses
+            let
+                -- Count failures in tool responses
                 failures = sum $ map (countFailureInResponse . snd) utc.userToolResponses
-             in defaultExecutionSignals{sigFailureCount = failures}
+             in
+                defaultExecutionSignals{sigFailureCount = failures}
         LlmTurn _ _ ->
             -- Loop detection requires cross-turn analysis
             defaultExecutionSignals
@@ -522,7 +527,8 @@ detectExecutionLoop :: [LlmToolCall] -> Maybe ([Text], Int)
 detectExecutionLoop toolCalls
     | length toolCalls < 3 = Nothing
     | otherwise =
-        let -- Extract tool names
+        let
+            -- Extract tool names
             toolNames = map extractToolCallName toolCalls
 
             -- Check for exact repetition of same tool
@@ -533,7 +539,8 @@ detectExecutionLoop toolCalls
 
             -- Check for repeated sequences of 2+ tools
             sequenceLoop = findSequenceLoop toolNames
-         in exactLoop <|> oscillation <|> sequenceLoop
+         in
+            exactLoop <|> oscillation <|> sequenceLoop
 
 -- | Find exact loops (same tool called repeatedly).
 findExactLoop :: [Text] -> Maybe ([Text], Int)
@@ -560,14 +567,16 @@ findOscillation :: [Text] -> Maybe ([Text], Int)
 findOscillation names
     | length names < 4 = Nothing
     | otherwise =
-        let -- Look for A-B-A-B pattern
+        let
+            -- Look for A-B-A-B pattern
             isOscillation [a, b, c, d] = a == c && b == d && a /= b
             isOscillation _ = False
 
             -- Sliding window of 4
             windows = takeWindowed 4 names
             oscillations = filter isOscillation windows
-         in case oscillations of
+         in
+            case oscillations of
                 (win : _) -> Just (nub win, length oscillations)
                 [] -> Nothing
   where
@@ -578,10 +587,12 @@ findSequenceLoop :: [Text] -> Maybe ([Text], Int)
 findSequenceLoop names
     | length names < 6 = Nothing
     | otherwise =
-        let -- Try sequence lengths from 2 to half the list
+        let
+            -- Try sequence lengths from 2 to half the list
             maxLen = length names `div` 2
             candidates = concatMap (\n -> findRepeats n names) [2 .. maxLen]
-         in case candidates of
+         in
+            case candidates of
                 ((seqTools, count) : _) -> Just (seqTools, count)
                 [] -> Nothing
   where
@@ -614,10 +625,12 @@ Analyzes turns for:
 -}
 detectEnvironmentSignals :: [Turn] -> EnvironmentSignals
 detectEnvironmentSignals turnList =
-    let -- Count exhaustion events across all responses
+    let
+        -- Count exhaustion events across all responses
         exhaustionTypes = concatMap detectExhaustionInTurn turnList
         uniqueTypes = nub exhaustionTypes
-     in EnvironmentSignals
+     in
+        EnvironmentSignals
             { sigExhaustionCount = length exhaustionTypes
             , sigExhaustionTypes = uniqueTypes
             }
@@ -710,7 +723,8 @@ Scoring formula (based on paper's approach):
 -}
 calculateInformativenessScore :: InteractionSignals -> ExecutionSignals -> EnvironmentSignals -> Int
 calculateInformativenessScore is es env =
-    let -- Base score
+    let
+        -- Base score
         baseScore = 30
 
         -- Positive signals (indicate actionable insights)
@@ -734,7 +748,8 @@ calculateInformativenessScore is es env =
                 + stagnationPoints
                 + exhaustionPoints
                 + satisfactionPenalty
-     in max 0 $ min 100 rawScore
+     in
+        max 0 $ min 100 rawScore
 
 -------------------------------------------------------------------------------
 -- Utility Functions
@@ -792,4 +807,3 @@ extractResponseText (MixedResponse parts) =
   where
     extractPart (TextPart t) = t
     extractPart (MediaPart m) = "[Media: " <> m.mediaMimeType <> "]"
-
