@@ -45,7 +45,17 @@ import System.IO (stderr)
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import qualified System.Agents.Session.Base as Session
-import System.Agents.Session.Types (StepByteUsage (..), UserToolResponse (..))
+import System.Agents.Session.Signals (
+    calculateTrajectorySignals,
+ )
+import System.Agents.Session.Types (
+    EnvironmentSignals (..),
+    ExecutionSignals (..),
+    InteractionSignals (..),
+    StepByteUsage (..),
+    TrajectorySignals (..),
+    UserToolResponse (..),
+ )
 
 -- | Preference for ordering session steps.
 data OrderPreference
@@ -124,6 +134,8 @@ data SessionStatistics = SessionStatistics
     , statTotalBytes :: Int
     , statTokenUsage :: Maybe TokenUsageStats
     -- ^ Token usage statistics if available
+    , statTrajectorySignals :: Maybe TrajectorySignals
+    -- ^ Signal-based trajectory metrics
     }
     deriving (Show, Eq)
 
@@ -213,7 +225,7 @@ elideLines leadingCount trailingCount content =
                     trailing = drop (totalLines - actualTrailing) lines'
                     elidedCount = totalLines - actualLeading - actualTrailing
                  in Text.intercalate "\n" leading
-                        <> "\n...("
+                        <> "\n... ("
                         <> Text.pack (show elidedCount)
                         <> " line"
                         <> (if elidedCount == 1 then "" else "s")
@@ -236,7 +248,7 @@ elideChars leadingCount trailingCount content =
                     trailing = Text.drop (totalChars - actualTrailing) content
                     elidedCount = totalChars - actualLeading - actualTrailing
                  in leading
-                        <> "...(elided "
+                        <> "... (elided "
                         <> Text.pack (show elidedCount)
                         <> " char"
                         <> (if elidedCount == 1 then "" else "s")
@@ -329,6 +341,9 @@ calculateStatistics session =
 
         -- Calculate token usage from StepByteUsage data
         tokenStats = calculateTokenUsageStats turns
+
+        -- Calculate trajectory signals
+        signals = calculateTrajectorySignals session
      in SessionStatistics
             { statTotalTurns = totalTurns
             , statUserTurns = userTurns
@@ -340,6 +355,7 @@ calculateStatistics session =
             , statReasoningBytes = reasoningBytes
             , statTotalBytes = totalBytes
             , statTokenUsage = tokenStats
+            , statTrajectorySignals = Just signals
             }
 
 -- | Calculate aggregated token usage statistics from all turns.
@@ -455,6 +471,113 @@ formatStatistics stats =
         <> case statTokenUsage stats of
             Nothing -> ""
             Just tokenStats -> "\n\n### 🎫 Token Usage\n\n" <> formatTokenChart tokenStats
+        <> case statTrajectorySignals stats of
+            Nothing -> ""
+            Just signals -> "\n\n### 📡 Signal Metrics\n\n" <> formatSignalMetrics signals
+
+-- | Format signal metrics as markdown.
+formatSignalMetrics :: TrajectorySignals -> Text.Text
+formatSignalMetrics signals =
+    let is = trajInteraction signals
+        es = trajExecution signals
+        env = trajEnvironment signals
+        score = trajInformativenessScore signals
+     in "**Informativeness Score:** "
+            <> showScore score
+            <> "\n\n"
+            <> "#### Interaction Signals\n\n"
+            <> formatInteractionSignals is
+            <> "\n\n#### Execution Signals\n\n"
+            <> formatExecutionSignals es
+            <> "\n\n#### Environment Signals\n\n"
+            <> formatEnvironmentSignals env
+
+-- | Show informativeness score with visual indicator.
+showScore :: Int -> Text.Text
+showScore score
+    | score >= 70 = Text.pack (show score) <> "/100 🟢"
+    | score >= 40 = Text.pack (show score) <> "/100 🟡"
+    | otherwise = Text.pack (show score) <> "/100 🔴"
+
+-- | Format interaction signals as markdown table.
+formatInteractionSignals :: InteractionSignals -> Text.Text
+formatInteractionSignals is =
+    "| Signal | Status | Details |\n"
+        <> "|--------|--------|---------|\n"
+        <> "| Misalignment | "
+        <> showCount (sigMisalignmentCount is)
+        <> " | "
+        <> if sigMisalignmentCount is > 0
+            then Text.pack (show (sigMisalignmentCount is)) <> " instances detected"
+            else "None detected"
+        <> " |\n"
+        <> "| Stagnation | "
+        <> showCount (sigStagnationCount is)
+        <> " | "
+        <> if sigStagnationCount is > 0
+            then Text.pack (show (sigStagnationCount is)) <> " instances detected"
+            else "None detected"
+        <> " |\n"
+        <> "| Disengagement | "
+        <> showBool (sigDisengagementDetected is)
+        <> " | "
+        <> if sigDisengagementDetected is
+            then "⚠️ Exit/withdrawal markers found"
+            else "Not detected"
+        <> " |\n"
+        <> "| Satisfaction | "
+        <> showBool (sigSatisfactionDetected is)
+        <> " | "
+        <> if sigSatisfactionDetected is
+            then "✓ Success markers found"
+            else "Not detected"
+        <> " |"
+
+-- | Format execution signals as markdown table.
+formatExecutionSignals :: ExecutionSignals -> Text.Text
+formatExecutionSignals es =
+    "| Signal | Status | Details |\n"
+        <> "|--------|--------|---------|\n"
+        <> "| Failures | "
+        <> showCount (sigFailureCount es)
+        <> " | "
+        <> if sigFailureCount es > 0
+            then Text.pack (show (sigFailureCount es)) <> " tool/action failures"
+            else "No failures detected"
+        <> " |\n"
+        <> "| Loop | "
+        <> showBool (sigLoopDetected es)
+        <> " | "
+        <> if sigLoopDetected es
+            then "🔴 Loop detected: " <> Text.intercalate " → " (sigLoopToolSequence es)
+            else "No loops detected"
+        <> " |"
+
+-- | Format environment signals as markdown table.
+formatEnvironmentSignals :: EnvironmentSignals -> Text.Text
+formatEnvironmentSignals env =
+    "| Signal | Status | Details |\n"
+        <> "|--------|--------|---------|\n"
+        <> "| Exhaustion | "
+        <> showCount (sigExhaustionCount env)
+        <> " | "
+        <> if sigExhaustionCount env > 0
+            then
+                Text.pack (show (sigExhaustionCount env))
+                    <> " resource boundary hits: "
+                    <> Text.intercalate ", " (sigExhaustionTypes env)
+            else "No resource exhaustion detected"
+        <> " |"
+
+-- | Show count with visual indicator.
+showCount :: Int -> Text.Text
+showCount 0 = "✓ 0"
+showCount n = "⚠️ " <> Text.pack (show n)
+
+-- | Show boolean status.
+showBool :: Bool -> Text.Text
+showBool True = "⚠️ Yes"
+showBool False = "✓ No"
 
 -- | Format tool call statistics with bar chart.
 formatToolCallStats :: Map Text.Text Int -> Text.Text
@@ -845,3 +968,4 @@ extractToolCallName (Session.LlmToolCall val) =
 -- | Format a JSON value as compact text.
 formatJsonAsText :: Aeson.Value -> Text.Text
 formatJsonAsText = Text.pack . show . Aeson.encode
+

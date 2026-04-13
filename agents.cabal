@@ -138,6 +138,7 @@ library agents-lib
                     , System.Agents.Session.OpenAI
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
+                    , System.Agents.Session.Signals
                     , System.Agents.Session.Search.Types
                     , System.Agents.Session.Search.Index
                     , System.Agents.Session.Search.Query

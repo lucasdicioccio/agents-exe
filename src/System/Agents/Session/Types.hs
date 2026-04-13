@@ -39,6 +39,17 @@ module System.Agents.Session.Types (
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
 
+    -- * Signal types (trajectory analysis)
+    InteractionSignals (..),
+    ExecutionSignals (..),
+    EnvironmentSignals (..),
+    TrajectorySignals (..),
+    StepSignals (..),
+    defaultInteractionSignals,
+    defaultExecutionSignals,
+    defaultEnvironmentSignals,
+    defaultTrajectorySignals,
+
     -- * Re-exports for convenience
     TokenUsage (..),
 ) where
@@ -75,6 +86,138 @@ newtype TurnId = TurnId UUID
 newTurnId :: IO TurnId
 newTurnId =
     TurnId <$> UUID.nextRandom
+
+-------------------------------------------------------------------------------
+-- Signal Types (Trajectory Analysis)
+-------------------------------------------------------------------------------
+
+{- | Interaction signals derived from user-assistant natural language discourse.
+
+Based on: "Signals: Trajectory Sampling and Triage for Agentic Interactions"
+(Chen et al., 2026)
+
+These signals capture learning-oriented patterns in the conversation:
+- Misalignment: Semantic/intent mismatches (rephrasing, corrections)
+- Stagnation: Discourse without visible progress (near-duplicates, circular)
+- Disengagement: Withdrawal of cooperative intent (exit requests, negative stance)
+- Satisfaction: Successful convergence (gratitude, confirmations)
+-}
+data InteractionSignals = InteractionSignals
+    { sigMisalignmentCount :: Int
+    -- ^ Semantic/intent mismatches detected (rephrasing, corrections)
+    , sigStagnationCount :: Int
+    -- ^ Discourse without progress (near-duplicates, circular explanations)
+    , sigDisengagementDetected :: Bool
+    -- ^ User withdrawal markers detected (exit requests, negative stance)
+    , sigSatisfactionDetected :: Bool
+    -- ^ Success confirmation markers detected (gratitude, confirmations)
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON InteractionSignals
+instance ToJSON InteractionSignals
+
+-- | Default empty interaction signals.
+defaultInteractionSignals :: InteractionSignals
+defaultInteractionSignals = InteractionSignals
+    { sigMisalignmentCount = 0
+    , sigStagnationCount = 0
+    , sigDisengagementDetected = False
+    , sigSatisfactionDetected = False
+    }
+
+{- | Execution signals derived from structured runtime events (tool calls, API responses).
+
+These signals capture learning-oriented patterns in tool execution:
+- Failure: Action attempts not yielding usable outcomes
+- Loop: Repetitive execution without progress (retries, oscillations)
+-}
+data ExecutionSignals = ExecutionSignals
+    { sigFailureCount :: Int
+    -- ^ Tool/action attempts with non-advancing outcomes
+    , sigLoopDetected :: Bool
+    -- ^ Repetitive execution patterns without progress
+    , sigLoopToolSequence :: [Text]
+    -- ^ Tool names involved in detected loop (for diagnostics)
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON ExecutionSignals
+instance ToJSON ExecutionSignals
+
+-- | Default empty execution signals.
+defaultExecutionSignals :: ExecutionSignals
+defaultExecutionSignals = ExecutionSignals
+    { sigFailureCount = 0
+    , sigLoopDetected = False
+    , sigLoopToolSequence = []
+    }
+
+{- | Environment signals for system-level boundary conditions.
+
+These signals capture diagnosis-oriented patterns:
+- Exhaustion: Context overflows, rate limits, API failures, resource boundaries
+-}
+data EnvironmentSignals = EnvironmentSignals
+    { sigExhaustionCount :: Int
+    -- ^ Resource boundary hits (rate limits, context overflows)
+    , sigExhaustionTypes :: [Text]
+    -- ^ Types of exhaustion detected (e.g., "rate_limit", "context_overflow")
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON EnvironmentSignals
+instance ToJSON EnvironmentSignals
+
+-- | Default empty environment signals.
+defaultEnvironmentSignals :: EnvironmentSignals
+defaultEnvironmentSignals = EnvironmentSignals
+    { sigExhaustionCount = 0
+    , sigExhaustionTypes = []
+    }
+
+{- | Combined trajectory signals for a session.
+
+Aggregates all signal categories and provides a composite informativeness score.
+Higher scores indicate trajectories more likely to contain actionable insights
+for learning and improvement.
+-}
+data TrajectorySignals = TrajectorySignals
+    { trajInteraction :: InteractionSignals
+    , trajExecution :: ExecutionSignals
+    , trajEnvironment :: EnvironmentSignals
+    -- | Composite informativeness score (0-100)
+    -- Higher = more likely to contain actionable insights
+    , trajInformativenessScore :: Int
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON TrajectorySignals
+instance ToJSON TrajectorySignals
+
+-- | Default empty trajectory signals.
+defaultTrajectorySignals :: TrajectorySignals
+defaultTrajectorySignals = TrajectorySignals
+    { trajInteraction = defaultInteractionSignals
+    , trajExecution = defaultExecutionSignals
+    , trajEnvironment = defaultEnvironmentSignals
+    , trajInformativenessScore = 0
+    }
+
+{- | Per-step signal tracking.
+
+Stores signal information for individual turns, similar to how StepByteUsage
+tracks per-turn byte usage. Uses Maybe for backward compatibility.
+-}
+data StepSignals = StepSignals
+    { stepInteractionSignals :: Maybe InteractionSignals
+    , stepExecutionSignals :: Maybe ExecutionSignals
+    , stepEnvironmentSignals :: Maybe EnvironmentSignals
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON StepSignals
+instance ToJSON StepSignals
 
 -------------------------------------------------------------------------------
 -- Byte Usage Tracking
@@ -450,7 +593,7 @@ instance FromJSON Turn where
                     pure $ UserTurn contents byteUsage
                 "LlmTurn" -> do
                     contents <- obj .: "contents"
-                    byteUsage <- obj .: "byteUsage"
+                    byteUsage <- obj .:? "byteUsage"
                     pure $ LlmTurn contents byteUsage
                 _ -> fail $ "Unknown Turn tag: " ++ show tag
 
@@ -507,3 +650,4 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
+

@@ -34,7 +34,16 @@ import System.Agents.Base (Agent (..), ConversationId)
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base hiding (Agent)
-import System.Agents.Session.Types (StepByteUsage (..), sessionTotalBytes)
+import System.Agents.Session.Signals (
+    calculateTrajectorySignals,
+ )
+import System.Agents.Session.Types (
+    ExecutionSignals (..),
+    InteractionSignals (..),
+    StepByteUsage (..),
+    TrajectorySignals (..),
+    sessionTotalBytes,
+ )
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
@@ -79,6 +88,10 @@ byteUsageAttr = attrName "byteUsage"
 -- | Attribute for token usage text.
 tokenUsageAttr :: AttrName
 tokenUsageAttr = attrName "tokenUsage"
+
+-- | Attribute for signal metrics text.
+signalMetricsAttr :: AttrName
+signalMetricsAttr = attrName "signalMetrics"
 
 -- | Attribute for paused conversation indicator.
 pausedAttr :: AttrName
@@ -755,27 +768,52 @@ render_queued_messages msgs =
                 ++ map (\m -> txt $ "  ▶ " <> Text.take 60 m) msgs
                 ++ [txt ""]
 
--- | Render total session usage (tokens if available, else bytes) and turn count.
+-- | Render total session usage (tokens if available, else bytes), turn count, and signal metrics.
 render_session_usage :: Session -> Widget N
 render_session_usage session =
     let turnCount = length session.turns
         -- Try to get aggregated token usage from all turns
         mTokenStats = aggregateSessionTokenUsage session
+        -- Calculate trajectory signals
+        mSignals = Just (calculateTrajectorySignals session)
      in if turnCount == 0
             then emptyWidget
-            else case mTokenStats of
-                Just tokenStats ->
-                    withAttr tokenUsageAttr $
-                        txt $
-                            "Session total: " <> formatTokenStats tokenStats <> "  (" <> Text.pack (show turnCount) <> " turns)  "
-                Nothing ->
-                    let totalBytes = sessionTotalBytes session
-                     in if totalBytes == 0
-                            then emptyWidget
-                            else
-                                withAttr byteUsageAttr $
-                                    txt $
-                                        "Session total: " <> formatBytes totalBytes <> "  (" <> Text.pack (show turnCount) <> " turns)  "
+            else
+                vBox
+                    [ case mTokenStats of
+                        Just tokenStats ->
+                            withAttr tokenUsageAttr $
+                                txt $
+                                    "Session total: " <> formatTokenStats tokenStats <> "  (" <> Text.pack (show turnCount) <> " turns)  "
+                        Nothing ->
+                            let totalBytes = sessionTotalBytes session
+                             in if totalBytes == 0
+                                    then emptyWidget
+                                    else
+                                        withAttr byteUsageAttr $
+                                            txt $
+                                                "Session total: " <> formatBytes totalBytes <> "  (" <> Text.pack (show turnCount) <> " turns)  "
+                    , renderSignalSummary mSignals
+                    ]
+
+-- | Render compact signal summary for TUI header.
+renderSignalSummary :: Maybe TrajectorySignals -> Widget N
+renderSignalSummary Nothing = emptyWidget
+renderSignalSummary (Just signals) =
+    let score = trajInformativenessScore signals
+        is = trajInteraction signals
+        es = trajExecution signals
+        -- Compact display: score + key indicators
+        indicators = concat
+            [ if sigDisengagementDetected is then ["⚠️ disengage"] else []
+            , if sigLoopDetected es then ["🔴 loop"] else []
+            , if sigFailureCount es > 0 then ["⚡" <> Text.pack (show (sigFailureCount es)) <> " fails"] else []
+            , if sigMisalignmentCount is > 0 then ["🔄" <> Text.pack (show (sigMisalignmentCount is)) <> " misalign"] else []
+            , if sigStagnationCount is > 0 then ["⏸️ " <> Text.pack (show (sigStagnationCount is)) <> " stagn"] else []
+            ]
+        scoreText = "Signals: " <> Text.pack (show score) <> "/100"
+        indicatorsText = if null indicators then "" else " | " <> Text.intercalate " | " indicators
+     in withAttr signalMetricsAttr $ txt $ scoreText <> indicatorsText
 
 -- | Aggregate token usage across all turns in a session.
 aggregateSessionTokenUsage :: Session -> Maybe TokenUsageStats
@@ -993,6 +1031,7 @@ tui_appAttrMap _ =
         , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
         , (byteUsageAttr, BrickUtil.fg Vty.brightYellow `Vty.withStyle` Vty.dim)
         , (tokenUsageAttr, BrickUtil.fg Vty.brightGreen `Vty.withStyle` Vty.dim)
+        , (signalMetricsAttr, BrickUtil.fg Vty.brightCyan `Vty.withStyle` Vty.dim)
         , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
@@ -1019,3 +1058,4 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
+
