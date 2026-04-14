@@ -33,6 +33,16 @@
         "path": "faq.json"
       }
     ],
+    "builtinToolboxes": [
+      {
+        "tag": "DeveloperToolbox",
+        "contents": {
+          "Name": "dev",
+          "Description": "Development utilities",
+          "Capabilities": ["read-file-range", "write-file-range"]
+        }
+      }
+    ],
     "bashToolboxes": [
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read"}},
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/write"}},

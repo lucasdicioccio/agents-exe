@@ -109,8 +109,7 @@
       "- Cross-reference related documentation",
       "- Test code examples mentally"
     ],
-    "extraAgents": [
-    ],
+    "extraAgents": [],
     "builtinToolboxes": [
       {
         "tag": "SqliteToolbox",
@@ -120,14 +119,45 @@
           "Path": "./resources/documenter-knowledge.db",
           "Access": "read-write"
         }
+      },
+      {
+        "tag": "DeveloperToolbox",
+        "contents": {
+          "Name": "dev",
+          "Description": "Development utilities",
+          "Capabilities": [
+            "read-file-range"
+          ]
+        }
       }
     ],
     "bashToolboxes": [
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read"}},
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/git/read", "BasenameFilter": ".sh"}},
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/gen/graphviz", "BasenameFilter": ".sh"}},
-        {"tag": "SingleTool", "contents": {"Path": "tools/dev/write/write-file.sh"}}
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/read"
+        }
+      },
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/git/read",
+          "BasenameFilter": ".sh"
+        }
+      },
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/gen/graphviz",
+          "BasenameFilter": ".sh"
+        }
+      },
+      {
+        "tag": "SingleTool",
+        "contents": {
+          "Path": "tools/dev/write/write-file.sh"
+        }
+      }
     ]
   }
 }
-
