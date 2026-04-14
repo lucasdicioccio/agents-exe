@@ -127,4 +127,3 @@ callResultToUserToolResponse _ result =
 -- | Base64 encode ByteString to Text.
 base64Encode :: BS.ByteString -> Text
 base64Encode = Text.decodeUtf8 . B64.encode
-

@@ -269,12 +269,12 @@ instance ToJSON CreateResult where
 
 -- | Range specification for file operations.
 data RangeSpec
-    = Lines (Int, Int)
-    -- ^ 1-based, inclusive line range (start, end)
-    | Head
-    -- ^ Before line 1 (prepend)
-    | Tail
-    -- ^ After last line (append)
+    = -- | 1-based, inclusive line range (start, end)
+      Lines (Int, Int)
+    | -- | Before line 1 (prepend)
+      Head
+    | -- | After last line (append)
+      Tail
     deriving (Show, Eq)
 
 -- | Result of a read file range operation.
@@ -618,15 +618,17 @@ executeReadFileRange tracer toolbox filePath rangesTxt = do
 
                                     runTracer tracer (ReadFileRangeCompletedTrace filePath linesRead)
 
-                                    pure $ Right $
-                                        ReadFileRangeResult
-                                            { readFilePath = filePath
-                                            , readFileContent = output
-                                            , readFileLinesRead = linesRead
-                                            }
+                                    pure $
+                                        Right $
+                                            ReadFileRangeResult
+                                                { readFilePath = filePath
+                                                , readFileContent = output
+                                                , readFileLinesRead = linesRead
+                                                }
 
--- | Extract lines based on range specifications.
--- Returns list of (lineNumber, lineContent) pairs.
+{- | Extract lines based on range specifications.
+Returns list of (lineNumber, lineContent) pairs.
+-}
 extractLines :: [Text] -> [RangeSpec] -> [(Int, Text)]
 extractLines allLines ranges =
     concatMap (extractRange allLines) ranges
@@ -740,12 +742,13 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
 
                                             runTracer tracer (WriteFileRangeCompletedTrace filePath rangesModified linesWritten)
 
-                                            pure $ Right $
-                                                WriteFileRangeResult
-                                                    { writeFilePath = filePath
-                                                    , writeFileRangesModified = rangesModified
-                                                    , writeFileLinesWritten = linesWritten
-                                                    }
+                                            pure $
+                                                Right $
+                                                    WriteFileRangeResult
+                                                        { writeFilePath = filePath
+                                                        , writeFileRangesModified = rangesModified
+                                                        , writeFileLinesWritten = linesWritten
+                                                        }
   where
     isHeadOrTail Head = True
     isHeadOrTail Tail = True
@@ -1843,4 +1846,3 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
-

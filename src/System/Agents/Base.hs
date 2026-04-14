@@ -1271,4 +1271,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-
