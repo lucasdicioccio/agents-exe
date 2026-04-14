@@ -22,14 +22,13 @@ module System.Agents.TUI.Core (
     ConversationStatus (..),
     AuxiliaryTask (..),
     Core,
-    UIState (..),
+UIState (..),
     TuiState,
     SessionConfig (..),
     Tab (..),
     initUIState,
     initCore,
     updateConversationSession,
-    updateConversation,
 
     -- * Lens accessors
     uiFocusRing,
@@ -39,15 +38,13 @@ module System.Agents.TUI.Core (
     messageEditor,
     selectedAgentInfo,
     unreadConversations,
-    ongoingConversations,
     auxiliaryTasks,
-    coreAgentTools,
+    uiAgentTools,
     attachedFiles,
     attachmentDialogState,
     filePathInput,
     fileBrowser,
     selectedAttachmentIndex,
-    coreAgents,
     coreConversations,
     corePausedConversations,
     coreBufferedMessages,
@@ -56,7 +53,6 @@ module System.Agents.TUI.Core (
     eventChan,
     currentTab,
     helpContent,
-
     -- * Re-exports from Render
     tui_appDraw,
     tui_appAttrMap,
@@ -235,8 +231,8 @@ runTUIWithConfig tracer config props = do
     -- Create TUI agents from OS-native trees
     let tuiAgents = map createTuiAgent itrees
 
-    -- Load existing session files
-    loadedSessions <- loadSessionFiles config.sessionStore
+-- Load existing session files
+    _loadedSessions <- loadSessionFiles config.sessionStore
 
     -- Collect tools from all agents (read from their TVars)
     agentTools <- collectAgentTools tuiAgents
@@ -244,17 +240,15 @@ runTUIWithConfig tracer config props = do
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
 
-    -- Create core state with loaded conversations
-    core0 <- initCore tuiAgents
+-- Create core state with loaded conversations
+    core0 <- initCore
     coreTVar <- newTVarIO core0
 
     -- Create UI state with loaded sessions and collected tools
     -- Also initialize help content with keyboard shortcuts
-    let ui0 =
-            initHelpContent $
-                (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
-                    { _coreAgentTools = agentTools
-                    }
+    let ui0 = (initUIState initHelpContent tuiAgents)
+            { _uiAgentTools = agentTools
+            }
 
     -- Create TUI state with session configuration
     let st = TuiState coreTVar ui0 evChan config

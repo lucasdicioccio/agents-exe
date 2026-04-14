@@ -23,20 +23,18 @@ import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
+import Data.Set ()
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..), ConversationId)
+import System.Agents.Base (Agent (..))
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base hiding (Agent)
-import System.Agents.Session.Signals (
-    calculateTrajectorySignals,
- )
+import System.Agents.Session.Signals (calculateTrajectorySignals)
 import System.Agents.Session.Types (
     ExecutionSignals (..),
     InteractionSignals (..),
@@ -149,6 +147,14 @@ attachmentSizeAttr = attrName "attachmentSize"
 dialogAttr :: AttrName
 dialogAttr = attrName "dialog"
 
+-- | Attribute for subcall conversations (dimmed).
+subcallAttr :: AttrName
+subcallAttr = attrName "subcall"
+
+-- | Attribute for selected subcall conversations.
+subcallSelectedAttr :: AttrName
+subcallSelectedAttr = attrName "subcallSelected"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -161,23 +167,9 @@ tui_appDraw st =
         AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
 
-{- | Render the main UI based on current state.
-When zoomed, the content displayed is based on the current tab rather than
-the currently focused widget.
--}
+-- | Render the main UI based on current state.
 render_ui :: TuiState -> Widget N
-render_ui st
-    | st ^. tuiUI . zoomed =
-        case st ^. tuiUI . currentTab of
-            AgentsTab -> render_agentInfo st
-            ChatsTab -> render_conversationView st
-            HistoryTab -> render_sessionView st
-            HelpTab -> renderHelpTab st
-    | otherwise = render_mainLayout st
-
--------------------------------------------------------------------------------
--- Layout Components
--------------------------------------------------------------------------------
+render_ui st = render_mainLayout st
 
 -- | Main layout with tab bar, sidebar, and content area.
 render_mainLayout :: TuiState -> Widget N
@@ -344,7 +336,6 @@ render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
     txt $ " " <> agentSlug0
   where
-    -- Access the agent slug from the OS-native tree
     agentSlug0 = slug (osNodeConfig (tuiNode agent))
 
 -------------------------------------------------------------------------------
@@ -364,13 +355,15 @@ render_conversationList st =
 
 -- | Render a single conversation item.
 render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
-render_conversationItem st _ conv =
+render_conversationItem st isSelected conv =
     let indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
             ConversationStatus_WaitingForInput ->
                 if isUnread then "● " else "  "
             ConversationStatus_Paused -> "⏸ "
-        baseText = indicator <> Text.take 18 (conversationName conv)
+        -- Add indentation for subcalls based on depth
+        indent = Text.replicate (conversationSubcallDepth conv * 2) " "
+        baseText = indicator <> indent <> Text.take 18 (conversationName conv)
         -- Add turn count next to conversation name
         turnCount = case conversationSession conv of
             Nothing -> 0
@@ -383,10 +376,14 @@ render_conversationItem st _ conv =
         queueCount = getQueuedMessageCount st conv
         queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
         fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
+        -- Choose widget style based on subcall status and selection
         widget = case conversationStatus conv of
             ConversationStatus_Paused ->
                 withAttr pausedAttr $ txt $ " " <> fullText
-            _ -> txt $ " " <> fullText
+            _ ->
+                if conversationIsSubcall conv
+                    then withAttr (if isSelected then subcallSelectedAttr else subcallAttr) $ txt $ " " <> fullText
+                    else txt $ " " <> fullText
      in widget
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
@@ -407,7 +404,12 @@ getAttachmentCount st conv =
             Nothing -> 0
             Just atts -> length atts
 
--- | Render the sessions list.
+-------------------------------------------------------------------------------
+-- Session List Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the session list.
+-- | Render the session list.
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
     borderWithFocus
@@ -418,17 +420,10 @@ render_sessionList st =
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
--- | Render a single conversation item.
+-- | Render a single session item.
 render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem _st _ sess =
-    let
-        widget = txt $ Text.pack $ " " <> show sess.sessionId
-     in
-        widget
-
--------------------------------------------------------------------------------
--- Agent Info Rendering
--------------------------------------------------------------------------------
+render_sessionItem _st _isSelected sess =
+    txt $ Text.pack $ " " <> show sess.sessionId
 
 -- | Render agent information panel.
 render_agentInfo :: TuiState -> Widget N
@@ -442,7 +437,7 @@ render_agentInfo st =
             Just agent ->
                 let node = tuiNode agent
                     agentCfg = osNodeConfig node
-                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . coreAgentTools)
+                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . uiAgentTools)
                  in viewport AgentInfoWidget Both $
                         vBox $
                             mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
@@ -575,7 +570,6 @@ render_attachment_item selectedIdx idx att =
 -- | Format attachment size based on base64 data length.
 formatAttachmentSize :: Text -> Text
 formatAttachmentSize base64Data =
-    -- Base64 encoding is ~4/3 of original size, so we estimate original
     let base64Len = Text.length base64Data
         originalBytes = (base64Len * 3) `div` 4
      in formatBytes originalBytes
@@ -610,15 +604,13 @@ renderFilePathDialog st =
 renderFileBrowserDialog :: TuiState -> Widget N
 renderFileBrowserDialog st =
     case st ^. tuiUI . fileBrowser of
-        Nothing -> renderFilePathDialog st -- Fallback to text input if browser not initialized
+        Nothing -> renderFilePathDialog st
         Just fb ->
             center $
                 withAttr dialogAttr $
                     borderWithLabel (txt " Attach File (Ctrl+F) ") $
                         vBox
-                            [ hLimit 80 $
-                                vLimit 20 $
-                                    renderFileBrowser True fb -- True = has focus
+                            [ hLimit 80 $ vLimit 20 $ renderFileBrowser True fb
                             , txt ""
                             , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
                             ]
@@ -627,12 +619,9 @@ renderFileBrowserDialog st =
 -- Queued Messages Management Rendering
 -------------------------------------------------------------------------------
 
-{- | Render the queued messages management panel.
-This is only shown when the conversation is paused and has queued messages.
--}
+-- | Render the queued messages management panel.
 render_queued_messages_manager :: TuiState -> Conversation -> Widget N
 render_queued_messages_manager st conv =
-    -- Only show queue management when conversation is paused
     if conversationStatus conv /= ConversationStatus_Paused
         then emptyWidget
         else
@@ -689,7 +678,6 @@ render_conversationView st =
                         st
                         ConversationViewWidget
                         (conversationSession conv)
-                        (st ^. tuiUI . ongoingConversations)
                         mNavState
 
 -- | Get the list of queued messages for a conversation.
@@ -698,7 +686,7 @@ getQueuedMessages st conv =
     let buffered = st ^. tuiUI . uiBufferedMessages
      in case Map.lookup (conversationId conv) buffered of
             Nothing -> []
-            Just msgs -> reverse msgs -- Reverse to show oldest first
+            Just msgs -> reverse msgs
 
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
@@ -707,27 +695,24 @@ render_sessionView st =
   where
     content =
         case listSelectedElement (st ^. tuiUI . sessionList) of
-            Nothing -> do
-                txt "No session selected"
+            Nothing -> txt "No session selected"
             Just (_, session) ->
                 let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget (Just session) (st ^. tuiUI . ongoingConversations) mNavState
+                 in render_session st SessionViewWidget (Just session) mNavState
 
 -- | Render a session's turns.
-render_session :: TuiState -> WidgetName -> Maybe Session -> Set ConversationId -> Maybe TurnNavigationState -> Widget N
-render_session _ _ Nothing _ _ =
-    vBox $ [txt "session not started yet"]
-render_session st w (Just session) _ongoingConvs mNavState =
+render_session :: TuiState -> WidgetName -> Maybe Session -> Maybe TurnNavigationState -> Widget N
+render_session _ _ Nothing _ =
+    vBox [txt "session not started yet"]
+render_session st w (Just session) mNavState =
     case mNavState of
         Nothing ->
-            -- Normal mode: render as before
             borderWithFocus st w "Session" $
                 viewport w Both $
                     vBox $
                         [render_session_usage session]
                             ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
-            -- Navigation mode: render with selection highlight
             render_turn_navigation session navState
 
 -- | Render session in turn navigation mode.
@@ -736,15 +721,14 @@ render_turn_navigation session navState =
     let selectedIdx = navState ^. navSelectedTurnIndex
         totalTurns = navState ^. navTotalTurns
         headerText = "Turn Navigation (" <> Text.pack (show (selectedIdx + 1)) <> "/" <> Text.pack (show totalTurns) <> ") [Enter:exit F:fork]"
-        turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
+        turnsWithIndices = zip [0 ..] session.turns
         shownTurns = drop selectedIdx turnsWithIndices
      in borderWithLabel (txt headerText) $
             viewport TurnNavigationWidget Both $
                 vBox $
                     [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
                     , txt ""
-                    ]
-                        ++ map (render_navigable_turn selectedIdx) shownTurns
+                    ] ++ map (render_navigable_turn selectedIdx) shownTurns
 
 -- | Render a single turn with selection indicator.
 render_navigable_turn :: Int -> (Int, Turn) -> Widget N
@@ -753,28 +737,14 @@ render_navigable_turn selectedIdx (idx, turn) =
         selectionMarker = if isSelected then "▶ " else "  "
         turnWidget = render_turn (idx, turn)
      in if isSelected
-            then
-                withAttr selectedTurnAttr $
-                    hBox [txt selectionMarker, turnWidget]
+            then withAttr selectedTurnAttr $ hBox [txt selectionMarker, turnWidget]
             else hBox [txt selectionMarker, turnWidget]
-
--- | Render queued messages for a conversation (legacy inline display).
-render_queued_messages :: [Text] -> Widget N
-render_queued_messages [] = emptyWidget
-render_queued_messages msgs =
-    withAttr queuedMessageAttr $
-        vBox $
-            [txt "Queued messages:"]
-                ++ map (\m -> txt $ "  ▶ " <> Text.take 60 m) msgs
-                ++ [txt ""]
 
 -- | Render total session usage (tokens if available, else bytes), turn count, and signal metrics.
 render_session_usage :: Session -> Widget N
 render_session_usage session =
     let turnCount = length session.turns
-        -- Try to get aggregated token usage from all turns
         mTokenStats = aggregateSessionTokenUsage session
-        -- Calculate trajectory signals
         mSignals = Just (calculateTrajectorySignals session)
      in if turnCount == 0
             then emptyWidget
@@ -803,7 +773,6 @@ renderSignalSummary (Just signals) =
     let score = trajInformativenessScore signals
         is = trajInteraction signals
         es = trajExecution signals
-        -- Compact display: score + key indicators
         indicators =
             concat
                 [ if sigDisengagementDetected is then ["⚠️ disengage"] else []
@@ -927,7 +896,7 @@ render_turn (k, turn) =
                     , if k == 0
                         then txt $ "+ " <> getSystemPromptText (userPrompt userTurn)
                         else txt $ "+ ..."
-                    , emptyWidget -- TODO n-tools, n-responses here
+                    , emptyWidget
                     , render_usage mUsage
                     , txt ""
                     ]
@@ -983,9 +952,7 @@ formatTokenUsage usage =
                 ]
      in Text.intercalate ", " parts <> " | total: " <> formatTokenCount (tokenTotalTokens usage)
 
-{- | Format byte usage breakdown for display.
-TODO: display tools and tool-responses explicitly
--}
+-- | Format byte usage breakdown for display.
 formatByteBreakdown :: StepByteUsage -> Text
 formatByteBreakdown usage =
     let parts =
@@ -1051,6 +1018,9 @@ tui_appAttrMap _ =
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
+        , -- Subcall attributes
+          (subcallAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (subcallSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
         , -- FileBrowser attributes
           (fileBrowserAttr, Vty.defAttr)
         , (fileBrowserCurrentDirectoryAttr, BrickUtil.fg Vty.cyan)
@@ -1059,3 +1029,4 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
+

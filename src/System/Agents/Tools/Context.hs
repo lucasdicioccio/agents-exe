@@ -33,6 +33,7 @@ module System.Agents.Tools.Context (
     mkMinimalContext,
     mkRootContext,
     mkPortalContext,
+    mkSubcallContext,
     pushAgentContext,
 
     -- * Access helpers
@@ -47,8 +48,13 @@ module System.Agents.Tools.Context (
 
     -- * Security helpers
     isToolAllowed,
+
+    -- * Subcall helpers
+    getSubcallDepth,
+    isSubcallContext,
 ) where
 
+import Control.Concurrent.STM (TQueue)
 import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
@@ -56,6 +62,8 @@ import Data.Time (NominalDiffTime)
 import GHC.Generics (Generic)
 
 import System.Agents.Base (AgentId, ConversationId)
+import System.Agents.OS.Core.World (World)
+import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Types (Session, SessionId, TurnId)
 
 -------------------------------------------------------------------------------
@@ -189,6 +197,7 @@ The context is designed to be:
 * LLM-agnostic - no types from LLM interfaces are included
 * Recursion-aware - tracks call stack for nested agent invocations
 * Portal-enabled - supports inter-toolbox communication
+* OS-integrated - supports OS World and event emission for TUI visibility
 
 === Fields
 
@@ -208,6 +217,12 @@ The context is designed to be:
   When present, tools can invoke other tools through this callback.
 * 'ctxAllowedTools' - Whitelist of tool names allowed in this context.
   Empty list means all tools are allowed (backward compatibility).
+* 'ctxWorld' - Optional OS World for ECS operations. When present, subcalls
+  can insert conversations into the OS for TUI visibility.
+* 'ctxEventQueue' - Optional event queue for OS event emission. When present,
+  subcalls can emit events to notify the TUI of their lifecycle.
+* 'ctxParentConversation' - Optional parent conversation ID for subcalls.
+  When present, indicates this context is for a nested agent invocation.
 -}
 data ToolExecutionContext = ToolExecutionContext
     { ctxSessionId :: SessionId
@@ -250,10 +265,25 @@ data ToolExecutionContext = ToolExecutionContext
     means all tools are allowed (for backward compatibility). This is
     checked before invoking tools through the portal.
     -}
+    , ctxWorld :: Maybe World
+    {- ^ Optional OS World for ECS operations. When present, tools can
+    insert entities and components into the OS. This enables subcall
+    conversations to be visible in the TUI.
+    -}
+    , ctxEventQueue :: Maybe (TQueue OSEvent)
+    {- ^ Optional event queue for OS event emission. When present, tools
+    can emit events to notify the TUI of subcall lifecycle (start,
+    progress, completion, failure).
+    -}
+    , ctxParentConversation :: Maybe ConversationId
+    {- ^ Optional parent conversation ID for subcalls. When present,
+    indicates this context is for a nested agent invocation, enabling
+    proper lineage tracking in the OS.
+    -}
     }
     deriving (Generic)
 
--- | Custom Eq instance for ToolExecutionContext that handles the function field
+-- | Custom Eq instance for ToolExecutionContext that handles non-comparable fields
 instance Eq ToolExecutionContext where
     (==) a b =
         ctxSessionId a == ctxSessionId b
@@ -264,10 +294,12 @@ instance Eq ToolExecutionContext where
             && ctxCallStack a == ctxCallStack b
             && ctxMaxDepth a == ctxMaxDepth b
             && ctxAllowedTools a == ctxAllowedTools b
+            && ctxParentConversation a == ctxParentConversation b
 
--- Note: ctxToolPortal is not compared (functions can't be compared)
+-- Note: ctxToolPortal, ctxWorld, and ctxEventQueue are not compared
+-- (functions, TVars, and TQueue can't be compared)
 
--- | Custom Show instance for ToolExecutionContext that handles the function field
+-- | Custom Show instance for ToolExecutionContext that handles non-showable fields
 instance Show ToolExecutionContext where
     show ctx =
         "ToolExecutionContext {"
@@ -289,12 +321,20 @@ instance Show ToolExecutionContext where
             ++ portalStr
             ++ ", ctxAllowedTools = "
             ++ show (ctxAllowedTools ctx)
+            ++ ", ctxWorld = "
+            ++ worldStr
+            ++ ", ctxEventQueue = "
+            ++ eventQueueStr
+            ++ ", ctxParentConversation = "
+            ++ show (ctxParentConversation ctx)
             ++ " }"
       where
         portalStr = "<portal>"
+        worldStr = "<world>"
+        eventQueueStr = "<eventQueue>"
 
 {- | JSON serialization support for 'ToolExecutionContext'.
-Note: The tool portal function is not serialized (functions can't be serialized).
+Note: The tool portal function, world, and event queue are not serialized.
 -}
 instance ToJSON ToolExecutionContext where
     toJSON ctx =
@@ -307,7 +347,9 @@ instance ToJSON ToolExecutionContext where
             , "callStack" .= ctxCallStack ctx
             , "maxDepth" .= ctxMaxDepth ctx
             , "allowedTools" .= ctxAllowedTools ctx
-            -- Note: ctxToolPortal is intentionally omitted (not serializable)
+            , "parentConversation" .= ctxParentConversation ctx
+            -- Note: ctxToolPortal, ctxWorld, and ctxEventQueue are intentionally omitted
+            -- (not serializable)
             ]
 
 instance FromJSON ToolExecutionContext where
@@ -322,6 +364,9 @@ instance FromJSON ToolExecutionContext where
             <*> v .: "maxDepth"
             <*> pure dummyPortal
             <*> v .: "allowedTools"
+            <*> pure Nothing
+            <*> pure Nothing
+            <*> v .: "parentConversation"
 
 -------------------------------------------------------------------------------
 -- Construction Helpers
@@ -348,6 +393,9 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxMaxDepth = maxDepth
         , ctxToolPortal = portal
         , ctxAllowedTools = []
+        , ctxWorld = Nothing
+        , ctxEventQueue = Nothing
+        , ctxParentConversation = Nothing
         }
 
 {- | Create a minimal 'ToolExecutionContext' with only required identifiers.
@@ -382,6 +430,9 @@ mkMinimalContext sessId convId tId portal =
         , ctxMaxDepth = Nothing
         , ctxToolPortal = portal
         , ctxAllowedTools = []
+        , ctxWorld = Nothing
+        , ctxEventQueue = Nothing
+        , ctxParentConversation = Nothing
         }
 
 {- | Create a root-level context for the start of agent execution (depth 0).
@@ -423,6 +474,9 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxMaxDepth = maxDepth
         , ctxToolPortal = portal
         , ctxAllowedTools = []
+        , ctxWorld = Nothing
+        , ctxEventQueue = Nothing
+        , ctxParentConversation = Nothing
         }
 
 {- | Create a context with tool portal support.
@@ -467,6 +521,47 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxMaxDepth = maxDepth
         , ctxToolPortal = portal
         , ctxAllowedTools = allowed
+        , ctxWorld = Nothing
+        , ctxEventQueue = Nothing
+        , ctxParentConversation = Nothing
+        }
+
+{- | Create a nested context for subcall execution with OS integration.
+
+This constructor is used when setting up a context for a nested agent
+call (subcall) that needs OS integration for TUI visibility. It includes
+all the fields needed for the subcall to insert itself into the OS World
+and emit events.
+
+Example:
+
+@
+case pushAgentContext "helper-agent" newConvId parentCtx of
+    Left err -> handleRecursionError err
+    Right baseCtx -> do
+        let subcallCtx = mkSubcallContext
+                baseCtx
+                (Just world)        -- OS World
+                (Just eventQueue)   -- Event queue
+                parentConvId        -- Parent conversation
+        runSubAgent subcallCtx query
+@
+-}
+mkSubcallContext ::
+    -- | Base context from pushAgentContext
+    ToolExecutionContext ->
+    -- | Optional OS World for ECS operations
+    Maybe World ->
+    -- | Optional event queue for OS events
+    Maybe (TQueue OSEvent) ->
+    -- | Parent conversation ID (required for subcalls)
+    ConversationId ->
+    ToolExecutionContext
+mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
+    baseCtx
+        { ctxWorld = mWorld
+        , ctxEventQueue = mEventQueue
+        , ctxParentConversation = Just parentConvId
         }
 
 {- | Create a nested context when calling a sub-agent.
@@ -610,3 +705,38 @@ isToolAllowed :: Text -> ToolExecutionContext -> Bool
 isToolAllowed toolName ctx =
     -- Empty allowed list means all tools allowed (backward compatibility)
     null (ctxAllowedTools ctx) || toolName `elem` ctxAllowedTools ctx
+
+-------------------------------------------------------------------------------
+-- Subcall Helpers
+-------------------------------------------------------------------------------
+
+{- | Get the subcall depth (0 if not a subcall).
+
+Returns 0 for root conversations, 1+ for nested subcalls.
+This is calculated from the ctxParentConversation field.
+
+@
+depth = getSubcallDepth ctx
+-- depth == 0: root conversation
+-- depth > 0: nested subcall
+@
+-}
+getSubcallDepth :: ToolExecutionContext -> Int
+getSubcallDepth ctx = case ctxParentConversation ctx of
+    Nothing -> 0
+    Just _ -> length (ctxCallStack ctx)
+
+{- | Check if this context represents a subcall (nested agent invocation).
+
+Returns True if ctxParentConversation is Just, indicating this
+context is for a nested agent call.
+
+@
+if isSubcallContext ctx
+    then handleSubcallBehavior ctx
+    else handleRootBehavior ctx
+@
+-}
+isSubcallContext :: ToolExecutionContext -> Bool
+isSubcallContext = maybe False (const True) . ctxParentConversation
+

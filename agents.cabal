@@ -75,6 +75,7 @@ library agents-lib
                     , System.Agents.OS.Core
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
+                    , System.Agents.OS.Events
                     , System.Agents.OS.Interfaces
                     , System.Agents.OS.Interfaces.TUI
                     , System.Agents.OS.Interfaces.OneShot
@@ -84,23 +85,20 @@ library agents-lib
                     , System.Agents.OS.Persistence.Sqlite
                     , System.Agents.OS.Persistence.Types
                     , System.Agents.OS.Resources
-                    , System.Agents.OS.Resources.Types
-                    , System.Agents.OS.Resources.Sqlite
-                    , System.Agents.OS.Resources.Lua
                     , System.Agents.OS.Resources.Http
-                    , System.Agents.ToolPortal
-                    , System.Agents.ToolRegistration
+                    , System.Agents.OS.Resources.Lua
+                    , System.Agents.OS.Resources.Sqlite
+                    , System.Agents.OS.Resources.Types
                     , System.Agents.Tools
                     , System.Agents.Tools.Activation
                     , System.Agents.Tools.Activation.Session
-                    , System.Agents.Tools.Context
-                    , System.Agents.Tools.ExecuteToolCall
-                    , System.Agents.Tools.Trace
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
+                    , System.Agents.Tools.Context
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.EndpointPredicate
+                    , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.IO
                     , System.Agents.Tools.LuaToolbox
                     , System.Agents.Tools.LuaToolbox.Utils
@@ -126,6 +124,7 @@ library agents-lib
                     , System.Agents.Tools.Skills.Toolbox
                     , System.Agents.Tools.SqliteToolbox
                     , System.Agents.Tools.SystemToolbox
+                    , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
@@ -158,8 +157,10 @@ library agents-lib
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Event
                     , System.Agents.TUI.Clipboard
-                    , System.Agents.TraceUtils
+                    , System.Agents.ToolPortal
+                    , System.Agents.ToolRegistration
                     , System.Agents.ToolSchema
+                    , System.Agents.TraceUtils
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,
@@ -339,5 +340,4 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
-
 

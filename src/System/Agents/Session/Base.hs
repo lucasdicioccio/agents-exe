@@ -22,6 +22,9 @@ module System.Agents.Session.Base (
     SystemTool (..),
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
+    SessionProgress (..),
+    OnSessionProgress,
+    ignoreSessionProgress,
 
     -- * Defined in this module
     MissingUserPrompt (..),
@@ -30,12 +33,7 @@ module System.Agents.Session.Base (
     ContextConfig (..),
     defaultContextConfig,
     Agent (..),
-    SessionProgress (..),
-    OnSessionProgress,
-    ignoreSessionProgress,
 ) where
-
-import Data.Text (Text)
 
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
@@ -72,7 +70,7 @@ data Action r
     | AskUserPrompt MissingUserPrompt
     | AskLlmCompletion LlmCompletion
     | -- comfort/note fully-motivated below, is to evolve the agent so that th runner logic has a primitive to do so
-      -- \* one advantage is it allows "pure" agents (i.e., dropping the need for an IO in usrQuery et al.)
+      -- \* one advantage is it allows "pure" agents (i.e., dropping the need for a IO in usrQuery et al.)
       -- \* could consider forking but that would require a joining function (r -> r -> r) to combine results, which prevents the functorial aspects
       -- \* could consider extensiblility so that agents come with their set of decisions, but the runloop then has to account for these
       Evolve (Agent r)
@@ -121,30 +119,3 @@ data Agent r = Agent
     }
     deriving (Functor)
 
--------------------------------------------------------------------------------
--- Session Progress Tracking
--------------------------------------------------------------------------------
-
-{- | Represents the progress of a session through its lifecycle.
-This type is used with 'OnSessionProgress' callbacks to track
-session state changes in a decoupled manner.
--}
-data SessionProgress
-    = -- | Emitted when a new session is started
-      SessionStarted Session
-    | -- | Emitted after each step when the session is updated
-      SessionUpdated Session
-    | -- | Emitted when the session completes successfully
-      SessionCompleted Session
-    | -- | Emitted when the session fails with an error message
-      SessionFailed Session Text
-    deriving (Show, Eq)
-
-{- | Callback type for receiving session progress updates.
-This decouples the session storage mechanism from the agent loop logic.
--}
-type OnSessionProgress = SessionProgress -> IO ()
-
--- | A no-op session progress handler for when tracking is not needed.
-ignoreSessionProgress :: OnSessionProgress
-ignoreSessionProgress = const (pure ())

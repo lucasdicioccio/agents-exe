@@ -36,15 +36,22 @@ import System.Agents.ToolRegistration (ToolRegistration)
 -- Widget Names
 -------------------------------------------------------------------------------
 
--- | Widget names for Brick focus management.
+-- | Widget names for the TUI focus ring and viewport management.
 data WidgetName
-    = AgentListWidget
-    | SessionsListWidget
-    | ConversationListWidget
-    | MessageEditorWidget
-    | ConversationViewWidget
-    | SessionViewWidget
-    | AgentInfoWidget
+    = -- | Agent list in the left sidebar
+      AgentListWidget
+    | -- | Agent information/details panel
+      AgentInfoWidget
+    | -- | Conversation list in the left sidebar
+      ConversationListWidget
+    | -- | Saved sessions list in the History tab
+      SessionsListWidget
+    | -- | Message editor input area
+      MessageEditorWidget
+    | -- | Main conversation display viewport
+      ConversationViewWidget
+    | -- | Session content display viewport
+      SessionViewWidget
     | -- | For viewport scrolling during turn navigation
       TurnNavigationWidget
     | -- | For focusing the queued messages list
@@ -132,6 +139,20 @@ data AppEvent
     | AppEvent_AgentTrace Trace
     | AppEvent_ShowStatus StatusSeverity Text
     | AppEvent_ClearStatus
+    | -- ** Subcall Events for TUI visibility
+      -- | A subcall conversation has started
+      AppEvent_SubcallStarted
+        { appSubcallParentId :: ConversationId
+        , appSubcallId :: ConversationId
+        , appSubcallAgentSlug :: Text
+        , appSubcallDepth :: Int
+        }
+    | -- | A subcall has made progress
+      AppEvent_SubcallProgress ConversationId Session
+    | -- | A subcall has completed successfully
+      AppEvent_SubcallCompleted ConversationId Text
+    | -- | A subcall has failed
+      AppEvent_SubcallFailed ConversationId Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -289,7 +310,12 @@ data ConversationStatus
       ConversationStatus_Paused
     deriving (Show, Eq)
 
--- | A conversation with an agent.
+{- | A conversation with an agent.
+
+Conversations can be either root-level user-initiated conversations
+or subcalls (nested agent invocations). Subcall conversations have
+additional metadata for TUI visibility and lineage tracking.
+-}
 data Conversation = Conversation
     { conversationId :: ConversationId
     , conversationAgent :: TuiAgent
@@ -302,49 +328,128 @@ data Conversation = Conversation
     -- ^ Current status of the conversation
     , conversationOnProgress :: OnSessionProgress
     -- ^ Callback for session progress updates
+    , conversationIsSubcall :: Bool
+    -- ^ Whether this is a subcall (nested agent invocation)
+    , conversationParentId :: Maybe ConversationId
+    -- ^ Parent conversation ID for subcalls (Nothing for root conversations)
+    , conversationSubcallDepth :: Int
+    -- ^ Subcall nesting depth (0 = root, 1+ = nested)
     }
+
+-- | Manual Show instance for Conversation.
+instance Show Conversation where
+    show conv =
+        "Conversation {conversationId = "
+            ++ show conv.conversationId
+            ++ ", conversationAgent = "
+            ++ show conv.conversationAgent
+            ++ ", conversationName = "
+            ++ show conv.conversationName
+            ++ ", conversationIsSubcall = "
+            ++ show conv.conversationIsSubcall
+            ++ ", conversationParentId = "
+            ++ show conv.conversationParentId
+            ++ ", ...}"
+
+-- | Create a root-level conversation (not a subcall).
+mkRootConversation ::
+    ConversationId ->
+    TuiAgent ->
+    Maybe ThreadId ->
+    Maybe Session ->
+    Text ->
+    BChan (Maybe UserQuery) ->
+    ConversationStatus ->
+    OnSessionProgress ->
+    Conversation
+mkRootConversation convId agent threadId session convName chan status onProgress =
+    Conversation
+        { conversationId = convId
+        , conversationAgent = agent
+        , conversationThreadId = threadId
+        , conversationSession = session
+        , conversationName = convName
+        , conversationChan = chan
+        , conversationStatus = status
+        , conversationOnProgress = onProgress
+        , conversationIsSubcall = False
+        , conversationParentId = Nothing
+        , conversationSubcallDepth = 0
+        }
+
+-- | Create a subcall conversation.
+mkSubcallConversation ::
+    ConversationId ->
+    TuiAgent ->
+    Maybe ThreadId ->
+    Maybe Session ->
+    Text ->
+    BChan (Maybe UserQuery) ->
+    ConversationStatus ->
+    OnSessionProgress ->
+    ConversationId ->
+    -- ^ Parent conversation ID
+    Int ->
+    -- ^ Subcall depth
+    Conversation
+mkSubcallConversation convId agent threadId session convName chan status onProgress parentId depth =
+    Conversation
+        { conversationId = convId
+        , conversationAgent = agent
+        , conversationThreadId = threadId
+        , conversationSession = session
+        , conversationName = "↳ " <> convName
+        , conversationChan = chan
+        , conversationStatus = status
+        , conversationOnProgress = onProgress
+        , conversationIsSubcall = True
+        , conversationParentId = Just parentId
+        , conversationSubcallDepth = depth
+        }
 
 -------------------------------------------------------------------------------
 -- Auxiliary Task Types
 -------------------------------------------------------------------------------
 
-{- | An auxiliary task running asynchronously in the background.
-These tasks don't block the TUI but are tracked for cleanup.
--}
+-- | Auxiliary tasks running in the background (e.g., external viewers).
 data AuxiliaryTask
-    = -- | An external viewer process viewing a specific conversation/session
-      Viewer (Async ()) ConversationId SessionId
-
-instance Show AuxiliaryTask where
-    show (Viewer _ convId sessId) =
-        "Viewer <async> " ++ show convId ++ " " ++ show sessId
+    = -- | External markdown viewer task
+      Viewer
+        { viewerAsync :: Async ()
+        , viewerConversationId :: ConversationId
+        , viewerSessionId :: SessionId
+        }
 
 -------------------------------------------------------------------------------
 -- Session Configuration
 -------------------------------------------------------------------------------
 
--- | Configuration for session handling in the TUI.
+-- | Configuration for TUI sessions.
 data SessionConfig = SessionConfig
     { sessionStore :: SessionStore
+    -- ^ Storage for sessions
     , sessionApiKeys :: LoadedApiKeys
-    -- ^ API keys for creating HTTP runtime for LLM calls
+    -- ^ API keys for agents
     }
 
 -------------------------------------------------------------------------------
 -- Core State
 -------------------------------------------------------------------------------
 
--- | The core state holding agents and conversations.
+{- | Core state shared across the TUI.
+
+This is stored in a TVar for thread-safe access. It contains
+mutable state that needs to be accessed from multiple threads.
+-}
 data Core = Core
-    { coreAgents :: [TuiAgent]
-    , coreConversations :: [Conversation]
-    , corePausedConversations :: Set ConversationId
-    -- ^ Set of conversation IDs that are currently paused
+    { coreConversations :: [Conversation]
+    -- ^ Active conversations
+    , coreAgentTools :: [(AgentId, [ToolRegistration])]
+    -- ^ Tools per agent for display
     , coreBufferedMessages :: TVar (Map ConversationId [Text])
-    {- ^ Buffered messages per conversation - allows users to send messages
-    while the agent is processing tool calls. Messages are consumed and
-    concatenated when the agent collects user input.
-    -}
+    -- ^ Buffered messages per conversation (queued while agent is processing)
+    , corePausedConversations :: Set ConversationId
+    -- ^ Set of paused conversation IDs
     }
 
 makeLenses ''Core
@@ -353,122 +458,133 @@ makeLenses ''Core
 -- UI State
 -------------------------------------------------------------------------------
 
--- | UI-related state.
+{- | UI-specific state for the TUI.
+
+This contains all the visual/interaction state that doesn't need
+to be thread-safe and is only accessed from the UI thread.
+-}
 data UIState = UIState
     { _uiFocusRing :: FocusRing WidgetName
-    , _zoomed :: Bool
-    , _agentList :: List WidgetName TuiAgent
-    , _sessionList :: List WidgetName Session
-    , _conversationList :: List WidgetName Conversation
-    , _messageEditor :: Editor Text WidgetName
-    , _selectedAgentInfo :: Maybe TuiAgent
-    , _unreadConversations :: Set ConversationId
-    , _ongoingConversations :: Set ConversationId
-    {- ^ Conversations currently being processed by an agent
-    (kept for backward compatibility and heartbeat tracking)
-    -}
-    , _auxiliaryTasks :: [AuxiliaryTask]
-    -- ^ Background async tasks (e.g., external viewers)
-    , _coreAgentTools :: [(AgentId, [ToolRegistration])]
-    , _statusMessage :: Maybe StatusMessage
-    -- ^ Current status message to display (if any)
+    -- ^ Focus ring for widget navigation
     , _currentTab :: Tab
-    -- ^ Currently active tab in the TUI
+    -- ^ Currently active tab
     , _helpContent :: [Text]
-    -- ^ Help text content for the Help tab
-    , _uiBufferedMessages :: Map ConversationId [Text]
-    -- ^ Copy of buffered messages from Core for UI rendering
-    , _quitConfirmationPending :: Bool
-    -- ^ Whether the user has pressed Ctrl+Q once and needs to confirm
+    -- ^ Help text content lines
     , _turnNavigation :: Maybe TurnNavigationState
     -- ^ When Just, we are in turn navigation mode
     , _queuedMessagesFocus :: Maybe Int
-    -- ^ Index of currently selected queued message (Nothing = none selected)
+    -- ^ Index of currently selected queued message
     , _attachedFiles :: Map ConversationId [MediaAttachment]
-    -- ^ Media attachments per conversation (not persisted across restarts)
+    -- ^ Media attachments per conversation
     , _attachmentDialogState :: AttachmentDialogState
-    -- ^ Current state of the attachment dialog
+    -- ^ File attachment dialog state
     , _filePathInput :: Editor Text WidgetName
-    -- ^ Editor for file path input (Ctrl+F dialog) - legacy fallback
-    , _fileBrowser :: Maybe (FileBrowser WidgetName)
-    -- ^ FileBrowser widget state for file selection
+    -- ^ Editor for file path input
     , _selectedAttachmentIndex :: Maybe Int
-    -- ^ Index of currently selected attachment in the list (Nothing = none selected)
+    -- ^ Selected attachment index
+    , _agentList :: List WidgetName TuiAgent
+    -- ^ List widget for agents
+    , _conversationList :: List WidgetName Conversation
+    -- ^ List widget for conversations
+    , _sessionList :: List WidgetName Session
+    -- ^ List widget for saved sessions
+    , _messageEditor :: Editor Text WidgetName
+    -- ^ Editor for message input
+    , _selectedAgentInfo :: Maybe TuiAgent
+    -- ^ Currently selected agent for display
+    , _statusMessage :: Maybe StatusMessage
+    -- ^ Current status message (if any)
+    , _zoomed :: Bool
+    -- ^ Whether zoom mode is active
+    , _quitConfirmationPending :: Bool
+    -- ^ Whether quit confirmation is pending
+    , _unreadConversations :: Set ConversationId
+    -- ^ Set of conversations with unread messages
+    , _fileBrowser :: Maybe (FileBrowser WidgetName)
+    -- ^ File browser widget for attachments
+, _auxiliaryTasks :: [AuxiliaryTask]
+    -- ^ Background tasks (e.g., external viewers)
+    , _uiBufferedMessages :: Map ConversationId [Text]
+    -- ^ Copy of buffered messages from Core for UI rendering
+    , _uiAgentTools :: [(AgentId, [ToolRegistration])]
+    -- ^ Tools per agent for display (mirror of Core's coreAgentTools)
     }
 
 makeLenses ''UIState
 
 -------------------------------------------------------------------------------
--- Main TUI State
+-- TUI State
 -------------------------------------------------------------------------------
 
--- | Main TUI state combining core and UI.
+-- | Complete TUI state combining core and UI components.
 data TuiState = TuiState
     { _tuiCore :: TVar Core
+    -- ^ Thread-safe core state
     , _tuiUI :: UIState
+    -- ^ UI-specific state
     , _eventChan :: BChan AppEvent
+    -- ^ Channel for application events
     , _sessionConfig :: SessionConfig
+    -- ^ Session configuration
     }
 
 makeLenses ''TuiState
 
 -------------------------------------------------------------------------------
--- Initialization Helpers
+-- Initialization Functions
 -------------------------------------------------------------------------------
 
--- | Create initial UI state.
-initUIState :: [TuiAgent] -> [Session] -> UIState
-initUIState agents loadedSessions =
+-- | Initialize UI state with default values.
+initUIState :: [Text] -> [TuiAgent] -> UIState
+initUIState helpText agents =
     UIState
-        { _uiFocusRing =
-            focusRing
-                [ AgentListWidget
-                , AgentInfoWidget
-                , SessionsListWidget
-                , MessageEditorWidget
-                , SessionViewWidget
-                , AgentInfoWidget
-                ]
-        , _zoomed = False
-        , _agentList = list AgentListWidget (Vector.fromList agents) 1
-        , _conversationList = list ConversationListWidget Vector.empty 1
-        , _sessionList = list SessionsListWidget (Vector.fromList loadedSessions) 1
-        , _messageEditor = editorText MessageEditorWidget (Just 1) ""
-        , _selectedAgentInfo = listToMaybe agents
-        , _unreadConversations = Set.empty
-        , _ongoingConversations = Set.empty
-        , _auxiliaryTasks = []
-        , _coreAgentTools = []
-        , _statusMessage = Nothing
+        { _uiFocusRing = focusRing [AgentListWidget]
         , _currentTab = AgentsTab
-        , _helpContent = []
-        , _uiBufferedMessages = Map.empty
-        , _quitConfirmationPending = False
+        , _helpContent = helpText
         , _turnNavigation = Nothing
         , _queuedMessagesFocus = Nothing
         , _attachedFiles = Map.empty
         , _attachmentDialogState = AttachmentDialogClosed
         , _filePathInput = editorText FilePathInputWidget (Just 1) ""
-        , _fileBrowser = Nothing
         , _selectedAttachmentIndex = Nothing
+        , _agentList = list AgentListWidget (Vector.fromList agents) 1
+        , _conversationList = list ConversationListWidget Vector.empty 1
+        , _sessionList = list SessionsListWidget Vector.empty 1
+        , _messageEditor = editorText MessageEditorWidget Nothing ""
+        , _selectedAgentInfo = listToMaybe agents
+        , _statusMessage = Nothing
+        , _zoomed = False
+        , _quitConfirmationPending = False
+        , _unreadConversations = Set.empty
+        , _fileBrowser = Nothing
+        , _auxiliaryTasks = []
+        , _uiBufferedMessages = Map.empty
+        , _uiAgentTools = []
         }
 
--- | Create initial Core state.
-initCore :: [TuiAgent] -> IO Core
-initCore agents = do
-    bufferVar <- newTVarIO Map.empty
-    pure $ Core agents [] Set.empty bufferVar
+-- | Initialize core state.
+initCore :: IO Core
+initCore = do
+    bufferedVar <- newTVarIO Map.empty
+    pure
+        Core
+            { coreConversations = []
+            , coreAgentTools = []
+            , coreBufferedMessages = bufferedVar
+            , corePausedConversations = Set.empty
+            }
 
 -------------------------------------------------------------------------------
 -- Utility Functions
 -------------------------------------------------------------------------------
 
--- | Update a conversation's session in the list.
+-- | Update a conversation's session in a list of conversations.
 updateConversationSession :: ConversationId -> Session -> [Conversation] -> [Conversation]
-updateConversationSession convId newSession =
-    map (\c -> if conversationId c == convId then c{conversationSession = Just newSession} else c)
+updateConversationSession targetConvId newSession =
+    map
+        ( \conv ->
+            if conversationId conv == targetConvId
+                then conv{conversationSession = Just newSession}
+                else conv
+        )
 
--- | Update a conversation in the list.
-updateConversation :: Conversation -> [Conversation] -> [Conversation]
-updateConversation conv =
-    map (\c -> if conversationId c == conversationId conv then conv else c)

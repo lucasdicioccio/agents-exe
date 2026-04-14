@@ -45,7 +45,6 @@ module System.Agents.OS.Interfaces (
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM (TQueue, TVar, readTVarIO)
-import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -53,13 +52,8 @@ import Data.Time (UTCTime)
 
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Compat.Runtime (OS (..))
-import System.Agents.Session.Base (Session, SessionProgress)
-
--------------------------------------------------------------------------------
--- Interface Configuration
--------------------------------------------------------------------------------
-
--- | Operating mode for the interface.
+import System.Agents.OS.Events (OSEvent (..))
+import System.Agents.Session.Base (Session)
 data InterfaceMode
     = -- | Interactive TUI mode with multi-agent support
       ModeTUI
@@ -267,20 +261,6 @@ getConversationStatus handle convId = do
 -- Event Handling
 -------------------------------------------------------------------------------
 
--- | Events that can be emitted by the OS.
-data OSEvent
-    = OSEvent_AgentStarted AgentId
-    | OSEvent_AgentStopped AgentId
-    | OSEvent_ConversationStarted ConversationId AgentId
-    | OSEvent_ConversationProgress ConversationId SessionProgress
-    | OSEvent_ConversationCompleted ConversationId
-    | OSEvent_ConversationFailed ConversationId Text
-    | OSEvent_ToolCalled AgentId Text Value
-    | OSEvent_ToolCompleted AgentId Text Value
-    | OSEvent_Error Text
-    | OSEvent_Shutdown
-    deriving (Show)
-
 -- | Subscribe to OS events.
 subscribeToEvents :: InterfaceHandle -> IO (TQueue OSEvent)
 subscribeToEvents handle = pure (ihEventSub handle)
@@ -290,3 +270,4 @@ unsubscribeFromEvents :: InterfaceHandle -> IO ()
 unsubscribeFromEvents _handle = do
     -- In a full implementation, this would remove the subscriber
     pure ()
+
