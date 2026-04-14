@@ -54,6 +54,7 @@ import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Compat.Runtime (OS (..))
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.Session.Base (Session)
+
 data InterfaceMode
     = -- | Interactive TUI mode with multi-agent support
       ModeTUI
@@ -270,4 +271,3 @@ unsubscribeFromEvents :: InterfaceHandle -> IO ()
 unsubscribeFromEvents _handle = do
     -- In a full implementation, this would remove the subscriber
     pure ()
-

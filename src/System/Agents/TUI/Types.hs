@@ -139,7 +139,8 @@ data AppEvent
     | AppEvent_AgentTrace Trace
     | AppEvent_ShowStatus StatusSeverity Text
     | AppEvent_ClearStatus
-    | -- ** Subcall Events for TUI visibility
+    | -- \** Subcall Events for TUI visibility
+
       -- | A subcall conversation has started
       AppEvent_SubcallStarted
         { appSubcallParentId :: ConversationId
@@ -387,10 +388,10 @@ mkSubcallConversation ::
     BChan (Maybe UserQuery) ->
     ConversationStatus ->
     OnSessionProgress ->
+    -- | Parent conversation ID
     ConversationId ->
-    -- ^ Parent conversation ID
+    -- | Subcall depth
     Int ->
-    -- ^ Subcall depth
     Conversation
 mkSubcallConversation convId agent threadId session convName chan status onProgress parentId depth =
     Conversation
@@ -415,10 +416,10 @@ mkSubcallConversation convId agent threadId session convName chan status onProgr
 data AuxiliaryTask
     = -- | External markdown viewer task
       Viewer
-        { viewerAsync :: Async ()
-        , viewerConversationId :: ConversationId
-        , viewerSessionId :: SessionId
-        }
+      { viewerAsync :: Async ()
+      , viewerConversationId :: ConversationId
+      , viewerSessionId :: SessionId
+      }
 
 -------------------------------------------------------------------------------
 -- Session Configuration
@@ -502,7 +503,7 @@ data UIState = UIState
     -- ^ Set of conversations with unread messages
     , _fileBrowser :: Maybe (FileBrowser WidgetName)
     -- ^ File browser widget for attachments
-, _auxiliaryTasks :: [AuxiliaryTask]
+    , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background tasks (e.g., external viewers)
     , _uiBufferedMessages :: Map ConversationId [Text]
     -- ^ Copy of buffered messages from Core for UI rendering
@@ -587,4 +588,3 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
-

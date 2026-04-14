@@ -408,8 +408,9 @@ getAttachmentCount st conv =
 -- Session List Rendering
 -------------------------------------------------------------------------------
 
--- | Render the session list.
--- | Render the session list.
+{- | Render the session list.
+| Render the session list.
+-}
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
     borderWithFocus
@@ -728,7 +729,8 @@ render_turn_navigation session navState =
                 vBox $
                     [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
                     , txt ""
-                    ] ++ map (render_navigable_turn selectedIdx) shownTurns
+                    ]
+                        ++ map (render_navigable_turn selectedIdx) shownTurns
 
 -- | Render a single turn with selection indicator.
 render_navigable_turn :: Int -> (Int, Turn) -> Widget N
@@ -1029,4 +1031,3 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
-

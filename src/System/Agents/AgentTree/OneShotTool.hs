@@ -39,8 +39,6 @@ import qualified System.Agents.Base as Base
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
-import qualified System.Agents.OneShot as OneShot
 import System.Agents.OS.Conversation (
     ConversationConfig (..),
     ConversationState (..),
@@ -58,6 +56,8 @@ import System.Agents.OS.Core.Types (
 import System.Agents.OS.Core.World (World, setComponent)
 import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
+import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
+import qualified System.Agents.OneShot as OneShot
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -122,13 +122,15 @@ instance Aeson.FromJSON PromptOtherAgent where
 -- Type Conversions
 -------------------------------------------------------------------------------
 
--- | Convert a Base.AgentId to an OS.Core.Types.AgentId
--- Base.AgentId wraps UUID, OS.AgentId wraps EntityId which wraps UUID
+{- | Convert a Base.AgentId to an OS.Core.Types.AgentId
+Base.AgentId wraps UUID, OS.AgentId wraps EntityId which wraps UUID
+-}
 baseAgentIdToOS :: Base.AgentId -> AgentId
 baseAgentIdToOS (Base.AgentId uuid) = AgentId (EntityId uuid)
 
--- | Convert a Base.ConversationId to an OS.Core.Types.ConversationId
--- Base.ConversationId wraps UUID, OS.ConversationId wraps EntityId which wraps UUID
+{- | Convert a Base.ConversationId to an OS.Core.Types.ConversationId
+Base.ConversationId wraps UUID, OS.ConversationId wraps EntityId which wraps UUID
+-}
 baseConversationIdToOS :: Base.ConversationId -> ConversationId
 baseConversationIdToOS (Base.ConversationId uuid) = ConversationId (EntityId uuid)
 
@@ -332,8 +334,9 @@ calculateSubcallDepth ctx = case ctx.ctxParentConversation of
     Nothing -> 0
     Just _ -> max 0 (length (ctxCallStack ctx) - 1)
 
--- | Run the sub-agent with event emission for TUI visibility.
--- Uses Base.ConversationId throughout, converting to OS types only for World operations.
+{- | Run the sub-agent with event emission for TUI visibility.
+Uses Base.ConversationId throughout, converting to OS types only for World operations.
+-}
 runSubAgentWithEventEmission ::
     Base.ConversationId ->
     Session ->
@@ -344,17 +347,18 @@ runSubAgentWithEventEmission ::
 runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
     -- Run the agent and handle exceptions
     -- Session.run uses Base.ConversationId directly
-    result <- catch
-        ( do
-            (finalTurnContent, _finalSession) <- run baseConvId agent session0
-            -- Extract and return the response text
-            let resultText = extractResponseText finalTurnContent.llmResponse
-            pure $ Right resultText
-        )
-        ( \e -> do
-            let errMsg = Text.pack $ displayException (e :: SomeException)
-            pure $ Left errMsg
-        )
+    result <-
+        catch
+            ( do
+                (finalTurnContent, _finalSession) <- run baseConvId agent session0
+                -- Extract and return the response text
+                let resultText = extractResponseText finalTurnContent.llmResponse
+                pure $ Right resultText
+            )
+            ( \e -> do
+                let errMsg = Text.pack $ displayException (e :: SomeException)
+                pure $ Left errMsg
+            )
 
     -- Emit completion or failure event
     -- OSEvent types use Base.ConversationId
@@ -396,8 +400,9 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
         Right resultText -> pure resultText
         Left errMsg -> error $ Text.unpack errMsg
 
--- | Update conversation status in OS World.
--- Takes OS.Core.Types.ConversationId since this is a World operation.
+{- | Update conversation status in OS World.
+Takes OS.Core.Types.ConversationId since this is a World operation.
+-}
 updateConversationStatus :: World -> ConversationId -> ConversationStatus -> IO ()
 updateConversationStatus world osConvId newStatus = do
     now <- getCurrentTime
@@ -422,8 +427,9 @@ lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) key
 
 -------------------------------------------------------------------------------
 
--- | Creates an Agent from an OSAgentNode configured for use as a tool.
--- Uses Base types throughout since Session subsystem uses Base.ConversationId.
+{- | Creates an Agent from an OSAgentNode configured for use as a tool.
+Uses Base types throughout since Session subsystem uses Base.ConversationId.
+-}
 nodeToAgent ::
     SessionStore ->
     -- | HTTP runtime for making LLM requests
@@ -514,7 +520,7 @@ toolParamsToJson props =
         Aeson.object $
             [ "type" .= paramTypeToString p.propertyType
             , "description" .= p.propertyDescription
-                ]
+            ]
                 ++ case p.propertyType of
                     EnumParamType values -> ["enum" .= values]
                     _ -> []
@@ -540,4 +546,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
-

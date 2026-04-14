@@ -33,7 +33,8 @@ data OSEvent
     | OSEvent_ToolCompleted AgentId Text Value
     | OSEvent_Error Text
     | OSEvent_Shutdown
-    | -- ** Subcall Events for TUI visibility
+    | -- \** Subcall Events for TUI visibility
+
       -- | Emitted when a subcall (helper agent invocation) starts
       OSEvent_SubcallStarted
         { subcallParentConversationId :: ConversationId
@@ -67,4 +68,3 @@ data OSEvent
         -- ^ The error message
         }
     deriving (Show)
-

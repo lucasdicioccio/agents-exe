@@ -133,8 +133,9 @@ data Trace
     | OneShotTrace !OneShot.Trace
     deriving (Show)
 
--- | Default keyboard shortcuts help content.
--- | Default keyboard shortcuts help content.
+{- | Default keyboard shortcuts help content.
+| Default keyboard shortcuts help content.
+-}
 defaultHelpContent :: [Text.Text]
 defaultHelpContent =
     [ "Keyboard Shortcuts:"
@@ -192,6 +193,7 @@ defaultHelpContent =
 -- | Alias for defaultHelpContent for backward compatibility.
 initHelpContent :: [Text.Text]
 initHelpContent = defaultHelpContent
+
 {- | The base widgets that are always present in the focus ring.
 These correspond to the main navigation lists.
 -}
@@ -1490,4 +1492,3 @@ handleSendMessage = do
                         tuiUI . selectedAttachmentIndex .= Nothing
                         updateConversationStatus convId ConversationStatus_Active
             Nothing -> showStatus StatusWarning "No conversation selected"
-

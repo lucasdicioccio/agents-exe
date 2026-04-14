@@ -118,4 +118,3 @@ data Agent r = Agent
     -- ^ Configuration for what to include in tool execution context
     }
     deriving (Functor)
-
