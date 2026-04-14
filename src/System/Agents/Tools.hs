@@ -263,6 +263,8 @@ agents and tools. The tool accepts parameters based on the capability:
 * scaffold-agent: { "template": "openai", "slug": "my-agent", "file_path": "my-agent.json", "force": false }
 * scaffold-tool: { "language": "bash", "slug": "my-tool", "file_path": "my-tool.sh", "force": false }
 * show-spec: { "spec_name": "bash-tools" }
+* read-file-range: { "path": "/path/to/file", "ranges": "1-10,20-30" }
+* write-file-range: { "path": "/path/to/file", "ranges": "head,5-10,tail", "content": "new content" }
 -}
 developerTool :: Tracer IO Trace -> DeveloperTools.Toolbox -> Tool ()
 developerTool tracer box =
@@ -338,6 +340,31 @@ executeDeveloperCapability tracer box cap params = case cap of
                     Left err -> pure $ DeveloperToolError () err
                     Right content -> pure $ DeveloperToolSpecResult () content
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'spec_name' parameter")
+    "read-file-range" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
+                        Just (Aeson.String r) -> r
+                        _ -> ""
+                result <- DeveloperTools.executeReadFileRange (contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "write-file-range" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                case KeyMap.lookup (AesonKey.fromText "ranges") params of
+                    Just (Aeson.String ranges) -> do
+                        let content = case KeyMap.lookup (AesonKey.fromText "content") params of
+                                Just (Aeson.String c) -> c
+                                _ -> ""
+                        result <- DeveloperTools.executeWriteFileRange (contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges content
+                        case result of
+                            Left err -> pure $ DeveloperToolError () err
+                            Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
 -------------------------------------------------------------------------------

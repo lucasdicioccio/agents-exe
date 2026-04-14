@@ -107,6 +107,8 @@ callResultToUserToolResponse _ result =
         DeveloperToolSpecResult _ content -> TextResponse content
         DeveloperToolAgentValidationResult _ validationResult -> JsonResponse $ Aeson.toJSON validationResult
         DeveloperToolCreateResult _ createResult -> JsonResponse $ Aeson.toJSON createResult
+        DeveloperToolReadFileRangeResult _ readResult -> JsonResponse $ Aeson.toJSON readResult
+        DeveloperToolWriteFileRangeResult _ writeResult -> JsonResponse $ Aeson.toJSON writeResult
         DeveloperToolError _ err ->
             JsonResponse $ Aeson.object ["error" .= ("Developer tool error: " <> show err)]
         LuaToolResult _ toolResult -> JsonResponse toolResult

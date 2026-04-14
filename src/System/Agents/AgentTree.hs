@@ -185,7 +185,6 @@ data AgentConfigGraph = AgentConfigGraph
     }
     deriving (Show)
 
-
 lookupAgent :: AgentRegistry -> AgentId -> IO (Maybe OS.AgentConfig)
 lookupAgent registry (AgentId uuid) = do
     let entityId = EntityId uuid
@@ -237,8 +236,6 @@ data OSAgentTree = OSAgentTree
 -------------------------------------------------------------------------------
 -- Configuration Graph Types
 -------------------------------------------------------------------------------
-
-
 
 -- | A node in the configuration graph
 data AgentConfigNode = AgentConfigNode
@@ -418,11 +415,14 @@ discoverAgentConfigs props = do
             let edges = Map.map (\n -> n.nodeExtraRefs) nodes
             -- Find the root slug by matching file path
             case findNodeByFile normalizedRoot nodes of
-                Nothing -> pure $ Left $ NonEmpty.singleton $ 
-                    OtherError $ "Root agent file not found in discovered nodes: " ++ props.rootAgentFile
+                Nothing ->
+                    pure $
+                        Left $
+                            NonEmpty.singleton $
+                                OtherError $
+                                    "Root agent file not found in discovered nodes: " ++ props.rootAgentFile
                 Just (rootSlug, _) ->
                     pure $ Right $ AgentConfigGraph nodes edges rootSlug
-
 
 {- | BFS discovery state
 FilePath: path to agent config
@@ -765,8 +765,11 @@ buildAgentTree ::
 buildAgentTree graph nodeMap =
     -- Find root agent using the stored root slug from graph discovery
     case Map.lookup graph.graphRootSlug graph.graphNodes of
-        Nothing -> Left $ NonEmpty.singleton $ OtherError $ 
-            "Root agent not found in graph: " ++ Text.unpack graph.graphRootSlug
+        Nothing ->
+            Left $
+                NonEmpty.singleton $
+                    OtherError $
+                        "Root agent not found in graph: " ++ Text.unpack graph.graphRootSlug
         Just rootNode ->
             case buildSubtree graph nodeMap Set.empty graph.graphRootSlug rootNode of
                 Left errs -> Left errs
@@ -780,7 +783,6 @@ buildAgentTree graph nodeMap =
                                 , osTreeRoot = rootOSNode
                                 , osTreeRootDir = rootDir
                                 }
-
 
 {- | Recursively build a subtree with cycle detection.
 

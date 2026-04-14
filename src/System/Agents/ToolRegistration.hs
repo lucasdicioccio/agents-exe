@@ -982,6 +982,8 @@ Developer tools expose functions based on configured capabilities:
 * scaffold-agent: Generate agent scaffolding
 * scaffold-tool: Generate tool scaffolding
 * show-spec: Display specification documentation
+* read-file-range: Read specific line ranges from a file
+* write-file-range: Replace line ranges in a file with new content
 
 The tool accepts a 'capability' parameter to select which operation to perform.
 
@@ -996,8 +998,41 @@ registerDeveloperTool box =
         tName = "developer_tools"
         llmName = developer2LLMName box tName
 
-        -- Single parameter: the capability to execute
-        paramProps =
+        -- Build parameter properties based on enabled capabilities
+        paramProps = buildDeveloperToolParams box
+
+        toolDescription =
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
+                , toolDescriptionParamProperties = paramProps
+                }
+
+        -- Create the tool
+        tool' = developerTool box
+
+        -- Find function - matches on the LLM name
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call =
+            if call.callToolName == getToolName llmName
+                then Just $ mapToolResult (const call) tool'
+                else Nothing
+
+        -- Extract activation from toolbox config
+        mbActivation = (DeveloperTools.toolboxConfig box).developerToolboxActivation
+     in
+        Right $
+            ToolRegistration
+                { innerTool = mapToolResult (const ()) tool'
+                , declareTool = toolDescription
+                , findTool = find
+                , toolActivation = mbActivation
+                }
+
+-- | Build parameter properties for developer tools based on enabled capabilities.
+buildDeveloperToolParams :: DeveloperTools.Toolbox -> [ParamProperty]
+buildDeveloperToolParams box =
+    let baseParams =
             [ ParamProperty
                 { propertyKey = "capability"
                 , propertyType = StringParamType
@@ -1048,33 +1083,39 @@ registerDeveloperTool box =
                 }
             ]
 
-        toolDescription =
-            ToolDescription
-                { toolDescriptionName = llmName
-                , toolDescriptionText = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
-                , toolDescriptionParamProperties = paramProps
+        -- Add read-file-range params if enabled
+        readFileRangeParams =
+            [ ParamProperty
+                { propertyKey = "path"
+                , propertyType = StringParamType
+                , propertyDescription = "For read-file-range: Path to the file to read"
+                , propertyRequired = False
                 }
-
-        -- Create the tool
-        tool' = developerTool box
-
-        -- Find function - matches on the LLM name
-        find :: ToolCall -> Maybe (Tool ToolCall)
-        find call =
-            if call.callToolName == getToolName llmName
-                then Just $ mapToolResult (const call) tool'
-                else Nothing
-
-        -- Extract activation from toolbox config
-        mbActivation = (DeveloperTools.toolboxConfig box).developerToolboxActivation
-     in
-        Right $
-            ToolRegistration
-                { innerTool = mapToolResult (const ()) tool'
-                , declareTool = toolDescription
-                , findTool = find
-                , toolActivation = mbActivation
+            , ParamProperty
+                { propertyKey = "ranges"
+                , propertyType = StringParamType
+                , propertyDescription = "For read-file-range: Line ranges (e.g., '1-10', '5', 'head', 'tail'). Omit to read entire file."
+                , propertyRequired = False
                 }
+            ]
+
+        -- Add write-file-range params if enabled
+        writeFileRangeParams =
+            [ ParamProperty
+                { propertyKey = "content"
+                , propertyType = StringParamType
+                , propertyDescription = "For write-file-range: Replacement content. Use '---' to separate multiple ranges."
+                , propertyRequired = False
+                }
+            ]
+
+        hasCapability cap = cap `elem` box.toolboxCapabilities
+
+        fileRangeParams =
+            if hasCapability DevToolReadFileRange || hasCapability DevToolWriteFileRange
+                then readFileRangeParams ++ writeFileRangeParams
+                else []
+     in baseParams ++ fileRangeParams
 
 -- Helper to convert developer capability to text
 devCapabilityToText :: DeveloperToolCapability -> Text
@@ -1085,6 +1126,8 @@ devCapabilityToText DevToolShowSpec = "show-spec"
 devCapabilityToText DevToolValidateAgent = "validate-agent"
 devCapabilityToText DevToolCreateAgent = "create-agent"
 devCapabilityToText DevToolCreateTool = "create-tool"
+devCapabilityToText DevToolReadFileRange = "read-file-range"
+devCapabilityToText DevToolWriteFileRange = "write-file-range"
 
 {- | Register all tools from a Developer toolbox.
 
@@ -1449,6 +1492,31 @@ executeDeveloperCapability tracer box cap params = case cap of
                     Left err -> pure $ DeveloperToolError () err
                     Right content -> pure $ DeveloperToolSpecResult () content
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'spec_name' parameter")
+    "read-file-range" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
+                        Just (Aeson.String r) -> r
+                        _ -> ""
+                result <- DeveloperTools.executeReadFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "write-file-range" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                case KeyMap.lookup (AesonKey.fromText "ranges") params of
+                    Just (Aeson.String ranges) -> do
+                        let content = case KeyMap.lookup (AesonKey.fromText "content") params of
+                                Just (Aeson.String c) -> c
+                                _ -> ""
+                        result <- DeveloperTools.executeWriteFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges content
+                        case result of
+                            Left err -> pure $ DeveloperToolError () err
+                            Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
 -------------------------------------------------------------------------------

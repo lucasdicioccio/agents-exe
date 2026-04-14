@@ -110,6 +110,10 @@ data CallResult call
       DeveloperToolAgentValidationResult call DeveloperTools.AgentValidationResult
     | -- | Developer tool create result
       DeveloperToolCreateResult call DeveloperTools.CreateResult
+    | -- | Developer tool read file range result
+      DeveloperToolReadFileRangeResult call DeveloperTools.ReadFileRangeResult
+    | -- | Developer tool write file range result
+      DeveloperToolWriteFileRangeResult call DeveloperTools.WriteFileRangeResult
     | -- | Developer tool execution failed
       DeveloperToolError call DeveloperTools.DeveloperToolError
     | -- | Lua tool executed successfully with result
@@ -143,6 +147,8 @@ mapCallResult f c =
         (DeveloperToolSpecResult v r) -> DeveloperToolSpecResult (f v) r
         (DeveloperToolAgentValidationResult v r) -> DeveloperToolAgentValidationResult (f v) r
         (DeveloperToolCreateResult v r) -> DeveloperToolCreateResult (f v) r
+        (DeveloperToolReadFileRangeResult v r) -> DeveloperToolReadFileRangeResult (f v) r
+        (DeveloperToolWriteFileRangeResult v r) -> DeveloperToolWriteFileRangeResult (f v) r
         (DeveloperToolError v e) -> DeveloperToolError (f v) e
         (LuaToolResult v r) -> LuaToolResult (f v) r
         (LuaToolError v e) -> LuaToolError (f v) e
@@ -177,6 +183,8 @@ extractCall (DeveloperToolScaffoldResult c _) = c
 extractCall (DeveloperToolSpecResult c _) = c
 extractCall (DeveloperToolAgentValidationResult c _) = c
 extractCall (DeveloperToolCreateResult c _) = c
+extractCall (DeveloperToolReadFileRangeResult c _) = c
+extractCall (DeveloperToolWriteFileRangeResult c _) = c
 extractCall (DeveloperToolError c _) = c
 extractCall (LuaToolResult c _) = c
 extractCall (LuaToolError c _) = c
@@ -235,6 +243,10 @@ callResultByteSize (DeveloperToolSpecResult _ content) =
 callResultByteSize (DeveloperToolAgentValidationResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (DeveloperToolCreateResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (DeveloperToolReadFileRangeResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (DeveloperToolWriteFileRangeResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (DeveloperToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
