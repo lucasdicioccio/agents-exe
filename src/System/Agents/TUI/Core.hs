@@ -29,7 +29,6 @@ module System.Agents.TUI.Core (
     initUIState,
     initCore,
     updateConversationSession,
-    updateConversation,
 
     -- * Lens accessors
     uiFocusRing,
@@ -39,15 +38,13 @@ module System.Agents.TUI.Core (
     messageEditor,
     selectedAgentInfo,
     unreadConversations,
-    ongoingConversations,
     auxiliaryTasks,
-    coreAgentTools,
+    uiAgentTools,
     attachedFiles,
     attachmentDialogState,
     filePathInput,
     fileBrowser,
     selectedAttachmentIndex,
-    coreAgents,
     coreConversations,
     corePausedConversations,
     coreBufferedMessages,
@@ -236,7 +233,7 @@ runTUIWithConfig tracer config props = do
     let tuiAgents = map createTuiAgent itrees
 
     -- Load existing session files
-    loadedSessions <- loadSessionFiles config.sessionStore
+    _loadedSessions <- loadSessionFiles config.sessionStore
 
     -- Collect tools from all agents (read from their TVars)
     agentTools <- collectAgentTools tuiAgents
@@ -245,16 +242,15 @@ runTUIWithConfig tracer config props = do
     evChan <- newBChan 100
 
     -- Create core state with loaded conversations
-    core0 <- initCore tuiAgents
+    core0 <- initCore
     coreTVar <- newTVarIO core0
 
     -- Create UI state with loaded sessions and collected tools
     -- Also initialize help content with keyboard shortcuts
     let ui0 =
-            initHelpContent $
-                (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
-                    { _coreAgentTools = agentTools
-                    }
+            (initUIState initHelpContent tuiAgents)
+                { _uiAgentTools = agentTools
+                }
 
     -- Create TUI state with session configuration
     let st = TuiState coreTVar ui0 evChan config
