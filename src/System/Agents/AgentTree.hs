@@ -174,10 +174,18 @@ registerAgent registry agentSlug config = do
 
     pure theNewAgentId
 
-{- | Lookup an agent by its EntityId in the OS registry.
+-- | Result of the discovery phase - represents the agent reference graph
+data AgentConfigGraph = AgentConfigGraph
+    { graphNodes :: Map.Map AgentSlug AgentConfigNode
+    -- ^ All agents by slug, with their file paths and configs
+    , graphEdges :: Map.Map AgentSlug [AgentSlug]
+    -- ^ References from each agent to others (children + extra-agents)
+    , graphRootSlug :: AgentSlug
+    -- ^ The slug of the root agent (from rootAgentFile)
+    }
+    deriving (Show)
 
-Returns the AgentConfig if found.
--}
+
 lookupAgent :: AgentRegistry -> AgentId -> IO (Maybe OS.AgentConfig)
 lookupAgent registry (AgentId uuid) = do
     let entityId = EntityId uuid
@@ -230,14 +238,7 @@ data OSAgentTree = OSAgentTree
 -- Configuration Graph Types
 -------------------------------------------------------------------------------
 
--- | Result of the discovery phase - represents the agent reference graph
-data AgentConfigGraph = AgentConfigGraph
-    { graphNodes :: Map.Map AgentSlug AgentConfigNode
-    -- ^ All agents by slug, with their file paths and configs
-    , graphEdges :: Map.Map AgentSlug [AgentSlug]
-    -- ^ References from each agent to others (children + extra-agents)
-    }
-    deriving (Show)
+
 
 -- | A node in the configuration graph
 data AgentConfigNode = AgentConfigNode
@@ -415,7 +416,13 @@ discoverAgentConfigs props = do
         Right nodes -> do
             -- Build edges map from nodes
             let edges = Map.map (\n -> n.nodeExtraRefs) nodes
-            pure $ Right $ AgentConfigGraph nodes edges
+            -- Find the root slug by matching file path
+            case findNodeByFile normalizedRoot nodes of
+                Nothing -> pure $ Left $ NonEmpty.singleton $ 
+                    OtherError $ "Root agent file not found in discovered nodes: " ++ props.rootAgentFile
+                Just (rootSlug, _) ->
+                    pure $ Right $ AgentConfigGraph nodes edges rootSlug
+
 
 {- | BFS discovery state
 FilePath: path to agent config
@@ -756,11 +763,12 @@ buildAgentTree ::
     Map.Map AgentSlug OSAgentNode ->
     Either (NonEmpty.NonEmpty LoadingError) OSAgentTree
 buildAgentTree graph nodeMap =
-    -- Find root agent (the one from rootAgentFile, which is the first node)
-    case Map.toList graph.graphNodes of
-        [] -> Left $ NonEmpty.singleton $ OtherError "No agents found in graph"
-        ((_rootSlug, rootNode) : _) ->
-            case buildSubtree graph nodeMap Set.empty (slug (nodeConfig rootNode)) rootNode of
+    -- Find root agent using the stored root slug from graph discovery
+    case Map.lookup graph.graphRootSlug graph.graphNodes of
+        Nothing -> Left $ NonEmpty.singleton $ OtherError $ 
+            "Root agent not found in graph: " ++ Text.unpack graph.graphRootSlug
+        Just rootNode ->
+            case buildSubtree graph nodeMap Set.empty graph.graphRootSlug rootNode of
                 Left errs -> Left errs
                 Right (rootOSNode, _) ->
                     let rootDir = FilePath.takeDirectory rootNode.nodeFile
@@ -772,6 +780,7 @@ buildAgentTree graph nodeMap =
                                 , osTreeRoot = rootOSNode
                                 , osTreeRootDir = rootDir
                                 }
+
 
 {- | Recursively build a subtree with cycle detection.
 

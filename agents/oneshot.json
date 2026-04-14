@@ -27,6 +27,10 @@
       {
         "slug": "oneshot",
         "path": "oneshot.json"
+      },
+      {
+        "slug": "faq",
+        "path": "faq.json"
       }
     ],
     "bashToolboxes": [

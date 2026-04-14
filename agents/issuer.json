@@ -33,22 +33,13 @@
       "docs/ITERATIVE-WORKFLOW.md  - Multi-step documentation patterns",
       "docs/ai-assistant-guidelines.md - Detailed reference",
       "",
-      "=== KNOWLEDGE BASE ===",
-      "SQLite database tracks state in tables:",
-      "- project_overview: Project metadata",
-      "- code_index: 79 modules with documentation linkage",
-      "- docs_index: Documentation files registry",
-      "- commits_seen: Git commits processed"
+      "=== FAQ AGENT ===",
+      "You can ask questions to the FAQ agent who has access to an extensive knowledge base about the project."
     ],
-    "builtinToolboxes": [
+    "extraAgents": [
       {
-        "tag": "SqliteToolbox",
-        "contents": {
-          "Name": "knowledge_store",
-          "Description": "A knowledge base from the documenter agent.",
-          "Path": "./resources/documenter-knowledge.db",
-          "Access": "read-only"
-        }
+        "slug": "faq",
+        "path": "faq.json"
       }
     ],
     "bashToolboxes": [
