@@ -362,6 +362,18 @@ callResultToJson (DeveloperToolCreateResult _ result) =
         , "data" .= result
         , "toolType" .= ("devtool-create" :: Text)
         ]
+callResultToJson (DeveloperToolReadFileRangeResult _ result) =
+    Aeson.object
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
+        , "toolType" .= ("devtool-read-file-range" :: Text)
+        ]
+callResultToJson (DeveloperToolWriteFileRangeResult _ result) =
+    Aeson.object
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
+        , "toolType" .= ("devtool-write-file-range" :: Text)
+        ]
 callResultToJson (DeveloperToolError _ err) =
     Aeson.object
         [ "type" .= ("error" :: Text)
@@ -380,3 +392,4 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
+

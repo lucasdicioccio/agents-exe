@@ -15,6 +15,8 @@ for:
 * Validating agent configurations
 * Creating agent configurations
 * Creating tool scripts
+* Reading specific line ranges from files
+* Writing to specific line ranges in files
 
 These tools help developers write and validate agents and tools.
 -}
@@ -28,6 +30,9 @@ module System.Agents.Tools.DeveloperToolbox (
     ScaffoldResult (..),
     AgentValidationResult (..),
     CreateResult (..),
+    ReadFileRangeResult (..),
+    WriteFileRangeResult (..),
+    RangeSpec (..),
     AgentOverrides (..),
     ToolConfig (..),
     ScriptArg (..),
@@ -44,11 +49,16 @@ module System.Agents.Tools.DeveloperToolbox (
     executeValidateAgent,
     executeCreateAgent,
     executeCreateTool,
+    executeReadFileRange,
+    executeWriteFileRange,
 
     -- * Capability info
     getCapabilityInfo,
     capabilityToName,
     capabilityFromName,
+
+    -- * Range parsing
+    parseRanges,
 
     -- * Template functions (exposed for testing)
     makeAgentTemplate,
@@ -65,7 +75,9 @@ import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.ByteString.Lazy as LByteString
+import Data.Char (isDigit)
 import Data.FileEmbed (embedStringFile)
+import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -89,6 +101,7 @@ import System.Agents.Base (
     PostgRESTToolboxDescription,
  )
 import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.Tools.Bash (LoadTrace)
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
@@ -105,6 +118,8 @@ These events allow tracking of:
 * Agent validation
 * Agent creation
 * Tool creation
+* File range read operations
+* File range write operations
 -}
 data Trace
     = -- | Tool validation started
@@ -135,6 +150,14 @@ data Trace
       CreateToolStartedTrace !Text !(Maybe FilePath) !FilePath
     | -- | Tool creation completed
       CreateToolCompletedTrace !FilePath !Bool
+    | -- | Read file range started
+      ReadFileRangeStartedTrace !FilePath !Text
+    | -- | Read file range completed
+      ReadFileRangeCompletedTrace !FilePath !Int
+    | -- | Write file range started
+      WriteFileRangeStartedTrace !FilePath !Text
+    | -- | Write file range completed
+      WriteFileRangeCompletedTrace !FilePath !Int !Int
     | -- | Error during operation
       DeveloperToolErrorTrace !Text !Text
     deriving (Show)
@@ -244,6 +267,50 @@ instance ToJSON CreateResult where
             , "error" .= createError result
             ]
 
+-- | Range specification for file operations.
+data RangeSpec
+    = Lines (Int, Int)
+    -- ^ 1-based, inclusive line range (start, end)
+    | Head
+    -- ^ Before line 1 (prepend)
+    | Tail
+    -- ^ After last line (append)
+    deriving (Show, Eq)
+
+-- | Result of a read file range operation.
+data ReadFileRangeResult = ReadFileRangeResult
+    { readFilePath :: FilePath
+    , readFileContent :: Text
+    , readFileLinesRead :: Int
+    }
+    deriving (Show)
+
+-- | JSON serialization for ReadFileRangeResult.
+instance ToJSON ReadFileRangeResult where
+    toJSON result =
+        Aeson.object
+            [ "path" .= readFilePath result
+            , "content" .= readFileContent result
+            , "linesRead" .= readFileLinesRead result
+            ]
+
+-- | Result of a write file range operation.
+data WriteFileRangeResult = WriteFileRangeResult
+    { writeFilePath :: FilePath
+    , writeFileRangesModified :: Int
+    , writeFileLinesWritten :: Int
+    }
+    deriving (Show)
+
+-- | JSON serialization for WriteFileRangeResult.
+instance ToJSON WriteFileRangeResult where
+    toJSON result =
+        Aeson.object
+            [ "path" .= writeFilePath result
+            , "rangesModified" .= writeFileRangesModified result
+            , "linesWritten" .= writeFileLinesWritten result
+            ]
+
 -- | Override parameters for creating an agent from reference or scratch.
 data AgentOverrides = AgentOverrides
     { overrideSlug :: Maybe Text
@@ -339,6 +406,12 @@ data DeveloperToolError
       ToolCreationError !Text
     | -- | File not found
       FileNotFoundError !FilePath
+    | -- | Invalid range format
+      InvalidRangeError !Text
+    | -- | Range out of bounds
+      RangeOutOfBoundsError !Text
+    | -- | Permission denied
+      PermissionError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -383,6 +456,8 @@ capabilityToName DevToolShowSpec = "show-spec"
 capabilityToName DevToolValidateAgent = "validate-agent"
 capabilityToName DevToolCreateAgent = "create-agent"
 capabilityToName DevToolCreateTool = "create-tool"
+capabilityToName DevToolReadFileRange = "read-file-range"
+capabilityToName DevToolWriteFileRange = "write-file-range"
 
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
@@ -394,6 +469,8 @@ capabilityFromName name = case name of
     "validate-agent" -> Just DevToolValidateAgent
     "create-agent" -> Just DevToolCreateAgent
     "create-tool" -> Just DevToolCreateTool
+    "read-file-range" -> Just DevToolReadFileRange
+    "write-file-range" -> Just DevToolWriteFileRange
     _ -> Nothing
 
 -- | Get information about a capability (name and description).
@@ -426,6 +503,277 @@ getCapabilityInfo DevToolCreateTool =
     ( "create-tool"
     , "Creates a new tool script from scratch or from a reference"
     )
+getCapabilityInfo DevToolReadFileRange =
+    ( "read-file-range"
+    , "Reads specific line ranges from a file (e.g., '1-10', '5', 'head', 'tail')"
+    )
+getCapabilityInfo DevToolWriteFileRange =
+    ( "write-file-range"
+    , "Replaces line ranges in a file with new content (use '---' to separate multiple ranges)"
+    )
+
+-------------------------------------------------------------------------------
+-- Range Parsing
+-------------------------------------------------------------------------------
+
+{- | Parse a ranges string into a list of RangeSpec.
+
+Supports formats:
+- Single number: "5" -> Lines (5, 5)
+- Range: "1-10" -> Lines (1, 10)
+- Special: "head" -> Head, "tail" -> Tail
+- Multiple: "1-10,20-30" -> [Lines (1, 10), Lines (20, 30)]
+
+Returns Left with error message if parsing fails.
+-}
+parseRanges :: Text -> Either DeveloperToolError [RangeSpec]
+parseRanges txt
+    | Text.null txt = Right []
+    | otherwise =
+        let parts = map Text.strip $ Text.splitOn "," txt
+         in mapM parseRangePart parts
+
+-- | Parse a single range part.
+parseRangePart :: Text -> Either DeveloperToolError RangeSpec
+parseRangePart part
+    | part == "head" = Right Head
+    | part == "tail" = Right Tail
+    | "-" `Text.isInfixOf` part =
+        case Text.breakOn "-" part of
+            (startStr, rest) | not (Text.null rest) -> do
+                let endStr = Text.drop 1 rest
+                start <- parsePositiveInt startStr "Invalid start line"
+                end <- parsePositiveInt endStr "Invalid end line"
+                if start <= end
+                    then Right $ Lines (start, end)
+                    else Left $ InvalidRangeError $ "Start line must be <= end line in range: " <> part
+            _ -> Left $ InvalidRangeError $ "Invalid range format: " <> part
+    | otherwise = do
+        n <- parsePositiveInt part "Invalid line number"
+        Right $ Lines (n, n)
+
+-- | Parse a positive integer from Text.
+parsePositiveInt :: Text -> Text -> Either DeveloperToolError Int
+parsePositiveInt txt errPrefix =
+    let str = Text.unpack txt
+     in if all isDigit str && not (null str)
+            then
+                let n = read str :: Int
+                 in if n > 0
+                        then Right n
+                        else Left $ InvalidRangeError $ errPrefix <> " (must be positive): " <> txt
+            else Left $ InvalidRangeError $ errPrefix <> ": " <> txt
+
+-------------------------------------------------------------------------------
+-- File Range Operations
+-------------------------------------------------------------------------------
+
+{- | Execute read file range operation.
+
+Reads specific line ranges from a file and returns them with line numbers
+prepended as "{line_num}\t{line_content}".
+
+Parameters:
+- path: Path to the file to read
+- ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail")
+
+Returns Right with ReadFileRangeResult on success, Left with error on failure.
+-}
+executeReadFileRange ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    Text ->
+    IO (Either DeveloperToolError ReadFileRangeResult)
+executeReadFileRange tracer toolbox filePath rangesTxt = do
+    if DevToolReadFileRange `notElem` toolboxCapabilities toolbox
+        then pure $ Left $ CapabilityNotEnabledError "read-file-range"
+        else do
+            runTracer tracer (ReadFileRangeStartedTrace filePath rangesTxt)
+
+            -- Check if file exists
+            fileExists <- doesFileExist filePath
+            if not fileExists
+                then do
+                    let err = FileNotFoundError filePath
+                    runTracer tracer (DeveloperToolErrorTrace "read-file-range" $ Text.pack $ show err)
+                    pure $ Left err
+                else do
+                    -- Parse ranges
+                    case parseRanges rangesTxt of
+                        Left err -> pure $ Left err
+                        Right ranges -> do
+                            -- Read file and extract lines
+                            result <- try $ Text.readFile filePath
+                            case result of
+                                Left (e :: SomeException) -> do
+                                    let err = PermissionError $ Text.pack $ show e
+                                    runTracer tracer (DeveloperToolErrorTrace "read-file-range" $ Text.pack $ show e)
+                                    pure $ Left err
+                                Right content -> do
+                                    let allLines = Text.lines content
+                                    let resultLines = extractLines allLines ranges
+                                    let output = Text.unlines $ map formatLineWithNumber resultLines
+                                    let linesRead = length resultLines
+
+                                    runTracer tracer (ReadFileRangeCompletedTrace filePath linesRead)
+
+                                    pure $ Right $
+                                        ReadFileRangeResult
+                                            { readFilePath = filePath
+                                            , readFileContent = output
+                                            , readFileLinesRead = linesRead
+                                            }
+
+-- | Extract lines based on range specifications.
+-- Returns list of (lineNumber, lineContent) pairs.
+extractLines :: [Text] -> [RangeSpec] -> [(Int, Text)]
+extractLines allLines ranges =
+    concatMap (extractRange allLines) ranges
+
+-- | Extract lines for a single range.
+extractRange :: [Text] -> RangeSpec -> [(Int, Text)]
+extractRange _ Head = []
+extractRange _ Tail = []
+extractRange allLines (Lines (start, end)) =
+    let totalLines = length allLines
+        actualStart = max 1 start
+        actualEnd = min end totalLines
+     in if actualStart > actualEnd || actualStart > totalLines
+            then []
+            else zip [actualStart ..] (take (actualEnd - actualStart + 1) $ drop (actualStart - 1) allLines)
+
+-- | Format a line with its line number.
+formatLineWithNumber :: (Int, Text) -> Text
+formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
+
+{- | Execute write file range operation.
+
+Replaces line ranges in a file with new content. Multiple ranges are applied
+bottom-to-top so earlier line numbers stay valid. Content blocks for multiple
+ranges are separated by a line containing only "---".
+
+Parameters:
+- path: Path to the file to modify
+- ranges: Comma-separated ranges (e.g., "1-10", "5", "head", "tail")
+- content: Replacement text (or multiple blocks separated by "---")
+
+Returns Right with WriteFileRangeResult on success, Left with error on failure.
+-}
+executeWriteFileRange ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    Text ->
+    Text ->
+    IO (Either DeveloperToolError WriteFileRangeResult)
+executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
+    if DevToolWriteFileRange `notElem` toolboxCapabilities toolbox
+        then pure $ Left $ CapabilityNotEnabledError "write-file-range"
+        else do
+            runTracer tracer (WriteFileRangeStartedTrace filePath rangesTxt)
+
+            -- Parse ranges
+            case parseRanges rangesTxt of
+                Left err -> pure $ Left err
+                Right ranges -> do
+                    -- Split content by "---" separator
+                    let contentBlocks = map Text.strip $ Text.splitOn "---" contentTxt
+
+                    if length contentBlocks /= length ranges && length ranges > 1
+                        then
+                            pure $
+                                Left $
+                                    InvalidRangeError $
+                                        "Number of content blocks ("
+                                            <> Text.pack (show $ length contentBlocks)
+                                            <> ") must match number of ranges ("
+                                            <> Text.pack (show $ length ranges)
+                                            <> "). Use '---' to separate blocks."
+                        else do
+                            -- Check if file exists
+                            fileExists <- doesFileExist filePath
+
+                            if not fileExists && not (any isHeadOrTail ranges)
+                                then do
+                                    let err = FileNotFoundError filePath
+                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
+                                    pure $ Left err
+                                else do
+                                    -- Read existing file or start empty
+                                    existingContent <-
+                                        if fileExists
+                                            then Text.readFile filePath
+                                            else pure ""
+
+                                    let existingLines = Text.lines existingContent
+
+                                    -- Pair ranges with content blocks
+                                    let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
+
+                                    -- Sort by start line in descending order (bottom-to-top)
+                                    let sortedPairs = sortOn (negate . rangeStartKey) rangeContentPairs
+
+                                    -- Apply each range replacement
+                                    let finalLines = foldl (applyRangeReplacement existingLines) existingLines sortedPairs
+
+                                    -- Preserve trailing newline if original had one
+                                    let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
+                                    let output =
+                                            if hasTrailingNewline || null existingLines
+                                                then Text.unlines finalLines
+                                                else Text.unlines finalLines
+
+                                    -- Write result
+                                    writeResult <- try $ do
+                                        createDirectoryIfMissing True (takeDirectory filePath)
+                                        Text.writeFile filePath output
+
+                                    case writeResult of
+                                        Left (e :: SomeException) -> do
+                                            let err = PermissionError $ Text.pack $ show e
+                                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                                            pure $ Left err
+                                        Right () -> do
+                                            let rangesModified = length ranges
+                                            let linesWritten = length $ Text.lines contentTxt
+
+                                            runTracer tracer (WriteFileRangeCompletedTrace filePath rangesModified linesWritten)
+
+                                            pure $ Right $
+                                                WriteFileRangeResult
+                                                    { writeFilePath = filePath
+                                                    , writeFileRangesModified = rangesModified
+                                                    , writeFileLinesWritten = linesWritten
+                                                    }
+  where
+    isHeadOrTail Head = True
+    isHeadOrTail Tail = True
+    isHeadOrTail _ = False
+
+    -- Get sort key for range (for bottom-to-top ordering)
+    rangeStartKey :: (RangeSpec, Text) -> Int
+    rangeStartKey (Head, _) = 0
+    rangeStartKey (Lines (n, _), _) = n
+    rangeStartKey (Tail, _) = maxBound
+
+-- | Apply a range replacement to the lines.
+applyRangeReplacement :: [Text] -> [Text] -> (RangeSpec, Text) -> [Text]
+applyRangeReplacement originalLines currentLines (range, content) =
+    let newLines = Text.lines content
+     in case range of
+            Head -> newLines ++ currentLines
+            Tail -> currentLines ++ newLines
+            Lines (start, end) ->
+                let totalLines = length originalLines
+                    actualStart = max 1 start
+                    actualEnd = min end totalLines
+                 in if actualStart > actualEnd || actualStart > length currentLines
+                        then currentLines
+                        else
+                            let before = take (actualStart - 1) currentLines
+                                after = drop actualEnd currentLines
+                             in before ++ newLines ++ after
 
 -------------------------------------------------------------------------------
 -- Tool Execution - Validation
@@ -441,7 +789,7 @@ Returns:
 * 'Left DeveloperToolError' if capability not enabled
 -}
 executeValidateTool ::
-    Tracer IO Bash.LoadTrace ->
+    Tracer IO LoadTrace ->
     Toolbox ->
     FilePath ->
     IO (Either DeveloperToolError ValidationResult)
@@ -751,7 +1099,7 @@ Returns:
 * 'Left DeveloperToolError' if capability not enabled
 -}
 executeCreateTool ::
-    Tracer IO Bash.LoadTrace ->
+    Tracer IO LoadTrace ->
     -- | Language (bash, python, haskell)
     Toolbox ->
     -- | Language (bash, python, haskell)
@@ -1141,6 +1489,8 @@ defaultDeveloperToolboxDescription =
                 , DevToolValidateAgent
                 , DevToolCreateAgent
                 , DevToolCreateTool
+                , DevToolReadFileRange
+                , DevToolWriteFileRange
                 ]
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             }
@@ -1493,3 +1843,4 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
+
