@@ -12,9 +12,8 @@ import Brick.Widgets.FileBrowser (FileBrowser)
 import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
-import Control.Concurrent.STM (TQueue, TVar, newTVarIO)
+import Control.Concurrent.STM (TVar, newTVarIO)
 import Control.Lens (makeLenses)
-import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
@@ -190,76 +189,6 @@ agentTree :: TuiAgent -> OSAgentTree
 agentTree = tuiTree
 
 -------------------------------------------------------------------------------
--- Multi-Agent Coordination Types
--------------------------------------------------------------------------------
-
--- | Role definition for agents in multi-agent conversations.
-data AgentRole
-    = -- | Coordinates other agents
-      AgentRole_Orchestrator
-    | -- | Specialized agent with a specific role description
-      AgentRole_Specialist Text
-    | -- | General worker agent
-      AgentRole_Worker
-    | -- | Observes but doesn't initiate
-      AgentRole_Observer
-    deriving (Show, Eq)
-
--- | Configuration for an agent's role in multi-agent mode.
-data AgentRoleConfig = AgentRoleConfig
-    { arcAgentId :: AgentId
-    , arcRole :: AgentRole
-    , arcCanInitiate :: Bool
-    -- ^ Whether this agent can start new conversations
-    , arcSubscribesTo :: [AgentId]
-    -- ^ Agents this agent listens to for messages
-    }
-    deriving (Show)
-
--- | Strategy for coordinating multiple agents.
-data CoordinationStrategy
-    = -- | Each agent takes turns
-      CoordinationStrategy_RoundRobin
-    | -- | One agent orchestrates others
-      CoordinationStrategy_Hierarchical AgentId
-    | -- | Agents collaborate freely
-      CoordinationStrategy_Collaborative
-    deriving (Show, Eq)
-
--- | Configuration for multi-agent conversations.
-data MultiAgentConfig = MultiAgentConfig
-    { maAgents :: [AgentRoleConfig]
-    , maCoordinationStrategy :: CoordinationStrategy
-    }
-    deriving (Show)
-
--- | Message type for inter-agent communication.
-data MessageType
-    = -- | Direct message to specific agent
-      MessageType_Direct
-    | -- | Message to all subscribed agents
-      MessageType_Broadcast
-    | -- | Response to a previous message
-      MessageType_Response
-    | -- | Request for action from another agent
-      MessageType_Request
-    deriving (Show, Eq)
-
--- | Message sent between agents.
-data InterAgentMessage = InterAgentMessage
-    { iamFrom :: AgentId
-    , iamTo :: AgentId
-    , iamType :: MessageType
-    , iamContent :: Value
-    }
-    deriving (Show)
-
--- | Agent bus for inter-agent communication.
-newtype AgentBus = AgentBus
-    { busChannels :: TVar (Map AgentId (TQueue InterAgentMessage))
-    }
-
--------------------------------------------------------------------------------
 -- Layout Configuration
 -------------------------------------------------------------------------------
 
@@ -351,62 +280,6 @@ instance Show Conversation where
             ++ ", conversationParentId = "
             ++ show conv.conversationParentId
             ++ ", ...}"
-
--- | Create a root-level conversation (not a subcall).
-mkRootConversation ::
-    ConversationId ->
-    TuiAgent ->
-    Maybe ThreadId ->
-    Maybe Session ->
-    Text ->
-    BChan (Maybe UserQuery) ->
-    ConversationStatus ->
-    OnSessionProgress ->
-    Conversation
-mkRootConversation convId agent threadId session convName chan status onProgress =
-    Conversation
-        { conversationId = convId
-        , conversationAgent = agent
-        , conversationThreadId = threadId
-        , conversationSession = session
-        , conversationName = convName
-        , conversationChan = chan
-        , conversationStatus = status
-        , conversationOnProgress = onProgress
-        , conversationIsSubcall = False
-        , conversationParentId = Nothing
-        , conversationSubcallDepth = 0
-        }
-
--- | Create a subcall conversation.
-mkSubcallConversation ::
-    ConversationId ->
-    TuiAgent ->
-    Maybe ThreadId ->
-    Maybe Session ->
-    Text ->
-    BChan (Maybe UserQuery) ->
-    ConversationStatus ->
-    OnSessionProgress ->
-    -- | Parent conversation ID
-    ConversationId ->
-    -- | Subcall depth
-    Int ->
-    Conversation
-mkSubcallConversation convId agent threadId session convName chan status onProgress parentId depth =
-    Conversation
-        { conversationId = convId
-        , conversationAgent = agent
-        , conversationThreadId = threadId
-        , conversationSession = session
-        , conversationName = "↳ " <> convName
-        , conversationChan = chan
-        , conversationStatus = status
-        , conversationOnProgress = onProgress
-        , conversationIsSubcall = True
-        , conversationParentId = Just parentId
-        , conversationSubcallDepth = depth
-        }
 
 -------------------------------------------------------------------------------
 -- Auxiliary Task Types
