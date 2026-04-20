@@ -687,7 +687,7 @@ handleNormalEvent tracer ev =
 
 -- | Handle subcall started event.
 handleSubcallStarted :: ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
-handleSubcallStarted _parentId _subcallId slug depth = do
+handleSubcallStarted parentId subcallId slug depth = do
     showStatus StatusInfo $ "Subcall started: " <> slug <> " (depth " <> Text.pack (show depth) <> ")"
 
 -- | Handle subcall progress event.
@@ -1236,6 +1236,14 @@ handleRefreshTools = do
         ((aid, newTools) :) . filter ((/= aid) . fst)
 
 -------------------------------------------------------------------------------
+-- Core State Manipulation
+-------------------------------------------------------------------------------
+
+-- | Append a conversation to the front of the core's conversation list.
+appendConversation :: Conversation -> Core -> Core
+appendConversation conv c = c{coreConversations = conv : coreConversations c}
+
+-------------------------------------------------------------------------------
 -- Conversation Management
 -------------------------------------------------------------------------------
 
@@ -1399,6 +1407,83 @@ addBufferedMessage convId core msg =
     atomically $ modifyTVar core.coreBufferedMessages $ Map.insertWith (\new old -> new ++ old) convId [msg]
 
 -------------------------------------------------------------------------------
+-- Subcall Conversation Management
+-------------------------------------------------------------------------------
+
+{- | Initialize a conversation for a sub-agent call (agentToTool).
+
+This function creates a conversation that represents a nested agent invocation,
+where one agent calls another as a tool. The conversation is marked as a subcall
+with appropriate parent/depth metadata for lineage tracking in the TUI.
+
+The subcall conversation is added to both the core state and the UI conversation list.
+-}
+initSubcallConversation
+    :: Tracer IO Trace
+    -> TuiAgent
+    -- ^ The agent being invoked as a tool
+    -> Session
+    -- ^ Initial session state for the subcall
+    -> ConversationId
+    -- ^ Parent conversation ID (the caller)
+    -> Int
+    -- ^ Nesting depth (1+ for subcalls)
+    -> EventM N TuiState ()
+initSubcallConversation tracer baseTuiAgent session parentId depth = do
+    config <- use sessionConfig
+    outChan <- use eventChan
+    inChan <- liftIO $ newBChan 100
+    let convId = session.sessionId
+    let notifyProgress = buildOnProgress convId outChan
+    let node = tuiNode baseTuiAgent
+    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
+    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
+    coreRef <- use tuiCore
+    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+    let a =
+            agent1
+                { step = \sess -> do
+                    let waitIfPaused = do
+                            core <- readTVarIO coreRef
+                            when (isConversationPaused convId core) $ do
+                                threadDelay 200000
+                                waitIfPaused
+                    waitIfPaused
+                    notifyProgress (SessionUpdated sess)
+                    ret <- agent1.step sess
+                    case ret of
+                        Stop _r -> pure $ AskUserPrompt (MissingUserPrompt True [])
+                        _ -> pure ret
+                , usrQuery = do
+                    core <- readTVarIO coreRef
+                    buffered <- readAndClearBufferedMessages convId core
+                    case buffered of
+                        Nothing -> notifyNeedInput >> readBChan inChan
+                        Just buftxt -> pure (Just $ UserQuery buftxt [])
+                }
+    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiTree baseTuiAgent) (tuiNode baseTuiAgent) (tuiSlug baseTuiAgent)
+    threadId <- liftIO $ forkIO $ do
+        notifyProgress (SessionStarted session)
+        void $ Loop.run convId a session
+        notifyProgress (SessionCompleted session)
+    let conv =
+            Conversation
+                { conversationId = convId
+                , conversationAgent = tuiAgent
+                , conversationThreadId = Just threadId
+                , conversationSession = Nothing
+                , conversationName = Text.replicate depth ">" <> "@" <> tuiSlug baseTuiAgent
+                , conversationChan = inChan
+                , conversationStatus = ConversationStatus_Active
+                , conversationOnProgress = notifyProgress
+                , conversationIsSubcall = True
+                , conversationParentId = Just parentId
+                , conversationSubcallDepth = depth
+                }
+    liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
+    tuiUI . conversationList %= listInsert 0 conv
+
+-------------------------------------------------------------------------------
 -- Run Conversation
 -------------------------------------------------------------------------------
 
@@ -1454,8 +1539,7 @@ runConversation tracer baseTuiAgent session = do
                 , conversationParentId = Nothing
                 , conversationSubcallDepth = 0
                 }
-    liftIO $ atomically $ modifyTVar coreRef $ \c ->
-        c{coreConversations = conv : coreConversations c}
+    liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
     tuiUI . conversationList %= listInsert 0 conv
     tuiUI . conversationList . listSelectedL .= Just 0
     switchToChatsAndFocusMessage
@@ -1492,3 +1576,4 @@ handleSendMessage = do
                         tuiUI . selectedAttachmentIndex .= Nothing
                         updateConversationStatus convId ConversationStatus_Active
             Nothing -> showStatus StatusWarning "No conversation selected"
+
