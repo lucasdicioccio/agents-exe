@@ -85,10 +85,10 @@ module System.Agents.TUI.Core (
 ) where
 
 import Brick hiding (Down)
-import Brick.BChan (newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (newTVarIO, readTVarIO)
+import Control.Concurrent.STM (TQueue, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
 import Prod.Tracer (Tracer)
@@ -103,6 +103,7 @@ import System.Agents.AgentTree (
  )
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
+import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
@@ -205,6 +206,38 @@ collectAgentTools agents = mapM collectTools agents
         pure (tuiAgentId agent, tools)
 
 -------------------------------------------------------------------------------
+-- OSEvent to AppEvent Bridge
+-------------------------------------------------------------------------------
+
+{- | Convert an OSEvent to an AppEvent.
+
+This function bridges OS events to TUI application events, enabling
+subcall visibility and lifecycle tracking in the TUI.
+-}
+convertOSEvent :: OSEvent -> Maybe AppEvent
+convertOSEvent (OSEvent_SubcallStarted parentId convId slug depth) =
+    Just $ AppEvent_SubcallStarted parentId convId slug depth
+convertOSEvent (OSEvent_SubcallProgress convId session) =
+    Just $ AppEvent_SubcallProgress convId session
+convertOSEvent (OSEvent_SubcallCompleted convId result) =
+    Just $ AppEvent_SubcallCompleted convId result
+convertOSEvent (OSEvent_SubcallFailed convId err) =
+    Just $ AppEvent_SubcallFailed convId err
+convertOSEvent _ = Nothing
+
+{- | Start a background thread that bridges OSEvents to AppEvents.
+
+This thread reads from the OSEvent queue and writes converted AppEvents
+to the Brick event channel, enabling the TUI to respond to subcall events.
+-}
+startOSEventBridge :: TQueue OSEvent -> BChan AppEvent -> IO ()
+startOSEventBridge osEventQueue appEventChan = void $ forkIO $ forever $ do
+    osEvent <- atomically $ readTQueue osEventQueue
+    case convertOSEvent osEvent of
+        Just appEvent -> writeBChan appEventChan appEvent
+        Nothing -> pure () -- Ignore non-TUI events
+
+-------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
@@ -241,6 +274,12 @@ runTUIWithConfig tracer config props = do
     -- Create event channel (needed for conversations)
     evChan <- newBChan 100
 
+    -- Create OS event queue for subcall visibility
+    osEventQueue <- newTQueueIO
+
+    -- Start the event bridge
+    startOSEventBridge osEventQueue evChan
+
     -- Create core state with loaded conversations
     core0 <- initCore
     coreTVar <- newTVarIO core0
@@ -269,3 +308,4 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+

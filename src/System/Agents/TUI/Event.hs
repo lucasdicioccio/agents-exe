@@ -539,7 +539,7 @@ handleTurnNavigationEvent tracer navState ev =
         AppEvent (AppEvent_ShowStatus severity text) -> handleShowStatus severity text
         AppEvent AppEvent_ClearStatus -> handleClearStatus
         AppEvent (AppEvent_SubcallStarted parentId subcallId slug depth) ->
-            handleSubcallStarted parentId subcallId slug depth
+            handleSubcallStarted tracer parentId subcallId slug depth
         AppEvent (AppEvent_SubcallProgress subcallId sess) ->
             handleSubcallProgress subcallId sess
         AppEvent (AppEvent_SubcallCompleted subcallId result) ->
@@ -606,7 +606,7 @@ handleNormalEvent tracer ev =
         AppEvent (AppEvent_ShowStatus severity text) -> handleShowStatus severity text
         AppEvent AppEvent_ClearStatus -> handleClearStatus
         AppEvent (AppEvent_SubcallStarted parentId subcallId slug depth) ->
-            handleSubcallStarted parentId subcallId slug depth
+            handleSubcallStarted tracer parentId subcallId slug depth
         AppEvent (AppEvent_SubcallProgress subcallId sess) ->
             handleSubcallProgress subcallId sess
         AppEvent (AppEvent_SubcallCompleted subcallId result) ->
@@ -686,9 +686,28 @@ handleNormalEvent tracer ev =
 -------------------------------------------------------------------------------
 
 -- | Handle subcall started event.
-handleSubcallStarted :: ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
-handleSubcallStarted parentId subcallId slug depth = do
+-- This initializes the subcall conversation in the TUI.
+handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
+handleSubcallStarted tracer parentId subcallId slug depth = do
+    -- Show status message
     showStatus StatusInfo $ "Subcall started: " <> slug <> " (depth " <> Text.pack (show depth) <> ")"
+    
+    -- Look up the agent by slug from the agent list
+    agents <- use (tuiUI . agentList . to listElements)
+    case findAgentBySlug slug agents of
+        Just tuiAgent -> do
+            -- Create an empty session for the subcall
+            -- The session will be populated by the subcall itself
+            session <- liftIO $ Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
+            -- Initialize the subcall conversation
+            initSubcallConversation tracer tuiAgent session subcallId parentId depth
+        Nothing -> do
+            showStatus StatusWarning $ "Agent not found for subcall: " <> slug
+
+-- | Find a TuiAgent by slug from the agent list.
+findAgentBySlug :: Text.Text -> Vector.Vector TuiAgent -> Maybe TuiAgent
+findAgentBySlug slug agents = 
+    Vector.find (\a -> tuiSlug a == slug) agents
 
 -- | Handle subcall progress event.
 handleSubcallProgress :: ConversationId -> Session -> EventM N TuiState ()
@@ -1425,15 +1444,16 @@ initSubcallConversation
     -> Session
     -- ^ Initial session state for the subcall
     -> ConversationId
+    -- ^ The conversation ID for this subcall (pre-generated)
+    -> ConversationId
     -- ^ Parent conversation ID (the caller)
     -> Int
     -- ^ Nesting depth (1+ for subcalls)
     -> EventM N TuiState ()
-initSubcallConversation tracer baseTuiAgent session parentId depth = do
+initSubcallConversation tracer baseTuiAgent session convId parentId depth = do
     config <- use sessionConfig
     outChan <- use eventChan
     inChan <- liftIO $ newBChan 100
-    let convId = session.sessionId
     let notifyProgress = buildOnProgress convId outChan
     let node = tuiNode baseTuiAgent
     agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
