@@ -686,9 +686,11 @@ handleNormalEvent tracer ev =
 -------------------------------------------------------------------------------
 
 -- | Handle subcall started event.
--- This initializes the subcall conversation in the TUI.
+-- This creates a conversation entry for the subcall in the TUI.
+-- Note: The actual execution is handled by runSubAgentWithEventEmission in OneShotTool.hs,
+-- which emits progress events that update this conversation.
 handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
-handleSubcallStarted tracer parentId subcallId slug depth = do
+handleSubcallStarted _tracer parentId subcallId slug depth = do
     -- Show status message
     showStatus StatusInfo $ "Subcall started: " <> slug <> " (depth " <> Text.pack (show depth) <> ")"
     
@@ -696,11 +698,9 @@ handleSubcallStarted tracer parentId subcallId slug depth = do
     agents <- use (tuiUI . agentList . to listElements)
     case findAgentBySlug slug agents of
         Just tuiAgent -> do
-            -- Create an empty session for the subcall
-            -- The session will be populated by the subcall itself
-            session <- liftIO $ Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
-            -- Initialize the subcall conversation
-            initSubcallConversation tracer tuiAgent session subcallId parentId depth
+            -- Create the subcall conversation entry
+            -- The session will be populated by progress events from OneShotTool
+            createSubcallConversationEntry tuiAgent subcallId parentId depth
         Nothing -> do
             showStatus StatusWarning $ "Agent not found for subcall: " <> slug
 
@@ -713,8 +713,17 @@ findAgentBySlug slug agents =
 handleSubcallProgress :: ConversationId -> Session -> EventM N TuiState ()
 handleSubcallProgress subcallId sess = do
     coreRef <- use tuiCore
-    liftIO $ atomically $ modifyTVar coreRef $ \c ->
-        c{coreConversations = updateConversationSession subcallId sess (coreConversations c)}
+    -- Check if this subcall conversation exists
+    coreState <- liftIO $ readTVarIO coreRef
+    let exists = any (\c -> conversationId c == subcallId) (coreConversations coreState)
+    if exists
+        then do
+            -- Update existing conversation
+            liftIO $ atomically $ modifyTVar coreRef $ \c ->
+                c{coreConversations = updateConversationSession subcallId sess (coreConversations c)}
+        else do
+            -- Conversation doesn't exist yet - heartbeat will pick it up
+            pure ()
 
 -- | Handle subcall completed event.
 handleSubcallCompleted :: ConversationId -> Text.Text -> EventM N TuiState ()
@@ -1429,20 +1438,19 @@ addBufferedMessage convId core msg =
 -- Subcall Conversation Management
 -------------------------------------------------------------------------------
 
-{- | Initialize a conversation for a sub-agent call (agentToTool).
+{- | Create a conversation entry for a sub-agent call.
 
-This function creates a conversation that represents a nested agent invocation,
-where one agent calls another as a tool. The conversation is marked as a subcall
-with appropriate parent/depth metadata for lineage tracking in the TUI.
+This function creates a conversation entry in the TUI that represents a nested
+agent invocation. Unlike regular conversations, the execution is handled by
+runSubAgentWithEventEmission in OneShotTool.hs, which emits progress events
+that update this conversation entry.
 
-The subcall conversation is added to both the core state and the UI conversation list.
+The conversation is marked as a subcall with appropriate parent/depth metadata
+for lineage tracking in the TUI.
 -}
-initSubcallConversation
-    :: Tracer IO Trace
-    -> TuiAgent
+createSubcallConversationEntry
+    :: TuiAgent
     -- ^ The agent being invoked as a tool
-    -> Session
-    -- ^ Initial session state for the subcall
     -> ConversationId
     -- ^ The conversation ID for this subcall (pre-generated)
     -> ConversationId
@@ -1450,57 +1458,32 @@ initSubcallConversation
     -> Int
     -- ^ Nesting depth (1+ for subcalls)
     -> EventM N TuiState ()
-initSubcallConversation tracer baseTuiAgent session convId parentId depth = do
-    config <- use sessionConfig
-    outChan <- use eventChan
+createSubcallConversationEntry tuiAgent convId parentId depth = do
+    -- Create the conversation entry
+    -- Note: conversationThreadId is Nothing because the execution is handled by OneShotTool
+    -- conversationChan is a dummy channel since we don't need to send messages to subcalls
     inChan <- liftIO $ newBChan 100
-    let notifyProgress = buildOnProgress convId outChan
-    let node = tuiNode baseTuiAgent
-    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
-    coreRef <- use tuiCore
-    let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-    let a =
-            agent1
-                { step = \sess -> do
-                    let waitIfPaused = do
-                            core <- readTVarIO coreRef
-                            when (isConversationPaused convId core) $ do
-                                threadDelay 200000
-                                waitIfPaused
-                    waitIfPaused
-                    notifyProgress (SessionUpdated sess)
-                    ret <- agent1.step sess
-                    case ret of
-                        Stop _r -> pure $ AskUserPrompt (MissingUserPrompt True [])
-                        _ -> pure ret
-                , usrQuery = do
-                    core <- readTVarIO coreRef
-                    buffered <- readAndClearBufferedMessages convId core
-                    case buffered of
-                        Nothing -> notifyNeedInput >> readBChan inChan
-                        Just buftxt -> pure (Just $ UserQuery buftxt [])
-                }
-    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiTree baseTuiAgent) (tuiNode baseTuiAgent) (tuiSlug baseTuiAgent)
-    threadId <- liftIO $ forkIO $ do
-        notifyProgress (SessionStarted session)
-        void $ Loop.run convId a session
-        notifyProgress (SessionCompleted session)
+    
     let conv =
             Conversation
                 { conversationId = convId
                 , conversationAgent = tuiAgent
-                , conversationThreadId = Just threadId
+                , conversationThreadId = Nothing
                 , conversationSession = Nothing
-                , conversationName = Text.replicate depth ">" <> "@" <> tuiSlug baseTuiAgent
+                , conversationName = Text.replicate depth ">" <> "@" <> tuiSlug tuiAgent
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_Active
-                , conversationOnProgress = notifyProgress
+                , conversationOnProgress = \_ -> pure ()  -- Progress comes via SubcallProgress events
                 , conversationIsSubcall = True
                 , conversationParentId = Just parentId
                 , conversationSubcallDepth = depth
                 }
+    
+    -- Add to core state
+    coreRef <- use tuiCore
     liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
+    
+    -- Add to UI conversation list
     tuiUI . conversationList %= listInsert 0 conv
 
 -------------------------------------------------------------------------------
