@@ -156,7 +156,7 @@ the OSAgentNode, runs it with a session, and returns the result.
 When the ToolExecutionContext includes a World and EventQueue, this function:
 1. Inserts the subcall conversation into the OS World as a first-class entity
 2. Emits OSEvent_SubcallStarted at the beginning
-3. Emits OSEvent_SubcallProgress during execution (if progress tracking enabled)
+3. Emits OSEvent_SubcallProgress during execution (after each step)
 4. Emits OSEvent_SubcallCompleted or OSEvent_SubcallFailed at the end
 
 This enables TUI visibility for subcall conversations, showing parent/child
@@ -335,6 +335,11 @@ calculateSubcallDepth ctx = case ctx.ctxParentConversation of
     Just _ -> max 0 (length (ctxCallStack ctx) - 1)
 
 {- | Run the sub-agent with event emission for TUI visibility.
+
+This function wraps the agent's step function to emit progress events after each
+step, enabling the TUI to show the conversation as it loads. Without this, the TUI
+would only see the start and end events, not the intermediate progress.
+
 Uses Base.ConversationId throughout, converting to OS types only for World operations.
 -}
 runSubAgentWithEventEmission ::
@@ -345,12 +350,28 @@ runSubAgentWithEventEmission ::
     Maybe (TQueue OSEvent) ->
     IO Text
 runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
+    -- Create a progress emitter function that sends SubcallProgress events
+    let emitProgress sess = case mEventQueue of
+            Just eventQueue -> do
+                let event =
+                        OSEvent_SubcallProgress
+                            { subcallProgressConversationId = baseConvId
+                            , subcallProgressSession = sess
+                            }
+                atomically $ writeTQueue eventQueue event
+            Nothing -> pure ()
+
+    -- Wrap the agent's step function to emit progress after each step
+    let agentWithProgress = wrapAgentWithProgress emitProgress agent
+
     -- Run the agent and handle exceptions
     -- Session.run uses Base.ConversationId directly
     result <-
         catch
             ( do
-                (finalTurnContent, _finalSession) <- run baseConvId agent session0
+                (finalTurnContent, finalSession) <- run baseConvId agentWithProgress session0
+                -- Emit final progress with the completed session
+                emitProgress finalSession
                 -- Extract and return the response text
                 let resultText = extractResponseText finalTurnContent.llmResponse
                 pure $ Right resultText
@@ -399,6 +420,25 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
     case result of
         Right resultText -> pure resultText
         Left errMsg -> error $ Text.unpack errMsg
+
+{- | Wrap an agent's step function to emit progress events after each step.
+
+This allows the TUI to track the conversation as it progresses, showing
+intermediate states rather than just the final result.
+-}
+wrapAgentWithProgress ::
+    (Session -> IO ()) ->
+    Agent (LlmTurnContent, Session) ->
+    Agent (LlmTurnContent, Session)
+wrapAgentWithProgress emitProgress agent =
+    agent
+        { step = \sess -> do
+            -- Emit progress before executing the step
+            emitProgress sess
+            -- Execute the original step
+            result <- agent.step sess
+            pure result
+        }
 
 {- | Update conversation status in OS World.
 Takes OS.Core.Types.ConversationId since this is a World operation.
@@ -546,3 +586,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
+

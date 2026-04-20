@@ -35,7 +35,6 @@ import System.Agents.OS.Interfaces.OneShot (
     initOneShotInterface,
  )
 import System.Agents.OS.Interfaces.TUI (
-    MultiAgentConfig (..),
     TUIInterfaceConfig (..),
     defaultTUIInterfaceConfig,
     getLayoutMode,
@@ -59,7 +58,6 @@ tests =
         [ runtimeBridgeTests
         , tuiInterfaceTests
         , oneShotInterfaceTests
-        , multiAgentTests
         ]
 
 -------------------------------------------------------------------------------
@@ -151,25 +149,6 @@ oneShotInterfaceTests =
             handle <- initOneShotInterface config
             result <- executeOneShot handle Nothing "test query"
             extractResultText result @?= "OneShot execution not yet fully implemented - use legacy mainOneShotText"
-        ]
-
--------------------------------------------------------------------------------
--- Multi-Agent Tests
--------------------------------------------------------------------------------
-
-multiAgentTests :: TestTree
-multiAgentTests =
-    testGroup
-        "Multi-Agent Coordination"
-        [ testCase "can create multi-agent config" $ do
-            let config =
-                    (defaultTUIInterfaceConfig)
-                        { tuiEnableMultiAgent = True
-                        }
-            config.tuiEnableMultiAgent @?= True
-        , testCase "multi-agent config defaults to disabled" $ do
-            let config = defaultTUIInterfaceConfig
-            tuiEnableMultiAgent config @?= False
         ]
 
 -------------------------------------------------------------------------------
