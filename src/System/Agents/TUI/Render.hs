@@ -19,7 +19,7 @@ import Brick.Widgets.FileBrowser (
     fileBrowserSelectionInfoAttr,
     renderFileBrowser,
  )
-import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
+import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList, listElements)
 import Control.Lens ((^.))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as Map
@@ -27,10 +27,11 @@ import Data.Set ()
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..))
+import System.Agents.Base (Agent (..), ConversationId (..))
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base hiding (Agent)
@@ -155,6 +156,18 @@ subcallAttr = attrName "subcall"
 subcallSelectedAttr :: AttrName
 subcallSelectedAttr = attrName "subcallSelected"
 
+-- | Attribute for nested tree branch lines.
+treeBranchAttr :: AttrName
+treeBranchAttr = attrName "treeBranch"
+
+-- | Attribute for root conversation.
+rootConversationAttr :: AttrName
+rootConversationAttr = attrName "rootConversation"
+
+-- | Default attribute (no styling).
+defaultAttr :: AttrName
+defaultAttr = attrName "default"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -202,7 +215,7 @@ renderTabBar activeTab =
 -- | Sidebar with agent and conversation lists.
 render_sidebar :: TuiState -> Widget N
 render_sidebar st =
-    hLimit 30 $
+    hLimit 35 $
         vBox
             [ render_agentList st
             , render_conversationList st
@@ -339,52 +352,108 @@ render_agentItem _ agent =
     agentSlug0 = slug (osNodeConfig (tuiNode agent))
 
 -------------------------------------------------------------------------------
--- Conversation List Rendering
+-- Conversation List Rendering with Nesting
 -------------------------------------------------------------------------------
 
--- | Render the conversation list.
+-- | Tree structure for nested conversations.
+data ConversationTree = ConversationTree
+    { treeConversation :: Conversation
+    , treeChildren :: [ConversationTree]
+    }
+
+-- | Build a forest of conversation trees from a flat list.
+buildConversationForest :: [Conversation] -> [ConversationTree]
+buildConversationForest convs =
+    let -- Find root conversations (depth 0 or no parent)
+        roots = filter (\c -> conversationSubcallDepth c == 0) convs
+        -- Build tree recursively
+        buildTree conv = ConversationTree
+            { treeConversation = conv
+            , treeChildren = map buildTree (findChildren conv)
+            }
+        findChildren parent =
+            filter (\c -> conversationParentId c == Just (conversationId parent)) convs
+    in map buildTree roots
+
+-- | Make prefix for a conversation at a specific depth with tree branches.
+makePrefixAtDepth :: Int -> Text
+makePrefixAtDepth depth =
+    if depth == 0
+        then ""
+        else Text.replicate (depth - 1) "│ " <> "├─"
+
+-- | Sort conversations to ensure proper nesting order.
+sortConversationsForNesting :: [Conversation] -> [Conversation]
+sortConversationsForNesting convs =
+    let forest = buildConversationForest convs
+        -- Flatten maintaining tree order
+        go [] = []
+        go (ConversationTree conv children : rest) =
+            conv : go children ++ go rest
+    in go forest
+
+-- | Render the conversation list with nesting.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
-    borderWithFocus
+    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
+        -- Create a custom rendering of the nested list
+        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
+            Just (_, conv) -> Just (conversationId conv)
+            Nothing -> Nothing
+        forest = buildConversationForest convs
+    in borderWithFocus
         st
         ConversationListWidget
         "Conversations"
-        (renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList))
-  where
-    hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+        (viewport ConversationListWidget Both $
+            vBox $ renderConversationForest st selectedId hasFocus forest)
 
--- | Render a single conversation item.
-render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
-render_conversationItem st isSelected conv =
+-- | Render a forest of conversation trees.
+renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
+renderConversationForest st selectedId hasFocus = concatMap (renderTreeNode st selectedId hasFocus 0)
+
+-- | Render a tree node recursively.
+renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> Int -> ConversationTree -> [Widget N]
+renderTreeNode st selectedId hasFocus depth (ConversationTree conv children) =
+    let isSelected = selectedId == Just (conversationId conv)
+        nodeWidget = renderNestedConversationItem st hasFocus isSelected depth conv
+        childWidgets = concatMap (renderTreeNode st selectedId hasFocus (depth + 1)) children
+    in nodeWidget : childWidgets
+
+-- | Render a nested conversation item with tree branches.
+renderNestedConversationItem :: TuiState -> Bool -> Bool -> Int -> Conversation -> Widget N
+renderNestedConversationItem st hasFocus isSelected depth conv =
     let indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
             ConversationStatus_WaitingForInput ->
-                if isUnread then "● " else "  "
+                if isUnread then "● " else "○ "
             ConversationStatus_Paused -> "⏸ "
-        -- Add indentation for subcalls based on depth
-        indent = Text.replicate (conversationSubcallDepth conv * 2) " "
-        baseText = indicator <> indent <> Text.take 18 (conversationName conv)
-        -- Add turn count next to conversation name
+        -- Tree branch prefix
+        branchPrefix = makePrefixAtDepth depth
+        -- For the last child at each level, use └─ instead
+        baseText = branchPrefix <> indicator <> Text.take 20 (conversationName conv)
+        -- Add turn count
         turnCount = case conversationSession conv of
             Nothing -> 0
             Just session -> length session.turns
         turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        -- Add attachment count if any
+        -- Add attachment count
         attachmentCount = getAttachmentCount st conv
         attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
-        -- Add queued message count if any
+        -- Add queued message count
         queueCount = getQueuedMessageCount st conv
         queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
         fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
-        -- Choose widget style based on subcall status and selection
-        widget = case conversationStatus conv of
-            ConversationStatus_Paused ->
-                withAttr pausedAttr $ txt $ " " <> fullText
-            _ ->
-                if conversationIsSubcall conv
-                    then withAttr (if isSelected then subcallSelectedAttr else subcallAttr) $ txt $ " " <> fullText
-                    else txt $ " " <> fullText
-     in widget
+        -- Determine the appropriate attribute
+        attr = if isSelected && hasFocus
+            then subcallSelectedAttr
+            else if isSelected
+                then listSelectedAttr
+            else if depth == 0
+                then rootConversationAttr
+            else subcallAttr
+     in withAttr attr $ txt $ " " <> fullText
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
 
@@ -1020,8 +1089,10 @@ tui_appAttrMap _ =
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
-        , -- Subcall attributes
-          (subcallAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , -- Tree and conversation hierarchy attributes
+          (treeBranchAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (rootConversationAttr, Vty.defAttr)
+        , (subcallAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (subcallSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
         , -- FileBrowser attributes
           (fileBrowserAttr, Vty.defAttr)
@@ -1031,3 +1102,4 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
+
