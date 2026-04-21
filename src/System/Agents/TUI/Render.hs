@@ -364,8 +364,8 @@ data ConversationTree = ConversationTree
 -- | Build a forest of conversation trees from a flat list.
 buildConversationForest :: [Conversation] -> [ConversationTree]
 buildConversationForest convs =
-    let -- Find root conversations (depth 0 or no parent)
-        roots = filter (\c -> conversationSubcallDepth c == 0) convs
+    let -- Find root conversations (depth 0 AND no parent)
+        roots = filter (\c -> conversationSubcallDepth c == 0 && conversationParentId c == Nothing) convs
         -- Build tree recursively
         buildTree conv = ConversationTree
             { treeConversation = conv
@@ -376,11 +376,11 @@ buildConversationForest convs =
     in map buildTree roots
 
 -- | Make prefix for a conversation at a specific depth with tree branches.
-makePrefixAtDepth :: Int -> Text
-makePrefixAtDepth depth =
-    if depth == 0
-        then ""
-        else Text.replicate (depth - 1) "│ " <> "├─"
+makePrefixAtDepth :: Int -> Bool -> Text
+makePrefixAtDepth depth isLast
+    | depth == 0 = ""
+    | isLast = Text.replicate (depth - 1) "│ " <> "└─"
+    | otherwise = Text.replicate (depth - 1) "│ " <> "├─"
 
 -- | Sort conversations to ensure proper nesting order.
 sortConversationsForNesting :: [Conversation] -> [Conversation]
@@ -411,27 +411,29 @@ render_conversationList st =
 
 -- | Render a forest of conversation trees.
 renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
-renderConversationForest st selectedId hasFocus = concatMap (renderTreeNode st selectedId hasFocus 0)
+renderConversationForest st selectedId hasFocus trees =
+    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus 0 (idx == length trees - 1) tree) (zip [0..] trees)
 
 -- | Render a tree node recursively.
-renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> Int -> ConversationTree -> [Widget N]
-renderTreeNode st selectedId hasFocus depth (ConversationTree conv children) =
+renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> Int -> Bool -> ConversationTree -> [Widget N]
+renderTreeNode st selectedId hasFocus depth isLast (ConversationTree conv children) =
     let isSelected = selectedId == Just (conversationId conv)
-        nodeWidget = renderNestedConversationItem st hasFocus isSelected depth conv
-        childWidgets = concatMap (renderTreeNode st selectedId hasFocus (depth + 1)) children
+        nodeWidget = renderNestedConversationItem st hasFocus isSelected depth isLast conv
+        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (depth + 1) (idx == length children - 1) child) (zip [0..] children)
     in nodeWidget : childWidgets
 
 -- | Render a nested conversation item with tree branches.
-renderNestedConversationItem :: TuiState -> Bool -> Bool -> Int -> Conversation -> Widget N
-renderNestedConversationItem st hasFocus isSelected depth conv =
+renderNestedConversationItem :: TuiState -> Bool -> Bool -> Int -> Bool -> Conversation -> Widget N
+renderNestedConversationItem st hasFocus isSelected depth isLast conv =
     let indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
             ConversationStatus_WaitingForInput ->
                 if isUnread then "● " else "○ "
             ConversationStatus_Paused -> "⏸ "
         -- Tree branch prefix
-        branchPrefix = makePrefixAtDepth depth
-        -- For the last child at each level, use └─ instead
+        branchPrefix = makePrefixAtDepth depth isLast
+        -- Selection marker
+        selectionMarker = if isSelected && hasFocus then "▶ " else "  "
         baseText = branchPrefix <> indicator <> Text.take 20 (conversationName conv)
         -- Add turn count
         turnCount = case conversationSession conv of
@@ -453,7 +455,7 @@ renderNestedConversationItem st hasFocus isSelected depth conv =
             else if depth == 0
                 then rootConversationAttr
             else subcallAttr
-     in withAttr attr $ txt $ " " <> fullText
+     in withAttr attr $ txt $ selectionMarker <> fullText
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
 
