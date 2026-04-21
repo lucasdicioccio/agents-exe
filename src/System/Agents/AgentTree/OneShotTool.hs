@@ -85,7 +85,7 @@ import System.Agents.ToolRegistration (
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 -- Import ToolExecutionContext type but NOT the field accessors to avoid ambiguity with Agent fields
-import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext)
 import qualified System.Agents.Tools.Context as Ctx
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
@@ -221,18 +221,24 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         -- nodeToAgent expects Base.AgentId and returns Agent using Base.ConversationId
         sessionAgent0 <- nodeToAgent store httpRuntime node tracer callerSlug callerId
 
+        -- Calculate new call stack from parent context for arbitrarily deep nesting
+        let parentCallStack = Ctx.ctxCallStack ctx
+        subcallBaseConvId <- newBaseConversationId
+        let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
+        let subcallCallStack = newEntry : parentCallStack
+
+        -- Update the agent with the new call stack
+        let sessionAgent0WithStack = sessionAgent0 { ctxCallStack = subcallCallStack }
+
         -- Apply dynamic tool filtering based on session activation state
         -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-        sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0
+        sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0WithStack
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
 
         -- Create a fresh session with media support (version 1)
         session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
-
-        -- Generate a conversation ID for this execution (Base.ConversationId)
-        subcallBaseConvId <- newBaseConversationId
 
         -- Get current time for timestamps
         now <- getCurrentTime
@@ -386,7 +392,7 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
                             OSEvent_SubcallCompleted
                                 { subcallCompletedConversationId = baseConvId
                                 , subcallCompletedResult = resultText
-                                }
+                            }
                     atomically $ writeTQueue eventQueue event
                     -- Update OS World status if available
                     -- Convert Base.ConversationId to OS types for World update
@@ -400,7 +406,7 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
                             OSEvent_SubcallFailed
                                 { subcallFailedConversationId = baseConvId
                                 , subcallFailedError = errMsg
-                                }
+                            }
                     atomically $ writeTQueue eventQueue event
                     -- Update OS World status if available
                     -- Convert Base.ConversationId to OS types for World update
@@ -512,6 +518,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
+                , ctxCallStack = [CallStackEntry "root" convId 0]
                 }
 
 -------------------------------------------------------------------------------

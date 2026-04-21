@@ -39,7 +39,7 @@ import Control.Concurrent.STM (TQueue)
 
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
-import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
+import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
 
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Media.Types (MediaAttachment)
@@ -129,6 +129,9 @@ data Agent r = Agent
     -- ^ Optional event queue for OS event emission. When present, tools
     -- can emit events to notify the TUI of subcall lifecycle (start,
     -- progress, completion, failure).
+    , ctxCallStack :: [CallStackEntry]
+    -- ^ Call stack for tracking nested agent invocations. Root entry
+    -- is at depth 0, and each nested call adds a new entry.
     }
     deriving (Functor)
 

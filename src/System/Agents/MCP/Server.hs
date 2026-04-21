@@ -72,6 +72,7 @@ import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import qualified System.Agents.ToolSchema as ToolSchema
+import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.Trace as Tools
 
@@ -320,6 +321,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
 
     let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (AgentTree.osNodeTools node)
     -- Create the agent with the naive step function that stops when no tool calls remain
+    -- Initialize the call stack with a root entry for arbitrarily deep nesting support
     let agent =
             Agent
                 { step = naiveTilNoToolCallStep
@@ -332,6 +334,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
+                , ctxCallStack = [CallStackEntry "root" convId 0]
                 }
 
     -- Create initial session with media support (version 1)

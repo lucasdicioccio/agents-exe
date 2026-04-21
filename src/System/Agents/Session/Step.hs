@@ -15,7 +15,7 @@ import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
 import qualified System.Agents.Tools.Context as Ctx
 
 {- | Runs a single step of agent for a given session.
@@ -61,8 +61,8 @@ The context is populated according to 'ContextConfig' settings:
 * 'includeFullSession' controls whether 'ctxFullSession' is populated
 * 'includeAgentId' controls whether 'ctxAgentId' is included (as Nothing or Just)
 
-This creates a root-level context with a single "root" entry in the call stack
-at depth 0, and no recursion depth limit.
+This uses the agent's 'ctxCallStack' to maintain the call chain for nested
+agent invocations, supporting arbitrarily deep nesting of sub-conversations.
 
 The context also includes the agent's 'ctxWorld' and 'ctxEventQueue' if present,
 which enables subcall conversations to be visible in the TUI.
@@ -78,7 +78,7 @@ buildContext agent sess convId =
                 (if config.includeAgentId then Nothing else Nothing) -- AgentId not available in Session, use Nothing
                 (if config.includeFullSession then Just sess else Nothing)
                 agent.toolPortal
-                [CallStackEntry "root" convId 0] -- Root call stack entry
+                agent.ctxCallStack
                 Nothing -- No max recursion depth by default
      in baseCtx
             { Ctx.ctxWorld = agent.ctxWorld

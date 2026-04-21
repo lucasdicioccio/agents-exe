@@ -61,6 +61,7 @@ import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (.
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.TUI.Clipboard (
     ContentAction (..),
     analyzeContent,
@@ -1549,9 +1550,11 @@ runConversation tracer baseTuiAgent session = do
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
     
     -- Set the World and EventQueue on the agent for subcall visibility
+    -- and initialize the call stack with a root entry
     let agentWithOS = agent1
             { ctxWorld = mWorld
             , ctxEventQueue = mEventQueue
+            , ctxCallStack = [CallStackEntry "root" convId 0]
             }
     
     let a =
