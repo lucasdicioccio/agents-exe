@@ -90,8 +90,10 @@ import System.Agents.TUI.Types (
     conversationId,
     conversationList,
     conversationName,
+    conversationParentId,
     conversationSession,
     conversationStatus,
+    conversationSubcallDepth,
     coreBufferedMessages,
     coreConversations,
     corePausedConversations,
@@ -127,6 +129,38 @@ import System.Agents.TUI.Types (
 
 -- Import Tracer for creating a no-op tracer
 import Prod.Tracer (Tracer (..), contramap)
+
+-- | Tree structure for nested conversations.
+data ConversationTree = ConversationTree
+    { treeConversation :: Conversation
+    , treeChildren :: [ConversationTree]
+    }
+
+-- | Sort conversations to ensure proper nesting order for navigation.
+-- This ensures that when navigating with Up/Down, we navigate through
+-- the tree in the same order as it's rendered.
+sortConversationsForNesting :: [Conversation] -> [Conversation]
+sortConversationsForNesting convs =
+    let forest = buildConversationForest convs
+        -- Flatten maintaining tree order (pre-order traversal)
+        go [] = []
+        go (ConversationTree conv children : rest) =
+            conv : go children ++ go rest
+    in go forest
+
+-- | Build a forest of conversation trees from a flat list.
+buildConversationForest :: [Conversation] -> [ConversationTree]
+buildConversationForest conversations =
+    let -- Find root conversations (depth 0 AND no parent)
+        roots = filter (\c -> conversationSubcallDepth c == 0 && conversationParentId c == Nothing) conversations
+        -- Build tree recursively
+        buildTree conv = ConversationTree
+            { treeConversation = conv
+            , treeChildren = map buildTree (findChildren conv)
+            }
+        findChildren parent =
+            filter (\c -> conversationParentId c == Just (conversationId parent)) conversations
+    in map buildTree roots
 
 data Trace
     = RuntimeTrace !Runtime.Trace
@@ -1146,10 +1180,11 @@ handleHeartbeat = do
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
-    tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList convs) 1
+    let sortedConvs = sortConversationsForNesting convs
+    tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList sortedConvs) 1
     case mSelectedConvId of
         Just selectedConvId -> do
-            let newConvs = Vector.fromList convs
+            let newConvs = Vector.fromList sortedConvs
             case Vector.findIndex (\c -> conversationId c == selectedConvId) newConvs of
                 Just idx -> tuiUI . conversationList . listSelectedL .= Just idx
                 Nothing -> pure ()
