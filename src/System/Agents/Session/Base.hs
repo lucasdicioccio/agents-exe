@@ -35,6 +35,10 @@ module System.Agents.Session.Base (
     Agent (..),
 ) where
 
+import Control.Concurrent.STM (TQueue)
+
+import System.Agents.OS.Core.World (World)
+import System.Agents.OS.Events (OSEvent)
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Re-export all session types from Session.Types for backward compatibility
@@ -116,5 +120,15 @@ data Agent r = Agent
     , --
       contextConfig :: ContextConfig
     -- ^ Configuration for what to include in tool execution context
+    , --
+      ctxWorld :: Maybe World
+    -- ^ Optional OS World for ECS operations. When present, tools can
+    -- insert entities and components into the OS. This enables subcall
+    -- conversations to be visible in the TUI.
+    , ctxEventQueue :: Maybe (TQueue OSEvent)
+    -- ^ Optional event queue for OS event emission. When present, tools
+    -- can emit events to notify the TUI of subcall lifecycle (start,
+    -- progress, completion, failure).
     }
     deriving (Functor)
+

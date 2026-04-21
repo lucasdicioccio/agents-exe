@@ -12,7 +12,7 @@ import Brick.Widgets.FileBrowser (FileBrowser)
 import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
-import Control.Concurrent.STM (TVar, newTVarIO)
+import Control.Concurrent.STM (TQueue, TVar, newTVarIO)
 import Control.Lens (makeLenses)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -26,6 +26,8 @@ import qualified Data.Vector as Vector
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode, OSAgentTree)
 import System.Agents.Base (AgentId, ConversationId (..))
 import System.Agents.Media.Types (MediaAttachment)
+import System.Agents.OS.Core.World (World)
+import System.Agents.OS.Events (OSEvent)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
@@ -324,6 +326,12 @@ data Core = Core
     -- ^ Buffered messages per conversation (queued while agent is processing)
     , corePausedConversations :: Set ConversationId
     -- ^ Set of paused conversation IDs
+    , coreWorld :: Maybe World
+    -- ^ Optional OS World for ECS operations. Enables subcall visibility
+    -- in the TUI by allowing sub-agent conversations to be tracked as entities.
+    , coreOSEventQueue :: Maybe (TQueue OSEvent)
+    -- ^ Optional OS event queue for subcall event emission. Enables the TUI
+    -- to receive notifications about subcall lifecycle (start, progress, completion).
     }
 
 makeLenses ''Core
@@ -436,9 +444,9 @@ initUIState helpText agents =
         , _uiAgentTools = []
         }
 
--- | Initialize core state.
-initCore :: IO Core
-initCore = do
+-- | Initialize core state with optional World and EventQueue.
+initCore :: Maybe World -> Maybe (TQueue OSEvent) -> IO Core
+initCore mWorld mEventQueue = do
     bufferedVar <- newTVarIO Map.empty
     pure
         Core
@@ -446,6 +454,8 @@ initCore = do
             , coreAgentTools = []
             , coreBufferedMessages = bufferedVar
             , corePausedConversations = Set.empty
+            , coreWorld = mWorld
+            , coreOSEventQueue = mEventQueue
             }
 
 -------------------------------------------------------------------------------
@@ -461,3 +471,4 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
+

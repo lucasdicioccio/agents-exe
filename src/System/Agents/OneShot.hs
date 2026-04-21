@@ -325,6 +325,8 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                     let completionWithMedia = completion{completeMedia = mediaAttachs}
                     completeF completionWithMedia
                 , contextConfig = defaultContextConfig
+                , ctxWorld = Nothing
+                , ctxEventQueue = Nothing
                 }
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
@@ -399,3 +401,4 @@ fileStoringCallback store convId progress =
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
+

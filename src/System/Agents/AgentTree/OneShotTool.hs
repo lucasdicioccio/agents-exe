@@ -84,14 +84,9 @@ import System.Agents.ToolRegistration (
  )
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Context (
-    ToolExecutionContext,
-    ctxCallStack,
-    ctxConversationId,
-    ctxEventQueue,
-    ctxParentConversation,
-    ctxWorld,
- )
+-- Import ToolExecutionContext type but NOT the field accessors to avoid ambiguity with Agent fields
+import System.Agents.Tools.Context (ToolExecutionContext)
+import qualified System.Agents.Tools.Context as Ctx
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 
@@ -211,7 +206,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
     runSubAgent ctx (PromptOtherAgent query) = do
         -- Extract the conversation ID from the execution context for tracing
         -- ctx.ctxConversationId is Base.ConversationId
-        let parentBaseConvId = ctx.ctxConversationId
+        let parentBaseConvId = Ctx.ctxConversationId ctx
 
         -- Get the API key for this agent
         let apiKeyId = Base.apiKeyId agent
@@ -243,9 +238,9 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         now <- getCurrentTime
 
         -- Extract OS integration fields from context
-        let mWorld = ctx.ctxWorld
-        let mEventQueue = ctx.ctxEventQueue
-        let mParentBaseConv = ctx.ctxParentConversation
+        let mWorld = Ctx.ctxWorld ctx
+        let mEventQueue = Ctx.ctxEventQueue ctx
+        let mParentBaseConv = Ctx.ctxParentConversation ctx
 
         -- Calculate subcall depth for lineage
         let depth = calculateSubcallDepth ctx
@@ -311,7 +306,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
                             , subcallConversationId = subcallBaseConvId
                             , subcallAgentSlug = Base.slug agent
                             , subcallDepth = depth
-                            }
+                        }
                 atomically $ writeTQueue eventQueue event
             Nothing -> pure ()
 
@@ -330,9 +325,9 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
 
 -- | Calculate the subcall depth from the context.
 calculateSubcallDepth :: ToolExecutionContext -> Int
-calculateSubcallDepth ctx = case ctx.ctxParentConversation of
+calculateSubcallDepth ctx = case Ctx.ctxParentConversation ctx of
     Nothing -> 0
-    Just _ -> max 0 (length (ctxCallStack ctx) - 1)
+    Just _ -> max 0 (length (Ctx.ctxCallStack ctx) - 1)
 
 {- | Run the sub-agent with event emission for TUI visibility.
 
@@ -515,6 +510,8 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
+                , ctxWorld = Nothing
+                , ctxEventQueue = Nothing
                 }
 
 -------------------------------------------------------------------------------

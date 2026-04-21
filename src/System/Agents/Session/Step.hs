@@ -15,7 +15,8 @@ import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, ToolPortal, mkToolExecutionContext)
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext, mkToolExecutionContext)
+import qualified System.Agents.Tools.Context as Ctx
 
 {- | Runs a single step of agent for a given session.
 Agent may be modified, may decide to return a session, or decide to stop.
@@ -40,7 +41,7 @@ runStepM convId agent sess =
                 sTools <- agent0.sysTools
                 uQuery <- if missing.missingQuery then agent0.usrQuery else pure Nothing
                 -- Construct ToolExecutionContext for each tool call
-                let ctx = buildContext agent0.contextConfig sess0 agent0.toolPortal convId
+                let ctx = buildContext agent0 sess0 convId
                 toolResponses <- traverse (agent0.toolCall ctx) missing.missingToolCalls
                 let uToolResponses = zip missing.missingToolCalls toolResponses
                 -- Calculate byte usage for this user turn
@@ -62,18 +63,27 @@ The context is populated according to 'ContextConfig' settings:
 
 This creates a root-level context with a single "root" entry in the call stack
 at depth 0, and no recursion depth limit.
+
+The context also includes the agent's 'ctxWorld' and 'ctxEventQueue' if present,
+which enables subcall conversations to be visible in the TUI.
 -}
-buildContext :: ContextConfig -> Session -> ToolPortal -> ConversationId -> ToolExecutionContext
-buildContext config sess portal convId =
-    mkToolExecutionContext
-        sess.sessionId
-        convId
-        sess.turnId
-        (if config.includeAgentId then Nothing else Nothing) -- AgentId not available in Session, use Nothing
-        (if config.includeFullSession then Just sess else Nothing)
-        portal
-        [CallStackEntry "root" convId 0] -- Root call stack entry
-        Nothing -- No max recursion depth by default
+buildContext :: Agent r -> Session -> ConversationId -> ToolExecutionContext
+buildContext agent sess convId =
+    let config = agent.contextConfig
+        baseCtx =
+            mkToolExecutionContext
+                sess.sessionId
+                convId
+                sess.turnId
+                (if config.includeAgentId then Nothing else Nothing) -- AgentId not available in Session, use Nothing
+                (if config.includeFullSession then Just sess else Nothing)
+                agent.toolPortal
+                [CallStackEntry "root" convId 0] -- Root call stack entry
+                Nothing -- No max recursion depth by default
+     in baseCtx
+            { Ctx.ctxWorld = agent.ctxWorld
+            , Ctx.ctxEventQueue = agent.ctxEventQueue
+            }
 
 {- | Calculate byte usage for a user turn.
 
@@ -203,3 +213,4 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+

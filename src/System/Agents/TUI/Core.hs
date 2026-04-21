@@ -88,9 +88,10 @@ import Brick hiding (Down)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (TQueue, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
+import Control.Concurrent.STM (TQueue, STM, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
+import Data.Proxy (Proxy (..))
 import Prod.Tracer (Tracer)
 
 import System.Agents.AgentTree (
@@ -103,6 +104,12 @@ import System.Agents.AgentTree (
  )
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (AgentId (..))
+import System.Agents.OS.Conversation (
+    ConversationConfig,
+    ConversationState,
+    Lineage (..),
+ )
+import System.Agents.OS.Core.World (World, newWorld, registerComponentStore)
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.Session.Base (Session (..))
 import System.Agents.SessionStore (SessionStore)
@@ -238,6 +245,24 @@ startOSEventBridge osEventQueue appEventChan = void $ forkIO $ forever $ do
         Nothing -> pure () -- Ignore non-TUI events
 
 -------------------------------------------------------------------------------
+-- World Initialization
+-------------------------------------------------------------------------------
+
+{- | Initialize the OS World with required component stores.
+
+This creates a World and registers the component types needed for
+subcall conversation tracking.
+-}
+initWorld :: STM World
+initWorld = do
+    world <- newWorld
+    -- Register component stores for conversation tracking
+    world1 <- registerComponentStore world (Proxy @ConversationConfig)
+    world2 <- registerComponentStore world1 (Proxy @ConversationState)
+    world3 <- registerComponentStore world2 (Proxy @Lineage)
+    pure world3
+
+-------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
@@ -280,8 +305,11 @@ runTUIWithConfig tracer config props = do
     -- Start the event bridge
     startOSEventBridge osEventQueue evChan
 
-    -- Create core state with loaded conversations
-    core0 <- initCore
+    -- Create and initialize the OS World
+    world <- atomically initWorld
+
+    -- Create core state with World and EventQueue for subcall visibility
+    core0 <- initCore (Just world) (Just osEventQueue)
     coreTVar <- newTVarIO core0
 
     -- Create UI state with loaded sessions and collected tools

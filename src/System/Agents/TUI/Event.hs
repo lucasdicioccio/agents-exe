@@ -24,7 +24,7 @@ import Brick.Widgets.List (handleListEvent, listElements, listInsert, listSelect
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async, poll)
-import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
 import Control.Lens (to, use, (%=), (.=), (^.), _Just)
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
@@ -1490,6 +1490,10 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
 -- Run Conversation
 -------------------------------------------------------------------------------
 
+-- | Run a conversation with the given agent and session.
+--
+-- This function creates an agent with the World and EventQueue from the Core
+-- state, enabling subcall conversations to be visible in the TUI.
 runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
 runConversation tracer baseTuiAgent session = do
     config <- use sessionConfig
@@ -1501,9 +1505,22 @@ runConversation tracer baseTuiAgent session = do
     agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
     agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
     coreRef <- use tuiCore
+    
+    -- Get the World and EventQueue from Core for subcall visibility
+    coreState <- liftIO $ readTVarIO coreRef
+    let mWorld = coreWorld coreState
+    let mEventQueue = coreOSEventQueue coreState
+    
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+    
+    -- Set the World and EventQueue on the agent for subcall visibility
+    let agentWithOS = agent1
+            { ctxWorld = mWorld
+            , ctxEventQueue = mEventQueue
+            }
+    
     let a =
-            agent1
+            agentWithOS
                 { step = \sess -> do
                     let waitIfPaused = do
                             core <- readTVarIO coreRef
@@ -1512,7 +1529,7 @@ runConversation tracer baseTuiAgent session = do
                                 waitIfPaused
                     waitIfPaused
                     notifyProgress (SessionUpdated sess)
-                    ret <- agent1.step sess
+                    ret <- agentWithOS.step sess
                     case ret of
                         Stop _r -> pure $ AskUserPrompt (MissingUserPrompt True [])
                         _ -> pure ret
