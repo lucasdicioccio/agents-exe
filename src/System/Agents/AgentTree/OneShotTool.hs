@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
@@ -58,6 +59,8 @@ import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
 import qualified System.Agents.OneShot as OneShot
+-- Import Agent with qualified name to disambiguate record updates
+import qualified System.Agents.Session.Base as SessionBase
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -84,8 +87,9 @@ import System.Agents.ToolRegistration (
  )
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
--- Import ToolExecutionContext type but NOT the field accessors to avoid ambiguity with Agent fields
-import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext)
+-- Import ToolExecutionContext with qualified access to avoid ambiguity with Agent fields.
+-- DuplicateRecordFields allows both Agent and ToolExecutionContext to have the same field names.
+import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext (..))
 import qualified System.Agents.Tools.Context as Ctx
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
@@ -206,7 +210,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
     runSubAgent ctx (PromptOtherAgent query) = do
         -- Extract the conversation ID from the execution context for tracing
         -- ctx.ctxConversationId is Base.ConversationId
-        let parentBaseConvId = Ctx.ctxConversationId ctx
+        let parentBaseConvId = ctx.ctxConversationId
 
         -- Get the API key for this agent
         let apiKeyId = Base.apiKeyId agent
@@ -222,13 +226,19 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         sessionAgent0 <- nodeToAgent store httpRuntime node tracer callerSlug callerId
 
         -- Calculate new call stack from parent context for arbitrarily deep nesting
+        -- Use qualified access to avoid ambiguity with Agent fields
         let parentCallStack = Ctx.ctxCallStack ctx
         subcallBaseConvId <- newBaseConversationId
         let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
         let subcallCallStack = newEntry : parentCallStack
 
-        -- Update the agent with the new call stack
-        let sessionAgent0WithStack = sessionAgent0 { ctxCallStack = subcallCallStack }
+        -- Update the agent with the new call stack and parent reference
+        -- This ensures nested calls correctly track their lineage
+        -- Use SessionBase.Agent to disambiguate the record update
+        let sessionAgent0WithStack = sessionAgent0
+                { SessionBase.ctxCallStack = subcallCallStack
+                , SessionBase.ctxParentConversation = Just parentBaseConvId
+                }
 
         -- Apply dynamic tool filtering based on session activation state
         -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
@@ -244,12 +254,14 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         now <- getCurrentTime
 
         -- Extract OS integration fields from context
+        -- Use qualified access to avoid ambiguity with Agent fields
         let mWorld = Ctx.ctxWorld ctx
         let mEventQueue = Ctx.ctxEventQueue ctx
         let mParentBaseConv = Ctx.ctxParentConversation ctx
 
-        -- Calculate subcall depth for lineage
-        let depth = calculateSubcallDepth ctx
+        -- Calculate subcall depth: child's depth = length of parent's call stack
+        -- Root has stack of length 1, so first subcall has depth 1, etc.
+        let depth = length parentCallStack
 
         -- Insert into OS World and emit start event if OS integration is available
         -- Convert Base.ConversationId to OS types for World operations
@@ -328,12 +340,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
 
         -- Return the result
         pure $ Text.encodeUtf8 result
-
--- | Calculate the subcall depth from the context.
-calculateSubcallDepth :: ToolExecutionContext -> Int
-calculateSubcallDepth ctx = case Ctx.ctxParentConversation ctx of
-    Nothing -> 0
-    Just _ -> max 0 (length (Ctx.ctxCallStack ctx) - 1)
 
 {- | Run the sub-agent with event emission for TUI visibility.
 
@@ -519,6 +525,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxParentConversation = Nothing
                 }
 
 -------------------------------------------------------------------------------

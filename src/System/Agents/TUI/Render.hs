@@ -362,17 +362,38 @@ data ConversationTree = ConversationTree
     }
 
 -- | Build a forest of conversation trees from a flat list.
+--
+-- This function handles "orphaned" conversations - children whose parents
+-- are not in the list. This can happen due to async event ordering where
+-- a child subcall event arrives before its parent is fully registered.
+-- Such orphaned conversations are treated as temporary roots to ensure
+-- they remain visible in the TUI.
 buildConversationForest :: [Conversation] -> [ConversationTree]
 buildConversationForest convs =
-    let -- Find root conversations (depth 0 AND no parent)
-        roots = filter (\c -> conversationSubcallDepth c == 0 && conversationParentId c == Nothing) convs
+    let -- Build a set of all conversation IDs for quick lookup
+        convIds = Set.fromList $ map conversationId convs
+        
+        -- Find root conversations:
+        -- 1. Conversations with no parent (parentId == Nothing), OR
+        -- 2. "Orphaned" conversations whose parent is not in the list
+        --    (this handles race conditions in async subcall creation)
+        isRoot c =
+            case conversationParentId c of
+                Nothing -> True
+                Just parentId -> not (Set.member parentId convIds)
+        
+        roots = filter isRoot convs
+        
         -- Build tree recursively
         buildTree conv = ConversationTree
             { treeConversation = conv
             , treeChildren = map buildTree (findChildren conv)
             }
+        
+        -- Find all children of a given parent conversation
         findChildren parent =
             filter (\c -> conversationParentId c == Just (conversationId parent)) convs
+            
     in map buildTree roots
 
 -- | Make prefix for a conversation at a specific depth with tree branches.
@@ -386,7 +407,7 @@ makePrefixAtDepth depth isLast
 sortConversationsForNesting :: [Conversation] -> [Conversation]
 sortConversationsForNesting convs =
     let forest = buildConversationForest convs
-        -- Flatten maintaining tree order
+        -- Flatten maintaining tree order (pre-order traversal)
         go [] = []
         go (ConversationTree conv children : rest) =
             conv : go children ++ go rest

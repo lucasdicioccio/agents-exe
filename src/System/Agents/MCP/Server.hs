@@ -46,6 +46,7 @@ import System.Agents.MCP.Server.Runtime
 -- OneShot integration imports
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.OneShot (parseModelFlavor)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -335,6 +336,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxParentConversation = Nothing
                 }
 
     -- Create initial session with media support (version 1)
@@ -359,10 +361,6 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
     -- Extract response text from LLM response, handling Nothing case
     extractResponseText :: LlmResponse -> Text
     extractResponseText (LlmResponse mtxt _thinking _ _) = Maybe.fromMaybe "" mtxt
-
-    -- Parse model flavor from text, defaulting to OpenAIv1
-    parseModelFlavor :: Text -> OpenAI.ModelFlavor
-    parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
 
     -- Look up an API key by its ID from the loaded API keys
     lookupApiKey :: Text -> AgentTree.LoadedApiKeys -> Maybe OpenAI.ApiKey

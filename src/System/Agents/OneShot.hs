@@ -329,6 +329,7 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxParentConversation = Nothing
                 }
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.
