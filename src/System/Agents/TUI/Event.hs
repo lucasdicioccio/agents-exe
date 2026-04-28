@@ -695,8 +695,10 @@ handleNormalEvent tracer ev =
 -- which emits progress events that update this conversation.
 handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
 handleSubcallStarted _tracer parentId subcallId slug depth = do
-    -- Show status message
-    showStatus StatusInfo $ "Subcall started: " <> slug <> " (depth " <> Text.pack (show depth) <> ")"
+    -- Show status message with session IDs for debugging
+    let parentShort = Text.take 8 (Text.pack $ show parentId)
+    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+    showStatus StatusInfo $ "Subcall d=" <> Text.pack (show depth) <> " pid=" <> parentShort <> " cid=" <> subcallShort <> " " <> slug
     
     -- Look up the agent by slug from the agent list
     agents <- use (tuiUI . agentList . to listElements)
@@ -727,17 +729,20 @@ handleSubcallProgress subcallId sess = do
                 c{coreConversations = updateConversationSession subcallId sess (coreConversations c)}
         else do
             -- Conversation doesn't exist yet - heartbeat will pick it up
-            pure ()
+            let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+            showStatus StatusWarning $ "Subcall progress for unknown conv: " <> subcallShort
 
 -- | Handle subcall completed event.
 handleSubcallCompleted :: ConversationId -> Text.Text -> EventM N TuiState ()
-handleSubcallCompleted _subcallId result = do
-    showStatus StatusInfo $ "Subcall completed: " <> Text.take 50 result
+handleSubcallCompleted subcallId result = do
+    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+    showStatus StatusInfo $ "Subcall completed cid=" <> subcallShort <> ": " <> Text.take 30 result
 
 -- | Handle subcall failed event.
 handleSubcallFailed :: ConversationId -> Text.Text -> EventM N TuiState ()
-handleSubcallFailed _subcallId err = do
-    showStatus StatusError $ "Subcall failed: " <> err
+handleSubcallFailed subcallId err = do
+    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+    showStatus StatusError $ "Subcall failed cid=" <> subcallShort <> ": " <> err
 
 -------------------------------------------------------------------------------
 -- Widget-Specific Event Handlers
@@ -1150,8 +1155,20 @@ handleHeartbeat = do
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
+    
+    -- Debug: log conversation counts
+    let convCount = length convs
+    let rootCount = length $ filter (\c -> conversationParentId c == Nothing) convs
+    
     let sortedConvs = sortConversationsForNesting convs
+    let sortedCount = length sortedConvs
+    
+    -- Show debug info if counts don't match
+    when (sortedCount /= convCount) $ do
+        showStatus StatusWarning $ "Conv count mismatch: raw=" <> Text.pack (show convCount) <> " sorted=" <> Text.pack (show sortedCount) <> " roots=" <> Text.pack (show rootCount)
+    
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList sortedConvs) 1
+    
     case mSelectedConvId of
         Just selectedConvId -> do
             let newConvs = Vector.fromList sortedConvs
@@ -1450,8 +1467,9 @@ agent invocation. Unlike regular conversations, the execution is handled by
 runSubAgentWithEventEmission in OneShotTool.hs, which emits progress events
 that update this conversation entry.
 
-The conversation is marked as a subcall with appropriate parent/depth metadata
-for lineage tracking in the TUI.
+The conversation uses the SAME decoration/naming as regular conversations
+to ensure visual consistency in the TUI. The tree branches (└─>, ├─, │) 
+provide the visual nesting indication, not the conversation name itself.
 -}
 createSubcallConversationEntry
     :: TuiAgent
@@ -1469,13 +1487,15 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
     -- conversationChan is a dummy channel since we don't need to send messages to subcalls
     inChan <- liftIO $ newBChan 100
     
+    -- Use the SAME decoration as regular conversations: "@" <> slug
+    -- The tree branches in renderConversationForest provide the visual nesting
     let conv =
             Conversation
                 { conversationId = convId
                 , conversationAgent = tuiAgent
                 , conversationThreadId = Nothing
                 , conversationSession = Nothing
-                , conversationName = Text.replicate depth ">" <> "@" <> tuiSlug tuiAgent
+                , conversationName = "@" <> tuiSlug tuiAgent
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_Active
                 , conversationOnProgress = \_ -> pure ()  -- Progress comes via SubcallProgress events
@@ -1490,6 +1510,11 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
     
     -- Add to UI conversation list
     tuiUI . conversationList %= listInsert 0 conv
+    
+    -- Debug: show conversation created
+    let convShort = Text.take 8 (Text.pack $ show convId)
+    let parentShort = Text.take 8 (Text.pack $ show parentId)
+    showStatus StatusInfo $ "Created subcall d=" <> Text.pack (show depth) <> " cid=" <> convShort <> " pid=" <> parentShort
 
 -------------------------------------------------------------------------------
 -- Run Conversation
