@@ -33,14 +33,6 @@ module System.Agents.OS.Interfaces.TUI (
     setLayoutMode,
     getLayoutMode,
 
-    -- * Multi-Agent Coordination
-    configureMultiAgent,
-
-    -- * Agent Bus Operations
-    createAgentBus,
-    sendInterAgentMessage,
-    broadcastMessage,
-
     -- * Conversation Management
     ConversationStatus (..),
     startConversation,
@@ -49,15 +41,12 @@ module System.Agents.OS.Interfaces.TUI (
 
     -- * Utility
     defaultTUIInterfaceConfig,
-    MultiAgentConfig (..),
 ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar, newTVarIO, readTVarIO, writeTQueue, writeTVar)
-import Data.Aeson (Value)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar, newTVarIO, readTVarIO, writeTVar)
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import Data.Text (Text)
 
 import System.Agents.Base (AgentId, ConversationId, newAgentId, newConversationId)
@@ -70,12 +59,7 @@ import System.Agents.OS.Interfaces (
  )
 import System.Agents.Session.Base (Session)
 import System.Agents.TUI.Types (
-    AgentBus (..),
-    AgentRoleConfig (..),
-    CoordinationStrategy (..),
-    InterAgentMessage (..),
     LayoutMode (..),
-    MessageType (..),
  )
 
 -------------------------------------------------------------------------------
@@ -88,8 +72,6 @@ data TUIInterfaceConfig = TUIInterfaceConfig
     -- ^ Base interface configuration
     , tuiDefaultLayout :: LayoutMode
     -- ^ Default layout mode
-    , tuiEnableMultiAgent :: Bool
-    -- ^ Enable multi-agent coordination features
     , tuiMaxConversations :: Int
     -- ^ Maximum concurrent conversations per agent
     }
@@ -101,7 +83,6 @@ defaultTUIInterfaceConfig =
     TUIInterfaceConfig
         { tuiBaseConfig = (defaultInterfaceConfig){ifcMode = ModeTUI}
         , tuiDefaultLayout = SingleAgent
-        , tuiEnableMultiAgent = False
         , tuiMaxConversations = 5
         }
 
@@ -115,22 +96,11 @@ data TUIInterfaceHandle = TUIInterfaceHandle
     -- ^ Base interface handle
     , tuiLayout :: TVar LayoutMode
     -- ^ Current layout mode
-    , tuiAgentBus :: Maybe AgentBus
-    -- ^ Optional agent bus for multi-agent mode
-    , tuiMultiAgentConfig :: Maybe MultiAgentConfig
-    -- ^ Multi-agent configuration if enabled
     , tuiRegisteredAgents :: TVar (Map.Map AgentId ())
     -- ^ Registered agents with their bridges
     , tuiConversations :: TVar (Map.Map ConversationId TUIConversationHandle)
     -- ^ Active conversations
     }
-
--- | Multi-agent configuration.
-data MultiAgentConfig = MultiAgentConfig
-    { maAgents :: [AgentRoleConfig]
-    , maCoordinationStrategy :: CoordinationStrategy
-    }
-    deriving (Show)
 
 -- | Conversation handle for TUI.
 data TUIConversationHandle = TUIConversationHandle
@@ -195,18 +165,10 @@ initTUIInterface config = do
     registeredAgentsVar <- newTVarIO Map.empty
     tuiConversationsVar <- newTVarIO Map.empty
 
-    -- Create agent bus if multi-agent is enabled
-    agentBus <-
-        if tuiEnableMultiAgent config
-            then Just <$> createAgentBus
-            else pure Nothing
-
     pure $
         TUIInterfaceHandle
             { tuiBaseHandle = baseHandle
             , tuiLayout = layoutVar
-            , tuiAgentBus = agentBus
-            , tuiMultiAgentConfig = Nothing
             , tuiRegisteredAgents = registeredAgentsVar
             , tuiConversations = tuiConversationsVar
             }
@@ -270,75 +232,6 @@ setLayoutMode handle mode = do
 getLayoutMode :: TUIInterfaceHandle -> IO LayoutMode
 getLayoutMode handle =
     readTVarIO (tuiLayout handle)
-
--------------------------------------------------------------------------------
--- Multi-Agent Coordination
--------------------------------------------------------------------------------
-
--- | Configure multi-agent mode.
-configureMultiAgent :: TUIInterfaceHandle -> MultiAgentConfig -> IO ()
-configureMultiAgent handle config = do
-    -- Validate that all configured agents are registered
-    registered <- getRegisteredAgents handle
-    let registeredIds = Set.fromList $ map fst registered
-    let configuredIds = Set.fromList $ map arcAgentId (maAgents config)
-
-    if configuredIds `Set.isSubsetOf` registeredIds
-        then do
-            -- Valid configuration
-            error "configureMultiAgent: Full implementation pending"
-        else do
-            error "configureMultiAgent: Some configured agents are not registered"
-
--------------------------------------------------------------------------------
--- Agent Bus Operations
--------------------------------------------------------------------------------
-
--- | Create a new agent bus.
-createAgentBus :: IO AgentBus
-createAgentBus = do
-    channels <- newTVarIO Map.empty
-    pure $ AgentBus channels
-
--- | Send a message from one agent to another.
-sendInterAgentMessage ::
-    AgentBus ->
-    -- | From agent
-    AgentId ->
-    -- | To agent
-    AgentId ->
-    -- | Message type
-    MessageType ->
-    -- | Content
-    Value ->
-    IO ()
-sendInterAgentMessage bus fromAgent toAgent msgType content = do
-    let message =
-            InterAgentMessage
-                { iamFrom = fromAgent
-                , iamTo = toAgent
-                , iamType = msgType
-                , iamContent = content
-                }
-
-    -- Get or create channel for target agent
-    channels <- readTVarIO (busChannels bus)
-    case Map.lookup toAgent channels of
-        Just queue -> atomically $ writeTQueue queue message
-        Nothing -> pure () -- Target agent not listening, message dropped
-
--- | Broadcast a message to all subscribed agents.
-broadcastMessage ::
-    AgentBus ->
-    -- | From agent
-    AgentId ->
-    -- | Content
-    Value ->
-    -- | List of target agents
-    [AgentId] ->
-    IO ()
-broadcastMessage bus fromAgent content targets = do
-    mapM_ (\toAgent -> sendInterAgentMessage bus fromAgent toAgent MessageType_Broadcast content) targets
 
 -------------------------------------------------------------------------------
 -- Conversation Management

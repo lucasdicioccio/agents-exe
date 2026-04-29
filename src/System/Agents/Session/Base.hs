@@ -22,6 +22,9 @@ module System.Agents.Session.Base (
     SystemTool (..),
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
+    SessionProgress (..),
+    OnSessionProgress,
+    ignoreSessionProgress,
 
     -- * Defined in this module
     MissingUserPrompt (..),
@@ -30,14 +33,14 @@ module System.Agents.Session.Base (
     ContextConfig (..),
     defaultContextConfig,
     Agent (..),
-    SessionProgress (..),
-    OnSessionProgress,
-    ignoreSessionProgress,
 ) where
 
-import Data.Text (Text)
+import Control.Concurrent.STM (TQueue)
 
-import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
+import System.Agents.Base (ConversationId)
+import System.Agents.OS.Core.World (World)
+import System.Agents.OS.Events (OSEvent)
+import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
 
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Media.Types (MediaAttachment)
@@ -72,7 +75,7 @@ data Action r
     | AskUserPrompt MissingUserPrompt
     | AskLlmCompletion LlmCompletion
     | -- comfort/note fully-motivated below, is to evolve the agent so that th runner logic has a primitive to do so
-      -- \* one advantage is it allows "pure" agents (i.e., dropping the need for an IO in usrQuery et al.)
+      -- \* one advantage is it allows "pure" agents (i.e., dropping the need for a IO in usrQuery et al.)
       -- \* could consider forking but that would require a joining function (r -> r -> r) to combine results, which prevents the functorial aspects
       -- \* could consider extensiblility so that agents come with their set of decisions, but the runloop then has to account for these
       Evolve (Agent r)
@@ -118,33 +121,25 @@ data Agent r = Agent
     , --
       contextConfig :: ContextConfig
     -- ^ Configuration for what to include in tool execution context
+    , --
+      ctxWorld :: Maybe World
+    {- ^ Optional OS World for ECS operations. When present, tools can
+    insert entities and components into the OS. This enables subcall
+    conversations to be visible in the TUI.
+    -}
+    , ctxEventQueue :: Maybe (TQueue OSEvent)
+    {- ^ Optional event queue for OS event emission. When present, tools
+    can emit events to notify the TUI of subcall lifecycle (start,
+    progress, completion, failure).
+    -}
+    , ctxCallStack :: [CallStackEntry]
+    {- ^ Call stack for tracking nested agent invocations. Root entry
+    is at depth 0, and each nested call adds a new entry.
+    -}
+    , ctxParentConversation :: Maybe ConversationId
+    {- ^ Optional parent conversation ID for subcalls. When present,
+    indicates this agent is being used for a nested agent invocation,
+    enabling proper lineage tracking in the OS.
+    -}
     }
     deriving (Functor)
-
--------------------------------------------------------------------------------
--- Session Progress Tracking
--------------------------------------------------------------------------------
-
-{- | Represents the progress of a session through its lifecycle.
-This type is used with 'OnSessionProgress' callbacks to track
-session state changes in a decoupled manner.
--}
-data SessionProgress
-    = -- | Emitted when a new session is started
-      SessionStarted Session
-    | -- | Emitted after each step when the session is updated
-      SessionUpdated Session
-    | -- | Emitted when the session completes successfully
-      SessionCompleted Session
-    | -- | Emitted when the session fails with an error message
-      SessionFailed Session Text
-    deriving (Show, Eq)
-
-{- | Callback type for receiving session progress updates.
-This decouples the session storage mechanism from the agent loop logic.
--}
-type OnSessionProgress = SessionProgress -> IO ()
-
--- | A no-op session progress handler for when tracking is not needed.
-ignoreSessionProgress :: OnSessionProgress
-ignoreSessionProgress = const (pure ())

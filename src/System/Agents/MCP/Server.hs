@@ -46,6 +46,7 @@ import System.Agents.MCP.Server.Runtime
 -- OneShot integration imports
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.OneShot (parseModelFlavor)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -72,6 +73,7 @@ import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import qualified System.Agents.ToolSchema as ToolSchema
+import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.Trace as Tools
 
@@ -320,6 +322,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
 
     let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (AgentTree.osNodeTools node)
     -- Create the agent with the naive step function that stops when no tool calls remain
+    -- Initialize the call stack with a root entry for arbitrarily deep nesting support
     let agent =
             Agent
                 { step = naiveTilNoToolCallStep
@@ -330,6 +333,10 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig
+                , ctxWorld = Nothing
+                , ctxEventQueue = Nothing
+                , ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxParentConversation = Nothing
                 }
 
     -- Create initial session with media support (version 1)
@@ -354,10 +361,6 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
     -- Extract response text from LLM response, handling Nothing case
     extractResponseText :: LlmResponse -> Text
     extractResponseText (LlmResponse mtxt _thinking _ _) = Maybe.fromMaybe "" mtxt
-
-    -- Parse model flavor from text, defaulting to OpenAIv1
-    parseModelFlavor :: Text -> OpenAI.ModelFlavor
-    parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
 
     -- Look up an API key by its ID from the loaded API keys
     lookupApiKey :: Text -> AgentTree.LoadedApiKeys -> Maybe OpenAI.ApiKey

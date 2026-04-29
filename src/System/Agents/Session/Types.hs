@@ -50,6 +50,11 @@ module System.Agents.Session.Types (
     defaultEnvironmentSignals,
     defaultTrajectorySignals,
 
+    -- * Session progress tracking
+    SessionProgress (..),
+    OnSessionProgress,
+    ignoreSessionProgress,
+
     -- * Re-exports for convenience
     TokenUsage (..),
 ) where
@@ -655,3 +660,31 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
+
+-------------------------------------------------------------------------------
+-- Session Progress Tracking
+-------------------------------------------------------------------------------
+
+{- | Represents the progress of a session through its lifecycle.
+This type is used with 'OnSessionProgress' callbacks to track
+session state changes in a decoupled manner.
+-}
+data SessionProgress
+    = -- | Emitted when a new session is started
+      SessionStarted Session
+    | -- | Emitted after each step when the session is updated
+      SessionUpdated Session
+    | -- | Emitted when the session completes successfully
+      SessionCompleted Session
+    | -- | Emitted when the session fails with an error message
+      SessionFailed Session Text
+    deriving (Show, Eq)
+
+{- | Callback type for receiving session progress updates.
+This decouples the session storage mechanism from the agent loop logic.
+-}
+type OnSessionProgress = SessionProgress -> IO ()
+
+-- | A no-op session progress handler for when tracking is not needed.
+ignoreSessionProgress :: OnSessionProgress
+ignoreSessionProgress = const (pure ())

@@ -72,6 +72,7 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
+import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 -- Re-export agentEvaluateActiveTools from the new module
@@ -325,6 +326,10 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                     let completionWithMedia = completion{completeMedia = mediaAttachs}
                     completeF completionWithMedia
                 , contextConfig = defaultContextConfig
+                , ctxWorld = Nothing
+                , ctxEventQueue = Nothing
+                , ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxParentConversation = Nothing
                 }
 
 -- | Convert a ToolRegistration to a SystemTool for the Session agent.

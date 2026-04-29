@@ -19,24 +19,23 @@ import Brick.Widgets.FileBrowser (
     fileBrowserSelectionInfoAttr,
     renderFileBrowser,
  )
-import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList)
+import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
+import Data.Set ()
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 
 import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..), ConversationId)
+import System.Agents.Base (Agent (..), ConversationId (..))
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base hiding (Agent)
-import System.Agents.Session.Signals (
-    calculateTrajectorySignals,
- )
+import System.Agents.Session.Signals (calculateTrajectorySignals)
 import System.Agents.Session.Types (
     ExecutionSignals (..),
     InteractionSignals (..),
@@ -149,6 +148,26 @@ attachmentSizeAttr = attrName "attachmentSize"
 dialogAttr :: AttrName
 dialogAttr = attrName "dialog"
 
+-- | Attribute for subcall conversations (dimmed).
+subcallAttr :: AttrName
+subcallAttr = attrName "subcall"
+
+-- | Attribute for selected subcall conversations.
+subcallSelectedAttr :: AttrName
+subcallSelectedAttr = attrName "subcallSelected"
+
+-- | Attribute for nested tree branch lines.
+treeBranchAttr :: AttrName
+treeBranchAttr = attrName "treeBranch"
+
+-- | Attribute for root conversation.
+rootConversationAttr :: AttrName
+rootConversationAttr = attrName "rootConversation"
+
+-- | Default attribute (no styling).
+defaultAttr :: AttrName
+defaultAttr = attrName "default"
+
 -------------------------------------------------------------------------------
 -- Main Draw Function
 -------------------------------------------------------------------------------
@@ -161,23 +180,9 @@ tui_appDraw st =
         AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
 
-{- | Render the main UI based on current state.
-When zoomed, the content displayed is based on the current tab rather than
-the currently focused widget.
--}
+-- | Render the main UI based on current state.
 render_ui :: TuiState -> Widget N
-render_ui st
-    | st ^. tuiUI . zoomed =
-        case st ^. tuiUI . currentTab of
-            AgentsTab -> render_agentInfo st
-            ChatsTab -> render_conversationView st
-            HistoryTab -> render_sessionView st
-            HelpTab -> renderHelpTab st
-    | otherwise = render_mainLayout st
-
--------------------------------------------------------------------------------
--- Layout Components
--------------------------------------------------------------------------------
+render_ui st = render_mainLayout st
 
 -- | Main layout with tab bar, sidebar, and content area.
 render_mainLayout :: TuiState -> Widget N
@@ -210,7 +215,7 @@ renderTabBar activeTab =
 -- | Sidebar with agent and conversation lists.
 render_sidebar :: TuiState -> Widget N
 render_sidebar st =
-    hLimit 30 $
+    hLimit 35 $
         vBox
             [ render_agentList st
             , render_conversationList st
@@ -293,6 +298,32 @@ render_shortcutsHelp =
             [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file"
             ]
 
+{- | Make prefix for a conversation at a specific depth with tree branches.
+The Bool list indicates for each ancestor level (from root to immediate parent)
+whether that ancestor is a last child (True) or not (False).
+-}
+makePrefix :: [Bool] -> Bool -> Text
+makePrefix ancestorIsLasts isLast
+    | null ancestorIsLasts = if isLast then "└─" else "├─"
+    | otherwise =
+        let
+            -- Build the continuation part from ancestors
+            -- For each ancestor: if it was the last child, use spaces ("  "),
+            -- otherwise use a vertical bar ("│ ") to show continuation
+            continuation = mconcat $ map (\isLastAncestor -> if isLastAncestor then "  " else "│ ") ancestorIsLasts
+         in
+            continuation <> (if isLast then "└─" else "├─")
+
+-- | Sort conversations to ensure proper nesting order.
+sortConversationsForNesting :: [Conversation] -> [Conversation]
+sortConversationsForNesting convs =
+    let forest = buildConversationForest convs
+        -- Flatten maintaining tree order (pre-order traversal)
+        go [] = []
+        go (ConversationTree conv children : rest) =
+            conv : go children ++ go rest
+     in go forest
+
 -- | Conversation area with message input and conversation history.
 render_sessionArea :: TuiState -> Widget N
 render_sessionArea st =
@@ -344,50 +375,78 @@ render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
     txt $ " " <> agentSlug0
   where
-    -- Access the agent slug from the OS-native tree
     agentSlug0 = slug (osNodeConfig (tuiNode agent))
 
--------------------------------------------------------------------------------
--- Conversation List Rendering
--------------------------------------------------------------------------------
-
--- | Render the conversation list.
+-- | Render the conversation list with nesting.
 render_conversationList :: TuiState -> Widget N
 render_conversationList st =
-    borderWithFocus
-        st
-        ConversationListWidget
-        "Conversations"
-        (renderList (render_conversationItem st) hasFocus (st ^. tuiUI . conversationList))
-  where
-    hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
+        -- Create a custom rendering of the nested list
+        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
+            Just (_, conv) -> Just (conversationId conv)
+            Nothing -> Nothing
+        forest = buildConversationForest convs
+     in borderWithFocus
+            st
+            ConversationListWidget
+            "Conversations"
+            ( viewport ConversationListWidget Both $
+                vBox $
+                    renderConversationForest st selectedId hasFocus forest
+            )
 
--- | Render a single conversation item.
-render_conversationItem :: TuiState -> Bool -> Conversation -> Widget N
-render_conversationItem st _ conv =
+renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
+renderConversationForest st selectedId hasFocus trees =
+    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0 ..] trees)
+
+{- | Render a tree node recursively.
+The Bool list tracks for each ancestor whether it is a last child.
+-}
+renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> [Bool] -> Bool -> ConversationTree -> [Widget N]
+renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (ConversationTree conv children) =
+    let isSelected = selectedId == Just (conversationId conv)
+        nodeWidget = renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv
+        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0 ..] children)
+     in nodeWidget : childWidgets
+
+-- | Render a nested conversation item with tree branches.
+renderNestedConversationItem :: TuiState -> Bool -> Bool -> [Bool] -> Bool -> Conversation -> Widget N
+renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv =
     let indicator = case conversationStatus conv of
             ConversationStatus_Active -> "⟳ "
             ConversationStatus_WaitingForInput ->
-                if isUnread then "● " else "  "
+                if isUnread then "● " else "○ "
             ConversationStatus_Paused -> "⏸ "
-        baseText = indicator <> Text.take 18 (conversationName conv)
-        -- Add turn count next to conversation name
+        -- Tree branch prefix based on ancestor status
+        branchPrefix = makePrefix ancestorIsLasts isLast
+        -- Selection marker
+        selectionMarker = if isSelected && hasFocus then "▶ " else "  "
+        baseText = branchPrefix <> indicator <> Text.take 20 (conversationName conv)
+        -- Add turn count
         turnCount = case conversationSession conv of
             Nothing -> 0
             Just session -> length session.turns
         turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        -- Add attachment count if any
+        -- Add attachment count
         attachmentCount = getAttachmentCount st conv
         attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
-        -- Add queued message count if any
+        -- Add queued message count
         queueCount = getQueuedMessageCount st conv
         queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
         fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
-        widget = case conversationStatus conv of
-            ConversationStatus_Paused ->
-                withAttr pausedAttr $ txt $ " " <> fullText
-            _ -> txt $ " " <> fullText
-     in widget
+        -- Determine the appropriate attribute
+        attr =
+            if isSelected && hasFocus
+                then subcallSelectedAttr
+                else
+                    if isSelected
+                        then listSelectedAttr
+                        else
+                            if null ancestorIsLasts
+                                then rootConversationAttr
+                                else subcallAttr
+     in withAttr attr $ txt $ selectionMarker <> fullText
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
 
@@ -407,7 +466,55 @@ getAttachmentCount st conv =
             Nothing -> 0
             Just atts -> length atts
 
--- | Render the sessions list.
+-- | Tree structure for nested conversations.
+data ConversationTree = ConversationTree
+    { treeConversation :: Conversation
+    , treeChildren :: [ConversationTree]
+    }
+
+{- | Build a forest of conversation trees from a flat list.
+
+This function handles "orphaned" conversations - children whose parents
+are not in the list. This can happen due to async event ordering where
+a child subcall event arrives before its parent is fully registered.
+Such orphaned conversations are treated as temporary roots to ensure
+they remain visible in the TUI.
+-}
+buildConversationForest :: [Conversation] -> [ConversationTree]
+buildConversationForest convs =
+    let
+        -- Build a set of all conversation IDs for quick lookup
+        convIds = Set.fromList $ map conversationId convs
+
+        -- Find root conversations:
+        -- 1. Conversations with no parent (parentId == Nothing), OR
+        -- 2. "Orphaned" conversations whose parent is not in the list
+        --    (this handles race conditions in async subcall creation)
+        isRoot c =
+            case conversationParentId c of
+                Nothing -> True
+                Just parentId -> not (Set.member parentId convIds)
+
+        roots = filter isRoot convs
+
+        -- Build tree recursively
+        buildTree conv =
+            ConversationTree
+                { treeConversation = conv
+                , treeChildren = map buildTree (findChildren conv)
+                }
+
+        -- Find all children of a given parent conversation
+        findChildren parent =
+            filter (\c -> conversationParentId c == Just (conversationId parent)) convs
+     in
+        map buildTree roots
+
+-------------------------------------------------------------------------------
+-- Session List Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the session list.
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
     borderWithFocus
@@ -418,17 +525,10 @@ render_sessionList st =
   where
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
--- | Render a single conversation item.
+-- | Render a single session item.
 render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem _st _ sess =
-    let
-        widget = txt $ Text.pack $ " " <> show sess.sessionId
-     in
-        widget
-
--------------------------------------------------------------------------------
--- Agent Info Rendering
--------------------------------------------------------------------------------
+render_sessionItem _st _isSelected sess =
+    txt $ Text.pack $ " " <> show sess.sessionId
 
 -- | Render agent information panel.
 render_agentInfo :: TuiState -> Widget N
@@ -442,7 +542,7 @@ render_agentInfo st =
             Just agent ->
                 let node = tuiNode agent
                     agentCfg = osNodeConfig node
-                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . coreAgentTools)
+                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . uiAgentTools)
                  in viewport AgentInfoWidget Both $
                         vBox $
                             mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
@@ -575,7 +675,6 @@ render_attachment_item selectedIdx idx att =
 -- | Format attachment size based on base64 data length.
 formatAttachmentSize :: Text -> Text
 formatAttachmentSize base64Data =
-    -- Base64 encoding is ~4/3 of original size, so we estimate original
     let base64Len = Text.length base64Data
         originalBytes = (base64Len * 3) `div` 4
      in formatBytes originalBytes
@@ -610,15 +709,13 @@ renderFilePathDialog st =
 renderFileBrowserDialog :: TuiState -> Widget N
 renderFileBrowserDialog st =
     case st ^. tuiUI . fileBrowser of
-        Nothing -> renderFilePathDialog st -- Fallback to text input if browser not initialized
+        Nothing -> renderFilePathDialog st
         Just fb ->
             center $
                 withAttr dialogAttr $
                     borderWithLabel (txt " Attach File (Ctrl+F) ") $
                         vBox
-                            [ hLimit 80 $
-                                vLimit 20 $
-                                    renderFileBrowser True fb -- True = has focus
+                            [ hLimit 80 $ vLimit 20 $ renderFileBrowser True fb
                             , txt ""
                             , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
                             ]
@@ -627,12 +724,9 @@ renderFileBrowserDialog st =
 -- Queued Messages Management Rendering
 -------------------------------------------------------------------------------
 
-{- | Render the queued messages management panel.
-This is only shown when the conversation is paused and has queued messages.
--}
+-- | Render the queued messages management panel.
 render_queued_messages_manager :: TuiState -> Conversation -> Widget N
 render_queued_messages_manager st conv =
-    -- Only show queue management when conversation is paused
     if conversationStatus conv /= ConversationStatus_Paused
         then emptyWidget
         else
@@ -689,7 +783,6 @@ render_conversationView st =
                         st
                         ConversationViewWidget
                         (conversationSession conv)
-                        (st ^. tuiUI . ongoingConversations)
                         mNavState
 
 -- | Get the list of queued messages for a conversation.
@@ -698,7 +791,7 @@ getQueuedMessages st conv =
     let buffered = st ^. tuiUI . uiBufferedMessages
      in case Map.lookup (conversationId conv) buffered of
             Nothing -> []
-            Just msgs -> reverse msgs -- Reverse to show oldest first
+            Just msgs -> reverse msgs
 
 -- | Render the session history view.
 render_sessionView :: TuiState -> Widget N
@@ -707,27 +800,24 @@ render_sessionView st =
   where
     content =
         case listSelectedElement (st ^. tuiUI . sessionList) of
-            Nothing -> do
-                txt "No session selected"
+            Nothing -> txt "No session selected"
             Just (_, session) ->
                 let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget (Just session) (st ^. tuiUI . ongoingConversations) mNavState
+                 in render_session st SessionViewWidget (Just session) mNavState
 
 -- | Render a session's turns.
-render_session :: TuiState -> WidgetName -> Maybe Session -> Set ConversationId -> Maybe TurnNavigationState -> Widget N
-render_session _ _ Nothing _ _ =
-    vBox $ [txt "session not started yet"]
-render_session st w (Just session) _ongoingConvs mNavState =
+render_session :: TuiState -> WidgetName -> Maybe Session -> Maybe TurnNavigationState -> Widget N
+render_session _ _ Nothing _ =
+    vBox [txt "session not started yet"]
+render_session st w (Just session) mNavState =
     case mNavState of
         Nothing ->
-            -- Normal mode: render as before
             borderWithFocus st w "Session" $
                 viewport w Both $
                     vBox $
                         [render_session_usage session]
                             ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
-            -- Navigation mode: render with selection highlight
             render_turn_navigation session navState
 
 -- | Render session in turn navigation mode.
@@ -736,7 +826,7 @@ render_turn_navigation session navState =
     let selectedIdx = navState ^. navSelectedTurnIndex
         totalTurns = navState ^. navTotalTurns
         headerText = "Turn Navigation (" <> Text.pack (show (selectedIdx + 1)) <> "/" <> Text.pack (show totalTurns) <> ") [Enter:exit F:fork]"
-        turnsWithIndices = zip [0 ..] session.turns -- Maintain chronological order
+        turnsWithIndices = zip [0 ..] session.turns
         shownTurns = drop selectedIdx turnsWithIndices
      in borderWithLabel (txt headerText) $
             viewport TurnNavigationWidget Both $
@@ -753,28 +843,14 @@ render_navigable_turn selectedIdx (idx, turn) =
         selectionMarker = if isSelected then "▶ " else "  "
         turnWidget = render_turn (idx, turn)
      in if isSelected
-            then
-                withAttr selectedTurnAttr $
-                    hBox [txt selectionMarker, turnWidget]
+            then withAttr selectedTurnAttr $ hBox [txt selectionMarker, turnWidget]
             else hBox [txt selectionMarker, turnWidget]
-
--- | Render queued messages for a conversation (legacy inline display).
-render_queued_messages :: [Text] -> Widget N
-render_queued_messages [] = emptyWidget
-render_queued_messages msgs =
-    withAttr queuedMessageAttr $
-        vBox $
-            [txt "Queued messages:"]
-                ++ map (\m -> txt $ "  ▶ " <> Text.take 60 m) msgs
-                ++ [txt ""]
 
 -- | Render total session usage (tokens if available, else bytes), turn count, and signal metrics.
 render_session_usage :: Session -> Widget N
 render_session_usage session =
     let turnCount = length session.turns
-        -- Try to get aggregated token usage from all turns
         mTokenStats = aggregateSessionTokenUsage session
-        -- Calculate trajectory signals
         mSignals = Just (calculateTrajectorySignals session)
      in if turnCount == 0
             then emptyWidget
@@ -803,7 +879,6 @@ renderSignalSummary (Just signals) =
     let score = trajInformativenessScore signals
         is = trajInteraction signals
         es = trajExecution signals
-        -- Compact display: score + key indicators
         indicators =
             concat
                 [ if sigDisengagementDetected is then ["⚠️ disengage"] else []
@@ -927,7 +1002,7 @@ render_turn (k, turn) =
                     , if k == 0
                         then txt $ "+ " <> getSystemPromptText (userPrompt userTurn)
                         else txt $ "+ ..."
-                    , emptyWidget -- TODO n-tools, n-responses here
+                    , emptyWidget
                     , render_usage mUsage
                     , txt ""
                     ]
@@ -983,9 +1058,7 @@ formatTokenUsage usage =
                 ]
      in Text.intercalate ", " parts <> " | total: " <> formatTokenCount (tokenTotalTokens usage)
 
-{- | Format byte usage breakdown for display.
-TODO: display tools and tool-responses explicitly
--}
+-- | Format byte usage breakdown for display.
 formatByteBreakdown :: StepByteUsage -> Text
 formatByteBreakdown usage =
     let parts =
@@ -1051,6 +1124,11 @@ tui_appAttrMap _ =
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
+        , -- Tree and conversation hierarchy attributes
+          (treeBranchAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (rootConversationAttr, Vty.defAttr)
+        , (subcallAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (subcallSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
         , -- FileBrowser attributes
           (fileBrowserAttr, Vty.defAttr)
         , (fileBrowserCurrentDirectoryAttr, BrickUtil.fg Vty.cyan)
