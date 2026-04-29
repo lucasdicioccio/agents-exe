@@ -81,7 +81,8 @@ module System.Agents.TUI.Core (
     lookupBinding,
 
     -- * Session loading
--- * Session loading
+
+    -- * Session loading
     loadSessionFiles,
 
     -- * Main entry point
@@ -95,6 +96,7 @@ module System.Agents.TUI.Core (
     refreshAgentTools,
     getAgentTools,
 ) where
+
 import Control.Monad (forever, void)
 import Data.Proxy (Proxy (..))
 import Prod.Tracer (Tracer)
@@ -190,8 +192,7 @@ fileSessionConfig store apiKeys =
         , sessionKeyMapping = defaultKeyMapping
         }
 
-{- | Create a session configuration with a custom key mapping.
--}
+-- | Create a session configuration with a custom key mapping.
 fileSessionConfigWithKeymap :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
 fileSessionConfigWithKeymap store apiKeys keymap =
     SessionConfig
@@ -357,4 +358,3 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
-

@@ -31,8 +31,8 @@ import System.Agents.OS.Events (OSEvent)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
-import System.Agents.ToolRegistration (ToolRegistration)
 import System.Agents.TUI.KeyMapping (KeyMapping)
+import System.Agents.ToolRegistration (ToolRegistration)
 
 -------------------------------------------------------------------------------
 -- Widget Names
@@ -476,4 +476,3 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
-

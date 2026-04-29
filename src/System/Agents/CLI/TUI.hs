@@ -80,4 +80,3 @@ handleTUIWithKeymap tracer sessionStore apiKeysFile agentFiles keymap = do
     agentPropsList <- traverse oneAgent agentFiles
     let config = TUI.fileSessionConfigWithKeymap sessionStore apiKeys keymap
     TUI.runTUIWithConfig (Prod.contramap TUITrace tracer) config agentPropsList
-

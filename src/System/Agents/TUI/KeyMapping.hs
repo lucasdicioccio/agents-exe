@@ -2,8 +2,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | Key mapping configuration for TUI event bindings.
--}
+-- | Key mapping configuration for TUI event bindings.
 module System.Agents.TUI.KeyMapping (
     KeyMapping (..),
     KeyBinding (..),
@@ -18,10 +17,10 @@ module System.Agents.TUI.KeyMapping (
 
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Types (Parser)
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import qualified Data.Text as Text
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as Text
 import GHC.Generics (Generic)
 import qualified Graphics.Vty as Vty
 
@@ -241,11 +240,12 @@ instance Aeson.FromJSON Modifiers where
 
 instance Aeson.ToJSON Modifiers where
     toJSON (Modifiers ctrl meta shift) =
-        Aeson.object $ concat
-            [ ["ctrl" Aeson..= True | ctrl]
-            , ["meta" Aeson..= True | meta]
-            , ["shift" Aeson..= True | shift]
-            ]
+        Aeson.object $
+            concat
+                [ ["ctrl" Aeson..= True | ctrl]
+                , ["meta" Aeson..= True | meta]
+                , ["shift" Aeson..= True | shift]
+                ]
 
 defaultModifiers :: Modifiers
 defaultModifiers = Modifiers False False False
@@ -268,8 +268,9 @@ instance Aeson.FromJSON KeyBinding where
 
 instance Aeson.ToJSON KeyBinding where
     toJSON (KeyBinding key mods) =
-        Aeson.object $ ["key" Aeson..= key] ++
-            ["modifiers" Aeson..= mods | mods /= defaultModifiers]
+        Aeson.object $
+            ["key" Aeson..= key]
+                ++ ["modifiers" Aeson..= mods | mods /= defaultModifiers]
 
 -------------------------------------------------------------------------------
 -- Key Mapping
@@ -294,43 +295,45 @@ instance Aeson.ToJSON KeyMapping where
 -------------------------------------------------------------------------------
 
 defaultKeyMapping :: KeyMapping
-defaultKeyMapping = KeyMapping $ Map.fromList
-    [ (EventCycleTabForward, KeyBinding (KeyChar ']') (Modifiers True False False))
-    , (EventCycleTabBackward, KeyBinding KeyEsc (Modifiers True False False))
-    , (EventCycleFocusForward, KeyBinding KeyTab defaultModifiers)
-    , (EventCycleFocusBackward, KeyBinding KeyBackTab defaultModifiers)
-    , (EventToggleZoom, KeyBinding (KeyChar 'z') (Modifiers True False False))
-    , (EventEnterTurnNavigation, KeyBinding KeyEnter defaultModifiers)
-    , (EventExitTurnNavigation, KeyBinding KeyEnter defaultModifiers)
-    , (EventNavigateUp, KeyBinding KeyUp defaultModifiers)
-    , (EventNavigateDown, KeyBinding KeyDown defaultModifiers)
-    , (EventForkAtTurn, KeyBinding (KeyChar 'f') defaultModifiers)
-    , (EventNewConversation, KeyBinding (KeyChar 'n') (Modifiers True False False))
-    , (EventContinueSession, KeyBinding (KeyChar 'c') (Modifiers True False False))
-    , (EventSendMessage, KeyBinding KeyEnter (Modifiers False True False))
-    , (EventTogglePause, KeyBinding (KeyChar 'e') (Modifiers True False False))
-    , (EventAttachFile, KeyBinding (KeyChar 'f') (Modifiers True False False))
-    , (EventClearAttachments, KeyBinding (KeyChar 'F') (Modifiers True False True))
-    , (EventPasteClipboard, KeyBinding (KeyChar 'v') (Modifiers True False False))
-    , (EventRemoveAttachment, KeyBinding KeyDelete defaultModifiers)
-    , (EventSelectAttachmentUp, KeyBinding KeyUp defaultModifiers)
-    , (EventSelectAttachmentDown, KeyBinding KeyDown defaultModifiers)
-    , (EventClearQueuedMessages, KeyBinding (KeyChar 'd') (Modifiers True False False))
-    , (EventDeleteQueuedMessage, KeyBinding KeyDelete defaultModifiers)
-    , (EventSelectQueuedUp, KeyBinding KeyUp defaultModifiers)
-    , (EventSelectQueuedDown, KeyBinding KeyDown defaultModifiers)
-    , (EventExportSession, KeyBinding (KeyChar 'p') (Modifiers True False False))
-    , (EventViewSessionChronological, KeyBinding (KeyChar 't') (Modifiers True False False))
-    , (EventViewSessionReverse, KeyBinding (KeyChar 'r') (Modifiers True False False))
-    , (EventRefreshTools, KeyBinding (KeyFun 5) defaultModifiers)
-    , (EventQuit, KeyBinding (KeyChar 'q') (Modifiers True False False))
-    , (EventScrollUp, KeyBinding KeyUp defaultModifiers)
-    , (EventScrollDown, KeyBinding KeyDown defaultModifiers)
-    , (EventScrollLeft, KeyBinding KeyLeft defaultModifiers)
-    , (EventScrollRight, KeyBinding KeyRight defaultModifiers)
-    , (EventPageUp, KeyBinding KeyPageUp defaultModifiers)
-    , (EventPageDown, KeyBinding KeyPageDown defaultModifiers)
-    ]
+defaultKeyMapping =
+    KeyMapping $
+        Map.fromList
+            [ (EventCycleTabForward, KeyBinding (KeyChar ']') (Modifiers True False False))
+            , (EventCycleTabBackward, KeyBinding KeyEsc (Modifiers True False False))
+            , (EventCycleFocusForward, KeyBinding KeyTab defaultModifiers)
+            , (EventCycleFocusBackward, KeyBinding KeyBackTab defaultModifiers)
+            , (EventToggleZoom, KeyBinding (KeyChar 'z') (Modifiers True False False))
+            , (EventEnterTurnNavigation, KeyBinding KeyEnter defaultModifiers)
+            , (EventExitTurnNavigation, KeyBinding KeyEnter defaultModifiers)
+            , (EventNavigateUp, KeyBinding KeyUp defaultModifiers)
+            , (EventNavigateDown, KeyBinding KeyDown defaultModifiers)
+            , (EventForkAtTurn, KeyBinding (KeyChar 'f') defaultModifiers)
+            , (EventNewConversation, KeyBinding (KeyChar 'n') (Modifiers True False False))
+            , (EventContinueSession, KeyBinding (KeyChar 'c') (Modifiers True False False))
+            , (EventSendMessage, KeyBinding KeyEnter (Modifiers False True False))
+            , (EventTogglePause, KeyBinding (KeyChar 'e') (Modifiers True False False))
+            , (EventAttachFile, KeyBinding (KeyChar 'f') (Modifiers True False False))
+            , (EventClearAttachments, KeyBinding (KeyChar 'F') (Modifiers True False True))
+            , (EventPasteClipboard, KeyBinding (KeyChar 'v') (Modifiers True False False))
+            , (EventRemoveAttachment, KeyBinding KeyDelete defaultModifiers)
+            , (EventSelectAttachmentUp, KeyBinding KeyUp defaultModifiers)
+            , (EventSelectAttachmentDown, KeyBinding KeyDown defaultModifiers)
+            , (EventClearQueuedMessages, KeyBinding (KeyChar 'd') (Modifiers True False False))
+            , (EventDeleteQueuedMessage, KeyBinding KeyDelete defaultModifiers)
+            , (EventSelectQueuedUp, KeyBinding KeyUp defaultModifiers)
+            , (EventSelectQueuedDown, KeyBinding KeyDown defaultModifiers)
+            , (EventExportSession, KeyBinding (KeyChar 'p') (Modifiers True False False))
+            , (EventViewSessionChronological, KeyBinding (KeyChar 't') (Modifiers True False False))
+            , (EventViewSessionReverse, KeyBinding (KeyChar 'r') (Modifiers True False False))
+            , (EventRefreshTools, KeyBinding (KeyFun 5) defaultModifiers)
+            , (EventQuit, KeyBinding (KeyChar 'q') (Modifiers True False False))
+            , (EventScrollUp, KeyBinding KeyUp defaultModifiers)
+            , (EventScrollDown, KeyBinding KeyDown defaultModifiers)
+            , (EventScrollLeft, KeyBinding KeyLeft defaultModifiers)
+            , (EventScrollRight, KeyBinding KeyRight defaultModifiers)
+            , (EventPageUp, KeyBinding KeyPageUp defaultModifiers)
+            , (EventPageDown, KeyBinding KeyPageDown defaultModifiers)
+            ]
 
 -------------------------------------------------------------------------------
 -- Key Resolution
@@ -358,11 +361,12 @@ keyNameToVty KeyEnd = Vty.KEnd
 keyNameToVty (KeyFun n) = Vty.KFun n
 
 modifiersToVty :: Modifiers -> [Vty.Modifier]
-modifiersToVty (Modifiers ctrl meta shift) = concat
-    [ [Vty.MCtrl | ctrl]
-    , [Vty.MMeta | meta]
-    , [Vty.MShift | shift]
-    ]
+modifiersToVty (Modifiers ctrl meta shift) =
+    concat
+        [ [Vty.MCtrl | ctrl]
+        , [Vty.MMeta | meta]
+        , [Vty.MShift | shift]
+        ]
 
 keyBindingToVtyEvent :: KeyBinding -> Vty.Event
 keyBindingToVtyEvent (KeyBinding key mods) =
@@ -373,4 +377,3 @@ resolveKeyEvent vtyEvent (KeyMapping bindings) =
     Map.lookup vtyEvent reverseMap
   where
     reverseMap = Map.fromList $ map (\(ev, kb) -> (keyBindingToVtyEvent kb, ev)) $ Map.toList bindings
-
