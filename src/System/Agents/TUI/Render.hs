@@ -298,6 +298,29 @@ render_shortcutsHelp =
             [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file"
             ]
 
+-- | Make prefix for a conversation at a specific depth with tree branches.
+-- The Bool list indicates for each ancestor level (from root to immediate parent)
+-- whether that ancestor is a last child (True) or not (False).
+makePrefix :: [Bool] -> Bool -> Text
+makePrefix ancestorIsLasts isLast
+    | null ancestorIsLasts = if isLast then "└─" else "├─"
+    | otherwise =
+        let -- Build the continuation part from ancestors
+            -- For each ancestor: if it was the last child, use spaces ("  "),
+            -- otherwise use a vertical bar ("│ ") to show continuation
+            continuation = mconcat $ map (\isLastAncestor -> if isLastAncestor then "  " else "│ ") ancestorIsLasts
+         in continuation <> (if isLast then "└─" else "├─")
+
+-- | Sort conversations to ensure proper nesting order.
+sortConversationsForNesting :: [Conversation] -> [Conversation]
+sortConversationsForNesting convs =
+    let forest = buildConversationForest convs
+        -- Flatten maintaining tree order (pre-order traversal)
+        go [] = []
+        go (ConversationTree conv children : rest) =
+            conv : go children ++ go rest
+    in go forest
+
 -- | Conversation area with message input and conversation history.
 render_sessionArea :: TuiState -> Widget N
 render_sessionArea st =
@@ -351,9 +374,87 @@ render_agentItem _ agent =
   where
     agentSlug0 = slug (osNodeConfig (tuiNode agent))
 
--------------------------------------------------------------------------------
--- Conversation List Rendering with Nesting
--------------------------------------------------------------------------------
+-- | Render the conversation list with nesting.
+render_conversationList :: TuiState -> Widget N
+render_conversationList st =
+    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
+        -- Create a custom rendering of the nested list
+        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
+            Just (_, conv) -> Just (conversationId conv)
+            Nothing -> Nothing
+        forest = buildConversationForest convs
+    in borderWithFocus
+        st
+        ConversationListWidget
+        "Conversations"
+        (viewport ConversationListWidget Both $
+            vBox $ renderConversationForest st selectedId hasFocus forest)
+renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
+renderConversationForest st selectedId hasFocus trees =
+    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0..] trees)
+
+-- | Render a tree node recursively.
+-- The Bool list tracks for each ancestor whether it is a last child.
+renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> [Bool] -> Bool -> ConversationTree -> [Widget N]
+renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (ConversationTree conv children) =
+    let isSelected = selectedId == Just (conversationId conv)
+        nodeWidget = renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv
+        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0..] children)
+    in nodeWidget : childWidgets
+
+-- | Render a nested conversation item with tree branches.
+renderNestedConversationItem :: TuiState -> Bool -> Bool -> [Bool] -> Bool -> Conversation -> Widget N
+renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv =
+    let indicator = case conversationStatus conv of
+            ConversationStatus_Active -> "⟳ "
+            ConversationStatus_WaitingForInput ->
+                if isUnread then "● " else "○ "
+            ConversationStatus_Paused -> "⏸ "
+        -- Tree branch prefix based on ancestor status
+        branchPrefix = makePrefix ancestorIsLasts isLast
+        -- Selection marker
+        selectionMarker = if isSelected && hasFocus then "▶ " else "  "
+        baseText = branchPrefix <> indicator <> Text.take 20 (conversationName conv)
+        -- Add turn count
+        turnCount = case conversationSession conv of
+            Nothing -> 0
+            Just session -> length session.turns
+        turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
+        -- Add attachment count
+        attachmentCount = getAttachmentCount st conv
+        attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
+        -- Add queued message count
+        queueCount = getQueuedMessageCount st conv
+        queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
+        fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
+        -- Determine the appropriate attribute
+        attr = if isSelected && hasFocus
+            then subcallSelectedAttr
+            else if isSelected
+                then listSelectedAttr
+            else if null ancestorIsLasts
+                then rootConversationAttr
+            else subcallAttr
+     in withAttr attr $ txt $ selectionMarker <> fullText
+  where
+    isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
+
+-- | Get the number of queued messages for a conversation.
+getQueuedMessageCount :: TuiState -> Conversation -> Int
+getQueuedMessageCount st conv =
+    let buffered = st ^. tuiUI . uiBufferedMessages
+     in case Map.lookup (conversationId conv) buffered of
+            Nothing -> 0
+            Just msgs -> length msgs
+
+-- | Get the number of attachments for a conversation.
+getAttachmentCount :: TuiState -> Conversation -> Int
+getAttachmentCount st conv =
+    let attachments = st ^. tuiUI . attachedFiles
+     in case Map.lookup (conversationId conv) attachments of
+            Nothing -> 0
+            Just atts -> length atts
 
 -- | Tree structure for nested conversations.
 data ConversationTree = ConversationTree
@@ -396,113 +497,11 @@ buildConversationForest convs =
             
     in map buildTree roots
 
--- | Make prefix for a conversation at a specific depth with tree branches.
-makePrefixAtDepth :: Int -> Bool -> Text
-makePrefixAtDepth depth isLast
-    | depth == 0 = ""
-    | isLast = Text.replicate (depth - 1) "│ " <> "└─"
-    | otherwise = Text.replicate (depth - 1) "│ " <> "├─"
-
--- | Sort conversations to ensure proper nesting order.
-sortConversationsForNesting :: [Conversation] -> [Conversation]
-sortConversationsForNesting convs =
-    let forest = buildConversationForest convs
-        -- Flatten maintaining tree order (pre-order traversal)
-        go [] = []
-        go (ConversationTree conv children : rest) =
-            conv : go children ++ go rest
-    in go forest
-
--- | Render the conversation list with nesting.
-render_conversationList :: TuiState -> Widget N
-render_conversationList st =
-    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
-        -- Create a custom rendering of the nested list
-        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
-        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
-            Just (_, conv) -> Just (conversationId conv)
-            Nothing -> Nothing
-        forest = buildConversationForest convs
-    in borderWithFocus
-        st
-        ConversationListWidget
-        "Conversations"
-        (viewport ConversationListWidget Both $
-            vBox $ renderConversationForest st selectedId hasFocus forest)
-
--- | Render a forest of conversation trees.
-renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
-renderConversationForest st selectedId hasFocus trees =
-    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus 0 (idx == length trees - 1) tree) (zip [0..] trees)
-
--- | Render a tree node recursively.
-renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> Int -> Bool -> ConversationTree -> [Widget N]
-renderTreeNode st selectedId hasFocus depth isLast (ConversationTree conv children) =
-    let isSelected = selectedId == Just (conversationId conv)
-        nodeWidget = renderNestedConversationItem st hasFocus isSelected depth isLast conv
-        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (depth + 1) (idx == length children - 1) child) (zip [0..] children)
-    in nodeWidget : childWidgets
-
--- | Render a nested conversation item with tree branches.
-renderNestedConversationItem :: TuiState -> Bool -> Bool -> Int -> Bool -> Conversation -> Widget N
-renderNestedConversationItem st hasFocus isSelected depth isLast conv =
-    let indicator = case conversationStatus conv of
-            ConversationStatus_Active -> "⟳ "
-            ConversationStatus_WaitingForInput ->
-                if isUnread then "● " else "○ "
-            ConversationStatus_Paused -> "⏸ "
-        -- Tree branch prefix
-        branchPrefix = makePrefixAtDepth depth isLast
-        -- Selection marker
-        selectionMarker = if isSelected && hasFocus then "▶ " else "  "
-        baseText = branchPrefix <> indicator <> Text.take 20 (conversationName conv)
-        -- Add turn count
-        turnCount = case conversationSession conv of
-            Nothing -> 0
-            Just session -> length session.turns
-        turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        -- Add attachment count
-        attachmentCount = getAttachmentCount st conv
-        attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
-        -- Add queued message count
-        queueCount = getQueuedMessageCount st conv
-        queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
-        fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
-        -- Determine the appropriate attribute
-        attr = if isSelected && hasFocus
-            then subcallSelectedAttr
-            else if isSelected
-                then listSelectedAttr
-            else if depth == 0
-                then rootConversationAttr
-            else subcallAttr
-     in withAttr attr $ txt $ selectionMarker <> fullText
-  where
-    isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
-
--- | Get the number of queued messages for a conversation.
-getQueuedMessageCount :: TuiState -> Conversation -> Int
-getQueuedMessageCount st conv =
-    let buffered = st ^. tuiUI . uiBufferedMessages
-     in case Map.lookup (conversationId conv) buffered of
-            Nothing -> 0
-            Just msgs -> length msgs
-
--- | Get the number of attachments for a conversation.
-getAttachmentCount :: TuiState -> Conversation -> Int
-getAttachmentCount st conv =
-    let attachments = st ^. tuiUI . attachedFiles
-     in case Map.lookup (conversationId conv) attachments of
-            Nothing -> 0
-            Just atts -> length atts
-
 -------------------------------------------------------------------------------
 -- Session List Rendering
 -------------------------------------------------------------------------------
 
-{- | Render the session list.
-| Render the session list.
--}
+-- | Render the session list.
 render_sessionList :: TuiState -> Widget N
 render_sessionList st =
     borderWithFocus
