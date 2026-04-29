@@ -417,8 +417,8 @@ makeLenses ''TuiState
 -------------------------------------------------------------------------------
 
 -- | Initialize UI state with default values.
-initUIState :: [Text] -> [TuiAgent] -> UIState
-initUIState helpText agents =
+initUIState :: [Text] -> [TuiAgent] -> [Session] -> UIState
+initUIState helpText agents sessions =
     UIState
         { _uiFocusRing = focusRing [AgentListWidget]
         , _currentTab = AgentsTab
@@ -431,7 +431,7 @@ initUIState helpText agents =
         , _selectedAttachmentIndex = Nothing
         , _agentList = list AgentListWidget (Vector.fromList agents) 1
         , _conversationList = list ConversationListWidget Vector.empty 1
-        , _sessionList = list SessionsListWidget Vector.empty 1
+        , _sessionList = list SessionsListWidget (Vector.fromList sessions) 1
         , _messageEditor = editorText MessageEditorWidget Nothing ""
         , _selectedAgentInfo = listToMaybe agents
         , _statusMessage = Nothing
