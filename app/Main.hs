@@ -67,6 +67,8 @@ import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.TUI.KeyMapping (KeyMapping)
+import qualified System.Agents.TUI.KeyMapping as KeyMapping
 
 import System.Agents.CLI (Trace (..), toJsonTrace)
 
@@ -268,11 +270,16 @@ data ArgParserArgs = ArgParserArgs
     , argPromptAliases :: Map Text AliasDefinition
     , defaultSelfDescribeSlug :: Maybe String
     , defaultSelfDescribeDescription :: Maybe String
+    , defaultKeymapPath :: Maybe FilePath
     }
 
 -- | Get the path to the secrets key file
 secretsKeyFile :: ArgParserArgs -> FilePath
 secretsKeyFile pargs = pargs.configdir </> "secret-keys"
+
+-- | Get the keymap path
+keymapPath :: ArgParserArgs -> Maybe FilePath
+keymapPath = defaultKeymapPath
 
 -- | Helper to make agent-file entirely optional whilst using the 'many' combinator
 addDefaultAgentFiles :: ArgParserArgs -> [FilePath] -> [FilePath]
@@ -299,6 +306,7 @@ data AgentsExeConfig = AgentsExeConfig
     , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
     , cfgSelfDescribeSlug :: Maybe String
     , cfgSelfDescribeDescription :: Maybe String
+    , cfgKeymapPath :: Maybe FilePath
     }
     deriving (Show, Generic)
 
@@ -312,6 +320,7 @@ instance Aeson.FromJSON AgentsExeConfig where
             <*> v Aeson..:? "promptAliases"
             <*> v Aeson..:? "selfDescribeSlug"
             <*> v Aeson..:? "selfDescribeDescription"
+            <*> v Aeson..:? "keymap"
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
 locateAgentsExeConfig :: IO (Maybe FilePath)
@@ -361,6 +370,7 @@ initArgParserArgs = do
                         (resolveAliases obj.cfgPromptAliases)
                         obj.cfgSelfDescribeSlug
                         obj.cfgSelfDescribeDescription
+                        obj.cfgKeymapPath
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
@@ -381,6 +391,7 @@ initArgParserArgs = do
                 Nothing
                 (Just sessionsDir)
                 defaultAliases
+                Nothing
                 Nothing
                 Nothing
 
@@ -1243,7 +1254,7 @@ main = do
     hSetBuffering stderr LineBuffering
     hSetBuffering stdout LineBuffering
     argzparam <- initArgParserArgs
-    prog =<< execParser (infoProg argzparam)
+    prog argzparam =<< execParser (infoProg argzparam)
   where
     infoProg argzparam =
         info
@@ -1257,8 +1268,8 @@ main = do
     traceExtra t1 Nothing = t1
     traceExtra t1 (Just t2) = Prod.traceBoth t1 t2
 
-    prog :: Prog -> IO ()
-    prog pargs = do
+    prog :: ArgParserArgs -> Prog -> IO ()
+    prog argArgs pargs = do
         showFileTracer <- makeShowLogFileTracer pargs.logFile
         baseJsonFileTracer1 <- traverse makeFileJsonTracer pargs.logJsonFile
         let logFileJsonTracer =
@@ -1284,7 +1295,7 @@ main = do
                 Text.hPutStrLn stderr err
                 exitFailure
             Right agentFiles' ->
-                runCommand pargs baseTracer sessionStore agentFiles'
+                runCommand argArgs pargs baseTracer sessionStore agentFiles'
 
 -- | Resolve agent files based on optional slug selection
 resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
@@ -1316,8 +1327,8 @@ resolveAgentFiles files (Just agentSlug) = do
                 ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
 
 -- | Run the selected command
-runCommand :: Prog -> Prod.Tracer IO Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
-runCommand pargs baseTracer sessionStore files =
+runCommand :: ArgParserArgs -> Prog -> Prod.Tracer IO Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
+runCommand argArgs pargs baseTracer sessionStore files =
     case pargs.mainCommand of
         Check checkOpts ->
             CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile files
@@ -1327,8 +1338,10 @@ runCommand pargs baseTracer sessionStore files =
             ReplayToolCallCmd.handleListToolCalls opts
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall Prod.silent opts
-        TerminalUI _ ->
-            TUICmd.handleTUI (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile files
+        TerminalUI _ -> do
+            -- Load custom keymap if specified
+            keymap <- loadKeymap (keymapPath argArgs)
+            TUICmd.handleTUIWithKeymap (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile files keymap
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
@@ -1360,6 +1373,25 @@ runCommand pargs baseTracer sessionStore files =
         ToolCall opts ->
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
 
+-- | Load keymap from file, falling back to default if loading fails
+loadKeymap :: Maybe FilePath -> IO KeyMapping
+loadKeymap Nothing = pure KeyMapping.defaultKeyMapping
+loadKeymap (Just path) = do
+    exists <- doesFileExist path
+    if not exists
+        then do
+            putStrLn $ "Warning: Keymap file not found: " ++ path ++ ", using default keymap"
+            pure KeyMapping.defaultKeyMapping
+        else do
+            result <- Aeson.eitherDecodeFileStrict' path
+            case result of
+                Left err -> do
+                    putStrLn $ "Warning: Failed to parse keymap file " ++ path ++ ": " ++ err ++ ", using default keymap"
+                    pure KeyMapping.defaultKeyMapping
+                Right keymap -> do
+                    putStrLn $ "Loaded custom keymap from: " ++ path
+                    pure keymap
+
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)
 makeHttpJsonTrace baseTracer url = do
@@ -1377,3 +1409,4 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
+

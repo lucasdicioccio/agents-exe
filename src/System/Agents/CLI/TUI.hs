@@ -16,6 +16,7 @@ module System.Agents.CLI.TUI (
 
     -- * Handler
     handleTUI,
+    handleTUIWithKeymap,
 ) where
 
 import qualified Prod.Tracer as Prod
@@ -23,6 +24,7 @@ import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
+import System.Agents.TUI.KeyMapping (KeyMapping, defaultKeyMapping)
 
 data Trace
     = TUITrace !TUI.Trace
@@ -47,7 +49,23 @@ handleTUI ::
     -- | List of agent files to load
     [FilePath] ->
     IO ()
-handleTUI tracer sessionStore apiKeysFile agentFiles = do
+handleTUI tracer sessionStore apiKeysFile agentFiles =
+    handleTUIWithKeymap tracer sessionStore apiKeysFile agentFiles defaultKeyMapping
+
+-- | Handle the TUI command with a custom key mapping
+handleTUIWithKeymap ::
+    -- | Base tracer for logging
+    Prod.Tracer IO Trace ->
+    -- | Session store for persistence
+    SessionStore.SessionStore ->
+    -- | Path to API keys file
+    FilePath ->
+    -- | List of agent files to load
+    [FilePath] ->
+    -- | Custom key mapping for TUI bindings
+    KeyMapping ->
+    IO ()
+handleTUIWithKeymap tracer sessionStore apiKeysFile agentFiles keymap = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let oneAgent agentFile = do
             pure $
@@ -60,4 +78,6 @@ handleTUI tracer sessionStore apiKeysFile agentFiles = do
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUI (Prod.contramap TUITrace tracer) sessionStore apiKeys agentPropsList
+    let config = TUI.fileSessionConfigWithKeymap sessionStore apiKeys keymap
+    TUI.runTUIWithConfig (Prod.contramap TUITrace tracer) config agentPropsList
+

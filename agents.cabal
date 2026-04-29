@@ -156,6 +156,7 @@ library agents-lib
                     , System.Agents.TUI.Types
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Event
+                    , System.Agents.TUI.KeyMapping
                     , System.Agents.TUI.Clipboard
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration

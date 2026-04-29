@@ -71,26 +71,30 @@ module System.Agents.TUI.Core (
     defaultHelpContent,
     initHelpContent,
 
+    -- * Re-exports from KeyMapping
+    KeyMapping (..),
+    EventName (..),
+    KeyBinding (..),
+    Modifiers (..),
+    KeyName (..),
+    defaultKeyMapping,
+    lookupBinding,
+
     -- * Session loading
+-- * Session loading
     loadSessionFiles,
 
     -- * Main entry point
     runTUI,
     runTUIWithConfig,
     fileSessionConfig,
+    fileSessionConfigWithKeymap,
 
     -- * OS-native helpers
     createTuiAgent,
     refreshAgentTools,
     getAgentTools,
 ) where
-
-import Brick hiding (Down)
-import Brick.BChan (BChan, newBChan, writeBChan)
-import Brick.Focus (focusGetCurrent)
-import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (STM, TQueue, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
-import Control.Lens ((^.))
 import Control.Monad (forever, void)
 import Data.Proxy (Proxy (..))
 import Prod.Tracer (Tracer)
@@ -127,6 +131,15 @@ import System.Agents.TUI.Event (
     nextTab,
     prevTab,
     tui_appHandleEvent,
+ )
+import System.Agents.TUI.KeyMapping (
+    EventName (..),
+    KeyBinding (..),
+    KeyMapping (..),
+    KeyName (..),
+    Modifiers (..),
+    defaultKeyMapping,
+    lookupBinding,
  )
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
@@ -167,16 +180,27 @@ loadSessionFiles store = do
 -------------------------------------------------------------------------------
 
 {- | Create a session configuration with file-based persistence.
-| Create a session configuration with file-based persistence.
+Uses the default key mapping.
 -}
 fileSessionConfig :: SessionStore -> LoadedApiKeys -> SessionConfig
 fileSessionConfig store apiKeys =
     SessionConfig
         { sessionStore = store
         , sessionApiKeys = apiKeys
+        , sessionKeyMapping = defaultKeyMapping
         }
 
-{- | Initialize the TUI with props and optional conversation prefix (legacy API).
+{- | Create a session configuration with a custom key mapping.
+-}
+fileSessionConfigWithKeymap :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
+fileSessionConfigWithKeymap store apiKeys keymap =
+    SessionConfig
+        { sessionStore = store
+        , sessionApiKeys = apiKeys
+        , sessionKeyMapping = keymap
+        }
+
+{- | Initialize the TUI with props and default key mapping (legacy API).
 For more control, use 'runTUIWithConfig' instead.
 
 This function:
@@ -333,3 +357,4 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
+
