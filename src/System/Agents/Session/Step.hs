@@ -213,4 +213,3 @@ naiveTilNoToolCallStep sess = do
                         else
                             -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
-

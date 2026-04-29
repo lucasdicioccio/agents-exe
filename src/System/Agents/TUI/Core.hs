@@ -89,7 +89,7 @@ import Brick hiding (Down)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (TQueue, STM, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
+import Control.Concurrent.STM (STM, TQueue, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
 import Data.Proxy (Proxy (..))
@@ -166,8 +166,9 @@ loadSessionFiles store = do
 -- Session Configuration Helpers
 -------------------------------------------------------------------------------
 
--- | Create a session configuration with file-based persistence.
--- | Create a session configuration with file-based persistence.
+{- | Create a session configuration with file-based persistence.
+| Create a session configuration with file-based persistence.
+-}
 fileSessionConfig :: SessionStore -> LoadedApiKeys -> SessionConfig
 fileSessionConfig store apiKeys =
     SessionConfig
@@ -175,13 +176,14 @@ fileSessionConfig store apiKeys =
         , sessionApiKeys = apiKeys
         }
 
--- | Initialize the TUI with props and optional conversation prefix (legacy API).
--- For more control, use 'runTUIWithConfig' instead.
---
--- This function:
--- 1. Loads agent trees from the provided props
--- 2. Creates TuiAgents with OS-native structures
--- 3. Initializes the TUI with the agents and loaded sessions
+{- | Initialize the TUI with props and optional conversation prefix (legacy API).
+For more control, use 'runTUIWithConfig' instead.
+
+This function:
+1. Loads agent trees from the provided props
+2. Creates TuiAgents with OS-native structures
+3. Initializes the TUI with the agents and loaded sessions
+-}
 runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
 runTUI tracer store apiKeys props = do
     let config = fileSessionConfig store apiKeys
@@ -246,6 +248,7 @@ runTUIWithConfig tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
+
 {- | Create a TuiAgent from an OSAgentTree.
 
 This function extracts the root agent from the tree and creates
@@ -330,5 +333,3 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
-
-

@@ -61,7 +61,6 @@ import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (.
 import qualified System.Agents.Session.Loop as Loop
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.TUI.Clipboard (
     ContentAction (..),
     analyzeContent,
@@ -128,6 +127,7 @@ import System.Agents.TUI.Types (
     updateConversationSession,
     zoomed,
  )
+import System.Agents.Tools.Context (CallStackEntry (..))
 
 -- Import Tracer for creating a no-op tracer
 import Prod.Tracer (Tracer (..), contramap)
@@ -689,17 +689,18 @@ handleNormalEvent tracer ev =
 -- Subcall Event Handlers
 -------------------------------------------------------------------------------
 
--- | Handle subcall started event.
--- This creates a conversation entry for the subcall in the TUI.
--- Note: The actual execution is handled by runSubAgentWithEventEmission in OneShotTool.hs,
--- which emits progress events that update this conversation.
+{- | Handle subcall started event.
+This creates a conversation entry for the subcall in the TUI.
+Note: The actual execution is handled by runSubAgentWithEventEmission in OneShotTool.hs,
+which emits progress events that update this conversation.
+-}
 handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
 handleSubcallStarted _tracer parentId subcallId slug depth = do
     -- Show status message with session IDs for debugging
     let parentShort = Text.take 8 (Text.pack $ show parentId)
     let subcallShort = Text.take 8 (Text.pack $ show subcallId)
     showStatus StatusInfo $ "Subcall d=" <> Text.pack (show depth) <> " pid=" <> parentShort <> " cid=" <> subcallShort <> " " <> slug
-    
+
     -- Look up the agent by slug from the agent list
     agents <- use (tuiUI . agentList . to listElements)
     case findAgentBySlug slug agents of
@@ -712,7 +713,7 @@ handleSubcallStarted _tracer parentId subcallId slug depth = do
 
 -- | Find a TuiAgent by slug from the agent list.
 findAgentBySlug :: Text.Text -> Vector.Vector TuiAgent -> Maybe TuiAgent
-findAgentBySlug slug agents = 
+findAgentBySlug slug agents =
     Vector.find (\a -> tuiSlug a == slug) agents
 
 -- | Handle subcall progress event.
@@ -1155,20 +1156,20 @@ handleHeartbeat = do
     coreRef <- use tuiCore
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
-    
+
     -- Debug: log conversation counts
     let convCount = length convs
     let rootCount = length $ filter (\c -> conversationParentId c == Nothing) convs
-    
+
     let sortedConvs = sortConversationsForNesting convs
     let sortedCount = length sortedConvs
-    
+
     -- Show debug info if counts don't match
     when (sortedCount /= convCount) $ do
         showStatus StatusWarning $ "Conv count mismatch: raw=" <> Text.pack (show convCount) <> " sorted=" <> Text.pack (show sortedCount) <> " roots=" <> Text.pack (show rootCount)
-    
+
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList sortedConvs) 1
-    
+
     case mSelectedConvId of
         Just selectedConvId -> do
             let newConvs = Vector.fromList sortedConvs
@@ -1468,25 +1469,25 @@ runSubAgentWithEventEmission in OneShotTool.hs, which emits progress events
 that update this conversation entry.
 
 The conversation uses the SAME decoration/naming as regular conversations
-to ensure visual consistency in the TUI. The tree branches (└─>, ├─, │) 
+to ensure visual consistency in the TUI. The tree branches (└─>, ├─, │)
 provide the visual nesting indication, not the conversation name itself.
 -}
-createSubcallConversationEntry
-    :: TuiAgent
-    -- ^ The agent being invoked as a tool
-    -> ConversationId
-    -- ^ The conversation ID for this subcall (pre-generated)
-    -> ConversationId
-    -- ^ Parent conversation ID (the caller)
-    -> Int
-    -- ^ Nesting depth (1+ for subcalls)
-    -> EventM N TuiState ()
+createSubcallConversationEntry ::
+    -- | The agent being invoked as a tool
+    TuiAgent ->
+    -- | The conversation ID for this subcall (pre-generated)
+    ConversationId ->
+    -- | Parent conversation ID (the caller)
+    ConversationId ->
+    -- | Nesting depth (1+ for subcalls)
+    Int ->
+    EventM N TuiState ()
 createSubcallConversationEntry tuiAgent convId parentId depth = do
     -- Create the conversation entry
     -- Note: conversationThreadId is Nothing because the execution is handled by OneShotTool
     -- conversationChan is a dummy channel since we don't need to send messages to subcalls
     inChan <- liftIO $ newBChan 100
-    
+
     -- Use the SAME decoration as regular conversations: "@" <> slug
     -- The tree branches in renderConversationForest provide the visual nesting
     let conv =
@@ -1498,19 +1499,19 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
                 , conversationName = "@" <> tuiSlug tuiAgent
                 , conversationChan = inChan
                 , conversationStatus = ConversationStatus_Active
-                , conversationOnProgress = \_ -> pure ()  -- Progress comes via SubcallProgress events
+                , conversationOnProgress = \_ -> pure () -- Progress comes via SubcallProgress events
                 , conversationIsSubcall = True
                 , conversationParentId = Just parentId
                 , conversationSubcallDepth = depth
                 }
-    
+
     -- Add to core state
     coreRef <- use tuiCore
     liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
-    
+
     -- Add to UI conversation list
     tuiUI . conversationList %= listInsert 0 conv
-    
+
     -- Debug: show conversation created
     let convShort = Text.take 8 (Text.pack $ show convId)
     let parentShort = Text.take 8 (Text.pack $ show parentId)
@@ -1520,10 +1521,11 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
 -- Run Conversation
 -------------------------------------------------------------------------------
 
--- | Run a conversation with the given agent and session.
---
--- This function creates an agent with the World and EventQueue from the Core
--- state, enabling subcall conversations to be visible in the TUI.
+{- | Run a conversation with the given agent and session.
+
+This function creates an agent with the World and EventQueue from the Core
+state, enabling subcall conversations to be visible in the TUI.
+-}
 runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
 runConversation tracer baseTuiAgent session = do
     config <- use sessionConfig
@@ -1535,22 +1537,23 @@ runConversation tracer baseTuiAgent session = do
     agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
     agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
     coreRef <- use tuiCore
-    
+
     -- Get the World and EventQueue from Core for subcall visibility
     coreState <- liftIO $ readTVarIO coreRef
     let mWorld = coreWorld coreState
     let mEventQueue = coreOSEventQueue coreState
-    
+
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
-    
+
     -- Set the World and EventQueue on the agent for subcall visibility
     -- and initialize the call stack with a root entry
-    let agentWithOS = agent1
-            { ctxWorld = mWorld
-            , ctxEventQueue = mEventQueue
-            , ctxCallStack = [CallStackEntry "root" convId 0]
-            }
-    
+    let agentWithOS =
+            agent1
+                { ctxWorld = mWorld
+                , ctxEventQueue = mEventQueue
+                , ctxCallStack = [CallStackEntry "root" convId 0]
+                }
+
     let a =
             agentWithOS
                 { step = \sess -> do
@@ -1628,4 +1631,3 @@ handleSendMessage = do
                         tuiUI . selectedAttachmentIndex .= Nothing
                         updateConversationStatus convId ConversationStatus_Active
             Nothing -> showStatus StatusWarning "No conversation selected"
-

@@ -123,20 +123,23 @@ data Agent r = Agent
     -- ^ Configuration for what to include in tool execution context
     , --
       ctxWorld :: Maybe World
-    -- ^ Optional OS World for ECS operations. When present, tools can
-    -- insert entities and components into the OS. This enables subcall
-    -- conversations to be visible in the TUI.
+    {- ^ Optional OS World for ECS operations. When present, tools can
+    insert entities and components into the OS. This enables subcall
+    conversations to be visible in the TUI.
+    -}
     , ctxEventQueue :: Maybe (TQueue OSEvent)
-    -- ^ Optional event queue for OS event emission. When present, tools
-    -- can emit events to notify the TUI of subcall lifecycle (start,
-    -- progress, completion, failure).
+    {- ^ Optional event queue for OS event emission. When present, tools
+    can emit events to notify the TUI of subcall lifecycle (start,
+    progress, completion, failure).
+    -}
     , ctxCallStack :: [CallStackEntry]
-    -- ^ Call stack for tracking nested agent invocations. Root entry
-    -- is at depth 0, and each nested call adds a new entry.
+    {- ^ Call stack for tracking nested agent invocations. Root entry
+    is at depth 0, and each nested call adds a new entry.
+    -}
     , ctxParentConversation :: Maybe ConversationId
-    -- ^ Optional parent conversation ID for subcalls. When present,
-    -- indicates this agent is being used for a nested agent invocation,
-    -- enabling proper lineage tracking in the OS.
+    {- ^ Optional parent conversation ID for subcalls. When present,
+    indicates this agent is being used for a nested agent invocation,
+    enabling proper lineage tracking in the OS.
+    -}
     }
     deriving (Functor)
-

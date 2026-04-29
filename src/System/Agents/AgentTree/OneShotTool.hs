@@ -60,8 +60,9 @@ import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
 import qualified System.Agents.OneShot as OneShot
+
 -- Import Agent with qualified name to disambiguate record updates
-import qualified System.Agents.Session.Base as SessionBase
+
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -76,6 +77,7 @@ import System.Agents.Session.Base (
     newSessionId,
     newTurnId,
  )
+import qualified System.Agents.Session.Base as SessionBase
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop (run)
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
@@ -88,6 +90,7 @@ import System.Agents.ToolRegistration (
  )
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
+
 -- Import ToolExecutionContext with qualified access to avoid ambiguity with Agent fields.
 -- DuplicateRecordFields allows both Agent and ToolExecutionContext to have the same field names.
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext (..))
@@ -251,12 +254,13 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
 
         -- Update the agent with the new call stack, parent reference, AND OS integration fields
         -- The World and EventQueue are essential for nested subcalls to be visible in the TUI
-        let sessionAgent0WithStack = sessionAgent0
-                { SessionBase.ctxCallStack = subcallCallStack
-                , SessionBase.ctxParentConversation = Just parentBaseConvId
-                , SessionBase.ctxWorld = mWorld
-                , SessionBase.ctxEventQueue = mEventQueue
-                }
+        let sessionAgent0WithStack =
+                sessionAgent0
+                    { SessionBase.ctxCallStack = subcallCallStack
+                    , SessionBase.ctxParentConversation = Just parentBaseConvId
+                    , SessionBase.ctxWorld = mWorld
+                    , SessionBase.ctxEventQueue = mEventQueue
+                    }
 
         -- Debug: verify we have the event queue
         case mEventQueue of
@@ -420,7 +424,7 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
                             OSEvent_SubcallCompleted
                                 { subcallCompletedConversationId = baseConvId
                                 , subcallCompletedResult = resultText
-                            }
+                                }
                     atomically $ writeTQueue eventQueue event
                     -- Update OS World status if available
                     -- Convert Base.ConversationId to OS types for World update
@@ -434,7 +438,7 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
                             OSEvent_SubcallFailed
                                 { subcallFailedConversationId = baseConvId
                                 , subcallFailedError = errMsg
-                            }
+                                }
                     atomically $ writeTQueue eventQueue event
                     -- Update OS World status if available
                     -- Convert Base.ConversationId to OS types for World update
@@ -619,4 +623,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
-

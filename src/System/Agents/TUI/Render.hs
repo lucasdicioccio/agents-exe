@@ -19,7 +19,7 @@ import Brick.Widgets.FileBrowser (
     fileBrowserSelectionInfoAttr,
     renderFileBrowser,
  )
-import Brick.Widgets.List (listSelectedAttr, listSelectedElement, renderList, listElements)
+import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as Map
@@ -298,18 +298,21 @@ render_shortcutsHelp =
             [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file"
             ]
 
--- | Make prefix for a conversation at a specific depth with tree branches.
--- The Bool list indicates for each ancestor level (from root to immediate parent)
--- whether that ancestor is a last child (True) or not (False).
+{- | Make prefix for a conversation at a specific depth with tree branches.
+The Bool list indicates for each ancestor level (from root to immediate parent)
+whether that ancestor is a last child (True) or not (False).
+-}
 makePrefix :: [Bool] -> Bool -> Text
 makePrefix ancestorIsLasts isLast
     | null ancestorIsLasts = if isLast then "└─" else "├─"
     | otherwise =
-        let -- Build the continuation part from ancestors
+        let
+            -- Build the continuation part from ancestors
             -- For each ancestor: if it was the last child, use spaces ("  "),
             -- otherwise use a vertical bar ("│ ") to show continuation
             continuation = mconcat $ map (\isLastAncestor -> if isLastAncestor then "  " else "│ ") ancestorIsLasts
-         in continuation <> (if isLast then "└─" else "├─")
+         in
+            continuation <> (if isLast then "└─" else "├─")
 
 -- | Sort conversations to ensure proper nesting order.
 sortConversationsForNesting :: [Conversation] -> [Conversation]
@@ -319,7 +322,7 @@ sortConversationsForNesting convs =
         go [] = []
         go (ConversationTree conv children : rest) =
             conv : go children ++ go rest
-    in go forest
+     in go forest
 
 -- | Conversation area with message input and conversation history.
 render_sessionArea :: TuiState -> Widget N
@@ -384,24 +387,28 @@ render_conversationList st =
             Just (_, conv) -> Just (conversationId conv)
             Nothing -> Nothing
         forest = buildConversationForest convs
-    in borderWithFocus
-        st
-        ConversationListWidget
-        "Conversations"
-        (viewport ConversationListWidget Both $
-            vBox $ renderConversationForest st selectedId hasFocus forest)
+     in borderWithFocus
+            st
+            ConversationListWidget
+            "Conversations"
+            ( viewport ConversationListWidget Both $
+                vBox $
+                    renderConversationForest st selectedId hasFocus forest
+            )
+
 renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
 renderConversationForest st selectedId hasFocus trees =
-    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0..] trees)
+    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0 ..] trees)
 
--- | Render a tree node recursively.
--- The Bool list tracks for each ancestor whether it is a last child.
+{- | Render a tree node recursively.
+The Bool list tracks for each ancestor whether it is a last child.
+-}
 renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> [Bool] -> Bool -> ConversationTree -> [Widget N]
 renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (ConversationTree conv children) =
     let isSelected = selectedId == Just (conversationId conv)
         nodeWidget = renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv
-        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0..] children)
-    in nodeWidget : childWidgets
+        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0 ..] children)
+     in nodeWidget : childWidgets
 
 -- | Render a nested conversation item with tree branches.
 renderNestedConversationItem :: TuiState -> Bool -> Bool -> [Bool] -> Bool -> Conversation -> Widget N
@@ -429,13 +436,16 @@ renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv 
         queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
         fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
         -- Determine the appropriate attribute
-        attr = if isSelected && hasFocus
-            then subcallSelectedAttr
-            else if isSelected
-                then listSelectedAttr
-            else if null ancestorIsLasts
-                then rootConversationAttr
-            else subcallAttr
+        attr =
+            if isSelected && hasFocus
+                then subcallSelectedAttr
+                else
+                    if isSelected
+                        then listSelectedAttr
+                        else
+                            if null ancestorIsLasts
+                                then rootConversationAttr
+                                else subcallAttr
      in withAttr attr $ txt $ selectionMarker <> fullText
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
@@ -462,18 +472,20 @@ data ConversationTree = ConversationTree
     , treeChildren :: [ConversationTree]
     }
 
--- | Build a forest of conversation trees from a flat list.
---
--- This function handles "orphaned" conversations - children whose parents
--- are not in the list. This can happen due to async event ordering where
--- a child subcall event arrives before its parent is fully registered.
--- Such orphaned conversations are treated as temporary roots to ensure
--- they remain visible in the TUI.
+{- | Build a forest of conversation trees from a flat list.
+
+This function handles "orphaned" conversations - children whose parents
+are not in the list. This can happen due to async event ordering where
+a child subcall event arrives before its parent is fully registered.
+Such orphaned conversations are treated as temporary roots to ensure
+they remain visible in the TUI.
+-}
 buildConversationForest :: [Conversation] -> [ConversationTree]
 buildConversationForest convs =
-    let -- Build a set of all conversation IDs for quick lookup
+    let
+        -- Build a set of all conversation IDs for quick lookup
         convIds = Set.fromList $ map conversationId convs
-        
+
         -- Find root conversations:
         -- 1. Conversations with no parent (parentId == Nothing), OR
         -- 2. "Orphaned" conversations whose parent is not in the list
@@ -482,20 +494,21 @@ buildConversationForest convs =
             case conversationParentId c of
                 Nothing -> True
                 Just parentId -> not (Set.member parentId convIds)
-        
+
         roots = filter isRoot convs
-        
+
         -- Build tree recursively
-        buildTree conv = ConversationTree
-            { treeConversation = conv
-            , treeChildren = map buildTree (findChildren conv)
-            }
-        
+        buildTree conv =
+            ConversationTree
+                { treeConversation = conv
+                , treeChildren = map buildTree (findChildren conv)
+                }
+
         -- Find all children of a given parent conversation
         findChildren parent =
             filter (\c -> conversationParentId c == Just (conversationId parent)) convs
-            
-    in map buildTree roots
+     in
+        map buildTree roots
 
 -------------------------------------------------------------------------------
 -- Session List Rendering
@@ -1124,4 +1137,3 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
-

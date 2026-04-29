@@ -404,4 +404,3 @@ fileStoringCallback store convId progress =
 agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
-

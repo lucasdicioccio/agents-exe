@@ -327,11 +327,13 @@ data Core = Core
     , corePausedConversations :: Set ConversationId
     -- ^ Set of paused conversation IDs
     , coreWorld :: Maybe World
-    -- ^ Optional OS World for ECS operations. Enables subcall visibility
-    -- in the TUI by allowing sub-agent conversations to be tracked as entities.
+    {- ^ Optional OS World for ECS operations. Enables subcall visibility
+    in the TUI by allowing sub-agent conversations to be tracked as entities.
+    -}
     , coreOSEventQueue :: Maybe (TQueue OSEvent)
-    -- ^ Optional OS event queue for subcall event emission. Enables the TUI
-    -- to receive notifications about subcall lifecycle (start, progress, completion).
+    {- ^ Optional OS event queue for subcall event emission. Enables the TUI
+    to receive notifications about subcall lifecycle (start, progress, completion).
+    -}
     }
 
 makeLenses ''Core
@@ -471,4 +473,3 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
-
