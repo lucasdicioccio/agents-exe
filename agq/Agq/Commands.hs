@@ -529,8 +529,11 @@ execTask cfg conn t = do
         sessDir = repoRoot </> worktreeProj </> sessionsDir cfg
         sessFile = sessDir </> nameStr <> ".session.json"
         sessMd = sessDir </> nameStr <> ".session.md"
+        -- Sub-directory for sub-agent conversations: tasks-sessions/<name>/conv.*.json
+        convDir = sessDir </> nameStr
 
     createDirectoryIfMissing True sessDir
+    createDirectoryIfMissing True convDir
 
     -- 3. Optional prepare hook
     putStrLn $ "[agq] Step 3: " <> maybe "skipping prepare hook (none configured)" (\_ -> "running prepare hook") mHook
@@ -566,6 +569,8 @@ execTask cfg conn t = do
     let agentArgs =
             [ "--agent-file"
             , agentCfg
+            , "--session-json-file-prefix"
+            , convDir <> "/"
             , "run"
             , "--session-file"
             , sessFile
@@ -670,6 +675,9 @@ execTask cfg conn t = do
         void $ runGit ["-C", nameStr, "checkout", "-b", branchName]
         (_, statusOut) <- captureCmd "git" ["-C", nameStr, "status", "--porcelain"]
         unless (Text.null (Text.strip statusOut)) $ do
+            -- Force-add sub-agent conversation files; they may be in .gitignore.
+            let convDirRel = projDir </> sessionsDir cfg </> nameStr
+            void $ runGit ["-C", nameStr, "add", "--force", convDirRel]
             void $ runGit ["-C", nameStr, "add", "-A"]
             void $ runGit ["-C", nameStr, "commit", "--no-verify", "-m", commit]
 
