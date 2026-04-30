@@ -337,10 +337,13 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
+                , ctxExecutionMode = SessionTypes.Synchronous
+                , ctxToolCache = Nothing
+                , ctxAsyncToolCall = Nothing
                 }
 
     -- Create initial session with media support (version 1)
-    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
+    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
 
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)

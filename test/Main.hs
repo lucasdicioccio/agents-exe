@@ -648,6 +648,7 @@ turnRoundTripTests =
                     , forkedFromSessionId = Nothing
                     , turnId = turnId'
                     , sessionVersion = Nothing
+                    , sessionExecutionMode = Nothing
                     }
             
             let json = encode session
@@ -664,6 +665,7 @@ turnRoundTripTests =
                     , forkedFromSessionId = Just forkedFromId
                     , turnId = turnId'
                     , sessionVersion = Nothing
+                    , sessionExecutionMode = Nothing
                     }
             
             let json = encode session

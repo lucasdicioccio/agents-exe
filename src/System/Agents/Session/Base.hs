@@ -14,6 +14,7 @@ module System.Agents.Session.Base (
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),
+    PartialUserTurnContent (..),
     SystemPrompt (..),
     LlmResponse (..),
     LlmToolCall (..),
@@ -25,6 +26,11 @@ module System.Agents.Session.Base (
     SessionProgress (..),
     OnSessionProgress,
     ignoreSessionProgress,
+    ExecutionMode (..),
+    ContinuationToken (..),
+    newContinuationToken,
+    CacheKey (..),
+    migrateSessionV1ToV2,
 
     -- * Defined in this module
     MissingUserPrompt (..),
@@ -33,6 +39,15 @@ module System.Agents.Session.Base (
     ContextConfig (..),
     defaultContextConfig,
     Agent (..),
+
+    -- * Async execution helpers
+    AsyncToolCallFn,
+    defaultAsyncExecutor,
+
+    -- * Agent combinators
+    withExecutionMode,
+    withToolCache,
+    withAsyncToolCall,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -40,11 +55,37 @@ import Control.Concurrent.STM (TQueue)
 import System.Agents.Base (ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
+import System.Agents.Session.Async (AsyncToolResponse (..))
+import System.Agents.Tools.Cache (ToolCache (..))
 import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
 
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Types
+
+-------------------------------------------------------------------------------
+-- Async Execution Types
+-------------------------------------------------------------------------------
+
+{- | Type alias for async-aware tool execution function.
+
+In async mode, tool calls can either complete immediately or yield
+for external completion.
+-}
+type AsyncToolCallFn =
+    ToolExecutionContext ->
+    LlmToolCall ->
+    IO AsyncToolResponse
+
+{- | Default async executor that simply calls the synchronous tool executor.
+
+This provides backward compatibility - when no special async handling
+is needed, tools execute synchronously as before.
+-}
+defaultAsyncExecutor :: (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) -> AsyncToolCallFn
+defaultAsyncExecutor syncExec ctx call = do
+    result <- syncExec ctx call
+    pure $ ToolComplete result
 
 -------------------------------------------------------------------------------
 -- Action and Agent types
@@ -107,6 +148,11 @@ defaultContextConfig = ContextConfig False True
 {- | An agent is a decorated step function from a session step to an action that
 may yield a result r or some delay.
 Functions in its body.
+
+Version 2 additions for async/resumable execution:
+* 'ctxExecutionMode' - Controls sync vs async execution
+* 'ctxToolCache' - Optional cache for tool results
+* 'ctxAsyncToolCall' - Async-aware tool executor
 -}
 data Agent r = Agent
     { step :: Session -> IO (Action r)
@@ -141,5 +187,56 @@ data Agent r = Agent
     indicates this agent is being used for a nested agent invocation,
     enabling proper lineage tracking in the OS.
     -}
+    , ctxExecutionMode :: ExecutionMode
+    {- ^ Execution mode: Synchronous (default) or Asynchronous.
+    Async mode enables partial execution and session resumption.
+    -}
+    , ctxToolCache :: Maybe ToolCache
+    {- ^ Optional tool cache for storing and retrieving tool results.
+    Used in async mode to avoid re-executing cached tool calls.
+    -}
+    , ctxAsyncToolCall :: Maybe AsyncToolCallFn
+    {- ^ Optional async-aware tool executor. When present and execution
+    mode is Asynchronous, this function is used instead of the
+    standard toolCall function.
+    -}
     }
     deriving (Functor)
+
+-------------------------------------------------------------------------------
+-- Agent Combinators
+-------------------------------------------------------------------------------
+
+{- | Set the execution mode for an agent.
+
+Example:
+
+@
+asyncAgent = withExecutionMode Asynchronous baseAgent
+@
+-}
+withExecutionMode :: ExecutionMode -> Agent r -> Agent r
+withExecutionMode mode agent = agent{ctxExecutionMode = mode}
+
+{- | Add a tool cache to an agent.
+
+Example:
+
+@
+cache <- mkSqliteToolCache ".agents-cache.db"
+cachedAgent = withToolCache agent cache
+@
+-}
+withToolCache :: Agent r -> ToolCache -> Agent r
+withToolCache agent cache = agent{ctxToolCache = Just cache}
+
+{- | Set a custom async tool call executor.
+
+Example:
+
+@
+asyncAgent = withAsyncToolCall customAsyncExecutor agent
+@
+-}
+withAsyncToolCall :: Agent r -> AsyncToolCallFn -> Agent r
+withAsyncToolCall agent asyncFn = agent{ctxAsyncToolCall = Just asyncFn}

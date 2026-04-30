@@ -1,17 +1,5 @@
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
-
 {- |
-Module for the replay tool commands.
-
-This module provides functionality to:
-
-1. List tool calls from a session file ('list-tool-calls' command)
-2. Replay a specific tool call, validating arguments and executing again ('replay-tool-call' command)
-
-These commands are useful for debugging and reproducing tool calls from
-previous sessions.
+Module for replaying tool calls from session files.
 
 Usage:
     agents-exe list-tool-calls <session-file>
@@ -26,30 +14,24 @@ module System.Agents.CLI.ReplayToolCall (
     ToolCallInfo (..),
 ) where
 
-import Control.Exception (try)
+import Control.Exception (IOException, try)
 import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.Text.Encoding.Error
+import qualified Data.Text.Encoding as TextEnc
+import qualified Data.Text.Encoding.Error as TextErr
 import qualified Data.Text.IO as Text
 import System.Exit (exitFailure)
 import System.IO (stderr, stdout)
 import System.Posix.Files as Posix
 
 import qualified Prod.Tracer as Prod
-import System.Agents.Session.Types (
-    LlmToolCall (..),
-    LlmTurnContent (..),
-    Session (..),
-    Turn (..),
- )
+import System.Agents.Session.Base (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
 import qualified System.Agents.ToolRegistration as ToolReg
 import System.Agents.Tools.Bash (LoadTrace, RunTrace, ScriptDescription (..), ScriptInfo (..), loadScript, runValue)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
@@ -125,13 +107,14 @@ extractToolCallsFromSession sessionPath = do
         [] -> Nothing
         rows -> Just (last rows)
 
-    extractFromSession :: Session -> [ToolCallInfo]
-    extractFromSession session = concat $ zipWith extractFromTurn [1 ..] session.turns
-
+extractFromSession :: Session -> [ToolCallInfo]
+extractFromSession session = concat $ zipWith extractFromTurn [1 ..] session.turns
+  where
     extractFromTurn :: Int -> Turn -> [ToolCallInfo]
     extractFromTurn turnNum (LlmTurn content _) =
         mapMaybe (extractToolCall turnNum) (zip [0 ..] content.llmToolCalls)
     extractFromTurn _ (UserTurn _ _) = []
+    extractFromTurn _ (PartialUserTurn _ _) = []
 
     extractToolCall :: Int -> (Int, LlmToolCall) -> Maybe ToolCallInfo
     extractToolCall turnNum (idx, LlmToolCall val) =
@@ -147,7 +130,6 @@ extractToolCallsFromSession sessionPath = do
                     Aeson.String n -> Just n
                     _ -> Nothing
                 argsVal <- KeyMap.lookup "arguments" funcObj
-                -- Generate a global index based on position
                 Just $
                     ToolCallInfo
                         { toolCallIndex = idx
@@ -156,13 +138,6 @@ extractToolCallsFromSession sessionPath = do
                         , toolCallArguments = argsVal
                         }
             _ -> Nothing
-
-doesFileExist' :: FilePath -> IO Bool
-doesFileExist' path = do
-    result <- try @IOError $ Posix.getFileStatus path
-    case result of
-        Left _ -> pure False
-        Right stat -> pure $ Posix.isRegularFile stat
 
 -- | Handle the list-tool-calls command
 handleListToolCalls :: ListToolCallsOptions -> IO ()
@@ -285,10 +260,10 @@ handleReplayToolCall tracer opts = do
                                                         exitFailure
                                                     Right output -> do
                                                         if opts.replayShowRaw
-                                                            then BSL.hPut stdout (LByteString.fromStrict output) >> BSL.hPut stdout "\n"
+                                                            then BSL.hPut stdout (BSL.fromStrict output) >> BSL.hPut stdout "\n"
                                                             else do
                                                                 Text.putStrLn "=== Tool Output ==="
-                                                                Text.putStrLn $ Text.decodeUtf8With Data.Text.Encoding.Error.lenientDecode output
+                                                                Text.putStrLn $ TextEnc.decodeUtf8With TextErr.lenientDecode output
                                                                 Text.putStrLn "==================="
                                             _ -> do
                                                 Text.hPutStrLn stderr "Error: Tool arguments must be a JSON object"
@@ -301,3 +276,11 @@ handleReplayToolCall tracer opts = do
                                                 <> ")"
                                     Text.putStrLn $ formatValidationErrors toolName errors
                                     exitFailure
+
+-- | Check if a file exists, handling exceptions
+doesFileExist' :: FilePath -> IO Bool
+doesFileExist' path = do
+    result <- try (Posix.getFileStatus path) :: IO (Either IOException Posix.FileStatus)
+    case result of
+        Left _ -> pure False
+        Right status -> pure $ Posix.isRegularFile status

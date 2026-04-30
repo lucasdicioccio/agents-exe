@@ -906,33 +906,34 @@ aggregateSessionTokenUsage session =
         , usage <- extractUsageFromTurn turn
         ]
 
-    extractUsageFromTurn :: Turn -> [TokenUsage]
-    extractUsageFromTurn turn =
-        let mUsage = case turn of
-                UserTurn _ mStepUsage -> mStepUsage
-                LlmTurn _ mStepUsage -> mStepUsage
-         in case mUsage of
-                Just stepUsage -> maybeToList (stepTokenUsage stepUsage)
-                Nothing -> []
-
+extractUsageFromTurn :: Turn -> [TokenUsage]
+extractUsageFromTurn turn =
+    let mUsage = case turn of
+            UserTurn _ mStepUsage -> mStepUsage
+            LlmTurn _ mStepUsage -> mStepUsage
+            PartialUserTurn _ mStepUsage -> mStepUsage
+     in case mUsage of
+            Just stepUsage -> maybeToList (stepTokenUsage stepUsage)
+            Nothing -> []
+  where
     maybeToList :: Maybe a -> [a]
     maybeToList Nothing = []
     maybeToList (Just x) = [x]
 
-    aggregateTokenUsages :: [TokenUsage] -> TokenUsageStats
-    aggregateTokenUsages usages =
-        TokenUsageStats
-            { statPromptTokens = sum $ map tokenPromptTokens usages
-            , statCompletionTokens = sum $ map tokenCompletionTokens usages
-            , statTotalTokens = sum $ map tokenTotalTokens usages
-            , statCachedTokens = sumMaybe $ map tokenCachedTokens usages
-            , statThinkingTokens = sumMaybe $ map tokenThinkingTokens usages
-            }
+aggregateTokenUsages :: [TokenUsage] -> TokenUsageStats
+aggregateTokenUsages usages =
+    TokenUsageStats
+        { statPromptTokens = sum $ map tokenPromptTokens usages
+        , statCompletionTokens = sum $ map tokenCompletionTokens usages
+        , statTotalTokens = sum $ map tokenTotalTokens usages
+        , statCachedTokens = sumMaybe $ map tokenCachedTokens usages
+        , statThinkingTokens = sumMaybe $ map tokenThinkingTokens usages
+        }
 
-    sumMaybe :: [Maybe Int] -> Maybe Int
-    sumMaybe ms =
-        let vs = [v | Just v <- ms]
-         in if null vs then Nothing else Just (sum vs)
+sumMaybe :: [Maybe Int] -> Maybe Int
+sumMaybe ms =
+    let vs = [v | Just v <- ms]
+     in if null vs then Nothing else Just (sum vs)
 
 -- | Token usage statistics aggregated across a session.
 data TokenUsageStats = TokenUsageStats
@@ -986,91 +987,58 @@ formatBytes n
 
 -- | Render a single turn with usage info (tokens preferred, bytes fallback).
 render_turn :: (Int, Turn) -> Widget N
-render_turn (k, turn) =
+render_turn (_k, turn) =
     case turn of
         UserTurn userTurn mUsage ->
             withAttr userMessageAttr $
                 vBox
-                    [ txt "-----------------------"
-                    , case userQuery userTurn of
-                        Just (UserQuery q _) ->
-                            vBox
-                                [ txt $ "< " <> q
-                                , txt ""
-                                ]
-                        Nothing -> emptyWidget
-                    , if k == 0
-                        then txt $ "+ " <> getSystemPromptText (userPrompt userTurn)
-                        else txt $ "+ ..."
-                    , emptyWidget
+                    [ txt $
+                        "> " <> case userTurn.userQuery of
+                            Just (UserQuery q _) -> q
+                            Nothing -> "(no query)"
                     , render_usage mUsage
-                    , txt ""
+                    , txt " "
                     ]
         LlmTurn llmTurn mUsage ->
             withAttr llmMessageAttr $
                 vBox
-                    [ txt "-----------------------"
-                    , vBox
-                        [ case llmTurn.llmResponse.responseText of
-                            Just txt0 -> txt $ "< " <> txt0
-                            Nothing -> txt "< (no response)"
-                        , case llmTurn.llmResponse.responseThinking of
-                            Just thinking ->
-                                withAttr thinkingAttr $
-                                    vBox [txt "🤔 Thinking...", txt thinking]
-                            Nothing -> txt ""
-                        , render_usage mUsage
-                        , txt " "
-                        ]
-                    , if null llmTurn.llmToolCalls
-                        then emptyWidget
-                        else
-                            vBox
-                                [ txt $ "  [tool calls: " <> Text.pack (show (length llmTurn.llmToolCalls)) <> "]"
-                                , render_usage mUsage
-                                , txt " "
-                                ]
+                    [ txt $
+                        "AI: " <> case llmTurn.llmResponse.responseText of
+                            Just txt0 -> txt0
+                            Nothing -> "(no response)"
+                    , case llmTurn.llmResponse.responseThinking of
+                        Just thinking -> withAttr thinkingAttr $ txt $ "Thinking: " <> thinking
+                        Nothing -> emptyWidget
+                    , render_usage mUsage
+                    , txt " "
+                    ]
+        PartialUserTurn partial mUsage ->
+            withAttr userMessageAttr $
+                vBox
+                    [ txt $
+                        "[Partial] > " <> case partial.pUserQuery of
+                            Just (UserQuery q _) -> q
+                            Nothing -> "(no query)"
+                    , render_usage mUsage
+                    , txt " "
                     ]
 
--- | Render usage info for a turn (tokens if available, else bytes).
+-- | Render usage information for a turn (tokens or bytes).
 render_usage :: Maybe StepByteUsage -> Widget N
 render_usage Nothing = emptyWidget
 render_usage (Just usage) =
-    case stepTokenUsage usage of
-        Just tokenUsage ->
-            withAttr tokenUsageAttr $ txt $ "[" <> formatTokenUsage tokenUsage <> "]"
+    case usage.stepTokenUsage of
+        Just tokens ->
+            withAttr byteUsageAttr $
+                txt $
+                    "  [Tokens: " <> Text.pack (show $ tokenTotalTokens tokens) <> "]"
         Nothing ->
-            withAttr byteUsageAttr $ txt $ "[" <> formatByteBreakdown usage <> "]"
-
--- | Format token usage for display.
-formatTokenUsage :: TokenUsage -> Text
-formatTokenUsage usage =
-    let parts =
-            concat
-                [ ["in: " <> formatTokenCount (tokenPromptTokens usage)]
-                , ["out: " <> formatTokenCount (tokenCompletionTokens usage)]
-                , case tokenCachedTokens usage of
-                    Just n | n > 0 -> ["cached: " <> formatTokenCount n]
-                    _ -> []
-                , case tokenThinkingTokens usage of
-                    Just n | n > 0 -> ["think: " <> formatTokenCount n]
-                    _ -> []
-                ]
-     in Text.intercalate ", " parts <> " | total: " <> formatTokenCount (tokenTotalTokens usage)
-
--- | Format byte usage breakdown for display.
-formatByteBreakdown :: StepByteUsage -> Text
-formatByteBreakdown usage =
-    let parts =
-            concat
-                [ if stepInputBytes usage > 0 then ["in: " <> formatBytes (stepInputBytes usage)] else []
-                , if stepOutputBytes usage > 0 then ["out: " <> formatBytes (stepOutputBytes usage)] else []
-                , if stepReasoningBytes usage > 0 then ["reason: " <> formatBytes (stepReasoningBytes usage)] else []
-                , if stepToolBytes usage > 0 then ["tool: " <> formatBytes (stepToolBytes usage)] else []
-                ]
-     in if null parts
-            then "total: " <> formatBytes (stepTotalBytes usage)
-            else Text.intercalate ", " parts
+            if usage.stepTotalBytes > 0
+                then
+                    withAttr byteUsageAttr $
+                        txt $
+                            "  [" <> formatBytes usage.stepTotalBytes <> "]"
+                else emptyWidget
 
 -- | Helper to extract text from SystemPrompt.
 getSystemPromptText :: SystemPrompt -> Text
