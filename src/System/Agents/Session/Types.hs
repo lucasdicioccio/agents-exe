@@ -21,6 +21,15 @@ module System.Agents.Session.Types (
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),
+    PartialUserTurnContent (..),
+
+    -- * Execution mode
+    ExecutionMode (..),
+
+    -- * Async/Continuation types
+    ContinuationToken (..),
+    newContinuationToken,
+    CacheKey (..),
 
     -- * Byte usage tracking
     StepByteUsage (..),
@@ -55,6 +64,9 @@ module System.Agents.Session.Types (
     OnSessionProgress,
     ignoreSessionProgress,
 
+    -- * Migration helpers
+    migrateSessionV1ToV2,
+
     -- * Re-exports for convenience
     TokenUsage (..),
 ) where
@@ -63,10 +75,12 @@ import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson.Types ((.!=))
 import qualified Data.Aeson.Types as Aeson.Types
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
@@ -91,6 +105,80 @@ newtype TurnId = TurnId UUID
 newTurnId :: IO TurnId
 newTurnId =
     TurnId <$> UUID.nextRandom
+
+-------------------------------------------------------------------------------
+-- Async/Continuation Types
+-------------------------------------------------------------------------------
+
+{- | Unique token identifying a yielded tool call.
+
+Used to resume a paused tool execution. Tokens are UUID-based for
+global uniqueness across machines.
+-}
+newtype ContinuationToken = ContinuationToken UUID
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ContinuationToken where
+    toJSON (ContinuationToken uuid) = Aeson.toJSON $ UUID.toText uuid
+
+instance FromJSON ContinuationToken where
+    parseJSON val = do
+        txt <- Aeson.parseJSON val
+        case UUID.fromText txt of
+            Just uuid -> pure $ ContinuationToken uuid
+            Nothing -> fail "Invalid UUID for ContinuationToken"
+
+-- | Generate a new unique continuation token.
+newContinuationToken :: IO ContinuationToken
+newContinuationToken = ContinuationToken <$> UUID.nextRandom
+
+{- | Cache key derived from tool call.
+
+The key uniquely identifies a tool call based on:
+* Tool name (e.g., "bash", "sqlite_query")
+* Arguments hash (normalized JSON representation)
+
+This content-addressable approach ensures that identical tool calls
+(with the same arguments) map to the same cache key.
+-}
+data CacheKey = CacheKey
+    { ckToolName :: Text
+    -- ^ The name of the tool (e.g., "bash_command")
+    , ckArgumentsHash :: Text
+    -- ^ Hash of normalized arguments
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON CacheKey where
+    toJSON key =
+        Aeson.object
+            [ "toolName" .= key.ckToolName
+            , "argumentsHash" .= key.ckArgumentsHash
+            ]
+
+instance FromJSON CacheKey where
+    parseJSON = Aeson.withObject "CacheKey" $ \v ->
+        CacheKey
+            <$> v .: "toolName"
+            <*> v .: "argumentsHash"
+
+-------------------------------------------------------------------------------
+-- Execution Mode
+-------------------------------------------------------------------------------
+
+{- | Execution mode for the agent.
+
+Determines how tool calls are executed within a session:
+* 'Synchronous' - All tool calls execute immediately (traditional behavior)
+* 'Asynchronous' - Tool calls execute one at a time, allowing pausing/resuming
+-}
+data ExecutionMode
+    = Synchronous
+    | Asynchronous
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ExecutionMode
+instance FromJSON ExecutionMode
 
 -------------------------------------------------------------------------------
 -- Signal Types (Trajectory Analysis)
@@ -319,6 +407,7 @@ sessionTotalBytes session =
     turnByteUsage :: Turn -> Maybe StepByteUsage
     turnByteUsage (UserTurn _ usage) = usage
     turnByteUsage (LlmTurn _ usage) = usage
+    turnByteUsage (PartialUserTurn _ usage) = usage
 
 -------------------------------------------------------------------------------
 -- Core content types
@@ -553,15 +642,62 @@ data LlmTurnContent
 instance FromJSON LlmTurnContent
 instance ToJSON LlmTurnContent
 
+{- | Partial user-turn content for async execution.
+
+Represents an incomplete user turn where some tool calls have completed
+and others are still pending (either not yet executed or yielded for
+external completion).
+-}
+data PartialUserTurnContent = PartialUserTurnContent
+    { pUserPrompt :: SystemPrompt
+    -- ^ System prompt used
+    , pUserTools :: [SystemTool]
+    -- ^ Tools available
+    , pUserQuery :: Maybe UserQuery
+    -- ^ User query if any
+    , pCompletedResponses :: [(LlmToolCall, UserToolResponse)]
+    -- ^ Completed tool calls with their responses
+    , pPendingCalls :: [LlmToolCall]
+    -- ^ Tool calls that still need execution
+    , pPendingContinuations :: [(ContinuationToken, CacheKey)]
+    -- ^ Continuation tokens for yielded tool calls (async mode)
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON PartialUserTurnContent where
+    toJSON content =
+        Aeson.object
+            [ "userPrompt" .= content.pUserPrompt
+            , "userTools" .= content.pUserTools
+            , "userQuery" .= content.pUserQuery
+            , "completedResponses" .= content.pCompletedResponses
+            , "pendingCalls" .= content.pPendingCalls
+            , "pendingContinuations" .= content.pPendingContinuations
+            ]
+
+instance FromJSON PartialUserTurnContent where
+    parseJSON = Aeson.withObject "PartialUserTurnContent" $ \v ->
+        PartialUserTurnContent
+            <$> v .: "userPrompt"
+            <*> v .: "userTools"
+            <*> v .:? "userQuery"
+            <*> v .: "completedResponses"
+            <*> v .: "pendingCalls"
+            <*> v .:? "pendingContinuations" .!= []
+
 {- | Unification.
 
 Each turn now optionally includes 'StepByteUsage' for tracking
 data exchange sizes. The 'Maybe' allows backward compatibility
 with sessions that were created before byte tracking was added.
+
+Version 2 additions:
+* 'PartialUserTurn' - Represents incomplete tool execution in async mode
 -}
 data Turn
     = UserTurn UserTurnContent (Maybe StepByteUsage)
     | LlmTurn LlmTurnContent (Maybe StepByteUsage)
+    | PartialUserTurn PartialUserTurnContent (Maybe StepByteUsage)
     deriving (Show, Ord, Eq, Generic)
 
 {- | Custom ToJSON instance that matches the FromJSON format.
@@ -575,6 +711,10 @@ instance ToJSON Turn where
     toJSON (LlmTurn contents byteUsage) =
         Aeson.object $
             ["tag" .= ("LlmTurn" :: Text), "contents" .= contents]
+                ++ ["byteUsage" .= usage | Just usage <- [byteUsage]]
+    toJSON (PartialUserTurn contents byteUsage) =
+        Aeson.object $
+            ["tag" .= ("PartialUserTurn" :: Text), "contents" .= contents]
                 ++ ["byteUsage" .= usage | Just usage <- [byteUsage]]
 
 {- | Legacy Turn structure without byte usage tracking.
@@ -605,6 +745,10 @@ instance FromJSON Turn where
                     contents <- obj .: "contents"
                     byteUsage <- obj .:? "byteUsage"
                     pure $ LlmTurn contents byteUsage
+                "PartialUserTurn" -> do
+                    contents <- obj .: "contents"
+                    byteUsage <- obj .:? "byteUsage"
+                    pure $ PartialUserTurn contents byteUsage
                 _ -> fail $ "Unknown Turn tag: " ++ show tag
 
         parseOld = Aeson.withObject "Turn" $ \obj -> do
@@ -626,6 +770,7 @@ and an optional version field for feature compatibility.
 Version history:
 * Nothing / missing - Legacy session (pre-media support)
 * Just 1 - Media support enabled (base64-encoded binary content)
+* Just 2 - Async/resumable execution support
 -}
 data Session
     = Session
@@ -635,12 +780,16 @@ data Session
     , turnId :: TurnId
     , sessionVersion :: Maybe Int
     {- ^ Optional session version for feature compatibility:
-    Nothing = legacy (pre-media), Just 1 = media support
+    Nothing = legacy (pre-media), Just 1 = media support, Just 2 = async support
+    -}
+    , sessionExecutionMode :: Maybe ExecutionMode
+    {- ^ Execution mode used for this session.
+    Nothing = default to Synchronous for backward compatibility.
     -}
     }
     deriving (Show, Ord, Eq, Generic)
 
--- | Custom ToJSON for Session that omits version when Nothing.
+-- | Custom ToJSON for Session that omits optional fields when Nothing.
 instance ToJSON Session where
     toJSON s =
         Aeson.object $
@@ -650,8 +799,9 @@ instance ToJSON Session where
             , "turnId" .= s.turnId
             ]
                 ++ ["sessionVersion" .= v | Just v <- [s.sessionVersion]]
+                ++ ["sessionExecutionMode" .= m | Just m <- [s.sessionExecutionMode]]
 
--- | Custom FromJSON for Session that handles missing version field.
+-- | Custom FromJSON for Session that handles missing fields.
 instance FromJSON Session where
     parseJSON = Aeson.withObject "Session" $ \v ->
         Session
@@ -660,6 +810,24 @@ instance FromJSON Session where
             <*> v .:? "forkedFromSessionId"
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
+            <*> v .:? "sessionExecutionMode"
+
+-------------------------------------------------------------------------------
+-- Session Migration
+-------------------------------------------------------------------------------
+
+{- | Migrate a session from version 1 to version 2.
+
+Adds async/resumable execution support by:
+* Setting version to Just 2
+* Defaulting execution mode to Synchronous for existing sessions
+-}
+migrateSessionV1ToV2 :: Session -> Session
+migrateSessionV1ToV2 session =
+    session
+        { sessionVersion = Just 2
+        , sessionExecutionMode = Just Synchronous
+        }
 
 -------------------------------------------------------------------------------
 -- Session Progress Tracking

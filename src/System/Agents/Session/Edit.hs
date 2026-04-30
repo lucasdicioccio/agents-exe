@@ -97,6 +97,7 @@ sessionEditDropTail n session
 This removes:
 * Tool calls from LLM turns ('llmToolCalls')
 * Tool responses from user turns ('userToolResponses')
+* Pending/completed tool calls from partial user turns
 
 The tool call structures are replaced with an empty list, preserving
 the overall session structure.
@@ -110,6 +111,15 @@ sessionEditCensorToolCalls session =
     censorTurn :: Session.Turn -> Session.Turn
     censorTurn (Session.UserTurn utc mUsage) =
         Session.UserTurn (utc{Session.userToolResponses = []}) mUsage
+    censorTurn (Session.PartialUserTurn puc mUsage) =
+        Session.PartialUserTurn
+            ( puc
+                { Session.pCompletedResponses = []
+                , Session.pPendingCalls = []
+                , Session.pPendingContinuations = []
+                }
+            )
+            mUsage
     censorTurn (Session.LlmTurn ltc mUsage) =
         Session.LlmTurn (ltc{Session.llmToolCalls = []}) mUsage
 
@@ -131,6 +141,7 @@ sessionEditCensorThinking session =
   where
     censorTurn :: Session.Turn -> Session.Turn
     censorTurn (Session.UserTurn utc mUsage) = Session.UserTurn utc mUsage
+    censorTurn (Session.PartialUserTurn puc mUsage) = Session.PartialUserTurn puc mUsage
     censorTurn (Session.LlmTurn ltc mUsage) =
         Session.LlmTurn (ltc{Session.llmResponse = censorResponse ltc.llmResponse}) mUsage
 

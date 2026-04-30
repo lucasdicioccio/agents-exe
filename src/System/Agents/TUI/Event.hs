@@ -587,6 +587,7 @@ handleForkAtTurn tracer navState = do
                 , forkedFromSessionId = Just originalSessionId
                 , turnId = newTurnId'
                 , sessionVersion = Just 1
+                , sessionExecutionMode = Nothing
                 }
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
     case mAgent of
@@ -1304,7 +1305,7 @@ handleNewConversationFromEditor tracer = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1))
+            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing)
             runConversation tracer baseTuiAgent session
         _ -> pure ()
 

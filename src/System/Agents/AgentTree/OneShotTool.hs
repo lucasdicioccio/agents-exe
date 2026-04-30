@@ -274,7 +274,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
 
         -- Create a fresh session with media support (version 1)
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
+        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
 
         -- Get current time for timestamps
         now <- getCurrentTime
@@ -552,6 +552,9 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
+                , ctxExecutionMode = SessionBase.Synchronous
+                , ctxToolCache = Nothing
+                , ctxAsyncToolCall = Nothing
                 }
 
 -------------------------------------------------------------------------------
