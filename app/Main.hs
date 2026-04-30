@@ -41,6 +41,7 @@ import System.Agents.CLI.Aliases (
 import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
 import qualified System.Agents.CLI.CheckToolCall as CheckToolCallCmd
+import qualified System.Agents.CLI.Config as ConfigCmd
 import qualified System.Agents.CLI.Cowsay as CowsayCmd
 import qualified System.Agents.CLI.DescribeTool as DescribeToolCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
@@ -407,6 +408,7 @@ data Prog = Prog
 data Command
     = Check CheckCmd.CheckOptions
     | CheckToolCall CheckToolCallCmd.CheckToolCallOptions
+    | Config ConfigCmd.ConfigOptions
     | ListToolCalls ReplayToolCallCmd.ListToolCallsOptions
     | ReplayToolCall ReplayToolCallCmd.ReplayToolCallOptions
     | TerminalUI TUICmd.TuiOptions
@@ -429,6 +431,7 @@ data Command
 instance Show Command where
     show (Check _) = "Check"
     show (CheckToolCall _) = "CheckToolCall"
+    show (Config _) = "Config"
     show (ListToolCalls _) = "ListToolCalls"
     show (ReplayToolCall _) = "ReplayToolCall"
     show (TerminalUI _) = "TerminalUI"
@@ -498,6 +501,71 @@ parseCheckToolCallOptions =
                 <> metavar "TOOLPATH"
                 <> help "Path to the tool script to validate against"
             )
+
+-- | Parse the config command and its subcommands
+parseConfigCommand :: ArgParserArgs -> Parser Command
+parseConfigCommand argArgs = Config <$> parseConfigOptions argArgs
+
+parseConfigOptions :: ArgParserArgs -> Parser ConfigCmd.ConfigOptions
+parseConfigOptions argArgs =
+    ConfigCmd.ConfigOptions
+        <$> parseConfigSubcommand argArgs
+        <*> switch
+            ( long "force"
+                <> short 'f'
+                <> help "Overwrite existing files"
+            )
+
+parseConfigSubcommand :: ArgParserArgs -> Parser ConfigCmd.ConfigCommand
+parseConfigSubcommand argArgs =
+    subparser
+        ( command "local" (info (parseConfigLocalCommand argArgs) (progDesc "Manage local agents-exe.cfg.json"))
+            <> command "keymap" (info parseConfigKeymapCommand (progDesc "Manage keymap configuration"))
+            <> command "api-key" (info (parseConfigApiKeyCommand argArgs) (progDesc "Manage API keys"))
+        )
+
+parseConfigLocalCommand :: ArgParserArgs -> Parser ConfigCmd.ConfigCommand
+parseConfigLocalCommand _argArgs =
+    ConfigCmd.ConfigLocal . ConfigCmd.LocalConfigOptions
+        <$> subparser
+            ( command "init" (info (pure ConfigCmd.LocalInit) (progDesc "Initialize a new agents-exe.cfg.json file"))
+            )
+
+parseConfigKeymapCommand :: Parser ConfigCmd.ConfigCommand
+parseConfigKeymapCommand =
+    ConfigCmd.ConfigKeymap
+        <$> subparser
+            ( command "init" (info parseKeymapInitOptions (progDesc "Initialize a new keymap file with default bindings"))
+            )
+
+parseKeymapInitOptions :: Parser ConfigCmd.KeymapConfigOptions
+parseKeymapInitOptions =
+    ConfigCmd.KeymapConfigOptions
+        <$> pure ConfigCmd.KeymapInit
+        <*> strArgument
+            ( metavar "FILE"
+                <> help "Path where the keymap file will be created"
+            )
+
+parseConfigApiKeyCommand :: ArgParserArgs -> Parser ConfigCmd.ConfigCommand
+parseConfigApiKeyCommand argArgs =
+    ConfigCmd.ConfigApiKey
+        <$> subparser
+            ( command "list" (info parseApiKeyListOptions (progDesc "List all configured API key names"))
+                <> command "create" (info parseApiKeyCreateOptions (progDesc "Create a new API key entry"))
+            )
+  where
+    parseApiKeyListOptions :: Parser ConfigCmd.ApiKeyConfigOptions
+    parseApiKeyListOptions =
+        ConfigCmd.ApiKeyConfigOptions
+            <$> pure ConfigCmd.ApiKeyList
+            <*> pure (secretsKeyFile argArgs)
+
+    parseApiKeyCreateOptions :: Parser ConfigCmd.ApiKeyConfigOptions
+    parseApiKeyCreateOptions =
+        ConfigCmd.ApiKeyConfigOptions
+            <$> (ConfigCmd.ApiKeyCreate <$> strArgument (metavar "NAME" <> help "Name for the new API key"))
+            <*> pure (secretsKeyFile argArgs)
 
 -- | Parse the list-tool-calls command
 parseListToolCallsCommand :: Parser Command
@@ -1199,6 +1267,7 @@ parseProgOptions argparserargs =
         <*> hsubparser
             ( command "check" (info parseCheckCommand (progDesc "Validate agent configurations and optionally dump tool schemas"))
                 <> command "check-tool-call" (info parseCheckToolCallCommand (progDesc "Validate a tool call payload against a tool schema (reads JSON from stdin)"))
+                <> command "config" (info (parseConfigCommand argparserargs) (progDesc "Configure agents-exe (git-config style)"))
                 <> command "list-tool-calls" (info parseListToolCallsCommand (progDesc "List all tool calls from a session file"))
                 <> command "replay-tool-call" (info parseReplayToolCallCommand (progDesc "Replay a tool call from a session file, validating and optionally executing"))
                 <> command "tui" (info (parseTuiChatCommand argparserargs) (idm))
@@ -1338,6 +1407,8 @@ runCommand pargs baseTracer sessionStore files =
             CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile files
         CheckToolCall opts ->
             CheckToolCallCmd.handleCheckToolCall Prod.silent opts
+        Config opts ->
+            ConfigCmd.handleConfig pargs.configDir opts
         ListToolCalls opts ->
             ReplayToolCallCmd.handleListToolCalls opts
         ReplayToolCall opts ->
@@ -1392,3 +1463,4 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
+
