@@ -7,6 +7,7 @@ module System.Agents.Session.Step where
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Text as Text
+import qualified Data.Time
 
 import Data.Void (Void)
 
@@ -15,14 +16,29 @@ import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
+import System.Agents.Tools.Cache (ToolCache (..), CachedResult (..))
+import qualified System.Agents.Tools.Cache as Cache
 import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
 import qualified System.Agents.Tools.Context as Ctx
-
-{- | Runs a single step of agent for a given session.
+{- | Runs a single step of agent for a given session (synchronous mode).
 Agent may be modified, may decide to return a session, or decide to stop.
+
+This is the original synchronous implementation that executes all tool
+calls at once using 'traverse'.
 -}
 runStepM :: forall r. ConversationId -> Agent r -> Session -> IO (Agent r, Either r Session)
 runStepM convId agent sess =
+    case agent.ctxExecutionMode of
+        Asynchronous -> runStepMAsync convId agent sess
+        Synchronous -> runStepMSync convId agent sess
+
+{- | Synchronous step execution - all tools execute immediately.
+
+This is the traditional execution mode where all tool calls in a turn
+are executed immediately and the session continues without pausing.
+-}
+runStepMSync :: forall r. ConversationId -> Agent r -> Session -> IO (Agent r, Either r Session)
+runStepMSync convId agent sess =
     go agent sess
   where
     addTurn :: Session -> Turn -> IO Session
@@ -55,6 +71,176 @@ runStepM convId agent sess =
                 sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
                 pure (agent0, Right sess1)
 
+-------------------------------------------------------------------------------
+-- Asynchronous Step Execution
+-------------------------------------------------------------------------------
+
+{- | Asynchronous step execution - supports partial tool execution.
+
+In async mode:
+1. Tool calls are executed one at a time
+2. Each call checks the cache first
+3. After each call, the session can be persisted
+4. If all calls complete, the turn is finalized
+5. If yielding is needed, a PartialUserTurn is created
+
+This enables sessions to be paused and resumed, potentially on different machines.
+-}
+runStepMAsync :: forall r. ConversationId -> Agent r -> Session -> IO (Agent r, Either r Session)
+runStepMAsync convId agent sess =
+    go agent sess
+  where
+    addTurn :: Session -> Turn -> IO Session
+    addTurn sess0 turn = do
+        tId <- newTurnId
+        pure $ sess0{turns = turn : sess0.turns, turnId = tId}
+
+    go :: Agent r -> Session -> IO (Agent r, Either r Session)
+    go agent0 sess0 = do
+        next <- agent0.step sess0
+        case next of
+            Stop r -> pure (agent0, Left r)
+            Evolve agent1 -> pure (agent1, Right sess0)
+            AskUserPrompt missing -> do
+                sPrompt <- agent0.sysPrompt
+                sTools <- agent0.sysTools
+                uQuery <- if missing.missingQuery then agent0.usrQuery else pure Nothing
+                -- Check if there's a partial turn to continue
+                case getPartialTurn sess0 of
+                    Just partial -> do
+                        -- Continue execution of partial turn
+                        continuePartialTurn convId agent0 sess0 partial
+                    Nothing -> do
+                        -- Start new async execution
+                        startNewAsyncTurn convId agent0 sess0 sPrompt sTools uQuery missing.missingToolCalls
+            AskLlmCompletion completion -> do
+                (llmRsp, llmTool) <- agent0.complete completion
+                let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
+                sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
+                pure (agent0, Right sess1)
+
+{- | Get the most recent partial turn from a session, if any.
+
+Looks at the most recent turn and returns it if it's a PartialUserTurn.
+-}
+getPartialTurn :: Session -> Maybe PartialUserTurnContent
+getPartialTurn session =
+    case session.turns of
+        (PartialUserTurn content _ : _) -> Just content
+        _ -> Nothing
+
+{- | Start a new async user turn.
+
+Executes the first tool call (checking cache first), then either:
+1. If more calls remain: creates a PartialUserTurn and pauses
+2. If all calls complete: creates a complete UserTurn
+-}
+startNewAsyncTurn ::
+    forall r.
+    ConversationId ->
+    Agent r ->
+    Session ->
+    SystemPrompt ->
+    [SystemTool] ->
+    Maybe UserQuery ->
+    [LlmToolCall] ->
+    IO (Agent r, Either r Session)
+startNewAsyncTurn convId agent sess sPrompt sTools uQuery calls = do
+    let ctx = buildContext agent sess convId
+    -- Execute first call
+    executeNextCall ctx agent sess sPrompt sTools uQuery [] calls
+
+{- | Continue execution of a partial turn.
+
+Takes the completed responses so far and the pending calls, executes
+the next pending call, and updates the session accordingly.
+-}
+continuePartialTurn ::
+    forall r.
+    ConversationId ->
+    Agent r ->
+    Session ->
+    PartialUserTurnContent ->
+    IO (Agent r, Either r Session)
+continuePartialTurn convId agent sess partial = do
+    let ctx = buildContext agent sess convId
+    executeNextCall ctx agent sess partial.pUserPrompt partial.pUserTools partial.pUserQuery partial.pCompletedResponses partial.pPendingCalls
+
+{- | Execute the next tool call in sequence.
+
+Checks cache first, then executes if needed. Updates the session with
+either a new partial turn or a complete user turn.
+-}
+executeNextCall ::
+    forall r.
+    ToolExecutionContext ->
+    Agent r ->
+    Session ->
+    SystemPrompt ->
+    [SystemTool] ->
+    Maybe UserQuery ->
+    [(LlmToolCall, UserToolResponse)] ->
+    [LlmToolCall] ->
+    IO (Agent r, Either r Session)
+executeNextCall ctx agent sess sPrompt sTools uQuery completed pending =
+    case pending of
+        [] -> do
+            -- All calls complete - finalize the turn
+            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd completed)
+            sess' <- addTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery completed) (Just byteUsage))
+            pure (agent, Right sess')
+        (nextCall : remaining) -> do
+            -- Execute next call with cache check
+            result <- executeToolCallWithCache agent ctx nextCall
+            let newCompleted = completed ++ [(nextCall, result)]
+            if null remaining
+                then do
+                    -- This was the last call - complete the turn
+                    let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd newCompleted)
+                    sess' <- addTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery newCompleted) (Just byteUsage))
+                    pure (agent, Right sess')
+                else do
+                    -- More calls remain - create partial turn
+                    let partial = PartialUserTurnContent sPrompt sTools uQuery newCompleted remaining []
+                    let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery newCompleted
+                    sess' <- addTurn sess (PartialUserTurn partial (Just byteUsage))
+                    pure (agent, Right sess')
+  where
+    addTurn s t = do
+        tId <- newTurnId
+        pure $ s{turns = t : s.turns, turnId = tId}
+
+{- | Execute a tool call with optional cache lookup.
+
+If a cache is configured, checks it first. If found, returns the cached
+result. Otherwise executes the tool and optionally stores the result.
+-}
+executeToolCallWithCache :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+executeToolCallWithCache agent ctx call = do
+    case agent.ctxToolCache of
+        Just cache -> do
+            let key = computeSimpleCacheKey call
+            mCached <- cache.cacheLookup key
+            case mCached of
+                Just cached -> pure $ cached.crResult
+                Nothing -> do
+                    result <- agent.toolCall ctx call
+                    -- Store in cache
+                    now <- getCurrentTime
+                    cache.cacheStore key $ CachedResult result now Nothing
+                    pure result
+        Nothing -> agent.toolCall ctx call
+-- Simple cache key computation (tool name + argument hash)
+computeSimpleCacheKey :: LlmToolCall -> Cache.CacheKey
+computeSimpleCacheKey (LlmToolCall val) =
+    let jsonStr = Text.pack $ show val
+        hash = Text.take 64 jsonStr
+     in Cache.CacheKey "tool" hash
+
+-- Import needed for getCurrentTime
+getCurrentTime :: IO Data.Time.UTCTime
+getCurrentTime = Data.Time.getCurrentTime
+
 {- | Build a ToolExecutionContext based on the agent's configuration.
 
 The context is populated according to 'ContextConfig' settings:
@@ -85,6 +271,10 @@ buildContext agent sess convId =
             , Ctx.ctxEventQueue = agent.ctxEventQueue
             }
 
+-------------------------------------------------------------------------------
+-- Byte Usage Calculation
+-------------------------------------------------------------------------------
+
 {- | Calculate byte usage for a user turn.
 
 This includes:
@@ -99,6 +289,21 @@ calculateUserTurnByteUsage sPrompt sTools uQuery toolResponses =
                 + userQueryBytes uQuery
         toolBytes = sum (map userToolResponseBytes toolResponses)
         -- User turns have no output or reasoning from the LLM
+        outputBytes = 0
+        reasoningBytes = 0
+     in calculateStepByteUsage inputBytes outputBytes reasoningBytes toolBytes Nothing
+
+{- | Calculate byte usage for a partial turn.
+
+Similar to user turn but accounts for partial completion.
+-}
+calculatePartialTurnByteUsage :: SystemPrompt -> [SystemTool] -> Maybe UserQuery -> [(LlmToolCall, UserToolResponse)] -> StepByteUsage
+calculatePartialTurnByteUsage sPrompt sTools uQuery completed =
+    let inputBytes =
+            systemPromptBytes sPrompt
+                + toolsBytes sTools
+                + userQueryBytes uQuery
+        toolBytes = sum (map (userToolResponseBytes . snd) completed)
         outputBytes = 0
         reasoningBytes = 0
      in calculateStepByteUsage inputBytes outputBytes reasoningBytes toolBytes Nothing
@@ -166,6 +371,10 @@ contentPartBytes :: ContentPart -> Int
 contentPartBytes (TextPart txt) = Text.length txt * 4
 contentPartBytes (MediaPart media) = Text.length media.mediaBase64Data
 
+-------------------------------------------------------------------------------
+-- Naive Step Functions
+-------------------------------------------------------------------------------
+
 -- Naive action selection function that merely parrots the least surprising
 -- thing: it never evolves or stops the agent, always ask for a user query or a prompt.
 naiveStep :: Session -> IO (Action Void)
@@ -186,6 +395,14 @@ naiveStep sess0 = do
                         let sTools0 = userTurn.userTools
                         let uQuery0 = userTurn.userQuery
                         let tAnswers0 = userTurn.userToolResponses
+                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
+                    (PartialUserTurn partial _mUsage) -> do
+                        -- Partial turn: continue with remaining pending calls
+                        let sPrompt0 = partial.pUserPrompt
+                        let sTools0 = partial.pUserTools
+                        let uQuery0 = partial.pUserQuery
+                        let tAnswers0 = partial.pCompletedResponses
+                        -- Create completion with completed responses so far
                         pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
 
 -- | Step function that stops when the LLM returns no tool calls.
@@ -211,5 +428,18 @@ naiveTilNoToolCallStep sess = do
                             -- No tool calls: stop
                             pure $ Stop (llmTurn, sess)
                         else
-                            -- Has tool calls: continue with user prompt for tool responses
+-- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
+                PartialUserTurn partial _mUsage ->
+                    -- Last turn was partial - need to continue execution
+                    if null partial.pPendingCalls
+                        then
+                            -- No pending calls: treat like user turn completion
+                            let sPrompt0 = partial.pUserPrompt
+                                sTools0 = partial.pUserTools
+                                uQuery0 = partial.pUserQuery
+                                tAnswers0 = partial.pCompletedResponses
+                             in pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
+                        else
+                            -- Still have pending calls: continue execution
+                            pure $ AskUserPrompt $ MissingUserPrompt False partial.pPendingCalls

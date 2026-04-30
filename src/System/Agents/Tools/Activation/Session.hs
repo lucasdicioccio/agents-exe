@@ -61,9 +61,9 @@ import qualified Data.Text.Encoding as Text
 
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
-import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Activation
+import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
+import System.Agents.ToolSchema (ToolDescription (..), ParamProperty (..), ParamType (..), toolDescriptionName, toolDescriptionText, toolDescriptionParamProperties, propertyKey, propertyType, propertyDescription, propertyRequired)
+import System.Agents.Tools.Activation (ActivationState (..), ToolboxSessionState (..), ToolgroupName, Activation(..))
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..))
@@ -72,39 +72,37 @@ import System.Agents.Tools.Context (ToolCall (..))
 -- Pure Session Folding
 -------------------------------------------------------------------------------
 
-{- | Fold a complete session into the toolbox session state.
+{- | Fold over a session to compute the current activation state.
 
-This is a pure function that computes the current activation state
-of all toolgroups by folding over all turns in the session.
+This function walks through all turns in the session, extracting
+meta-tool calls and computing the resulting activation state.
 -}
 foldSession :: Session -> ToolboxSessionState
-foldSession session = foldl' (\acc turn -> acc <> extractFromTurn turn) mempty session.turns
+foldSession session = foldl' applyTurn mempty session.turns
+  where
+    applyTurn :: ToolboxSessionState -> Turn -> ToolboxSessionState
+    applyTurn state turn = state <> extractFromTurn turn
 
-{- | Extract toolbox activation state changes from a single turn.
+{- | Extract state changes from a single turn.
 
-User turns don't modify activation state.
-LLM turns may contain meta_activate_tool or meta_deactivate_tool calls.
+For LLM turns, this extracts all meta-tool calls and computes
+the resulting state changes.
 -}
 extractFromTurn :: Turn -> ToolboxSessionState
+extractFromTurn (LlmTurn content _) = foldMap extractFromToolCall content.llmToolCalls
 extractFromTurn (UserTurn _ _) = mempty
-extractFromTurn (LlmTurn llmTurn _) =
-    foldl' (\acc tc -> acc <> extractFromToolCall tc) mempty llmTurn.llmToolCalls
+extractFromTurn (PartialUserTurn _ _) = mempty
 
-{- | Extract activation state changes from a single tool call.
+{- | Extract state change from a single tool call.
 
-Recognizes:
-- meta_activate_tool(toolgroup) -> activates the toolgroup
-- meta_deactivate_tool(toolgroup) -> deactivates the toolgroup
-- skill_enable_{name} (backward compat) -> activates "skill:{name}"
-- skill_disable_{name} (backward compat) -> deactivates "skill:{name}"
-- meta_discover_tools() -> no state change
-- skill_list -> no state change (backward compat)
+This checks if the tool call is a meta-tool call (activate/deactivate)
+and returns the appropriate state change.
 -}
 extractFromToolCall :: LlmToolCall -> ToolboxSessionState
 extractFromToolCall (LlmToolCall val) =
     case extractFunctionName val of
-        Nothing -> mempty
         Just funcName -> parseMetaToolCall funcName val
+        Nothing -> mempty
 
 {- | Extract the function name from a tool call JSON value.
 
@@ -299,7 +297,7 @@ makeActivateTool toolgroups =
 
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.callToolName == getToolName llmName
+            if call.callToolName == OpenAI.getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find Nothing
@@ -340,7 +338,7 @@ makeDeactivateTool toolgroups =
 
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.callToolName == getToolName llmName
+            if call.callToolName == OpenAI.getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc paramProps) find Nothing
@@ -367,7 +365,7 @@ makeDiscoverTools toolgroups =
 
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call =
-            if call.callToolName == getToolName llmName
+            if call.callToolName == OpenAI.getToolName llmName
                 then Just $ mapToolResult (const call) tool
                 else Nothing
      in ToolRegistration tool (makeToolDecl llmName llmDesc []) find Nothing
@@ -398,3 +396,4 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
+

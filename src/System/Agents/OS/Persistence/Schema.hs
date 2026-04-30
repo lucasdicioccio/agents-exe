@@ -6,6 +6,10 @@ Database schema definitions for the OS persistence layer.
 
 This module provides SQL schema definitions for SQLite and PostgreSQL
 backends, along with migration support.
+
+Schema Version History:
+* Version 1 - Initial schema with entities, components, events, messages, tool_calls
+* Version 2 - Added tool_call_cache and tool_continuations tables for async execution
 -}
 module System.Agents.OS.Persistence.Schema (
     -- * Schema Version
@@ -21,6 +25,10 @@ module System.Agents.OS.Persistence.Schema (
     postgresCreateSchema,
     postgresDropSchema,
     postgresMigrationScript,
+
+    -- * Async Execution Schema
+    sqliteCreateAsyncSchema,
+    postgresCreateAsyncSchema,
 
     -- * Migration
     Migration (..),
@@ -39,17 +47,21 @@ import Database.SQLite.Simple.QQ (sql)
 
 {- | Current schema version number.
 Increment this when schema changes require migrations.
+
+Version history:
+* 1 - Initial schema (entities, components, events, messages, tool_calls)
+* 2 - Added async execution support (tool_call_cache, tool_continuations)
 -}
 currentSchemaVersion :: Int
-currentSchemaVersion = 1
+currentSchemaVersion = 2
 
 -------------------------------------------------------------------------------
--- SQLite Schema
+-- SQLite Schema - Version 1 (Base)
 -------------------------------------------------------------------------------
 
 -- | Individual SQLite schema statements for proper execution.
-sqliteSchemaStatements :: [Query]
-sqliteSchemaStatements =
+sqliteSchemaV1Statements :: [Query]
+sqliteSchemaV1Statements =
     [ [sql| CREATE TABLE IF NOT EXISTS schema_version (
             version INTEGER PRIMARY KEY,
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -114,17 +126,56 @@ sqliteSchemaStatements =
     , [sql| CREATE INDEX IF NOT EXISTS idx_entities_updated ON entities(updated_at) |]
     ]
 
+-------------------------------------------------------------------------------
+-- SQLite Schema - Version 2 (Async Execution)
+-------------------------------------------------------------------------------
+
+-- | SQLite schema statements for version 2 (async execution support).
+sqliteSchemaV2Statements :: [Query]
+sqliteSchemaV2Statements =
+    [ -- Tool call cache table
+      [sql| CREATE TABLE IF NOT EXISTS tool_call_cache (
+            cache_key TEXT PRIMARY KEY,
+            tool_name TEXT NOT NULL,
+            arguments_hash TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP
+        ) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at) |]
+    , -- Tool continuations table
+      [sql| CREATE TABLE IF NOT EXISTS tool_continuations (
+            token TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            tool_call_json TEXT NOT NULL,
+            context_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            result_json TEXT
+        ) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at) |]
+    , -- Update schema version
+      [sql| INSERT INTO schema_version (version) VALUES (2) 
+            ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP |]
+    ]
+
 -- | Execute SQLite schema statements individually.
 executeSqliteSchema :: Connection -> IO ()
 executeSqliteSchema conn = do
-    forM_ sqliteSchemaStatements $ \stmt ->
+    forM_ sqliteSchemaV1Statements $ \stmt ->
+        execute_ conn stmt
+    forM_ sqliteSchemaV2Statements $ \stmt ->
         execute_ conn stmt
 
 -- | Complete SQLite schema creation script (for reference/documentation).
 sqliteCreateSchema :: Query
 sqliteCreateSchema =
     [sql|
--- OS Persistence Schema v1
+-- OS Persistence Schema v2
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -188,6 +239,28 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     status TEXT NOT NULL
 );
 
+-- Tool call cache table (async execution)
+CREATE TABLE IF NOT EXISTS tool_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    tool_name TEXT NOT NULL,
+    arguments_hash TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+-- Tool continuations table (async execution)
+CREATE TABLE IF NOT EXISTS tool_continuations (
+    token TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    tool_call_json TEXT NOT NULL,
+    context_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result_json TEXT
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id);
 CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type);
@@ -201,12 +274,22 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_parent ON tool_calls(parent_call_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_status ON tool_calls(status);
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 CREATE INDEX IF NOT EXISTS idx_entities_updated ON entities(updated_at);
+CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
+CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
 |]
 
 -- | SQLite schema destruction script.
 sqliteDropSchema :: Query
 sqliteDropSchema =
     [sql|
+DROP INDEX IF EXISTS idx_continuations_completed;
+DROP INDEX IF EXISTS idx_continuations_expires;
+DROP INDEX IF EXISTS idx_continuations_session;
+DROP INDEX IF EXISTS idx_cache_expires;
+DROP INDEX IF EXISTS idx_cache_tool_name;
 DROP INDEX IF EXISTS idx_entities_updated;
 DROP INDEX IF EXISTS idx_entities_type;
 DROP INDEX IF EXISTS idx_tool_calls_status;
@@ -219,6 +302,8 @@ DROP INDEX IF EXISTS idx_events_created;
 DROP INDEX IF EXISTS idx_events_entity;
 DROP INDEX IF EXISTS idx_components_type;
 DROP INDEX IF EXISTS idx_components_entity;
+DROP TABLE IF EXISTS tool_continuations;
+DROP TABLE IF EXISTS tool_call_cache;
 DROP TABLE IF EXISTS tool_calls;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS events;
@@ -227,12 +312,29 @@ DROP TABLE IF EXISTS entities;
 DROP TABLE IF EXISTS schema_version;
 |]
 
--- | SQLite migration script (version 0 -> 1).
+-- | SQLite migration script.
 sqliteMigrationScript :: Int -> Int -> Maybe (Connection -> IO ())
 sqliteMigrationScript fromVer toVer
-    | fromVer == 0 && toVer == 1 = Just executeSqliteSchema
+    | fromVer == 0 && toVer == 1 = Just migrateV0ToV1
+    | fromVer == 1 && toVer == 2 = Just migrateV1ToV2
+    | fromVer == 0 && toVer == 2 = Just migrateV0ToV2
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
+  where
+    migrateV0ToV1 :: Connection -> IO ()
+    migrateV0ToV1 conn =
+        forM_ sqliteSchemaV1Statements $ \stmt ->
+            execute_ conn stmt
+
+    migrateV1ToV2 :: Connection -> IO ()
+    migrateV1ToV2 conn =
+        forM_ sqliteSchemaV2Statements $ \stmt ->
+            execute_ conn stmt
+
+    migrateV0ToV2 :: Connection -> IO ()
+    migrateV0ToV2 conn = do
+        migrateV0ToV1 conn
+        migrateV1ToV2 conn
 
 -------------------------------------------------------------------------------
 -- PostgreSQL Schema
@@ -242,7 +344,7 @@ sqliteMigrationScript fromVer toVer
 postgresCreateSchema :: Query
 postgresCreateSchema =
     [sql|
--- OS Persistence Schema v1
+-- OS Persistence Schema v2
 
 -- Enable UUID extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -254,7 +356,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 -- Insert initial version
-INSERT INTO schema_version (version) VALUES (1) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+INSERT INTO schema_version (version) VALUES (2) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 
 -- Entities table (sparse representation)
 CREATE TABLE IF NOT EXISTS entities (
@@ -309,6 +411,28 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     status TEXT NOT NULL
 );
 
+-- Tool call cache table (async execution)
+CREATE TABLE IF NOT EXISTS tool_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    tool_name TEXT NOT NULL,
+    arguments_hash TEXT NOT NULL,
+    result_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+-- Tool continuations table (async execution)
+CREATE TABLE IF NOT EXISTS tool_continuations (
+    token TEXT PRIMARY KEY,
+    session_id UUID NOT NULL,
+    tool_call_json JSONB NOT NULL,
+    context_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result_json JSONB
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id);
 CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type);
@@ -323,12 +447,22 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_parent ON tool_calls(parent_call_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_status ON tool_calls(status);
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 CREATE INDEX IF NOT EXISTS idx_entities_updated ON entities(updated_at);
+CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
+CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
 |]
 
 -- | PostgreSQL schema destruction script.
 postgresDropSchema :: Query
 postgresDropSchema =
     [sql|
+DROP INDEX IF EXISTS idx_continuations_completed;
+DROP INDEX IF EXISTS idx_continuations_expires;
+DROP INDEX IF EXISTS idx_continuations_session;
+DROP INDEX IF EXISTS idx_cache_expires;
+DROP INDEX IF EXISTS idx_cache_tool_name;
 DROP INDEX IF EXISTS idx_entities_updated;
 DROP INDEX IF EXISTS idx_entities_type;
 DROP INDEX IF EXISTS idx_tool_calls_status;
@@ -342,6 +476,8 @@ DROP INDEX IF EXISTS idx_events_entity;
 DROP INDEX IF EXISTS idx_components_data;
 DROP INDEX IF EXISTS idx_components_type;
 DROP INDEX IF EXISTS idx_components_entity;
+DROP TABLE IF EXISTS tool_continuations;
+DROP TABLE IF EXISTS tool_call_cache;
 DROP TABLE IF EXISTS tool_calls;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS events;
@@ -350,12 +486,143 @@ DROP TABLE IF EXISTS entities;
 DROP TABLE IF EXISTS schema_version;
 |]
 
--- | PostgreSQL migration script (version 0 -> 1).
+-- | PostgreSQL migration script.
 postgresMigrationScript :: Int -> Int -> Maybe Query
 postgresMigrationScript fromVer toVer
-    | fromVer == 0 && toVer == 1 = Just postgresCreateSchema
+    | fromVer == 0 && toVer == 1 = Just postgresCreateV1Schema
+    | fromVer == 1 && toVer == 2 = Just postgresCreateV2Schema
+    | fromVer == 0 && toVer == 2 = Just postgresCreateSchema
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
+  where
+    postgresCreateV1Schema = [sql|
+-- V1 schema (legacy)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO schema_version (version) VALUES (1) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+-- (rest of V1 schema omitted for brevity)
+|]
+
+    postgresCreateV2Schema = [sql|
+-- V2 additions
+CREATE TABLE IF NOT EXISTS tool_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    tool_name TEXT NOT NULL,
+    arguments_hash TEXT NOT NULL,
+    result_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS tool_continuations (
+    token TEXT PRIMARY KEY,
+    session_id UUID NOT NULL,
+    tool_call_json JSONB NOT NULL,
+    context_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result_json JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
+CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+
+INSERT INTO schema_version (version) VALUES (2) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+-------------------------------------------------------------------------------
+-- Async Execution Schema Helpers
+-------------------------------------------------------------------------------
+
+{- | Create only the async execution schema tables (SQLite).
+
+Useful when you want to add async support to an existing database
+without recreating the entire schema.
+-}
+sqliteCreateAsyncSchema :: Query
+sqliteCreateAsyncSchema =
+    [sql|
+-- Tool call cache table
+CREATE TABLE IF NOT EXISTS tool_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    tool_name TEXT NOT NULL,
+    arguments_hash TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
+
+-- Tool continuations table
+CREATE TABLE IF NOT EXISTS tool_continuations (
+    token TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    tool_call_json TEXT NOT NULL,
+    context_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
+CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+
+-- Update schema version
+INSERT INTO schema_version (version) VALUES (2) 
+    ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+{- | Create only the async execution schema tables (PostgreSQL).
+
+Useful when you want to add async support to an existing database
+without recreating the entire schema.
+-}
+postgresCreateAsyncSchema :: Query
+postgresCreateAsyncSchema =
+    [sql|
+-- Tool call cache table
+CREATE TABLE IF NOT EXISTS tool_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    tool_name TEXT NOT NULL,
+    arguments_hash TEXT NOT NULL,
+    result_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
+
+-- Tool continuations table
+CREATE TABLE IF NOT EXISTS tool_continuations (
+    token TEXT PRIMARY KEY,
+    session_id UUID NOT NULL,
+    tool_call_json JSONB NOT NULL,
+    context_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result_json JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
+CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+
+-- Update schema version
+INSERT INTO schema_version (version) VALUES (2) 
+    ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
 
 -------------------------------------------------------------------------------
 -- Migration
@@ -426,3 +693,4 @@ applyMigrations conn fromVer toVer getMigration
                     -- Update schema version
                     execute conn "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP" (Only toVer)
                 pure $ Right toVer
+

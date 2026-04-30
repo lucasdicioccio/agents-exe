@@ -22,10 +22,7 @@ module System.Agents.OneShot (
     mainOneShotText,
     mainOneShotTextWithThinking,
 
-    -- * Re-export from ProgressiveDisclosure
-    agentEvaluateActiveTools,
-
-    -- * Re-export from StoreSessionProgress
+-- * Re-export from StoreSessionProgress
     agentStoreSession,
     agentWithSessionProgress,
 
@@ -66,7 +63,6 @@ import System.Agents.Session.Base
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop
 import System.Agents.Session.OpenAI
-import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -74,9 +70,6 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
-
--- Re-export agentEvaluateActiveTools from the new module
-import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
 
 -- Re-export session storage combinators
@@ -153,18 +146,19 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
 
     -- Apply dynamic tool filtering based on session activation state
+-- Apply dynamic tool filtering based on session activation state
     -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-    agent1 <- agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
+    agent1 <- ProgressiveDisclosure.agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
 
     let agent =
             agentSetQuery (UserQuery query []) $
                 agentWithSessionProgress (config.onSessionProgress convId) $
                     agent1
 
-    -- Create or use initial session with media support (version 1)
+-- Create or use initial session with media support (version 1)
     session0 <- case config.initialSession of
         Just s -> pure s
-        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
+        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
 
     config.onSessionProgress convId (SessionStarted session0)
     (llmTurn, _) <- run convId agent session0
@@ -325,14 +319,15 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                     -- Inject media attachments into the completion
                     let completionWithMedia = completion{completeMedia = mediaAttachs}
                     completeF completionWithMedia
-                , contextConfig = defaultContextConfig
+, contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
+                , ctxExecutionMode = Synchronous
+                , ctxToolCache = Nothing
+                , ctxAsyncToolCall = Nothing
                 }
-
--- | Convert a ToolRegistration to a SystemTool for the Session agent.
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
 toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool

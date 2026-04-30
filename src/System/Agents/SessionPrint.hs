@@ -379,6 +379,7 @@ calculateTokenUsageStats turns =
         let mUsage = case turn of
                 Session.UserTurn _ mStepUsage -> mStepUsage
                 Session.LlmTurn _ mStepUsage -> mStepUsage
+                Session.PartialUserTurn _ mStepUsage -> mStepUsage
          in case mUsage of
                 Just stepUsage -> maybeToList (stepTokenUsage stepUsage)
                 Nothing -> []
@@ -426,7 +427,9 @@ calculateByteCounts turns =
             outBytes = maybe 0 textBytes response.responseText
             reasBytes = maybe 0 textBytes response.responseThinking
          in (inp, out + outBytes, reas + reasBytes)
-
+    countTurn (Session.PartialUserTurn _ _) (inp, out, reas) =
+        -- Partial user turns don't contribute to byte counts
+        (inp, out, reas)
     textBytes :: Text.Text -> Int
     textBytes = BS.length . Text.encodeUtf8
 
@@ -736,7 +739,11 @@ formatTurn opts firstDisplayStepNum (stepNum, turn) =
                     <> Text.pack (show (stepNum :: Int))
                     <> ": LLM Turn\n\n"
                     <> formatLlmTurn opts content
-
+            Session.PartialUserTurn _content _mUsage ->
+                "## ⏸️ Step "
+                    <> Text.pack (show (stepNum :: Int))
+                    <> ": Partial Turn (in progress)\n\n"
+                    <> "_(Turn execution paused - async mode)_\n"
 {- | Format user turn content.
 The 'isFirstTurn' parameter ensures that system prompt and tools are shown
 at least once, even when 'repeatSystemPrompt' or 'repeatTools' is False.

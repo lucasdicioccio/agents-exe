@@ -55,7 +55,7 @@ import System.Agents.OS.Interfaces (
     InterfaceMode (..),
     defaultInterfaceConfig,
  )
-import System.Agents.Session.Base (Session (..), newSessionId, newTurnId)
+import System.Agents.Session.Base (Session (..), newSessionId, newTurnId, ExecutionMode (..))
 import System.Agents.SessionStore (SessionStore)
 
 -------------------------------------------------------------------------------
@@ -206,16 +206,15 @@ executeOneShot ::
     Maybe AgentId ->
     -- | User query
     Text ->
-    -- | Result
     IO OneShotResult
 executeOneShot handle mAgentId _query = do
-    -- Create session with media support (version 1)
-    session <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1)
+    -- Create session with media support (version 2 with Synchronous execution mode)
+    newSessId <- newSessionId
+    newTurnId' <- newTurnId
+    let session = Session [] newSessId Nothing newTurnId' (Just 2) (Just Synchronous)
     executeOneShotWithSession handle mAgentId session
 
 {- | Execute a one-shot conversation with an existing session.
-
-This allows resuming from a previous session.
 -}
 executeOneShotWithSession ::
     OneShotInterfaceHandle ->
@@ -259,3 +258,4 @@ executeOneShotWithSession handle mAgentId session = do
 -- | Extract just the result text from a OneShotResult.
 extractResultText :: OneShotResult -> Text
 extractResultText = osrText
+

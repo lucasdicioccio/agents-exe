@@ -14,7 +14,6 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import qualified Data.Text.IO as Text
 import qualified Data.UUID as UUID
 
 import Prod.Tracer (Tracer)
@@ -195,6 +194,7 @@ mkOpenAICompletion config completion = do
             histMsgs = historyToMessages comp.completeConversationHistory
          in systemMsg : histMsgs ++ userMsg ++ toolMsgs
 
+    -- Convert conversation history turns to OpenAI messages
     historyToMessages :: [Turn] -> [Aeson.Value]
     historyToMessages ts = concatMap turnToMessages (reverse ts)
 
@@ -215,29 +215,43 @@ mkOpenAICompletion config completion = do
             toolMsgs = concatMap toolResponseToMessages toolResponses
          in
             userMsg ++ toolMsgs
+    turnToMessages (PartialUserTurn turn _mUsage) =
+        -- Partial user turns: include completed responses but not pending calls
+        let
+            mQuery = turn.pUserQuery
+            -- Extract media from the query
+            mediaAttachments = case mQuery of
+                Nothing -> []
+                Just (UserQuery _ media) -> media
+            userMsg = userQueryToMessages mQuery mediaAttachments
+            toolResponses = turn.pCompletedResponses
+            toolMsgs = concatMap toolResponseToMessages toolResponses
+         in
+            userMsg ++ toolMsgs
 
     -- Convert a UserQuery and media attachments to OpenAI message format
     -- Supports multi-modal content with text and images
     userQueryToMessages :: Maybe UserQuery -> [MediaAttachment] -> [Aeson.Value]
-    userQueryToMessages mQuery mediaAttachments = case mQuery of
-        Nothing -> []
-        Just (UserQuery text [])
-            | null mediaAttachments ->
+    userQueryToMessages Nothing [] = []
+    userQueryToMessages mQuery mediaAttachments =
+        case mQuery of
+            Nothing -> []
+            Just (UserQuery text []) | null mediaAttachments ->
                 -- Text-only query with no media
                 [ Aeson.object
                     [ "role" .= ("user" :: Text)
                     , "content" .= text
                     ]
                 ]
-        Just (UserQuery text userMedia) ->
-            -- Multi-modal query with text and media
-            let allMedia = userMedia ++ mediaAttachments
-                contentParts = buildContentParts text allMedia
-             in [ Aeson.object
-                    [ "role" .= ("user" :: Text)
-                    , "content" .= contentParts
+            Just (UserQuery text userMedia) ->
+                -- Multi-modal query with text and media
+                let allMedia = userMedia ++ mediaAttachments
+                    contentParts = buildContentParts text allMedia
+                 in [ Aeson.object
+                        [ "role" .= ("user" :: Text)
+                        , "content" .= contentParts
+                        ]
                     ]
-                ]
 
     -- Build content parts array for multi-modal messages
     -- The text part comes first, followed by all media attachments
@@ -385,33 +399,3 @@ mkOpenAICompletion config completion = do
     toolCallToLlmToolCall :: OpenAI.OpenAIToolCall -> LlmToolCall
     toolCallToLlmToolCall tc = LlmToolCall $ Aeson.Object tc.rawToolCall
 
-newConfig :: Tracer IO OpenAI.Trace -> IO OpenAICompletionConfig
-newConfig tracer =
-    OpenAICompletionConfig
-        <$> pure tracer
-        <*> (HttpClient.newRuntime =<< (HttpClient.BearerToken . Text.strip <$> Text.readFile "token.txt"))
-        <*> pure (OpenAI.ApiBaseUrl "https://api.openai.com/v1")
-        <*> pure "gpt-4.1-mini"
-        <*> pure OpenAI.OpenAIv1
-
-parseToolCall_openAI :: Aeson.Value -> Maybe OpenAI.OpenAIToolCall
-parseToolCall_openAI val =
-    case Aeson.parseMaybe Aeson.parseJSON val of
-        Just tc -> Just tc
-        Nothing ->
-            -- Try to extract from our LlmToolCall format
-            case val of
-                Aeson.Object obj ->
-                    case (KeyMap.lookup "id" obj, KeyMap.lookup "function" obj) of
-                        (Just (Aeson.String tid), Just funcVal) ->
-                            Just $
-                                OpenAI.OpenAIToolCall
-                                    { OpenAI.rawToolCall = obj
-                                    , OpenAI.toolCallId = tid
-                                    , OpenAI.toolCallType = KeyMap.lookup "type" obj >>= \v -> case v of Aeson.String t -> Just t; _ -> Nothing
-                                    , OpenAI.toolCallFunction = case Aeson.parseMaybe Aeson.parseJSON funcVal of
-                                        Just f -> f
-                                        Nothing -> OpenAI.ToolCallFunction (OpenAI.ToolName "") "" Nothing
-                                    }
-                        _ -> Nothing
-                _ -> Nothing

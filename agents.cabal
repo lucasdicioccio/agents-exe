@@ -95,6 +95,7 @@ library agents-lib
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
+                    , System.Agents.Tools.Cache
                     , System.Agents.Tools.Context
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.EndpointPredicate
@@ -132,6 +133,7 @@ library agents-lib
                     , System.Agents.Runtime.Trace
                     , System.Agents.Session.Types
                     , System.Agents.Session.Base
+                    , System.Agents.Session.Async
                     , System.Agents.Session.Edit
                     , System.Agents.Session.Compat
                     , System.Agents.Session.OpenAI

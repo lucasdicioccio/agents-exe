@@ -159,6 +159,10 @@ detectTurnInteractionSignals turn =
                     , sigDisengagementDetected = disengagement
                     , sigSatisfactionDetected = satisfaction
                     }
+        PartialUserTurn _ _ ->
+            -- Partial user turns are treated like user turns for interaction signals
+            -- They represent incomplete user input that can still show intent patterns
+            defaultInteractionSignals
         LlmTurn _ _ ->
             -- Stagnation requires cross-turn comparison; individual turns
             -- don't show stagnation on their own
@@ -432,6 +436,9 @@ detectTurnExecutionSignals turn =
                 failures = sum $ map (countFailureInResponse . snd) utc.userToolResponses
              in
                 defaultExecutionSignals{sigFailureCount = failures}
+        PartialUserTurn _ _ ->
+            -- Partial user turns don't have tool responses yet
+            defaultExecutionSignals
         LlmTurn _ _ ->
             -- Loop detection requires cross-turn analysis
             defaultExecutionSignals
@@ -439,6 +446,7 @@ detectTurnExecutionSignals turn =
 -- | Extract tool calls from a turn.
 extractTurnToolCalls :: Turn -> [LlmToolCall]
 extractTurnToolCalls (UserTurn _ _) = []
+extractTurnToolCalls (PartialUserTurn _ _) = []
 extractTurnToolCalls (LlmTurn ltc _) = ltc.llmToolCalls
 
 -- | Count failures across all turns.
@@ -447,6 +455,7 @@ countFailuresInTurnList turnList = sum $ map countFailuresInTurn turnList
   where
     countFailuresInTurn :: Turn -> Int
     countFailuresInTurn (LlmTurn _ _) = 0
+    countFailuresInTurn (PartialUserTurn _ _) = 0
     countFailuresInTurn (UserTurn utc _) =
         sum $ map (countFailureInResponse . snd) utc.userToolResponses
 
@@ -608,11 +617,12 @@ findSequenceLoop names
 
 -- | Loop detection heuristics exported for documentation/testing.
 loopDetectionHeuristics :: Text
-loopDetectionHeuristics =
-    "Loop detection identifies:\n\
-    \- Exact loops: Same tool called 3+ times in sequence\n\
-    \- Oscillation: A->B->A->B pattern between two tools\n\
-    \- Sequence loops: Repeated cycles of 2+ tools"
+loopDetectionHeuristics = Text.intercalate "\n"
+    [ "Loop detection identifies:"
+    , "- Exact loops: Same tool called 3+ times in sequence"
+    , "- Oscillation: A->B->A->B pattern between two tools"
+    , "- Sequence loops: Repeated cycles of 2+ tools"
+    ]
 
 -------------------------------------------------------------------------------
 -- Environment Signal Detection
@@ -653,6 +663,9 @@ detectExhaustionInTurn (LlmTurn ltc _) =
     -- Check LLM response for exhaustion markers
     let respText = fromMaybe "" (responseText ltc.llmResponse)
      in detectExhaustionInText respText
+detectExhaustionInTurn (PartialUserTurn _ _) =
+    -- Partial user turns don't have responses to check
+    []
 detectExhaustionInTurn (UserTurn utc _) =
     -- Check tool responses for exhaustion markers
     concatMap (detectExhaustionInResponse . snd) utc.userToolResponses
@@ -713,7 +726,7 @@ detectExhaustionInJson val =
 Score ranges from 0-100, where higher scores indicate trajectories more
 likely to contain actionable insights for learning and improvement.
 
-Scoring formula (based on paper's approach):
+Scoring formula (based on the paper's approach):
 - Base score: 30
 - Failure points: +10 per failure (max 30)
 - Misalignment points: +5 per misalignment (max 20)
@@ -760,6 +773,7 @@ extractUserTexts :: [Turn] -> [Text]
 extractUserTexts turnList = catMaybes $ map extractUserText turnList
   where
     extractUserText (UserTurn utc _) = userQuery utc >>= Just . queryText
+    extractUserText (PartialUserTurn _ _) = Nothing
     extractUserText (LlmTurn _ _) = Nothing
 
 -- | Extract LLM response texts from turns.
@@ -768,6 +782,7 @@ extractLlmTexts turnList = mapMaybe extractLlmText turnList
   where
     extractLlmText (LlmTurn ltc _) = responseText ltc.llmResponse
     extractLlmText (UserTurn _ _) = Nothing
+    extractLlmText (PartialUserTurn _ _) = Nothing
 
 -- | Extract tool call name from LlmToolCall.
 extractToolCallName :: LlmToolCall -> Text
@@ -807,3 +822,4 @@ extractResponseText (MixedResponse parts) =
   where
     extractPart (TextPart t) = t
     extractPart (MediaPart m) = "[Media: " <> m.mediaMimeType <> "]"
+

@@ -67,6 +67,9 @@ isToolOnlyTurn (Session.UserTurn utc _mUsage) =
     isNothing utc.userQuery && null utc.userToolResponses
 isToolOnlyTurn (Session.LlmTurn ltc _mUsage) =
     isNothing ltc.llmResponse.responseText && not (null ltc.llmToolCalls)
+isToolOnlyTurn (Session.PartialUserTurn _ _) =
+    -- Partial user turns are not tool-only (they're in-progress user turns)
+    False
 
 -- | Format a single turn at the given verbosity level.
 formatTurn :: SessionVerbosity -> Int -> Session.Turn -> Text
@@ -74,6 +77,9 @@ formatTurn verbosity idx turn =
     case turn of
         Session.UserTurn content _mUsage -> formatUserTurn verbosity idx content
         Session.LlmTurn content _mUsage -> formatLlmTurn verbosity idx content
+        Session.PartialUserTurn _content _mUsage ->
+            -- Partial user turns are skipped in prompt injection
+            ""
 
 -- | Format a user turn.
 formatUserTurn :: SessionVerbosity -> Int -> Session.UserTurnContent -> Text
@@ -165,3 +171,4 @@ formatStatisticsSection session =
             <> "- Total tool calls: "
             <> Text.pack (show (toolCalls :: Int))
             <> "\n\n"
+
