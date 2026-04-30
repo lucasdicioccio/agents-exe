@@ -74,8 +74,8 @@ data LocalConfigOptions = LocalConfigOptions
 
 -- | Commands for local config management
 data LocalConfigCommand
-    = LocalInit
-    -- ^ Initialize a new agents-exe.cfg.json
+    = -- | Initialize a new agents-exe.cfg.json
+      LocalInit
     deriving (Show, Eq)
 
 -- | Options for the 'config keymap' subcommand
@@ -87,8 +87,8 @@ data KeymapConfigOptions = KeymapConfigOptions
 
 -- | Commands for keymap management
 data KeymapConfigCommand
-    = KeymapInit
-    -- ^ Initialize a new keymap file with defaults
+    = -- | Initialize a new keymap file with defaults
+      KeymapInit
     deriving (Show, Eq)
 
 -- | Options for the 'config api-key' subcommand
@@ -100,10 +100,10 @@ data ApiKeyConfigOptions = ApiKeyConfigOptions
 
 -- | Commands for API key management
 data ApiKeyConfigCommand
-    = ApiKeyList
-    -- ^ List all API key names
-    | ApiKeyCreate Text
-    -- ^ Create a new API key entry
+    = -- | List all API key names
+      ApiKeyList
+    | -- | Create a new API key entry
+      ApiKeyCreate Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -112,12 +112,13 @@ data ApiKeyConfigCommand
 
 -- | Minimal agents-exe.cfg.json template
 defaultAgentsExeConfigMinimal :: Text
-defaultAgentsExeConfigMinimal = Text.unlines
-    [ "{"
-    , "  \"agentsConfigDir\": \"$HOME/.config/agents-exe\","
-    , "  \"agentsFiles\": []"
-    , "}"
-    ]
+defaultAgentsExeConfigMinimal =
+    Text.unlines
+        [ "{"
+        , "  \"agentsConfigDir\": \"$HOME/.config/agents-exe\","
+        , "  \"agentsFiles\": []"
+        , "}"
+        ]
 
 -------------------------------------------------------------------------------
 -- Handler Implementation
@@ -308,4 +309,3 @@ addAndSaveKey path keyName keys = do
         Right () -> do
             Text.putStrLn $ "Created API key: " <> keyName
             Text.putStrLn $ "Please edit " <> Text.pack path <> " and set your actual API key value"
-

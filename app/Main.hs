@@ -528,15 +528,13 @@ parseConfigLocalCommand :: ArgParserArgs -> Parser ConfigCmd.ConfigCommand
 parseConfigLocalCommand _argArgs =
     ConfigCmd.ConfigLocal . ConfigCmd.LocalConfigOptions
         <$> subparser
-            ( command "init" (info (pure ConfigCmd.LocalInit) (progDesc "Initialize a new agents-exe.cfg.json file"))
-            )
+            (command "init" (info (pure ConfigCmd.LocalInit) (progDesc "Initialize a new agents-exe.cfg.json file")))
 
 parseConfigKeymapCommand :: Parser ConfigCmd.ConfigCommand
 parseConfigKeymapCommand =
     ConfigCmd.ConfigKeymap
         <$> subparser
-            ( command "init" (info parseKeymapInitOptions (progDesc "Initialize a new keymap file with default bindings"))
-            )
+            (command "init" (info parseKeymapInitOptions (progDesc "Initialize a new keymap file with default bindings")))
 
 parseKeymapInitOptions :: Parser ConfigCmd.KeymapConfigOptions
 parseKeymapInitOptions =
@@ -1463,4 +1461,3 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
-
