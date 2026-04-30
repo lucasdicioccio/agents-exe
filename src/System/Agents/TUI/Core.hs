@@ -54,6 +54,18 @@ module System.Agents.TUI.Core (
     eventChan,
     currentTab,
     helpContent,
+    keyMapping,
+
+    -- * Re-exports from KeyMapping
+    EventName (..),
+    KeyName (..),
+    Modifiers (..),
+    KeyBinding (..),
+    KeyMapping,
+    defaultKeyMapping,
+    matchesEvent,
+    generateHelpContent,
+    loadKeymapFromFile,
 
     -- * Re-exports from Render
     tui_appDraw,
@@ -77,6 +89,7 @@ module System.Agents.TUI.Core (
     -- * Main entry point
     runTUI,
     runTUIWithConfig,
+    runTUIWithKeymap,
     fileSessionConfig,
 
     -- * OS-native helpers
@@ -128,6 +141,17 @@ import System.Agents.TUI.Event (
     prevTab,
     tui_appHandleEvent,
  )
+import System.Agents.TUI.KeyMapping (
+    EventName (..),
+    KeyBinding (..),
+    KeyMapping,
+    KeyName (..),
+    Modifiers (..),
+    defaultKeyMapping,
+    generateHelpContent,
+    loadKeymapFromFile,
+    matchesEvent,
+ )
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
 
@@ -169,29 +193,43 @@ loadSessionFiles store = do
 {- | Create a session configuration with file-based persistence.
 | Create a session configuration with file-based persistence.
 -}
-fileSessionConfig :: SessionStore -> LoadedApiKeys -> SessionConfig
-fileSessionConfig store apiKeys =
+fileSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
+fileSessionConfig store apiKeys keymap =
     SessionConfig
         { sessionStore = store
         , sessionApiKeys = apiKeys
+        , sessionKeyMapping = keymap
         }
 
 {- | Initialize the TUI with props and optional conversation prefix (legacy API).
-For more control, use 'runTUIWithConfig' instead.
+For more control, use 'runTUIWithConfig' or 'runTUIWithKeymap' instead.
 
 This function:
 1. Loads agent trees from the provided props
 2. Creates TuiAgents with OS-native structures
 3. Initializes the TUI with the agents and loaded sessions
+4. Uses the default key mapping
 -}
 runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
-runTUI tracer store apiKeys props = do
-    let config = fileSessionConfig store apiKeys
-    runTUIWithConfig tracer config props
+runTUI tracer store apiKeys props =
+    runTUIWithKeymap tracer store apiKeys defaultKeyMapping props
 
--- | Initialize the TUI with a custom session configuration.
+{- | Initialize the TUI with a custom session configuration.
+Uses the keymap from the SessionConfig.
+-}
 runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
 runTUIWithConfig tracer config props = do
+    runTUIInternal tracer config props
+
+-- | Initialize the TUI with a custom keymap.
+runTUIWithKeymap :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> KeyMapping -> [Props] -> IO ()
+runTUIWithKeymap tracer store apiKeys keymap props = do
+    let config = fileSessionConfig store apiKeys keymap
+    runTUIInternal tracer config props
+
+-- | Internal function to run the TUI with the given configuration.
+runTUIInternal :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
+runTUIInternal tracer config props = do
     -- Load agent trees and create TuiAgents
     trees <- traverse loadAgentTree props
     let itrees = [tree | Initialized tree <- trees]
@@ -223,16 +261,20 @@ runTUIWithConfig tracer config props = do
     -- Create core state with World and EventQueue for subcall visibility
     core0 <- initCore (Just world) (Just osEventQueue)
     coreTVar <- newTVarIO core0
+    -- Generate help content from the keymap
+    let helpText = generateHelpContent (sessionKeyMapping config)
 
     -- Create UI state with loaded sessions and collected tools
-    -- Also initialize help content with keyboard shortcuts
+    -- Also initialize help content with keyboard shortcuts from the keymap
     let ui0 =
-            (initUIState initHelpContent tuiAgents sessions)
+            (initUIState helpText tuiAgents sessions)
+                { _uiAgentTools = agentTools
+                }
                 { _uiAgentTools = agentTools
                 }
 
-    -- Create TUI state with session configuration
-    let st = TuiState coreTVar ui0 evChan config
+    -- Create TUI state with session configuration and keymap
+    let st = TuiState coreTVar ui0 evChan config (sessionKeyMapping config)
 
     -- Build and run the app
     let app =
