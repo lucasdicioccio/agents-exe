@@ -16,10 +16,11 @@ import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
-import System.Agents.Tools.Cache (ToolCache (..), CachedResult (..))
+import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..))
 import qualified System.Agents.Tools.Cache as Cache
 import System.Agents.Tools.Context (ToolExecutionContext, mkToolExecutionContext)
 import qualified System.Agents.Tools.Context as Ctx
+
 {- | Runs a single step of agent for a given session (synchronous mode).
 Agent may be modified, may decide to return a session, or decide to stop.
 
@@ -230,6 +231,7 @@ executeToolCallWithCache agent ctx call = do
                     cache.cacheStore key $ CachedResult result now Nothing
                     pure result
         Nothing -> agent.toolCall ctx call
+
 -- Simple cache key computation (tool name + argument hash)
 computeSimpleCacheKey :: LlmToolCall -> Cache.CacheKey
 computeSimpleCacheKey (LlmToolCall val) =
@@ -428,7 +430,7 @@ naiveTilNoToolCallStep sess = do
                             -- No tool calls: stop
                             pure $ Stop (llmTurn, sess)
                         else
--- Has tool calls: continue with user prompt for tool responses
+                            -- Has tool calls: continue with user prompt for tool responses
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
                 PartialUserTurn partial _mUsage ->
                     -- Last turn was partial - need to continue execution

@@ -171,4 +171,3 @@ formatStatisticsSection session =
             <> "- Total tool calls: "
             <> Text.pack (show (toolCalls :: Int))
             <> "\n\n"
-

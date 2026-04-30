@@ -75,8 +75,8 @@ import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.Aeson.Types as Aeson.Types
 import Data.Aeson.Types ((.!=))
+import qualified Data.Aeson.Types as Aeson.Types
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
@@ -856,4 +856,3 @@ type OnSessionProgress = SessionProgress -> IO ()
 -- | A no-op session progress handler for when tracking is not needed.
 ignoreSessionProgress :: OnSessionProgress
 ignoreSessionProgress = const (pure ())
-

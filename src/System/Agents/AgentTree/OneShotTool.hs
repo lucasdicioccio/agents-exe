@@ -550,9 +550,9 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
-, ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
-, ctxExecutionMode = SessionBase.Synchronous
+                , ctxExecutionMode = SessionBase.Synchronous
                 , ctxToolCache = Nothing
                 , ctxAsyncToolCall = Nothing
                 }
@@ -626,4 +626,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
-

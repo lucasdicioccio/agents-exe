@@ -22,7 +22,7 @@ module System.Agents.OneShot (
     mainOneShotText,
     mainOneShotTextWithThinking,
 
--- * Re-export from StoreSessionProgress
+    -- * Re-export from StoreSessionProgress
     agentStoreSession,
     agentWithSessionProgress,
 
@@ -56,6 +56,7 @@ import System.Agents.AgentTree (
  )
 import System.Agents.Base (ConversationId, newConversationId)
 import qualified System.Agents.Base as Base
+import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Media.Types (MediaAttachment)
@@ -70,7 +71,6 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
-import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
 
 -- Re-export session storage combinators
 import System.Agents.Combinators.StoreSessionProgress (
@@ -146,7 +146,7 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
 
     -- Apply dynamic tool filtering based on session activation state
--- Apply dynamic tool filtering based on session activation state
+    -- Apply dynamic tool filtering based on session activation state
     -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
     agent1 <- ProgressiveDisclosure.agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
 
@@ -155,7 +155,7 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
                 agentWithSessionProgress (config.onSessionProgress convId) $
                     agent1
 
--- Create or use initial session with media support (version 1)
+    -- Create or use initial session with media support (version 1)
     session0 <- case config.initialSession of
         Just s -> pure s
         Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
@@ -319,7 +319,7 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                     -- Inject media attachments into the completion
                     let completionWithMedia = completion{completeMedia = mediaAttachs}
                     completeF completionWithMedia
-, contextConfig = defaultContextConfig
+                , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
                 , ctxCallStack = [CallStackEntry "root" convId 0]
@@ -328,6 +328,7 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                 , ctxToolCache = Nothing
                 , ctxAsyncToolCall = Nothing
                 }
+
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
 toolRegistrationToSystemTool reg =
     let llmTool = reg.declareTool

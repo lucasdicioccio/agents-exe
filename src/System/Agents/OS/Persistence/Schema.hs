@@ -495,7 +495,8 @@ postgresMigrationScript fromVer toVer
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
   where
-    postgresCreateV1Schema = [sql|
+    postgresCreateV1Schema =
+        [sql|
 -- V1 schema (legacy)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -506,7 +507,8 @@ INSERT INTO schema_version (version) VALUES (1) ON CONFLICT(version) DO UPDATE S
 -- (rest of V1 schema omitted for brevity)
 |]
 
-    postgresCreateV2Schema = [sql|
+    postgresCreateV2Schema =
+        [sql|
 -- V2 additions
 CREATE TABLE IF NOT EXISTS tool_call_cache (
     cache_key TEXT PRIMARY KEY,
@@ -693,4 +695,3 @@ applyMigrations conn fromVer toVer getMigration
                     -- Update schema version
                     execute conn "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP" (Only toVer)
                 pure $ Right toVer
-

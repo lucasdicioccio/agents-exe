@@ -213,4 +213,3 @@ getSessionStatus session =
                 ++ " completed, "
                 ++ show (length partial.pPendingCalls)
                 ++ " pending"
-

@@ -55,7 +55,7 @@ import System.Agents.OS.Interfaces (
     InterfaceMode (..),
     defaultInterfaceConfig,
  )
-import System.Agents.Session.Base (Session (..), newSessionId, newTurnId, ExecutionMode (..))
+import System.Agents.Session.Base (ExecutionMode (..), Session (..), newSessionId, newTurnId)
 import System.Agents.SessionStore (SessionStore)
 
 -------------------------------------------------------------------------------
@@ -214,8 +214,7 @@ executeOneShot handle mAgentId _query = do
     let session = Session [] newSessId Nothing newTurnId' (Just 2) (Just Synchronous)
     executeOneShotWithSession handle mAgentId session
 
-{- | Execute a one-shot conversation with an existing session.
--}
+-- | Execute a one-shot conversation with an existing session.
 executeOneShotWithSession ::
     OneShotInterfaceHandle ->
     -- | Agent identifier (or create new if empty)
@@ -258,4 +257,3 @@ executeOneShotWithSession handle mAgentId session = do
 -- | Extract just the result text from a OneShotResult.
 extractResultText :: OneShotResult -> Text
 extractResultText = osrText
-

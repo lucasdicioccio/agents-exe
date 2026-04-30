@@ -158,4 +158,3 @@ The edits are applied in the order they appear in the list:
 -}
 applySessionEdits :: [Session.Session -> Session.Session] -> Session.Session -> Session.Session
 applySessionEdits edits session = foldl (\s f -> f s) session edits
-

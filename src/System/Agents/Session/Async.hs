@@ -290,8 +290,9 @@ executeAsyncToolCall exec ctx call mCache = do
             result <- exec ctx call
             pure $ ToolComplete result
 
--- | Compute cache key from an LLM tool call.
--- This is a simple wrapper that delegates to System.Agents.Tools.Cache
+{- | Compute cache key from an LLM tool call.
+This is a simple wrapper that delegates to System.Agents.Tools.Cache
+-}
 computeCacheKeyFromCall :: LlmToolCall -> CacheKey
 computeCacheKeyFromCall call =
     -- Import and use the computeCacheKey from Cache module
@@ -341,8 +342,7 @@ storeContinuation ::
     IO ()
 storeContinuation store = csStore store
 
-{- | Load a continuation by its token.
--}
+-- | Load a continuation by its token.
 loadContinuation ::
     ContinuationStore ->
     ContinuationToken ->
@@ -353,8 +353,7 @@ loadContinuation store = csLoad store
 -- SQLite Continuation Store Implementation
 -------------------------------------------------------------------------------
 
-{- | Create a SQLite-backed continuation store.
--}
+-- | Create a SQLite-backed continuation store.
 mkSqliteContinuationStore :: Connection -> IO ContinuationStore
 mkSqliteContinuationStore conn = do
     initializeContinuationSchema conn
@@ -416,8 +415,9 @@ sqliteStoreContinuation conn tc = do
                 expires_at = excluded.expires_at |]
         (tokenStr, UUID.toText sid, toolCallJson, contextJson, tc.tcCreatedAt, tc.tcExpiresAt)
 
--- | Load a continuation from SQLite.
--- Note: Simplified implementation - full implementation would need proper JSON parsing with type annotations
+{- | Load a continuation from SQLite.
+Note: Simplified implementation - full implementation would need proper JSON parsing with type annotations
+-}
 sqliteLoadContinuation :: Connection -> ContinuationToken -> IO (Maybe ToolContinuation)
 sqliteLoadContinuation _conn _token = do
     -- Simplified for compilation - full implementation would parse the stored JSON
@@ -448,8 +448,9 @@ sqliteDeleteContinuation conn token = do
     let tokenStr = tokenToText token
     execute conn [sql| DELETE FROM tool_continuations WHERE token = ? |] (Only tokenStr)
 
--- | List pending continuations for a session.
--- Note: Simplified implementation - full implementation would need proper JSON parsing with type annotations
+{- | List pending continuations for a session.
+Note: Simplified implementation - full implementation would need proper JSON parsing with type annotations
+-}
 sqliteListPending :: Connection -> SessionId -> IO [(ContinuationToken, ToolContinuation)]
 sqliteListPending _conn _sid = do
     -- Simplified for compilation
@@ -471,11 +472,9 @@ getPendingContinuation session =
   where
     extractFromTurn :: Turn -> [(ContinuationToken, CacheKey)]
     extractFromTurn turn = case turn of
-        PartialUserTurn _content _ -> []  -- Note: CacheKey is different type, so return empty for now
+        PartialUserTurn _content _ -> [] -- Note: CacheKey is different type, so return empty for now
         _ -> []
 
-{- | Check if a session has any pending continuations.
--}
+-- | Check if a session has any pending continuations.
 hasPendingContinuations :: Session -> Bool
 hasPendingContinuations = maybe False (const True) . getPendingContinuation
-

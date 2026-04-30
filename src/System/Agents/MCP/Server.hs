@@ -335,9 +335,9 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
-, ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
-, ctxExecutionMode = SessionTypes.Synchronous
+                , ctxExecutionMode = SessionTypes.Synchronous
                 , ctxToolCache = Nothing
                 , ctxAsyncToolCall = Nothing
                 }
@@ -478,4 +478,3 @@ toolCallContent (Left err) =
     Mcp.TextContent $ Mcp.TextContentImpl (Text.unwords ["got an error:", Text.pack err]) (Just [])
 toolCallContent (Right txt) =
     Mcp.TextContent $ Mcp.TextContentImpl txt (Just [])
-

@@ -744,6 +744,7 @@ formatTurn opts firstDisplayStepNum (stepNum, turn) =
                     <> Text.pack (show (stepNum :: Int))
                     <> ": Partial Turn (in progress)\n\n"
                     <> "_(Turn execution paused - async mode)_\n"
+
 {- | Format user turn content.
 The 'isFirstTurn' parameter ensures that system prompt and tools are shown
 at least once, even when 'repeatSystemPrompt' or 'repeatTools' is False.

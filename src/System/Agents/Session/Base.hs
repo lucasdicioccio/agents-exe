@@ -73,9 +73,9 @@ In async mode, tool calls can either complete immediately or yield
 for external completion.
 -}
 type AsyncToolCallFn =
-    ToolExecutionContext
-    -> LlmToolCall
-    -> IO AsyncToolResponse
+    ToolExecutionContext ->
+    LlmToolCall ->
+    IO AsyncToolResponse
 
 {- | Default async executor that simply calls the synchronous tool executor.
 
@@ -240,4 +240,3 @@ asyncAgent = withAsyncToolCall customAsyncExecutor agent
 -}
 withAsyncToolCall :: Agent r -> AsyncToolCallFn -> Agent r
 withAsyncToolCall agent asyncFn = agent{ctxAsyncToolCall = Just asyncFn}
-

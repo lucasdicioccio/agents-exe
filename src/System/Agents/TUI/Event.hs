@@ -586,7 +586,7 @@ handleForkAtTurn tracer navState = do
                 , sessionId = newSessionId'
                 , forkedFromSessionId = Just originalSessionId
                 , turnId = newTurnId'
-, sessionVersion = Just 1
+                , sessionVersion = Just 1
                 , sessionExecutionMode = Nothing
                 }
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
@@ -1632,4 +1632,3 @@ handleSendMessage = do
                         tuiUI . selectedAttachmentIndex .= Nothing
                         updateConversationStatus convId ConversationStatus_Active
             Nothing -> showStatus StatusWarning "No conversation selected"
-

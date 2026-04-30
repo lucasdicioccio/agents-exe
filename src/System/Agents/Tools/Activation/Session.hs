@@ -61,9 +61,9 @@ import qualified Data.Text.Encoding as Text
 
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Session.Types (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
-import System.Agents.ToolRegistration (ToolRegistration (..), Tool)
-import System.Agents.ToolSchema (ToolDescription (..), ParamProperty (..), ParamType (..), toolDescriptionName, toolDescriptionText, toolDescriptionParamProperties, propertyKey, propertyType, propertyDescription, propertyRequired)
-import System.Agents.Tools.Activation (ActivationState (..), ToolboxSessionState (..), ToolgroupName, Activation(..))
+import System.Agents.ToolRegistration (Tool, ToolRegistration (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), propertyDescription, propertyKey, propertyRequired, propertyType, toolDescriptionName, toolDescriptionParamProperties, toolDescriptionText)
+import System.Agents.Tools.Activation (Activation (..), ActivationState (..), ToolboxSessionState (..), ToolgroupName)
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..))
@@ -396,4 +396,3 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
-

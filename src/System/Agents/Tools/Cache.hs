@@ -89,10 +89,11 @@ instance Aeson.FromJSON CacheKey where
             <$> v Aeson..: "toolName"
             <*> v Aeson..: "argumentsHash"
 
--- | Compute a cache key from an LLM tool call.
---
--- Extracts the tool name and arguments from the JSON structure,
--- normalizes the arguments, and computes a hash.
+{- | Compute a cache key from an LLM tool call.
+
+Extracts the tool name and arguments from the JSON structure,
+normalizes the arguments, and computes a hash.
+-}
 computeCacheKey :: LlmToolCall -> CacheKey
 computeCacheKey (LlmToolCall val) =
     let (toolName, args) = extractToolInfo val
@@ -100,9 +101,10 @@ computeCacheKey (LlmToolCall val) =
         hash = hashArguments normalized
      in CacheKey toolName hash
 
--- | Extract tool name and arguments from the LLM tool call JSON.
---
--- Handles both OpenAI-style and native tool call formats.
+{- | Extract tool name and arguments from the LLM tool call JSON.
+
+Handles both OpenAI-style and native tool call formats.
+-}
 extractToolInfo :: Aeson.Value -> (Text, Aeson.Value)
 extractToolInfo val = case val of
     Aeson.Object obj ->
@@ -129,11 +131,12 @@ extractToolInfo val = case val of
                  in (name, args)
     _ -> ("unknown", Aeson.Object mempty)
 
--- | Normalize arguments for consistent hashing.
---
--- * Sorts object keys alphabetically
--- * Removes insignificant whitespace
--- * Normalizes number formats
+{- | Normalize arguments for consistent hashing.
+
+* Sorts object keys alphabetically
+* Removes insignificant whitespace
+* Normalizes number formats
+-}
 normalizeArguments :: Aeson.Value -> Aeson.Value
 normalizeArguments val = case val of
     Aeson.Object obj ->
@@ -147,10 +150,11 @@ normalizeArguments val = case val of
     sortByKey :: [(KeyMap.Key, Aeson.Value)] -> [(KeyMap.Key, Aeson.Value)]
     sortByKey = sortBy (\(a, _) (b, _) -> compare a b)
 
--- | Compute hash of arguments.
---
--- Uses a simple hash based on the canonical JSON representation.
--- Returns a string suitable for use as a database key.
+{- | Compute hash of arguments.
+
+Uses a simple hash based on the canonical JSON representation.
+Returns a string suitable for use as a database key.
+-}
 hashArguments :: Aeson.Value -> Text
 hashArguments val =
     let jsonBytes = LBS.toStrict $ Aeson.encode val
@@ -208,8 +212,9 @@ All operations are in IO since cache access typically involves I/O.
 -}
 data ToolCache = ToolCache
     { cacheLookup :: CacheKey -> IO (Maybe CachedResult)
-    -- ^ Look up a cached result by key.
-    -- Returns Nothing if not found or expired.
+    {- ^ Look up a cached result by key.
+    Returns Nothing if not found or expired.
+    -}
     , cacheStore :: CacheKey -> CachedResult -> IO ()
     -- ^ Store a result in the cache.
     , cacheInvalidate :: CacheKey -> IO ()
@@ -336,4 +341,3 @@ sqliteInvalidateTool conn toolName =
 sqliteClear :: Connection -> IO ()
 sqliteClear conn =
     execute_ conn [sql| DELETE FROM tool_call_cache |]
-

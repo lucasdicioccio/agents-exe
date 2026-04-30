@@ -617,12 +617,14 @@ findSequenceLoop names
 
 -- | Loop detection heuristics exported for documentation/testing.
 loopDetectionHeuristics :: Text
-loopDetectionHeuristics = Text.intercalate "\n"
-    [ "Loop detection identifies:"
-    , "- Exact loops: Same tool called 3+ times in sequence"
-    , "- Oscillation: A->B->A->B pattern between two tools"
-    , "- Sequence loops: Repeated cycles of 2+ tools"
-    ]
+loopDetectionHeuristics =
+    Text.intercalate
+        "\n"
+        [ "Loop detection identifies:"
+        , "- Exact loops: Same tool called 3+ times in sequence"
+        , "- Oscillation: A->B->A->B pattern between two tools"
+        , "- Sequence loops: Repeated cycles of 2+ tools"
+        ]
 
 -------------------------------------------------------------------------------
 -- Environment Signal Detection
@@ -822,4 +824,3 @@ extractResponseText (MixedResponse parts) =
   where
     extractPart (TextPart t) = t
     extractPart (MediaPart m) = "[Media: " <> m.mediaMimeType <> "]"
-

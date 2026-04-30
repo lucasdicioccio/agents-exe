@@ -992,18 +992,20 @@ render_turn (_k, turn) =
         UserTurn userTurn mUsage ->
             withAttr userMessageAttr $
                 vBox
-                    [ txt $ "> " <> case userTurn.userQuery of
-                        Just (UserQuery q _) -> q
-                        Nothing -> "(no query)"
+                    [ txt $
+                        "> " <> case userTurn.userQuery of
+                            Just (UserQuery q _) -> q
+                            Nothing -> "(no query)"
                     , render_usage mUsage
                     , txt " "
                     ]
         LlmTurn llmTurn mUsage ->
             withAttr llmMessageAttr $
                 vBox
-                    [ txt $ "AI: " <> case llmTurn.llmResponse.responseText of
-                        Just txt0 -> txt0
-                        Nothing -> "(no response)"
+                    [ txt $
+                        "AI: " <> case llmTurn.llmResponse.responseText of
+                            Just txt0 -> txt0
+                            Nothing -> "(no response)"
                     , case llmTurn.llmResponse.responseThinking of
                         Just thinking -> withAttr thinkingAttr $ txt $ "Thinking: " <> thinking
                         Nothing -> emptyWidget
@@ -1013,9 +1015,10 @@ render_turn (_k, turn) =
         PartialUserTurn partial mUsage ->
             withAttr userMessageAttr $
                 vBox
-                    [ txt $ "[Partial] > " <> case partial.pUserQuery of
-                        Just (UserQuery q _) -> q
-                        Nothing -> "(no query)"
+                    [ txt $
+                        "[Partial] > " <> case partial.pUserQuery of
+                            Just (UserQuery q _) -> q
+                            Nothing -> "(no query)"
                     , render_usage mUsage
                     , txt " "
                     ]
@@ -1027,12 +1030,14 @@ render_usage (Just usage) =
     case usage.stepTokenUsage of
         Just tokens ->
             withAttr byteUsageAttr $
-                txt $ "  [Tokens: " <> Text.pack (show $ tokenTotalTokens tokens) <> "]"
+                txt $
+                    "  [Tokens: " <> Text.pack (show $ tokenTotalTokens tokens) <> "]"
         Nothing ->
             if usage.stepTotalBytes > 0
                 then
                     withAttr byteUsageAttr $
-                        txt $ "  [" <> formatBytes usage.stepTotalBytes <> "]"
+                        txt $
+                            "  [" <> formatBytes usage.stepTotalBytes <> "]"
                 else emptyWidget
 
 -- | Helper to extract text from SystemPrompt.

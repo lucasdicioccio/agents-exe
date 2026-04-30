@@ -14,7 +14,7 @@ module System.Agents.CLI.ReplayToolCall (
     ToolCallInfo (..),
 ) where
 
-import Control.Exception (try, IOException)
+import Control.Exception (IOException, try)
 import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -284,4 +284,3 @@ doesFileExist' path = do
     case result of
         Left _ -> pure False
         Right status -> pure $ Posix.isRegularFile status
-

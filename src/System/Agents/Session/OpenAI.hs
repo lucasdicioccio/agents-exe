@@ -236,13 +236,14 @@ mkOpenAICompletion config completion = do
     userQueryToMessages mQuery mediaAttachments =
         case mQuery of
             Nothing -> []
-            Just (UserQuery text []) | null mediaAttachments ->
-                -- Text-only query with no media
-                [ Aeson.object
-                    [ "role" .= ("user" :: Text)
-                    , "content" .= text
+            Just (UserQuery text [])
+                | null mediaAttachments ->
+                    -- Text-only query with no media
+                    [ Aeson.object
+                        [ "role" .= ("user" :: Text)
+                        , "content" .= text
+                        ]
                     ]
-                ]
             Just (UserQuery text userMedia) ->
                 -- Multi-modal query with text and media
                 let allMedia = userMedia ++ mediaAttachments
@@ -398,4 +399,3 @@ mkOpenAICompletion config completion = do
     -- Convert OpenAI OpenAIToolCall to LlmToolCall (wrapping the raw object)
     toolCallToLlmToolCall :: OpenAI.OpenAIToolCall -> LlmToolCall
     toolCallToLlmToolCall tc = LlmToolCall $ Aeson.Object tc.rawToolCall
-

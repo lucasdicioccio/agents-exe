@@ -1,5 +1,5 @@
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE RankNTypes #-}
 
 {- |
 Compatibility and migration utilities for session handling.
@@ -49,7 +49,7 @@ import System.Agents.Session.Types (
     Session (..),
     Turn (..),
     UserToolResponse (..),
-    migrateSessionV1ToV2
+    migrateSessionV1ToV2,
  )
 import System.Agents.ToolSchema (ToolName (..))
 import System.Agents.Tools.Base (CallResult (..))
@@ -82,8 +82,9 @@ parseLlmToolCall_Compat val =
     openai :: Maybe CompatToolCall
     openai = ToolCall_OpenApi <$> parseToolCall_openAI val
 
--- | Parse an OpenAI-style tool call from a JSON value.
--- This is a local implementation since OpenAI.parseToolCall_openAI is not exported.
+{- | Parse an OpenAI-style tool call from a JSON value.
+This is a local implementation since OpenAI.parseToolCall_openAI is not exported.
+-}
 parseToolCall_openAI :: Aeson.Value -> Maybe OpenAI.OpenAIToolCall
 parseToolCall_openAI val =
     case Aeson.parseMaybe Aeson.parseJSON val of
@@ -105,6 +106,7 @@ parseToolCall_openAI val =
                                     }
                         _ -> Nothing
                 _ -> Nothing
+
 {- | Convert a CallResult to a UserToolResponse.
 
 This function handles the conversion from internal tool results to the
@@ -231,4 +233,3 @@ let session = ensureSessionVersion rawSession
 -}
 ensureSessionVersion :: Session -> Session
 ensureSessionVersion = migrateSessionToV2
-
