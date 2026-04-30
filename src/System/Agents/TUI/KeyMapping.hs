@@ -61,8 +61,9 @@ import System.IO (hPutStrLn, stderr)
 -- Event Names
 -------------------------------------------------------------------------------
 
--- | Name of a TUI event/action.
--- These represent all the actions that can be triggered by keyboard shortcuts.
+{- | Name of a TUI event/action.
+These represent all the actions that can be triggered by keyboard shortcuts.
+-}
 data EventName
     = EventQuit
     | EventSendMessage
@@ -183,7 +184,8 @@ data KeyName
     | KeyPageDown
     | KeyHome
     | KeyEnd
-    | KeyFun Int -- ^ Function key F1-F12
+    | -- | Function key F1-F12
+      KeyFun Int
     deriving (Show, Eq, Ord)
 
 -- | Convert a KeyName to its JSON representation.
@@ -324,8 +326,9 @@ instance FromJSON KeyBinding where
 -- Key Mapping
 -------------------------------------------------------------------------------
 
--- | Complete key mapping from events to key bindings.
--- Multiple bindings per event allow alternatives (e.g., Esc and Ctrl+Q for quit).
+{- | Complete key mapping from events to key bindings.
+Multiple bindings per event allow alternatives (e.g., Esc and Ctrl+Q for quit).
+-}
 newtype KeyMapping = KeyMapping
     { keyMappingBindings :: Map EventName [KeyBinding]
     }
@@ -527,8 +530,9 @@ generateHelpContent keymap =
 -- Loading
 -------------------------------------------------------------------------------
 
--- | Load keymap from file, falling back to default on error.
--- If the file doesn't exist or is invalid, prints a warning and returns the default.
+{- | Load keymap from file, falling back to default on error.
+If the file doesn't exist or is invalid, prints a warning and returns the default.
+-}
 loadKeymapFromFile :: FilePath -> IO KeyMapping
 loadKeymapFromFile path = do
     exists <- doesFileExist path
@@ -548,11 +552,11 @@ loadKeymapFromFile path = do
                     hPutStrLn stderr $ "Loaded custom keymap from: " ++ path
                     pure $ mergeWithDefault keymap
 
--- | Merge a partial keymap with the default.
--- Events not specified in the custom keymap will use default bindings.
+{- | Merge a partial keymap with the default.
+Events not specified in the custom keymap will use default bindings.
+-}
 mergeWithDefault :: KeyMapping -> KeyMapping
 mergeWithDefault (KeyMapping custom) =
     KeyMapping $ Map.unionWith (\customBindings _ -> customBindings) custom defaultBindings
   where
     KeyMapping defaultBindings = defaultKeyMapping
-

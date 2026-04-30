@@ -214,8 +214,9 @@ runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
 runTUI tracer store apiKeys props =
     runTUIWithKeymap tracer store apiKeys defaultKeyMapping props
 
--- | Initialize the TUI with a custom session configuration.
--- Uses the keymap from the SessionConfig.
+{- | Initialize the TUI with a custom session configuration.
+Uses the keymap from the SessionConfig.
+-}
 runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
 runTUIWithConfig tracer config props = do
     runTUIInternal tracer config props
@@ -260,7 +261,7 @@ runTUIInternal tracer config props = do
     -- Create core state with World and EventQueue for subcall visibility
     core0 <- initCore (Just world) (Just osEventQueue)
     coreTVar <- newTVarIO core0
--- Generate help content from the keymap
+    -- Generate help content from the keymap
     let helpText = generateHelpContent (sessionKeyMapping config)
 
     -- Create UI state with loaded sessions and collected tools
@@ -374,4 +375,3 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
-

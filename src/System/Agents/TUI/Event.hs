@@ -1633,4 +1633,3 @@ handleSendMessage = do
                         tuiUI . selectedAttachmentIndex .= Nothing
                         updateConversationStatus convId ConversationStatus_Active
             Nothing -> showStatus StatusWarning "No conversation selected"
-
