@@ -1,6 +1,6 @@
 # Terminal UI (TUI)
 
-The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, and a tabbed interface for organizing different views.
+The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tabbed interface for organizing different views.
 
 ## Overview
 
@@ -128,12 +128,181 @@ data UIState = UIState
     , ...
     }
 
-data TUIState = TUIState
+data TUIState = TuiState
     { _tuiCore :: TVar Core
     , _tuiUI :: UIState
     , _eventChan :: BChan AppEvent
     , _sessionConfig :: SessionConfig
     }
+```
+
+## Subcall Conversation Visibility
+
+When agents call other agents as tools (via `prompt_agent_<slug>`), the subcall conversations are now visible in the TUI with visual distinction and hierarchy tracking.
+
+### Visual Hierarchy
+
+Subcall conversations are displayed with tree-branch styling to show parent-child relationships:
+
+```
+Conversations
+├─ @file-assistant (⟳)                    -- Root conversation
+│  ├─ @code-reviewer (⟳)                  -- Subcall depth 1
+│  │  └─ @syntax-checker (●)              -- Subcall depth 2
+│  └─ @documenter (●)                     -- Subcall depth 1
+└─ @helper-agent (●)                      -- Another root conversation
+```
+
+### Conversation Indicators
+
+| Visual | Meaning |
+|--------|---------|
+| `@slug` | Root conversation (depth 0) |
+| `├─ @slug` | Subcall with siblings |
+| `└─ @slug` | Last subcall in branch |
+| `│` | Continuation line for parent with more children |
+| Dimmed text | Subcall conversation |
+| Normal text | Root conversation |
+| `⟳` | Active (processing) |
+| `●` | Waiting for input |
+| `⏸` | Paused |
+
+### Subcall Event Flow
+
+```
+Parent Agent (TUI visible)
+       │
+       ▼ calls helper agent
+┌─────────────────────────┐
+│ turnAgentRuntimeIntoIOTool
+│ (OneShotTool.hs)        │
+│                         │
+│ 1. Insert into OS World │
+│    - ConversationConfig │
+│    - ConversationState  │
+│    - Lineage (parent)   │
+│                         │
+│ 2. Emit SubcallStarted  │◄── OSEvent
+│    (parentId, convId)   │
+│                         │
+│ 3. Run sub-agent        │
+│                         │
+│ 4. Emit SubcallProgress │◄── OSEvent (after each step)
+│                         │
+│ 5. Emit SubcallCompleted│◄── OSEvent (on success)
+│    or SubcallFailed     │◄── OSEvent (on error)
+└──────────┬──────────────┘
+           │
+           ▼ OS Event Queue
+┌─────────────────────────┐
+│   TUI Event Handler     │
+│   (Event.hs)            │
+│                         │
+│ - Create conversation   │
+│ - Show in list          │
+│ - Update on progress    │
+│ - Mark completed        │
+└─────────────────────────┘
+```
+
+### Subcall Event Types
+
+```haskell
+-- OS Events (from System.Agents.OS.Events)
+data OSEvent
+    = ...
+    | OSEvent_SubcallStarted
+        { subcallParentConversationId :: ConversationId
+        , subcallConversationId :: ConversationId
+        , subcallAgentSlug :: Text
+        , subcallDepth :: Int
+        }
+    | OSEvent_SubcallProgress
+        { subcallProgressConversationId :: ConversationId
+        , subcallProgressSession :: Session
+        }
+    | OSEvent_SubcallCompleted
+        { subcallCompletedConversationId :: ConversationId
+        , subcallCompletedResult :: Text
+        }
+    | OSEvent_SubcallFailed
+        { subcallFailedConversationId :: ConversationId
+        , subcallFailedError :: Text
+        }
+
+-- App Events (TUI internal)
+data AppEvent
+    = ...
+    | AppEvent_SubcallStarted ConversationId ConversationId Text Int
+    | AppEvent_SubcallProgress ConversationId Session
+    | AppEvent_SubcallCompleted ConversationId Text
+    | AppEvent_SubcallFailed ConversationId Text
+```
+
+### Conversation Types
+
+```haskell
+data Conversation = Conversation
+    { conversationId :: ConversationId
+    , conversationAgent :: TuiAgent
+    , conversationThreadId :: Maybe ThreadId
+    , conversationSession :: Maybe Session
+    , conversationName :: Text
+    , conversationChan :: BChan (Maybe UserQuery)
+    , conversationStatus :: ConversationStatus
+    , conversationOnProgress :: OnSessionProgress
+    , conversationIsSubcall :: Bool      -- ^ NEW: Is this a subcall?
+    , conversationParentId :: Maybe ConversationId  -- ^ NEW: Parent conversation
+    , conversationSubcallDepth :: Int    -- ^ NEW: Nesting depth (0 = root)
+    }
+```
+
+### Rendering Subcall Hierarchy
+
+```haskell
+-- Render conversations with tree structure
+renderConversationForest :: [ConversationTree] -> [Widget N]
+renderConversationForest trees =
+    concatMap (renderTreeNode [] False) trees
+
+-- Build tree from flat list
+buildConversationForest :: [Conversation] -> [ConversationTree]
+buildConversationForest convs =
+    let -- Find roots (no parent or orphaned)
+        isRoot c = conversationParentId c == Nothing
+                || conversationParentId c `notElem` map (Just . conversationId) convs
+        roots = filter isRoot convs
+        
+        -- Build recursively
+        buildTree conv = ConversationTree conv $
+            map buildTree (findChildren conv)
+        findChildren parent =
+            filter (\c -> conversationParentId c == Just (conversationId parent)) convs
+    in map buildTree roots
+
+-- Make prefix with tree branches
+makePrefix :: [Bool] -> Bool -> Text
+makePrefix ancestorIsLasts isLast
+    | null ancestorIsLasts = if isLast then "└─" else "├─"
+    | otherwise =
+        let continuation = mconcat $
+                map (\isLast' -> if isLast' then "  " else "│ ") ancestorIsLasts
+        in continuation <> (if isLast then "└─" else "├─")
+```
+
+### Visual Attributes
+
+```haskell
+tui_appAttrMap :: TuiState -> AttrMap
+tui_appAttrMap _ =
+    attrMap Vty.defAttr
+        [ ...
+        , -- Subcall visual distinction
+          (subcallAttr, fg white `withStyle` dim)
+        , (subcallSelectedAttr, fg black `on` brightWhite `withStyle` bold)
+        , (treeBranchAttr, fg white `withStyle` dim)
+        , (rootConversationAttr, defAttr)
+        ]
 ```
 
 ## File Attachments
@@ -287,7 +456,7 @@ data ClipboardContent
 ```
 
 Detection order:
-1. Check for image data (via magic bytes: PNG `[0m[32m\x89PNG`, JPEG `[0m[32m\xFF\xD8\xFF`, GIF `GIF87a/GIF89a`, WebP `RIFF`)
+1. Check for image data (via magic bytes: PNG `\x89PNG`, JPEG `\xFF\xD8\xFF`, GIF `GIF87a/GIF89a`, WebP `RIFF`)
 2. Check for file paths (valid paths that exist)
 3. Check for multiple file paths (one per line)
 4. Fall back to plain text
@@ -408,6 +577,38 @@ render_attachment_item selectedIdx idx att =
          ]
 ```
 
+### Conversation List with Nesting
+
+```haskell
+-- Render conversation list with subcall hierarchy
+render_conversationList :: TuiState -> Widget N
+render_conversationList st =
+    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
+        forest = buildConversationForest convs
+        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
+            Just (_, conv) -> Just (conversationId conv)
+            Nothing -> Nothing
+     in borderWithFocus
+            st
+            ConversationListWidget
+            "Conversations"
+            ( viewport ConversationListWidget Both $
+                vBox $ renderConversationForest st selectedId hasFocus forest
+            )
+
+renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
+renderConversationForest st selectedId hasFocus trees =
+    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0 ..] trees)
+
+renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> [Bool] -> Bool -> ConversationTree -> [Widget N]
+renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (ConversationTree conv children) =
+    let isSelected = selectedId == Just (conversationId conv)
+        nodeWidget = renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv
+        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0 ..] children)
+     in nodeWidget : childWidgets
+```
+
 ## Event Handling
 
 ### Tab Switching
@@ -431,6 +632,61 @@ cycleTabForward = do
     -- Update focus ring for the new tab
     mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
     tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
+```
+
+### Subcall Event Handling
+
+```haskell
+-- Handle subcall events in both normal and navigation mode
+handleNormalEvent tracer ev =
+    case ev of
+        AppEvent (AppEvent_SubcallStarted parentId subcallId slug depth) ->
+            handleSubcallStarted tracer parentId subcallId slug depth
+        AppEvent (AppEvent_SubcallProgress subcallId sess) ->
+            handleSubcallProgress subcallId sess
+        AppEvent (AppEvent_SubcallCompleted subcallId result) ->
+            handleSubcallCompleted subcallId result
+        AppEvent (AppEvent_SubcallFailed subcallId err) ->
+            handleSubcallFailed subcallId err
+        ...
+
+-- Create subcall conversation entry
+handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text -> Int -> EventM N TuiState ()
+handleSubcallStarted _tracer parentId subcallId slug depth = do
+    agents <- use (tuiUI . agentList . to listElements)
+    case findAgentBySlug slug agents of
+        Just tuiAgent -> do
+            inChan <- liftIO $ newBChan 100
+            let conv = Conversation
+                    { conversationId = subcallId
+                    , conversationAgent = tuiAgent
+                    , conversationThreadId = Nothing
+                    , conversationSession = Nothing
+                    , conversationName = "@" <> tuiSlug tuiAgent
+                    , conversationChan = inChan
+                    , conversationStatus = ConversationStatus_Active
+                    , conversationOnProgress = \_ -> pure ()
+                    , conversationIsSubcall = True
+                    , conversationParentId = Just parentId
+                    , conversationSubcallDepth = depth
+                    }
+            coreRef <- use tuiCore
+            liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
+            tuiUI . conversationList %= listInsert 0 conv
+        Nothing -> showStatus StatusWarning $ "Agent not found for subcall: " <> slug
+
+-- Update subcall progress
+handleSubcallProgress :: ConversationId -> Session -> EventM N TuiState ()
+handleSubcallProgress subcallId sess = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c { coreConversations = updateConversationSession subcallId sess (coreConversations c) }
+
+-- Mark subcall completed
+handleSubcallCompleted :: ConversationId -> Text -> EventM N TuiState ()
+handleSubcallCompleted subcallId _result = do
+    updateConversationStatus subcallId ConversationStatus_WaitingForInput
+    showStatus StatusInfo "Subcall completed"
 ```
 
 ### Attachment Event Handling
@@ -471,13 +727,11 @@ handleClipboardPaste _tracer = do
                         IgnoreContent ->
                             showStatus StatusWarning "No attachable content in clipboard"
                         PasteAsText text -> do
-                            -- Insert text into editor
                             editorContents <- use (tuiUI . messageEditor . editContentsL)
                             let newContents = TextZipper.insertMany text editorContents
                             tuiUI . messageEditor . editContentsL .= newContents
                             showStatus StatusInfo "Text pasted from clipboard"
                         AttachAsMedia attachment -> do
-                            -- Attach to current conversation
                             mConv <- getFocusedConversation
                             case mConv of
                                 Nothing -> showStatus StatusError "No conversation selected"
@@ -487,7 +741,6 @@ handleClipboardPaste _tracer = do
                                     let filename = maybe "unnamed" id attachment.mediaFilename
                                     showStatus StatusInfo $ "Attached from clipboard: " <> filename
                         AttachMultipleFiles attachments -> do
-                            -- Attach multiple files
                             mConv <- getFocusedConversation
                             case mConv of
                                 Nothing -> showStatus StatusError "No conversation selected"
@@ -842,14 +1095,22 @@ runTUIWithConfig tracer config props = do
     -- Create event channel
     evChan <- newBChan 100
 
-    -- Create core state
-    core0 <- initCore tuiAgents
+    -- Create OS event queue for subcall visibility
+    osEventQueue <- newTQueueIO
+
+    -- Start the event bridge
+    startOSEventBridge osEventQueue evChan
+
+    -- Create and initialize the OS World
+    world <- atomically initWorld
+
+    -- Create core state with World and EventQueue
+    core0 <- initCore (Just world) (Just osEventQueue)
     coreTVar <- newTVarIO core0
 
-    -- Create UI state with help content initialized
-    let ui0 = initHelpContent $
-            (initUIState tuiAgents [s | (_, Just s) <- loadedSessions])
-                { _coreAgentTools = agentTools }
+    -- Create UI state
+    let ui0 = (initUIState defaultHelpContent tuiAgents [s | (_, Just s) <- loadedSessions])
+                { _uiAgentTools = agentTools }
 
     -- Create TUI state
     let st = TuiState coreTVar ui0 evChan config
@@ -890,6 +1151,11 @@ tui_appAttrMap _ =
         , (attachmentAttr, fg cyan)
         , (attachmentSelectedAttr, bg blue `withStyle` bold)
         , (attachmentSizeAttr, fg white `withStyle` dim)
+        , -- Subcall conversation attributes
+          (subcallAttr, fg white `withStyle` dim)
+        , (subcallSelectedAttr, fg black `on` brightWhite `withStyle` bold)
+        , (treeBranchAttr, fg white `withStyle` dim)
+        , (rootConversationAttr, defAttr)
         ]
 ```
 
@@ -930,6 +1196,7 @@ data StatusSeverity
 1. **Clear indicators**: Show which agent is active
 2. **Separate contexts**: Each agent maintains its own conversation
 3. **Easy switching**: Tab between agents quickly
+4. **Subcall visibility**: Show nested agent calls with visual hierarchy
 
 ### Conversation Forking
 
@@ -951,6 +1218,14 @@ data StatusSeverity
 2. **Security**: Validate file paths before attachment
 3. **Size limits**: Prevent memory issues with large clipboard content
 4. **Platform detection**: Auto-detect best clipboard backend
+
+### Subcall Visibility
+
+1. **Tree rendering**: Show parent-child relationships clearly
+2. **Visual distinction**: Use different attributes for subcalls vs root conversations
+3. **Event bridging**: Convert OS events to AppEvents for Brick integration
+4. **Orphan handling**: Handle async race conditions where child arrives before parent
+5. **Nesting depth**: Track and display recursion depth
 
 ## Customization
 
@@ -993,4 +1268,6 @@ customProgressBar progress =
 | `System.Agents.TUI.Clipboard` | Clipboard and drag-and-drop support |
 | `System.Agents.Media.Types` | Media attachment types |
 | `System.Agents.SessionPrint` | Session formatting |
+| `System.Agents.OS.Events` | OS event types for subcall visibility |
+| `System.Agents.AgentTree.OneShotTool` | Subcall execution |
 
