@@ -34,7 +34,6 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (getCurrentTime)
 import Prod.Tracer (Tracer (..), contramap)
-import System.IO (hPutStrLn, stderr)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
 import qualified System.Agents.Base as Base
@@ -212,14 +211,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
     -- Run the sub-agent with the given prompt and execution context
     runSubAgent :: ToolExecutionContext -> PromptOtherAgent -> IO CByteString.ByteString
     runSubAgent ctx (PromptOtherAgent query) = do
-        -- Debug: log entry into runSubAgent
-        -- Debug: log entry into runSubAgent
-        let callStackDebug = Text.pack $ show $ map (\e -> (callAgentSlug e, callDepth e)) (Ctx.ctxCallStack ctx)
-        let parentIdStr = case ctxConversationId ctx of Base.ConversationId _ -> show (ctxConversationId ctx)
-        hPutStrLn stderr $ "[OneShotTool] runSubAgent ENTER: parent=" ++ parentIdStr ++ " stack=" ++ Text.unpack callStackDebug
-
-        hPutStrLn stderr $ "[OneShotTool] runSubAgent ENTER: parent=" ++ parentIdStr ++ " stack=" ++ Text.unpack callStackDebug
-
         -- Extract the conversation ID from the execution context for tracing
         -- ctx.ctxConversationId is Base.ConversationId
         let parentBaseConvId = ctx.ctxConversationId
@@ -249,9 +240,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         let mEventQueue = Ctx.ctxEventQueue ctx
         let mParentBaseConv = Ctx.ctxParentConversation ctx
 
-        -- Debug: log calculated depth and stack
-        hPutStrLn stderr $ "[OneShotTool] parentCallStack length=" ++ show (length parentCallStack) ++ " depth=" ++ show (length parentCallStack) ++ " newStack length=" ++ show (length subcallCallStack)
-
         -- Update the agent with the new call stack, parent reference, AND OS integration fields
         -- The World and EventQueue are essential for nested subcalls to be visible in the TUI
         let sessionAgent0WithStack =
@@ -261,11 +249,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
                     , SessionBase.ctxWorld = mWorld
                     , SessionBase.ctxEventQueue = mEventQueue
                     }
-
-        -- Debug: verify we have the event queue
-        case mEventQueue of
-            Just _ -> hPutStrLn stderr "[OneShotTool] Event queue present - nested subcalls will be visible"
-            Nothing -> hPutStrLn stderr "[OneShotTool] WARNING: No event queue - nested subcalls won't be visible"
 
         -- Apply dynamic tool filtering based on session activation state
         sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0WithStack
@@ -280,9 +263,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         now <- getCurrentTime
 
         let depth = length parentCallStack
-
-        -- Debug: log about to emit event
-        hPutStrLn stderr $ "[OneShotTool] Emitting SubcallStarted depth=" ++ show depth ++ " cid=" ++ show subcallBaseConvId ++ " parent=" ++ show parentBaseConvId
 
         -- Insert into OS World and emit start event if OS integration is available
         -- Convert Base.ConversationId to OS types for World operations
@@ -347,13 +327,10 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
                             , subcallDepth = depth
                             }
                 atomically $ writeTQueue eventQueue event
-                hPutStrLn stderr $ "[OneShotTool] SubcallStarted event emitted for cid=" ++ show subcallBaseConvId
-            Nothing -> do
-                hPutStrLn stderr $ "[OneShotTool] WARNING: No event queue, cannot emit SubcallStarted"
+            Nothing -> pure ()
 
         -- Run the agent and handle result
         -- Session.run uses Base.ConversationId
-        hPutStrLn stderr $ "[OneShotTool] About to run sub-agent cid=" ++ show subcallBaseConvId
         result <-
             runSubAgentWithEventEmission
                 subcallBaseConvId
@@ -361,7 +338,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
                 agentWithQuery
                 mWorld
                 mEventQueue
-        hPutStrLn stderr $ "[OneShotTool] Sub-agent completed cid=" ++ show subcallBaseConvId
 
         -- Return the result
         pure $ Text.encodeUtf8 result
@@ -396,7 +372,6 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
     -- Wrap the agent's step function to emit progress after each step
     let agentWithProgress = wrapAgentWithProgress emitProgress agent
 
-    hPutStrLn stderr $ "[OneShotTool] runSubAgentWithEventEmission: starting run for cid=" ++ show baseConvId
     result <-
         catch
             ( do
@@ -409,10 +384,8 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
             )
             ( \e -> do
                 let errMsg = Text.pack $ displayException (e :: SomeException)
-                hPutStrLn stderr $ "[OneShotTool] Sub-agent EXCEPTION: " ++ show e
                 pure $ Left errMsg
             )
-    hPutStrLn stderr $ "[OneShotTool] runSubAgentWithEventEmission: completed for cid=" ++ show baseConvId
 
     -- Emit completion or failure event
     -- OSEvent types use Base.ConversationId
@@ -626,3 +599,4 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     Maybe.fromMaybe "" txt
+
