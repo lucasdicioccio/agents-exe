@@ -11,7 +11,8 @@ Complete API reference for the Entity-Component-System (ECS) based OS architectu
 5. [Resource Management](#resource-management)
 6. [Concurrent Access](#concurrent-access)
 7. [Conversation Tracking](#conversation-tracking)
-8. [Persistence Layer](#persistence-layer)
+8. [OS Events](#os-events)
+9. [Persistence Layer](#persistence-layer)
 
 ---
 
@@ -708,6 +709,268 @@ let convFrames = findFramesByType ConversationFrame lineage
 
 ---
 
+## OS Events
+
+The OS Event system provides a mechanism for tracking entity lifecycle events, particularly for subcall visibility in the TUI. Events are emitted during agent execution and can be subscribed to by UI components.
+
+### OSEvent Type
+
+```haskell
+-- | Events that can be emitted by the OS.
+data OSEvent
+    = OSEvent_AgentStarted AgentId
+    | OSEvent_AgentStopped AgentId
+    | OSEvent_ConversationStarted ConversationId AgentId
+    | OSEvent_ConversationProgress ConversationId SessionProgress
+    | OSEvent_ConversationCompleted ConversationId
+    | OSEvent_ConversationFailed ConversationId Text
+    | OSEvent_ToolCalled AgentId Text Value
+    | OSEvent_ToolCompleted AgentId Text Value
+    | OSEvent_Error Text
+    | OSEvent_Shutdown
+    | -- ** Subcall Events for TUI visibility
+      OSEvent_SubcallStarted
+        { subcallParentConversationId :: ConversationId
+        -- ^ The parent conversation that initiated the subcall
+        , subcallConversationId :: ConversationId
+        -- ^ The new conversation ID for the subcall
+        , subcallAgentSlug :: Text
+        -- ^ The slug of the agent being called
+        , subcallDepth :: Int
+        -- ^ The recursion depth of this subcall (0 = root)
+        }
+    | OSEvent_SubcallProgress
+        { subcallProgressConversationId :: ConversationId
+        -- ^ The subcall conversation ID
+        , subcallProgressSession :: Session
+        -- ^ The current session state
+        }
+    | OSEvent_SubcallCompleted
+        { subcallCompletedConversationId :: ConversationId
+        -- ^ The subcall conversation ID
+        , subcallCompletedResult :: Text
+        -- ^ The result/response text from the subcall
+        }
+    | OSEvent_SubcallFailed
+        { subcallFailedConversationId :: ConversationId
+        -- ^ The subcall conversation ID
+        , subcallFailedError :: Text
+        -- ^ The error message
+        }
+    deriving (Show)
+```
+
+### Subcall Event Lifecycle
+
+```
+Parent Conversation
+       │
+       ▼ triggers agent call
+┌─────────────────────┐
+│ OSEvent_SubcallStarted    │ Emitted when subcall begins
+│ - parentId          │
+│ - subcallId         │
+│ - agentSlug         │
+│ - depth             │
+└──────────┬──────────┘
+           │
+           ▼
+    Agent execution
+           │
+           ▼
+┌─────────────────────┐
+│ OSEvent_SubcallProgress   │ Emitted after each step
+│ - subcallId         │
+│ - session           │
+└──────────┬──────────┘
+           │
+           ▼ (completion)
+┌─────────────────────┐
+│ OSEvent_SubcallCompleted  │ Emitted on success
+│ - subcallId         │
+│ - result            │
+└─────────────────────┘
+           │
+           ▼ (or failure)
+┌─────────────────────┐
+│ OSEvent_SubcallFailed     │ Emitted on error
+│ - subcallId         │
+│ - error             │
+└─────────────────────┘
+```
+
+### Subcall Visibility Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Subcall Visibility via OS Events                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Parent Conversation (TUI visible)                              │
+│  ┌────────────────────────────────────┐                         │
+│  │  User: "Analyze this code"         │                         │
+│  │  Agent: calls "prompt_agent_code_  │                         │
+│  │          reviewer"                 │                         │
+│  └────────────┬───────────────────────┘                         │
+│               │                                                 │
+│               ▼                                                 │
+│  ┌────────────────────────────────────┐                         │
+│  │  turnAgentRuntimeIntoIOTool        │                         │
+│  │  (System.Agents.AgentTree.         │                         │
+│  │   OneShotTool)                     │                         │
+│  │                                    │                         │
+│  │  1. Generate ConversationId        │                         │
+│  │  2. INSERT INTO OS WORLD:          │◄── OS component insertion│
+│  │     - ConversationConfig           │                         │
+│  │     - ConversationState            │                         │
+│  │     - Lineage (parent link)        │                         │
+│  │  3. EMIT OSEvent_SubcallStarted    │◄── Event emission       │
+│  │  4. Run sub-agent                  │                         │
+│  │  5. EMIT OSEvent_SubcallCompleted  │◄── Event emission       │
+│  └────────────┬───────────────────────┘                         │
+│               │                                                 │
+│               ▼                                                 │
+│  OS Event Queue (TQueue OSEvent)                                │
+│               │                                                 │
+│               ▼                                                 │
+│  ┌────────────────────────────────────┐                         │
+│  │  TUI Event Handler                 │                         │
+│  │  - Add to conversationList         │◄── VISIBLE IN TUI       │
+│  │  - Show as "↳ agent_slug"          │                         │
+│  │  - Link to parent                  │                         │
+│  └────────────────────────────────────┘                         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Using OS Events
+
+**Subscribing to Events:**
+```haskell
+import System.Agents.OS.Events
+import System.Agents.OS.Interfaces
+
+-- Initialize OS interface
+handle <- initInterface config
+
+-- Subscribe to events
+eventQueue <- subscribeToEvents handle
+
+-- Process events in a separate thread
+forkIO $ forever $ do
+    event <- atomically $ readTQueue eventQueue
+    handleEvent event
+
+-- Handle specific events
+handleEvent :: OSEvent -> IO ()
+handleEvent (OSEvent_SubcallStarted parentId convId slug depth) = do
+    putStrLn $ "Subcall started: " ++ show slug
+    putStrLn $ "  Parent: " ++ show parentId
+    putStrLn $ "  Subcall: " ++ show convId
+    putStrLn $ "  Depth: " ++ show depth
+
+handleEvent (OSEvent_SubcallCompleted convId result) = do
+    putStrLn $ "Subcall completed: " ++ show convId
+    putStrLn $ "  Result: " ++ take 100 result
+
+handleEvent (OSEvent_SubcallFailed convId err) = do
+    putStrLn $ "Subcall failed: " ++ show convId
+    putStrLn $ "  Error: " ++ show err
+
+handleEvent _ = pure ()  -- Ignore other events
+```
+
+**Emitting Events (in Tool Execution):**
+```haskell
+import System.Agents.Tools.Context
+
+runSubAgent :: ToolExecutionContext -> Prompt -> IO Result
+runSubAgent ctx prompt = do
+    -- Check if we have event queue
+    case ctxEventQueue ctx of
+        Nothing -> pure ()  -- No event emission (backward compatible)
+        Just eventQueue -> do
+            -- Emit start event
+            atomically $ writeTQueue eventQueue $
+                OSEvent_SubcallStarted
+                    { subcallParentConversationId = ctxConversationId ctx
+                    , subcallConversationId = newConvId
+                    , subcallAgentSlug = agentSlug
+                    , subcallDepth = length (ctxCallStack ctx)
+                    }
+            
+            -- ... run agent ...
+            
+            -- Emit completion event
+            atomically $ writeTQueue eventQueue $
+                OSEvent_SubcallCompleted
+                    { subcallCompletedConversationId = newConvId
+                    , subcallCompletedResult = result
+                    }
+```
+
+### ToolExecutionContext Extensions
+
+For subcall visibility, the `ToolExecutionContext` includes OS integration fields:
+
+```haskell
+data ToolExecutionContext = ToolExecutionContext
+    { -- ... existing fields ...
+    , ctxWorld :: Maybe World
+    -- ^ Optional OS World for ECS operations. When present, subcalls
+    -- can insert entities and components into the OS.
+    , ctxEventQueue :: Maybe (TQueue OSEvent)
+    -- ^ Optional event queue for OS event emission. When present,
+    -- subcalls can emit events to notify the TUI of lifecycle changes.
+    , ctxParentConversation :: Maybe ConversationId
+    -- ^ Optional parent conversation ID for subcalls. When present,
+    -- indicates this context is for a nested agent invocation.
+    }
+```
+
+**Helper Functions:**
+```haskell
+-- | Get the subcall depth (0 if not a subcall).
+getSubcallDepth :: ToolExecutionContext -> Int
+
+-- | Check if this context represents a subcall.
+isSubcallContext :: ToolExecutionContext -> Bool
+
+-- | Create a nested context for subcall execution.
+mkSubcallContext ::
+    ToolExecutionContext ->
+    Maybe World ->
+    Maybe (TQueue OSEvent) ->
+    ConversationId ->
+    ToolExecutionContext
+```
+
+### TUI Integration
+
+In the TUI, subcall events are converted to AppEvents and handled by the event loop:
+
+```haskell
+-- | Convert OSEvent to AppEvent
+convertOSEvent :: OSEvent -> Maybe AppEvent
+convertOSEvent (OSEvent_SubcallStarted parentId convId slug depth) =
+    Just $ AppEvent_SubcallStarted parentId convId slug depth
+convertOSEvent (OSEvent_SubcallProgress convId session) =
+    Just $ AppEvent_SubcallProgress convId session
+convertOSEvent (OSEvent_SubcallCompleted convId result) =
+    Just $ AppEvent_SubcallCompleted convId result
+convertOSEvent (OSEvent_SubcallFailed convId err) =
+    Just $ AppEvent_SubcallFailed convId err
+convertOSEvent _ = Nothing
+
+-- | Event handlers in TUI.Event
+handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text -> Int -> EventM N TuiState ()
+handleSubcallProgress :: ConversationId -> Session -> EventM N TuiState ()
+handleSubcallCompleted :: ConversationId -> Text -> EventM N TuiState ()
+handleSubcallFailed :: ConversationId -> Text -> EventM N TuiState ()
+```
+
+---
+
 ## Persistence Layer
 
 ### Backend Types
@@ -941,6 +1204,10 @@ atomically $ updateAgentAndToolbox world agentId toolboxId newAgentConfig newToo
 - `ResourceM` - Resource monad
 - `ResourceError` - Error types
 - `SyncPrimitive`, `ExclusiveLock`, `ReadWriteLock`, `PoolLock` - Lock types
+
+### Event Types
+- `OSEvent` - OS event types including subcall events
+- `SessionProgress` - Session progress tracking
 
 ### Persistence Types
 - `PersistenceHandle`, `PersistenceBackendType` - Backend types

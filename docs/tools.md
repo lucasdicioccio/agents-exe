@@ -487,7 +487,7 @@ The System Toolbox provides agents with contextual information about the running
 | `working-directory` | Current working directory |
 | `process-info` | Process ID, parent PID, process name |
 | `uptime` | System uptime |
-| `attach-file` | Attach a file to the conversation (NEW) |
+| `attach-file` | Attach a file to the conversation |
 
 ### Configuration
 
@@ -588,6 +588,8 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
 | `scaffold-agent` | Generates agent scaffolding from template |
 | `scaffold-tool` | Generates tool scaffolding in multiple languages |
 | `show-spec` | Displays specification documentation |
+| `read-file-range` | Reads specific line ranges from a file |
+| `write-file-range` | Replaces line ranges in a file with new content |
 
 ### Configuration
 
@@ -599,7 +601,7 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "show-spec"]
+        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range"]
       }
     }
   ]
@@ -690,6 +692,144 @@ The developer toolbox exposes a single tool named `developer_{name}_developer_to
 **Specs:** `bash-tools`
 
 **Response:** Returns the embedded specification documentation as text.
+
+#### read-file-range
+
+Reads specific line ranges from a file and returns them with line numbers.
+
+**Parameters:**
+```json
+{
+  "capability": "read-file-range",
+  "path": "/path/to/file",
+  "ranges": "1-10,20-30"
+}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Path to the file to read |
+| `ranges` | string | No | Line ranges (e.g., `"1-10"`, `"5"`, `"head"`, `"tail"`, `"1-5,20-30"`). Omit to read entire file. |
+
+**Range Formats:**
+- Single line: `"5"` - Reads line 5
+- Line range: `"1-10"` - Reads lines 1 through 10
+- Multiple ranges: `"1-5,20-30"` - Reads lines 1-5 and 20-30
+- Head: `"head"` - Reads from beginning (no-op for read)
+- Tail: `"tail"` - Reads to end (no-op for read)
+
+**Returns:**
+```json
+{
+  "path": "/path/to/file",
+  "content": "1\tdef hello():\n2\t    print('Hello, World!')\n3\t    return True\n",
+  "linesRead": 3
+}
+```
+
+The content includes line numbers prepended with a tab separator in the format `{line_num}\t{line_content}`.
+
+**Example Output:**
+```
+1	def hello():
+2	    print("Hello, World!")
+3	    return True
+```
+
+**Error Responses:**
+```json
+{
+  "error": "File not found: /path/to/file"
+}
+```
+
+#### write-file-range
+
+Replaces line ranges in a file with new content. Multiple ranges can be modified in a single call.
+
+**Parameters:**
+```json
+{
+  "capability": "write-file-range",
+  "path": "/path/to/file",
+  "ranges": "head,5-10,tail",
+  "content": "# New header\n---\n# Replaced middle\n---\n# New footer"
+}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Path to the file to modify |
+| `ranges` | string | Yes | Comma-separated ranges (e.g., `"1-10"`, `"5"`, `"head"`, `"tail"`, `"head,5-10,tail"`) |
+| `content` | string | Yes | Replacement text. Use `'---'` to separate multiple ranges. |
+
+**Range Formats:**
+- Single line: `"5"` - Replaces line 5
+- Line range: `"1-10"` - Replaces lines 1 through 10
+- Multiple ranges: `"1-5,20-30"` - Replaces two separate ranges
+- Head: `"head"` - Prepends content before line 1
+- Tail: `"tail"` - Appends content after last line
+
+**Multiple Ranges with Content Blocks:**
+When modifying multiple ranges, separate content blocks with a line containing only `---`:
+
+```json
+{
+  "capability": "write-file-range",
+  "path": "/path/to/file",
+  "ranges": "1-3,10-12",
+  "content": "// New lines 1-3\n// replacement content\n// end of block 1\n---\n// New lines 10-12\n// replacement content\n// end of block 2"
+}
+```
+
+**Important:** Ranges are applied bottom-to-top so earlier line numbers stay valid during the operation.
+
+**Returns:**
+```json
+{
+  "path": "/path/to/file",
+  "rangesModified": 2,
+  "linesWritten": 6
+}
+```
+
+**Behavior:**
+- **Preserves trailing newline:** If the original file ends with a newline, the output will too
+- **Creates file for head/tail:** If file doesn't exist and using `head` or `tail`, creates the file
+- **Error for missing file:** Returns error if file doesn't exist for non-head/tail operations
+- **Bottom-to-top application:** Multiple ranges are processed in reverse order to maintain line number validity
+
+**Error Responses:**
+```json
+{
+  "error": "Number of content blocks (1) must match number of ranges (2). Use '---' to separate blocks."
+}
+```
+
+### Range Specification Types
+
+```haskell
+-- | Range specification for file operations.
+data RangeSpec
+    = Lines (Int, Int)  -- ^ 1-based, inclusive line range (start, end)
+    | Head              -- ^ Before line 1 (prepend)
+    | Tail              -- ^ After last line (append)
+    deriving (Show, Eq)
+
+-- | Result of a read file range operation.
+data ReadFileRangeResult = ReadFileRangeResult
+    { readFilePath :: FilePath
+    , readFileContent :: Text
+    , readFileLinesRead :: Int
+    }
+
+-- | Result of a write file range operation.
+data WriteFileRangeResult = WriteFileRangeResult
+    { writeFilePath :: FilePath
+    , writeFileRangesModified :: Int
+    , writeFileLinesWritten :: Int
+    }
+```
 
 ### Generated Templates
 
@@ -1346,6 +1486,41 @@ pushAgentContext ::
 
 Prevents infinite loops by tracking call depth and failing when `maxDepth` is exceeded.
 
+### OS Integration (Subcall Visibility)
+
+For TUI visibility of subcall conversations, the context includes OS integration fields:
+
+```haskell
+data ToolExecutionContext = ToolExecutionContext
+    { -- ... existing fields ...
+    , ctxWorld :: Maybe World
+    -- ^ OS World for ECS operations. Enables subcall conversations
+    -- to be tracked as first-class entities in the OS.
+    , ctxEventQueue :: Maybe (TQueue OSEvent)
+    -- ^ Event queue for OS event emission. Enables the TUI to receive
+    -- notifications about subcall lifecycle (start, progress, completion).
+    , ctxParentConversation :: Maybe ConversationId
+    -- ^ Parent conversation ID for nested agent calls.
+    }
+```
+
+**Helper Functions:**
+```haskell
+-- | Create a nested context for subcall execution.
+mkSubcallContext ::
+    ToolExecutionContext ->
+    Maybe World ->
+    Maybe (TQueue OSEvent) ->
+    ConversationId ->
+    ToolExecutionContext
+
+-- | Get the subcall depth (0 for root conversations).
+getSubcallDepth :: ToolExecutionContext -> Int
+
+-- | Check if this context is for a subcall.
+isSubcallContext :: ToolExecutionContext -> Bool
+```
+
 ## Tool Result Types
 
 ```haskell
@@ -1369,6 +1544,10 @@ data CallResult call
     | DeveloperToolResult call ValidationResult
     | DeveloperToolScaffoldResult call ScaffoldResult
     | DeveloperToolSpecResult call Text
+    | DeveloperToolAgentValidationResult call AgentValidationResult
+    | DeveloperToolCreateResult call CreateResult
+    | DeveloperToolReadFileRangeResult call ReadFileRangeResult
+    | DeveloperToolWriteFileRangeResult call WriteFileRangeResult
     | LuaToolResult call Aeson.Value
     | LuaToolError call Text
 ```
@@ -1527,6 +1706,9 @@ data DeveloperToolError
     | ScaffoldError Text
     | FileExistsError FilePath
     | InvalidTemplateError Text
+    | InvalidRangeError Text
+    | RangeOutOfBoundsError Text
+    | PermissionError Text
 ```
 
 ### Validation Errors
@@ -1564,6 +1746,9 @@ data PortalError
 12. **Lua security**: Always specify allowedTools, allowedPaths, and allowedHosts - empty means no access
 13. **Media output**: Declare `output-media-type` for tools that produce binary content
 14. **Mixed responses**: Use `MixedResponse` for rich multi-modal tool outputs
+15. **File range operations**: Use `read-file-range` and `write-file-range` for precise file editing rather than reading/writing entire files
+16. **Line numbers**: When using `read-file-range`, the output includes line numbers to help LLMs understand file structure
+17. **Range formatting**: Always use 1-based line numbers for ranges (e.g., "1-10" for lines 1 through 10)
 
 ## Example: Complete Tool Configuration
 
@@ -1633,7 +1818,7 @@ data PortalError
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool"]
+        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range"]
       }
     },
     {
@@ -1680,4 +1865,5 @@ data PortalError
 | `System.Agents.ToolPortal` | Inter-tool communication |
 | `System.Agents.ToolRegistration` | Tool registration |
 | `System.Agents.ToolSchema` | Schema definitions |
+| `System.Agents.OS.Events` | OS event types for subcall visibility |
 
