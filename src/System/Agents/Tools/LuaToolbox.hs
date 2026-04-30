@@ -5,10 +5,11 @@
 
 {- | Provides a sandboxed Lua interpreter for agent-scriptable tool orchestration with security hardening.
 
-This module implements the Lua toolbox functionality, including:
+This module implements the Lua toolbox functionality with per-tool-call isolation:
 
-* Lua interpreter initialization using hslua
-* Sandboxed execution environment
+* Each tool call creates a fresh, isolated Lua state
+* Lua state is destroyed immediately after execution completes
+* No persistent state between calls (use SQLite for persistence)
 * Memory limits via Lua allocator hooks
 * Timeout enforcement via Haskell watchdog thread
 * Error handling and stack trace capture
@@ -17,6 +18,10 @@ This module implements the Lua toolbox functionality, including:
 * Comprehensive tool invocation tracing
 
 Security Features:
+* Maximum isolation: Each call starts from identical initial state
+* Memory bounded: No accumulation of Lua heap across calls
+* Secure by default: No way for call N to influence call N+1
+* No deadlocks: No shared lock between parent and recursive sub-agent
 * Path sandboxing with canonicalization (prevents symlink traversal)
 * Host whitelisting for HTTP requests
 * Tool whitelist enforcement
@@ -66,6 +71,29 @@ Example Lua script using modules:
 > end
 >
 > return {parts = parts, date = formatted}
+
+== Migration from Persistent State
+
+Scripts that relied on persistence across calls must use SQLite:
+
+-- BEFORE (won't work now):
+-- Call 1: users = { "alice" }
+-- Call 2: return users[1]  -- Returns "alice"
+
+-- AFTER (explicit persistence):
+local json = require("json")
+local tools = require("tools")
+
+-- Save
+tools.call("sqlite_memory_query", {
+    sql = "INSERT INTO state VALUES ('users', '" .. json.encode(users) .. "')"
+})
+
+-- Load
+local result = tools.call("sqlite_memory_query", {
+    sql = "SELECT value FROM state WHERE key = 'users'"
+})
+users = json.decode(result.result_txt)
 -}
 module System.Agents.Tools.LuaToolbox (
     -- * Core types
@@ -80,7 +108,7 @@ module System.Agents.Tools.LuaToolbox (
     -- * Initialization
     initializeToolbox,
     initializeToolboxWithModuleTracer,
-    closeToolbox,
+    closeToolbox, -- ^ Deprecated: LuaToolbox is now stateless
 
     -- * Script execution
     executeScriptWithPortal,
@@ -91,7 +119,7 @@ module System.Agents.Tools.LuaToolbox (
     applyTimeout,
 
     -- * Module registration
-    registerSandardModules,
+    registerStandardModules,
 
     -- * Re-exported module traces for convenience
     module System.Agents.Tools.LuaToolbox.Modules.Fs,
@@ -102,9 +130,9 @@ module System.Agents.Tools.LuaToolbox (
     module System.Agents.Tools.LuaToolbox.Modules.Tools,
 ) where
 
-import Control.Concurrent (MVar, newEmptyMVar, putMVar, takeMVar, threadDelay)
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, bracket, try)
 import Control.Monad (replicateM, void, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Text as Text
@@ -217,20 +245,21 @@ data Trace
       SandboxViolationTrace !Text.Text
     deriving (Show)
 
-{- | Runtime state for a Lua toolbox.
+{- | Runtime configuration for a Lua toolbox.
 
-The toolbox maintains:
-* Lua state (from hslua)
-* Configuration (memory limit, timeout, etc.)
-* An MVar for serializing script execution within this toolbox instance
+The toolbox maintains only configuration - no persistent Lua state.
+Each tool call creates a fresh, isolated Lua state that is destroyed
+immediately after execution completes.
+
+This design provides:
+* Maximum isolation between calls
+* Bounded memory usage (no accumulation across calls)
+* No deadlocks with recursive agent calls
+* Deterministic behavior (same inputs always produce same outputs)
 -}
 data Toolbox = Toolbox
-    { toolboxLuaState :: Lua.State
-    -- ^ The Lua state (opaque pointer managed by hslua)
-    , toolboxConfig :: LuaToolboxDescription
+    { toolboxConfig :: LuaToolboxDescription
     -- ^ Configuration for this toolbox
-    , toolboxLock :: MVar ()
-    -- ^ Lock for serializing access within this toolbox instance
     , toolboxName :: Text.Text
     -- ^ Name of this toolbox instance
     }
@@ -277,20 +306,24 @@ instance Aeson.ToJSON ExecutionResult where
 
 {- | Initialize a Lua toolbox from a description.
 
-This function:
-1. Creates a new Lua state using hslua
-2. Configures the sandbox (removes dangerous functions)
-3. Sets up memory limit tracking
-4. Registers standard library modules (json, text, time, fs, http) with security settings
-5. Creates an MVar lock for serializing access
-6. Returns a 'Toolbox' ready for script execution
-
-Returns an error if the Lua state cannot be created.
+This function creates a stateless toolbox configuration. The actual Lua state
+is created fresh for each tool call and destroyed immediately after execution.
 
 Security configuration:
 * fsAllowedPaths: whitelist for filesystem access (empty = no access)
 * httpAllowedHosts: whitelist for HTTP hosts (empty = no access)
 * luaToolboxAllowedTools: whitelist for tools (empty = no access)
+
+Example:
+@
+result <- initializeToolbox tracer desc
+case result of
+    Left err -> putStrLn $ "Failed to initialize: " ++ err
+    Right toolbox -> do
+        -- Use toolbox for script execution
+        result <- executeScriptWithPortal tracer toolbox script portal
+        -- ...
+@
 -}
 initializeToolbox ::
     Tracer IO Trace ->
@@ -326,33 +359,21 @@ initializeToolboxWithModuleTracer ::
 initializeToolboxWithModuleTracer tracer desc = do
     runTracer tracer (StateInitializedTrace desc.luaToolboxName)
 
-    -- Create Lua state
-    result <- try $ Lua.newstate
+    -- The toolbox is now stateless - just configuration
+    -- Lua state is created fresh per call
+    pure $
+        Right
+            Toolbox
+                { toolboxConfig = desc
+                , toolboxName = desc.luaToolboxName
+                }
 
-    case result of
-        Left (e :: SomeException) -> do
-            let errMsg = "Failed to create Lua state: " <> show e
-            pure $ Left errMsg
-        Right lstate -> do
-            -- Configure sandbox
-            configureSandbox lstate
-
-            -- Set up memory limit if configured
-            when (desc.luaToolboxMaxMemoryMB > 0) $
-                applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
-
-            -- Create lock for serializing access
-            lock <- newEmptyMVar
-            putMVar lock ()
-
-            pure $
-                Right
-                    Toolbox
-                        { toolboxLuaState = lstate
-                        , toolboxConfig = desc
-                        , toolboxLock = lock
-                        , toolboxName = desc.luaToolboxName
-                        }
+{- | Deprecated: closeToolbox is no longer needed since LuaToolbox is stateless.
+Kept for backward compatibility with existing tests.
+-}
+{-# DEPRECATED closeToolbox "LuaToolbox is now stateless, closeToolbox is no longer needed and does nothing" #-}
+closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
+closeToolbox _tracer _toolbox = pure ()
 
 {- | Register all standard library modules with tracing support and portal.
 
@@ -360,13 +381,13 @@ This variant includes the tools module with portal support.
 
 The portal enables Lua scripts to call other tools through tools.call().
 -}
-registerSandardModules ::
+registerStandardModules ::
     Tracer IO LuaModuleTrace ->
     Lua.State ->
     LuaToolboxDescription ->
     ToolPortal ->
     IO ()
-registerSandardModules moduleTracer lstate desc portal = do
+registerStandardModules moduleTracer lstate desc portal = do
     -- Create individual module tracers using contramap
     let fsTracer = contramap FsTrace moduleTracer
     let httpTracer = contramap HttpTrace moduleTracer
@@ -411,16 +432,6 @@ registerSandardModules moduleTracer lstate desc portal = do
             { ToolsMod.toolsAllowedTools = desc.luaToolboxAllowedTools
             }
         portal
-
-{- | Close a toolbox and release its resources.
-
-This function closes the Lua state and should be called when the
-sandbox is no longer needed.
--}
-closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
-closeToolbox tracer toolbox = do
-    Lua.close (toolboxLuaState toolbox)
-    runTracer tracer StateClosedTrace
 
 -------------------------------------------------------------------------------
 -- Sandbox Configuration
@@ -583,14 +594,24 @@ applyTimeout seconds go =
 {- | Execute a Lua script with access to the tool portal.
 
 This is the full execution function that:
-1. Sets up the tools module with the portal and tracer
-2. Executes the script with the portal available
-3. Handles timeouts and memory limits
-4. Provides detailed error information
-5. Traces all tool invocations
+1. Creates a fresh Lua state using bracket pattern
+2. Configures the sandbox (removes dangerous functions)
+3. Registers standard library modules (json, text, time, fs, http) with security settings
+4. Sets up the tools module with the portal and tracer
+5. Executes the script with the portal available
+6. Handles timeouts and memory limits
+7. Provides detailed error information
+8. Traces all tool invocations
+9. Cleans up the Lua state automatically after execution
 
 The portal is exposed to Lua through the 'tools' module, which provides
 functions like tools.call().
+
+This function provides maximum isolation:
+* Each call starts from identical initial state
+* No memory accumulation across calls
+* No way for call N to influence call N+1
+* No shared locks (safe for recursive agent calls)
 -}
 executeScriptWithPortal ::
     Tracer IO Trace ->
@@ -601,41 +622,84 @@ executeScriptWithPortal ::
     ToolPortal ->
     IO (Either ScriptError ExecutionResult)
 executeScriptWithPortal tracer toolbox script portal = do
-    -- Acquire lock to serialize access within this toolbox instance
-    withMVar (toolboxLock toolbox) $ \() ->
-        executeScriptInternal tracer toolbox script portal
-
--- | Helper to run IO action with MVar lock
-withMVar :: MVar a -> (a -> IO b) -> IO b
-withMVar mvar action = do
-    val <- takeMVar mvar
-    result <- action val
-    putMVar mvar val
-    pure result
-
-executeScriptInternal ::
-    Tracer IO Trace ->
-    Toolbox ->
-    Text.Text ->
-    ToolPortal ->
-    IO (Either ScriptError ExecutionResult)
-executeScriptInternal tracer toolbox script portal = do
     startTime <- getCurrentTime
-    let lstate = toolboxLuaState toolbox
-    let maxTime = (toolboxConfig toolbox).luaToolboxMaxExecutionTimeSeconds
     let desc = toolboxConfig toolbox
+    let maxTime = desc.luaToolboxMaxExecutionTimeSeconds
 
-    -- Re-register modules with portal before execution
-    -- This ensures the tools module has access to the portal
-    registerSandardModules
+    -- Trace script execution start with full script content
+    runTracer tracer (ScriptExecutionStartTrace script)
+
+    -- Execute with a fresh Lua state using bracket pattern
+    result <-
+        try $
+            bracket
+                (createFreshState tracer desc portal)
+                (destroyState tracer)
+                (\lstate -> executeScriptInternal tracer lstate script maxTime)
+
+    endTime <- getCurrentTime
+    let execTime = diffUTCTime endTime startTime
+
+    case result of
+        Left (e :: SomeException) -> do
+            let errMsg = "Execution failed: " <> Text.pack (show e)
+            runTracer tracer (LuaErrorTrace errMsg)
+            pure $ Left $ LuaRuntimeError [Aeson.String errMsg]
+        Right execResult -> do
+            case execResult of
+                Left err -> do
+                    runTracer tracer (LuaErrorTrace (Text.pack $ show err))
+                    pure $ Left err
+                Right val -> do
+                    runTracer tracer (ScriptExecutionEndTrace script val execTime)
+                    pure $
+                        Right
+                            ExecutionResult
+                                { resultValues = val
+                                , resultExecutionTime = execTime
+                                }
+
+-- | Create a fresh Lua state with sandbox and modules configured.
+createFreshState ::
+    Tracer IO Trace ->
+    LuaToolboxDescription ->
+    ToolPortal ->
+    IO Lua.State
+createFreshState tracer desc portal = do
+    -- Create fresh Lua state
+    lstate <- Lua.newstate
+
+    -- Configure sandbox
+    configureSandbox lstate
+
+    -- Set up memory limit if configured
+    when (desc.luaToolboxMaxMemoryMB > 0) $
+        applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
+
+    -- Register standard modules
+    registerStandardModules
         (contramap ModuleRegistrationTrace tracer)
         lstate
         desc
         portal
 
-    -- Trace script execution start with full script content
-    runTracer tracer (ScriptExecutionStartTrace script)
+    pure lstate
 
+-- | Destroy a Lua state and release its resources.
+destroyState :: Tracer IO Trace -> Lua.State -> IO ()
+destroyState tracer lstate = do
+    Lua.close lstate
+    runTracer tracer StateClosedTrace
+
+-- | Internal execution function that runs in the context of a fresh Lua state.
+executeScriptInternal ::
+    Tracer IO Trace ->
+    Lua.State ->
+    Text.Text ->
+    -- | Timeout in seconds
+    Int ->
+    IO (Either ScriptError [Aeson.Value])
+executeScriptInternal tracer lstate script maxTime = do
     -- Execute with timeout
     result <- applyTimeout maxTime $ do
         Lua.runWith lstate $ do
@@ -661,23 +725,9 @@ executeScriptInternal tracer toolbox script portal = do
                             jsonValues <- replicateM (stackIndexToInt nrets) luaToJsonValue
                             pure $ Right jsonValues
 
-    endTime <- getCurrentTime
-    let execTime = diffUTCTime endTime startTime
-
     case result of
         Nothing -> do
             -- Timeout occurred
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
-        Just (Left err) -> do
-            runTracer tracer (LuaErrorTrace (Text.pack $ show err))
-            pure $ Left err
-        Just (Right val) -> do
-            -- Trace script execution end with script, result values, and execution time
-            runTracer tracer (ScriptExecutionEndTrace script val execTime)
-            pure $
-                Right
-                    ExecutionResult
-                        { resultValues = val
-                        , resultExecutionTime = execTime
-                        }
+        Just val -> pure val
