@@ -32,6 +32,7 @@ import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
 import System.Agents.ToolRegistration (ToolRegistration)
+import System.Agents.TUI.KeyMapping (KeyMapping)
 
 -------------------------------------------------------------------------------
 -- Widget Names
@@ -306,6 +307,8 @@ data SessionConfig = SessionConfig
     -- ^ Storage for sessions
     , sessionApiKeys :: LoadedApiKeys
     -- ^ API keys for agents
+    , sessionKeyMapping :: KeyMapping
+    -- ^ Key mapping for keyboard shortcuts
     }
 
 -------------------------------------------------------------------------------
@@ -410,6 +413,8 @@ data TuiState = TuiState
     -- ^ Channel for application events
     , _sessionConfig :: SessionConfig
     -- ^ Session configuration
+    , _keyMapping :: KeyMapping
+    -- ^ Current key mapping for keyboard shortcuts
     }
 
 makeLenses ''TuiState
@@ -473,3 +478,4 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
+
