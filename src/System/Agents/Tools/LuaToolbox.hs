@@ -108,7 +108,7 @@ module System.Agents.Tools.LuaToolbox (
     -- * Initialization
     initializeToolbox,
     initializeToolboxWithModuleTracer,
-    closeToolbox,  -- ^ Deprecated: LuaToolbox is now stateless
+    closeToolbox, -- ^ Deprecated: LuaToolbox is now stateless
 
     -- * Script execution
     executeScriptWithPortal,
@@ -368,8 +368,9 @@ initializeToolboxWithModuleTracer tracer desc = do
                 , toolboxName = desc.luaToolboxName
                 }
 
--- | Deprecated: closeToolbox is no longer needed since LuaToolbox is stateless.
--- Kept for backward compatibility with existing tests.
+{- | Deprecated: closeToolbox is no longer needed since LuaToolbox is stateless.
+Kept for backward compatibility with existing tests.
+-}
 {-# DEPRECATED closeToolbox "LuaToolbox is now stateless, closeToolbox is no longer needed and does nothing" #-}
 closeToolbox :: Tracer IO Trace -> Toolbox -> IO ()
 closeToolbox _tracer _toolbox = pure ()
@@ -629,10 +630,12 @@ executeScriptWithPortal tracer toolbox script portal = do
     runTracer tracer (ScriptExecutionStartTrace script)
 
     -- Execute with a fresh Lua state using bracket pattern
-    result <- try $ bracket
-        (createFreshState tracer desc portal)
-        (destroyState tracer)
-        (\lstate -> executeScriptInternal tracer lstate script maxTime)
+    result <-
+        try $
+            bracket
+                (createFreshState tracer desc portal)
+                (destroyState tracer)
+                (\lstate -> executeScriptInternal tracer lstate script maxTime)
 
     endTime <- getCurrentTime
     let execTime = diffUTCTime endTime startTime
@@ -649,10 +652,12 @@ executeScriptWithPortal tracer toolbox script portal = do
                     pure $ Left err
                 Right val -> do
                     runTracer tracer (ScriptExecutionEndTrace script val execTime)
-                    pure $ Right ExecutionResult
-                        { resultValues = val
-                        , resultExecutionTime = execTime
-                        }
+                    pure $
+                        Right
+                            ExecutionResult
+                                { resultValues = val
+                                , resultExecutionTime = execTime
+                                }
 
 -- | Create a fresh Lua state with sandbox and modules configured.
 createFreshState ::
@@ -726,4 +731,3 @@ executeScriptInternal tracer lstate script maxTime = do
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
         Just val -> pure val
-
