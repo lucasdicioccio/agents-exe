@@ -138,11 +138,9 @@ library agents-lib
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
                     , System.Agents.Session.Signals
-                    , System.Agents.Session.Search.Types
                     , System.Agents.Session.Search.Index
                     , System.Agents.Session.Search.Query
-                    , System.Agents.SessionPrint
-                    , System.Agents.SessionPrint.Inject
+                    , System.Agents.Session.Search.Types
                     , System.Agents.SessionStore
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
@@ -161,6 +159,8 @@ library agents-lib
                     , System.Agents.ToolRegistration
                     , System.Agents.ToolSchema
                     , System.Agents.TraceUtils
+                    , System.Agents.SessionPrint
+                    , System.Agents.SessionPrint.Inject
     build-depends:    base  >=4.18.3.0,
                       aeson >=2.2.0.0,
                       aeson-pretty,
@@ -273,6 +273,7 @@ test-suite agents-tests
     hs-source-dirs:   test
     main-is:          Main.hs
     other-modules:    ActivationSessionTests
+                    , DeveloperToolboxTests
                     , EndpointPredicateTests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests

@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import System.Agents.LLMs.OpenAI as OpenAI hiding (SystemPrompt)
@@ -64,6 +66,8 @@ import qualified OS.IntegrationTests
 import qualified OS.PersistenceTests
 -- Import Activation Session tests
 import qualified ActivationSessionTests
+-- Import DeveloperToolbox tests
+import qualified DeveloperToolboxTests
 
 main :: IO ()
 main = defaultMain tests
@@ -98,6 +102,7 @@ tests =
         , LuaToolboxTests.luaToolboxTests
         , LuaToolboxJsonValueTests.luaToJsonValueTests
         , LuaToolboxHttpTests.luaToolboxHttpTests
+        , DeveloperToolboxTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
