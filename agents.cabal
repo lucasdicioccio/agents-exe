@@ -157,6 +157,7 @@ library agents-lib
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Event
                     , System.Agents.TUI.Clipboard
+                    , System.Agents.TUI.KeyMapping
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.ToolSchema
@@ -176,6 +177,7 @@ library agents-lib
                       containers,
                       contravariant,
                       data-clist,
+                      data-default,
                       deepseq,
                       direct-sqlite,
                       directory,

@@ -54,11 +54,20 @@ import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
 import System.Agents.CLI.PromptScript (parseMediaReference, resolveMediaType)
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.OneShot (mapProgressiveDisclosureTrace, nodeToAgent)
-import qualified System.Agents.OneShot as OneShot
-import qualified System.Agents.Runtime.Trace as Runtime
-import System.Agents.Session.Base (Action (..), Agent (..), MissingUserPrompt (..), OnSessionProgress, Session (..), SessionProgress (..), UserQuery (..), newSessionId, newTurnId)
-import qualified System.Agents.Session.Loop as Loop
+import qualified System.Agents.OneShot as OneShot (Trace, mapProgressiveDisclosureTrace, nodeToAgent)
+import qualified System.Agents.Runtime.Trace as Runtime (Trace)
+import System.Agents.Session.Base (
+    Action (..),
+    Agent (..),
+    MissingUserPrompt (..),
+    OnSessionProgress,
+    Session (..),
+    SessionProgress (..),
+    UserQuery (..),
+    newSessionId,
+    newTurnId,
+ )
+import qualified System.Agents.Session.Loop as Loop (run)
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.TUI.Clipboard (
@@ -66,6 +75,13 @@ import System.Agents.TUI.Clipboard (
     analyzeContent,
     detectClipboardContent,
     hasClipboardSupport,
+ )
+import System.Agents.TUI.KeyMapping (
+    EventName (..),
+    KeyMapping,
+    defaultKeyMapping,
+    generateHelpContent,
+    matchesEvent,
  )
 import System.Agents.TUI.Render (sortConversationsForNesting)
 import System.Agents.TUI.Types (
@@ -102,6 +118,7 @@ import System.Agents.TUI.Types (
     eventChan,
     fileBrowser,
     filePathInput,
+    keyMapping,
     messageEditor,
     navSelectedTurnIndex,
     navSession,
@@ -138,61 +155,10 @@ data Trace
     deriving (Show)
 
 {- | Default keyboard shortcuts help content.
-| Default keyboard shortcuts help content.
+Generated from the default key mapping.
 -}
 defaultHelpContent :: [Text.Text]
-defaultHelpContent =
-    [ "Keyboard Shortcuts:"
-    , ""
-    , "Navigation:"
-    , "  Tab          - Cycle focus forward through widgets"
-    , "  Shift+Tab    - Cycle focus backward through widgets"
-    , "  Ctrl+Z       - Toggle zoom mode (based on current tab)"
-    , ""
-    , "Zoom Mode (Ctrl+Z):"
-    , "  Agents  tab  - Zooms the agent description panel"
-    , "  Chats   tab  - Zooms the conversation panel"
-    , "  History tab  - Zooms the session panel"
-    , "  Help    tab  - Zooms the help content"
-    , ""
-    , "Tabs:"
-    , "  Ctrl+[       - Switch to previous tab"
-    , "  Ctrl+]       - Switch to next tab"
-    , "  Enter        - Open selected conversation (from Conversations list)"
-    , ""
-    , "Conversations:"
-    , "  Ctrl+N       - Start new conversation with selected agent"
-    , "  Ctrl+C       - Continue restored session"
-    , "  Meta+Enter   - Send message"
-    , "  Ctrl+E       - Pause/unpause conversation"
-    , ""
-    , "Attachments:"
-    , "  Ctrl+F       - Attach file (opens file browser)"
-    , "  Ctrl+Shift+F - Clear all attachments"
-    , "  Ctrl+V       - Paste from clipboard (images/files)"
-    , "  Del/Backspace- Remove selected attachment"
-    , "  Up/Down      - Select attachment"
-    , ""
-    , "Queue Management (when paused):"
-    , "  Ctrl+D       - Clear all queued messages"
-    , "  Del/Backspace- Delete selected queued message"
-    , "  Up/Down      - Select queued message"
-    , ""
-    , "Session Navigation & Forking:"
-    , "  Enter        - Enter turn navigation mode (when on conversation)"
-    , "  Up/Down      - Navigate between turns (in navigation mode)"
-    , "  F            - Fork conversation at selected turn"
-    , "  Enter/Esc    - Exit turn navigation mode"
-    , ""
-    , "Session Export:"
-    , "  Ctrl+P       - Export session to markdown file"
-    , "  Ctrl+T       - View session in external viewer (chronological)"
-    , "  Ctrl+R       - View session in external viewer (reverse)"
-    , ""
-    , "Other:"
-    , "  F5           - Refresh tools for selected agent"
-    , "  Ctrl+Q       - Quit application (press twice to confirm)"
-    ]
+defaultHelpContent = generateHelpContent defaultKeyMapping
 
 -- | Alias for defaultHelpContent for backward compatibility.
 initHelpContent :: [Text.Text]
@@ -534,7 +500,8 @@ openFilePathDialog = openFileBrowserDialog
 
 -- | Handle events when in turn navigation mode.
 handleTurnNavigationEvent :: Tracer IO Trace -> TurnNavigationState -> BrickEvent N AppEvent -> EventM N TuiState ()
-handleTurnNavigationEvent tracer navState ev =
+handleTurnNavigationEvent tracer navState ev = do
+    keymap <- use keyMapping
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
         AppEvent (AppEvent_AgentStepProgrress convId sess) -> handleConversationUpdated convId sess
@@ -550,25 +517,24 @@ handleTurnNavigationEvent tracer navState ev =
             handleSubcallCompleted subcallId result
         AppEvent (AppEvent_SubcallFailed subcallId err) ->
             handleSubcallFailed subcallId err
-        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
-            tuiUI . turnNavigation .= Nothing
-            showStatus StatusInfo "Exited turn navigation"
-            resetQuitConfirmation
-        VtyEvent (Vty.EvKey Vty.KEsc []) -> do
-            tuiUI . turnNavigation .= Nothing
-            showStatus StatusInfo "Exited turn navigation"
-            resetQuitConfirmation
-        VtyEvent (Vty.EvKey Vty.KUp []) -> do
-            let currentIdx = navState ^. navSelectedTurnIndex
-                newIdx = max 0 (currentIdx - 1)
-            tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
-        VtyEvent (Vty.EvKey Vty.KDown []) -> do
-            let currentIdx = navState ^. navSelectedTurnIndex
-                maxIdx = (navState ^. navTotalTurns) - 1
-                newIdx = min maxIdx (currentIdx + 1)
-            tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
-        VtyEvent (Vty.EvKey (Vty.KChar 'f') []) -> handleForkAtTurn tracer navState
-        VtyEvent (Vty.EvKey (Vty.KChar 'F') []) -> handleForkAtTurn tracer navState
+        VtyEvent vtyEv
+            | matchesEvent keymap EventExitTurnNavigation vtyEv -> do
+                tuiUI . turnNavigation .= Nothing
+                showStatus StatusInfo "Exited turn navigation"
+                resetQuitConfirmation
+        VtyEvent vtyEv
+            | matchesEvent keymap EventNavigateUp vtyEv -> do
+                let currentIdx = navState ^. navSelectedTurnIndex
+                    newIdx = max 0 (currentIdx - 1)
+                tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
+        VtyEvent vtyEv
+            | matchesEvent keymap EventNavigateDown vtyEv -> do
+                let currentIdx = navState ^. navSelectedTurnIndex
+                    maxIdx = (navState ^. navTotalTurns) - 1
+                    newIdx = min maxIdx (currentIdx + 1)
+                tuiUI . turnNavigation .= Just (navState{_navSelectedTurnIndex = newIdx})
+        VtyEvent vtyEv
+            | matchesEvent keymap EventForkAtTurn vtyEv -> handleForkAtTurn tracer navState
         _ -> pure ()
 
 -- | Fork a new conversation at the selected turn.
@@ -602,7 +568,8 @@ handleForkAtTurn tracer navState = do
 
 -- | Handle normal (non-navigation) events.
 handleNormalEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
-handleNormalEvent tracer ev =
+handleNormalEvent tracer ev = do
+    keymap <- use keyMapping
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
         AppEvent (AppEvent_AgentStepProgrress convId sess) -> handleConversationUpdated convId sess
@@ -618,71 +585,89 @@ handleNormalEvent tracer ev =
             handleSubcallCompleted subcallId result
         AppEvent (AppEvent_SubcallFailed subcallId err) ->
             handleSubcallFailed subcallId err
-        VtyEvent (Vty.EvKey Vty.KEsc [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            cycleTabBackward
-        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            cycleTabForward
-        VtyEvent (Vty.EvKey (Vty.KChar 'q') [Vty.MCtrl]) -> handleQuit
-        VtyEvent (Vty.EvKey (Vty.KChar '\t') _) -> do
-            resetQuitConfirmation
-            cycleFocusForward
-        VtyEvent (Vty.EvKey Vty.KBackTab _) -> do
-            resetQuitConfirmation
-            cycleFocusBackward
-        VtyEvent (Vty.EvKey (Vty.KFun 5) _) -> do
-            resetQuitConfirmation
-            handleRefreshTools
-        VtyEvent (Vty.EvKey (Vty.KChar 'z') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            toggleZoom
-        VtyEvent (Vty.EvKey (Vty.KChar 'n') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleNewConversationFromEditor tracer
-        VtyEvent (Vty.EvKey (Vty.KChar 'c') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleRestoredConversation tracer
-        VtyEvent (Vty.EvKey Vty.KEnter [Vty.MMeta]) -> do
-            resetQuitConfirmation
-            handleSendMessage
-        VtyEvent (Vty.EvKey (Vty.KChar 'e') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleTogglePauseConversation
-        VtyEvent (Vty.EvKey (Vty.KChar 'f') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            openFilePathDialog
-        VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
-            resetQuitConfirmation
-            handleClearAllAttachments
-        VtyEvent (Vty.EvKey (Vty.KChar 'v') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleClipboardPaste tracer
-        VtyEvent (Vty.EvKey (Vty.KChar 'p') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleDumpSessionToMarkdown
-        VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleViewSessionWithExternalViewer Chronological
-        VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleViewSessionWithExternalViewer Antichronological
-        VtyEvent (Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl]) -> do
-            resetQuitConfirmation
-            handleClearQueuedMessages
+        VtyEvent vtyEv
+            | matchesEvent keymap EventQuit vtyEv -> handleQuit
+        VtyEvent vtyEv
+            | matchesEvent keymap EventCycleTabBackward vtyEv -> do
+                resetQuitConfirmation
+                cycleTabBackward
+        VtyEvent vtyEv
+            | matchesEvent keymap EventCycleTabForward vtyEv -> do
+                resetQuitConfirmation
+                cycleTabForward
+        VtyEvent vtyEv
+            | matchesEvent keymap EventCycleFocusForward vtyEv -> do
+                resetQuitConfirmation
+                cycleFocusForward
+        VtyEvent vtyEv
+            | matchesEvent keymap EventCycleFocusBackward vtyEv -> do
+                resetQuitConfirmation
+                cycleFocusBackward
+        VtyEvent vtyEv
+            | matchesEvent keymap EventRefreshTools vtyEv -> do
+                resetQuitConfirmation
+                handleRefreshTools
+        VtyEvent vtyEv
+            | matchesEvent keymap EventToggleZoom vtyEv -> do
+                resetQuitConfirmation
+                toggleZoom
+        VtyEvent vtyEv
+            | matchesEvent keymap EventNewConversation vtyEv -> do
+                resetQuitConfirmation
+                handleNewConversationFromEditor tracer
+        VtyEvent vtyEv
+            | matchesEvent keymap EventContinueSession vtyEv -> do
+                resetQuitConfirmation
+                handleRestoredConversation tracer
+        VtyEvent vtyEv
+            | matchesEvent keymap EventSendMessage vtyEv -> do
+                resetQuitConfirmation
+                handleSendMessage
+        VtyEvent vtyEv
+            | matchesEvent keymap EventTogglePause vtyEv -> do
+                resetQuitConfirmation
+                handleTogglePauseConversation
+        VtyEvent vtyEv
+            | matchesEvent keymap EventAttachFile vtyEv -> do
+                resetQuitConfirmation
+                openFilePathDialog
+        VtyEvent vtyEv
+            | matchesEvent keymap EventClearAttachments vtyEv -> do
+                resetQuitConfirmation
+                handleClearAllAttachments
+        VtyEvent vtyEv
+            | matchesEvent keymap EventPasteClipboard vtyEv -> do
+                resetQuitConfirmation
+                handleClipboardPaste tracer
+        VtyEvent vtyEv
+            | matchesEvent keymap EventExportSession vtyEv -> do
+                resetQuitConfirmation
+                handleDumpSessionToMarkdown
+        VtyEvent vtyEv
+            | matchesEvent keymap EventViewSessionChronological vtyEv -> do
+                resetQuitConfirmation
+                handleViewSessionWithExternalViewer Chronological
+        VtyEvent vtyEv
+            | matchesEvent keymap EventViewSessionReverse vtyEv -> do
+                resetQuitConfirmation
+                handleViewSessionWithExternalViewer Antichronological
+        VtyEvent vtyEv
+            | matchesEvent keymap EventClearQueuedMessages vtyEv -> do
+                resetQuitConfirmation
+                handleClearQueuedMessages
         VtyEvent vtyEv -> do
             resetQuitConfirmation
             currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
             case currentFocus of
                 Just AgentListWidget -> handleAgentListEvent vtyEv
                 Just SessionsListWidget -> handleSessionsListEvent vtyEv
-                Just ConversationListWidget -> handleConversationListEvent vtyEv
+                Just ConversationListWidget -> handleConversationListEvent vtyEv keymap
                 Just MessageEditorWidget -> handleMessageEditorEvent ev
-                Just ConversationViewWidget -> handleConversationViewEvent tracer vtyEv
-                Just SessionViewWidget -> handleSessionViewEvent tracer vtyEv
+                Just ConversationViewWidget -> handleConversationViewEvent tracer vtyEv keymap
+                Just SessionViewWidget -> handleSessionViewEvent tracer vtyEv keymap
                 Just AgentInfoWidget -> handleAgentInfoEvent vtyEv
-                Just QueuedMessageListWidget -> handleQueuedMessageListEvent vtyEv
-                Just AttachmentListWidget -> handleAttachmentListEvent vtyEv
+                Just QueuedMessageListWidget -> handleQueuedMessageListEvent vtyEv keymap
+                Just AttachmentListWidget -> handleAttachmentListEvent vtyEv keymap
                 _ -> pure ()
         _ -> pure ()
 
@@ -762,16 +747,17 @@ handleAgentListEvent ev = do
         Nothing -> pure ()
 
 -- | Handle conversation list navigation.
-handleConversationListEvent :: Vty.Event -> EventM N TuiState ()
-handleConversationListEvent ev =
+handleConversationListEvent :: Vty.Event -> KeyMapping -> EventM N TuiState ()
+handleConversationListEvent ev keymap =
     case ev of
-        Vty.EvKey Vty.KEnter [] -> do
-            mSelected <- use (tuiUI . conversationList . to listSelectedElement)
-            case mSelected of
-                Just (_, conv) -> do
-                    switchToChatsAndFocusMessage
-                    tuiUI . unreadConversations %= Set.delete (conversationId conv)
-                Nothing -> pure ()
+        Vty.EvKey key mods
+            | matchesEvent keymap EventOpenConversation (Vty.EvKey key mods) -> do
+                mSelected <- use (tuiUI . conversationList . to listSelectedElement)
+                case mSelected of
+                    Just (_, conv) -> do
+                        switchToChatsAndFocusMessage
+                        tuiUI . unreadConversations %= Set.delete (conversationId conv)
+                    Nothing -> pure ()
         _ -> do
             zoom (tuiUI . conversationList) $ handleListEvent ev
             selected <- use (tuiUI . conversationList . to listSelectedElement)
@@ -794,8 +780,8 @@ handleMessageEditorEvent ev = do
         _ -> pure ()
 
 -- | Handle conversation view scrolling and queue management.
-handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
-handleConversationViewEvent _tracer ev = do
+handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
+handleConversationViewEvent _tracer ev keymap = do
     mConv <- getFocusedConversation
     hasQueuedMessages <- case mConv of
         Just conv -> do
@@ -806,23 +792,29 @@ handleConversationViewEvent _tracer ev = do
         Nothing -> pure False
 
     case ev of
-        Vty.EvKey Vty.KEnter [] -> do
-            mSession <- getFocusedSession
-            case mSession of
-                Just session | not (null session.turns) -> do
-                    let navState =
-                            TurnNavigationState
-                                { _navSession = session
-                                , _navSelectedTurnIndex = length session.turns - 1
-                                , _navTotalTurns = length session.turns
-                                }
-                    tuiUI . turnNavigation .= Just navState
-                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
-                _ -> showStatus StatusWarning "No session or empty session to navigate"
-        Vty.EvKey Vty.KUp [] | hasQueuedMessages -> handleQueueNavigation (-1)
-        Vty.EvKey Vty.KDown [] | hasQueuedMessages -> handleQueueNavigation 1
-        Vty.EvKey Vty.KDel [] | hasQueuedMessages -> handleDeleteSelectedMessage
-        Vty.EvKey Vty.KBS [] | hasQueuedMessages -> handleDeleteSelectedMessage
+        Vty.EvKey key mods
+            | matchesEvent keymap EventEnterTurnNavigation (Vty.EvKey key mods) -> do
+                mSession <- getFocusedSession
+                case mSession of
+                    Just session | not (null session.turns) -> do
+                        let navState =
+                                TurnNavigationState
+                                    { _navSession = session
+                                    , _navSelectedTurnIndex = length session.turns - 1
+                                    , _navTotalTurns = length session.turns
+                                    }
+                        tuiUI . turnNavigation .= Just navState
+                        showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                    _ -> showStatus StatusWarning "No session or empty session to navigate"
+        Vty.EvKey key mods
+            | hasQueuedMessages && matchesEvent keymap EventNavigateUp (Vty.EvKey key mods) ->
+                handleQueueNavigation (-1)
+        Vty.EvKey key mods
+            | hasQueuedMessages && matchesEvent keymap EventNavigateDown (Vty.EvKey key mods) ->
+                handleQueueNavigation 1
+        Vty.EvKey key mods
+            | hasQueuedMessages && matchesEvent keymap EventDeleteItem (Vty.EvKey key mods) ->
+                handleDeleteSelectedMessage
         Vty.EvKey Vty.KUp _ -> vScrollBy (viewportScroll ConversationViewWidget) (-1)
         Vty.EvKey Vty.KDown _ -> vScrollBy (viewportScroll ConversationViewWidget) 1
         Vty.EvKey Vty.KLeft _ -> hScrollBy (viewportScroll ConversationViewWidget) (-1)
@@ -832,22 +824,23 @@ handleConversationViewEvent _tracer ev = do
         _ -> pure ()
 
 -- | Handle session view scrolling.
-handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> EventM N TuiState ()
-handleSessionViewEvent _tracer ev =
+handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
+handleSessionViewEvent _tracer ev keymap =
     case ev of
-        Vty.EvKey Vty.KEnter [] -> do
-            mSession <- getFocusedSession
-            case mSession of
-                Just session | not (null session.turns) -> do
-                    let navState =
-                            TurnNavigationState
-                                { _navSession = session
-                                , _navSelectedTurnIndex = 0
-                                , _navTotalTurns = length session.turns
-                                }
-                    tuiUI . turnNavigation .= Just navState
-                    showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
-                _ -> showStatus StatusWarning "No session or empty session to navigate"
+        Vty.EvKey key mods
+            | matchesEvent keymap EventEnterTurnNavigation (Vty.EvKey key mods) -> do
+                mSession <- getFocusedSession
+                case mSession of
+                    Just session | not (null session.turns) -> do
+                        let navState =
+                                TurnNavigationState
+                                    { _navSession = session
+                                    , _navSelectedTurnIndex = 0
+                                    , _navTotalTurns = length session.turns
+                                    }
+                        tuiUI . turnNavigation .= Just navState
+                        showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                    _ -> showStatus StatusWarning "No session or empty session to navigate"
         Vty.EvKey Vty.KUp _ -> vScrollBy (viewportScroll SessionViewWidget) (-1)
         Vty.EvKey Vty.KDown _ -> vScrollBy (viewportScroll SessionViewWidget) 1
         Vty.EvKey Vty.KLeft _ -> hScrollBy (viewportScroll SessionViewWidget) (-1)
@@ -867,8 +860,8 @@ handleAgentInfoEvent ev =
         _ -> pure ()
 
 -- | Handle queued message list events.
-handleQueuedMessageListEvent :: Vty.Event -> EventM N TuiState ()
-handleQueuedMessageListEvent ev = do
+handleQueuedMessageListEvent :: Vty.Event -> KeyMapping -> EventM N TuiState ()
+handleQueuedMessageListEvent ev keymap = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> pure ()
@@ -883,26 +876,31 @@ handleQueuedMessageListEvent ev = do
                         Just msgs -> do
                             let count = length msgs
                             case ev of
-                                Vty.EvKey Vty.KUp [] -> do
-                                    current <- use (tuiUI . queuedMessagesFocus)
-                                    let newIdx = case current of
-                                            Nothing -> count - 1
-                                            Just idx -> max 0 (idx - 1)
-                                    tuiUI . queuedMessagesFocus .= Just newIdx
-                                Vty.EvKey Vty.KDown [] -> do
-                                    current <- use (tuiUI . queuedMessagesFocus)
-                                    let newIdx = case current of
-                                            Nothing -> 0
-                                            Just idx -> min (count - 1) (idx + 1)
-                                    tuiUI . queuedMessagesFocus .= Just newIdx
-                                Vty.EvKey Vty.KDel [] -> handleDeleteSelectedMessage
-                                Vty.EvKey Vty.KBS [] -> handleDeleteSelectedMessage
-                                Vty.EvKey (Vty.KChar 'd') [Vty.MCtrl] -> handleClearQueuedMessages
+                                Vty.EvKey key mods
+                                    | matchesEvent keymap EventNavigateUp (Vty.EvKey key mods) -> do
+                                        current <- use (tuiUI . queuedMessagesFocus)
+                                        let newIdx = case current of
+                                                Nothing -> count - 1
+                                                Just idx -> max 0 (idx - 1)
+                                        tuiUI . queuedMessagesFocus .= Just newIdx
+                                Vty.EvKey key mods
+                                    | matchesEvent keymap EventNavigateDown (Vty.EvKey key mods) -> do
+                                        current <- use (tuiUI . queuedMessagesFocus)
+                                        let newIdx = case current of
+                                                Nothing -> 0
+                                                Just idx -> min (count - 1) (idx + 1)
+                                        tuiUI . queuedMessagesFocus .= Just newIdx
+                                Vty.EvKey key mods
+                                    | matchesEvent keymap EventDeleteItem (Vty.EvKey key mods) ->
+                                        handleDeleteSelectedMessage
+                                Vty.EvKey key mods
+                                    | matchesEvent keymap EventClearQueuedMessages (Vty.EvKey key mods) ->
+                                        handleClearQueuedMessages
                                 _ -> pure ()
 
 -- | Handle attachment list events.
-handleAttachmentListEvent :: Vty.Event -> EventM N TuiState ()
-handleAttachmentListEvent ev = do
+handleAttachmentListEvent :: Vty.Event -> KeyMapping -> EventM N TuiState ()
+handleAttachmentListEvent ev keymap = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> pure ()
@@ -914,20 +912,23 @@ handleAttachmentListEvent ev = do
                 Just atts -> do
                     let count = length atts
                     case ev of
-                        Vty.EvKey Vty.KUp [] -> do
-                            current <- use (tuiUI . selectedAttachmentIndex)
-                            let newIdx = case current of
-                                    Nothing -> count - 1
-                                    Just idx -> max 0 (idx - 1)
-                            tuiUI . selectedAttachmentIndex .= Just newIdx
-                        Vty.EvKey Vty.KDown [] -> do
-                            current <- use (tuiUI . selectedAttachmentIndex)
-                            let newIdx = case current of
-                                    Nothing -> 0
-                                    Just idx -> min (count - 1) (idx + 1)
-                            tuiUI . selectedAttachmentIndex .= Just newIdx
-                        Vty.EvKey Vty.KDel [] -> handleRemoveSelectedAttachment
-                        Vty.EvKey Vty.KBS [] -> handleRemoveSelectedAttachment
+                        Vty.EvKey key mods
+                            | matchesEvent keymap EventNavigateUp (Vty.EvKey key mods) -> do
+                                current <- use (tuiUI . selectedAttachmentIndex)
+                                let newIdx = case current of
+                                        Nothing -> count - 1
+                                        Just idx -> max 0 (idx - 1)
+                                tuiUI . selectedAttachmentIndex .= Just newIdx
+                        Vty.EvKey key mods
+                            | matchesEvent keymap EventNavigateDown (Vty.EvKey key mods) -> do
+                                current <- use (tuiUI . selectedAttachmentIndex)
+                                let newIdx = case current of
+                                        Nothing -> 0
+                                        Just idx -> min (count - 1) (idx + 1)
+                                tuiUI . selectedAttachmentIndex .= Just newIdx
+                        Vty.EvKey key mods
+                            | matchesEvent keymap EventDeleteItem (Vty.EvKey key mods) ->
+                                handleRemoveSelectedAttachment
                         _ -> pure ()
 
 -- | Remove the currently selected attachment.
@@ -1535,8 +1536,8 @@ runConversation tracer baseTuiAgent session = do
     inChan <- liftIO $ newBChan 100
     let notifyProgress = buildOnProgress convId outChan
     let node = tuiNode baseTuiAgent
-    agent0 <- liftIO $ nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
+    agent0 <- liftIO $ OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
+    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . OneShot.mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
     coreRef <- use tuiCore
 
     -- Get the World and EventQueue from Core for subcall visibility

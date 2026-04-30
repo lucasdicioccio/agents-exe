@@ -268,6 +268,7 @@ data ArgParserArgs = ArgParserArgs
     , argPromptAliases :: Map Text AliasDefinition
     , defaultSelfDescribeSlug :: Maybe String
     , defaultSelfDescribeDescription :: Maybe String
+    , defaultKeymapPath :: Maybe FilePath
     }
 
 -- | Get the path to the secrets key file
@@ -299,6 +300,7 @@ data AgentsExeConfig = AgentsExeConfig
     , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
     , cfgSelfDescribeSlug :: Maybe String
     , cfgSelfDescribeDescription :: Maybe String
+    , cfgKeymapPath :: Maybe FilePath
     }
     deriving (Show, Generic)
 
@@ -312,6 +314,7 @@ instance Aeson.FromJSON AgentsExeConfig where
             <*> v Aeson..:? "promptAliases"
             <*> v Aeson..:? "selfDescribeSlug"
             <*> v Aeson..:? "selfDescribeDescription"
+            <*> v Aeson..:? "keymap"
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
 locateAgentsExeConfig :: IO (Maybe FilePath)
@@ -361,6 +364,7 @@ initArgParserArgs = do
                         (resolveAliases obj.cfgPromptAliases)
                         obj.cfgSelfDescribeSlug
                         obj.cfgSelfDescribeDescription
+                        obj.cfgKeymapPath
 
     initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
     initWithoutAgentsExeConfig pconfigdir = do
@@ -381,6 +385,7 @@ initArgParserArgs = do
                 Nothing
                 (Just sessionsDir)
                 defaultAliases
+                Nothing
                 Nothing
                 Nothing
 
@@ -565,8 +570,8 @@ parseReplayToolCallOptions =
                 <> help "Show raw output instead of formatted"
             )
 
-parseTuiChatCommand :: Parser Command
-parseTuiChatCommand = TerminalUI <$> parseTuiOptions
+parseTuiChatCommand :: ArgParserArgs -> Parser Command
+parseTuiChatCommand argArgs = TerminalUI <$> parseTuiOptions argArgs
 
 parseOneShotTextualCommand :: Parser Command
 parseOneShotTextualCommand = OneShot <$> parseOneShotOptions
@@ -574,8 +579,18 @@ parseOneShotTextualCommand = OneShot <$> parseOneShotOptions
 parseEchoPromptCommand :: Parser Command
 parseEchoPromptCommand = EchoPrompt <$> parseEchoPromptOptions
 
-parseTuiOptions :: Parser TUICmd.TuiOptions
-parseTuiOptions = pure TUICmd.TuiOptions
+parseTuiOptions :: ArgParserArgs -> Parser TUICmd.TuiOptions
+parseTuiOptions argArgs =
+    TUICmd.TuiOptions
+        <$> optional
+            ( strOption
+                ( long "keymap"
+                    <> short 'k'
+                    <> metavar "KEYMAPFILE"
+                    <> help "Path to keymap configuration JSON file"
+                    <> maybe mempty value argArgs.defaultKeymapPath
+                )
+            )
 
 -- | Parse the --thinking option with choices: none, stdout, stderr
 parseThinkingOption :: Parser OneShot.ThinkingOutput
@@ -1186,7 +1201,7 @@ parseProgOptions argparserargs =
                 <> command "check-tool-call" (info parseCheckToolCallCommand (progDesc "Validate a tool call payload against a tool schema (reads JSON from stdin)"))
                 <> command "list-tool-calls" (info parseListToolCallsCommand (progDesc "List all tool calls from a session file"))
                 <> command "replay-tool-call" (info parseReplayToolCallCommand (progDesc "Replay a tool call from a session file, validating and optionally executing"))
-                <> command "tui" (info parseTuiChatCommand (idm))
+                <> command "tui" (info (parseTuiChatCommand argparserargs) (idm))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info (parseSelfDescribeCommand argparserargs) (idm))
@@ -1327,8 +1342,8 @@ runCommand pargs baseTracer sessionStore files =
             ReplayToolCallCmd.handleListToolCalls opts
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall Prod.silent opts
-        TerminalUI _ ->
-            TUICmd.handleTUI (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile files
+        TerminalUI tuiOpts ->
+            TUICmd.handleTUI (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile (TUICmd.tuiKeymapPath tuiOpts) files
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
