@@ -1,4 +1,8 @@
-{
-  "agentsConfigDir": "$HOME/.config/agents-exe",
-  "agentsFiles": []
+{ "agentsDirectories":["./agents/", "./localdev-agents/"]
+, "agentsFiles":[]
+, "agentsLogs": {
+    "logJsonPath": "logs.json"
+  }
+, "selfDescribeSlug": "root-project-agent"
+, "selfDescribeDescription": "the root project agent"
 }
