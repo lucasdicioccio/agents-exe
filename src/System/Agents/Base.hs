@@ -696,7 +696,6 @@ instance ToJSON SqliteToolboxDescription where
 instance FromJSON SqliteToolboxDescription where
     parseJSON = Aeson.genericParseJSON sqliteToolboxOptions
 
-
 -------------------------------------------------------------------------------
 -- Lua Toolbox Configuration
 -------------------------------------------------------------------------------
@@ -1270,4 +1269,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-
