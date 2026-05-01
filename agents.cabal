@@ -36,6 +36,7 @@ library agents-lib
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
                     , System.Agents.CLI.CheckToolCall
+                    , System.Agents.CLI.Config
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
