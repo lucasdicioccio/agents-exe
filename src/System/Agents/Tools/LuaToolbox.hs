@@ -673,10 +673,11 @@ executeScriptWithPortal tracer toolbox script parentCtx portal = do
                                 , resultExecutionTime = execTime
                                 }
 
--- | Create a fresh Lua state with sandbox and modules configured.
---
--- The parent context is passed through to registerStandardModules for
--- OS integration field propagation.
+{- | Create a fresh Lua state with sandbox and modules configured.
+
+The parent context is passed through to registerStandardModules for
+OS integration field propagation.
+-}
 createFreshState ::
     Tracer IO Trace ->
     LuaToolboxDescription ->
@@ -751,4 +752,3 @@ executeScriptInternal tracer lstate script maxTime = do
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
         Just val -> pure val
-

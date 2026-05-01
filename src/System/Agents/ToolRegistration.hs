@@ -895,6 +895,7 @@ and an optional 'filepath' parameter for the 'attach-file' capability.
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
 -}
+
 {- | Register a SystemToolbox tool with the LLM system.
 
 System tools expose functions based on configured capabilities.
@@ -979,6 +980,7 @@ registerSystemTools box =
     pure $ case registerSystemTool box of
         Left err -> Left err
         Right reg -> Right [reg]
+
 -------------------------------------------------------------------------------
 -- Developer Tool Registration
 -------------------------------------------------------------------------------

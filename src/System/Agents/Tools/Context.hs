@@ -747,4 +747,3 @@ if isSubcallContext ctx
 -}
 isSubcallContext :: ToolExecutionContext -> Bool
 isSubcallContext = maybe False (const True) . ctxParentConversation
-

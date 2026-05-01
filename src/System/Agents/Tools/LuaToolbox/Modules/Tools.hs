@@ -100,10 +100,11 @@ data ToolsConfig = ToolsConfig
     }
     deriving (Show, Eq)
 
--- | Register the tools module in the Lua state.
---
--- The parent context is captured in the closure and passed to nested tool calls,
--- enabling OS integration fields (World, EventQueue) to propagate for TUI visibility.
+{- | Register the tools module in the Lua state.
+
+The parent context is captured in the closure and passed to nested tool calls,
+enabling OS integration fields (World, EventQueue) to propagate for TUI visibility.
+-}
 registerToolsModule ::
     Tracer IO ToolsTrace ->
     Lua.State ->
@@ -207,10 +208,11 @@ isToolAllowed config toolName =
     -- Empty allowed list means no tools allowed (secure default)
     not (null (toolsAllowedTools config)) && toolName `elem` toolsAllowedTools config
 
--- | Call a tool through the portal with parent context propagation.
---
--- The parent context is passed to the portal, enabling OS integration fields
--- (World, EventQueue) to propagate to nested tool calls for TUI visibility.
+{- | Call a tool through the portal with parent context propagation.
+
+The parent context is passed to the portal, enabling OS integration fields
+(World, EventQueue) to propagate to nested tool calls for TUI visibility.
+-}
 callToolThroughPortal :: ToolPortal -> ToolExecutionContext -> Text -> Aeson.Value -> IO ToolResult
 callToolThroughPortal portal parentCtx toolName args = do
     let toolCall =
@@ -312,4 +314,3 @@ luaTableToAeson idx = do
     ret <- luaToJsonValue
     Lua.pop 1
     pure ret
-

@@ -110,8 +110,9 @@ data ApiKeyConfigCommand
 -- Configuration Templates
 -------------------------------------------------------------------------------
 
--- | Minimal agents-exe.cfg.json template with resolved home directory.
--- Takes the resolved home directory path and returns the config content.
+{- | Minimal agents-exe.cfg.json template with resolved home directory.
+Takes the resolved home directory path and returns the config content.
+-}
 defaultAgentsExeConfigMinimal :: FilePath -> Text
 defaultAgentsExeConfigMinimal homeDir =
     Text.unlines
@@ -313,4 +314,3 @@ addAndSaveKey path keyName keys = do
         Right () -> do
             Text.putStrLn $ "Created API key: " <> keyName
             Text.putStrLn $ "Please edit " <> Text.pack path <> " and set your actual API key value"
-

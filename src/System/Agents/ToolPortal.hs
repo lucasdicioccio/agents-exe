@@ -213,6 +213,7 @@ callToolViaPortal tracer portal registrations mParentCtx toolCall = do
                             -- Execute without parent context (no OS fields)
                             execResult <- executeTool tracer portal Nothing matchedTool (callArgs toolCall)
                             pure $ first PortalExecutionError execResult
+
 {- | Find a tool registration by tool name.
 
 This looks up the tool by comparing the requested name against the
@@ -442,4 +443,3 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
-
