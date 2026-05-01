@@ -696,124 +696,6 @@ instance ToJSON SqliteToolboxDescription where
 instance FromJSON SqliteToolboxDescription where
     parseJSON = Aeson.genericParseJSON sqliteToolboxOptions
 
--------------------------------------------------------------------------------
--- System Toolbox Configuration
--------------------------------------------------------------------------------
-
-{- | Enumeration of available system information capabilities.
-
-Each capability represents a category of system information that
-can be exposed to agents through the system toolbox.
--}
-data SystemToolCapability
-    = -- | Current date/time information
-      SystemToolDate
-    | -- | OS name and version
-      SystemToolOperatingSystem
-    | -- | Environment variables (with optional filtering)
-      SystemToolEnvVars
-    | -- | Current user information
-      SystemToolRunningUser
-    | -- | Machine hostname
-      SystemToolHostname
-    | -- | Current working directory
-      SystemToolWorkingDirectory
-    | -- | Process ID and other process information
-      SystemToolProcessInfo
-    | -- | System uptime
-      SystemToolUptime
-    | -- | Attach a file to the conversation
-      SystemToolAttachFile
-    deriving (Show, Ord, Eq, Generic)
-
--- | Serialize SystemToolCapability as kebab-case strings.
-instance ToJSON SystemToolCapability where
-    toJSON SystemToolDate = Aeson.String "date"
-    toJSON SystemToolOperatingSystem = Aeson.String "operating-system"
-    toJSON SystemToolEnvVars = Aeson.String "env-vars"
-    toJSON SystemToolRunningUser = Aeson.String "running-user"
-    toJSON SystemToolHostname = Aeson.String "hostname"
-    toJSON SystemToolWorkingDirectory = Aeson.String "working-directory"
-    toJSON SystemToolProcessInfo = Aeson.String "process-info"
-    toJSON SystemToolUptime = Aeson.String "uptime"
-    toJSON SystemToolAttachFile = Aeson.String "attach-file"
-
--- | Parse SystemToolCapability from kebab-case strings.
-instance FromJSON SystemToolCapability where
-    parseJSON = Aeson.withText "SystemToolCapability" $ \txt ->
-        case txt of
-            "date" -> return SystemToolDate
-            "operating-system" -> return SystemToolOperatingSystem
-            "env-vars" -> return SystemToolEnvVars
-            "running-user" -> return SystemToolRunningUser
-            "hostname" -> return SystemToolHostname
-            "working-directory" -> return SystemToolWorkingDirectory
-            "process-info" -> return SystemToolProcessInfo
-            "uptime" -> return SystemToolUptime
-            "attach-file" -> return SystemToolAttachFile
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file."
-
-{- | Configuration for the system toolbox.
-
-This describes which system information capabilities should be
-made available to an agent. The system toolbox provides contextual
-information about the running environment.
-
-Example configuration:
-
-@
-{
-  "tag": "SystemToolbox",
-  "contents": {
-    "name": "system",
-    "description": "System information and context",
-    "capabilities": ["date", "operating-system", "running-user", "hostname"],
-    "envVarFilter": null,
-    "lifetime": "conversation",
-    "activation": "always"
-  }
-}
-@
-
-The 'envVarFilter' field is an optional regex/pattern to filter
-environment variables when the 'env-vars' capability is enabled.
-If not specified, all environment variables are exposed.
-
-The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
--}
-data SystemToolboxDescription
-    = SystemToolboxDescription
-    { systemToolboxName :: Text
-    -- ^ Unique name for this toolbox instance (used as tool prefix)
-    , systemToolboxDescription :: Text
-    -- ^ Human-readable description of the toolbox purpose
-    , systemToolboxCapabilities :: [SystemToolCapability]
-    -- ^ List of system information capabilities to expose
-    , systemToolboxEnvVarFilter :: Maybe Text
-    -- ^ Optional regex/pattern to filter environment variables
-    , systemToolboxActivation :: Maybe Activation
-    -- ^ Optional activation mode (default: AlwaysActivated)
-    }
-    deriving (Show, Ord, Eq, Generic)
-
--- | Custom JSON options for SystemToolboxDescription to use camelCase field names
-systemToolboxOptions :: Aeson.Options
-systemToolboxOptions =
-    Aeson.defaultOptions
-        { Aeson.fieldLabelModifier = dropPrefix "systemToolbox"
-        , Aeson.omitNothingFields = True
-        }
-  where
-    dropPrefix prefix str
-        | take (length prefix) str == prefix = drop (length prefix) str
-        | otherwise = str
-
-instance ToJSON SystemToolboxDescription where
-    toJSON = Aeson.genericToJSON systemToolboxOptions
-    toEncoding = Aeson.genericToEncoding systemToolboxOptions
-
-instance FromJSON SystemToolboxDescription where
-    parseJSON = Aeson.genericParseJSON systemToolboxOptions
 
 -------------------------------------------------------------------------------
 -- Lua Toolbox Configuration
@@ -821,8 +703,8 @@ instance FromJSON SystemToolboxDescription where
 
 {- | Configuration for a Lua builtin toolbox.
 
-This describes a sandboxed Lua interpreter that can orchestrate other tools
-through the tool portal mechanism.
+This describes a Lua interpreter to load as a builtin toolbox.
+The toolbox provides a sandboxed Lua environment for tool orchestration.
 
 Example configuration:
 
@@ -884,7 +766,6 @@ instance ToJSON LuaToolboxDescription where
 instance FromJSON LuaToolboxDescription where
     parseJSON = Aeson.genericParseJSON luaToolboxOptions
 
--------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 -- Developer Toolbox Configuration
 -------------------------------------------------------------------------------
@@ -995,6 +876,124 @@ instance ToJSON DeveloperToolboxDescription where
 
 instance FromJSON DeveloperToolboxDescription where
     parseJSON = Aeson.genericParseJSON developerToolboxOptions
+
+-------------------------------------------------------------------------------
+-- System Toolbox Configuration
+-------------------------------------------------------------------------------
+
+{- | Enumeration of available system tool capabilities.
+
+Each capability represents a system information tool that can be
+exposed to agents.
+-}
+data SystemToolCapability
+    = -- | Get current date and time
+      SystemToolDate
+    | -- | Get operating system information
+      SystemToolOperatingSystem
+    | -- | Get environment variables
+      SystemToolEnvVars
+    | -- | Get running user information
+      SystemToolRunningUser
+    | -- | Get hostname
+      SystemToolHostname
+    | -- | Get working directory
+      SystemToolWorkingDirectory
+    | -- | Get process information
+      SystemToolProcessInfo
+    | -- | Get system uptime
+      SystemToolUptime
+    | -- | Attach files for multi-modal interactions
+      SystemToolAttachFile
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Serialize SystemToolCapability as kebab-case strings.
+instance ToJSON SystemToolCapability where
+    toJSON SystemToolDate = Aeson.String "date"
+    toJSON SystemToolOperatingSystem = Aeson.String "operating-system"
+    toJSON SystemToolEnvVars = Aeson.String "env-vars"
+    toJSON SystemToolRunningUser = Aeson.String "running-user"
+    toJSON SystemToolHostname = Aeson.String "hostname"
+    toJSON SystemToolWorkingDirectory = Aeson.String "working-directory"
+    toJSON SystemToolProcessInfo = Aeson.String "process-info"
+    toJSON SystemToolUptime = Aeson.String "uptime"
+    toJSON SystemToolAttachFile = Aeson.String "attach-file"
+
+-- | Parse SystemToolCapability from kebab-case strings.
+instance FromJSON SystemToolCapability where
+    parseJSON = Aeson.withText "SystemToolCapability" $ \txt ->
+        case txt of
+            "date" -> return SystemToolDate
+            "operating-system" -> return SystemToolOperatingSystem
+            "env-vars" -> return SystemToolEnvVars
+            "running-user" -> return SystemToolRunningUser
+            "hostname" -> return SystemToolHostname
+            "working-directory" -> return SystemToolWorkingDirectory
+            "process-info" -> return SystemToolProcessInfo
+            "uptime" -> return SystemToolUptime
+            "attach-file" -> return SystemToolAttachFile
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file."
+
+{- | Configuration for a system toolbox.
+
+This describes which system information capabilities should be made
+available to an agent.
+
+Example configuration:
+
+@
+{
+  "tag": "SystemToolbox",
+  "contents": {
+    "name": "system",
+    "description": "System context tools",
+    "capabilities": ["date", "hostname", "env-vars"],
+    "envVarFilter": null,
+    "lifetime": "conversation",
+    "activation": "always"
+  }
+}
+@
+
+The 'envVarFilter' field allows filtering environment variables by
+name (case-sensitive substring match). If null, all environment
+variables are exposed.
+
+The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
+-}
+data SystemToolboxDescription
+    = SystemToolboxDescription
+    { systemToolboxName :: Text
+    -- ^ Unique name for this toolbox instance (used as tool prefix)
+    , systemToolboxDescription :: Text
+    -- ^ Human-readable description of the toolbox purpose
+    , systemToolboxCapabilities :: [SystemToolCapability]
+    -- ^ List of system capabilities to expose
+    , systemToolboxEnvVarFilter :: Maybe Text
+    -- ^ Optional filter for environment variable names (substring match)
+    , systemToolboxActivation :: Maybe Activation
+    -- ^ Optional activation mode (default: AlwaysActivated)
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Custom JSON options for SystemToolboxDescription to use camelCase field names
+systemToolboxOptions :: Aeson.Options
+systemToolboxOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "systemToolbox"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON SystemToolboxDescription where
+    toJSON = Aeson.genericToJSON systemToolboxOptions
+    toEncoding = Aeson.genericToEncoding systemToolboxOptions
+
+instance FromJSON SystemToolboxDescription where
+    parseJSON = Aeson.genericParseJSON systemToolboxOptions
 
 {- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
 
@@ -1271,3 +1270,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+
