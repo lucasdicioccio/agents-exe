@@ -13,6 +13,7 @@
 -- * HTTP sandboxing
 -- * Tool portal integration
 -- * Error handling
+-- * Isolation between calls (no state persistence)
 --
 -- NOTE: Some tests use the module functions directly as globals since
 -- the modules are registered as global tables in the Lua state.
@@ -50,6 +51,7 @@ luaToolboxTests =
         , resourceLimitTests
         , errorHandlingTests
         , portalIntegrationTests
+        , isolationTests
         ]
 
 -------------------------------------------------------------------------------
@@ -85,11 +87,7 @@ withTestToolbox action = do
     initResult <- LuaToolbox.initializeToolbox silent testLuaToolbox
     case initResult of
         Left err -> assertFailure $ "Failed to initialize toolbox: " ++ err
-        Right box -> do
-            bracket
-                (pure box)
-                (\b -> LuaToolbox.closeToolbox silent b)
-                action
+        Right box -> action box
 
 -- | Run an action with a test toolbox that has filesystem access
 withTestToolboxFs :: (LuaToolbox.Toolbox -> FilePath -> IO ()) -> IO ()
@@ -98,11 +96,7 @@ withTestToolboxFs action = withTempSandbox $ \testDir -> do
     initResult <- LuaToolbox.initializeToolbox silent desc
     case initResult of
         Left err -> assertFailure $ "Failed to initialize toolbox: " ++ err
-        Right box -> do
-            bracket
-                (pure (box, testDir))
-                (\(b, _) -> LuaToolbox.closeToolbox silent b)
-                (\(b, d) -> action b d)
+        Right box -> action box testDir
 
 -- | Create a temporary sandbox directory for testing
 withTempSandbox :: (FilePath -> IO a) -> IO a
@@ -221,7 +215,7 @@ testSandboxBlocksOsExecute :: Assertion
 testSandboxBlocksOsExecute = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.execute('echo pwned')" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -231,7 +225,7 @@ testSandboxBlocksIoPopen :: Assertion
 testSandboxBlocksIoPopen = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "io.popen('echo pwned')" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -241,7 +235,7 @@ testSandboxBlocksDofile :: Assertion
 testSandboxBlocksDofile = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "dofile('/etc/passwd')" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -251,7 +245,7 @@ testSandboxBlocksLoadfile :: Assertion
 testSandboxBlocksLoadfile = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "loadfile('/etc/passwd')" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -261,7 +255,7 @@ testSandboxBlocksOsRemove :: Assertion
 testSandboxBlocksOsRemove = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.remove('/tmp/test')" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -271,7 +265,7 @@ testSandboxBlocksOsRename :: Assertion
 testSandboxBlocksOsRename = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.rename('/tmp/a', '/tmp/b')" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -281,7 +275,7 @@ testSandboxBlocksOsExit :: Assertion
 testSandboxBlocksOsExit = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "os.exit(0)" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -291,7 +285,7 @@ testSandboxBlocksIoTmpfile :: Assertion
 testSandboxBlocksIoTmpfile = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "io.tmpfile()" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention nil or attempt" $
                 "nil" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -379,7 +373,6 @@ testTimeout = do
         Left err -> assertFailure $ "Failed to initialize: " ++ err
         Right box -> do
             result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "while true do end" dummyPortal
-            LuaToolbox.closeToolbox silent box
             case result of
                 Left (TimeoutError _) -> pure () -- Expected
                 Left err -> assertFailure $ "Wrong error type: " ++ show err
@@ -402,7 +395,7 @@ testSyntaxError :: Assertion
 testSyntaxError = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return 1 +" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention syntax" $
                 "syntax" `Text.isInfixOf` msg || "expected" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -412,7 +405,7 @@ testRuntimeError :: Assertion
 testRuntimeError = withTestToolbox $ \box -> do
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return error(\"aie\")" dummyPortal
     case result of
-        Left (LuaRuntimeError (Aeson.String msg:[])) ->
+        Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention aie" $
                 "aie" `Text.isInfixOf` msg || "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
@@ -432,7 +425,7 @@ testPcallError = withTestToolbox $ \box -> do
         Left err -> assertFailure $ show err
         Right execResult ->
             case execResult.resultValues of
-                ((Aeson.Object obj):[]) -> do
+                ((Aeson.Object obj) : []) -> do
                     case KeyMap.lookup "success" obj of
                         Just (Aeson.Bool b) -> b @?= False
                         _ -> assertFailure "Expected success=false"
@@ -484,13 +477,11 @@ testPortalToolCall = do
                     )
                     mockPortal
 
-            LuaToolbox.closeToolbox silent box
-
             case result of
                 Left err -> assertFailure $ show err
                 Right execResult -> do
                     case execResult.resultValues of
-                        ((Aeson.Object resultObj):[]) -> do
+                        ((Aeson.Object resultObj) : []) -> do
                             -- Check status field
                             case KeyMap.lookup "status" resultObj of
                                 Just (Aeson.String "ok") -> pure () -- Expected
@@ -528,7 +519,7 @@ testToolBlockedByEmptyWhitelist = withTestToolbox $ \box -> do
         Left err -> assertFailure $ show err
         Right execResult ->
             case execResult.resultValues of
-                ((Aeson.Object obj):[]) -> do
+                ((Aeson.Object obj) : []) -> do
                     -- With empty whitelist, tools.call returns "not-allowed"
                     case KeyMap.lookup "status" obj of
                         Just (Aeson.String "not-allowed") -> pure () -- Expected
@@ -565,16 +556,114 @@ testToolWhitelist = do
                     )
                     mockPortal
 
-            LuaToolbox.closeToolbox silent box
-
             case result of
                 Left err -> assertFailure $ show err
                 Right execResult ->
                     case execResult.resultValues of
-                        ((Aeson.Object obj):[]) -> do
+                        ((Aeson.Object obj) : []) -> do
                             case KeyMap.lookup "status" obj of
                                 Just (Aeson.String "not-allowed") -> pure () -- Expected
                                 Just (Aeson.String status) -> assertFailure $ "Expected 'not-allowed' status, got: " ++ Text.unpack status
                                 _ -> assertFailure "Expected status field"
                         _ -> assertFailure "Expected object result"
+
+-------------------------------------------------------------------------------
+-- Isolation Tests (Per-Tool-Call Isolation)
+-------------------------------------------------------------------------------
+
+{- | Tests for per-tool-call isolation.
+
+These tests verify that each Lua tool call gets a fresh, isolated Lua state
+with no persistence between calls. This is a key security feature that:
+
+* Prevents state poisoning between calls
+* Bounds memory usage (no accumulation)
+* Eliminates deadlocks with recursive agent calls
+* Provides deterministic behavior
+-}
+isolationTests :: TestTree
+isolationTests =
+    testGroup
+        "Per-Call Isolation"
+        [ testCase "Globals don't persist between calls" testGlobalsDontPersist
+        , testCase "Table state is isolated between calls" testTableIsolation
+        , testCase "Multiple sequential calls are independent" testSequentialCalls
+        ]
+
+-- | Test that global variables don't persist between tool calls
+testGlobalsDontPersist :: Assertion
+testGlobalsDontPersist = withTestToolbox $ \box -> do
+    -- First call: set a global variable
+    result1 <-
+        LuaToolbox.executeScriptWithPortal Prod.tracePrint box
+            "globalVar = 'hello from first call'; return globalVar"
+            dummyPortal
+    case result1 of
+        Left err -> assertFailure $ "First call failed: " ++ show err
+        Right execResult1 -> do
+            execResult1.resultValues @?= [Aeson.String "hello from first call"]
+
+            -- Second call: try to access the global (should be nil)
+            result2 <-
+                LuaToolbox.executeScriptWithPortal Prod.tracePrint box
+                    "return globalVar"
+                    dummyPortal
+            case result2 of
+                Left err -> assertFailure $ "Second call failed: " ++ show err
+                Right execResult2 -> do
+                    -- globalVar should be nil because each call gets a fresh state
+                    execResult2.resultValues @?= [Aeson.Null]
+
+-- | Test that table state is isolated between calls
+testTableIsolation :: Assertion
+testTableIsolation = withTestToolbox $ \box -> do
+    -- First call: create and modify a table
+    result1 <-
+        LuaToolbox.executeScriptWithPortal Prod.tracePrint box
+            "myTable = {count = 1}; myTable.count = myTable.count + 1; return myTable.count"
+            dummyPortal
+    case result1 of
+        Left err -> assertFailure $ "First call failed: " ++ show err
+        Right execResult1 -> do
+            execResult1.resultValues @?= [Aeson.Number 2]
+
+            -- Second call: try to access the table (should not exist)
+            result2 <-
+                LuaToolbox.executeScriptWithPortal Prod.tracePrint box
+                    "if myTable then return myTable.count else return 'table_not_found' end"
+                    dummyPortal
+            case result2 of
+                Left err -> assertFailure $ "Second call failed: " ++ show err
+                Right execResult2 -> do
+                    -- myTable should be nil
+                    execResult2.resultValues @?= [Aeson.String "table_not_found"]
+
+-- | Test that multiple sequential calls are completely independent
+testSequentialCalls :: Assertion
+testSequentialCalls = withTestToolbox $ \box -> do
+    -- Run multiple calls in sequence, each should start fresh
+    let scripts =
+            [ ("call1", "x = 1; return x" :: Text)
+            , ("call2", "x = 2; return x")
+            , ("call3", "x = 3; return x")
+            , ("call4", "return x") -- Should return nil, not 3
+            ]
+
+    results <- mapM (\(name, script) -> do
+        result <- LuaToolbox.executeScriptWithPortal silent box script dummyPortal
+        pure (name, result)) scripts
+
+    -- Verify results
+    case results of
+        [ ("call1", Right r1)
+            , ("call2", Right r2)
+            , ("call3", Right r3)
+            , ("call4", Right r4)
+            ] -> do
+                r1.resultValues @?= [Aeson.Number 1]
+                r2.resultValues @?= [Aeson.Number 2]
+                r3.resultValues @?= [Aeson.Number 3]
+                -- x should be nil in call4 because each call gets fresh state
+                r4.resultValues @?= [Aeson.Null]
+        _ -> assertFailure $ "Unexpected results: " ++ show results
 
