@@ -165,13 +165,17 @@ instance FromJSON ToolResult
 This is the core inter-toolbox communication mechanism. When Lua (or another
 tool) wants to call another tool, it uses this portal.
 
+The portal accepts an optional parent context to propagate OS integration
+fields (World, EventQueue) to nested tool calls. This enables TUI visibility
+for subcalls initiated from Lua scripts.
+
 Note: The portal is synchronous (IO ToolResult) for simplicity.
 Async support can be added later if needed.
 -}
-type ToolPortal = ToolCall -> IO ToolResult
+type ToolPortal = Maybe ToolExecutionContext -> ToolCall -> IO ToolResult
 
 dummyPortal :: ToolPortal
-dummyPortal _call =
+dummyPortal _parentCtx _call =
     pure $
         ToolResult
             { resultData = Aeson.object [("error", Aeson.String "Tool portal not available during initialization")]
@@ -259,6 +263,9 @@ data ToolExecutionContext = ToolExecutionContext
     {- ^ Tool portal for inter-toolbox communication. When present,
     tools can use this callback to invoke other tools. This enables Lua
     scripts and other tools to orchestrate multiple tool calls.
+
+    The portal accepts an optional parent context to propagate OS integration
+    fields to nested calls, enabling TUI visibility for subcalls.
     -}
     , ctxAllowedTools :: [Text]
     {- ^ Whitelist of tool names allowed in this context. An empty list
@@ -410,7 +417,7 @@ For proper recursion tracking, use 'mkRootContext' instead.
 Example:
 
 @
-context <- mkMinimalContext sessionId conversationId turnId
+context <- mkMinimalContext sessionId conversationId turnId portal
 @
 -}
 mkMinimalContext ::
@@ -450,6 +457,7 @@ context <- mkRootContext
     turnId
     (Just agentId)
     (Just fullSession)
+    portal
     (Just 5)  -- max depth of 5
 @
 -}
@@ -495,7 +503,7 @@ context <- mkPortalContext
     (Just fullSession)
     [CallStackEntry "root" conversationId 0]
     (Just 5)
-    (Just toolPortal)  -- the portal function
+    portal  -- the portal function
     ["bash", "sqlite"]  -- allowed tools
 @
 -}
@@ -739,3 +747,4 @@ if isSubcallContext ctx
 -}
 isSubcallContext :: ToolExecutionContext -> Bool
 isSubcallContext = maybe False (const True) . ctxParentConversation
+

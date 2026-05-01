@@ -12,6 +12,12 @@ Security features:
 * Portal availability check - returns "not-found" if no portal configured
 * All calls are traced for debugging and auditing
 
+Context Propagation:
+When a Lua script is executed as part of a tool call, the parent context
+(containing OS World and EventQueue for TUI visibility) is captured and
+passed through to nested tool calls. This enables subcall conversations
+initiated from Lua to be visible in the TUI.
+
 Lua API:
 
 > local tools = require("tools")
@@ -53,7 +59,7 @@ import qualified Data.Text.Lazy as LazyText
 import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), runTracer)
 
-import System.Agents.Tools.Context (ToolCall (..), ToolPortal, ToolResult (..))
+import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext, ToolPortal, ToolResult (..))
 import System.Agents.Tools.LuaToolbox.Utils (luaToJsonValue)
 
 stackIdxToInt :: Lua.StackIndex -> Int
@@ -95,17 +101,22 @@ data ToolsConfig = ToolsConfig
     deriving (Show, Eq)
 
 -- | Register the tools module in the Lua state.
+--
+-- The parent context is captured in the closure and passed to nested tool calls,
+-- enabling OS integration fields (World, EventQueue) to propagate for TUI visibility.
 registerToolsModule ::
     Tracer IO ToolsTrace ->
     Lua.State ->
     ToolsConfig ->
+    -- | Parent execution context for OS field propagation
+    ToolExecutionContext ->
     ToolPortal ->
     IO ()
-registerToolsModule tracer lstate config portal = Lua.runWith lstate $ do
+registerToolsModule tracer lstate config parentCtx portal = Lua.runWith lstate $ do
     Lua.newtable
 
     Lua.pushName "call"
-    Lua.pushHaskellFunction (luaCall tracer config portal)
+    Lua.pushHaskellFunction (luaCall tracer config parentCtx portal)
     Lua.settable (Lua.nthTop 3)
 
     Lua.pushName "list"
@@ -144,13 +155,18 @@ luaList config = do
 
 {- | Lua function to call a tool through the portal.
 Usage: tools.call(toolName, payload) -> result table
+
+The parent context is passed to the portal, enabling OS integration fields
+(World, EventQueue) to propagate to nested tool calls for TUI visibility.
 -}
 luaCall ::
     Tracer IO ToolsTrace ->
     ToolsConfig ->
+    -- | Parent execution context for OS field propagation
+    ToolExecutionContext ->
     ToolPortal ->
     Lua.LuaE Lua.Exception Lua.NumResults
-luaCall tracer config portal = do
+luaCall tracer config parentCtx portal = do
     top <- Lua.gettop
     let topInt = getStackInt top
 
@@ -176,9 +192,9 @@ luaCall tracer config portal = do
                     pushErrorResult "not-allowed" ("Tool '" <> toolName <> "' not in allowed whitelist") Nothing Nothing
                     pure 1
                 else do
-                    -- Execute the tool call through portal
+                    -- Execute the tool call through portal with parent context
                     liftIO $ runTracer tracer (ToolsCallTrace toolName payloadValue)
-                    result <- liftIO $ callToolThroughPortal portal toolName payloadValue
+                    result <- liftIO $ callToolThroughPortal portal parentCtx toolName payloadValue
                     liftIO $ runTracer tracer (ToolsResultTrace toolName (resultStatus result) (resultData result))
                     pushToolResult result
                     pure 1
@@ -191,15 +207,19 @@ isToolAllowed config toolName =
     -- Empty allowed list means no tools allowed (secure default)
     not (null (toolsAllowedTools config)) && toolName `elem` toolsAllowedTools config
 
--- | Call a tool through the portal.
-callToolThroughPortal :: ToolPortal -> Text -> Aeson.Value -> IO ToolResult
-callToolThroughPortal portal toolName args = do
+-- | Call a tool through the portal with parent context propagation.
+--
+-- The parent context is passed to the portal, enabling OS integration fields
+-- (World, EventQueue) to propagate to nested tool calls for TUI visibility.
+callToolThroughPortal :: ToolPortal -> ToolExecutionContext -> Text -> Aeson.Value -> IO ToolResult
+callToolThroughPortal portal parentCtx toolName args = do
     let toolCall =
             ToolCall
                 { callToolName = toolName
                 , callArgs = args
                 }
-    portal toolCall
+    -- Pass parent context to portal for OS field propagation
+    portal (Just parentCtx) toolCall
 
 -- | Extract result status string from a ToolResult.
 resultStatus :: ToolResult -> Text
@@ -292,3 +312,4 @@ luaTableToAeson idx = do
     ret <- luaToJsonValue
     Lua.pop 1
     pure ret
+

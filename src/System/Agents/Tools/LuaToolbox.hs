@@ -143,7 +143,7 @@ import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
 import System.Agents.Base (LuaToolboxDescription (..))
-import System.Agents.Tools.Context (ToolPortal)
+import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Import standard library modules
 import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
@@ -321,7 +321,7 @@ case result of
     Left err -> putStrLn $ "Failed to initialize: " ++ err
     Right toolbox -> do
         -- Use toolbox for script execution
-        result <- executeScriptWithPortal tracer toolbox script portal
+        result <- executeScriptWithPortal tracer toolbox script parentCtx portal
         -- ...
 @
 -}
@@ -380,14 +380,19 @@ closeToolbox _tracer _toolbox = pure ()
 This variant includes the tools module with portal support.
 
 The portal enables Lua scripts to call other tools through tools.call().
+
+The parent context is passed through to enable OS integration field
+propagation (World, EventQueue) for TUI visibility of nested subcalls.
 -}
 registerStandardModules ::
     Tracer IO LuaModuleTrace ->
     Lua.State ->
     LuaToolboxDescription ->
+    -- | Parent execution context for OS field propagation
+    ToolExecutionContext ->
     ToolPortal ->
     IO ()
-registerStandardModules moduleTracer lstate desc portal = do
+registerStandardModules moduleTracer lstate desc parentCtx portal = do
     -- Create individual module tracers using contramap
     let fsTracer = contramap FsTrace moduleTracer
     let httpTracer = contramap HttpTrace moduleTracer
@@ -425,12 +430,14 @@ registerStandardModules moduleTracer lstate desc portal = do
 
     -- Register tools module with portal
     -- Security: empty allowedTools means NO tool access
+    -- Pass parent context for OS field propagation
     ToolsMod.registerToolsModule
         toolsTracer
         lstate
         ToolsMod.ToolsConfig
             { ToolsMod.toolsAllowedTools = desc.luaToolboxAllowedTools
             }
+        parentCtx
         portal
 
 -------------------------------------------------------------------------------
@@ -607,6 +614,11 @@ This is the full execution function that:
 The portal is exposed to Lua through the 'tools' module, which provides
 functions like tools.call().
 
+The parent context is passed through to enable OS integration field
+propagation (World, EventQueue) for TUI visibility of nested subcalls.
+This is essential for sub-agent calls initiated from Lua scripts to be
+visible in the TUI.
+
 This function provides maximum isolation:
 * Each call starts from identical initial state
 * No memory accumulation across calls
@@ -618,10 +630,12 @@ executeScriptWithPortal ::
     Toolbox ->
     -- | Lua script source
     Text.Text ->
+    -- | Parent execution context for OS field propagation
+    ToolExecutionContext ->
     -- | Tool portal for calling other tools
     ToolPortal ->
     IO (Either ScriptError ExecutionResult)
-executeScriptWithPortal tracer toolbox script portal = do
+executeScriptWithPortal tracer toolbox script parentCtx portal = do
     startTime <- getCurrentTime
     let desc = toolboxConfig toolbox
     let maxTime = desc.luaToolboxMaxExecutionTimeSeconds
@@ -633,7 +647,7 @@ executeScriptWithPortal tracer toolbox script portal = do
     result <-
         try $
             bracket
-                (createFreshState tracer desc portal)
+                (createFreshState tracer desc parentCtx portal)
                 (destroyState tracer)
                 (\lstate -> executeScriptInternal tracer lstate script maxTime)
 
@@ -660,12 +674,17 @@ executeScriptWithPortal tracer toolbox script portal = do
                                 }
 
 -- | Create a fresh Lua state with sandbox and modules configured.
+--
+-- The parent context is passed through to registerStandardModules for
+-- OS integration field propagation.
 createFreshState ::
     Tracer IO Trace ->
     LuaToolboxDescription ->
+    -- | Parent execution context for OS field propagation
+    ToolExecutionContext ->
     ToolPortal ->
     IO Lua.State
-createFreshState tracer desc portal = do
+createFreshState tracer desc parentCtx portal = do
     -- Create fresh Lua state
     lstate <- Lua.newstate
 
@@ -676,11 +695,12 @@ createFreshState tracer desc portal = do
     when (desc.luaToolboxMaxMemoryMB > 0) $
         applyMemoryLimit lstate desc.luaToolboxMaxMemoryMB
 
-    -- Register standard modules
+    -- Register standard modules with parent context for OS field propagation
     registerStandardModules
         (contramap ModuleRegistrationTrace tracer)
         lstate
         desc
+        parentCtx
         portal
 
     pure lstate
@@ -731,3 +751,4 @@ executeScriptInternal tracer lstate script maxTime = do
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
         Just val -> pure val
+

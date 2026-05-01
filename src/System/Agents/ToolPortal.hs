@@ -20,7 +20,7 @@ let portal = makeToolPortal registrations tracer
 -- Create context with portal
 let ctx = mkPortalContext
         sessId convId turnId mAgentId mSession
-        callStack maxDepth (Just portal) allowedTools
+        stack maxDepth (Just portal) allowedTools
 
 -- Now tools can call other tools through ctxToolPortal
 @
@@ -29,6 +29,13 @@ Security:
 * Tool whitelist is enforced at the portal level
 * Portal tools execute with a minimal context (no nested portal to prevent loops)
 * Execution time is tracked for each portal invocation
+
+Context Propagation:
+When a parent context is provided (Just ctx), the portal propagates the OS
+integration fields (ctxWorld, ctxEventQueue) to the nested tool call. This
+enables TUI visibility for subcalls initiated from Lua scripts or other
+tools. When called with Nothing, a fresh minimal context is created without
+OS integration.
 -}
 module System.Agents.ToolPortal (
     Trace (..),
@@ -63,10 +70,12 @@ import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), toolRun)
 import System.Agents.Tools.Context (
     ToolCall (..),
+    ToolExecutionContext,
     ToolPortal,
     ToolResult (..),
     mkMinimalContext,
  )
+import qualified System.Agents.Tools.Context as Ctx
 
 data Trace = PortalCall !ToolCall !ToolRegistration.Trace
     deriving (Show)
@@ -104,6 +113,10 @@ The portal allows tools to invoke other registered tools. Each invocation:
 4. Executes the tool with a minimal context (no nested portal to prevent loops)
 5. Returns the result as a ToolResult
 
+When called with a parent context (Just ctx), the portal propagates OS
+integration fields (World, EventQueue) to enable TUI visibility for nested
+subcalls.
+
 Example:
 
 @
@@ -124,10 +137,10 @@ makeToolPortal ::
 makeToolPortal tracer registrations = portal
   where
     portal :: ToolPortal
-    portal toolCall = do
+    portal mParentCtx toolCall = do
         print toolCall
         startTime <- getCurrentTime
-        result <- callToolViaPortal tracer portal registrations toolCall -- TODO(lucas): clarify stack recursion here
+        result <- callToolViaPortal (contramap (PortalCall toolCall) tracer) portal registrations mParentCtx toolCall -- TODO(lucas): clarify stack recursion here
         endTime <- getCurrentTime
         let duration = diffUTCTime endTime startTime
 
@@ -156,19 +169,26 @@ makeToolPortal tracer registrations = portal
 
 This function handles the core portal logic:
 1. Find the tool by name from registrations
-2. Execute with minimal context (no nested portal to prevent loops)
-3. Convert the result
+2. Check whitelist if parent context has allowed tools
+3. Execute with minimal context (no nested portal to prevent loops)
+4. Convert the result
+
+When a parent context is provided, its OS integration fields (World,
+EventQueue) are propagated to the nested tool call, enabling TUI visibility
+for subcalls initiated from Lua scripts.
 
 Note: The portal executes tools with a minimal context that does NOT include
 a nested portal. This prevents infinite recursion through the portal.
 -}
 callToolViaPortal ::
-    Tracer IO Trace ->
+    Tracer IO ToolRegistration.Trace ->
     ToolPortal ->
     TVar [ToolRegistration] ->
+    -- | Optional parent context for OS field propagation
+    Maybe ToolExecutionContext ->
     ToolCall ->
     IO (Either PortalError (CallResult ToolCall))
-callToolViaPortal tracer portal registrations toolCall = do
+callToolViaPortal tracer portal registrations mParentCtx toolCall = do
     regs <- readTVarIO registrations
     -- Find tool by name
     case findToolByName regs (callToolName toolCall) of
@@ -180,10 +200,19 @@ callToolViaPortal tracer portal registrations toolCall = do
                 Nothing ->
                     pure $ Left $ PortalToolNotFound (callToolName toolCall)
                 Just matchedTool -> do
-                    -- Execute with minimal context (no nested portal)
-                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) portal matchedTool (callArgs toolCall)
-                    pure $ first PortalExecutionError execResult
-
+                    -- Check whitelist if parent context has allowed tools
+                    case mParentCtx of
+                        Just parentCtx -> do
+                            if not (Ctx.isToolAllowed (callToolName toolCall) parentCtx)
+                                then pure $ Left $ PortalToolNotAllowed (callToolName toolCall) (Ctx.ctxAllowedTools parentCtx)
+                                else do
+                                    -- Execute with OS fields from parent context
+                                    execResult <- executeTool tracer portal mParentCtx matchedTool (callArgs toolCall)
+                                    pure $ first PortalExecutionError execResult
+                        Nothing -> do
+                            -- Execute without parent context (no OS fields)
+                            execResult <- executeTool tracer portal Nothing matchedTool (callArgs toolCall)
+                            pure $ first PortalExecutionError execResult
 {- | Find a tool registration by tool name.
 
 This looks up the tool by comparing the requested name against the
@@ -216,19 +245,40 @@ findMatchingTool regs call =
 
 The minimal context has no portal to prevent nested portal calls.
 This is a safety measure to avoid potential infinite recursion.
+
+When a parent context is provided, its OS integration fields (World,
+EventQueue, ParentConversation) are propagated to the minimal context.
+This enables TUI visibility for nested subcalls initiated from Lua scripts
+or other tools.
+
+Note: We still generate fresh session/conversation/turn IDs for the nested
+call to maintain proper isolation, but the OS fields link it to the parent
+for TUI tree visualization.
 -}
 executeTool ::
     Tracer IO ToolRegistration.Trace ->
     ToolPortal ->
+    -- | Optional parent context for OS field propagation
+    Maybe ToolExecutionContext ->
     Tool ToolCall ->
     Aeson.Value ->
     IO (Either Text (CallResult ToolCall))
-executeTool tracer portal tool args = do
-    -- Create minimal context without portal
+executeTool tracer portal mParentCtx tool args = do
+    -- Generate fresh IDs for this tool execution
     sessId <- newSessionId
     convId <- newConversationId
     turnId <- newTurnId
-    let minimalCtx = mkMinimalContext sessId convId turnId portal
+
+    -- Create minimal context, propagating OS fields from parent if available
+    let minimalCtx = case mParentCtx of
+            Just parentCtx ->
+                (mkMinimalContext sessId convId turnId portal)
+                    { Ctx.ctxWorld = Ctx.ctxWorld parentCtx
+                    , Ctx.ctxEventQueue = Ctx.ctxEventQueue parentCtx
+                    , Ctx.ctxParentConversation = Just (Ctx.ctxConversationId parentCtx)
+                    }
+            Nothing ->
+                mkMinimalContext sessId convId turnId portal
 
     -- Execute the tool
     result <- try $ tool.toolRun tracer minimalCtx args
@@ -392,3 +442,4 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
+
