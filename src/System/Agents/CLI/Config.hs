@@ -39,9 +39,9 @@ import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory)
 import System.Exit (exitFailure)
-import System.FilePath (takeDirectory)
+import System.FilePath (takeDirectory, (</>))
 import System.IO (stderr)
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
@@ -110,15 +110,18 @@ data ApiKeyConfigCommand
 -- Configuration Templates
 -------------------------------------------------------------------------------
 
--- | Minimal agents-exe.cfg.json template
-defaultAgentsExeConfigMinimal :: Text
-defaultAgentsExeConfigMinimal =
+-- | Minimal agents-exe.cfg.json template with resolved home directory.
+-- Takes the resolved home directory path and returns the config content.
+defaultAgentsExeConfigMinimal :: FilePath -> Text
+defaultAgentsExeConfigMinimal homeDir =
     Text.unlines
         [ "{"
-        , "  \"agentsConfigDir\": \"$HOME/.config/agents-exe\","
+        , "  \"agentsConfigDir\": \"" <> Text.pack configDir <> "\","
         , "  \"agentsFiles\": []"
         , "}"
         ]
+  where
+    configDir = homeDir </> ".config" </> "agents-exe"
 
 -------------------------------------------------------------------------------
 -- Handler Implementation
@@ -174,8 +177,9 @@ handleLocalConfig force _cfgDir opts = do
 -- | Write the agents-exe.cfg.json file
 writeAgentsExeConfig :: FilePath -> IO ()
 writeAgentsExeConfig path = do
+    homeDir <- getHomeDirectory
     createDirectoryIfMissing True (takeDirectory path)
-    Text.writeFile path defaultAgentsExeConfigMinimal
+    Text.writeFile path (defaultAgentsExeConfigMinimal homeDir)
     Text.putStrLn "Created agents-exe.cfg.json with minimal configuration"
 
 -------------------------------------------------------------------------------
@@ -309,3 +313,4 @@ addAndSaveKey path keyName keys = do
         Right () -> do
             Text.putStrLn $ "Created API key: " <> keyName
             Text.putStrLn $ "Please edit " <> Text.pack path <> " and set your actual API key value"
+
