@@ -455,13 +455,15 @@ testSyntaxError = withTestToolbox $ \box -> do
 testRuntimeError :: Assertion
 testRuntimeError = withTestToolbox $ \box -> do
     let ctx = mkTestContext dummyPortal
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return nil.foo" ctx dummyPortal
+    -- Use a variable assigned to nil to cause a runtime error (not syntax error)
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "local x = nil; return x.foo" ctx dummyPortal
     case result of
         Left (LuaRuntimeError (Aeson.String msg : [])) ->
             assertBool "Error should mention attempt to index" $
                 "attempt" `Text.isInfixOf` msg
         Left _ -> pure () -- Any error is acceptable
         Right _ -> assertFailure "Should have failed with runtime error"
+
 
 testPcallError :: Assertion
 testPcallError = withTestToolbox $ \box -> do
