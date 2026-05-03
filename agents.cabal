@@ -46,6 +46,7 @@ library agents-lib
                     , System.Agents.CLI.New
                     , System.Agents.CLI.OneShot
                     , System.Agents.CLI.Paths
+                    , System.Agents.CLI.PinnedTools
                     , System.Agents.CLI.PromptScript
                     , System.Agents.CLI.ReplayToolCall
                     , System.Agents.CLI.SelfDescribe
@@ -54,6 +55,7 @@ library agents-lib
                     , System.Agents.CLI.SessionSearch
                     , System.Agents.CLI.Spec
                     , System.Agents.CLI.ToolCall
+                    , System.Agents.CLI.ToolCommands
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.CLI.TUI
                     , System.Agents.Combinators.ProgressiveDisclosure

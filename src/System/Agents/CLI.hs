@@ -19,6 +19,7 @@ import qualified System.Agents.CLI.Check as CheckCmd
 -- import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
 -- import qualified System.Agents.CLI.Initialize as InitializeCmd
 import qualified System.Agents.CLI.McpServer as McpServerCmd
+import qualified System.Agents.CLI.ToolCommands as ToolCommandsCmd
 
 -- import qualified System.Agents.CLI.New as NewCmd
 import qualified System.Agents.CLI.OneShot as OneShotCmd
@@ -58,6 +59,7 @@ data Trace
     | ToolCallTrace !ToolCall.Trace
     | TUICmdTrace !TUICmd.Trace
     | CheckCmdTrace !CheckCmd.Trace
+    | ToolCommandsTrace !ToolCommandsCmd.Trace
     deriving (Show)
 
 {- | Convert TreeTrace to JSON for logging purposes.
@@ -134,7 +136,7 @@ toJsonTrace (AgentTreeTrace x) = case x of
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.StartToolCall n _)) =
             Just $
-                Aeson.object
+            Aeson.object
                     [ "x" .= ("tool-call-start" :: Text)
                     , "name" .= n
                     ]
@@ -150,3 +152,5 @@ toJsonTrace (OneShotCmdTrace _) = Nothing
 toJsonTrace (ToolCallTrace _) = Nothing
 toJsonTrace (TUICmdTrace _) = Nothing
 toJsonTrace (CheckCmdTrace _) = Nothing
+toJsonTrace (ToolCommandsTrace _) = Nothing
+
