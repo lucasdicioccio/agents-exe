@@ -64,7 +64,7 @@ data SessionStore = SessionStore
     {- ^ The prefix for session files. This can be a directory path
     or a path prefix. The directory component is extracted to find
     sessions, and the file component is used as a prefix before
-the default pattern.
+    the default pattern.
     -}
     }
     deriving (Show, Eq)
@@ -225,4 +225,3 @@ listSessions store = do
     let sortedFiles = sortOn (Data.Ord.Down . sessionInfoModTime) sessionFiles
     -- Load each session file
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sortedFiles
-
