@@ -222,4 +222,3 @@ instance Aeson.FromJSON ScriptDescription where
         ScriptDescription
             <$> o Aeson..: "path"
             <*> o Aeson..: "info"
-

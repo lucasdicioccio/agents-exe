@@ -285,4 +285,3 @@ toolParamsToJson props =
     paramTypeToString (OpaqueParamType t) = t
     paramTypeToString (MultipleParamType t) = t
     paramTypeToString (ObjectParamType _) = "object"
-

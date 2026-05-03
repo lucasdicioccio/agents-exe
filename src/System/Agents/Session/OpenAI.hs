@@ -400,4 +400,3 @@ mkOpenAICompletion config completion = do
     -- Convert OpenAI OpenAIToolCall to LlmToolCall (wrapping the raw object)
     toolCallToLlmToolCall :: OpenAI.OpenAIToolCall -> LlmToolCall
     toolCallToLlmToolCall tc = LlmToolCall $ Aeson.Object tc.rawToolCall
-

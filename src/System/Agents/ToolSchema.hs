@@ -108,4 +108,3 @@ data ToolDescription = ToolDescription
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON ToolDescription
 instance ToJSON ToolDescription
-

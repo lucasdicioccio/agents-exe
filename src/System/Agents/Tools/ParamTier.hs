@@ -54,8 +54,9 @@ instance FromJSON ParamTier where
             Just tier -> pure tier
             Nothing -> fail $ "Invalid ParamTier: " ++ Text.unpack t
 
--- | Default tier for parameters without explicit marking.
--- Using 'Basic' ensures backward compatibility.
+{- | Default tier for parameters without explicit marking.
+Using 'Basic' ensures backward compatibility.
+-}
 defaultParamTier :: ParamTier
 defaultParamTier = Basic
 
@@ -101,4 +102,3 @@ tierToInt :: ParamTier -> Int
 tierToInt Basic = 0
 tierToInt Advanced = 1
 tierToInt Expert = 2
-

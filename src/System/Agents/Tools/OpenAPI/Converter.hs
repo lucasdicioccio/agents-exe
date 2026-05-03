@@ -74,7 +74,6 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
-import System.Agents.Tools.ParamTier (defaultParamTier)
 import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),
@@ -84,6 +83,8 @@ import System.Agents.Tools.OpenAPI.Types (
     RequestBody (..),
     Schema (..),
  )
+import System.Agents.Tools.ParamTier (defaultParamTier)
+
 -- -------------------------------------------------------------------------
 -- Core Types
 -- -------------------------------------------------------------------------
@@ -647,6 +648,7 @@ toolParamProperties apiTool =
                 Just "object" -> ObjectParamType []
                 Just other -> OpaqueParamType other
                 Nothing -> OpaqueParamType "any"
+
 -- Handler Helpers
 -- -------------------------------------------------------------------------
 

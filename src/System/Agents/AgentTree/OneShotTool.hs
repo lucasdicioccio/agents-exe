@@ -95,6 +95,7 @@ import qualified System.Agents.Tools.Context as Ctx
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.ParamTier (defaultParamTier)
+
 -------------------------------------------------------------------------------
 
 -- | Data type for the prompt argument to the sub-agent.
@@ -610,4 +611,3 @@ baseConvIdToShort (Base.ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.to
 -- | Convert CallStackEntry to short text for debugging.
 callStackEntryToShort :: CallStackEntry -> Text
 callStackEntryToShort entry = entry.callAgentSlug <> ":" <> baseConvIdToShort entry.callConversationId
-
