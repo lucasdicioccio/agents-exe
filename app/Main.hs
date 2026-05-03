@@ -59,6 +59,7 @@ import qualified System.Agents.CLI.SessionSearch as SessionSearchCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.CLI.ToolCall as ToolCallCmd
+import qualified System.Agents.CLI.ToolCommands as ToolCommandsCmd
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
@@ -427,6 +428,7 @@ data Command
     | Spec SpecCmd.SpecOptions
     | New NewCmd.NewOptions
     | ToolCall ToolCallCmd.ToolCallOptions
+    | ToolCommands ToolCommandsCmd.ToolCommand
 
 instance Show Command where
     show (Check _) = "Check"
@@ -450,6 +452,7 @@ instance Show Command where
     show (Spec _) = "Spec"
     show (New _) = "New"
     show (ToolCall _) = "ToolCall"
+    show (ToolCommands _) = "ToolCommands"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -1200,6 +1203,128 @@ parseToolCallOptions =
                 )
             )
 
+-------------------------------------------------------------------------------
+-- Tool Commands Parser
+-------------------------------------------------------------------------------
+
+-- | Parse the 'tool' command with subcommands
+parseToolCommandsCommand :: Parser Command
+parseToolCommandsCommand = ToolCommands <$> parseToolCommand
+
+parseToolCommand :: Parser ToolCommandsCmd.ToolCommand
+parseToolCommand =
+    subparser
+        ( command "pin" (info parseToolPinOptions (progDesc "Create a pinned tool with pre-configured arguments"))
+            <> command "call" (info parseToolCallSubcommandOptions (progDesc "Call a tool or pinned tool"))
+            <> command "list" (info parseToolListOptions (progDesc "List all pinned tools"))
+            <> command "unpin" (info parseToolUnpinOptions (progDesc "Remove a pinned tool configuration"))
+        )
+
+parseToolPinOptions :: Parser ToolCommandsCmd.ToolCommand
+parseToolPinOptions =
+    ToolCommandsCmd.ToolPin
+        <$> ( ToolCommandsCmd.ToolPinOptions
+                <$> strArgument
+                    ( metavar "TOOL"
+                        <> help "Name of the base tool to pin"
+                    )
+                <*> many
+                    ( strOption
+                        ( long "pin-arg"
+                            <> metavar "NAME=VALUE"
+                            <> help "Argument to pin (can be specified multiple times). Format: name=value, name=true, name=123, or name={json}"
+                        )
+                    )
+                <*> optional
+                    ( strOption
+                        ( long "name"
+                            <> short 'n'
+                            <> metavar "NAME"
+                            <> help "Name for the pinned tool (defaults to base tool name)"
+                        )
+                    )
+                <*> optional
+                    ( strOption
+                        ( long "description"
+                            <> short 'd'
+                            <> metavar "DESC"
+                            <> help "Description of what this pinned tool does"
+                        )
+                    )
+            )
+
+parseToolCallSubcommandOptions :: Parser ToolCommandsCmd.ToolCommand
+parseToolCallSubcommandOptions =
+    ToolCommandsCmd.ToolCallCmd
+        <$> ( ToolCommandsCmd.ToolCallOptions'
+                <$> strArgument
+                    ( metavar "TARGET"
+                        <> help "Tool or pinned tool name to call"
+                    )
+                <*> optional
+                    ( strOption
+                        ( long "json"
+                            <> short 'j'
+                            <> metavar "JSON"
+                            <> help "JSON arguments as a string"
+                        )
+                    )
+                <*> optional
+                    ( strOption
+                        ( long "file"
+                            <> short 'f'
+                            <> metavar "FILE"
+                            <> help "Path to JSON file containing arguments"
+                        )
+                    )
+                <*> optional
+                    ( strOption
+                        ( long "log-file"
+                            <> short 'l'
+                            <> metavar "LOGFILE"
+                            <> help "Optional log file for tracing"
+                        )
+                    )
+                <*> pure True
+            )
+
+parseToolListOptions :: Parser ToolCommandsCmd.ToolCommand
+parseToolListOptions =
+    ToolCommandsCmd.ToolList
+        <$> ( ToolCommandsCmd.ToolListOptions
+                <$> option
+                    (maybeReader parseFormat)
+                    ( long "format"
+                        <> short 'f'
+                        <> metavar "FORMAT"
+                        <> help "Output format: human or json (default: human)"
+                        <> value ToolCommandsCmd.ListFormatHuman
+                        <> showDefaultWith showFormat
+                    )
+                <*> switch
+                    ( long "details"
+                        <> short 'd'
+                        <> help "Show detailed information including pinned arguments"
+                    )
+            )
+  where
+    parseFormat "human" = Just ToolCommandsCmd.ListFormatHuman
+    parseFormat "json" = Just ToolCommandsCmd.ListFormatJson
+    parseFormat _ = Nothing
+
+    showFormat ToolCommandsCmd.ListFormatHuman = "human"
+    showFormat ToolCommandsCmd.ListFormatJson = "json"
+
+parseToolUnpinOptions :: Parser ToolCommandsCmd.ToolCommand
+parseToolUnpinOptions =
+    ToolCommandsCmd.ToolUnpin
+        <$> ( ToolCommandsCmd.ToolUnpinOptions
+                <$> strArgument
+                    ( metavar "NAME"
+                        <> help "Name of the pinned tool to remove"
+                    )
+            )
+
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
     Prog
@@ -1310,6 +1435,12 @@ parseProgOptions argparserargs =
                     ( info
                         parseToolCallCommand
                         (progDesc "Call a tool from the first loaded agent with JSON payload from stdin")
+                    )
+                <> command
+                    "tool"
+                    ( info
+                        parseToolCommandsCommand
+                        (progDesc "Manage and call pinned tools with pre-configured arguments")
                     )
             )
   where
@@ -1443,6 +1574,8 @@ runCommand pargs baseTracer sessionStore files =
             NewCmd.handleNew opts
         ToolCall opts ->
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
+        ToolCommands toolCmd ->
+            ToolCommandsCmd.handleToolCommand (Prod.contramap ToolCommandsTrace baseTracer) sessionStore pargs.apiKeysFile files toolCmd
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)
