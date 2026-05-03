@@ -120,6 +120,7 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = contramap AgentTreeTrace tracer
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap OneShotToolTrace tracer) SessionStore.defaultSessionStore apiKeys
+                    , AgentTree.sessionStore = SessionStore.defaultSessionStore
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do
@@ -146,3 +147,4 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         LByteString.putStr "\n"
+

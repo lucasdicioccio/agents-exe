@@ -75,6 +75,7 @@ handleCheck tracer opts apiKeysFile agentFiles = do
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) SessionStore.defaultSessionStore apiKeys
+                , AgentTree.sessionStore = SessionStore.defaultSessionStore
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs
@@ -165,3 +166,4 @@ printToolsOpenAI tools = do
     Text.putStrLn "```"
     Text.putStrLn "</details>"
     Text.putStrLn ""
+

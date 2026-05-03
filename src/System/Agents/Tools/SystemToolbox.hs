@@ -52,6 +52,7 @@ module System.Agents.Tools.SystemToolbox (
 
     -- * Initialization
     initializeToolbox,
+    initializeToolboxWithSessionIntrospection,
 
     -- * Query execution
     executeQuery,
@@ -295,12 +296,36 @@ This function creates a 'Toolbox' value from a 'SystemToolboxDescription',
 validating the configuration and preparing the runtime state.
 
 Returns an error if the configuration is invalid.
+
+Note: This function does not configure session introspection. Use
+'initializeToolboxWithSessionIntrospection' if you need session-related
+capabilities like @list-sessions@, @search-sessions@, etc.
 -}
 initializeToolbox ::
     Tracer IO Trace ->
     SystemToolboxDescription ->
     IO (Either String Toolbox)
-initializeToolbox _tracer desc = do
+initializeToolbox tracer desc =
+    initializeToolboxWithSessionIntrospection tracer desc Nothing
+
+{- | Initialize a system toolbox with optional session introspection configuration.
+
+This function creates a 'Toolbox' value from a 'SystemToolboxDescription'
+and optionally configures session introspection capabilities.
+
+The session introspection configuration is required for session-related
+capabilities like @list-sessions@, @search-sessions@, @read-session@, and
+@get-session-stats@. If not provided, these capabilities will return
+"Session store not configured" errors.
+
+Returns an error if the configuration is invalid.
+-}
+initializeToolboxWithSessionIntrospection ::
+    Tracer IO Trace ->
+    SystemToolboxDescription ->
+    Maybe SessionIntrospectionConfig ->
+    IO (Either String Toolbox)
+initializeToolboxWithSessionIntrospection _tracer desc mSessionConfig = do
     -- Validate that we have at least one capability
     if null desc.systemToolboxCapabilities
         then pure $ Left "System toolbox must have at least one capability enabled"
@@ -312,7 +337,7 @@ initializeToolbox _tracer desc = do
                         , toolboxCapabilities = desc.systemToolboxCapabilities
                         , toolboxEnvVarFilter = desc.systemToolboxEnvVarFilter
                         , toolboxConfig = desc
-                        , toolboxSessionIntrospection = Nothing
+                        , toolboxSessionIntrospection = mSessionConfig
                         }
             pure $ Right toolbox
 
@@ -1091,3 +1116,4 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
+
