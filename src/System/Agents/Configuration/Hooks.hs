@@ -48,7 +48,6 @@ The configuration supports:
 * Conditional execution based on context
 * Different action types (log, validate, transform)
 * Chaining hooks in sequence
-
 -}
 module System.Agents.Configuration.Hooks (
     -- * Configuration Types
@@ -367,8 +366,7 @@ parseHookConfig val =
 -- Converting to Runtime Types
 -------------------------------------------------------------------------------
 
-{- | Convert a condition config to a runtime condition.
--}
+-- | Convert a condition config to a runtime condition.
 conditionFromConfig :: HookConditionConfig -> HookCondition
 conditionFromConfig ConfigAlways = Always
 conditionFromConfig (ConfigExitCodeIs n) = ExitCodeIs n
@@ -411,8 +409,7 @@ actionFromConfig (ConfigCustomAction name) =
         putStrLn $ "[CUSTOM HOOK] " ++ Text.unpack name
         pure $ HookSuccess Nothing Nothing
 
-{- | Convert a hook definition to a runtime tool hook.
--}
+-- | Convert a hook definition to a runtime tool hook.
 toolHookFromDefinition :: HookType -> HookDefinition -> ToolHook
 toolHookFromDefinition hType def =
     ToolHook
@@ -489,4 +486,3 @@ validateHookConfig config =
     findDuplicates :: (Ord a) => [a] -> [a]
     findDuplicates xs =
         concatMap (take 1) $ filter (\g -> length g > 1) $ group $ sort xs
-

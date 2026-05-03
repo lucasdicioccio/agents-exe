@@ -50,7 +50,6 @@ Hooks can be loaded from configuration:
 config <- loadHookConfig "hooks.yaml"
 let registry = hookRegistryFromConfig config
 @
-
 -}
 module System.Agents.Tools.Hooks (
     -- * Core Types
@@ -255,8 +254,9 @@ data HookResult
         -- ^ Modified result (for post-exec/error hooks)
         }
     | -- | Hook failed, abort tool execution
-      HookFailure Text
-    -- ^ Error message
+      HookFailure
+        -- | Error message
+        Text
     deriving (Show)
 
 {- | Definition of a tool hook.
@@ -601,4 +601,3 @@ runWithHooks registry toolName args execCtx executeTool = do
     isErrorResult (DeveloperToolError _ _) = True
     isErrorResult (LuaToolError _ _) = True
     isErrorResult _ = False
-
