@@ -17,6 +17,9 @@ module System.Agents.SessionStore (
     readSessionFromFile,
     storeSessionToFile,
 
+    -- * File path operations
+    sessionFilePath,
+
     -- * Session storage operations
     storeSession,
     readSession,
@@ -32,7 +35,7 @@ import Control.Monad (filterM)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import Data.List (isPrefixOf, sortOn)
+import Data.List (isInfixOf, isPrefixOf, sortOn)
 import Data.Ord (Down (..))
 import Data.Time (UTCTime)
 import System.Directory (doesFileExist, getModificationTime, listDirectory)
@@ -61,7 +64,7 @@ data SessionStore = SessionStore
     {- ^ The prefix for session files. This can be a directory path
     or a path prefix. The directory component is extracted to find
     sessions, and the file component is used as a prefix before
-    the default pattern.
+the default pattern.
     -}
     }
     deriving (Show, Eq)
@@ -109,7 +112,7 @@ parseConversationIdFromFileName name =
                         _ -> Nothing
             else Nothing
   where
-    isSuffixOf suffix str = reverse suffix `isPrefixOf` reverse str
+    isSuffixOf suffix str = reverse suffix `isInfixOf` reverse str
 
 -------------------------------------------------------------------------------
 -- Low-level File Operations
@@ -176,7 +179,7 @@ isSessionFile name =
      in defaultSessionPattern `isPrefixOf` baseName
             && defaultSessionSuffix `isSuffixOf` baseName
   where
-    isSuffixOf suffix str = reverse suffix `isPrefixOf` reverse str
+    isSuffixOf suffix str = reverse suffix `isInfixOf` reverse str
 
 {- | Get the directory component from a prefix path.
 If the prefix contains path separators, returns the directory part.
@@ -222,3 +225,4 @@ listSessions store = do
     let sortedFiles = sortOn (Data.Ord.Down . sessionInfoModTime) sessionFiles
     -- Load each session file
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sortedFiles
+

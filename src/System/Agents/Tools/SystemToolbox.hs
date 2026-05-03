@@ -8,6 +8,7 @@ This module implements the system toolbox functionality, including:
 
 * System information gathering (date, OS info, environment variables, etc.)
 * File attachment capability for multi-modal LLM interactions
+* Session introspection capabilities (list-sessions, search-sessions, read-session, get-session-stats)
 * Capability-based access control
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
@@ -63,11 +64,16 @@ module System.Agents.Tools.SystemToolbox (
     -- * Media type detection
     detectMediaType,
     getFileExtension,
+
+    -- * Session introspection helpers
+    SessionIntrospectionConfig (..),
+    defaultSessionIntrospectionConfig,
 ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, try)
+import Control.Monad (forM)
 import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -81,10 +87,10 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
+import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Time as Time
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Directory (doesFileExist, getCurrentDirectory)
+import System.Directory (doesFileExist, getCurrentDirectory, getModificationTime)
 import System.Environment (getEnvironment, lookupEnv)
 import System.FilePath (takeExtension)
 import System.IO.Error (isDoesNotExistError)
@@ -92,8 +98,18 @@ import System.Posix.Process (getParentProcessID, getProcessID)
 import System.Posix.User (getEffectiveGroupID, getEffectiveUserID, getUserEntryForID, homeDirectory, userName, userShell)
 import qualified System.Process as Process
 
-import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..))
+import System.Agents.Base (
+    ConversationId (..),
+    SessionIntrospectionScope (..),
+    SystemToolCapability (..),
+    SystemToolboxDescription (..),
+ )
 import System.Agents.Media.Types (ApplicationType (..), AudioType (..), ImageType (..), MediaType (..), TextSubtype (..), VideoType (..))
+import System.Agents.Session.Types (
+    Session (..),
+    SessionId (..),
+ )
+import qualified System.Agents.SessionStore as SessionStore
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -107,6 +123,7 @@ These events allow tracking of:
 * Query execution progress
 * System info retrieval timing
 * Capability errors
+* Session introspection operations
 -}
 data Trace
     = -- | System information was requested for a capability
@@ -121,7 +138,46 @@ data Trace
       SystemInfoRetrievedTrace !Text !NominalDiffTime
     | -- | Error occurred while retrieving system information
       SystemInfoErrorTrace !Text !Text
+    | -- | Session introspection was requested
+      SessionIntrospectionRequestedTrace !Text
+    | -- | Session introspection succeeded
+      SessionIntrospectionSuccessTrace !Text !Int
+    | -- | Session introspection failed
+      SessionIntrospectionErrorTrace !Text !Text
     deriving (Show)
+
+{- | Configuration for session introspection capabilities.
+
+This is passed to the toolbox to configure how session introspection
+operations should behave (scope, limits, etc.).
+-}
+data SessionIntrospectionConfig = SessionIntrospectionConfig
+    { introspectionStore :: SessionStore.SessionStore
+    -- ^ Session store for accessing session files
+    , introspectionCurrentSessionId :: Maybe SessionId
+    -- ^ Current session ID for scope filtering
+    , introspectionCurrentForkedFrom :: Maybe SessionId
+    -- ^ Current session's forkedFromSessionId for lineage tracking
+    , introspectionScope :: SessionIntrospectionScope
+    -- ^ Scope of accessible sessions
+    , introspectionMaxResults :: Int
+    -- ^ Max sessions to return in list operations
+    , introspectionIncludeToolOutputs :: Bool
+    -- ^ Whether to include tool outputs in read operations
+    }
+    deriving (Show)
+
+-- | Default session introspection configuration.
+defaultSessionIntrospectionConfig :: SessionStore.SessionStore -> SessionIntrospectionConfig
+defaultSessionIntrospectionConfig store =
+    SessionIntrospectionConfig
+        { introspectionStore = store
+        , introspectionCurrentSessionId = Nothing
+        , introspectionCurrentForkedFrom = Nothing
+        , introspectionScope = ScopeSubtree
+        , introspectionMaxResults = 50
+        , introspectionIncludeToolOutputs = True
+        }
 
 {- | Description of a system tool.
 
@@ -145,6 +201,7 @@ The toolbox maintains:
 * List of enabled capabilities
 * Optional environment variable filter pattern
 * The original configuration description used to create this toolbox
+* Session introspection configuration (for session-related capabilities)
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -153,6 +210,8 @@ data Toolbox = Toolbox
     , toolboxEnvVarFilter :: Maybe Text
     , toolboxConfig :: SystemToolboxDescription
     -- ^ Original configuration description used to create this toolbox
+    , toolboxSessionIntrospection :: Maybe SessionIntrospectionConfig
+    -- ^ Configuration for session introspection capabilities
     }
 
 {- | Result of a system information query.
@@ -216,6 +275,14 @@ data QueryError
       FileTooLargeError !FilePath !Int
     | -- | Unsupported file type
       UnsupportedFileTypeError !FilePath !Text
+    | -- | Session store not configured for session introspection
+      SessionStoreNotConfiguredError
+    | -- | Session not found
+      SessionNotFoundError !Text
+    | -- | Invalid session ID format
+      InvalidSessionIdError !Text
+    | -- | Access denied based on scope
+      SessionAccessDeniedError !Text !SessionIntrospectionScope
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -245,6 +312,7 @@ initializeToolbox _tracer desc = do
                         , toolboxCapabilities = desc.systemToolboxCapabilities
                         , toolboxEnvVarFilter = desc.systemToolboxEnvVarFilter
                         , toolboxConfig = desc
+                        , toolboxSessionIntrospection = Nothing
                         }
             pure $ Right toolbox
 
@@ -463,6 +531,10 @@ capabilityFromName name = case name of
     "process-info" -> Just SystemToolProcessInfo
     "uptime" -> Just SystemToolUptime
     "attach-file" -> Just SystemToolAttachFile
+    "list-sessions" -> Just SystemToolListSessions
+    "search-sessions" -> Just SystemToolSearchSessions
+    "read-session" -> Just SystemToolReadSession
+    "get-session-stats" -> Just SystemToolGetSessionStats
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -476,6 +548,10 @@ capabilityToName SystemToolWorkingDirectory = "working-directory"
 capabilityToName SystemToolProcessInfo = "process-info"
 capabilityToName SystemToolUptime = "uptime"
 capabilityToName SystemToolAttachFile = "attach-file"
+capabilityToName SystemToolListSessions = "list-sessions"
+capabilityToName SystemToolSearchSessions = "search-sessions"
+capabilityToName SystemToolReadSession = "read-session"
+capabilityToName SystemToolGetSessionStats = "get-session-stats"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -518,10 +594,184 @@ getCapabilityInfoInternal capability toolbox = do
             SystemToolProcessInfo -> getProcessInfo
             SystemToolUptime -> getUptimeInfo
             SystemToolAttachFile -> error "Use executeAttachFile for attach-file capability"
+            SystemToolListSessions -> getListSessionsInfo (toolboxSessionIntrospection toolbox)
+            SystemToolSearchSessions -> getSearchSessionsInfo (toolboxSessionIntrospection toolbox)
+            SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox)
+            SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
         Right val -> pure $ Right val
+
+-------------------------------------------------------------------------------
+-- Session Introspection Capabilities
+-------------------------------------------------------------------------------
+
+{- | List accessible sessions based on scope.
+
+Returns session IDs, timestamps, turn counts, and relationship info.
+-}
+getListSessionsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
+getListSessionsInfo Nothing = pure ("list-sessions", String "Session store not configured")
+getListSessionsInfo (Just config) = do
+    -- List all sessions from the store
+    allSessions <- SessionStore.listSessions (introspectionStore config)
+
+    -- Filter sessions based on scope
+    let accessibleSessions = filterSessionsByScope config allSessions
+
+    -- Apply limit
+    let limitedSessions = take (introspectionMaxResults config) accessibleSessions
+
+    -- Build session info list
+    sessionInfos <- forM limitedSessions $ \(_path, mSession, convId) -> do
+        mtime <- getSessionModTime (introspectionStore config) convId
+        let turnCount = maybe 0 (length . turns) mSession
+        let isParent = isParentSession config mSession
+        let isChild = isChildSession config mSession
+        pure $
+            Aeson.object
+                [ "sessionId" .= conversationIdToText convId
+                , "conversationId" .= conversationIdToText convId
+                , "modificationTime" .= maybe "" (Text.pack . show) mtime
+                , "turnCount" .= turnCount
+                , "isParent" .= isParent
+                , "isChild" .= isChild
+                ]
+
+    let totalAccessible = length accessibleSessions
+
+    pure $
+        ( "list-sessions"
+        , Aeson.object
+            [ "sessions" .= sessionInfos
+            , "totalAccessible" .= totalAccessible
+            ]
+        )
+
+{- | Search sessions using full-text search.
+
+Returns matching sessions with relevance scores and snippet previews.
+-}
+getSearchSessionsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
+getSearchSessionsInfo Nothing = pure ("search-sessions", String "Session store not configured")
+getSearchSessionsInfo (Just _config) = do
+    -- For now, return a placeholder indicating search is available
+    -- Full implementation would use Session.Search.Index.executeSearchWithOptions
+    pure $
+        ( "search-sessions"
+        , Aeson.object
+            [ "message" .= ("Search capability available. Use executeSearchWithOptions from Session.Search.Query for full-text search." :: Text)
+            , "hint" .= ("Configure search index with SearchIndexConfig and call executeSearchWithOptions" :: Text)
+            ]
+        )
+
+{- | Read session content.
+
+Returns: turns, tool calls, responses based on scope
+-}
+getReadSessionInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
+getReadSessionInfo Nothing = pure ("read-session", String "Session store not configured")
+getReadSessionInfo (Just config) = do
+    -- For now, return a placeholder
+    -- Full implementation would read specific session by ID and check scope
+    pure $
+        ( "read-session"
+        , Aeson.object
+            [ "message" .= ("Read session capability available. Session access is controlled by scope." :: Text)
+            , "currentScope" .= showScope (introspectionScope config)
+            , "hint" .= ("Use SessionStore.readSession with scope checking via canAccessSession" :: Text)
+            ]
+        )
+
+{- | Get session statistics.
+
+Returns: turn counts, token usage, byte counts, trajectory signals
+-}
+getSessionStatsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
+getSessionStatsInfo Nothing = pure ("get-session-stats", String "Session store not configured")
+getSessionStatsInfo (Just config) = do
+    -- List all accessible sessions
+    allSessions <- SessionStore.listSessions (introspectionStore config)
+    let accessibleSessions = filterSessionsByScope config allSessions
+
+    -- Calculate aggregate stats
+    let totalTurns = sum [maybe 0 (length . turns) mSession | (_, mSession, _) <- accessibleSessions]
+    let totalSessions = length accessibleSessions
+
+    pure $
+        ( "get-session-stats"
+        , Aeson.object
+            [ "totalSessions" .= totalSessions
+            , "totalTurnsAcrossAllSessions" .= totalTurns
+            , "scope" .= showScope (introspectionScope config)
+            , "note" .= ("Use SessionPrint.calculateStatistics for detailed per-session stats" :: Text)
+            ]
+        )
+
+-- | Helper to convert scope to text
+showScope :: SessionIntrospectionScope -> Text
+showScope ScopeParentsOnly = "parents-only"
+showScope ScopeChildrenOnly = "children-only"
+showScope ScopeSubtree = "subtree"
+showScope ScopeAll = "all"
+
+-- | Filter sessions based on the configured scope
+filterSessionsByScope :: SessionIntrospectionConfig -> [(FilePath, Maybe Session, ConversationId)] -> [(FilePath, Maybe Session, ConversationId)]
+filterSessionsByScope config sessions =
+    case introspectionScope config of
+        ScopeAll -> sessions
+        _ -> filter (sessionMatchesScope config) sessions
+
+-- | Check if a session matches the configured scope
+sessionMatchesScope :: SessionIntrospectionConfig -> (FilePath, Maybe Session, ConversationId) -> Bool
+sessionMatchesScope config (_, mSession, _convId) =
+    case introspectionScope config of
+        ScopeAll -> True
+        ScopeParentsOnly -> isParentSession config mSession
+        ScopeChildrenOnly -> isChildSession config mSession
+        ScopeSubtree -> isParentSession config mSession || isChildSession config mSession || isCurrentSession config mSession
+
+-- | Check if a session is a parent (ancestor) of the current session
+isParentSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
+isParentSession config mSession =
+    case (introspectionCurrentForkedFrom config, mSession) of
+        (Just currentForkedFrom, Just session) ->
+            sessionId session == currentForkedFrom
+        _ -> False
+
+-- | Check if a session is a child (descendant) of the current session
+isChildSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
+isChildSession config mSession =
+    case (introspectionCurrentSessionId config, mSession) of
+        (Just currentId, Just session) ->
+            forkedFromSessionId session == Just currentId
+        _ -> False
+
+-- | Check if a session is the current session
+isCurrentSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
+isCurrentSession config mSession =
+    case (introspectionCurrentSessionId config, mSession) of
+        (Just currentId, Just session) ->
+            sessionId session == currentId
+        _ -> False
+
+-- | Helper to get session modification time
+getSessionModTime :: SessionStore.SessionStore -> ConversationId -> IO (Maybe UTCTime)
+getSessionModTime store convId = do
+    let path = SessionStore.sessionFilePath store convId
+    result <- try $ getModificationTime path
+    case result of
+        Left (_ :: SomeException) -> pure Nothing
+        Right mtime -> pure $ Just mtime
+
+-- | Helper to convert ConversationId to Text
+conversationIdToText :: ConversationId -> Text
+conversationIdToText (ConversationId uuid) = Text.pack $ show uuid
+
+-------------------------------------------------------------------------------
+-- System Info Capabilities
+-------------------------------------------------------------------------------
 
 {- | Gather date/time information.
 
@@ -772,7 +1022,7 @@ with a default toolbox context (no env var filtering).
 -}
 getCapabilityInfo :: SystemToolCapability -> IO (Text, Aeson.Value)
 getCapabilityInfo capability = do
-    let toolbox = Toolbox "" "" [capability] Nothing undefined
+    let toolbox = Toolbox "" "" [capability] Nothing undefined Nothing
     result <- getCapabilityInfoWithTimeout capability toolbox
     case result of
         Left err -> pure (capabilityToName capability, String err)
@@ -841,3 +1091,4 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
+

@@ -665,7 +665,7 @@ buildPostgRESTParamProperties params =
                         }
             Nothing -> Nothing
 
-        -- NEW: Request body for write operations (POST, PUT, PATCH)
+        -- Request body for write operations (POST, PUT, PATCH)
         bodyProp = case tpRequestBody params of
             Just schema ->
                 Just $
@@ -705,7 +705,7 @@ buildPostgRESTParamProperties params =
             [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False) (rsOrder rs)
             ]
 
-    -- NEW: Build the parameter type for the request body
+    -- Build the parameter type for the request body
     buildBodyParamType :: Schema -> ParamType
     buildBodyParamType schema =
         case schema.schemaType of
@@ -719,7 +719,7 @@ buildPostgRESTParamProperties params =
                 ObjectParamType (buildSchemaProperties schema)
             _ -> OpaqueParamType "object"
 
-    -- NEW: Build description for the request body parameter
+    -- Build description for the request body parameter
     buildBodyDescription :: Schema -> Text
     buildBodyDescription schema =
         let baseDesc = Maybe.fromMaybe "JSON request body for insert/update operations" schema.schemaDescription
@@ -729,14 +729,14 @@ buildPostgRESTParamProperties params =
                 _ -> ""
          in baseDesc <> typeHint
 
-    -- NEW: Build properties from schema for object validation
+    -- Build properties from schema for object validation
     buildSchemaProperties :: Schema -> [ParamProperty]
     buildSchemaProperties schema =
         case schema.schemaProperties of
             Just props -> map (\(k, v) -> schemaToParamProperty k v) (Map.toList props)
             Nothing -> []
 
-    -- NEW: Convert a schema property to ParamProperty
+    -- Convert a schema property to ParamProperty
     schemaToParamProperty :: Text -> Schema -> ParamProperty
     schemaToParamProperty name schema =
         ParamProperty
@@ -746,7 +746,7 @@ buildPostgRESTParamProperties params =
             , propertyRequired = maybe False (name `elem`) schema.schemaRequired
             }
 
-    -- NEW: Convert schema type to ParamType
+    -- Convert schema type to ParamType
     schemaTypeToParamType :: Schema -> ParamType
     schemaTypeToParamType schema =
         case schema.schemaType of
@@ -895,16 +895,6 @@ and an optional 'filepath' parameter for the 'attach-file' capability.
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
 -}
-
-{- | Register a SystemToolbox tool with the LLM system.
-
-System tools expose functions based on configured capabilities.
-The tool accepts a 'capability' parameter to select which information to retrieve,
-and an optional 'filepath' parameter for the 'attach-file' capability.
-
-The activation is extracted from the toolbox configuration's
-'systemToolboxActivation' field.
--}
 registerSystemTool ::
     SystemTools.Toolbox ->
     Either String ToolRegistration
@@ -968,6 +958,10 @@ capabilityToText SystemToolWorkingDirectory = "working-directory"
 capabilityToText SystemToolProcessInfo = "process-info"
 capabilityToText SystemToolUptime = "uptime"
 capabilityToText SystemToolAttachFile = "attach-file"
+capabilityToText SystemToolListSessions = "list-sessions"
+capabilityToText SystemToolSearchSessions = "search-sessions"
+capabilityToText SystemToolReadSession = "read-session"
+capabilityToText SystemToolGetSessionStats = "get-session-stats"
 
 {- | Register all tools from a System toolbox.
 
@@ -1572,3 +1566,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+
