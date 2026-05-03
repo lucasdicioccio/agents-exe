@@ -687,17 +687,6 @@ handleSubcallStarted _tracer parentId subcallId slug depth = do
     let subcallShort = shortConvId subcallId
     showStatus StatusInfo $ "Subcall d=" <> Text.pack (show depth) <> " pid=" <> parentShort <> " cid=" <> subcallShort <> " " <> slug
 
-    -- Debug: Check if parent conversation exists in the list
-    coreRef <- use tuiCore
-    coreState <- liftIO $ readTVarIO coreRef
-    let convs = coreConversations coreState
-    let parentExists = any (\c -> conversationId c == parentId) convs
-    let allConvIds = map conversationId convs
-    let allConvShort = Text.intercalate "," $ map shortConvId allConvIds
-    
-    if parentExists
-        then debugLog $ "Parent " <> parentShort <> " found in " <> Text.pack (show $ length convs) <> " conversations"
-        else debugLog $ "Parent " <> parentShort <> " NOT FOUND! Have: " <> allConvShort
     -- Look up the agent by slug from the agent list
     agents <- use (tuiUI . agentList . to listElements)
     case findAgentBySlug slug agents of
@@ -1027,14 +1016,6 @@ showStatus severity text = do
     chan <- use eventChan
     liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
 
--- | Append a debug message to debug.log file with timestamp.
--- This persists across TUI re-renders unlike showStatus.
-debugLog :: Text.Text -> EventM n TuiState ()
-debugLog msg = do
-    now <- liftIO getCurrentTime
-    let line = Text.pack (show now) <> ": " <> msg <> "\n"
-    liftIO $ TextIO.appendFile "debug.log" line
-
 -- | Extract short identifier from ConversationId for debugging.
 shortConvId :: ConversationId -> Text.Text
 shortConvId (ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
@@ -1182,28 +1163,8 @@ handleHeartbeat = do
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
 
-    -- Debug: log conversation counts and IDs
-    let convCount = length convs
-    let rootCount = length $ filter (\c -> conversationParentId c == Nothing) convs
-    let subcallCount = convCount - rootCount
-    
-    -- Get IDs for debugging (only when there are conversations)
-    when (convCount > 0) $ do
-        let rootIds = map conversationId $ filter (\c -> conversationParentId c == Nothing) convs
-        let subcallIds = map conversationId $ filter (\c -> conversationParentId c /= Nothing) convs
-        let rootShort = Text.intercalate "," $ map shortConvId rootIds
-        let subcallShort = Text.intercalate "," $ map shortConvId subcallIds
-        debugLog $ "convs=" <> Text.pack (show convCount) <> 
-                   " roots=" <> Text.pack (show rootCount) <> "[" <> rootShort <> "]" <>
-                   " subs=" <> Text.pack (show subcallCount) <> "[" <> subcallShort <> "]"
-
     let sortedConvs = sortConversationsForNesting convs
-    let sortedCount = length sortedConvs
 
-    -- Show debug info if counts don't match
-    when (sortedCount /= convCount) $ do
-        debugLog $ "Conv count mismatch: raw=" <> Text.pack (show convCount) <> " sorted=" <> Text.pack (show sortedCount) <> " roots=" <> Text.pack (show rootCount)
-    
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList sortedConvs) 1
 
     case mSelectedConvId of
@@ -1632,9 +1593,6 @@ runConversation tracer baseTuiAgent session = do
                 }
     liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
     tuiUI . conversationList %= listInsert 0 conv
-    -- Debug: log root conversation creation
-    let convShort = shortConvId convId
-    debugLog $ "Root conv created cid=" <> convShort
     
     switchToChatsAndFocusMessage
 
