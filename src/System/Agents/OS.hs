@@ -21,7 +21,7 @@ module System.Agents.OS (
     -- * Agent Tree
     module System.Agents.OS.AgentTree,
 
--- * Resources (excluding conflicting types)
+    -- * Resources (excluding conflicting types)
     createResource,
     registerResourceHandle,
     cleanupScope,
@@ -80,6 +80,7 @@ module System.Agents.OS (
     module System.Agents.OS.Resources.Sqlite,
     module System.Agents.OS.Resources.Lua,
     module System.Agents.OS.Resources.Http,
+
     -- * Concurrent Access
     module System.Agents.OS.Concurrent,
 
@@ -135,6 +136,6 @@ import System.Agents.OS.Interfaces (
  )
 import System.Agents.OS.Persistence
 import System.Agents.OS.Resources hiding (ResourceScope (..))
-import System.Agents.OS.Resources.Sqlite
-import System.Agents.OS.Resources.Lua
 import System.Agents.OS.Resources.Http
+import System.Agents.OS.Resources.Lua
+import System.Agents.OS.Resources.Sqlite

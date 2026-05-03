@@ -124,10 +124,10 @@ import System.Agents.OS.Core.Types (
     newEntityId,
  )
 import System.Agents.OS.Resources.Http
+import System.Agents.OS.Resources.Lifecycle hiding (ResourceScope)
 import System.Agents.OS.Resources.Lua
 import System.Agents.OS.Resources.Sqlite
 import System.Agents.OS.Resources.Types
-import System.Agents.OS.Resources.Lifecycle hiding (ResourceScope)
 
 -------------------------------------------------------------------------------
 -- Resource Lifecycle Operations
@@ -352,4 +352,3 @@ getResourceCount registry = do
     atomically $ do
         handles <- readTVar (registryHandles registry)
         pure $ HashMap.size handles
-

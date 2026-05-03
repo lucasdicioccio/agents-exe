@@ -33,11 +33,11 @@ module System.Agents.OS.Resources.Lifecycle (
     restoreFromSnapshot,
 ) where
 
-import qualified Control.Exception
-import Control.Exception (bracket, catch, try)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM
-import Control.Monad (forever, forM_, unless, when)
+import Control.Exception (bracket, catch, try)
+import qualified Control.Exception
+import Control.Monad (forM_, forever, unless, when)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Hashable (Hashable)
@@ -61,7 +61,8 @@ data SessionState = SessionState
     , ssConversationId :: ConversationId
     , ssLastActivity :: UTCTime
     , ssResourceCount :: Int
-    } deriving (Show, Generic)
+    }
+    deriving (Show, Generic)
 
 data ResourcePersistability = Persistent | Transient | Recreatable
     deriving (Show, Eq, Ord, Generic)
@@ -91,7 +92,8 @@ data ResourceSnapshot = ResourceSnapshot
     , rsResourceType :: Text
     , rsSerializedState :: Maybe Text
     , rsConfigHash :: Text
-    } deriving (Show, Generic)
+    }
+    deriving (Show, Generic)
 
 data PersistedResource = PersistedResource
     { prResourceId :: ResourceId
@@ -112,7 +114,7 @@ data SessionManager = SessionManager
     }
 
 newtype TimeoutWatcherHandle = TimeoutWatcherHandle
-    { unTimeoutWatcher :: TVar Bool }
+    {unTimeoutWatcher :: TVar Bool}
 
 sessionManagerRegistry :: SessionManager -> ResourceRegistry
 sessionManagerRegistry = smRegistry
@@ -132,13 +134,15 @@ data SuspendedSession = SuspendedSession
     , suspendResourceSnapshots :: [ResourceSnapshot]
     , suspendTimestamp :: UTCTime
     , suspendPersistentResources :: [PersistedResource]
-    } deriving (Show, Generic)
+    }
+    deriving (Show, Generic)
 
 partitionHashMap :: (Hashable k) => (v -> Bool) -> HashMap k v -> (HashMap k v, HashMap k v)
 partitionHashMap p = HashMap.foldrWithKey go (HashMap.empty, HashMap.empty)
   where
-    go k v (as, bs) | p v = (HashMap.insert k v as, bs)
-                    | otherwise = (as, HashMap.insert k v bs)
+    go k v (as, bs)
+        | p v = (HashMap.insert k v as, bs)
+        | otherwise = (as, HashMap.insert k v bs)
 
 suspendSession :: SessionManager -> SessionState -> IO SuspendedSession
 suspendSession mgr state = do
@@ -301,7 +305,8 @@ data IdleResourceInfo = IdleResourceInfo
     , iriIdleTime :: NominalDiffTime
     , iriScope :: ResourceScope
     , iriPersistability :: ResourcePersistability
-    } deriving (Show, Generic)
+    }
+    deriving (Show, Generic)
 
 getIdleResourceInfo :: SessionManager -> NominalDiffTime -> IO [IdleResourceInfo]
 getIdleResourceInfo mgr threshold = do
@@ -336,4 +341,3 @@ takeResourceSnapshot mr = do
 
 restoreFromSnapshot :: ResourceSnapshot -> IO (Either String ResourceHandle)
 restoreFromSnapshot _ = return $ Left "restoreFromSnapshot: not fully implemented"
-
