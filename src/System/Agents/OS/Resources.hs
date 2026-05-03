@@ -11,6 +11,7 @@ This module provides comprehensive resource management for the OS architecture:
 * Explicit cleanup with predictable resource disposal
 * Thread-safe registry using STM
 * Integration with the ECS component system
+* Session lifecycle management: suspension, resumption, and timeout cleanup
 
 == Resource Lifecycle
 
@@ -22,6 +23,18 @@ Resources have different lifetimes depending on their scope:
 4. /Conversation scope/: Per-conversation resources like isolated Lua states
 5. /Turn scope/: Temporary resources for a single turn
 6. /ToolCall scope/: Single-use resources
+
+== Session Lifecycle
+
+The session lifecycle provides additional management for long-running sessions:
+
+@
+Active → Suspending → Suspended → Resuming → Active
+   ↓         ↓            ↓           ↓
+Cleanup   Persist      Wait       Restore
+@
+
+See 'System.Agents.OS.Resources.Lifecycle' for session lifecycle management.
 
 == Cleanup Ordering
 
@@ -76,6 +89,7 @@ module System.Agents.OS.Resources (
     module System.Agents.OS.Resources.Sqlite,
     module System.Agents.OS.Resources.Lua,
     module System.Agents.OS.Resources.Http,
+    module System.Agents.OS.Resources.Lifecycle,
 
     -- * Resource lifecycle operations
     createResource,
@@ -110,6 +124,7 @@ import System.Agents.OS.Core.Types (
     newEntityId,
  )
 import System.Agents.OS.Resources.Http
+import System.Agents.OS.Resources.Lifecycle hiding (ResourceScope)
 import System.Agents.OS.Resources.Lua
 import System.Agents.OS.Resources.Sqlite
 import System.Agents.OS.Resources.Types

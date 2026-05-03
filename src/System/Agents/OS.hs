@@ -22,7 +22,64 @@ module System.Agents.OS (
     module System.Agents.OS.AgentTree,
 
     -- * Resources (excluding conflicting types)
-    module System.Agents.OS.Resources,
+    createResource,
+    registerResourceHandle,
+    cleanupScope,
+    isResourceValid,
+    findResourcesInScope,
+    withResource,
+    lookupResourceHandle,
+    getResourceCount,
+    ResourceInfo (..),
+    ResourceType (..),
+    ResourceHandle (..),
+    ResourceAccessor (..),
+    ResourceRegistry (..),
+    ResourceContext (..),
+    SqliteConfig (..),
+    SqliteAccessMode (..),
+    LuaConfig (..),
+    HttpManagerConfig (..),
+    ProcessConfig (..),
+    newResourceRegistry,
+    generateResourceId,
+    ScopeLevel (..),
+    scopeLevelToList,
+    isScopeValid,
+    resourceInfoComponentId,
+
+    -- * Session Lifecycle
+    SessionLifecycle (..),
+    SessionState (..),
+    ManagedResource (..),
+    ResourcePersistability (..),
+    SessionManager,
+    newSessionManager,
+    sessionManagerRegistry,
+    suspendSession,
+    resumeSession,
+    forceCleanupSession,
+    withResourceTracking,
+    registerCleanup,
+    registerManagedResource,
+    startTimeoutWatcher,
+    stopTimeoutWatcher,
+    pingSessionActivity,
+    SessionTimeoutConfig (..),
+    defaultTimeoutConfig,
+    cleanupIdleResources,
+    getIdleResourceInfo,
+    IdleResourceInfo (..),
+    SuspendedSession (..),
+    ResourceSnapshot (..),
+    PersistedResource (..),
+    takeResourceSnapshot,
+    restoreFromSnapshot,
+
+    -- * Re-exported resource modules
+    module System.Agents.OS.Resources.Sqlite,
+    module System.Agents.OS.Resources.Lua,
+    module System.Agents.OS.Resources.Http,
 
     -- * Concurrent Access
     module System.Agents.OS.Concurrent,
@@ -78,4 +135,7 @@ import System.Agents.OS.Interfaces (
     unsubscribeFromEvents,
  )
 import System.Agents.OS.Persistence
-import System.Agents.OS.Resources hiding (ResourceScope)
+import System.Agents.OS.Resources hiding (ResourceScope (..))
+import System.Agents.OS.Resources.Http
+import System.Agents.OS.Resources.Lua
+import System.Agents.OS.Resources.Sqlite

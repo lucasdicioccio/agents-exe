@@ -88,6 +88,7 @@ library agents-lib
                     , System.Agents.OS.Resources
                     , System.Agents.OS.Resources.Http
                     , System.Agents.OS.Resources.Lua
+                    , System.Agents.OS.Resources.Lifecycle
                     , System.Agents.OS.Resources.Sqlite
                     , System.Agents.OS.Resources.Types
                     , System.Agents.Tools
