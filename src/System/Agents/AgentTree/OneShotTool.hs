@@ -32,15 +32,14 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as TextIO
-import Data.Time (getCurrentTime)
+import Data.Time.Clock (getCurrentTime)
 import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), contramap)
-
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.HttpClient as HttpClient
-import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.LLMs.OpenAI (ApiBaseUrl (..), ApiKey, revealApiKey)
 import System.Agents.OS.Conversation (
     ConversationConfig (..),
     ConversationState (..),
@@ -58,7 +57,12 @@ import System.Agents.OS.Core.Types (
 import System.Agents.OS.Core.World (World, setComponent)
 import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
-import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
+import System.Agents.OneShot (
+    Trace (..),
+    agentStoreSession,
+    mapProgressiveDisclosureTrace,
+    parseModelFlavor,
+ )
 import qualified System.Agents.OneShot as OneShot
 import System.Agents.Session.Base (
     Agent (..),
@@ -81,11 +85,7 @@ import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAIComple
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.ToolPortal as ToolPortal
-import System.Agents.ToolRegistration (
-    ToolRegistration (..),
-    registerIOScriptInLLM,
- )
-import qualified System.Agents.ToolRegistration as ToolRegistration
+import System.Agents.ToolRegistration (ToolRegistration (..), registerIOScriptInLLM)
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 
 -- Import ToolExecutionContext with qualified access to avoid ambiguity with Agent fields.
@@ -94,17 +94,7 @@ import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext (.
 import qualified System.Agents.Tools.Context as Ctx
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
-
--------------------------------------------------------------------------------
--- Trace Types
--------------------------------------------------------------------------------
-
-data Trace
-    = OneShotTrace !OneShot.Trace
-    | OpenAITrace !OpenAI.Trace
-    | ToolPortalTrace !ToolPortal.Trace
-    | ToolRegistrationTrace !ToolRegistration.Trace
-    deriving (Show)
+import System.Agents.Tools.ParamTier (defaultParamTier)
 
 -------------------------------------------------------------------------------
 
@@ -194,6 +184,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
             , propertyType = StringParamType
             , propertyDescription = "the prompt to call the specialized-agent with"
             , propertyRequired = True
+            , propertyTier = defaultParamTier
             }
         ]
 
@@ -224,7 +215,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
 
         -- Create HTTP runtime with the API key
         httpRuntime <- case mApiKey of
-            Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
+            Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ revealApiKey apiKey)
             Nothing -> HttpClient.newRuntime HttpClient.NoToken
 
         -- Create the agent from the OS node
@@ -258,7 +249,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
                     }
 
         -- Apply dynamic tool filtering based on session activation state
-        sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0WithStack
+        sessionAgent <- agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) sessionAgent0WithStack
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
@@ -475,7 +466,7 @@ updateConversationStatus world osConvId newStatus = do
         Nothing -> pure ()
 
 -- | Look up an API key by its ID from the loaded API keys.
-lookupApiKey :: Text -> LoadedApiKeys -> Maybe OpenAI.ApiKey
+lookupApiKey :: Text -> LoadedApiKeys -> Maybe ApiKey
 lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) keys
 
 -------------------------------------------------------------------------------
@@ -503,15 +494,15 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
     -- Create completion config and function
     let completionConfig =
             OpenAICompletionConfig
-                { cfgTracer = contramap OpenAITrace tracer
+                { cfgTracer = contramap OneShot.OpenAITrace tracer
                 , cfgRuntime = httpRuntime
-                , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
+                , cfgBaseUrl = ApiBaseUrl $ Base.modelUrl agentCfg
                 , cfgModelName = Base.modelName agentCfg
                 , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
                 }
     let completeF = mkOpenAICompletion completionConfig
 
-    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (osNodeTools node)
+    let tp = ToolPortal.makeToolPortal (contramap OneShot.ToolPortalTrace tracer) (osNodeTools node)
 
     -- Generate a new Base.ConversationId for this agent instance
     -- Session subsystem uses Base.ConversationId
@@ -524,7 +515,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , sysPrompt = pure sPrompt
                 , sysTools = pure sTools
                 , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (readTVarIO $ osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
+                , toolCall = executeLlmToolCall (contramap OneShot.ToolRegistrationTrace tracer) (readTVarIO $ osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
                 , toolPortal = tp
                 , complete = completeF
                 , contextConfig = defaultContextConfig

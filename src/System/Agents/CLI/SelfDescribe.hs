@@ -18,6 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptArgCallingMode (..), ScriptEmptyResultBehavior (..), ScriptInfo (..))
+import System.Agents.Tools.ParamTier (defaultParamTier)
 
 -- | Options for the self-describe command
 data SelfDescribeOptions = SelfDescribeOptions
@@ -51,6 +52,7 @@ handleSelfDescribe opts _apiKeysFile = do
                     "string"
                     Single
                     DashDashSpace
+                    defaultParamTier
                 ]
                 slug
                 description

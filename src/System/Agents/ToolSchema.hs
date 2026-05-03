@@ -17,6 +17,8 @@ import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+import System.Agents.Tools.ParamTier (ParamTier (..), defaultParamTier)
+
 data ParamProperty = ParamProperty
     { propertyKey :: Text
     , propertyType :: ParamType
@@ -26,10 +28,32 @@ data ParamProperty = ParamProperty
     is included in the 'required' array of the JSON schema.
     This allows the LLM to omit optional parameters.
     -}
+    , propertyTier :: ParamTier
+    {- ^ The visibility tier for progressive disclosure.
+    Basic parameters are always shown, Advanced are hidden by default,
+    and Expert are deeply hidden. Defaults to Basic for backward compatibility.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON ParamProperty
-instance ToJSON ParamProperty
+
+instance FromJSON ParamProperty where
+    parseJSON = Aeson.withObject "ParamProperty" $ \o ->
+        ParamProperty
+            <$> o Aeson..: "key"
+            <*> o Aeson..: "type"
+            <*> o Aeson..: "description"
+            <*> o Aeson..:? "required" Aeson..!= False
+            <*> o Aeson..:? "tier" Aeson..!= defaultParamTier
+
+instance ToJSON ParamProperty where
+    toJSON p =
+        Aeson.object $
+            [ "key" .= p.propertyKey
+            , "type" .= p.propertyType
+            , "description" .= p.propertyDescription
+            , "required" .= p.propertyRequired
+            , "tier" .= p.propertyTier
+            ]
 
 data ParamType
     = NullParamType

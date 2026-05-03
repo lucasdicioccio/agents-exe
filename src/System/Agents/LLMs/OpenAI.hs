@@ -48,9 +48,8 @@ import Text.Read (readMaybe)
 
 import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..), jsonSchema)
+import System.Agents.Tools.ParamTier (defaultParamTier)
 
--------------------------------------------------------------------------------
--- Token Usage Tracking
 -------------------------------------------------------------------------------
 
 {- | Token usage breakdown from LLM API response.
@@ -303,6 +302,7 @@ instance ToJSON Tool where
                 , propertyType = ObjectParamType t.toolDescriptionParamProperties
                 , propertyDescription = t.toolDescriptionText
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
 
 data ToolResponse
@@ -313,7 +313,6 @@ data ToolResponse
 
 newtype SystemPrompt = SystemPrompt {getSystemPrompt :: Text}
     deriving (Show, Eq, Ord, IsString)
-
 newtype ApiKey = ApiKey {revealApiKey :: ByteString}
 
 data ModelFlavor

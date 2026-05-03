@@ -14,6 +14,12 @@ module System.Agents.Combinators.ProgressiveDisclosure (
 
     -- * Progressive Disclosure
     agentEvaluateActiveTools,
+
+    -- * Parameter Progressive Disclosure
+    DisclosureLevel (..),
+    defaultDisclosureLevel,
+    filterToolParamsByDisclosure,
+    getVisibleParams,
 ) where
 
 import Control.Concurrent.STM (TVar, readTVarIO)
@@ -41,6 +47,7 @@ import System.Agents.Tools.Activation.Session (
     makeDiscoverTools,
  )
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import System.Agents.Tools.ParamTier (ParamTier (..), isTierVisible)
 
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -59,6 +66,62 @@ data Trace
 -- | A nil UUID for creating initial empty session references.
 nilUUID :: UUID
 nilUUID = UUID.fromWords 0 0 0 0
+
+-------------------------------------------------------------------------------
+-- Disclosure Level Types
+-------------------------------------------------------------------------------
+
+{- | User preference for parameter disclosure level.
+
+This controls which parameter tiers are visible in the UI:
+
+* 'DisclosureBasic' - Only basic parameters
+* 'DisclosureAdvanced' - Basic and advanced parameters
+* 'DisclosureExpert' - All parameters including expert
+
+The default is 'DisclosureBasic' to reduce cognitive load for new users.
+-}
+data DisclosureLevel
+    = DisclosureBasic
+    | DisclosureAdvanced
+    | DisclosureExpert
+    deriving (Show, Eq, Ord)
+
+-- | Default disclosure level - start with basic parameters only.
+defaultDisclosureLevel :: DisclosureLevel
+defaultDisclosureLevel = DisclosureBasic
+
+-- | Convert DisclosureLevel to the corresponding tier threshold.
+disclosureLevelToTier :: DisclosureLevel -> ParamTier
+disclosureLevelToTier DisclosureBasic = Basic
+disclosureLevelToTier DisclosureAdvanced = Advanced
+disclosureLevelToTier DisclosureExpert = Expert
+
+-------------------------------------------------------------------------------
+-- Parameter Filtering
+-------------------------------------------------------------------------------
+
+{- | Filter tool parameters based on disclosure level.
+
+Returns only the parameters that should be visible at the given
+disclosure level.
+-}
+filterToolParamsByDisclosure :: DisclosureLevel -> [ParamProperty] -> [ParamProperty]
+filterToolParamsByDisclosure level params =
+    let threshold = disclosureLevelToTier level
+     in filter (\p -> isTierVisible threshold p.propertyTier) params
+
+{- | Get visible parameter keys at a given disclosure level.
+
+Useful for building JSON schemas with only visible parameters.
+-}
+getVisibleParams :: DisclosureLevel -> [ParamProperty] -> [Text]
+getVisibleParams level params =
+    map propertyKey $ filterToolParamsByDisclosure level params
+
+-------------------------------------------------------------------------------
+-- Tool-Level Progressive Disclosure
+-------------------------------------------------------------------------------
 
 {- | Wrap an agent to dynamically evaluate and filter active tools based on session history.
 

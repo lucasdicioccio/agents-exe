@@ -23,6 +23,7 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
 import System.Agents.ToolSchema
+import System.Agents.Tools.ParamTier (defaultParamTier)
 
 -------------------------------------------------------------------------------
 
@@ -144,7 +145,7 @@ mkOpenAICompletion config completion = do
                     Just (Aeson.String d) -> d
                     _ -> ""
                 propRequired = Set.member (Key.toText key) requiredSet
-             in [ParamProperty (Key.toText key) propType propDesc propRequired]
+             in [ParamProperty (Key.toText key) propType propDesc propRequired defaultParamTier]
         parseProperty _ _ _ = []
 
         parseParamType :: Set Text -> Text -> KeyMap.KeyMap Aeson.Value -> ParamType
