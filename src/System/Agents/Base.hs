@@ -942,6 +942,65 @@ instance FromJSON DeveloperToolCapability where
             "write-file-range" -> return DevToolWriteFileRange
             other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range."
 
+{- | File scope configuration for developer toolbox file operations.
+
+This restricts which files the developer toolbox can access for
+read-file-range and write-file-range operations.
+
+Example configuration:
+
+@
+{
+  "allowedPatterns": ["/project/src/**/*.hs", "/project/docs/*.md"],
+  "allowRangeOps": true,
+  "allowCreate": false
+}
+@
+
+Security defaults:
+* Empty allowedPatterns means NO file access (secure default)
+* Paths are canonicalized before pattern matching
+-}
+data DeveloperFileScope = DeveloperFileScope
+    { devFileScopeAllowedPatterns :: [Text]
+    -- ^ List of glob patterns for allowed file paths.
+    -- Supports: * (any chars except /), ** (recursive), ? (single char), [abc] (char class)
+    -- If empty, NO paths are allowed.
+    , devFileScopeAllowRangeOps :: Bool
+    -- ^ Whether range-based read/write operations are allowed
+    , devFileScopeAllowCreate :: Bool
+    -- ^ Whether creating new files is allowed (vs. only existing files)
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Default file scope: denies all access.
+defaultDeveloperFileScope :: DeveloperFileScope
+defaultDeveloperFileScope =
+    DeveloperFileScope
+        { devFileScopeAllowedPatterns = []
+        , devFileScopeAllowRangeOps = True
+        , devFileScopeAllowCreate = False
+        }
+
+-- | Custom JSON options for DeveloperFileScope
+developerFileScopeOptions :: Aeson.Options
+developerFileScopeOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = dropPrefix "devFileScope"
+        , Aeson.omitNothingFields = True
+        }
+  where
+    dropPrefix prefix str
+        | take (length prefix) str == prefix = drop (length prefix) str
+        | otherwise = str
+
+instance ToJSON DeveloperFileScope where
+    toJSON = Aeson.genericToJSON developerFileScopeOptions
+    toEncoding = Aeson.genericToEncoding developerFileScopeOptions
+
+instance FromJSON DeveloperFileScope where
+    parseJSON = Aeson.genericParseJSON developerFileScopeOptions
+
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.
@@ -956,11 +1015,20 @@ Example configuration:
     "name": "developer",
     "description": "Tools for developing agents and tools",
     "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range"],
+    "fileScope": {
+      "allowedPatterns": ["./src/**/*.hs", "./docs/*.md"],
+      "allowRangeOps": true,
+      "allowCreate": false
+    },
     "lifetime": "conversation",
     "activation": "always"
   }
 }
 @
+
+The 'fileScope' field controls which files can be accessed by the
+read-file-range and write-file-range capabilities. If not specified,
+a secure default is used (no file access allowed).
 
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
@@ -972,6 +1040,8 @@ data DeveloperToolboxDescription
     -- ^ Human-readable description of the toolbox purpose
     , developerToolboxCapabilities :: [DeveloperToolCapability]
     -- ^ List of developer tool capabilities to expose
+    , developerToolboxFileScope :: Maybe DeveloperFileScope
+    -- ^ Optional file scope restrictions for file operations
     , developerToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
@@ -1271,3 +1341,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+

@@ -62,6 +62,7 @@ defaultDeveloperToolbox =
                 , DevToolCreateAgent
                 , DevToolCreateTool
                 ]
+            , developerToolboxFileScope = Nothing -- Uses default: deny all
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             }
 
@@ -519,3 +520,4 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
+
