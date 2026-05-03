@@ -85,6 +85,7 @@ library agents-lib
                     , System.Agents.OS.Persistence.Schema
                     , System.Agents.OS.Persistence.Sqlite
                     , System.Agents.OS.Persistence.Types
+                    , System.Agents.OS.Persistence.VersionedSqlite
                     , System.Agents.OS.Resources
                     , System.Agents.OS.Resources.Http
                     , System.Agents.OS.Resources.Lua
@@ -226,6 +227,8 @@ executable agents-exe
     import:           warnings
     main-is:          Main.hs
     ghc-options:      -threaded
+    hs-source-dirs:   app
+    default-language: Haskell2010
     build-depends:    base  >=4.18.3.0,
                       agents-lib,
                       aeson,
@@ -242,13 +245,14 @@ executable agents-exe
                       time,
                       temporary,
                       unix
-    hs-source-dirs:   app
-    default-language: Haskell2010
 
 executable agq
     import:           warnings
     main-is:          Main.hs
     ghc-options:      -threaded
+    hs-source-dirs:   agq
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
     other-modules:    Agq.Config
                     , Agq.DB
                     , Agq.Schedule
@@ -269,14 +273,13 @@ executable agq
                       text,
                       time,
                       unix
-    hs-source-dirs:   agq
-    default-language: Haskell2010
-    default-extensions: OverloadedStrings, OverloadedRecordDot
 
 test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
     other-modules:    ActivationSessionTests
                     , DeveloperToolboxTests
                     , EndpointPredicateTests
@@ -293,6 +296,7 @@ test-suite agents-tests
                     , OS.IntegrationTests
                     , OS.PersistenceTests
                     , OS.ResourcesTests
+                    , OS.VersionedSqliteTests
                     , PostgRESTParseTest
                     , SessionEditTests
                     , SessionPrintTests
@@ -300,8 +304,6 @@ test-suite agents-tests
                     , ToolPortalTests
                     , OS.CompatTests
                     , OS.CompatibilityTests
-    default-language: Haskell2010
-    default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
                       agents-lib,
                       aeson,
@@ -314,6 +316,7 @@ test-suite agents-tests
                       hslua,
                       mtl,
                       prodapi,
+                      sqlite-simple,
                       stm,
                       text,
                       tasty,
