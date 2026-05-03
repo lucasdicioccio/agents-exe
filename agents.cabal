@@ -82,9 +82,12 @@ library agents-lib
                     , System.Agents.OS.Interfaces.OneShot
                     , System.Agents.OS.Persistence
                     , System.Agents.OS.Persistence.File
+                    , System.Agents.OS.Persistence.References
                     , System.Agents.OS.Persistence.Schema
                     , System.Agents.OS.Persistence.Sqlite
                     , System.Agents.OS.Persistence.Types
+                    , System.Agents.OS.References
+                    , System.Agents.OS.References.Types
                     , System.Agents.OS.Resources
                     , System.Agents.OS.Resources.Http
                     , System.Agents.OS.Resources.Lua

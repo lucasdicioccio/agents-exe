@@ -80,6 +80,8 @@ data ComponentType
     | ComponentTypeToolCallConfig
     | ComponentTypeToolCallState
     | ComponentTypeMessage
+    | ComponentTypeReferenceConfig
+    | ComponentTypeReferenceState
     | ComponentTypeUnknown Int
     deriving (Show, Eq, Generic)
 
@@ -102,6 +104,8 @@ componentTypeIdToType (ComponentTypeId n) = case n of
     35 -> ComponentTypeToolCallConfig
     36 -> ComponentTypeToolCallState
     38 -> ComponentTypeMessage
+    40 -> ComponentTypeReferenceConfig
+    41 -> ComponentTypeReferenceState
     _ -> ComponentTypeUnknown n
 
 -- | Convert ComponentType back to ComponentTypeId.
@@ -120,6 +124,8 @@ componentTypeToTypeId ct = ComponentTypeId $ case ct of
     ComponentTypeToolCallConfig -> 35
     ComponentTypeToolCallState -> 36
     ComponentTypeMessage -> 38
+    ComponentTypeReferenceConfig -> 40
+    ComponentTypeReferenceState -> 41
     ComponentTypeUnknown n -> n
 
 -------------------------------------------------------------------------------
@@ -344,3 +350,4 @@ defaultPersistenceConfig =
         , persistenceBatchSize = 100
         , persistenceEnableEvents = True
         }
+

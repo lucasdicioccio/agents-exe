@@ -10,6 +10,7 @@ backends, along with migration support.
 Schema Version History:
 * Version 1 - Initial schema with entities, components, events, messages, tool_calls
 * Version 2 - Added tool_call_cache and tool_continuations tables for async execution
+* Version 3 - Added conversation_refs table for cross-conversation references
 -}
 module System.Agents.OS.Persistence.Schema (
     -- * Schema Version
@@ -29,6 +30,10 @@ module System.Agents.OS.Persistence.Schema (
     -- * Async Execution Schema
     sqliteCreateAsyncSchema,
     postgresCreateAsyncSchema,
+
+    -- * References Schema
+    sqliteCreateReferencesSchema,
+    postgresCreateReferencesSchema,
 
     -- * Migration
     Migration (..),
@@ -51,9 +56,10 @@ Increment this when schema changes require migrations.
 Version history:
 * 1 - Initial schema (entities, components, events, messages, tool_calls)
 * 2 - Added async execution support (tool_call_cache, tool_continuations)
+* 3 - Added cross-conversation references (conversation_refs)
 -}
 currentSchemaVersion :: Int
-currentSchemaVersion = 2
+currentSchemaVersion = 3
 
 -------------------------------------------------------------------------------
 -- SQLite Schema - Version 1 (Base)
@@ -163,6 +169,39 @@ sqliteSchemaV2Statements =
             ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP |]
     ]
 
+-------------------------------------------------------------------------------
+-- SQLite Schema - Version 3 (Cross-Conversation References)
+-------------------------------------------------------------------------------
+
+-- | SQLite schema statements for version 3 (cross-conversation references).
+sqliteSchemaV3Statements :: [Query]
+sqliteSchemaV3Statements =
+    [ -- Conversation references table
+      [sql| CREATE TABLE IF NOT EXISTS conversation_refs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_conv_id TEXT NOT NULL,
+            target_conv_id TEXT NOT NULL,
+            target_msg_id TEXT,
+            ref_type TEXT NOT NULL DEFAULT 'related',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT,
+            context TEXT,
+            resolved_at TIMESTAMP,
+            is_valid BOOLEAN DEFAULT 1,
+            resolution_error TEXT,
+            UNIQUE(source_conv_id, target_conv_id, target_msg_id)
+        ) |]
+    , -- Indexes for references
+      [sql| CREATE INDEX IF NOT EXISTS idx_refs_source ON conversation_refs(source_conv_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_refs_target ON conversation_refs(target_conv_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_refs_type ON conversation_refs(ref_type) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_refs_valid ON conversation_refs(is_valid) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_refs_created ON conversation_refs(created_at) |]
+    , -- Update schema version
+      [sql| INSERT INTO schema_version (version) VALUES (3) 
+            ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP |]
+    ]
+
 -- | Execute SQLite schema statements individually.
 executeSqliteSchema :: Connection -> IO ()
 executeSqliteSchema conn = do
@@ -170,12 +209,14 @@ executeSqliteSchema conn = do
         execute_ conn stmt
     forM_ sqliteSchemaV2Statements $ \stmt ->
         execute_ conn stmt
+    forM_ sqliteSchemaV3Statements $ \stmt ->
+        execute_ conn stmt
 
 -- | Complete SQLite schema creation script (for reference/documentation).
 sqliteCreateSchema :: Query
 sqliteCreateSchema =
     [sql|
--- OS Persistence Schema v2
+-- OS Persistence Schema v3
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -261,6 +302,22 @@ CREATE TABLE IF NOT EXISTS tool_continuations (
     result_json TEXT
 );
 
+-- Conversation references table (cross-conversation linking)
+CREATE TABLE IF NOT EXISTS conversation_refs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_conv_id TEXT NOT NULL,
+    target_conv_id TEXT NOT NULL,
+    target_msg_id TEXT,
+    ref_type TEXT NOT NULL DEFAULT 'related',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    context TEXT,
+    resolved_at TIMESTAMP,
+    is_valid BOOLEAN DEFAULT 1,
+    resolution_error TEXT,
+    UNIQUE(source_conv_id, target_conv_id, target_msg_id)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id);
 CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type);
@@ -279,12 +336,22 @@ CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
 CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+CREATE INDEX IF NOT EXISTS idx_refs_source ON conversation_refs(source_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_target ON conversation_refs(target_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_type ON conversation_refs(ref_type);
+CREATE INDEX IF NOT EXISTS idx_refs_valid ON conversation_refs(is_valid);
+CREATE INDEX IF NOT EXISTS idx_refs_created ON conversation_refs(created_at);
 |]
 
 -- | SQLite schema destruction script.
 sqliteDropSchema :: Query
 sqliteDropSchema =
     [sql|
+DROP INDEX IF EXISTS idx_refs_created;
+DROP INDEX IF EXISTS idx_refs_valid;
+DROP INDEX IF EXISTS idx_refs_type;
+DROP INDEX IF EXISTS idx_refs_target;
+DROP INDEX IF EXISTS idx_refs_source;
 DROP INDEX IF EXISTS idx_continuations_completed;
 DROP INDEX IF EXISTS idx_continuations_expires;
 DROP INDEX IF EXISTS idx_continuations_session;
@@ -302,6 +369,7 @@ DROP INDEX IF EXISTS idx_events_created;
 DROP INDEX IF EXISTS idx_events_entity;
 DROP INDEX IF EXISTS idx_components_type;
 DROP INDEX IF EXISTS idx_components_entity;
+DROP TABLE IF EXISTS conversation_refs;
 DROP TABLE IF EXISTS tool_continuations;
 DROP TABLE IF EXISTS tool_call_cache;
 DROP TABLE IF EXISTS tool_calls;
@@ -317,7 +385,10 @@ sqliteMigrationScript :: Int -> Int -> Maybe (Connection -> IO ())
 sqliteMigrationScript fromVer toVer
     | fromVer == 0 && toVer == 1 = Just migrateV0ToV1
     | fromVer == 1 && toVer == 2 = Just migrateV1ToV2
+    | fromVer == 2 && toVer == 3 = Just migrateV2ToV3
     | fromVer == 0 && toVer == 2 = Just migrateV0ToV2
+    | fromVer == 0 && toVer == 3 = Just migrateV0ToV3
+    | fromVer == 1 && toVer == 3 = Just migrateV1ToV3
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
   where
@@ -331,10 +402,26 @@ sqliteMigrationScript fromVer toVer
         forM_ sqliteSchemaV2Statements $ \stmt ->
             execute_ conn stmt
 
+    migrateV2ToV3 :: Connection -> IO ()
+    migrateV2ToV3 conn =
+        forM_ sqliteSchemaV3Statements $ \stmt ->
+            execute_ conn stmt
+
     migrateV0ToV2 :: Connection -> IO ()
     migrateV0ToV2 conn = do
         migrateV0ToV1 conn
         migrateV1ToV2 conn
+
+    migrateV0ToV3 :: Connection -> IO ()
+    migrateV0ToV3 conn = do
+        migrateV0ToV1 conn
+        migrateV1ToV2 conn
+        migrateV2ToV3 conn
+
+    migrateV1ToV3 :: Connection -> IO ()
+    migrateV1ToV3 conn = do
+        migrateV1ToV2 conn
+        migrateV2ToV3 conn
 
 -------------------------------------------------------------------------------
 -- PostgreSQL Schema
@@ -344,7 +431,7 @@ sqliteMigrationScript fromVer toVer
 postgresCreateSchema :: Query
 postgresCreateSchema =
     [sql|
--- OS Persistence Schema v2
+-- OS Persistence Schema v3
 
 -- Enable UUID extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -356,7 +443,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 -- Insert initial version
-INSERT INTO schema_version (version) VALUES (2) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+INSERT INTO schema_version (version) VALUES (3) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 
 -- Entities table (sparse representation)
 CREATE TABLE IF NOT EXISTS entities (
@@ -433,6 +520,22 @@ CREATE TABLE IF NOT EXISTS tool_continuations (
     result_json JSONB
 );
 
+-- Conversation references table (cross-conversation linking)
+CREATE TABLE IF NOT EXISTS conversation_refs (
+    id SERIAL PRIMARY KEY,
+    source_conv_id UUID NOT NULL,
+    target_conv_id UUID NOT NULL,
+    target_msg_id TEXT,
+    ref_type TEXT NOT NULL DEFAULT 'related',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    context TEXT,
+    resolved_at TIMESTAMP,
+    is_valid BOOLEAN DEFAULT TRUE,
+    resolution_error TEXT,
+    UNIQUE(source_conv_id, target_conv_id, target_msg_id)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id);
 CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type);
@@ -452,12 +555,22 @@ CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
 CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+CREATE INDEX IF NOT EXISTS idx_refs_source ON conversation_refs(source_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_target ON conversation_refs(target_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_type ON conversation_refs(ref_type);
+CREATE INDEX IF NOT EXISTS idx_refs_valid ON conversation_refs(is_valid);
+CREATE INDEX IF NOT EXISTS idx_refs_created ON conversation_refs(created_at);
 |]
 
 -- | PostgreSQL schema destruction script.
 postgresDropSchema :: Query
 postgresDropSchema =
     [sql|
+DROP INDEX IF EXISTS idx_refs_created;
+DROP INDEX IF EXISTS idx_refs_valid;
+DROP INDEX IF EXISTS idx_refs_type;
+DROP INDEX IF EXISTS idx_refs_target;
+DROP INDEX IF EXISTS idx_refs_source;
 DROP INDEX IF EXISTS idx_continuations_completed;
 DROP INDEX IF EXISTS idx_continuations_expires;
 DROP INDEX IF EXISTS idx_continuations_session;
@@ -476,6 +589,7 @@ DROP INDEX IF EXISTS idx_events_entity;
 DROP INDEX IF EXISTS idx_components_data;
 DROP INDEX IF EXISTS idx_components_type;
 DROP INDEX IF EXISTS idx_components_entity;
+DROP TABLE IF EXISTS conversation_refs;
 DROP TABLE IF EXISTS tool_continuations;
 DROP TABLE IF EXISTS tool_call_cache;
 DROP TABLE IF EXISTS tool_calls;
@@ -491,7 +605,10 @@ postgresMigrationScript :: Int -> Int -> Maybe Query
 postgresMigrationScript fromVer toVer
     | fromVer == 0 && toVer == 1 = Just postgresCreateV1Schema
     | fromVer == 1 && toVer == 2 = Just postgresCreateV2Schema
+    | fromVer == 2 && toVer == 3 = Just postgresCreateV3Schema
     | fromVer == 0 && toVer == 2 = Just postgresCreateSchema
+    | fromVer == 0 && toVer == 3 = Just postgresCreateSchema
+    | fromVer == 1 && toVer == 3 = Just postgresCreateV3Schema
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
   where
@@ -536,6 +653,33 @@ CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expir
 CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
 
 INSERT INTO schema_version (version) VALUES (2) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+    postgresCreateV3Schema =
+        [sql|
+-- V3 additions (cross-conversation references)
+CREATE TABLE IF NOT EXISTS conversation_refs (
+    id SERIAL PRIMARY KEY,
+    source_conv_id UUID NOT NULL,
+    target_conv_id UUID NOT NULL,
+    target_msg_id TEXT,
+    ref_type TEXT NOT NULL DEFAULT 'related',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    context TEXT,
+    resolved_at TIMESTAMP,
+    is_valid BOOLEAN DEFAULT TRUE,
+    resolution_error TEXT,
+    UNIQUE(source_conv_id, target_conv_id, target_msg_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_refs_source ON conversation_refs(source_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_target ON conversation_refs(target_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_type ON conversation_refs(ref_type);
+CREATE INDEX IF NOT EXISTS idx_refs_valid ON conversation_refs(is_valid);
+CREATE INDEX IF NOT EXISTS idx_refs_created ON conversation_refs(created_at);
+
+INSERT INTO schema_version (version) VALUES (3) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 |]
 
 -------------------------------------------------------------------------------
@@ -627,6 +771,82 @@ INSERT INTO schema_version (version) VALUES (2)
 |]
 
 -------------------------------------------------------------------------------
+-- References Schema Helpers
+-------------------------------------------------------------------------------
+
+{- | Create only the conversation references schema tables (SQLite).
+
+Useful when you want to add cross-conversation reference support
+to an existing database without recreating the entire schema.
+-}
+sqliteCreateReferencesSchema :: Query
+sqliteCreateReferencesSchema =
+    [sql|
+-- Conversation references table
+CREATE TABLE IF NOT EXISTS conversation_refs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_conv_id TEXT NOT NULL,
+    target_conv_id TEXT NOT NULL,
+    target_msg_id TEXT,
+    ref_type TEXT NOT NULL DEFAULT 'related',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    context TEXT,
+    resolved_at TIMESTAMP,
+    is_valid BOOLEAN DEFAULT 1,
+    resolution_error TEXT,
+    UNIQUE(source_conv_id, target_conv_id, target_msg_id)
+);
+
+-- Indexes for references
+CREATE INDEX IF NOT EXISTS idx_refs_source ON conversation_refs(source_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_target ON conversation_refs(target_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_type ON conversation_refs(ref_type);
+CREATE INDEX IF NOT EXISTS idx_refs_valid ON conversation_refs(is_valid);
+CREATE INDEX IF NOT EXISTS idx_refs_created ON conversation_refs(created_at);
+
+-- Update schema version
+INSERT INTO schema_version (version) VALUES (3) 
+    ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+{- | Create only the conversation references schema tables (PostgreSQL).
+
+Useful when you want to add cross-conversation reference support
+to an existing database without recreating the entire schema.
+-}
+postgresCreateReferencesSchema :: Query
+postgresCreateReferencesSchema =
+    [sql|
+-- Conversation references table
+CREATE TABLE IF NOT EXISTS conversation_refs (
+    id SERIAL PRIMARY KEY,
+    source_conv_id UUID NOT NULL,
+    target_conv_id UUID NOT NULL,
+    target_msg_id TEXT,
+    ref_type TEXT NOT NULL DEFAULT 'related',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT,
+    context TEXT,
+    resolved_at TIMESTAMP,
+    is_valid BOOLEAN DEFAULT TRUE,
+    resolution_error TEXT,
+    UNIQUE(source_conv_id, target_conv_id, target_msg_id)
+);
+
+-- Indexes for references
+CREATE INDEX IF NOT EXISTS idx_refs_source ON conversation_refs(source_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_target ON conversation_refs(target_conv_id);
+CREATE INDEX IF NOT EXISTS idx_refs_type ON conversation_refs(ref_type);
+CREATE INDEX IF NOT EXISTS idx_refs_valid ON conversation_refs(is_valid);
+CREATE INDEX IF NOT EXISTS idx_refs_created ON conversation_refs(created_at);
+
+-- Update schema version
+INSERT INTO schema_version (version) VALUES (3) 
+    ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+-------------------------------------------------------------------------------
 -- Migration
 -------------------------------------------------------------------------------
 
@@ -695,3 +915,4 @@ applyMigrations conn fromVer toVer getMigration
                     -- Update schema version
                     execute conn "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP" (Only toVer)
                 pure $ Right toVer
+
