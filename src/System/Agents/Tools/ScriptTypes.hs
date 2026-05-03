@@ -29,6 +29,8 @@ import Data.List as List
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+import System.Agents.Tools.ParamTier (ParamTier (..), defaultParamTier)
+
 -------------------------------------------------------------------------------
 -- Script Argument Types
 -------------------------------------------------------------------------------
@@ -94,13 +96,18 @@ data ScriptArg
     , argBackingTypeString :: Text
     , argTypeArity :: ScriptArgArity
     , argCallingMode :: ScriptArgCallingMode
+    , argTier :: ParamTier
+    {- ^ The visibility tier for progressive disclosure.
+    Basic arguments are always shown, Advanced are hidden by default,
+    and Expert are deeply hidden. Defaults to Basic for backward compatibility.
+    -}
     }
     deriving (Show, Eq, Ord)
 
 -- | ToJSON instance for ScriptArg (internal format using Haskell field names)
 instance ToJSON ScriptArg where
     toJSON s =
-        Aeson.object
+        Aeson.object $
             [ "name" .= s.argName
             , "description" .= s.argDescription
             , "type" .= s.argTypeString
@@ -108,6 +115,7 @@ instance ToJSON ScriptArg where
             , "arity" .= s.argTypeArity
             , "mode" .= s.argCallingMode
             ]
+                <> ["tier" .= s.argTier | s.argTier /= defaultParamTier]
 
 instance Aeson.FromJSON ScriptArg where
     parseJSON = Aeson.withObject "ScriptArg" $ \o ->
@@ -118,6 +126,7 @@ instance Aeson.FromJSON ScriptArg where
             <*> o Aeson..: "backing_type"
             <*> o Aeson..: "arity"
             <*> o Aeson..: "mode"
+            <*> o Aeson..:? "tier" Aeson..!= defaultParamTier
 
 -------------------------------------------------------------------------------
 -- Script Info Types
@@ -213,3 +222,4 @@ instance Aeson.FromJSON ScriptDescription where
         ScriptDescription
             <$> o Aeson..: "path"
             <*> o Aeson..: "info"
+

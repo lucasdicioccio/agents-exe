@@ -115,6 +115,7 @@ import System.Agents.Tools.OpenAPIToolbox (
     createToolHandler,
  )
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
+import System.Agents.Tools.ParamTier (defaultParamTier)
 import System.Agents.Tools.PostgREST.Converter (
     ColumnFilterSchema (..),
     FilterSchema (..),
@@ -267,6 +268,7 @@ mapArg arg =
         , propertyType = OpaqueParamType arg.argBackingTypeString
         , propertyDescription = arg.argDescription
         , propertyRequired = True
+        , propertyTier = arg.argTier
         }
 
 {- | Register a bash tool with the LLM system.
@@ -640,6 +642,7 @@ buildPostgRESTParamProperties params =
                         , propertyType = ObjectParamType (buildFilterSubProperties fs)
                         , propertyDescription = fsDescription fs
                         , propertyRequired = False -- Optional parameter group
+                        , propertyTier = defaultParamTier
                         }
             Nothing -> Nothing
 
@@ -651,6 +654,7 @@ buildPostgRESTParamProperties params =
                         , propertyType = ObjectParamType (buildSubsetSubProperties ss)
                         , propertyDescription = "Pagination and column selection"
                         , propertyRequired = False -- Optional parameter group
+                        , propertyTier = defaultParamTier
                         }
             Nothing -> Nothing
 
@@ -662,10 +666,11 @@ buildPostgRESTParamProperties params =
                         , propertyType = ObjectParamType (buildRankingSubProperties rs)
                         , propertyDescription = "Result ordering"
                         , propertyRequired = False -- Optional parameter group
+                        , propertyTier = defaultParamTier
                         }
             Nothing -> Nothing
 
-        -- NEW: Request body for write operations (POST, PUT, PATCH)
+        -- Request body for write operations (POST, PUT, PATCH)
         bodyProp = case tpRequestBody params of
             Just schema ->
                 Just $
@@ -674,6 +679,7 @@ buildPostgRESTParamProperties params =
                         , propertyType = buildBodyParamType schema
                         , propertyDescription = buildBodyDescription schema
                         , propertyRequired = False -- Optional - can insert with defaults
+                        , propertyTier = defaultParamTier
                         }
             Nothing -> Nothing
      in Maybe.catMaybes [filterProp, subsetProp, rankingProp, bodyProp]
@@ -687,6 +693,7 @@ buildPostgRESTParamProperties params =
                     , propertyType = OpaqueParamType "string"
                     , propertyDescription = cfsDescription schema
                     , propertyRequired = False -- Optional filter property
+                    , propertyTier = defaultParamTier
                     }
             )
             (Map.toList $ fsProperties fs)
@@ -694,18 +701,18 @@ buildPostgRESTParamProperties params =
     buildSubsetSubProperties :: SubsetSchema -> [ParamProperty]
     buildSubsetSubProperties ss =
         Maybe.catMaybes
-            [ fmap (\desc -> ParamProperty "offset" (OpaqueParamType "string") desc False) (ssOffset ss)
-            , fmap (\desc -> ParamProperty "limit" (OpaqueParamType "string") desc False) (ssLimit ss)
-            , fmap (\desc -> ParamProperty "columns" (OpaqueParamType "string") desc False) (ssColumns ss)
+            [ fmap (\desc -> ParamProperty "offset" (OpaqueParamType "string") desc False defaultParamTier) (ssOffset ss)
+            , fmap (\desc -> ParamProperty "limit" (OpaqueParamType "string") desc False defaultParamTier) (ssLimit ss)
+            , fmap (\desc -> ParamProperty "columns" (OpaqueParamType "string") desc False defaultParamTier) (ssColumns ss)
             ]
 
     buildRankingSubProperties :: RankingSchema -> [ParamProperty]
     buildRankingSubProperties rs =
         Maybe.catMaybes
-            [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False) (rsOrder rs)
+            [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False defaultParamTier) (rsOrder rs)
             ]
 
-    -- NEW: Build the parameter type for the request body
+    -- Build the parameter type for the request body
     buildBodyParamType :: Schema -> ParamType
     buildBodyParamType schema =
         case schema.schemaType of
@@ -719,7 +726,7 @@ buildPostgRESTParamProperties params =
                 ObjectParamType (buildSchemaProperties schema)
             _ -> OpaqueParamType "object"
 
-    -- NEW: Build description for the request body parameter
+    -- Build description for the request body parameter
     buildBodyDescription :: Schema -> Text
     buildBodyDescription schema =
         let baseDesc = Maybe.fromMaybe "JSON request body for insert/update operations" schema.schemaDescription
@@ -729,14 +736,14 @@ buildPostgRESTParamProperties params =
                 _ -> ""
          in baseDesc <> typeHint
 
-    -- NEW: Build properties from schema for object validation
+    -- Build properties from schema for object validation
     buildSchemaProperties :: Schema -> [ParamProperty]
     buildSchemaProperties schema =
         case schema.schemaProperties of
             Just props -> map (\(k, v) -> schemaToParamProperty k v) (Map.toList props)
             Nothing -> []
 
-    -- NEW: Convert a schema property to ParamProperty
+    -- Convert a schema property to ParamProperty
     schemaToParamProperty :: Text -> Schema -> ParamProperty
     schemaToParamProperty name schema =
         ParamProperty
@@ -744,9 +751,10 @@ buildPostgRESTParamProperties params =
             , propertyType = schemaTypeToParamType schema
             , propertyDescription = Maybe.fromMaybe (name <> " column value") schema.schemaDescription
             , propertyRequired = maybe False (name `elem`) schema.schemaRequired
+            , propertyTier = defaultParamTier
             }
 
-    -- NEW: Convert schema type to ParamType
+    -- Convert schema type to ParamType
     schemaTypeToParamType :: Schema -> ParamType
     schemaTypeToParamType schema =
         case schema.schemaType of
@@ -839,6 +847,7 @@ registerSqliteTool box =
                 , propertyType = StringParamType
                 , propertyDescription = "SQL query to execute (SELECT for read-only, any valid SQL for read-write or snapshot)"
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
             ]
 
@@ -895,16 +904,6 @@ and an optional 'filepath' parameter for the 'attach-file' capability.
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
 -}
-
-{- | Register a SystemToolbox tool with the LLM system.
-
-System tools expose functions based on configured capabilities.
-The tool accepts a 'capability' parameter to select which information to retrieve,
-and an optional 'filepath' parameter for the 'attach-file' capability.
-
-The activation is extracted from the toolbox configuration's
-'systemToolboxActivation' field.
--}
 registerSystemTool ::
     SystemTools.Toolbox ->
     Either String ToolRegistration
@@ -920,12 +919,14 @@ registerSystemTool box =
                 , propertyType = StringParamType
                 , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "filepath"
                 , propertyType = StringParamType
                 , propertyDescription = "For attach-file: Absolute path to the file to attach"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             ]
 
@@ -1048,48 +1049,56 @@ buildDeveloperToolParams box =
                 , propertyType = StringParamType
                 , propertyDescription = "Capability to execute: " <> Text.intercalate ", " (map devCapabilityToText box.toolboxCapabilities)
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "tool_path"
                 , propertyType = StringParamType
                 , propertyDescription = "For validate-tool: Path to tool script"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "template"
                 , propertyType = StringParamType
                 , propertyDescription = "For scaffold-agent: Template (openai, mistral, ollama)"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "language"
                 , propertyType = StringParamType
                 , propertyDescription = "For scaffold-tool: Language (bash, python, haskell)"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "slug"
                 , propertyType = StringParamType
                 , propertyDescription = "For scaffold operations: Slug/name for the generated file"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "file_path"
                 , propertyType = StringParamType
                 , propertyDescription = "For scaffold operations: Output file path"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "force"
                 , propertyType = BoolParamType
                 , propertyDescription = "For scaffold operations: Overwrite existing files"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "spec_name"
                 , propertyType = StringParamType
                 , propertyDescription = "For show-spec: Spec name (bash-tools)"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             ]
 
@@ -1100,12 +1109,14 @@ buildDeveloperToolParams box =
                 , propertyType = StringParamType
                 , propertyDescription = "For read-file-range: Path to the file to read"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "ranges"
                 , propertyType = StringParamType
                 , propertyDescription = "For read-file-range: Line ranges (e.g., '1-10', '5', 'head', 'tail'). Omit to read entire file."
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             ]
 
@@ -1116,6 +1127,7 @@ buildDeveloperToolParams box =
                 , propertyType = StringParamType
                 , propertyDescription = "For write-file-range: Replacement content. Use '---' to separate multiple ranges."
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             ]
 
@@ -1181,12 +1193,14 @@ registerLuaTool box =
                 , propertyType = StringParamType
                 , propertyDescription = "Lua script source code to execute"
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
             , ParamProperty
                 { propertyKey = "timeout"
                 , propertyType = NumberParamType
                 , propertyDescription = "Optional timeout override in seconds (default: toolbox configured timeout)"
                 , propertyRequired = False
+                , propertyTier = defaultParamTier
                 }
             ]
 
@@ -1557,10 +1571,12 @@ adaptProperty k val =
         Aeson.Success prop ->
             Right $
                 ParamProperty
-                    (AesonKey.toText k)
-                    (OpaqueParamType prop._type)
-                    prop._description
-                    True -- MCP properties are required by default
+                    { propertyKey = AesonKey.toText k
+                    , propertyType = OpaqueParamType prop._type
+                    , propertyDescription = prop._description
+                    , propertyRequired = True -- MCP properties are required by default
+                    , propertyTier = defaultParamTier
+                    }
         Aeson.Error err -> Left err
   where
     propMappingResult :: Aeson.Result PropertyHelper
@@ -1572,3 +1588,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

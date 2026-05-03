@@ -115,6 +115,7 @@ library agents-lib
                     , System.Agents.Tools.OpenAPI.Resolver
                     , System.Agents.Tools.OpenAPI.Converter
                     , System.Agents.Tools.OpenAPIToolbox
+                    , System.Agents.Tools.ParamTier
                     , System.Agents.Tools.PostgREST.Types
                     , System.Agents.Tools.PostgREST.Converter
                     , System.Agents.Tools.PostgRESToolbox

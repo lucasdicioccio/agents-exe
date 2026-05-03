@@ -1,11 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 {- | OpenAPI to Tool conversion logic.
 
 This module converts parsed and dereferenced OpenAPI operations into the
 internal Tool representation used by the agents system. It handles:
 
+* Converting OpenAPI specs to lists of tools
+* Building tool parameter schemas from OpenAPI parameters
 * Converting OpenAPI specs to lists of tools
 * Building tool parameter schemas from OpenAPI parameters
 * Naming conventions (operationId or path/method based)
@@ -35,11 +38,7 @@ module System.Agents.Tools.OpenAPI.Converter (
     buildToolProperty,
     paramToToolName,
     buildToolParameters,
-
-    -- * Description building
     buildToolDescription,
-
-    -- * Required parameters
     getRequiredParams,
 
     -- * Naming
@@ -75,6 +74,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
+import System.Agents.Tools.ParamTier (defaultParamTier)
 import System.Agents.Tools.OpenAPI.Types (
     Method,
     OpenAPISpec (..),
@@ -84,7 +84,6 @@ import System.Agents.Tools.OpenAPI.Types (
     RequestBody (..),
     Schema (..),
  )
-
 -- -------------------------------------------------------------------------
 -- Core Types
 -- -------------------------------------------------------------------------
@@ -630,6 +629,7 @@ toolParamProperties apiTool =
             , propertyType = schemaTypeToParamType prop
             , propertyDescription = propDescription prop
             , propertyRequired = Set.member name required
+            , propertyTier = defaultParamTier
             }
 
     schemaTypeToParamType :: PropertySchema -> ParamType
@@ -647,8 +647,6 @@ toolParamProperties apiTool =
                 Just "object" -> ObjectParamType []
                 Just other -> OpaqueParamType other
                 Nothing -> OpaqueParamType "any"
-
--- -------------------------------------------------------------------------
 -- Handler Helpers
 -- -------------------------------------------------------------------------
 

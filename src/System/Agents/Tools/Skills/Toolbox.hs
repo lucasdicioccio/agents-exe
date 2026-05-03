@@ -67,6 +67,7 @@ import System.Agents.Tools.Activation (Activation (..))
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext)
+import System.Agents.Tools.ParamTier (defaultParamTier)
 import qualified System.Agents.Tools.ScriptTypes as ST
 import System.Agents.Tools.Skills.Source (loadSkillsFromSources)
 import System.Agents.Tools.Skills.Types
@@ -333,6 +334,7 @@ scriptArgToParam arg =
         , propertyType = OpaqueParamType (ST.argTypeString arg)
         , propertyDescription = ST.argDescription arg
         , propertyRequired = ST.argTypeArity arg == ST.Single
+        , propertyTier = defaultParamTier
         }
 
 -- | Make a tool declaration for OpenAI.

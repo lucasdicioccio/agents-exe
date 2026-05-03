@@ -67,6 +67,7 @@ import System.Agents.Tools.Activation (Activation (..), ActivationState (..), To
 import System.Agents.Tools.Base (CallResult (..), ToolDef (..), mapToolResult)
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Context (ToolCall (..))
+import System.Agents.Tools.ParamTier (defaultParamTier)
 
 -------------------------------------------------------------------------------
 -- Pure Session Folding
@@ -276,10 +277,10 @@ makeActivateTool toolgroups =
                 , propertyType = StringParamType
                 , propertyDescription = "Name of the toolgroup to activate. Available: " <> availableGroups
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
             ]
 
-        -- The run function checks if the toolgroup exists and returns "ok" or an error
         tool :: Tool ()
         tool =
             ToolBase.Tool
@@ -317,10 +318,10 @@ makeDeactivateTool toolgroups =
                 , propertyType = StringParamType
                 , propertyDescription = "Name of the toolgroup to deactivate. Available: " <> availableGroups
                 , propertyRequired = True
+                , propertyTier = defaultParamTier
                 }
             ]
 
-        -- The run function checks if the toolgroup exists and returns "ok" or an error
         tool :: Tool ()
         tool =
             ToolBase.Tool
@@ -396,3 +397,4 @@ makeToolDecl name desc props =
         , toolDescriptionText = desc
         , toolDescriptionParamProperties = props
         }
+
