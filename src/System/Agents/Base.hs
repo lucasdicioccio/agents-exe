@@ -15,6 +15,7 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
+import System.Agents.OS.Security.FileSandbox (FileSandbox)
 import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
@@ -229,8 +230,8 @@ The old 'tools' key (singular directory path) is still supported for
 backward compatibility. If both 'tools' and 'bashToolboxes' are specified,
 both will be used.
 
-Note: Relative paths are resolved relative to the execution's current
-working directory.
+Note: Relative paths in bashToolboxes are resolved relative to the execution's
+current working directory.
 -}
 data BashToolboxDescription
     = FileSystemDirectory FileSystemDirectoryDescription
@@ -596,7 +597,7 @@ instance FromJSON PostgRESTToolboxDescription where
             _ -> fail "expecting 'PostgRESTServer' or 'PostgRESTServerOnDisk' tag"
 
 -------------------------------------------------------------------------------
--- Builtin Toolbox Configuration
+-- SQLite Toolbox Configuration
 -------------------------------------------------------------------------------
 
 {- | Access mode for SQLite databases.
@@ -673,7 +674,7 @@ data SqliteToolboxDescription
     , sqliteToolboxAccess :: SqliteAccessMode
     -- ^ Access mode: read-only, read-write, or snapshot
     , sqliteToolboxActivation :: Maybe Activation
-    -- ^ Optional activation mode (default: AlwaysActivated)
+    -- ^ Optional activation mode (default: 'AlwaysActivated')
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -769,6 +770,11 @@ Example configuration:
     "description": "System information and context",
     "capabilities": ["date", "operating-system", "running-user", "hostname"],
     "envVarFilter": null,
+    "fileSandbox": {
+      "allowedPaths": ["/home/user/project"],
+      "allowSymlinks": false,
+      "allowSubdirectories": true
+    },
     "lifetime": "conversation",
     "activation": "always"
   }
@@ -778,6 +784,10 @@ Example configuration:
 The 'envVarFilter' field is an optional regex/pattern to filter
 environment variables when the 'env-vars' capability is enabled.
 If not specified, all environment variables are exposed.
+
+The 'fileSandbox' field controls file system access for the 'attach-file'
+capability. If not specified, a permissive sandbox is used for backward
+compatibility.
 
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
@@ -791,8 +801,10 @@ data SystemToolboxDescription
     -- ^ List of system information capabilities to expose
     , systemToolboxEnvVarFilter :: Maybe Text
     -- ^ Optional regex/pattern to filter environment variables
+    , systemToolboxFileSandbox :: Maybe FileSandbox
+    -- ^ Optional file sandbox configuration for attach-file capability
     , systemToolboxActivation :: Maybe Activation
-    -- ^ Optional activation mode (default: AlwaysActivated)
+    -- ^ Optional activation mode (default: 'AlwaysActivated')
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -861,7 +873,7 @@ data LuaToolboxDescription = LuaToolboxDescription
     , luaToolboxAllowedHosts :: [Text]
     -- ^ Whitelist of network hosts accessible to Lua HTTP module
     , luaToolboxActivation :: Maybe Activation
-    -- ^ Optional activation mode (default: AlwaysActivated)
+    -- ^ Optional activation mode (default: 'AlwaysActivated')
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -973,7 +985,7 @@ data DeveloperToolboxDescription
     , developerToolboxCapabilities :: [DeveloperToolCapability]
     -- ^ List of developer tool capabilities to expose
     , developerToolboxActivation :: Maybe Activation
-    -- ^ Optional activation mode (default: AlwaysActivated)
+    -- ^ Optional activation mode (default: 'AlwaysActivated')
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1124,7 +1136,7 @@ data McpSimpleBinaryConfiguration
     , args :: [Text]
     -- ^ Command-line arguments for the executable
     , mcpActivation :: Maybe Activation
-    -- ^ Optional activation mode (default: AlwaysActivated)
+    -- ^ Optional activation mode (default: 'AlwaysActivated')
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1271,3 +1283,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+
