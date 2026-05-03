@@ -11,23 +11,29 @@ This module implements the system toolbox functionality, including:
 * Capability-based access control
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
+* File sandboxing for security
 
 The toolbox can be configured to expose different system information capabilities,
 providing contextual information about the running environment to agents.
+
+File attachments are sandboxed to prevent unauthorized file system access.
 
 Example usage:
 
 @
 import System.Agents.Tools.SystemToolbox as System
 import System.Agents.Base (SystemToolCapability(..))
+import System.Agents.OS.Security.FileSandbox (defaultFileSandbox)
 
 main :: IO ()
 main = do
+    let sandbox = defaultFileSandbox { allowedPaths = ["/home/user/project"] }
     let desc = SystemToolboxDescription
             { systemToolboxName = "system"
             , systemToolboxDescription = "System information"
             , systemToolboxCapabilities = [SystemToolDate, SystemToolHostname]
             , systemToolboxEnvVarFilter = Nothing
+            , systemToolboxFileSandbox = Just sandbox
             }
     result <- System.initializeToolbox tracer desc
     case result of
@@ -94,6 +100,8 @@ import qualified System.Process as Process
 
 import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..))
 import System.Agents.Media.Types (ApplicationType (..), AudioType (..), ImageType (..), MediaType (..), TextSubtype (..), VideoType (..))
+import System.Agents.OS.Security.FileSandbox (FileSandbox, SandboxError)
+import qualified System.Agents.OS.Security.FileSandbox as Sandbox
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -107,6 +115,7 @@ These events allow tracking of:
 * Query execution progress
 * System info retrieval timing
 * Capability errors
+* Sandbox violations
 -}
 data Trace
     = -- | System information was requested for a capability
@@ -117,6 +126,8 @@ data Trace
       FileAttachSuccessTrace !FilePath !MediaType !Int
     | -- | File attachment failed
       FileAttachErrorTrace !FilePath !Text
+    | -- | File attachment blocked by sandbox
+      FileAttachSandboxBlockedTrace !FilePath !Text
     | -- | System information was retrieved successfully
       SystemInfoRetrievedTrace !Text !NominalDiffTime
     | -- | Error occurred while retrieving system information
@@ -144,6 +155,7 @@ The toolbox maintains:
 * Toolbox name and description
 * List of enabled capabilities
 * Optional environment variable filter pattern
+* File sandbox for secure file operations
 * The original configuration description used to create this toolbox
 -}
 data Toolbox = Toolbox
@@ -151,6 +163,8 @@ data Toolbox = Toolbox
     , toolboxDescription :: Text
     , toolboxCapabilities :: [SystemToolCapability]
     , toolboxEnvVarFilter :: Maybe Text
+    , toolboxSandbox :: FileSandbox
+    -- ^ File sandbox for restricting file system access
     , toolboxConfig :: SystemToolboxDescription
     -- ^ Original configuration description used to create this toolbox
     }
@@ -216,6 +230,8 @@ data QueryError
       FileTooLargeError !FilePath !Int
     | -- | Unsupported file type
       UnsupportedFileTypeError !FilePath !Text
+    | -- | File access denied by sandbox
+      SandboxError !SandboxError
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -238,12 +254,17 @@ initializeToolbox _tracer desc = do
     if null desc.systemToolboxCapabilities
         then pure $ Left "System toolbox must have at least one capability enabled"
         else do
+            -- Get sandbox from config or use permissive default
+            let sandbox = case desc.systemToolboxFileSandbox of
+                    Just sb -> sb
+                    Nothing -> Sandbox.allowAllSandbox -- Default to permissive for backward compatibility
             let toolbox =
                     Toolbox
                         { toolboxName = desc.systemToolboxName
                         , toolboxDescription = desc.systemToolboxDescription
                         , toolboxCapabilities = desc.systemToolboxCapabilities
                         , toolboxEnvVarFilter = desc.systemToolboxEnvVarFilter
+                        , toolboxSandbox = sandbox
                         , toolboxConfig = desc
                         }
             pure $ Right toolbox
@@ -335,9 +356,12 @@ maxFileSize = 50 * 1024 * 1024
 This function reads a file from disk and returns it as a base64-encoded
 attachment suitable for multi-modal LLM interactions.
 
+The file path is validated against the sandbox configuration before reading.
+
 Returns:
 * 'Right AttachFileResult' on successful attachment
-* 'Left QueryError' if capability not enabled, file not found, or file too large
+* 'Left QueryError' if capability not enabled, file not found, file too large,
+  or sandbox violation
 -}
 executeAttachFile ::
     Tracer IO Trace ->
@@ -354,50 +378,58 @@ executeAttachFile tracer toolbox filePath = do
             runTracer tracer (FileAttachErrorTrace filePath "Capability not enabled")
             pure $ Left err
         else do
-            -- Check if file exists
-            fileExists <- doesFileExist filePath
-            if not fileExists
-                then do
-                    let err = FileNotFoundError filePath
-                    runTracer tracer (FileAttachErrorTrace filePath "File not found")
-                    pure $ Left err
-                else do
-                    -- Read file
-                    result <- try $ BS.readFile filePath
-                    case result of
-                        Left (e :: SomeException) -> do
-                            let errMsg = Text.pack $ show e
-                            runTracer tracer (FileAttachErrorTrace filePath errMsg)
-                            pure $ Left $ SystemInfoError $ "Failed to read file: " <> errMsg
-                        Right content -> do
-                            let fileSize = BS.length content
+            -- Validate path against sandbox
+            sandboxResult <- Sandbox.validatePathForOperation (toolboxSandbox toolbox) True filePath
+            case sandboxResult of
+                Left sandboxErr -> do
+                    let errMsg = Text.pack $ show sandboxErr
+                    runTracer tracer (FileAttachSandboxBlockedTrace filePath errMsg)
+                    pure $ Left $ SandboxError sandboxErr
+                Right canonicalPath -> do
+                    -- Check if file exists
+                    fileExists <- doesFileExist canonicalPath
+                    if not fileExists
+                        then do
+                            let err = FileNotFoundError filePath
+                            runTracer tracer (FileAttachErrorTrace filePath "File not found")
+                            pure $ Left err
+                        else do
+                            -- Read file
+                            result <- try $ BS.readFile canonicalPath
+                            case result of
+                                Left (e :: SomeException) -> do
+                                    let errMsg = Text.pack $ show e
+                                    runTracer tracer (FileAttachErrorTrace filePath errMsg)
+                                    pure $ Left $ SystemInfoError $ "Failed to read file: " <> errMsg
+                                Right content -> do
+                                    let fileSize = BS.length content
 
-                            -- Check file size
-                            if fileSize > maxFileSize
-                                then do
-                                    runTracer tracer (FileAttachErrorTrace filePath "File too large")
-                                    pure $ Left $ FileTooLargeError filePath maxFileSize
-                                else do
-                                    -- Detect media type
-                                    case detectMediaType filePath of
-                                        Nothing -> do
-                                            let errMsg = "Unsupported file type: " <> getFileExtension filePath
-                                            runTracer tracer (FileAttachErrorTrace filePath errMsg)
-                                            pure $ Left $ UnsupportedFileTypeError filePath (getFileExtension filePath)
-                                        Just mediaType -> do
-                                            let mimeType = mediaTypeToMime mediaType
-                                            let base64Data = Text.decodeUtf8 $ B64.encode content
+                                    -- Check file size
+                                    if fileSize > maxFileSize
+                                        then do
+                                            runTracer tracer (FileAttachErrorTrace filePath "File too large")
+                                            pure $ Left $ FileTooLargeError filePath maxFileSize
+                                        else do
+                                            -- Detect media type
+                                            case detectMediaType filePath of
+                                                Nothing -> do
+                                                    let errMsg = "Unsupported file type: " <> getFileExtension filePath
+                                                    runTracer tracer (FileAttachErrorTrace filePath errMsg)
+                                                    pure $ Left $ UnsupportedFileTypeError filePath (getFileExtension filePath)
+                                                Just mediaType -> do
+                                                    let mimeType = mediaTypeToMime mediaType
+                                                    let base64Data = Text.decodeUtf8 $ B64.encode content
 
-                                            runTracer tracer (FileAttachSuccessTrace filePath mediaType fileSize)
+                                                    runTracer tracer (FileAttachSuccessTrace filePath mediaType fileSize)
 
-                                            pure $
-                                                Right $
-                                                    AttachFileResult
-                                                        { attachFilePath = filePath
-                                                        , attachMimeType = mimeType
-                                                        , attachBase64Data = base64Data
-                                                        , attachFileSize = fileSize
-                                                        }
+                                                    pure $
+                                                        Right $
+                                                            AttachFileResult
+                                                                { attachFilePath = filePath
+                                                                , attachMimeType = mimeType
+                                                                , attachBase64Data = base64Data
+                                                                , attachFileSize = fileSize
+                                                                }
 
 -------------------------------------------------------------------------------
 -- Query Execution
@@ -772,7 +804,7 @@ with a default toolbox context (no env var filtering).
 -}
 getCapabilityInfo :: SystemToolCapability -> IO (Text, Aeson.Value)
 getCapabilityInfo capability = do
-    let toolbox = Toolbox "" "" [capability] Nothing undefined
+    let toolbox = Toolbox "" "" [capability] Nothing Sandbox.allowAllSandbox undefined
     result <- getCapabilityInfoWithTimeout capability toolbox
     case result of
         Left err -> pure (capabilityToName capability, String err)
