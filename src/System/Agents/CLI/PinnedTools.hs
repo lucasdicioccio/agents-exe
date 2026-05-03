@@ -142,8 +142,7 @@ instance Aeson.FromJSON PinnedTool where
             <*> v Aeson..:? "args" Aeson..!= Map.empty
             <*> v Aeson..:? "description"
 
-{- | Top-level configuration container for pinned tools.
--}
+-- | Top-level configuration container for pinned tools.
 newtype PinnedToolsConfig = PinnedToolsConfig
     { pinnedTools :: [PinnedTool]
     -- ^ List of pinned tool configurations
@@ -202,8 +201,7 @@ savePinnedTools cfg = do
 -- Pinned Tool Operations
 -------------------------------------------------------------------------------
 
-{- | Find a pinned tool by name.
--}
+-- | Find a pinned tool by name.
 findPinnedTool :: Text -> PinnedToolsConfig -> Maybe PinnedTool
 findPinnedTool name cfg = find ((== name) . pinnedName) cfg.pinnedTools
   where
@@ -233,8 +231,7 @@ removePinnedTool name cfg =
         let (ys, zs) = partition p xs
          in if p x then (x : ys, zs) else (ys, x : zs)
 
-{- | List all pinned tools.
--}
+-- | List all pinned tools.
 listPinnedTools :: PinnedToolsConfig -> [PinnedTool]
 listPinnedTools = pinnedTools
 
@@ -306,8 +303,7 @@ applyPinnedArgs pinned userArgs =
     let pinnedAsObject = KeyMap.fromMapText pinned
      in KeyMap.union userArgs pinnedAsObject
 
-{- | Merge two JSON objects, with the second taking precedence.
--}
+-- | Merge two JSON objects, with the second taking precedence.
 mergeArgs :: Aeson.Object -> Aeson.Object -> Aeson.Object
 mergeArgs = KeyMap.union
 
@@ -335,4 +331,3 @@ validatePinnedToolName name
   where
     isValidFirst c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
     isValidChar c = isValidFirst c || (c >= '0' && c <= '9') || c == '-'
-

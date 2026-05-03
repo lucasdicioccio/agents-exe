@@ -26,7 +26,6 @@ Usage examples:
 >
 > # Unpin a tool
 > agents-exe tool unpin bash-in-src
-
 -}
 module System.Agents.CLI.ToolCommands (
     -- * Command types
@@ -164,10 +163,10 @@ data ToolUnpinOptions = ToolUnpinOptions
 handleToolCommand ::
     Tracer IO Trace ->
     SessionStore ->
+    -- | API keys file
     FilePath ->
-    -- ^ API keys file
+    -- | Agent files
     [FilePath] ->
-    -- ^ Agent files
     ToolCommand ->
     IO ()
 handleToolCommand tracer sessionStore apiKeysFile agentFiles cmd = case cmd of
@@ -241,10 +240,10 @@ parsePinArgs = mapM parseSingleArg
 handleToolCall' ::
     Tracer IO Trace ->
     SessionStore ->
+    -- | API keys file
     FilePath ->
-    -- ^ API keys file
+    -- | Agent files
     [FilePath] ->
-    -- ^ Agent files
     ToolCallOptions' ->
     IO ()
 handleToolCall' tracer sessionStore apiKeysFile agentFiles opts = do
@@ -314,16 +313,16 @@ mergeArguments pinnedArgsMap userArgs =
 executeToolCall ::
     Tracer IO Trace ->
     SessionStore ->
+    -- | API keys file
     FilePath ->
-    -- ^ API keys file
+    -- | Agent files
     [FilePath] ->
-    -- ^ Agent files
+    -- | Target tool name
     Text ->
-    -- ^ Target tool name
+    -- | Final arguments (merged)
     Aeson.Value ->
-    -- ^ Final arguments (merged)
+    -- | Optional log file (currently unused)
     Maybe FilePath ->
-    -- ^ Optional log file (currently unused)
     IO ()
 executeToolCall tracer sessionStore apiKeysFile agentFiles toolName args _mLogFile = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
@@ -440,4 +439,3 @@ handleToolUnpin opts = do
             Just updatedCfg -> do
                 savePinnedTools updatedCfg
                 putStrLn $ "Removed pinned tool: " <> Text.unpack opts.unpinName
-

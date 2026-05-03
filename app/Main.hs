@@ -1594,4 +1594,3 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
-

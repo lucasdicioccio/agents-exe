@@ -136,7 +136,7 @@ toJsonTrace (AgentTreeTrace x) = case x of
     encodeBaseMcpTrace
         (McpToolbox.McpClientLoopTrace (McpClient.StartToolCall n _)) =
             Just $
-            Aeson.object
+                Aeson.object
                     [ "x" .= ("tool-call-start" :: Text)
                     , "name" .= n
                     ]
@@ -153,4 +153,3 @@ toJsonTrace (ToolCallTrace _) = Nothing
 toJsonTrace (TUICmdTrace _) = Nothing
 toJsonTrace (CheckCmdTrace _) = Nothing
 toJsonTrace (ToolCommandsTrace _) = Nothing
-
