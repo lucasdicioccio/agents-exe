@@ -285,7 +285,6 @@ executeTool tracer portal mParentCtx tool args =
                     pure $ Left $ Text.pack $ show e
                 Right callResult ->
                     pure $ Right callResult
-
         Nothing -> do
             -- No parent context - generate fresh IDs for standalone execution
             sessId <- newSessionId
@@ -455,4 +454,3 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
-

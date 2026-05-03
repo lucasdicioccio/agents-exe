@@ -19,7 +19,6 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-
 import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeTQueue)
 import Control.Exception (SomeException, catch, displayException)
 import Data.Aeson ((.=))
@@ -27,8 +26,8 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
-import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -213,7 +212,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         -- Extract the conversation ID from the execution context for tracing
         -- ctx.ctxConversationId is Base.ConversationId
         let parentBaseConvId = ctx.ctxConversationId
-        
+
         -- Debug logging
         let parentShort = baseConvIdToShort parentBaseConvId
         let callStackShort = Text.intercalate "/" $ map callStackEntryToShort (Ctx.ctxCallStack ctx)
@@ -238,7 +237,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         subcallBaseConvId <- newBaseConversationId
         let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
         let subcallCallStack = newEntry : parentCallStack
-        
+
         -- Debug logging
         let subcallShort = baseConvIdToShort subcallBaseConvId
         debugLog $ "runSubAgent: created subcall=" <> subcallShort <> " depth=" <> Text.pack (show $ length subcallCallStack)
@@ -621,4 +620,3 @@ baseConvIdToShort (Base.ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.to
 -- | Convert CallStackEntry to short text for debugging.
 callStackEntryToShort :: CallStackEntry -> Text
 callStackEntryToShort entry = entry.callAgentSlug <> ":" <> baseConvIdToShort entry.callConversationId
-

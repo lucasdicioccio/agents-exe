@@ -28,14 +28,18 @@ import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, read
 import Control.Lens (to, use, (%=), (.=), (^.), _Just)
 import Control.Monad (filterM, void, when)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Base64 as Base64
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
 import Data.Time (diffUTCTime, getCurrentTime)
+import qualified Data.UUID as UUID
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import System.Environment (lookupEnv)
@@ -44,10 +48,6 @@ import System.FilePath (takeExtension, takeFileName, (<.>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
-import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Base64 as Base64
-import qualified Data.Text.Encoding as TextEncoding
-import qualified Data.UUID as UUID
 
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
@@ -463,10 +463,6 @@ openFileBrowserDialog = do
     tuiUI . fileBrowser .= Just fb
     tuiUI . attachmentDialogState .= AttachmentDialogFileBrowser
 
--------------------------------------------------------------------------------
--- Media Loading
--------------------------------------------------------------------------------
-
 -- | Load a media attachment from a file path.
 loadMediaAttachment :: FilePath -> IO (Either String MediaAttachment)
 loadMediaAttachment input = do
@@ -483,6 +479,22 @@ loadMediaAttachment input = do
                     let base64Data = TextEncoding.decodeUtf8 $ Base64.encode fileContent
                     let filename = Just $ Text.pack $ takeFileName filePath
                     pure $ Right $ MediaAttachment mimeType base64Data filename
+
+-- | Handle subcall completed event.
+handleSubcallCompleted :: ConversationId -> Text.Text -> EventM N TuiState ()
+handleSubcallCompleted subcallId result = do
+    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+    showStatus StatusInfo $ "Subcall completed cid=" <> subcallShort <> ": " <> Text.take 30 result
+    -- Update the conversation status to indicate it's no longer running
+    updateConversationStatus subcallId ConversationStatus_WaitingForInput
+
+-- | Handle subcall failed event.
+handleSubcallFailed :: ConversationId -> Text.Text -> EventM N TuiState ()
+handleSubcallFailed subcallId err = do
+    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+    showStatus StatusError $ "Subcall failed cid=" <> subcallShort <> ": " <> err
+    -- Update the conversation status to indicate it's no longer running
+    updateConversationStatus subcallId ConversationStatus_WaitingForInput
 
 -- | Close the file path dialog (legacy) and reset input.
 closeFilePathDialog :: EventM N TuiState ()
@@ -697,7 +709,6 @@ handleSubcallStarted _tracer parentId subcallId slug depth = do
         Nothing -> do
             showStatus StatusWarning $ "Agent not found for subcall: " <> slug
 
-
 -- | Find a TuiAgent by slug from the agent list.
 findAgentBySlug :: Text.Text -> Vector.Vector TuiAgent -> Maybe TuiAgent
 findAgentBySlug slug agents =
@@ -719,18 +730,6 @@ handleSubcallProgress subcallId sess = do
             -- Conversation doesn't exist yet - heartbeat will pick it up
             let subcallShort = Text.take 8 (Text.pack $ show subcallId)
             showStatus StatusWarning $ "Subcall progress for unknown conv: " <> subcallShort
-
--- | Handle subcall completed event.
-handleSubcallCompleted :: ConversationId -> Text.Text -> EventM N TuiState ()
-handleSubcallCompleted subcallId result = do
-    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
-    showStatus StatusInfo $ "Subcall completed cid=" <> subcallShort <> ": " <> Text.take 30 result
-
--- | Handle subcall failed event.
-handleSubcallFailed :: ConversationId -> Text.Text -> EventM N TuiState ()
-handleSubcallFailed subcallId err = do
-    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
-    showStatus StatusError $ "Subcall failed cid=" <> subcallShort <> ": " <> err
 
 -------------------------------------------------------------------------------
 -- Widget-Specific Event Handlers
@@ -1019,6 +1018,7 @@ showStatus severity text = do
 -- | Extract short identifier from ConversationId for debugging.
 shortConvId :: ConversationId -> Text.Text
 shortConvId (ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
+
 -------------------------------------------------------------------------------
 -- Markdown Export Handlers
 -------------------------------------------------------------------------------
@@ -1188,7 +1188,6 @@ handleHeartbeat = do
                 tuiUI . statusMessage .= Nothing
         Nothing -> pure ()
     cleanupAuxiliaryTasks
-
 
 -- | Remove completed auxiliary tasks from the state.
 cleanupAuxiliaryTasks :: EventM N TuiState ()
@@ -1593,7 +1592,7 @@ runConversation tracer baseTuiAgent session = do
                 }
     liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
     tuiUI . conversationList %= listInsert 0 conv
-    
+
     switchToChatsAndFocusMessage
 
 -- | Send a message in the current conversation.
