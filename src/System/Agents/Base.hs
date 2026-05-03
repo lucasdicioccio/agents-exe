@@ -963,9 +963,10 @@ Security defaults:
 -}
 data DeveloperFileScope = DeveloperFileScope
     { devFileScopeAllowedPatterns :: [Text]
-    -- ^ List of glob patterns for allowed file paths.
-    -- Supports: * (any chars except /), ** (recursive), ? (single char), [abc] (char class)
-    -- If empty, NO paths are allowed.
+    {- ^ List of glob patterns for allowed file paths.
+    Supports: * (any chars except /), ** (recursive), ? (single char), [abc] (char class)
+    If empty, NO paths are allowed.
+    -}
     , devFileScopeAllowRangeOps :: Bool
     -- ^ Whether range-based read/write operations are allowed
     , devFileScopeAllowCreate :: Bool
@@ -1341,4 +1342,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-

@@ -70,12 +70,13 @@ import System.FilePath (isAbsolute, normalise, (</>))
 -- Core Types
 -------------------------------------------------------------------------------
 
--- | A glob pattern for matching file paths.
--- Supports:
--- - @*@ matches any sequence of characters except path separator
--- - @**@ matches any sequence of characters including path separators (recursive)
--- - @?@ matches any single character
--- - @[abc]@ matches any character in the set
+{- | A glob pattern for matching file paths.
+Supports:
+- @*@ matches any sequence of characters except path separator
+- @**@ matches any sequence of characters including path separators (recursive)
+- @?@ matches any single character
+- @[abc]@ matches any character in the set
+-}
 newtype GlobPattern = GlobPattern {unGlobPattern :: String}
     deriving (Show, Eq)
 
@@ -118,8 +119,9 @@ data ScopeError
 -- Default Configurations
 -------------------------------------------------------------------------------
 
--- | Default secure file scope: no access allowed.
--- This is the most restrictive configuration.
+{- | Default secure file scope: no access allowed.
+This is the most restrictive configuration.
+-}
 denyAllFileScope :: FileScope
 denyAllFileScope =
     FileScope
@@ -128,8 +130,9 @@ denyAllFileScope =
         , allowCreate = False
         }
 
--- | Unrestricted file scope: allows all operations.
--- Use with caution - this removes all file access restrictions.
+{- | Unrestricted file scope: allows all operations.
+Use with caution - this removes all file access restrictions.
+-}
 unrestrictedFileScope :: FileScope
 unrestrictedFileScope =
     FileScope
@@ -138,8 +141,9 @@ unrestrictedFileScope =
         , allowCreate = True
         }
 
--- | Default file scope: denies all access.
--- Users must explicitly configure allowed paths.
+{- | Default file scope: denies all access.
+Users must explicitly configure allowed paths.
+-}
 defaultFileScope :: FileScope
 defaultFileScope = denyAllFileScope
 
@@ -193,8 +197,9 @@ validateFileAccess mBasePath scope path isRead = do
                                 else pure $ Left $ FileNotFound canonical
                         else pure $ Right canonical
 
--- | Validate file access without checking for file existence.
--- Useful for operations that will create the file.
+{- | Validate file access without checking for file existence.
+Useful for operations that will create the file.
+-}
 validateFileAccessRaw ::
     Maybe FilePath ->
     FileScope ->
@@ -258,9 +263,10 @@ matchGlob path (GlobPattern pattern) =
         normPattern = normalise pattern
      in matchGlob' normPath normPattern
 
--- | Internal glob matching implementation.
--- Note: The top-level patterns handle empty strings, so path and pattern
--- are guaranteed to be non-empty in the case alternatives.
+{- | Internal glob matching implementation.
+Note: The top-level patterns handle empty strings, so path and pattern
+are guaranteed to be non-empty in the case alternatives.
+-}
 matchGlob' :: String -> String -> Bool
 matchGlob' "" "" = True
 matchGlob' _ "" = False
@@ -268,12 +274,14 @@ matchGlob' "" _ = False
 matchGlob' path pattern =
     case pattern of
         -- Double asterisk matches any sequence of directories recursively
-        p1 : p2 : '/' : rest | p1 == '*' && p2 == '*' ->
-            -- Try matching ** against current position or skip to next /
-            matchGlobRecursive path rest || matchGlob' path rest
-        p1 : p2 : [] | p1 == '*' && p2 == '*' ->
-            -- ** at end matches any remaining path
-            True
+        p1 : p2 : '/' : rest
+            | p1 == '*' && p2 == '*' ->
+                -- Try matching ** against current position or skip to next /
+                matchGlobRecursive path rest || matchGlob' path rest
+        p1 : p2 : []
+            | p1 == '*' && p2 == '*' ->
+                -- \** at end matches any remaining path
+                True
         -- Single asterisk matches any chars except /
         '*' : rest ->
             matchGlobStar path rest
@@ -288,11 +296,12 @@ matchGlob' path pattern =
             case break (== ']') rest of
                 (classDef, ']' : patternRest) ->
                     case path of
-                        c : pathRest | c `matchesCharClass` classDef ->
-                            matchGlob' pathRest patternRest
+                        c : pathRest
+                            | c `matchesCharClass` classDef ->
+                                matchGlob' pathRest patternRest
                         _ -> False
                 _ -> matchGlob' path rest -- Invalid class, treat as literal
-        -- Escaped character
+                -- Escaped character
         '\\' : c : rest ->
             case path of
                 c' : pathRest | c == c' -> matchGlob' pathRest rest
@@ -309,8 +318,8 @@ matchGlobStar path pattern =
     -- Try matching * at different positions within the current segment
     let tryPositions p =
             case p of
-                '/' : _ -> matchGlob' p pattern  -- Hit a /, try matching rest from here
-                [] -> matchGlob' [] pattern  -- End of path, try matching empty
+                '/' : _ -> matchGlob' p pattern -- Hit a /, try matching rest from here
+                [] -> matchGlob' [] pattern -- End of path, try matching empty
                 (_ : cs) -> matchGlob' p pattern || tryPositions cs
      in tryPositions path
 
@@ -340,8 +349,7 @@ matchGlobRecursive path pattern =
 -- Scoped File Operations
 -------------------------------------------------------------------------------
 
-{- | Line range specification for scoped read operations.
--}
+-- | Line range specification for scoped read operations.
 data LineRange = LineRange
     { rangeStart :: Int
     -- ^ 1-based start line (inclusive)
@@ -369,8 +377,9 @@ scopedReadFile mBasePath scope filePath mRange = do
         Right canonicalPath -> do
             -- Check if range operations are allowed
             case mRange of
-                Just _ | not (allowRangeOps scope) ->
-                    pure $ Left RangeOpsNotAllowed
+                Just _
+                    | not (allowRangeOps scope) ->
+                        pure $ Left RangeOpsNotAllowed
                 _ -> do
                     -- Read file
                     result <- try $ TextIO.readFile canonicalPath
@@ -411,8 +420,9 @@ scopedWriteFile mBasePath scope filePath mRange content = do
         Right canonicalPath -> do
             -- Check if range operations are allowed
             case mRange of
-                Just _ | not (allowRangeOps scope) ->
-                    pure $ Left RangeOpsNotAllowed
+                Just _
+                    | not (allowRangeOps scope) ->
+                        pure $ Left RangeOpsNotAllowed
                 _ -> do
                     case mRange of
                         Nothing -> do
@@ -447,4 +457,3 @@ scopedWriteFile mBasePath scope filePath mRange content = do
                                             pure $ Left $ ScopeIOError canonicalPath (show e)
                                         Right () ->
                                             pure $ Right (length newLines)
-
