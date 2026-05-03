@@ -34,7 +34,7 @@ This module provides:
 
 == Version Management
 
-Versions are created automatically after each write operation (INSERT, UPDATE, DELETE, 
+Versions are created automatically after each write operation (INSERT, UPDATE, DELETE,
 CREATE, DROP, ALTER). Each version includes:
 
 * Unique version ID (sequential integer)
@@ -45,7 +45,7 @@ CREATE, DROP, ALTER). Each version includes:
 == Storage Strategy
 
 Versions are stored as complete SQLite database copies in a dedicated directory
-next to the original database. While this uses more storage than incremental 
+next to the original database. While this uses more storage than incremental
 deltas, it provides:
 
 * Fast rollback (simple file copy)
@@ -266,7 +266,7 @@ initializeVersionedDB dbPath config = do
 
     -- Create initial state
     let initialVersion = case existingVersions of
-            (v:_) -> versionId v
+            (v : _) -> versionId v
             [] -> 0
     state <-
         newMVar
@@ -608,7 +608,7 @@ getStorageStats vdb = do
             vs -> Just $ versionId $ last vs
     let newestId = case versions of
             [] -> Nothing
-            (v:_) -> Just $ versionId v
+            (v : _) -> Just $ versionId v
 
     pure $
         StorageStats
@@ -678,7 +678,7 @@ loadExistingVersions versionsDir = do
     extractVersionId :: FilePath -> Int
     extractVersionId fileName =
         case break (== '.') fileName of
-            (_, '.':'v':rest) ->
+            (_, '.' : 'v' : rest) ->
                 case reads (takeWhile (/= '.') rest) of
                     [(n, _)] -> n
                     _ -> 0
@@ -693,4 +693,3 @@ atomicReplace target source = do
 
 isInfixOf :: String -> String -> Bool
 isInfixOf needle haystack = any (isPrefixOf needle) (tails haystack)
-
