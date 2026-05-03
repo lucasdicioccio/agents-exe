@@ -15,10 +15,15 @@ for:
 * Validating agent configurations
 * Creating agent configurations
 * Creating tool scripts
-* Reading specific line ranges from files
-* Writing to specific line ranges in files
+* Reading specific line ranges from files (with scope validation)
+* Writing to specific line ranges in files (with scope validation)
 
 These tools help developers write and validate agents and tools.
+
+File scope security:
+File operations (read-file-range, write-file-range) respect configured scope
+boundaries defined in the developerToolboxFileScope field. Paths are validated
+against glob patterns before access is granted.
 -}
 module System.Agents.Tools.DeveloperToolbox (
     -- * Core types
@@ -67,6 +72,9 @@ module System.Agents.Tools.DeveloperToolbox (
     makePythonToolTemplate,
     makeHaskellToolTemplate,
     mergeAgentWithOverrides,
+
+    -- * Scope validation
+    scopeErrorToToolError,
 ) where
 
 import Control.Exception (SomeException, try)
@@ -93,14 +101,22 @@ import System.Agents.Base (
     AgentDescription (..),
     BashToolboxDescription,
     BuiltinToolboxDescription (..),
+    DeveloperFileScope (..),
     DeveloperToolCapability (..),
     DeveloperToolboxDescription (..),
     ExtraAgentRef,
     McpServerDescription,
     OpenAPIToolboxDescription,
     PostgRESTToolboxDescription,
+    defaultDeveloperFileScope,
  )
 import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.OS.Security.FileScope (
+    FileScope (..),
+    ScopeError (..),
+    compileGlob,
+    validateFileAccess,
+ )
 import System.Agents.Tools.Bash (LoadTrace)
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
@@ -120,6 +136,7 @@ These events allow tracking of:
 * Tool creation
 * File range read operations
 * File range write operations
+* Scope validation failures
 -}
 data Trace
     = -- | Tool validation started
@@ -158,6 +175,8 @@ data Trace
       WriteFileRangeStartedTrace !FilePath !Text
     | -- | Write file range completed
       WriteFileRangeCompletedTrace !FilePath !Int !Int
+    | -- | Scope validation failed
+      ScopeValidationFailedTrace !FilePath !Text
     | -- | Error during operation
       DeveloperToolErrorTrace !Text !Text
     deriving (Show)
@@ -181,12 +200,15 @@ data ToolDescription = ToolDescription
 The toolbox maintains:
 * Toolbox name and description
 * List of enabled capabilities
+* File scope configuration for restricting file access
 * The original configuration description used to create this toolbox
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
     , toolboxDescription :: Text
     , toolboxCapabilities :: [DeveloperToolCapability]
+    , toolboxFileScope :: FileScope
+    -- ^ File scope for restricting file operations
     , toolboxConfig :: DeveloperToolboxDescription
     -- ^ Original configuration description used to create this toolbox
     }
@@ -412,7 +434,34 @@ data DeveloperToolError
       RangeOutOfBoundsError !Text
     | -- | Permission denied
       PermissionError !Text
+    | -- | Scope validation error (file access denied)
+      ScopeError !ScopeError
     deriving (Show, Eq)
+
+-------------------------------------------------------------------------------
+-- Scope Error Conversion
+-------------------------------------------------------------------------------
+
+-- | Convert a ScopeError to a DeveloperToolError.
+scopeErrorToToolError :: ScopeError -> DeveloperToolError
+scopeErrorToToolError = ScopeError
+
+-- | Convert ScopeError to a user-friendly error message.
+scopeErrorToMessage :: ScopeError -> Text
+scopeErrorToMessage (PathNotAllowed path) =
+    "File access denied: path not in allowed patterns: " <> Text.pack path
+scopeErrorToMessage (PathNotAbsolute path) =
+    "File access denied: path must be absolute: " <> Text.pack path
+scopeErrorToMessage (PathEscapesSandbox path) =
+    "File access denied: path escapes sandbox: " <> Text.pack path
+scopeErrorToMessage (CreateNotAllowed path) =
+    "File creation denied: creating new files not allowed: " <> Text.pack path
+scopeErrorToMessage RangeOpsNotAllowed =
+    "Range operations not allowed by file scope configuration"
+scopeErrorToMessage (FileNotFound path) =
+    "File not found: " <> Text.pack path
+scopeErrorToMessage (ScopeIOError path msg) =
+    "IO error accessing file '" <> Text.pack path <> "': " <> Text.pack msg
 
 -------------------------------------------------------------------------------
 -- Initialization
@@ -434,14 +483,25 @@ initializeToolbox _tracer desc = do
     if null desc.developerToolboxCapabilities
         then pure $ Left "Developer toolbox must have at least one capability enabled"
         else do
+            let fileScope = convertFileScope (fromMaybe defaultDeveloperFileScope desc.developerToolboxFileScope)
             let toolbox =
                     Toolbox
                         { toolboxName = desc.developerToolboxName
                         , toolboxDescription = desc.developerToolboxDescription
                         , toolboxCapabilities = desc.developerToolboxCapabilities
+                        , toolboxFileScope = fileScope
                         , toolboxConfig = desc
                         }
             pure $ Right toolbox
+
+-- | Convert DeveloperFileScope to FileScope.
+convertFileScope :: DeveloperFileScope -> FileScope
+convertFileScope devScope =
+    FileScope
+        { allowedPatterns = map (compileGlob . Text.unpack) (devFileScopeAllowedPatterns devScope)
+        , allowRangeOps = devFileScopeAllowRangeOps devScope
+        , allowCreate = devFileScopeAllowCreate devScope
+        }
 
 -------------------------------------------------------------------------------
 -- Capability Info
@@ -565,10 +625,10 @@ parsePositiveInt txt errPrefix =
             else Left $ InvalidRangeError $ errPrefix <> ": " <> txt
 
 -------------------------------------------------------------------------------
--- File Range Operations
+-- File Range Operations with Scope Validation
 -------------------------------------------------------------------------------
 
-{- | Execute read file range operation.
+{- | Execute read file range operation with scope validation.
 
 Reads specific line ranges from a file and returns them with line numbers
 prepended as "{line_num}\t{line_content}".
@@ -576,6 +636,10 @@ prepended as "{line_num}\t{line_content}".
 Parameters:
 - path: Path to the file to read
 - ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail")
+
+This operation validates the file path against the configured file scope
+before reading. If the path is not in the allowed patterns, the operation
+is rejected with a ScopeError.
 
 Returns Right with ReadFileRangeResult on success, Left with error on failure.
 -}
@@ -591,14 +655,16 @@ executeReadFileRange tracer toolbox filePath rangesTxt = do
         else do
             runTracer tracer (ReadFileRangeStartedTrace filePath rangesTxt)
 
-            -- Check if file exists
-            fileExists <- doesFileExist filePath
-            if not fileExists
-                then do
-                    let err = FileNotFoundError filePath
+            -- Validate path against file scope
+            scopeResult <- validateFileAccess Nothing (toolboxFileScope toolbox) filePath True
+            case scopeResult of
+                Left scopeErr -> do
+                    let err = scopeErrorToToolError scopeErr
+                    runTracer tracer (ScopeValidationFailedTrace filePath (scopeErrorToMessage scopeErr))
                     runTracer tracer (DeveloperToolErrorTrace "read-file-range" $ Text.pack $ show err)
                     pure $ Left err
-                else do
+                Right _canonicalPath -> do
+                    -- Path is allowed, proceed with the operation
                     -- Parse ranges
                     case parseRanges rangesTxt of
                         Left err -> pure $ Left err
@@ -649,7 +715,7 @@ extractRange allLines (Lines (start, end)) =
 formatLineWithNumber :: (Int, Text) -> Text
 formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
 
-{- | Execute write file range operation.
+{- | Execute write file range operation with scope validation.
 
 Replaces line ranges in a file with new content. Multiple ranges are applied
 bottom-to-top so earlier line numbers stay valid. Content blocks for multiple
@@ -659,6 +725,10 @@ Parameters:
 - path: Path to the file to modify
 - ranges: Comma-separated ranges (e.g., "1-10", "5", "head", "tail")
 - content: Replacement text (or multiple blocks separated by "---")
+
+This operation validates the file path against the configured file scope
+before writing. If the path is not in the allowed patterns or if creating
+new files is not allowed, the operation is rejected with a ScopeError.
 
 Returns Right with WriteFileRangeResult on success, Left with error on failure.
 -}
@@ -675,80 +745,93 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
         else do
             runTracer tracer (WriteFileRangeStartedTrace filePath rangesTxt)
 
-            -- Parse ranges
-            case parseRanges rangesTxt of
-                Left err -> pure $ Left err
-                Right ranges -> do
-                    -- Split content by "---" separator
-                    let contentBlocks = map Text.strip $ Text.splitOn "---" contentTxt
+            -- Check if file exists first
+            fileExists <- doesFileExist filePath
 
-                    if length contentBlocks /= length ranges && length ranges > 1
-                        then
-                            pure $
-                                Left $
-                                    InvalidRangeError $
-                                        "Number of content blocks ("
-                                            <> Text.pack (show $ length contentBlocks)
-                                            <> ") must match number of ranges ("
-                                            <> Text.pack (show $ length ranges)
-                                            <> "). Use '---' to separate blocks."
-                        else do
-                            -- Check if file exists
-                            fileExists <- doesFileExist filePath
+            -- Validate path against file scope
+            -- For write operations, we need to check allowCreate if file doesn't exist
+            let isRead = False
+            scopeResult <- validateFileAccess Nothing (toolboxFileScope toolbox) filePath isRead
+            case scopeResult of
+                Left scopeErr -> do
+                    let err = scopeErrorToToolError scopeErr
+                    runTracer tracer (ScopeValidationFailedTrace filePath (scopeErrorToMessage scopeErr))
+                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
+                    pure $ Left err
+                Right _canonicalPath -> do
+                    -- Path is allowed, proceed with the operation
+                    -- Parse ranges
+                    case parseRanges rangesTxt of
+                        Left err -> pure $ Left err
+                        Right ranges -> do
+                            -- Split content by "---" separator
+                            let contentBlocks = map Text.strip $ Text.splitOn "---" contentTxt
 
-                            if not fileExists && not (any isHeadOrTail ranges)
-                                then do
-                                    let err = FileNotFoundError filePath
-                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
-                                    pure $ Left err
+                            if length contentBlocks /= length ranges && length ranges > 1
+                                then
+                                    pure $
+                                        Left $
+                                            InvalidRangeError $
+                                                "Number of content blocks ("
+                                                    <> Text.pack (show $ length contentBlocks)
+                                                    <> ") must match number of ranges ("
+                                                    <> Text.pack (show $ length ranges)
+                                                    <> "). Use '---' to separate blocks."
                                 else do
-                                    -- Read existing file or start empty
-                                    existingContent <-
-                                        if fileExists
-                                            then Text.readFile filePath
-                                            else pure ""
-
-                                    let existingLines = Text.lines existingContent
-
-                                    -- Pair ranges with content blocks
-                                    let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
-
-                                    -- Sort by start line in descending order (bottom-to-top)
-                                    let sortedPairs = sortOn (negate . rangeStartKey) rangeContentPairs
-
-                                    -- Apply each range replacement
-                                    let finalLines = foldl (applyRangeReplacement existingLines) existingLines sortedPairs
-
-                                    -- Preserve trailing newline if original had one
-                                    let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
-                                    let output =
-                                            if hasTrailingNewline || null existingLines
-                                                then Text.unlines finalLines
-                                                else Text.unlines finalLines
-
-                                    -- Write result
-                                    writeResult <- try $ do
-                                        createDirectoryIfMissing True (takeDirectory filePath)
-                                        Text.writeFile filePath output
-
-                                    case writeResult of
-                                        Left (e :: SomeException) -> do
-                                            let err = PermissionError $ Text.pack $ show e
-                                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                                    -- Check if file exists (already done above, but for clarity)
+                                    if not fileExists && not (any isHeadOrTail ranges)
+                                        then do
+                                            let err = FileNotFoundError filePath
+                                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
                                             pure $ Left err
-                                        Right () -> do
-                                            let rangesModified = length ranges
-                                            let linesWritten = length $ Text.lines contentTxt
+                                        else do
+                                            -- Read existing file or start empty
+                                            existingContent <-
+                                                if fileExists
+                                                    then Text.readFile filePath
+                                                    else pure ""
 
-                                            runTracer tracer (WriteFileRangeCompletedTrace filePath rangesModified linesWritten)
+                                            let existingLines = Text.lines existingContent
 
-                                            pure $
-                                                Right $
-                                                    WriteFileRangeResult
-                                                        { writeFilePath = filePath
-                                                        , writeFileRangesModified = rangesModified
-                                                        , writeFileLinesWritten = linesWritten
-                                                        }
+                                            -- Pair ranges with content blocks
+                                            let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
+
+                                            -- Sort by start line in descending order (bottom-to-top)
+                                            let sortedPairs = sortOn (negate . rangeStartKey) rangeContentPairs
+
+                                            -- Apply each range replacement
+                                            let finalLines = foldl (applyRangeReplacement existingLines) existingLines sortedPairs
+
+                                            -- Preserve trailing newline if original had one
+                                            let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
+                                            let output =
+                                                    if hasTrailingNewline || null existingLines
+                                                        then Text.unlines finalLines
+                                                        else Text.unlines finalLines
+
+                                            -- Write result
+                                            writeResult <- try $ do
+                                                createDirectoryIfMissing True (takeDirectory filePath)
+                                                Text.writeFile filePath output
+
+                                            case writeResult of
+                                                Left (e :: SomeException) -> do
+                                                    let err = PermissionError $ Text.pack $ show e
+                                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                                                    pure $ Left err
+                                                Right () -> do
+                                                    let rangesModified = length ranges
+                                                    let linesWritten = length $ Text.lines contentTxt
+
+                                                    runTracer tracer (WriteFileRangeCompletedTrace filePath rangesModified linesWritten)
+
+                                                    pure $
+                                                        Right $
+                                                            WriteFileRangeResult
+                                                                { writeFilePath = filePath
+                                                                , writeFileRangesModified = rangesModified
+                                                                , writeFileLinesWritten = linesWritten
+                                                                }
   where
     isHeadOrTail Head = True
     isHeadOrTail Tail = True
@@ -1495,6 +1578,7 @@ defaultDeveloperToolboxDescription =
                 , DevToolReadFileRange
                 , DevToolWriteFileRange
                 ]
+            , developerToolboxFileScope = Nothing -- Uses default (deny all)
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             }
 
