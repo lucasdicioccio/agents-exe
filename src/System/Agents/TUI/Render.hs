@@ -43,6 +43,7 @@ import System.Agents.Session.Types (
     TrajectorySignals (..),
     sessionTotalBytes,
  )
+import System.Agents.TUI.Drafts (DraftMessage, DraftMode (..), draftAutoTitle)
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
@@ -199,12 +200,13 @@ render_mainLayout st =
 -- | Render the tab bar with all tabs, highlighting the active one.
 renderTabBar :: Tab -> Widget N
 renderTabBar activeTab =
-    let tabs = [AgentsTab, ChatsTab, HistoryTab, HelpTab]
+    let tabs = [AgentsTab, ChatsTab, HistoryTab, DraftsTab, HelpTab]
         renderTab tab =
             let tabName = case tab of
                     AgentsTab -> " Agents "
                     ChatsTab -> " Chats "
                     HistoryTab -> " History "
+                    DraftsTab -> " Drafts "
                     HelpTab -> " Help "
                 tabAttr = if tab == activeTab then activeTabAttr else inactiveTabAttr
              in withAttr tabAttr $ txt tabName
@@ -213,31 +215,6 @@ renderTabBar activeTab =
      in hBorder <=> hBox (intersperse separator tabWidgets)
 
 -- | Sidebar with agent and conversation lists.
-render_sidebar :: TuiState -> Widget N
-render_sidebar st =
-    hLimit 35 $
-        vBox
-            [ render_agentList st
-            , render_conversationList st
-            , render_sessionList st
-            ]
-
--- | Content area showing content based on the current tab.
-render_contentArea :: TuiState -> Widget N
-render_contentArea st =
-    case st ^. tuiUI . currentTab of
-        AgentsTab -> renderAgentsTab st
-        ChatsTab -> renderChatsTab st
-        HistoryTab -> renderHistoryTab st
-        HelpTab -> renderHelpTab st
-
--- | Render the Agents tab content.
-renderAgentsTab :: TuiState -> Widget N
-renderAgentsTab st =
-    case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
-        Just AgentListWidget -> render_agentDetail st
-        Just AgentInfoWidget -> render_agentDetail st
-        _ -> render_agentDetail st
 
 -- | Render the Chats tab content.
 renderChatsTab :: TuiState -> Widget N
@@ -264,6 +241,31 @@ renderHelpTab st =
         viewport AgentInfoWidget Both $
             vBox $
                 map txt (st ^. tuiUI . helpContent)
+
+renderDraftEditor :: TuiState -> Widget N
+renderDraftEditor st =
+    borderWithFocus
+        st
+        DraftEditorWidget
+        "Draft Content"
+        ( renderEditor
+            (txt . Text.unlines)
+            (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just DraftEditorWidget)
+            (st ^. tuiUI . draftEditor)
+        )
+
+-- | Render the draft title editor.
+renderDraftTitle :: TuiState -> Widget N
+renderDraftTitle st =
+    borderWithFocus
+        st
+        DraftTitleInputWidget
+        "Title"
+        ( renderEditor
+            (txt . Text.unlines)
+            (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just DraftTitleInputWidget)
+            (st ^. tuiUI . draftTitleEditor)
+        )
 
 -- | Agent detail view with info and tools.
 render_agentDetail :: TuiState -> Widget N

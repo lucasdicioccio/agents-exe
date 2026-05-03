@@ -31,6 +31,7 @@ import System.Agents.OS.Events (OSEvent)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
+import System.Agents.TUI.Drafts (AutoSaveState, DraftId, DraftMessage, DraftMode (..), initAutoSaveState)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.ToolRegistration (ToolRegistration)
 
@@ -62,6 +63,14 @@ data WidgetName
       AttachmentListWidget
     | -- | For the file path input dialog
       FilePathInputWidget
+    | -- | Draft list in the Drafts tab
+      DraftListWidget
+    | -- | Draft editor for composing drafts
+      DraftEditorWidget
+    | -- | Draft title input
+      DraftTitleInputWidget
+    | -- | Draft detail view
+      DraftDetailWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -77,6 +86,8 @@ data Tab
     | ChatsTab
     | HistoryTab
     | HelpTab
+    | -- | Draft messages tab
+      DraftsTab
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -114,6 +125,20 @@ data TurnNavigationState = TurnNavigationState
     deriving (Show)
 
 makeLenses ''TurnNavigationState
+
+-------------------------------------------------------------------------------
+-- Draft Dialog State
+-------------------------------------------------------------------------------
+
+-- | State for draft-related dialogs
+data DraftDialogState
+    = -- | No dialog is open
+      DraftDialogNone
+    | -- | Confirm deletion of a draft
+      DraftDialogConfirmDelete DraftId
+    | -- | Confirm deletion of all drafts
+      DraftDialogConfirmDeleteAll
+    deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
 -- Attachment Dialog State
@@ -156,6 +181,14 @@ data AppEvent
       AppEvent_SubcallCompleted ConversationId Text
     | -- | A subcall has failed
       AppEvent_SubcallFailed ConversationId Text
+    | -- \** Draft Events
+
+      -- | Auto-save triggered for a draft
+      AppEvent_DraftAutoSave DraftId
+    | -- | Draft has been saved successfully
+      AppEvent_DraftSaved DraftId
+    | -- | Draft list needs refresh
+      AppEvent_DraftsRefresh
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -337,6 +370,8 @@ data Core = Core
     {- ^ Optional OS event queue for subcall event emission. Enables the TUI
     to receive notifications about subcall lifecycle (start, progress, completion).
     -}
+    , coreAutoSaveState :: TVar AutoSaveState
+    -- ^ Auto-save state for draft messages
     }
 
 makeLenses ''Core
@@ -395,6 +430,18 @@ data UIState = UIState
     -- ^ Copy of buffered messages from Core for UI rendering
     , _uiAgentTools :: [(AgentId, [ToolRegistration])]
     -- ^ Tools per agent for display (mirror of Core's coreAgentTools)
+    , _draftList :: List WidgetName DraftMessage
+    -- ^ List of draft messages
+    , _draftMode :: DraftMode
+    -- ^ Current draft mode state
+    , _currentDraft :: Maybe DraftMessage
+    -- ^ Draft currently being composed
+    , _draftEditor :: Editor Text WidgetName
+    -- ^ Editor for draft composition
+    , _draftTitleEditor :: Editor Text WidgetName
+    -- ^ Editor for draft title input
+    , _draftDialogState :: DraftDialogState
+    -- ^ Current draft dialog state
     }
 
 makeLenses ''UIState
@@ -449,12 +496,19 @@ initUIState helpText agents sessions =
         , _auxiliaryTasks = []
         , _uiBufferedMessages = Map.empty
         , _uiAgentTools = []
+        , _draftList = list DraftListWidget Vector.empty 1
+        , _draftMode = DraftModeNone
+        , _currentDraft = Nothing
+        , _draftEditor = editorText DraftEditorWidget Nothing ""
+        , _draftTitleEditor = editorText DraftTitleInputWidget (Just 1) ""
+        , _draftDialogState = DraftDialogNone
         }
 
 -- | Initialize core state with optional World and EventQueue.
 initCore :: Maybe World -> Maybe (TQueue OSEvent) -> IO Core
 initCore mWorld mEventQueue = do
     bufferedVar <- newTVarIO Map.empty
+    autoSaveVar <- newTVarIO initAutoSaveState
     pure
         Core
             { coreConversations = []
@@ -463,6 +517,7 @@ initCore mWorld mEventQueue = do
             , corePausedConversations = Set.empty
             , coreWorld = mWorld
             , coreOSEventQueue = mEventQueue
+            , coreAutoSaveState = autoSaveVar
             }
 
 -------------------------------------------------------------------------------

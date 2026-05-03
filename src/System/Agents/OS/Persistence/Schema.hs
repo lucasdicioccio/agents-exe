@@ -10,6 +10,7 @@ backends, along with migration support.
 Schema Version History:
 * Version 1 - Initial schema with entities, components, events, messages, tool_calls
 * Version 2 - Added tool_call_cache and tool_continuations tables for async execution
+* Version 3 - Added draft_messages table for TUI draft persistence
 -}
 module System.Agents.OS.Persistence.Schema (
     -- * Schema Version
@@ -29,6 +30,10 @@ module System.Agents.OS.Persistence.Schema (
     -- * Async Execution Schema
     sqliteCreateAsyncSchema,
     postgresCreateAsyncSchema,
+
+    -- * Drafts Schema
+    sqliteCreateDraftsSchema,
+    postgresCreateDraftsSchema,
 
     -- * Migration
     Migration (..),
@@ -51,9 +56,10 @@ Increment this when schema changes require migrations.
 Version history:
 * 1 - Initial schema (entities, components, events, messages, tool_calls)
 * 2 - Added async execution support (tool_call_cache, tool_continuations)
+* 3 - Added draft_messages table for TUI draft persistence
 -}
 currentSchemaVersion :: Int
-currentSchemaVersion = 2
+currentSchemaVersion = 3
 
 -------------------------------------------------------------------------------
 -- SQLite Schema - Version 1 (Base)
@@ -163,19 +169,45 @@ sqliteSchemaV2Statements =
             ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP |]
     ]
 
--- | Execute SQLite schema statements individually.
+-------------------------------------------------------------------------------
+-- SQLite Schema - Version 3 (Draft Messages)
+-------------------------------------------------------------------------------
+
+-- | SQLite schema statements for version 3 (draft messages support).
+sqliteSchemaV3Statements :: [Query]
+sqliteSchemaV3Statements =
+    [ -- Draft messages table
+      [sql| CREATE TABLE IF NOT EXISTS draft_messages (
+            draft_id TEXT PRIMARY KEY,
+            conversation_id TEXT,
+            content TEXT NOT NULL,
+            attachments TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            title TEXT
+        ) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC) |]
+    , -- Update schema version
+      [sql| INSERT INTO schema_version (version) VALUES (3) 
+            ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP |]
+    ]
+
+-- | Execute SQLite schema statements individually including v3.
 executeSqliteSchema :: Connection -> IO ()
 executeSqliteSchema conn = do
     forM_ sqliteSchemaV1Statements $ \stmt ->
         execute_ conn stmt
     forM_ sqliteSchemaV2Statements $ \stmt ->
         execute_ conn stmt
+    forM_ sqliteSchemaV3Statements $ \stmt ->
+        execute_ conn stmt
 
 -- | Complete SQLite schema creation script (for reference/documentation).
 sqliteCreateSchema :: Query
 sqliteCreateSchema =
     [sql|
--- OS Persistence Schema v2
+-- OS Persistence Schema v3
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -199,7 +231,7 @@ CREATE TABLE IF NOT EXISTS components (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     entity_id TEXT NOT NULL REFERENCES entities(entity_id) ON DELETE CASCADE,
     component_type INTEGER NOT NULL,
-    component_data JSON NOT NULL,
+    component_data TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(entity_id, component_type)
@@ -209,7 +241,7 @@ CREATE TABLE IF NOT EXISTS components (
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
-    event_data JSON NOT NULL,
+    event_data TEXT NOT NULL,
     entity_id TEXT REFERENCES entities(entity_id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -221,7 +253,7 @@ CREATE TABLE IF NOT EXISTS messages (
     turn_id TEXT NOT NULL,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
-    tool_calls JSON,
+    tool_calls TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -231,8 +263,8 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     tool_call_id TEXT NOT NULL UNIQUE,
     turn_id TEXT NOT NULL,
     tool_name TEXT NOT NULL,
-    tool_input JSON NOT NULL,
-    tool_result JSON,
+    tool_input TEXT NOT NULL,
+    tool_result TEXT,
     parent_call_id TEXT,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
@@ -261,6 +293,17 @@ CREATE TABLE IF NOT EXISTS tool_continuations (
     result_json TEXT
 );
 
+-- Draft messages table (TUI draft support)
+CREATE TABLE IF NOT EXISTS draft_messages (
+    draft_id TEXT PRIMARY KEY,
+    conversation_id TEXT,
+    content TEXT NOT NULL,
+    attachments TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title TEXT
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id);
 CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type);
@@ -279,12 +322,16 @@ CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
 CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC);
 |]
 
 -- | SQLite schema destruction script.
 sqliteDropSchema :: Query
 sqliteDropSchema =
     [sql|
+DROP INDEX IF EXISTS idx_drafts_updated;
+DROP INDEX IF EXISTS idx_drafts_conversation;
 DROP INDEX IF EXISTS idx_continuations_completed;
 DROP INDEX IF EXISTS idx_continuations_expires;
 DROP INDEX IF EXISTS idx_continuations_session;
@@ -302,6 +349,7 @@ DROP INDEX IF EXISTS idx_events_created;
 DROP INDEX IF EXISTS idx_events_entity;
 DROP INDEX IF EXISTS idx_components_type;
 DROP INDEX IF EXISTS idx_components_entity;
+DROP TABLE IF EXISTS draft_messages;
 DROP TABLE IF EXISTS tool_continuations;
 DROP TABLE IF EXISTS tool_call_cache;
 DROP TABLE IF EXISTS tool_calls;
@@ -317,7 +365,10 @@ sqliteMigrationScript :: Int -> Int -> Maybe (Connection -> IO ())
 sqliteMigrationScript fromVer toVer
     | fromVer == 0 && toVer == 1 = Just migrateV0ToV1
     | fromVer == 1 && toVer == 2 = Just migrateV1ToV2
+    | fromVer == 2 && toVer == 3 = Just migrateV2ToV3
     | fromVer == 0 && toVer == 2 = Just migrateV0ToV2
+    | fromVer == 0 && toVer == 3 = Just migrateV0ToV3
+    | fromVer == 1 && toVer == 3 = Just migrateV1ToV3
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
   where
@@ -331,10 +382,25 @@ sqliteMigrationScript fromVer toVer
         forM_ sqliteSchemaV2Statements $ \stmt ->
             execute_ conn stmt
 
+    migrateV2ToV3 :: Connection -> IO ()
+    migrateV2ToV3 conn =
+        forM_ sqliteSchemaV3Statements $ \stmt ->
+            execute_ conn stmt
+
     migrateV0ToV2 :: Connection -> IO ()
     migrateV0ToV2 conn = do
         migrateV0ToV1 conn
         migrateV1ToV2 conn
+
+    migrateV0ToV3 :: Connection -> IO ()
+    migrateV0ToV3 conn = do
+        migrateV0ToV2 conn
+        migrateV2ToV3 conn
+
+    migrateV1ToV3 :: Connection -> IO ()
+    migrateV1ToV3 conn = do
+        migrateV1ToV2 conn
+        migrateV2ToV3 conn
 
 -------------------------------------------------------------------------------
 -- PostgreSQL Schema
@@ -344,7 +410,7 @@ sqliteMigrationScript fromVer toVer
 postgresCreateSchema :: Query
 postgresCreateSchema =
     [sql|
--- OS Persistence Schema v2
+-- OS Persistence Schema v3
 
 -- Enable UUID extension if not already enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -356,7 +422,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 -- Insert initial version
-INSERT INTO schema_version (version) VALUES (2) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+INSERT INTO schema_version (version) VALUES (3) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 
 -- Entities table (sparse representation)
 CREATE TABLE IF NOT EXISTS entities (
@@ -433,6 +499,17 @@ CREATE TABLE IF NOT EXISTS tool_continuations (
     result_json JSONB
 );
 
+-- Draft messages table (TUI draft support)
+CREATE TABLE IF NOT EXISTS draft_messages (
+    draft_id UUID PRIMARY KEY,
+    conversation_id UUID,
+    content TEXT NOT NULL,
+    attachments JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title TEXT
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_components_entity ON components(entity_id);
 CREATE INDEX IF NOT EXISTS idx_components_type ON components(component_type);
@@ -452,12 +529,16 @@ CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
 CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
 CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC);
 |]
 
 -- | PostgreSQL schema destruction script.
 postgresDropSchema :: Query
 postgresDropSchema =
     [sql|
+DROP INDEX IF EXISTS idx_drafts_updated;
+DROP INDEX IF EXISTS idx_drafts_conversation;
 DROP INDEX IF EXISTS idx_continuations_completed;
 DROP INDEX IF EXISTS idx_continuations_expires;
 DROP INDEX IF EXISTS idx_continuations_session;
@@ -476,6 +557,7 @@ DROP INDEX IF EXISTS idx_events_entity;
 DROP INDEX IF EXISTS idx_components_data;
 DROP INDEX IF EXISTS idx_components_type;
 DROP INDEX IF EXISTS idx_components_entity;
+DROP TABLE IF EXISTS draft_messages;
 DROP TABLE IF EXISTS tool_continuations;
 DROP TABLE IF EXISTS tool_call_cache;
 DROP TABLE IF EXISTS tool_calls;
@@ -491,7 +573,10 @@ postgresMigrationScript :: Int -> Int -> Maybe Query
 postgresMigrationScript fromVer toVer
     | fromVer == 0 && toVer == 1 = Just postgresCreateV1Schema
     | fromVer == 1 && toVer == 2 = Just postgresCreateV2Schema
+    | fromVer == 2 && toVer == 3 = Just postgresCreateV3Schema
     | fromVer == 0 && toVer == 2 = Just postgresCreateSchema
+    | fromVer == 0 && toVer == 3 = Just postgresCreateSchema
+    | fromVer == 1 && toVer == 3 = Just postgresCreateV23Schema
     | fromVer == toVer = Nothing -- No migration needed
     | otherwise = Nothing -- Unknown migration path
   where
@@ -536,6 +621,67 @@ CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expir
 CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
 
 INSERT INTO schema_version (version) VALUES (2) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+    postgresCreateV3Schema =
+        [sql|
+-- V3 additions (Draft messages)
+CREATE TABLE IF NOT EXISTS draft_messages (
+    draft_id UUID PRIMARY KEY,
+    conversation_id UUID,
+    content TEXT NOT NULL,
+    attachments JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC);
+
+INSERT INTO schema_version (version) VALUES (3) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+    postgresCreateV23Schema =
+        [sql|
+-- V2+V3 additions
+CREATE TABLE IF NOT EXISTS tool_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    tool_name TEXT NOT NULL,
+    arguments_hash TEXT NOT NULL,
+    result_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cache_tool_name ON tool_call_cache(tool_name);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON tool_call_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS tool_continuations (
+    token TEXT PRIMARY KEY,
+    session_id UUID NOT NULL,
+    tool_call_json JSONB NOT NULL,
+    context_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result_json JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id);
+CREATE INDEX IF NOT EXISTS idx_continuations_expires ON tool_continuations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at);
+
+CREATE TABLE IF NOT EXISTS draft_messages (
+    draft_id UUID PRIMARY KEY,
+    conversation_id UUID,
+    content TEXT NOT NULL,
+    attachments JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC);
+
+INSERT INTO schema_version (version) VALUES (3) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 |]
 
 -------------------------------------------------------------------------------
@@ -623,6 +769,64 @@ CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(com
 
 -- Update schema version
 INSERT INTO schema_version (version) VALUES (2) 
+    ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+-------------------------------------------------------------------------------
+-- Drafts Schema Helpers
+-------------------------------------------------------------------------------
+
+{- | Create only the drafts schema tables (SQLite).
+
+Useful when you want to add draft support to an existing database
+without recreating the entire schema.
+-}
+sqliteCreateDraftsSchema :: Query
+sqliteCreateDraftsSchema =
+    [sql|
+-- Draft messages table
+CREATE TABLE IF NOT EXISTS draft_messages (
+    draft_id TEXT PRIMARY KEY,
+    conversation_id TEXT,
+    content TEXT NOT NULL,
+    attachments TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC);
+
+-- Update schema version
+INSERT INTO schema_version (version) VALUES (3) 
+    ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
+|]
+
+{- | Create only the drafts schema tables (PostgreSQL).
+
+Useful when you want to add draft support to an existing database
+without recreating the entire schema.
+-}
+postgresCreateDraftsSchema :: Query
+postgresCreateDraftsSchema =
+    [sql|
+-- Draft messages table
+CREATE TABLE IF NOT EXISTS draft_messages (
+    draft_id UUID PRIMARY KEY,
+    conversation_id UUID,
+    content TEXT NOT NULL,
+    attachments JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_conversation ON draft_messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_updated ON draft_messages(updated_at DESC);
+
+-- Update schema version
+INSERT INTO schema_version (version) VALUES (3) 
     ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP;
 |]
 

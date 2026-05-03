@@ -83,6 +83,7 @@ library agents-lib
                     , System.Agents.OS.Persistence
                     , System.Agents.OS.Persistence.File
                     , System.Agents.OS.Persistence.Schema
+                    , System.Agents.OS.Persistence.Drafts
                     , System.Agents.OS.Persistence.Sqlite
                     , System.Agents.OS.Persistence.Types
                     , System.Agents.OS.Resources
@@ -156,6 +157,7 @@ library agents-lib
                     , System.Agents.TUI.Core
                     , System.Agents.TUI.Types
                     , System.Agents.TUI.Render
+                    , System.Agents.TUI.Drafts
                     , System.Agents.TUI.Event
                     , System.Agents.TUI.Clipboard
                     , System.Agents.TUI.KeyMapping
