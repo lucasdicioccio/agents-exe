@@ -90,6 +90,14 @@ data EventName
     | EventNavigateDown
     | EventDeleteItem
     | EventOpenConversation
+    | -- ** Draft-related events
+      EventNewDraft
+    | EventSaveDraft
+    | EventLoadDraft
+    | EventDeleteDraft
+    | EventSendDraft
+    | EventDraftsList
+    | EventEditDraftTitle
     deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | All possible event names.
@@ -123,6 +131,13 @@ eventNameToText EventNavigateUp = "navigate-up"
 eventNameToText EventNavigateDown = "navigate-down"
 eventNameToText EventDeleteItem = "delete-item"
 eventNameToText EventOpenConversation = "open-conversation"
+eventNameToText EventNewDraft = "new-draft"
+eventNameToText EventSaveDraft = "save-draft"
+eventNameToText EventLoadDraft = "load-draft"
+eventNameToText EventDeleteDraft = "delete-draft"
+eventNameToText EventSendDraft = "send-draft"
+eventNameToText EventDraftsList = "drafts-list"
+eventNameToText EventEditDraftTitle = "edit-draft-title"
 
 -- | Parse an EventName from its JSON key representation.
 eventNameFromText :: Text -> Maybe EventName
@@ -151,6 +166,13 @@ eventNameFromText "navigate-up" = Just EventNavigateUp
 eventNameFromText "navigate-down" = Just EventNavigateDown
 eventNameFromText "delete-item" = Just EventDeleteItem
 eventNameFromText "open-conversation" = Just EventOpenConversation
+eventNameFromText "new-draft" = Just EventNewDraft
+eventNameFromText "save-draft" = Just EventSaveDraft
+eventNameFromText "load-draft" = Just EventLoadDraft
+eventNameFromText "delete-draft" = Just EventDeleteDraft
+eventNameFromText "send-draft" = Just EventSendDraft
+eventNameFromText "drafts-list" = Just EventDraftsList
+eventNameFromText "edit-draft-title" = Just EventEditDraftTitle
 eventNameFromText _ = Nothing
 
 instance ToJSON EventName where
@@ -390,6 +412,14 @@ defaultKeyMapping =
             , (EventNavigateDown, [KeyBinding KeyDown noModifiers])
             , (EventDeleteItem, [KeyBinding KeyDelete noModifiers, KeyBinding KeyBackspace noModifiers])
             , (EventOpenConversation, [KeyBinding KeyEnter noModifiers])
+            , -- Draft events
+              (EventNewDraft, [KeyBinding (KeyChar 'w') ctrlModifier])
+            , (EventSaveDraft, [KeyBinding (KeyChar 's') ctrlModifier])
+            , (EventLoadDraft, [KeyBinding (KeyChar 'l') ctrlModifier])
+            , (EventDeleteDraft, [KeyBinding (KeyChar 'D') (Modifiers True False True)])
+            , (EventSendDraft, [KeyBinding KeyEnter (Modifiers True True False)])
+            , (EventDraftsList, [KeyBinding (KeyChar 'b') ctrlModifier])
+            , (EventEditDraftTitle, [KeyBinding (KeyChar 'T') (Modifiers True False True)])
             ]
 
 -------------------------------------------------------------------------------
@@ -465,6 +495,7 @@ generateHelpContent keymap =
     , "  Chats   tab  - Zooms the conversation panel"
     , "  History tab  - Zooms the session panel"
     , "  Help    tab  - Zooms the help content"
+    , "  Drafts  tab  - Zooms the draft list panel"
     , ""
     , "Tabs:"
     , "  " <> formatBindings EventCycleTabBackward <> " - Switch to previous tab"
@@ -476,6 +507,15 @@ generateHelpContent keymap =
     , "  " <> formatBindings EventContinueSession <> " - Continue restored session"
     , "  " <> formatBindings EventSendMessage <> " - Send message"
     , "  " <> formatBindings EventTogglePause <> " - Pause/unpause conversation"
+    , ""
+    , "Drafts:"
+    , "  " <> formatBindings EventNewDraft <> " - Create new draft from current message"
+    , "  " <> formatBindings EventSaveDraft <> " - Save current draft"
+    , "  " <> formatBindings EventLoadDraft <> " - Load selected draft"
+    , "  " <> formatBindings EventDraftsList <> " - Open drafts tab"
+    , "  " <> formatBindings EventSendDraft <> " - Send draft as message"
+    , "  " <> formatBindings EventDeleteDraft <> " - Delete selected draft"
+    , "  " <> formatBindings EventEditDraftTitle <> " - Edit draft title"
     , ""
     , "Attachments:"
     , "  " <> formatBindings EventAttachFile <> " - Attach file (opens file browser)"
@@ -560,3 +600,4 @@ mergeWithDefault (KeyMapping custom) =
     KeyMapping $ Map.unionWith (\customBindings _ -> customBindings) custom defaultBindings
   where
     KeyMapping defaultBindings = defaultKeyMapping
+
