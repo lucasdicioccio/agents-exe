@@ -73,7 +73,7 @@ module System.Agents.Tools.SystemToolbox (
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, bracket, IOException)
 import Control.Monad (forM)
 import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
@@ -94,7 +94,8 @@ import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (doesFileExist, getCurrentDirectory, getModificationTime)
 import System.Environment (getEnvironment, lookupEnv)
 import System.FilePath (takeExtension)
-import System.IO.Error (isDoesNotExistError)
+import System.IO (IOMode(..), openBinaryFile, hClose)
+import System.IO.Error (isDoesNotExistError, ioeGetErrorString)
 import System.Posix.Process (getParentProcessID, getProcessID)
 import System.Posix.User (getEffectiveGroupID, getEffectiveUserID, getUserEntryForID, homeDirectory, userName, userShell)
 import qualified System.Process as Process
@@ -632,47 +633,83 @@ getCapabilityInfoInternal capability toolbox = do
 -- Session Introspection Capabilities
 -------------------------------------------------------------------------------
 
+{- | Check if an IOException indicates a "resource busy" (file locked) condition.
+This checks the error message for common patterns indicating a locked file.
+-}
+isResourceBusyError :: IOException -> Bool
+isResourceBusyError e = 
+    let errStr = ioeGetErrorString e
+        errTxt = Text.toLower $ Text.pack errStr
+    in "resource busy" `Text.isInfixOf` errTxt
+        || "file is locked" `Text.isInfixOf` errTxt
+        || "locked" `Text.isInfixOf` errTxt
+
 {- | List accessible sessions based on scope.
 
 Returns session IDs, timestamps, turn counts, and relationship info.
+Handles locked files gracefully by marking sessions that are currently
+being written to.
 -}
 getListSessionsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
 getListSessionsInfo Nothing = pure ("list-sessions", String "Session store not configured")
 getListSessionsInfo (Just config) = do
-    -- List all sessions from the store
-    allSessions <- SessionStore.listSessions (introspectionStore config)
+    -- List all sessions from the store with error handling for locked files
+    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    
+    case allSessionsResult of
+        Left (e :: SomeException) -> do
+            -- If we can't list sessions at all, return an error
+            pure ("list-sessions", Aeson.object ["error" .= Text.pack (show e), "sessions" .= ([] :: [Aeson.Value])])
+        Right allSessions -> do
+            -- Filter sessions based on scope
+            let accessibleSessions = filterSessionsByScope config allSessions
 
-    -- Filter sessions based on scope
-    let accessibleSessions = filterSessionsByScope config allSessions
+            -- Apply limit
+            let limitedSessions = take (introspectionMaxResults config) accessibleSessions
 
-    -- Apply limit
-    let limitedSessions = take (introspectionMaxResults config) accessibleSessions
+            -- Build session info list, handling locked files gracefully
+            sessionInfos <- forM limitedSessions $ \(path, mSession, convId) -> do
+                -- Try to get modification time, handling locked files
+                mtimeResult <- try $ getSessionModTime (introspectionStore config) convId
+                let mtime = case mtimeResult of
+                        Left (_ :: SomeException) -> Nothing
+                        Right mt -> mt
+                
+                -- Check if session is locked (currently being edited)
+                isLocked <- isSessionFileLocked path
+                
+                let turnCount = maybe 0 (length . turns) mSession
+                let isParent = isParentSession config mSession
+                let isChild = isChildSession config mSession
+                
+                pure $ Aeson.object
+                    [ "sessionId" .= conversationIdToText convId
+                    , "conversationId" .= conversationIdToText convId
+                    , "modificationTime" .= maybe "" (Text.pack . show) mtime
+                    , "turnCount" .= turnCount
+                    , "isParent" .= isParent
+                    , "isChild" .= isChild
+                    , "isLocked" .= isLocked
+                    , "status" .= if isLocked then ("active" :: Text) else ("idle" :: Text)
+                    ]
 
-    -- Build session info list
-    sessionInfos <- forM limitedSessions $ \(_path, mSession, convId) -> do
-        mtime <- getSessionModTime (introspectionStore config) convId
-        let turnCount = maybe 0 (length . turns) mSession
-        let isParent = isParentSession config mSession
-        let isChild = isChildSession config mSession
-        pure $
-            Aeson.object
-                [ "sessionId" .= conversationIdToText convId
-                , "conversationId" .= conversationIdToText convId
-                , "modificationTime" .= maybe "" (Text.pack . show) mtime
-                , "turnCount" .= turnCount
-                , "isParent" .= isParent
-                , "isChild" .= isChild
-                ]
+            let totalAccessible = length accessibleSessions
 
-    let totalAccessible = length accessibleSessions
+            pure $
+                ( "list-sessions"
+                , Aeson.object
+                    [ "sessions" .= sessionInfos
+                    , "totalAccessible" .= totalAccessible
+                    ]
+                )
 
-    pure $
-        ( "list-sessions"
-        , Aeson.object
-            [ "sessions" .= sessionInfos
-            , "totalAccessible" .= totalAccessible
-            ]
-        )
+-- | Check if a session file is currently locked (being written to)
+isSessionFileLocked :: FilePath -> IO Bool
+isSessionFileLocked path = do
+    result <- try $ bracket (openBinaryFile path ReadMode) hClose (\_ -> pure ())
+    case result of
+        Left (ioe :: IOException) -> pure $ isResourceBusyError ioe
+        Right _ -> pure False
 
 {- | Search sessions using full-text search.
 
@@ -716,23 +753,33 @@ Returns: turn counts, token usage, byte counts, trajectory signals
 getSessionStatsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
 getSessionStatsInfo Nothing = pure ("get-session-stats", String "Session store not configured")
 getSessionStatsInfo (Just config) = do
-    -- List all accessible sessions
-    allSessions <- SessionStore.listSessions (introspectionStore config)
-    let accessibleSessions = filterSessionsByScope config allSessions
+    -- List all accessible sessions with error handling
+    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    
+    case allSessionsResult of
+        Left (_ :: SomeException) -> do
+            pure $ ("get-session-stats", Aeson.object 
+                [ "totalSessions" .= (0 :: Int)
+                , "totalTurnsAcrossAllSessions" .= (0 :: Int)
+                , "scope" .= showScope (introspectionScope config)
+                , "note" .= ("Could not access session store" :: Text)
+                ])
+        Right allSessions -> do
+            let accessibleSessions = filterSessionsByScope config allSessions
 
-    -- Calculate aggregate stats
-    let totalTurns = sum [maybe 0 (length . turns) mSession | (_, mSession, _) <- accessibleSessions]
-    let totalSessions = length accessibleSessions
+            -- Calculate aggregate stats, handling Nothing sessions (locked/unreadable)
+            let totalTurns = sum [maybe 0 (length . turns) mSession | (_, mSession, _) <- accessibleSessions]
+            let totalSessions = length accessibleSessions
 
-    pure $
-        ( "get-session-stats"
-        , Aeson.object
-            [ "totalSessions" .= totalSessions
-            , "totalTurnsAcrossAllSessions" .= totalTurns
-            , "scope" .= showScope (introspectionScope config)
-            , "note" .= ("Use SessionPrint.calculateStatistics for detailed per-session stats" :: Text)
-            ]
-        )
+            pure $
+                ( "get-session-stats"
+                , Aeson.object
+                    [ "totalSessions" .= totalSessions
+                    , "totalTurnsAcrossAllSessions" .= totalTurns
+                    , "scope" .= showScope (introspectionScope config)
+                    , "note" .= ("Use SessionPrint.calculateStatistics for detailed per-session stats" :: Text)
+                    ]
+                )
 
 -- | Helper to convert scope to text
 showScope :: SessionIntrospectionScope -> Text
