@@ -75,11 +75,13 @@ data Trace
     = RuntimeTrace !Runtime.Trace
     | OneShotTrace !OneShot.Trace
     deriving (Show)
+
 {- | Default keyboard shortcuts help content.
 Generated from the default key mapping.
 -}
 defaultHelpContent :: [Text]
 defaultHelpContent = generateHelpContent defaultKeyMapping
+
 -- | Alias for defaultHelpContent for backward compatibility.
 initHelpContent :: [Text]
 initHelpContent = defaultHelpContent
@@ -116,8 +118,9 @@ buildFocusRingForTabPreserving :: Tab -> Maybe WidgetName -> FocusRing WidgetNam
 buildFocusRingForTabPreserving tab mCurrentFocus =
     let newRing = buildFocusRingForTab tab
      in case mCurrentFocus of
-            Just currentFocus | currentFocus `elem` focusRingElements newRing ->
-                focusSetCurrent currentFocus newRing
+            Just currentFocus
+                | currentFocus `elem` focusRingElements newRing ->
+                    focusSetCurrent currentFocus newRing
             _ -> newRing
 
 {- | Get the default (entry) widget for a tab.
@@ -471,36 +474,37 @@ handleForkAtTurn _tracer navState = do
     let session = navState ^. navSession
         selectedIdx = navState ^. navSelectedTurnIndex
         totalTurns = length session.turns
-    
+
     -- Calculate the number of turns to keep
     let keepCount = selectedIdx + 1
-    
+
     when (keepCount > 0 && keepCount <= totalTurns) $ do
         -- Get the turns to preserve (0 to selectedIdx)
         let preservedTurns = take keepCount session.turns
-        
+
         -- Create a new forked session
         newSessionId' <- liftIO newSessionId
         newTurnId' <- liftIO newTurnId
-        let forkedSession = Session
-                { turns = preservedTurns
-                , sessionId = newSessionId'
-                , forkedFromSessionId = Just session.sessionId
-                , turnId = newTurnId'
-                , sessionVersion = session.sessionVersion
-                , sessionExecutionMode = session.sessionExecutionMode
-                }
-        
+        let forkedSession =
+                Session
+                    { turns = preservedTurns
+                    , sessionId = newSessionId'
+                    , forkedFromSessionId = Just session.sessionId
+                    , turnId = newTurnId'
+                    , sessionVersion = session.sessionVersion
+                    , sessionExecutionMode = session.sessionExecutionMode
+                    }
+
         -- Find the agent for this conversation
         mConv <- getFocusedConversation
         case mConv of
             Nothing -> showStatus StatusError "No conversation selected to fork"
             Just conv -> do
                 let agent = conversationAgent conv
-                
+
                 -- Create conversation name indicating it's a fork
                 let forkName = conversationName conv <> " (fork at turn " <> Text.pack (show keepCount) <> ")"
-                
+
                 -- Start a new conversation with the forked session
                 handleRestoredConversation agent forkName forkedSession
                 exitTurnNavigation
@@ -518,40 +522,41 @@ attachment dialog mode.
 handleNormalEvent :: Tracer IO Trace -> BrickEvent N AppEvent -> EventM N TuiState ()
 handleNormalEvent tracer ev = do
     keyMap <- use keyMapping
-    
+
     -- Check for quit confirmation reset on any non-quit key press
     case ev of
         VtyEvent (Vty.EvKey (Vty.KChar 'q') [Vty.MCtrl]) -> pure ()
         VtyEvent _ -> resetQuitConfirmation
         _ -> pure ()
-    
+
     -- Extract VtyEvent for keybinding checks
     let mVtyEv = case ev of
             VtyEvent vtyEv -> Just vtyEv
             _ -> Nothing
-    
+
     -- First check for global keybindings
     case mVtyEv of
-        Just vtyEv | matchesEvent keyMap EventQuit vtyEv -> handleQuit
-                   | matchesEvent keyMap EventCycleTabForward vtyEv -> cycleTabForward
-                   | matchesEvent keyMap EventCycleTabBackward vtyEv -> cycleTabBackward
-                   | matchesEvent keyMap EventCycleFocusForward vtyEv -> cycleFocusForward
-                   | matchesEvent keyMap EventCycleFocusBackward vtyEv -> cycleFocusBackward
-                   | matchesEvent keyMap EventToggleZoom vtyEv -> toggleZoom
-                   | matchesEvent keyMap EventNewConversation vtyEv -> handleNewConversationFromEditor tracer
-                   | matchesEvent keyMap EventSendMessage vtyEv -> handleSendMessage tracer
-                   | matchesEvent keyMap EventAttachFile vtyEv -> openFilePathDialog
-                   | matchesEvent keyMap EventClearAttachments vtyEv -> handleClearAllAttachments
-                   | matchesEvent keyMap EventPasteClipboard vtyEv -> handleClipboardPaste
-                   | matchesEvent keyMap EventExportSession vtyEv -> handleDumpSessionToMarkdown
-                   | matchesEvent keyMap EventViewSessionChronological vtyEv -> 
-                         handleViewSessionWithExternalViewer Chronological
-                   | matchesEvent keyMap EventViewSessionReverse vtyEv -> 
-                         handleViewSessionWithExternalViewer Antichronological
-                   | matchesEvent keyMap EventClearQueuedMessages vtyEv -> handleClearQueuedMessages
-                   | matchesEvent keyMap EventTogglePause vtyEv -> handleTogglePauseConversation
-                   | matchesEvent keyMap EventRefreshTools vtyEv -> handleRefreshTools
-                   | otherwise -> handleNonGlobalEvent tracer ev
+        Just vtyEv
+            | matchesEvent keyMap EventQuit vtyEv -> handleQuit
+            | matchesEvent keyMap EventCycleTabForward vtyEv -> cycleTabForward
+            | matchesEvent keyMap EventCycleTabBackward vtyEv -> cycleTabBackward
+            | matchesEvent keyMap EventCycleFocusForward vtyEv -> cycleFocusForward
+            | matchesEvent keyMap EventCycleFocusBackward vtyEv -> cycleFocusBackward
+            | matchesEvent keyMap EventToggleZoom vtyEv -> toggleZoom
+            | matchesEvent keyMap EventNewConversation vtyEv -> handleNewConversationFromEditor tracer
+            | matchesEvent keyMap EventSendMessage vtyEv -> handleSendMessage tracer
+            | matchesEvent keyMap EventAttachFile vtyEv -> openFilePathDialog
+            | matchesEvent keyMap EventClearAttachments vtyEv -> handleClearAllAttachments
+            | matchesEvent keyMap EventPasteClipboard vtyEv -> handleClipboardPaste
+            | matchesEvent keyMap EventExportSession vtyEv -> handleDumpSessionToMarkdown
+            | matchesEvent keyMap EventViewSessionChronological vtyEv ->
+                handleViewSessionWithExternalViewer Chronological
+            | matchesEvent keyMap EventViewSessionReverse vtyEv ->
+                handleViewSessionWithExternalViewer Antichronological
+            | matchesEvent keyMap EventClearQueuedMessages vtyEv -> handleClearQueuedMessages
+            | matchesEvent keyMap EventTogglePause vtyEv -> handleTogglePauseConversation
+            | matchesEvent keyMap EventRefreshTools vtyEv -> handleRefreshTools
+            | otherwise -> handleNonGlobalEvent tracer ev
         Nothing -> handleNonGlobalEvent tracer ev
 
 -- | Handle non-global events (application events and widget-specific events).
@@ -565,18 +570,16 @@ handleNonGlobalEvent tracer ev = do
         AppEvent AppEvent_ClearStatus -> handleClearStatus
         AppEvent (AppEvent_AgentStepProgrress convId session) -> handleConversationUpdated convId session
         AppEvent (AppEvent_AgentNeedsInput convId) -> handleConversationNeedsInput convId
-        AppEvent (AppEvent_SubcallStarted parentId subcallId agentSlug depth) -> 
+        AppEvent (AppEvent_SubcallStarted parentId subcallId agentSlug depth) ->
             handleSubcallStarted tracer parentId subcallId agentSlug depth
-        AppEvent (AppEvent_SubcallProgress subcallId session) -> 
+        AppEvent (AppEvent_SubcallProgress subcallId session) ->
             handleSubcallProgress subcallId session
-        AppEvent (AppEvent_SubcallCompleted subcallId result) -> 
+        AppEvent (AppEvent_SubcallCompleted subcallId result) ->
             handleSubcallCompleted subcallId result
-        AppEvent (AppEvent_SubcallFailed subcallId err) -> 
+        AppEvent (AppEvent_SubcallFailed subcallId err) ->
             handleSubcallFailed subcallId err
-        
         -- Vty events
         VtyEvent vtyEv -> handleWidgetSpecificEvent tracer currentFocus vtyEv
-        
         _ -> pure ()
 
 -- | Handle widget-specific events.
@@ -626,8 +629,9 @@ handleConversationListEvent _tracer ev = do
         Vty.EvKey Vty.KEnter [] -> do
             mConv <- getFocusedConversation
             case mConv of
-                Just conv | conversationStatus conv == ConversationStatus_WaitingForInput ->
-                    switchToChatsAndFocusMessage
+                Just conv
+                    | conversationStatus conv == ConversationStatus_WaitingForInput ->
+                        switchToChatsAndFocusMessage
                 _ -> pure ()
         _ -> do
             zoom (tuiUI . conversationList) $ handleListEvent ev
@@ -787,7 +791,7 @@ handleClipboardContent conv content = do
             let currentLines = getEditContents currentEditor
             let newLines = case currentLines of
                     [] -> [text]
-                    (l:ls) -> (l <> text) : ls
+                    (l : ls) -> (l <> text) : ls
             tuiUI . messageEditor . editContentsL .= TextZipper.textZipper newLines Nothing
             showStatus StatusInfo "Text pasted from clipboard"
         ClipboardFilePaths paths -> do
@@ -837,7 +841,7 @@ cycleFocusForward = do
     tuiUI . uiFocusRing %= focusNext
     mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
     case mFocus of
-        Just widget -> 
+        Just widget ->
             when (widgetToTab widget /= oldTab) $ do
                 tuiUI . currentTab .= widgetToTab widget
         Nothing -> pure ()
@@ -849,7 +853,7 @@ cycleFocusBackward = do
     tuiUI . uiFocusRing %= focusPrev
     mFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
     case mFocus of
-        Just widget -> 
+        Just widget ->
             when (widgetToTab widget /= oldTab) $ do
                 tuiUI . currentTab .= widgetToTab widget
         Nothing -> pure ()
@@ -890,17 +894,18 @@ getFocusedConversationId = do
 -- | Format the current session as markdown.
 formatSessionMarkdown :: Session -> OrderPreference -> Text
 formatSessionMarkdown session order =
-    let opts = SessionPrintOptions
-            { sessionPrintFile = ""
-            , showToolCallResults = ShownFull
-            , showToolCallArguments = ShownFull
-            , nTurns = Nothing
-            , repeatSystemPrompt = False
-            , repeatTools = False
-            , orderPreference = order
-            , noFunnyStamp = True
-            }
-    in formatSessionAsMarkdown opts session
+    let opts =
+            SessionPrintOptions
+                { sessionPrintFile = ""
+                , showToolCallResults = ShownFull
+                , showToolCallArguments = ShownFull
+                , nTurns = Nothing
+                , repeatSystemPrompt = False
+                , repeatTools = False
+                , orderPreference = order
+                , noFunnyStamp = True
+                }
+     in formatSessionAsMarkdown opts session
 
 -- | Export the current session to a markdown file.
 handleDumpSessionToMarkdown :: EventM N TuiState ()
@@ -931,10 +936,10 @@ handleViewSessionWithExternalViewer order = do
                     -- Create a temp file with the session markdown
                     tempFile <- liftIO $ writeSystemTempFile "session-view.md" ""
                     let markdown = formatSessionMarkdown session order
-                    
+
                     -- Write to temp file
                     liftIO $ TextIO.writeFile tempFile markdown
-                    
+
                     -- Try to open with external viewer
                     mViewer <- liftIO $ lookupEnv "AGENTS_MARKDOWN_VIEWER"
                     case mViewer of
@@ -945,17 +950,18 @@ handleViewSessionWithExternalViewer order = do
                                 (exitCode, _, err) <- readProcessWithExitCode viewer [tempFile] ""
                                 case exitCode of
                                     ExitSuccess -> pure ()
-                                    ExitFailure code -> 
+                                    ExitFailure code ->
                                         hPutStrLn stderr $ "Viewer exited with code " ++ show code ++ ": " ++ err
-                            
+
                             -- Store the task for cleanup
-                            let auxTask = Viewer
-                                    { viewerAsync = asyncTask
-                                    , viewerConversationId = conversationId conv
-                                    , viewerSessionId = session.sessionId
-                                    }
+                            let auxTask =
+                                    Viewer
+                                        { viewerAsync = asyncTask
+                                        , viewerConversationId = conversationId conv
+                                        , viewerSessionId = session.sessionId
+                                        }
                             tuiUI . auxiliaryTasks %= (auxTask :)
-                            
+
                             showStatus StatusInfo "Opening session in external viewer"
 
 -- ============================================================================
@@ -967,7 +973,7 @@ handleHeartbeat :: EventM N TuiState ()
 handleHeartbeat = do
     -- Clean up completed auxiliary tasks
     cleanupAuxiliaryTasks
-    
+
     -- Refresh UI from core state
     syncWithCoreState
 
@@ -990,11 +996,11 @@ syncWithCoreState :: EventM N TuiState ()
 syncWithCoreState = do
     core <- use tuiCore
     coreState <- liftIO $ readTVarIO core
-    
+
     -- Sync buffered messages
     bufferedMsgs <- liftIO $ readAndClearBufferedMessages coreState
     tuiUI . uiBufferedMessages .= bufferedMsgs
-    
+
     -- Sync agent tools
     tuiUI . uiAgentTools .= coreAgentTools coreState
 
@@ -1026,85 +1032,89 @@ handleNewConversationFromEditor tracer = do
 handleNewConversation :: Tracer IO Trace -> TuiAgent -> EventM N TuiState ()
 handleNewConversation _tracer agent = do
     convId <- liftIO newConversationId
-    
+
     -- Create a new channel for this conversation
     convChan <- liftIO $ newBChan 100
-    
+
     -- Get agent tools
     tools <- liftIO $ readTVarIO (osNodeTools $ tuiNode agent)
-    
+
     -- Store tools in UI state
     tuiUI . uiAgentTools %= ((tuiAgentId agent, tools) :)
-    
+
     -- Create onProgress callback
     onProgress <- liftIO $ buildOnProgress convChan
-    
-    let conv = Conversation
-            { conversationId = convId
-            , conversationAgent = agent
-            , conversationThreadId = Nothing
-            , conversationSession = Nothing
-            , conversationName = tuiSlug agent <> " " <> shortConvId convId
-            , conversationChan = convChan
-            , conversationStatus = ConversationStatus_WaitingForInput
-            , conversationOnProgress = onProgress
-            , conversationIsSubcall = False
-            , conversationParentId = Nothing
-            , conversationSubcallDepth = 0
-            }
-    
+
+    let conv =
+            Conversation
+                { conversationId = convId
+                , conversationAgent = agent
+                , conversationThreadId = Nothing
+                , conversationSession = Nothing
+                , conversationName = tuiSlug agent <> " " <> shortConvId convId
+                , conversationChan = convChan
+                , conversationStatus = ConversationStatus_WaitingForInput
+                , conversationOnProgress = onProgress
+                , conversationIsSubcall = False
+                , conversationParentId = Nothing
+                , conversationSubcallDepth = 0
+                }
+
     -- Add conversation to core state
     core <- use tuiCore
     liftIO $ atomically $ modifyTVar core $ \c ->
-        c { coreConversations = conv : coreConversations c }
-    
+        c{coreConversations = conv : coreConversations c}
+
     -- Add conversation to UI list
     tuiUI . conversationList %= listInsert 0 conv
     tuiUI . conversationList %= listMoveTo 0
-    
+
     -- Switch to Chats tab and focus message editor
     switchToChatsAndFocusMessage
     showStatus StatusInfo $ "New conversation started with " <> tuiSlug agent
+
 -- | Handle a restored conversation with an existing session.
 handleRestoredConversation :: TuiAgent -> Text -> Session -> EventM N TuiState ()
 handleRestoredConversation agent convName session = do
     convId <- liftIO newConversationId
-    
+
     -- Create a new channel for this conversation
     convChan <- liftIO $ newBChan 100
-    
+
     onProgress <- liftIO $ buildOnProgress convChan
-    
-    let conv = Conversation
-            { conversationId = convId
-            , conversationAgent = agent
-            , conversationThreadId = Nothing
-            , conversationSession = Just session
-            , conversationName = convName
-            , conversationChan = convChan
-            , conversationStatus = ConversationStatus_WaitingForInput
-            , conversationOnProgress = onProgress
-            , conversationIsSubcall = False
-            , conversationParentId = Nothing
-            , conversationSubcallDepth = 0
-            }
-    
+
+    let conv =
+            Conversation
+                { conversationId = convId
+                , conversationAgent = agent
+                , conversationThreadId = Nothing
+                , conversationSession = Just session
+                , conversationName = convName
+                , conversationChan = convChan
+                , conversationStatus = ConversationStatus_WaitingForInput
+                , conversationOnProgress = onProgress
+                , conversationIsSubcall = False
+                , conversationParentId = Nothing
+                , conversationSubcallDepth = 0
+                }
+
     -- Add conversation to core state
     core <- use tuiCore
     liftIO $ atomically $ modifyTVar core $ \c ->
-        c { coreConversations = conv : coreConversations c }
-    
+        c{coreConversations = conv : coreConversations c}
+
     -- Add conversation to UI list
     tuiUI . conversationList %= listInsert 0 conv
     tuiUI . conversationList %= listMoveTo 0
-    
+
     -- Switch to Chats tab
     switchToChatsAndFocusMessage
     showStatus StatusInfo $ "Restored conversation: " <> convName
+
 handleConversationNeedsInput :: ConversationId -> EventM N TuiState ()
 handleConversationNeedsInput convId = do
     updateConversationStatus convId ConversationStatus_WaitingForInput
-    
+
     -- Check if this conversation is currently focused
     mCurrentConv <- getFocusedConversation
     case mCurrentConv of
@@ -1121,13 +1131,13 @@ updateConversationStatus convId newStatus = do
     -- Update in core state
     core <- use tuiCore
     liftIO $ atomically $ modifyTVar core $ \c ->
-        c { coreConversations = map updateStatus (coreConversations c) }
-    
+        c{coreConversations = map updateStatus (coreConversations c)}
+
     -- Update in UI list
     tuiUI . conversationList %= fmap updateStatus
   where
     updateStatus conv
-        | conversationId conv == convId = conv { conversationStatus = newStatus }
+        | conversationId conv == convId = conv{conversationStatus = newStatus}
         | otherwise = conv
 
 -- | Handle conversation update from progress event.
@@ -1136,13 +1146,13 @@ handleConversationUpdated convId session = do
     -- Update in core state
     core <- use tuiCore
     liftIO $ atomically $ modifyTVar core $ \c ->
-        c { coreConversations = map updateSession (coreConversations c) }
-    
+        c{coreConversations = map updateSession (coreConversations c)}
+
     -- Update in UI list
     tuiUI . conversationList %= fmap updateSession
   where
     updateSession conv
-        | conversationId conv == convId = conv { conversationSession = Just session }
+        | conversationId conv == convId = conv{conversationSession = Just session}
         | otherwise = conv
 
 -- | Refresh tools for the currently selected agent.
@@ -1181,21 +1191,22 @@ handleTogglePauseConversation = do
                 newStatus = case conversationStatus conv of
                     ConversationStatus_Paused -> ConversationStatus_WaitingForInput
                     _ -> ConversationStatus_Paused
-            
+
             updateConversationStatus convId newStatus
-            
+
             -- Update paused conversations set in core
             core <- use tuiCore
             liftIO $ atomically $ modifyTVar core $ \c ->
                 case newStatus of
                     ConversationStatus_Paused ->
-                        c { corePausedConversations = Set.insert convId (corePausedConversations c) }
+                        c{corePausedConversations = Set.insert convId (corePausedConversations c)}
                     _ ->
-                        c { corePausedConversations = Set.delete convId (corePausedConversations c) }
-            
-            showStatus StatusInfo $ if newStatus == ConversationStatus_Paused 
-                then "Conversation paused" 
-                else "Conversation resumed"
+                        c{corePausedConversations = Set.delete convId (corePausedConversations c)}
+
+            showStatus StatusInfo $
+                if newStatus == ConversationStatus_Paused
+                    then "Conversation paused"
+                    else "Conversation resumed"
 
 -- | Check if a conversation is paused.
 isConversationPaused :: ConversationId -> TuiState -> Bool
@@ -1208,7 +1219,7 @@ isConversationPaused convId st =
 getConversation :: ConversationId -> TuiState -> Maybe Conversation
 getConversation convId st =
     let convs = Vector.toList $ st ^. tuiUI . conversationList . to listElements
-    in listToMaybe $ filter ((== convId) . conversationId) convs
+     in listToMaybe $ filter ((== convId) . conversationId) convs
 
 -- ============================================================================
 -- Queued Message Management
@@ -1227,8 +1238,10 @@ handleClearQueuedMessages = do
             -- Also clear in core
             coreTVar <- use tuiCore
             core <- liftIO $ readTVarIO coreTVar
-            liftIO $ atomically $ modifyTVar (coreBufferedMessages core) $ 
-                Map.filterWithKey (\k _ -> k /= convId)
+            liftIO $
+                atomically $
+                    modifyTVar (coreBufferedMessages core) $
+                        Map.filterWithKey (\k _ -> k /= convId)
             showStatus StatusInfo "Queued messages cleared"
 
 -- | Delete the currently selected queued message.
@@ -1259,8 +1272,8 @@ handleDeleteSelectedMessage = do
 -- | Delete element at index from a list.
 deleteAt :: Int -> [a] -> [a]
 deleteAt _ [] = []
-deleteAt 0 (_:xs) = xs
-deleteAt n (x:xs) = x : deleteAt (n-1) xs
+deleteAt 0 (_ : xs) = xs
+deleteAt n (x : xs) = x : deleteAt (n - 1) xs
 
 -- | Navigate through queued messages.
 handleQueueNavigation :: Int -> EventM N TuiState ()
@@ -1298,9 +1311,9 @@ buildOnProgressForConversation :: BChan AppEvent -> ConversationId -> IO OnSessi
 buildOnProgressForConversation chan convId = do
     pure $ \progress -> case progress of
         SessionStarted _ -> pure ()
-        SessionUpdated session -> 
+        SessionUpdated session ->
             writeBChan chan (AppEvent_AgentStepProgrress convId session)
-        SessionCompleted _ -> 
+        SessionCompleted _ ->
             writeBChan chan (AppEvent_AgentNeedsInput convId)
         SessionFailed _ err -> do
             writeBChan chan (AppEvent_ShowStatus StatusError $ "Session failed: " <> err)
@@ -1315,7 +1328,7 @@ readAndClearBufferedMessagesSTM core = do
 
 -- | Read and clear buffered messages for all conversations (IO version).
 readAndClearBufferedMessages :: Core -> IO (Map ConversationId [Text])
-readAndClearBufferedMessages core = 
+readAndClearBufferedMessages core =
     atomically $ readAndClearBufferedMessagesSTM core
 
 -- | Add a buffered message for a conversation.
@@ -1339,31 +1352,32 @@ handleSubcallStarted _tracer parentId subcallId agentSlug depth = do
         Just agent -> do
             -- Create a new channel for this subcall conversation
             convChan <- liftIO $ newBChan 100
-            
+
             onProgress <- liftIO $ buildOnProgress convChan
-            
-            let conv = Conversation
-                    { conversationId = subcallId
-                    , conversationAgent = agent
-                    , conversationThreadId = Nothing
-                    , conversationSession = Nothing
-                    , conversationName = tuiSlug agent <> " (subcall " <> Text.pack (show depth) <> ")"
-                    , conversationChan = convChan
-                    , conversationStatus = ConversationStatus_Active
-                    , conversationOnProgress = onProgress
-                    , conversationIsSubcall = True
-                    , conversationParentId = Just parentId
-                    , conversationSubcallDepth = depth
-                    }
-            
+
+            let conv =
+                    Conversation
+                        { conversationId = subcallId
+                        , conversationAgent = agent
+                        , conversationThreadId = Nothing
+                        , conversationSession = Nothing
+                        , conversationName = tuiSlug agent <> " (subcall " <> Text.pack (show depth) <> ")"
+                        , conversationChan = convChan
+                        , conversationStatus = ConversationStatus_Active
+                        , conversationOnProgress = onProgress
+                        , conversationIsSubcall = True
+                        , conversationParentId = Just parentId
+                        , conversationSubcallDepth = depth
+                        }
+
             -- Add to core
             core <- use tuiCore
             liftIO $ atomically $ modifyTVar core $ \c ->
-                c { coreConversations = conv : coreConversations c }
-            
+                c{coreConversations = conv : coreConversations c}
+
             -- Add to UI
             tuiUI . conversationList %= listInsert 0 conv
-            
+
             showStatus StatusInfo $ "Subcall started: " <> agentSlug
 
 -- | Find an agent by its slug.
@@ -1416,22 +1430,22 @@ handleSendMessage _tracer = do
             -- Get message text
             editorLines <- use (tuiUI . messageEditor . to getEditContents)
             let msgText = Text.strip $ Text.unlines editorLines
-            
+
             -- Get attachments
             attachments <- use (tuiUI . attachedFiles)
             let convId = conversationId conv
             let convAttachments = fromMaybe [] $ Map.lookup convId attachments
-            
+
             if Text.null msgText && null convAttachments
                 then showStatus StatusWarning "No message to send"
                 else do
                     -- Create user query
                     let query = UserQuery msgText convAttachments
-                    
+
                     -- Check if conversation is paused
                     st <- get
                     let isPaused = isConversationPaused convId st
-                    
+
                     if isPaused
                         then do
                             -- Buffer the message
@@ -1445,9 +1459,8 @@ handleSendMessage _tracer = do
                             liftIO $ writeBChan (conversationChan conv) (Just query)
                             updateConversationStatus convId ConversationStatus_Active
                             showStatus StatusInfo "Message sent"
-                    
+
                     -- Clear editor and attachments
                     tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
                     tuiUI . attachedFiles %= Map.delete convId
                     tuiUI . selectedAttachmentIndex .= Nothing
-

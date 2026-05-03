@@ -152,26 +152,35 @@ data FileBrowser n = FileBrowser
     }
 
 -- | Manual Show instance for FileBrowser (omitting the filter function).
-instance Show n => Show (FileBrowser n) where
+instance (Show n) => Show (FileBrowser n) where
     show fb =
         "FileBrowser {"
-            ++ "fbCurrentDir = " ++ show fb.fbCurrentDir
-            ++ ", fbSelectedIndex = " ++ show fb.fbSelectedIndex
-            ++ ", fbEntries = " ++ show fb.fbEntries
-            ++ ", fbMode = " ++ show fb.fbMode
-            ++ ", fbSelection = " ++ show fb.fbSelection
+            ++ "fbCurrentDir = "
+            ++ show fb.fbCurrentDir
+            ++ ", fbSelectedIndex = "
+            ++ show fb.fbSelectedIndex
+            ++ ", fbEntries = "
+            ++ show fb.fbEntries
+            ++ ", fbMode = "
+            ++ show fb.fbMode
+            ++ ", fbSelection = "
+            ++ show fb.fbSelection
             ++ ", fbFilter = <filter function>"
-            ++ ", fbError = " ++ show fb.fbError
-            ++ ", fbWidgetName = " ++ show fb.fbWidgetName
-            ++ ", fbShowHidden = " ++ show fb.fbShowHidden
+            ++ ", fbError = "
+            ++ show fb.fbError
+            ++ ", fbWidgetName = "
+            ++ show fb.fbWidgetName
+            ++ ", fbShowHidden = "
+            ++ show fb.fbShowHidden
             ++ "}"
 
 -------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
 
--- | Create a new file browser starting at the given directory.
--- If no directory is provided, uses the current working directory.
+{- | Create a new file browser starting at the given directory.
+If no directory is provided, uses the current working directory.
+-}
 newFileBrowser :: (Ord n, Show n) => n -> Maybe FilePath -> IO (FileBrowser n)
 newFileBrowser name mStartPath = newFileBrowserWithFilter name mStartPath Nothing
 
@@ -256,8 +265,9 @@ readEntry dir name = do
     let fullPath = dir </> name
     isDir <- doesDirectoryExist fullPath
     isLink <-
-        (pathIsSymbolicLink fullPath >>= \isSym ->
-            if isSym then pure True else pure False)
+        ( pathIsSymbolicLink fullPath >>= \isSym ->
+            if isSym then pure True else pure False
+        )
             `catch` \(_ :: SomeException) -> pure False
     isAccessible <-
         (if isDir then doesDirectoryExist fullPath else doesFileExist fullPath)
@@ -483,4 +493,3 @@ fileBrowserEntryPath = fbePath
 -- | Check if a file browser entry is a directory.
 fileBrowserEntryIsDirectory :: FileBrowserEntry -> Bool
 fileBrowserEntryIsDirectory = fbeIsDirectory
-

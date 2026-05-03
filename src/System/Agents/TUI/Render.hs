@@ -787,7 +787,7 @@ renderFileBrowserHelp fb =
             SelectMode -> "[Select Mode]"
         helpText =
             "↑/↓: Navigate | Enter: "
-                <> (case fileBrowserMode fb of
+                <> ( case fileBrowserMode fb of
                         BrowseMode -> "Open"
                         SelectMode -> "Select"
                    )
@@ -1191,4 +1191,3 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
-
