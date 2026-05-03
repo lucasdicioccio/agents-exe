@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
@@ -138,6 +139,10 @@ Returns 'Nothing' if:
 - The file doesn't exist
 - The file is locked (resource busy)
 - The file can't be parsed
+
+Note: This function forces strict evaluation of the file content to ensure
+the file handle is closed promptly, preventing "resource busy" errors when
+listing sessions concurrently.
 -}
 readSessionFromFile :: FilePath -> IO (Maybe Session)
 readSessionFromFile path = do
@@ -150,7 +155,12 @@ readSessionFromFile path = do
                 Left (e :: IOException)
                     | isResourceBusyError e -> pure Nothing  -- File is locked, return Nothing
                     | otherwise -> pure Nothing  -- Other IO errors, return Nothing
-                Right dat -> pure $ Aeson.decode =<< lastLine dat
+                Right dat ->
+                    -- Force strict evaluation by using `seq` on the length.
+                    -- This ensures the file handle is closed before we return,
+                    -- preventing "resource busy" errors when listing sessions.
+                    LByteString.length dat `seq`
+                    pure $ Aeson.decode =<< lastLine dat
         else do
             pure Nothing
   where
