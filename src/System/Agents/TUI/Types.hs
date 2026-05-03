@@ -8,7 +8,6 @@ module System.Agents.TUI.Types where
 import Brick.BChan (BChan)
 import Brick.Focus (FocusRing, focusRing)
 import Brick.Widgets.Edit (Editor, editorText)
-import Brick.Widgets.FileBrowser (FileBrowser)
 import Brick.Widgets.List (List, list)
 import Control.Concurrent (ThreadId)
 import Control.Concurrent.Async (Async)
@@ -31,6 +30,7 @@ import System.Agents.OS.Events (OSEvent)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
+import System.Agents.TUI.FileBrowser (FileBrowser)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.ToolRegistration (ToolRegistration)
 
@@ -388,7 +388,7 @@ data UIState = UIState
     , _unreadConversations :: Set ConversationId
     -- ^ Set of conversations with unread messages
     , _fileBrowser :: Maybe (FileBrowser WidgetName)
-    -- ^ File browser widget for attachments
+    -- ^ File browser widget for attachments (using custom implementation)
     , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background tasks (e.g., external viewers)
     , _uiBufferedMessages :: Map ConversationId [Text]

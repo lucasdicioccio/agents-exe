@@ -10,15 +10,6 @@ import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel, hBorder)
 import Brick.Widgets.Center (center)
 import Brick.Widgets.Edit (renderEditor)
-import Brick.Widgets.FileBrowser (
-    fileBrowserAttr,
-    fileBrowserCurrentDirectoryAttr,
-    fileBrowserDirectoryAttr,
-    fileBrowserRegularFileAttr,
-    fileBrowserSelectedAttr,
-    fileBrowserSelectionInfoAttr,
-    renderFileBrowser,
- )
 import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
 import Control.Lens ((^.))
 import Data.List (intersperse)
@@ -42,6 +33,17 @@ import System.Agents.Session.Types (
     StepByteUsage (..),
     TrajectorySignals (..),
     sessionTotalBytes,
+ )
+import System.Agents.TUI.FileBrowser (
+    FileBrowser,
+    FileBrowserEntry (..),
+    FileBrowserError (..),
+    FileBrowserMode (..),
+    fileBrowserEntries,
+    fileBrowserError,
+    fileBrowserMode,
+    getCurrentDir,
+    getSelectedEntry,
  )
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
@@ -167,6 +169,30 @@ rootConversationAttr = attrName "rootConversation"
 -- | Default attribute (no styling).
 defaultAttr :: AttrName
 defaultAttr = attrName "default"
+
+-- | Attribute for file browser widget.
+fileBrowserAttr :: AttrName
+fileBrowserAttr = attrName "fileBrowser"
+
+-- | Attribute for current directory in file browser.
+fileBrowserCurrentDirectoryAttr :: AttrName
+fileBrowserCurrentDirectoryAttr = attrName "fileBrowserCurrentDirectory"
+
+-- | Attribute for directories in file browser.
+fileBrowserDirectoryAttr :: AttrName
+fileBrowserDirectoryAttr = attrName "fileBrowserDirectory"
+
+-- | Attribute for regular files in file browser.
+fileBrowserRegularFileAttr :: AttrName
+fileBrowserRegularFileAttr = attrName "fileBrowserRegularFile"
+
+-- | Attribute for selected item in file browser.
+fileBrowserSelectedAttr :: AttrName
+fileBrowserSelectedAttr = attrName "fileBrowserSelected"
+
+-- | Attribute for selection info in file browser.
+fileBrowserSelectionInfoAttr :: AttrName
+fileBrowserSelectionInfoAttr = attrName "fileBrowserSelectionInfo"
 
 -------------------------------------------------------------------------------
 -- Main Draw Function
@@ -715,10 +741,70 @@ renderFileBrowserDialog st =
                 withAttr dialogAttr $
                     borderWithLabel (txt " Attach File (Ctrl+F) ") $
                         vBox
-                            [ hLimit 80 $ vLimit 20 $ renderFileBrowser True fb
+                            [ renderCustomFileBrowser fb
                             , txt ""
-                            , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
+                            , renderFileBrowserHelp fb
+                            , renderFileBrowserError fb
                             ]
+
+-- | Render the custom file browser widget.
+renderCustomFileBrowser :: FileBrowser WidgetName -> Widget N
+renderCustomFileBrowser fb =
+    hLimit 80 $
+        vLimit 20 $
+            withAttr fileBrowserAttr $
+                borderWithLabel (withAttr fileBrowserCurrentDirectoryAttr $ txt $ " " <> currentDir <> " ") $
+                    viewport FilePathInputWidget Both $
+                        vBox $
+                            map renderEntry (zip [0 ..] entries)
+  where
+    currentDir = getCurrentDir fb
+    entries = fileBrowserEntries fb
+    selectedIdx = case getSelectedEntry fb of
+        Just entry ->
+            -- Find index of selected entry
+            length (takeWhile (\e -> fbePath e /= fbePath entry) entries)
+        Nothing -> -1
+
+    renderEntry :: (Int, FileBrowserEntry) -> Widget N
+    renderEntry (idx, entry) =
+        let isSelected = idx == selectedIdx
+            marker = if isSelected then "▶ " else "  "
+            attr =
+                if isSelected
+                    then fileBrowserSelectedAttr
+                    else
+                        if fbeIsDirectory entry
+                            then fileBrowserDirectoryAttr
+                            else fileBrowserRegularFileAttr
+         in withAttr attr $ txt $ marker <> fbeName entry
+
+-- | Render help text for file browser.
+renderFileBrowserHelp :: FileBrowser WidgetName -> Widget N
+renderFileBrowserHelp fb =
+    let modeText = case fileBrowserMode fb of
+            BrowseMode -> "[Browse Mode]"
+            SelectMode -> "[Select Mode]"
+        helpText =
+            "↑/↓: Navigate | Enter: "
+                <> ( case fileBrowserMode fb of
+                        BrowseMode -> "Open"
+                        SelectMode -> "Select"
+                   )
+                <> " | Backspace: Parent | Space: Select | Tab: Toggle Mode | Esc: Cancel"
+     in withAttr fileBrowserSelectionInfoAttr $ txt $ modeText <> " " <> helpText
+
+-- | Render error message for file browser.
+renderFileBrowserError :: FileBrowser WidgetName -> Widget N
+renderFileBrowserError fb =
+    case fileBrowserError fb of
+        Nothing -> emptyWidget
+        Just err ->
+            let errText = case err of
+                    PermissionError path msg -> "Error: " <> msg <> " (" <> Text.pack path <> ")"
+                    DirectoryNotFound path -> "Directory not found: " <> Text.pack path
+                    GeneralError msg -> "Error: " <> msg
+             in withAttr statusErrorAttr $ txt errText
 
 -------------------------------------------------------------------------------
 -- Queued Messages Management Rendering
