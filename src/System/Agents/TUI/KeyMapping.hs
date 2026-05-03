@@ -90,7 +90,7 @@ data EventName
     | EventNavigateDown
     | EventDeleteItem
     | EventOpenConversation
-    | -- ** Draft-related events
+    | -- \** Draft-related events
       EventNewDraft
     | EventSaveDraft
     | EventLoadDraft
@@ -600,4 +600,3 @@ mergeWithDefault (KeyMapping custom) =
     KeyMapping $ Map.unionWith (\customBindings _ -> customBindings) custom defaultBindings
   where
     KeyMapping defaultBindings = defaultKeyMapping
-

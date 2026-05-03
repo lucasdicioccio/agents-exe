@@ -899,4 +899,3 @@ applyMigrations conn fromVer toVer getMigration
                     -- Update schema version
                     execute conn "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT(version) DO UPDATE SET applied_at = CURRENT_TIMESTAMP" (Only toVer)
                 pure $ Right toVer
-

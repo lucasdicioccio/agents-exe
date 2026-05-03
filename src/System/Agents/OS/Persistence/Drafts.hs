@@ -46,7 +46,7 @@ import Database.SQLite.Simple (
     query,
     query_,
  )
-import Database.SQLite.Simple.FromField (FromField (..), returnError, ResultError (..))
+import Database.SQLite.Simple.FromField (FromField (..), ResultError (..), returnError)
 import Database.SQLite.Simple.QQ (sql)
 import Database.SQLite.Simple.ToField (ToField (..))
 
@@ -141,10 +141,11 @@ rowToDraft row = do
 -- Draft Operations
 -------------------------------------------------------------------------------
 
--- | Save or update a draft in the database.
---
--- If a draft with the same ID exists, it will be updated.
--- The updated_at timestamp is always set to the current time.
+{- | Save or update a draft in the database.
+
+If a draft with the same ID exists, it will be updated.
+The updated_at timestamp is always set to the current time.
+-}
 saveDraft :: SqliteBackend -> DraftMessage -> IO ()
 saveDraft backend draft = withConnection backend $ \conn -> do
     let attachmentsJson =
@@ -172,9 +173,10 @@ saveDraft backend draft = withConnection backend $ \conn -> do
         , draft._draftTitle
         )
 
--- | Load a specific draft by ID.
---
--- Returns Nothing if the draft doesn't exist.
+{- | Load a specific draft by ID.
+
+Returns Nothing if the draft doesn't exist.
+-}
 loadDraft :: SqliteBackend -> DraftId -> IO (Maybe DraftMessage)
 loadDraft backend draftId = withConnection backend $ \conn -> do
     results <-
@@ -192,9 +194,10 @@ loadDraft backend draftId = withConnection backend $ \conn -> do
         [] -> pure Nothing
         (row : _) -> pure $ either (const Nothing) Just $ rowToDraft row
 
--- | List all drafts, ordered by most recently updated first.
---
--- Optionally limit the number of results.
+{- | List all drafts, ordered by most recently updated first.
+
+Optionally limit the number of results.
+-}
 listDrafts :: SqliteBackend -> Maybe Int -> IO [DraftMessage]
 listDrafts backend mLimit = withConnection backend $ \conn -> do
     rows <- case mLimit of
@@ -221,9 +224,10 @@ listDrafts backend mLimit = withConnection backend $ \conn -> do
 
     pure $ rights $ map rowToDraft rows
 
--- | List drafts for a specific conversation.
---
--- Results are ordered by most recently updated first.
+{- | List drafts for a specific conversation.
+
+Results are ordered by most recently updated first.
+-}
 listDraftsForConversation :: SqliteBackend -> ConversationId -> IO [DraftMessage]
 listDraftsForConversation backend convId = withConnection backend $ \conn -> do
     rows <-
@@ -240,9 +244,10 @@ listDraftsForConversation backend convId = withConnection backend $ \conn -> do
 
     pure $ rights $ map rowToDraft rows
 
--- | Delete a draft by ID.
---
--- Returns silently if the draft doesn't exist.
+{- | Delete a draft by ID.
+
+Returns silently if the draft doesn't exist.
+-}
 deleteDraft :: SqliteBackend -> DraftId -> IO ()
 deleteDraft backend draftId = withConnection backend $ \conn ->
     execute
@@ -250,9 +255,10 @@ deleteDraft backend draftId = withConnection backend $ \conn ->
         [sql| DELETE FROM draft_messages WHERE draft_id = ? |]
         [draftId]
 
--- | Delete all drafts for a conversation.
---
--- Returns the number of drafts deleted.
+{- | Delete all drafts for a conversation.
+
+Returns the number of drafts deleted.
+-}
 deleteDraftsForConversation :: SqliteBackend -> ConversationId -> IO Int
 deleteDraftsForConversation backend convId = withConnection backend $ \conn -> do
     execute
@@ -263,9 +269,10 @@ deleteDraftsForConversation backend convId = withConnection backend $ \conn -> d
     -- or just assume success. For simplicity, we return 0.
     pure 0
 
--- | Delete all drafts from the database.
---
--- Use with caution. Returns the number of drafts deleted.
+{- | Delete all drafts from the database.
+
+Use with caution. Returns the number of drafts deleted.
+-}
 deleteAllDrafts :: SqliteBackend -> IO Int
 deleteAllDrafts backend = withConnection backend $ \conn -> do
     execute_ conn [sql| DELETE FROM draft_messages |]
@@ -278,4 +285,3 @@ countDrafts backend = withConnection backend $ \conn -> do
     pure $ case result of
         [Only n] -> n
         _ -> 0
-

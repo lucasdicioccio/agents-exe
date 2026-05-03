@@ -126,12 +126,12 @@ makeLenses ''DraftMessage
 
 -- | UI mode for draft management.
 data DraftMode
-    = DraftModeNone
-    -- ^ No draft mode active
-    | DraftModeComposing DraftId
-    -- ^ Currently composing/editing a specific draft
-    | DraftModeSelecting
-    -- ^ Browsing/selecting from existing drafts
+    = -- | No draft mode active
+      DraftModeNone
+    | -- | Currently composing/editing a specific draft
+      DraftModeComposing DraftId
+    | -- | Browsing/selecting from existing drafts
+      DraftModeSelecting
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -240,9 +240,10 @@ defaultAutoSaveConfig =
         , autoSaveMaxWaitMs = 10000 -- 10 seconds
         }
 
--- | Schedule an auto-save for a draft.
---
--- This cancels any existing timer for the draft and starts a new one.
+{- | Schedule an auto-save for a draft.
+
+This cancels any existing timer for the draft and starts a new one.
+-}
 scheduleAutoSave ::
     AutoSaveConfig ->
     (DraftMessage -> IO ()) ->
@@ -293,4 +294,3 @@ getPendingDraft state dId =
 markDraftSaved :: AutoSaveState -> DraftId -> AutoSaveState
 markDraftSaved state dId =
     state{autoSavePending = Map.delete dId (autoSavePending state)}
-

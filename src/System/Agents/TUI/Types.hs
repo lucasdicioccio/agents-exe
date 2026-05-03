@@ -86,8 +86,8 @@ data Tab
     | ChatsTab
     | HistoryTab
     | HelpTab
-    | DraftsTab
-    -- ^ Draft messages tab
+    | -- | Draft messages tab
+      DraftsTab
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -132,12 +132,12 @@ makeLenses ''TurnNavigationState
 
 -- | State for draft-related dialogs
 data DraftDialogState
-    = DraftDialogNone
-    -- ^ No dialog is open
-    | DraftDialogConfirmDelete DraftId
-    -- ^ Confirm deletion of a draft
-    | DraftDialogConfirmDeleteAll
-    -- ^ Confirm deletion of all drafts
+    = -- | No dialog is open
+      DraftDialogNone
+    | -- | Confirm deletion of a draft
+      DraftDialogConfirmDelete DraftId
+    | -- | Confirm deletion of all drafts
+      DraftDialogConfirmDeleteAll
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -533,4 +533,3 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
-
