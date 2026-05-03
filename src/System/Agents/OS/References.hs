@@ -138,16 +138,18 @@ module System.Agents.OS.References (
 
 import Control.Concurrent.STM (atomically)
 import Control.Monad (forM)
-import Data.Maybe (catMaybes, fromMaybe, isJust)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (getCurrentTime)
 
+import System.Agents.OS.Conversation.Types (
+    ConversationConfig (..),
+ )
 import System.Agents.OS.Core.Types (
     ConversationId (..),
-    EntityId,
     EntityId (..),
  )
 import System.Agents.OS.Core.World (
@@ -158,9 +160,6 @@ import System.Agents.OS.Core.World (
     setComponent,
  )
 import System.Agents.OS.References.Types
-import System.Agents.OS.Conversation.Types (
-    ConversationConfig (..),
- )
 
 -------------------------------------------------------------------------------
 -- Creating References
@@ -176,18 +175,18 @@ Returns the entity ID of the created reference.
 -}
 createReference ::
     World ->
+    -- | Source conversation
     ConversationId ->
-    -- ^ Source conversation
+    -- | Target conversation
     ConversationId ->
-    -- ^ Target conversation
+    -- | Optional target message
     Maybe MessageRef ->
-    -- ^ Optional target message
+    -- | Type of reference
     RefType ->
-    -- ^ Type of reference
+    -- | Created by (user/agent ID)
     Maybe Text ->
-    -- ^ Created by (user/agent ID)
+    -- | Context text
     Maybe Text ->
-    -- ^ Context text
     IO EntityId
 createReference world sourceId targetId mMsgRef referenceType createdBy mContext = do
     now <- getCurrentTime
@@ -229,14 +228,14 @@ Returns the list of created reference entity IDs.
 -}
 createReferenceFromText ::
     World ->
+    -- | Source conversation
     ConversationId ->
-    -- ^ Source conversation
+    -- | Text to parse
     Text ->
-    -- ^ Text to parse
+    -- | Default reference type
     RefType ->
-    -- ^ Default reference type
+    -- | Created by
     Maybe Text ->
-    -- ^ Created by
     IO [EntityId]
 createReferenceFromText world sourceId text referenceType createdBy = do
     let refs = extractReferencesFromText text
@@ -271,8 +270,9 @@ getOutgoingReferences world sourceId = do
         mConfig <- atomically $ getComponent world refId
         mState <- atomically $ getComponent world refId
         case (mConfig, mState) of
-            (Just config, Just state) | config.rcSourceId == sourceId ->
-                pure $ Just $ toConversationRef refId config state
+            (Just config, Just state)
+                | config.rcSourceId == sourceId ->
+                    pure $ Just $ toConversationRef refId config state
             _ -> pure Nothing
 
     pure $ catMaybes refs
@@ -294,8 +294,9 @@ getIncomingReferences world targetId = do
         mConfig <- atomically $ getComponent world refId
         mState <- atomically $ getComponent world refId
         case (mConfig, mState) of
-            (Just config, Just state) | config.rcTargetId == targetId ->
-                pure $ Just $ toConversationRef refId config state
+            (Just config, Just state)
+                | config.rcTargetId == targetId ->
+                    pure $ Just $ toConversationRef refId config state
             _ -> pure Nothing
 
     pure $ catMaybes refs
@@ -438,8 +439,7 @@ resolveReference _world _ref = do
     -- For now, return a placeholder
     pure Nothing
 
-{- | Format a reference view for display.
--}
+-- | Format a reference view for display.
 formatReferenceView :: ReferenceView -> Text
 formatReferenceView view =
     case view.rvPreviewText of
@@ -478,8 +478,7 @@ data ReferenceGraph = ReferenceGraph
     }
     deriving (Show, Eq)
 
-{- | A node in the reference graph (conversation).
--}
+-- | A node in the reference graph (conversation).
 data GraphNode = GraphNode
     { gnConversationId :: ConversationId
     , gnTitle :: Text
@@ -488,8 +487,7 @@ data GraphNode = GraphNode
     }
     deriving (Show, Eq)
 
-{- | An edge in the reference graph (reference).
--}
+-- | An edge in the reference graph (reference).
 data GraphEdge = GraphEdge
     { geSource :: ConversationId
     , geTarget :: ConversationId
@@ -552,8 +550,7 @@ buildReferenceGraph world = do
 -- Auto-complete
 -------------------------------------------------------------------------------
 
-{- | A suggestion for reference auto-complete.
--}
+-- | A suggestion for reference auto-complete.
 data ReferenceSuggestion = ReferenceSuggestion
     { rsConversationId :: ConversationId
     , rsTitle :: Text
@@ -569,10 +566,10 @@ Returns conversations that match the partial input, sorted by relevance.
 -}
 getReferenceSuggestions ::
     World ->
+    -- | Partial input (after [[conv:)
     Text ->
-    -- ^ Partial input (after [[conv:)
+    -- | Maximum number of suggestions
     Int ->
-    -- ^ Maximum number of suggestions
     IO [ReferenceSuggestion]
 getReferenceSuggestions _world _partialInput _limit = do
     -- In a real implementation, this would:
@@ -593,8 +590,8 @@ Updates the reference state with validation results.
 -}
 validateReference ::
     World ->
+    -- | Reference entity ID
     EntityId ->
-    -- ^ Reference entity ID
     IO Bool
 validateReference world refId = do
     mConfig <- atomically $ getComponent world refId
@@ -613,8 +610,7 @@ validateReference world refId = do
                     pure False
         Nothing -> pure False
 
-{- | Mark a reference as resolved (target found).
--}
+-- | Mark a reference as resolved (target found).
 markReferenceResolved ::
     World ->
     EntityId ->
@@ -634,13 +630,12 @@ markReferenceResolved world refId = do
             atomically $ setComponent world refId newState
         Nothing -> pure ()
 
-{- | Mark a reference as broken (target not found).
--}
+-- | Mark a reference as broken (target not found).
 markReferenceBroken ::
     World ->
     EntityId ->
+    -- | Error message
     Text ->
-    -- ^ Error message
     IO ()
 markReferenceBroken world refId errorMsg = do
     now <- getCurrentTime
@@ -677,4 +672,3 @@ toConversationRef _ config state =
 -- | Extract EntityId from ConversationId.
 entityIdFromConvId :: ConversationId -> EntityId
 entityIdFromConvId (ConversationId eid) = eid
-

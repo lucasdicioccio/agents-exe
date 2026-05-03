@@ -350,4 +350,3 @@ defaultPersistenceConfig =
         , persistenceBatchSize = 100
         , persistenceEnableEvents = True
         }
-

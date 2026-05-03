@@ -96,8 +96,9 @@ import System.Agents.OS.References.Types (
 -- Row Types
 -------------------------------------------------------------------------------
 
--- | Database row for conversation references.
--- Note: Some fields are parsed but not currently used in the domain model.
+{- | Database row for conversation references.
+Note: Some fields are parsed but not currently used in the domain model.
+-}
 data ReferenceRow = ReferenceRow
     { _rrId :: Int
     , rrSourceConvId :: Text
@@ -170,16 +171,15 @@ persistReference backend ref = do
             , Nothing :: Maybe Text
             )
 
-{- | Load a reference by its components.
--}
+-- | Load a reference by its components.
 loadReference ::
     SqliteBackend ->
+    -- | Source
     ConversationId ->
-    -- ^ Source
+    -- | Target
     ConversationId ->
-    -- ^ Target
+    -- | Optional message
     Maybe MessageRef ->
-    -- ^ Optional message
     IO (Maybe ConversationRef)
 loadReference backend sourceId targetId mMsgRef = do
     let pool = spConnectionPool (sbPersistence backend)
@@ -204,8 +204,7 @@ loadReference backend sourceId targetId mMsgRef = do
             [row] -> pure $ Just $ rowToReference row
             _ -> pure Nothing
 
-{- | Delete a reference.
--}
+-- | Delete a reference.
 deleteReference ::
     SqliteBackend ->
     ConversationId ->
@@ -272,8 +271,7 @@ persistReferencesBatch backend refs = do
 -- Querying
 -------------------------------------------------------------------------------
 
-{- | Get all outgoing references from a conversation.
--}
+-- | Get all outgoing references from a conversation.
 getOutgoingReferences ::
     SqliteBackend ->
     ConversationId ->
@@ -297,8 +295,7 @@ getOutgoingReferences backend sourceId = do
 
         pure $ map rowToReference rows
 
-{- | Get all incoming references to a conversation (backlinks).
--}
+-- | Get all incoming references to a conversation (backlinks).
 getIncomingReferences ::
     SqliteBackend ->
     ConversationId ->
@@ -322,8 +319,7 @@ getIncomingReferences backend targetId = do
 
         pure $ map rowToReference rows
 
-{- | Get references between two specific conversations.
--}
+-- | Get references between two specific conversations.
 getReferencesBetween ::
     SqliteBackend ->
     ConversationId ->
@@ -406,7 +402,7 @@ matchesRefQuery rq ref =
         Just rt -> ref.refType == rt
         Nothing -> True
 
-    validMatch = if rq.rqIncludeInvalid then True else True  -- All refs considered valid for now
+    validMatch = if rq.rqIncludeInvalid then True else True -- All refs considered valid for now
 
 -------------------------------------------------------------------------------
 -- Graph Operations
@@ -419,8 +415,8 @@ Returns references up to a specified depth for graph visualization.
 getReferenceGraph ::
     SqliteBackend ->
     ConversationId ->
+    -- | Maximum depth
     Int ->
-    -- ^ Maximum depth
     IO ([ConversationId], [(ConversationId, ConversationId, RefType)])
 getReferenceGraph backend startConvId maxDepth = do
     -- BFS traversal to find connected conversations
@@ -468,19 +464,18 @@ getConnectedConversations backend convId = do
 -- Validation
 -------------------------------------------------------------------------------
 
-{- | Update the resolution status of a reference.
--}
+-- | Update the resolution status of a reference.
 updateReferenceStatus ::
     SqliteBackend ->
+    -- | Source
     ConversationId ->
-    -- ^ Source
+    -- | Target
     ConversationId ->
-    -- ^ Target
     Maybe MessageRef ->
+    -- | Is valid
     Bool ->
-    -- ^ Is valid
+    -- | Error message
     Maybe Text ->
-    -- ^ Error message
     IO ()
 updateReferenceStatus backend sourceId targetId mMsgRef isValid mError = do
     let pool = spConnectionPool (sbPersistence backend)
@@ -502,8 +497,7 @@ updateReferenceStatus backend sourceId targetId mMsgRef isValid mError = do
             , fmap unMessageRef mMsgRef :: Maybe Text
             )
 
-{- | Get all broken/invalid references.
--}
+-- | Get all broken/invalid references.
 getBrokenReferences ::
     SqliteBackend ->
     IO [ConversationRef]
@@ -535,12 +529,12 @@ Searches titles and returns matches for the partial input.
 -}
 searchConversationsForRef ::
     SqliteBackend ->
+    -- | Partial input
     Text ->
-    -- ^ Partial input
+    -- | Limit
     Int ->
-    -- ^ Limit
+    -- | (ConversationId, Title, Preview)
     IO [(ConversationId, Text, Maybe Text)]
-    -- ^ (ConversationId, Title, Preview)
 searchConversationsForRef backend partialInput limit = do
     let pool = spConnectionPool (sbPersistence backend)
     let pattern = "%" <> partialInput <> "%"
@@ -563,9 +557,8 @@ searchConversationsForRef backend partialInput limit = do
             let convId = ConversationId $ _readTextEntityId eidText
             -- In practice, parse the JSON to extract title
             pure (convId, partialInput <> "...", Nothing)
-
-    where
-        _readTextEntityId txt = EntityId $ read $ Text.unpack txt
+  where
+    _readTextEntityId txt = EntityId $ read $ Text.unpack txt
 
 -------------------------------------------------------------------------------
 -- Helpers
@@ -606,4 +599,3 @@ entityIdFromConvId (ConversationId eid) = eid
 -- | Helper to read EntityId from Text.
 readTextEntityId :: Text -> EntityId
 readTextEntityId txt = EntityId $ read $ Text.unpack txt
-

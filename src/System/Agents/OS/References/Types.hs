@@ -85,7 +85,7 @@ import System.Agents.OS.Core.Types (
 Messages are identified by a unique identifier (could be timestamp-based
 or UUID depending on implementation).
 -}
-newtype MessageRef = MessageRef { unMessageRef :: Text }
+newtype MessageRef = MessageRef {unMessageRef :: Text}
     deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
 
 -------------------------------------------------------------------------------
@@ -363,8 +363,7 @@ renderReference convId mMsgRef mDisplayText =
 -- Reference Queries
 -------------------------------------------------------------------------------
 
-{- | Query specification for finding references.
--}
+-- | Query specification for finding references.
 data ReferenceQuery = ReferenceQuery
     { rqSourceConversation :: Maybe ConversationId
     -- ^ Filter by source conversation
@@ -400,4 +399,3 @@ defaultReferenceQuery =
 -- | ComponentTypeId for ReferenceConfig (40)
 referenceConfigComponentId :: ComponentTypeId
 referenceConfigComponentId = ComponentTypeId 40
-
