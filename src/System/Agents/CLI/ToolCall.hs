@@ -140,8 +140,9 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                                     }
 
                         -- Execute the tool call through the portal
-                        result' <- portal toolCall
+                        -- No parent context for top-level calls (Nothing)
+                        result' <- portal Nothing toolCall
 
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
-                        Text.putStrLn ""
+                        LByteString.putStr "\n"

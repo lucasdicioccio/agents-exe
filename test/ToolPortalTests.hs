@@ -91,7 +91,7 @@ portalExecutionTests =
                     }
             
             registrations <- newTVarIO []
-            result <- callToolViaPortal silent (error "portal recursive loop") registrations toolCall
+            result <- callToolViaPortal silent (error "portal recursive loop") registrations Nothing toolCall
             
             case result of
                 Left (PortalToolNotFound name) -> name @?= "nonexistent-tool"
@@ -107,13 +107,13 @@ portalExecutionTests =
             let mockReg = makeMockRegistration "mock-tool"
             registrations <- newTVarIO [mockReg]
             
-            result <- callToolViaPortal silent (error "portal recusrive loop") registrations toolCall
+            result <- callToolViaPortal silent (error "portal recusrive loop") registrations Nothing toolCall
             
             case result of
                 Left err -> assertFailure $ "Expected success, got error: " ++ show err
                 Right callResult -> do
                     case callResult of
-                        BlobToolSuccess toolCall output _ -> output @?= "mock output"
+                        BlobToolSuccess _toolCall output _ -> output @?= "mock output"
                         other -> assertFailure $ "Expected BlobToolSuccess, got: " ++ show other
         ]
 
@@ -431,5 +431,4 @@ makeTracingMockRegistration name =
         , findTool = find
         , toolActivation = Nothing
         }
-
 

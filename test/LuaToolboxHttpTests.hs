@@ -22,8 +22,11 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.List (find)
+import Data.Maybe (fromJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -31,18 +34,26 @@ import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), silent)
 import qualified Prod.Tracer as Prod
 
-import System.Agents.Base (LuaToolboxDescription (..))
-import System.Agents.Tools.Context (ToolPortal, ToolResult (..))
+import System.Agents.Base (ConversationId (..), LuaToolboxDescription (..))
+import System.Agents.Session.Types (SessionId (..), TurnId (..))
+import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
 import System.Agents.Tools.LuaToolbox as LuaToolbox
 import System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     RequestOptions (..),
-    parseOptions,
  )
+
+-- | Create a minimal test context with dummy UUIDs
+mkTestContext :: ToolPortal -> ToolExecutionContext
+mkTestContext portal =
+    let sessionId = SessionId $ fromJust $ UUID.fromText "550e8400-e29b-41d4-a716-446655440001"
+        conversationId = ConversationId $ fromJust $ UUID.fromText "550e8400-e29b-41d4-a716-446655440002"
+        turnId = TurnId $ fromJust $ UUID.fromText "550e8400-e29b-41d4-a716-446655440003"
+     in mkMinimalContext sessionId conversationId turnId portal
 
 -- | Dummy portal for tests
 dummyPortal :: ToolPortal
-dummyPortal _call =
+dummyPortal _mParentCtx _call =
     pure $
         ToolResult
             { resultData = Aeson.object [("error", Aeson.String "Tool portal not available in test")]
@@ -131,7 +142,8 @@ httpGetTests =
 -- | Test that http.get is blocked when no hosts are allowed
 testHttpGetBlockedHost :: Assertion
 testHttpGetBlockedHost = withTestToolboxNoHttp $ \box -> do
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('http://example.com')" dummyPortal
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('http://example.com')" ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -148,8 +160,9 @@ testHttpGetBlockedHost = withTestToolboxNoHttp $ \box -> do
 -- | Test that http.get validates host correctly
 testHttpGetHostValidation :: Assertion
 testHttpGetHostValidation = withTestToolboxHttp $ \box -> do
+    let ctx = mkTestContext dummyPortal
     -- localhost should be allowed but will fail to connect (no server)
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('http://localhost:99999/test')" dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('http://localhost:99999/test')" ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -189,11 +202,12 @@ testHttpPostArgumentOrder = withTestToolboxHttp $ \box -> do
     -- a segfault when trying to parse an invalid URL.
     
     -- Use a simple string body that is definitely NOT a valid URL
+    let ctx = mkTestContext dummyPortal
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local url = 'http://localhost:99999/api'"
         , "local body = 'this is not a url'"
         , "return http.post(url, body)"
-        ]) dummyPortal
+        ]) ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -222,7 +236,8 @@ testHttpPostArgumentOrder = withTestToolboxHttp $ \box -> do
 -- | Test that http.post validates host correctly before attempting request
 testHttpPostHostValidation :: Assertion
 testHttpPostHostValidation = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.post('http://localhost:99999/test', 'data')" dummyPortal
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.post('http://localhost:99999/test', 'data')" ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -239,6 +254,7 @@ testHttpPostHostValidation = withTestToolboxHttp $ \box -> do
 -- See the comments in luaPost function.
 testHttpPostWithOptions :: Assertion
 testHttpPostWithOptions = withTestToolboxHttp $ \box -> do
+    let ctx = mkTestContext dummyPortal
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "local url = 'http://localhost:99999/api'"
         , "local body = '{\"key\": \"value\"}'"
@@ -246,7 +262,7 @@ testHttpPostWithOptions = withTestToolboxHttp $ \box -> do
         , "    headers = {['Content-Type'] = 'application/json'}"
         , "}"
         , "return http.post(url, body, options)"
-        ]) dummyPortal
+        ]) ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -261,7 +277,8 @@ testHttpPostWithOptions = withTestToolboxHttp $ \box -> do
 -- | Test that http.post correctly blocks non-whitelisted hosts
 testHttpPostBlocksNonWhitelisted :: Assertion
 testHttpPostBlocksNonWhitelisted = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.post('http://example.com/api', 'data')" dummyPortal
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.post('http://example.com/api', 'data')" ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -288,13 +305,14 @@ httpRequestTests =
 -- | Test http.request function with all parameters
 testHttpRequestWithBody :: Assertion
 testHttpRequestWithBody = withTestToolboxHttp $ \box -> do
+    let ctx = mkTestContext dummyPortal
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return http.request({"
         , "    method = 'POST',"
         , "    url = 'http://localhost:99999/api',"
         , "    body = 'test data'"
         , "})"
-        ]) dummyPortal
+        ]) ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -308,12 +326,13 @@ testHttpRequestWithBody = withTestToolboxHttp $ \box -> do
 -- | Test that http.request validates host
 testHttpRequestValidatesHost :: Assertion
 testHttpRequestValidatesHost = withTestToolboxHttp $ \box -> do
+    let ctx = mkTestContext dummyPortal
     result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box (Text.unlines
         [ "return http.request({"
         , "    method = 'GET',"
         , "    url = 'http://evil.com/data'"
         , "})"
-        ]) dummyPortal
+        ]) ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -344,7 +363,8 @@ hostValidationErrorTests =
 -- | Test error message for invalid URL
 testInvalidUrlError :: Assertion
 testInvalidUrlError = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('not-a-valid-url')" dummyPortal
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('not-a-valid-url')" ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do
@@ -358,7 +378,8 @@ testInvalidUrlError = withTestToolboxHttp $ \box -> do
 -- | Test error for URL without host (like file://)
 testUrlWithoutHost :: Assertion
 testUrlWithoutHost = withTestToolboxHttp $ \box -> do
-    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('file:///etc/passwd')" dummyPortal
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return http.get('file:///etc/passwd')" ctx dummyPortal
     case result of
         Left err -> assertFailure $ "Script failed: " ++ show err
         Right execResult -> do

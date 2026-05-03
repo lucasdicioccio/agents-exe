@@ -19,6 +19,7 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
+
 import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeTQueue)
 import Control.Exception (SomeException, catch, displayException)
 import Data.Aeson ((.=))
@@ -26,13 +27,14 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
+import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (listToMaybe)
-import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import qualified Data.Text.IO as TextIO
 import Data.Time (getCurrentTime)
+import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
@@ -59,9 +61,6 @@ import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
 import qualified System.Agents.OneShot as OneShot
-
--- Import Agent with qualified name to disambiguate record updates
-
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -214,6 +213,11 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         -- Extract the conversation ID from the execution context for tracing
         -- ctx.ctxConversationId is Base.ConversationId
         let parentBaseConvId = ctx.ctxConversationId
+        
+        -- Debug logging
+        let parentShort = baseConvIdToShort parentBaseConvId
+        let callStackShort = Text.intercalate "/" $ map callStackEntryToShort (Ctx.ctxCallStack ctx)
+        debugLog $ "runSubAgent: parent=" <> parentShort <> " stack=[" <> callStackShort <> "]"
 
         -- Get the API key for this agent
         let apiKeyId = Base.apiKeyId agent
@@ -234,6 +238,10 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         subcallBaseConvId <- newBaseConversationId
         let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
         let subcallCallStack = newEntry : parentCallStack
+        
+        -- Debug logging
+        let subcallShort = baseConvIdToShort subcallBaseConvId
+        debugLog $ "runSubAgent: created subcall=" <> subcallShort <> " depth=" <> Text.pack (show $ length subcallCallStack)
 
         -- Extract OS integration fields from context
         let mWorld = Ctx.ctxWorld ctx
@@ -595,7 +603,22 @@ agentSetQuery :: UserQuery -> Agent r -> Agent r
 agentSetQuery query agent =
     agent{usrQuery = pure (Just query)}
 
--- | Extract text content from an LLM response.
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
-    Maybe.fromMaybe "" txt
+    fromMaybe "" txt
+
+-- | Append a debug message to debug.log file with timestamp.
+debugLog :: Text -> IO ()
+debugLog msg = do
+    now <- getCurrentTime
+    let line = Text.pack (show now) <> ": OneShotTool: " <> msg <> "\n"
+    TextIO.appendFile "debug.log" line
+
+-- | Convert Base.ConversationId to short text for debugging.
+baseConvIdToShort :: Base.ConversationId -> Text
+baseConvIdToShort (Base.ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
+
+-- | Convert CallStackEntry to short text for debugging.
+callStackEntryToShort :: CallStackEntry -> Text
+callStackEntryToShort entry = entry.callAgentSlug <> ":" <> baseConvIdToShort entry.callConversationId
+

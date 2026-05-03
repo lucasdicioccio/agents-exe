@@ -44,10 +44,10 @@ import System.FilePath (takeExtension, takeFileName, (<.>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (writeSystemTempFile)
 import System.Process (readProcessWithExitCode)
-
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.Text.Encoding as TextEncoding
+import qualified Data.UUID as UUID
 
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (AgentId (..), ConversationId (..), newConversationId)
@@ -683,8 +683,8 @@ which emits progress events that update this conversation.
 handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
 handleSubcallStarted _tracer parentId subcallId slug depth = do
     -- Show status message with session IDs for debugging
-    let parentShort = Text.take 8 (Text.pack $ show parentId)
-    let subcallShort = Text.take 8 (Text.pack $ show subcallId)
+    let parentShort = shortConvId parentId
+    let subcallShort = shortConvId subcallId
     showStatus StatusInfo $ "Subcall d=" <> Text.pack (show depth) <> " pid=" <> parentShort <> " cid=" <> subcallShort <> " " <> slug
 
     -- Look up the agent by slug from the agent list
@@ -696,6 +696,7 @@ handleSubcallStarted _tracer parentId subcallId slug depth = do
             createSubcallConversationEntry tuiAgent subcallId parentId depth
         Nothing -> do
             showStatus StatusWarning $ "Agent not found for subcall: " <> slug
+
 
 -- | Find a TuiAgent by slug from the agent list.
 findAgentBySlug :: Text.Text -> Vector.Vector TuiAgent -> Maybe TuiAgent
@@ -1015,6 +1016,9 @@ showStatus severity text = do
     chan <- use eventChan
     liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
 
+-- | Extract short identifier from ConversationId for debugging.
+shortConvId :: ConversationId -> Text.Text
+shortConvId (ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
 -------------------------------------------------------------------------------
 -- Markdown Export Handlers
 -------------------------------------------------------------------------------
@@ -1159,16 +1163,7 @@ handleHeartbeat = do
     coreState <- liftIO $ readTVarIO coreRef
     let convs = coreConversations coreState
 
-    -- Debug: log conversation counts
-    let convCount = length convs
-    let rootCount = length $ filter (\c -> conversationParentId c == Nothing) convs
-
     let sortedConvs = sortConversationsForNesting convs
-    let sortedCount = length sortedConvs
-
-    -- Show debug info if counts don't match
-    when (sortedCount /= convCount) $ do
-        showStatus StatusWarning $ "Conv count mismatch: raw=" <> Text.pack (show convCount) <> " sorted=" <> Text.pack (show sortedCount) <> " roots=" <> Text.pack (show rootCount)
 
     tuiUI . conversationList .= List.list ConversationListWidget (Vector.fromList sortedConvs) 1
 
@@ -1193,6 +1188,7 @@ handleHeartbeat = do
                 tuiUI . statusMessage .= Nothing
         Nothing -> pure ()
     cleanupAuxiliaryTasks
+
 
 -- | Remove completed auxiliary tasks from the state.
 cleanupAuxiliaryTasks :: EventM N TuiState ()
@@ -1513,10 +1509,9 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
 
     -- Add to UI conversation list
     tuiUI . conversationList %= listInsert 0 conv
-
     -- Debug: show conversation created
-    let convShort = Text.take 8 (Text.pack $ show convId)
-    let parentShort = Text.take 8 (Text.pack $ show parentId)
+    let convShort = shortConvId convId
+    let parentShort = shortConvId parentId
     showStatus StatusInfo $ "Created subcall d=" <> Text.pack (show depth) <> " cid=" <> convShort <> " pid=" <> parentShort
 
 -------------------------------------------------------------------------------
@@ -1598,7 +1593,7 @@ runConversation tracer baseTuiAgent session = do
                 }
     liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
     tuiUI . conversationList %= listInsert 0 conv
-    tuiUI . conversationList . listSelectedL .= Just 0
+    
     switchToChatsAndFocusMessage
 
 -- | Send a message in the current conversation.

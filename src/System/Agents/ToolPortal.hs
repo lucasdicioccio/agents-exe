@@ -20,7 +20,7 @@ let portal = makeToolPortal registrations tracer
 -- Create context with portal
 let ctx = mkPortalContext
         sessId convId turnId mAgentId mSession
-        callStack maxDepth (Just portal) allowedTools
+        stack maxDepth (Just portal) allowedTools
 
 -- Now tools can call other tools through ctxToolPortal
 @
@@ -29,6 +29,14 @@ Security:
 * Tool whitelist is enforced at the portal level
 * Portal tools execute with a minimal context (no nested portal to prevent loops)
 * Execution time is tracked for each portal invocation
+
+Context Propagation:
+When a parent context is provided (Just ctx), the portal propagates the OS
+integration fields (ctxWorld, ctxEventQueue) AND the conversation identifiers
+(ctxSessionId, ctxConversationId, ctxTurnId, ctxCallStack) to the nested tool
+call. This ensures proper conversation tracking when tools call sub-agents.
+When called with Nothing, a fresh minimal context is created without OS
+integration.
 -}
 module System.Agents.ToolPortal (
     Trace (..),
@@ -63,10 +71,11 @@ import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Base (CallResult (..), toolRun)
 import System.Agents.Tools.Context (
     ToolCall (..),
+    ToolExecutionContext,
     ToolPortal,
     ToolResult (..),
-    mkMinimalContext,
  )
+import qualified System.Agents.Tools.Context as Ctx
 
 data Trace = PortalCall !ToolCall !ToolRegistration.Trace
     deriving (Show)
@@ -104,6 +113,11 @@ The portal allows tools to invoke other registered tools. Each invocation:
 4. Executes the tool with a minimal context (no nested portal to prevent loops)
 5. Returns the result as a ToolResult
 
+When called with a parent context (Just ctx), the portal propagates OS
+integration fields (World, EventQueue) AND conversation identifiers
+(session ID, conversation ID, turn ID, call stack) to ensure proper
+conversation tracking when tools call sub-agents.
+
 Example:
 
 @
@@ -124,10 +138,10 @@ makeToolPortal ::
 makeToolPortal tracer registrations = portal
   where
     portal :: ToolPortal
-    portal toolCall = do
+    portal mParentCtx toolCall = do
         print toolCall
         startTime <- getCurrentTime
-        result <- callToolViaPortal tracer portal registrations toolCall -- TODO(lucas): clarify stack recursion here
+        result <- callToolViaPortal (contramap (PortalCall toolCall) tracer) portal registrations mParentCtx toolCall -- TODO(lucas): clarify stack recursion here
         endTime <- getCurrentTime
         let duration = diffUTCTime endTime startTime
 
@@ -156,19 +170,22 @@ makeToolPortal tracer registrations = portal
 
 This function handles the core portal logic:
 1. Find the tool by name from registrations
-2. Execute with minimal context (no nested portal to prevent loops)
-3. Convert the result
+2. Check whitelist if parent context has allowed tools
+3. Execute with minimal context (no nested portal to prevent loops)
+4. Convert the result
 
-Note: The portal executes tools with a minimal context that does NOT include
-a nested portal. This prevents infinite recursion through the portal.
+When a parent context is provided, its OS integration fields AND conversation
+identifiers are propagated to ensure proper conversation tracking.
 -}
 callToolViaPortal ::
-    Tracer IO Trace ->
+    Tracer IO ToolRegistration.Trace ->
     ToolPortal ->
     TVar [ToolRegistration] ->
+    -- | Optional parent context for OS field propagation
+    Maybe ToolExecutionContext ->
     ToolCall ->
     IO (Either PortalError (CallResult ToolCall))
-callToolViaPortal tracer portal registrations toolCall = do
+callToolViaPortal tracer portal registrations mParentCtx toolCall = do
     regs <- readTVarIO registrations
     -- Find tool by name
     case findToolByName regs (callToolName toolCall) of
@@ -180,9 +197,19 @@ callToolViaPortal tracer portal registrations toolCall = do
                 Nothing ->
                     pure $ Left $ PortalToolNotFound (callToolName toolCall)
                 Just matchedTool -> do
-                    -- Execute with minimal context (no nested portal)
-                    execResult <- executeTool (contramap (PortalCall toolCall) tracer) portal matchedTool (callArgs toolCall)
-                    pure $ first PortalExecutionError execResult
+                    -- Check whitelist if parent context has allowed tools
+                    case mParentCtx of
+                        Just parentCtx -> do
+                            if not (Ctx.isToolAllowed (callToolName toolCall) parentCtx)
+                                then pure $ Left $ PortalToolNotAllowed (callToolName toolCall) (Ctx.ctxAllowedTools parentCtx)
+                                else do
+                                    -- Execute with OS fields and IDs from parent context
+                                    execResult <- executeTool tracer portal mParentCtx matchedTool (callArgs toolCall)
+                                    pure $ first PortalExecutionError execResult
+                        Nothing -> do
+                            -- Execute without parent context (no OS fields, fresh IDs)
+                            execResult <- executeTool tracer portal Nothing matchedTool (callArgs toolCall)
+                            pure $ first PortalExecutionError execResult
 
 {- | Find a tool registration by tool name.
 
@@ -216,29 +243,65 @@ findMatchingTool regs call =
 
 The minimal context has no portal to prevent nested portal calls.
 This is a safety measure to avoid potential infinite recursion.
+
+When a parent context is provided, its OS integration fields (World,
+EventQueue, ParentConversation) AND its identifiers (session ID, conversation
+ID, turn ID, call stack) are propagated to the minimal context.
+This ensures proper conversation tracking when tools call sub-agents.
+
+When no parent context is available (Nothing), fresh IDs are generated
+for the tool execution.
 -}
 executeTool ::
     Tracer IO ToolRegistration.Trace ->
     ToolPortal ->
+    -- | Optional parent context for OS field propagation
+    Maybe ToolExecutionContext ->
     Tool ToolCall ->
     Aeson.Value ->
     IO (Either Text (CallResult ToolCall))
-executeTool tracer portal tool args = do
-    -- Create minimal context without portal
-    sessId <- newSessionId
-    convId <- newConversationId
-    turnId <- newTurnId
-    let minimalCtx = mkMinimalContext sessId convId turnId portal
+executeTool tracer portal mParentCtx tool args =
+    case mParentCtx of
+        Just parentCtx -> do
+            -- Propagate parent's IDs to maintain conversation continuity
+            let sessId = Ctx.ctxSessionId parentCtx
+            let convId = Ctx.ctxConversationId parentCtx
+            let turnId = Ctx.ctxTurnId parentCtx
 
-    -- Execute the tool
-    result <- try $ tool.toolRun tracer minimalCtx args
+            -- Create minimal context with propagated IDs and OS fields
+            let minimalCtx =
+                    (Ctx.mkMinimalContext sessId convId turnId portal)
+                        { Ctx.ctxWorld = Ctx.ctxWorld parentCtx
+                        , Ctx.ctxEventQueue = Ctx.ctxEventQueue parentCtx
+                        , Ctx.ctxParentConversation = Just (Ctx.ctxConversationId parentCtx)
+                        , Ctx.ctxCallStack = Ctx.ctxCallStack parentCtx
+                        }
 
-    case result of
-        Left (e :: SomeException) ->
-            pure $ Left $ Text.pack $ show e
-        Right callResult ->
-            -- Strip the OpenAI.ToolCall from the result
-            pure $ Right callResult
+            -- Execute the tool
+            result <- try $ tool.toolRun tracer minimalCtx args
+
+            case result of
+                Left (e :: SomeException) ->
+                    pure $ Left $ Text.pack $ show e
+                Right callResult ->
+                    pure $ Right callResult
+
+        Nothing -> do
+            -- No parent context - generate fresh IDs for standalone execution
+            sessId <- newSessionId
+            convId <- newConversationId
+            turnId <- newTurnId
+
+            let minimalCtx = Ctx.mkMinimalContext sessId convId turnId portal
+
+            -- Execute the tool
+            result <- try $ tool.toolRun tracer minimalCtx args
+
+            case result of
+                Left (e :: SomeException) ->
+                    pure $ Left $ Text.pack $ show e
+                Right callResult ->
+                    pure $ Right callResult
 
 -------------------------------------------------------------------------------
 -- Result Conversion
@@ -392,3 +455,4 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
+

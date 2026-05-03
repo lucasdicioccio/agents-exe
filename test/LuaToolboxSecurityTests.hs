@@ -13,9 +13,12 @@ module LuaToolboxSecurityTests where
 import Control.Exception (bracket)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
+import Data.Maybe (fromJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>))
 import System.IO (writeFile)
@@ -25,15 +28,24 @@ import Test.Tasty.HUnit
 import Prod.Tracer (silent)
 import qualified Prod.Tracer as Prod
 
-import System.Agents.Base (LuaToolboxDescription (..))
-import System.Agents.Tools.Context (ToolPortal, ToolResult (..))
+import System.Agents.Base (ConversationId (..), LuaToolboxDescription (..))
+import System.Agents.Session.Types (SessionId (..), TurnId (..))
+import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
 import System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 
+-- | Create a minimal test context with dummy UUIDs
+mkTestContext :: ToolPortal -> ToolExecutionContext
+mkTestContext portal =
+    let sessionId = SessionId $ fromJust $ UUID.fromText "550e8400-e29b-41d4-a716-446655440001"
+        conversationId = ConversationId $ fromJust $ UUID.fromText "550e8400-e29b-41d4-a716-446655440002"
+        turnId = TurnId $ fromJust $ UUID.fromText "550e8400-e29b-41d4-a716-446655440003"
+     in mkMinimalContext sessionId conversationId turnId portal
+
 -- | Dummy portal for tests
 dummyPortal :: ToolPortal
-dummyPortal _call =
+dummyPortal _mParentCtx _call =
     pure $
         ToolResult
             { resultData = Aeson.object [("error", Aeson.String "Tool portal not available in test")]
@@ -210,15 +222,16 @@ securityDefaultsTests =
                     Left err -> assertFailure $ "Failed to initialize: " ++ err
                     Right toolbox -> do
                         -- Try to read a file - should return nil or error string
-                        scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return fs.read('/etc/passwd')" dummyPortal
+                        let ctx = mkTestContext dummyPortal
+                        scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return fs.read('/etc/passwd')" ctx dummyPortal
                         case scriptResult of
                             Left err -> 
                                 -- Script execution itself failed
                                 assertFailure $ "Script execution failed unexpectedly: " ++ show err
                             Right result -> do
                                 -- Check that access was blocked (nil or error string)
-                                let value = LuaToolbox.resultValues result
-                                assertBool ("Expected blocked access, got: " ++ show value) (isAccessBlocked value)
+                                let values = LuaToolbox.resultValues result
+                                assertBool ("Expected blocked access, got: " ++ show values) (isAccessBlocked values)
 
                         LuaToolbox.closeToolbox silent toolbox
         , testCase "LuaToolbox http module blocks access with empty allowedHosts" $ do
@@ -238,7 +251,8 @@ securityDefaultsTests =
                 Left err -> assertFailure $ "Failed to initialize: " ++ err
                 Right toolbox -> do
                     -- Try to make HTTP request - should return nil or error string
-                    scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return http.get('http://example.com')" dummyPortal
+                    let ctx = mkTestContext dummyPortal
+                    scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return http.get('http://example.com')" ctx dummyPortal
                     case scriptResult of
                         Left err -> 
                             -- Script execution itself failed

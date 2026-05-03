@@ -895,6 +895,16 @@ and an optional 'filepath' parameter for the 'attach-file' capability.
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
 -}
+
+{- | Register a SystemToolbox tool with the LLM system.
+
+System tools expose functions based on configured capabilities.
+The tool accepts a 'capability' parameter to select which information to retrieve,
+and an optional 'filepath' parameter for the 'attach-file' capability.
+
+The activation is extracted from the toolbox configuration's
+'systemToolboxActivation' field.
+-}
 registerSystemTool ::
     SystemTools.Toolbox ->
     Either String ToolRegistration
@@ -1231,7 +1241,9 @@ The tool accepts a 'script' parameter containing the Lua source code.
 The tool execution:
 1. Extracts the script from the arguments
 2. Gets the tool portal from the execution context
-3. Executes the script with portal access
+3. Executes the script with portal access, passing the parent context for
+   OS integration field propagation (World, EventQueue) to enable TUI
+   visibility for nested subcalls
 4. Returns the result as JSON
 
 Errors are properly caught and returned as LuaToolError.
@@ -1248,12 +1260,15 @@ luaTool box =
         -- Extract script from arguments
         case KeyMap.lookup (AesonKey.fromText "script") v of
             Just (Aeson.String script) -> do
-                -- Execute script with portal, passing the tracer for detailed logging
+                -- Execute script with portal, passing the parent context and tracer
+                -- The parent context enables OS integration fields to propagate
+                -- to nested subcalls for TUI visibility
                 result <-
                     LuaTools.executeScriptWithPortal
                         (contramap LuaToolsTrace tracer)
                         box
                         script
+                        ctx
                         (Context.ctxToolPortal ctx)
 
                 case result of
