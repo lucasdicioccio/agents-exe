@@ -257,8 +257,7 @@ initializeToolbox _tracer desc = do
             -- Get sandbox from config or use permissive default
             let sandbox = case desc.systemToolboxFileSandbox of
                     Just sb -> sb
-                    Nothing -> Sandbox.allowAllSandbox  -- Default to permissive for backward compatibility
-            
+                    Nothing -> Sandbox.allowAllSandbox -- Default to permissive for backward compatibility
             let toolbox =
                     Toolbox
                         { toolboxName = desc.systemToolboxName
@@ -874,4 +873,3 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
-

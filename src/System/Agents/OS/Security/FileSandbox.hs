@@ -1,5 +1,5 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -89,14 +89,17 @@ for a permissive configuration during development.
 -}
 data FileSandbox = FileSandbox
     { allowedPaths :: [FilePath]
-    -- ^ List of allowed directory paths
-    -- Paths can include glob patterns like "/project/**" to allow subdirectories
+    {- ^ List of allowed directory paths
+    Paths can include glob patterns like "/project/**" to allow subdirectories
+    -}
     , allowSymlinks :: Bool
-    -- ^ Whether to allow accessing files through symbolic links
-    -- When False, any symlink in the path will cause rejection
+    {- ^ Whether to allow accessing files through symbolic links
+    When False, any symlink in the path will cause rejection
+    -}
     , allowSubdirectories :: Bool
-    -- ^ Whether subdirectories of allowed paths are automatically allowed
-    -- When True, "/home/user/project" allows "/home/user/project/src"
+    {- ^ Whether subdirectories of allowed paths are automatically allowed
+    When True, "/home/user/project" allows "/home/user/project/src"
+    -}
     }
     deriving (Show, Eq, Ord, Generic)
 
@@ -296,12 +299,13 @@ matchGlobPattern path pattern =
         | otherwise = False
     matchPattern (x : xs) (p : ps)
         | p == "**" =
-            -- ** matches zero or more directories
-            matchPattern (x : xs) ps  -- Match zero dirs
-                || matchPattern xs (p : ps)  -- Match one+ dirs
-                || matchPattern xs ps  -- Match exactly this dir
-        | p == "*" = matchPattern xs ps  -- * matches any single dir
-        | x == p = matchPattern xs ps  -- Exact match
+            -- \** matches zero or more directories
+            matchPattern (x : xs) ps -- Match zero dirs
+                || matchPattern xs (p : ps) -- Match one+ dirs
+                || matchPattern xs ps -- Match exactly this dir
+        | p == "*" = matchPattern xs ps
+        -- \* matches any single dir
+        | x == p = matchPattern xs ps -- Exact match
         | otherwise = False
 
 {- | Check if a path contains directory traversal sequences.
@@ -334,7 +338,7 @@ checkSymlinks sandbox path
         let current = if null prefix then c else prefix </> c
         exists <- doesPathExist current
         if not exists
-            then pure $ Right ()  -- Path doesn't exist, no symlink to check
+            then pure $ Right () -- Path doesn't exist, no symlink to check
             else do
                 isSymlink <- pathIsSymbolicLink current
                 if isSymlink
@@ -368,10 +372,10 @@ normalizePath path =
 
     collapseDirs :: [FilePath] -> [FilePath] -> [FilePath]
     collapseDirs [] acc = reverse acc
-    collapseDirs (".." : rest) (_ : acc) = collapseDirs rest acc  -- Go up
-    collapseDirs (".." : rest) [] = collapseDirs rest []  -- Can't go above root
-    collapseDirs ("." : rest) acc = collapseDirs rest acc  -- Skip .
-    collapseDirs ("" : rest) acc = collapseDirs rest acc  -- Skip empty
+    collapseDirs (".." : rest) (_ : acc) = collapseDirs rest acc -- Go up
+    collapseDirs (".." : rest) [] = collapseDirs rest [] -- Can't go above root
+    collapseDirs ("." : rest) acc = collapseDirs rest acc -- Skip .
+    collapseDirs ("" : rest) acc = collapseDirs rest acc -- Skip empty
     collapseDirs (d : rest) acc = collapseDirs rest (d : acc)
 
 {- | Resolve a relative path to an absolute path.
@@ -389,7 +393,7 @@ resolvePath path = do
             -- For absolute paths, try to canonicalize
             result <- try $ canonicalizePath normalized
             case result of
-                Left (_ :: IOException) -> pure $ Right normalized  -- Use normalized if can't canonicalize
+                Left (_ :: IOException) -> pure $ Right normalized -- Use normalized if can't canonicalize
                 Right canonical -> pure $ Right canonical
         else do
             -- Relative path: join with current directory
@@ -477,4 +481,3 @@ sandboxedWriteFile sandbox path content = do
                 Left (e :: IOException) ->
                     pure $ Left $ SandboxIOError path (Text.pack $ show e)
                 Right () -> pure $ Right ()
-
