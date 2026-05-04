@@ -890,7 +890,10 @@ registerSqliteTools box =
 
 System tools expose functions based on configured capabilities.
 The tool accepts a 'capability' parameter to select which information to retrieve,
-and an optional 'filepath' parameter for the 'attach-file' capability.
+and optional parameters:
+- 'filepath' for the 'attach-file' capability
+- 'session_id' for the 'read-session' capability
+- 'query' for the 'search-sessions' capability
 
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
@@ -903,21 +906,8 @@ registerSystemTool box =
         tName = "system_info"
         llmName = system2LLMName box tName
 
-        -- Parameters: capability (required) and filepath (optional, for attach-file)
-        paramProps =
-            [ ParamProperty
-                { propertyKey = "capability"
-                , propertyType = StringParamType
-                , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
-                , propertyRequired = True
-                }
-            , ParamProperty
-                { propertyKey = "filepath"
-                , propertyType = StringParamType
-                , propertyDescription = "For attach-file: Absolute path to the file to attach"
-                , propertyRequired = False
-                }
-            ]
+        -- Build parameter properties based on enabled capabilities
+        paramProps = buildSystemToolParams box
 
         toolDescription =
             ToolDescription
@@ -946,6 +936,56 @@ registerSystemTool box =
                 , findTool = find
                 , toolActivation = mbActivation
                 }
+
+-- | Build parameter properties for system tools based on enabled capabilities.
+buildSystemToolParams :: SystemTools.Toolbox -> [ParamProperty]
+buildSystemToolParams box =
+    let
+        baseParams =
+            [ ParamProperty
+                { propertyKey = "capability"
+                , propertyType = StringParamType
+                , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
+                , propertyRequired = True
+                }
+            ]
+
+        -- filepath parameter for attach-file capability
+        filepathParam =
+            ParamProperty
+                { propertyKey = "filepath"
+                , propertyType = StringParamType
+                , propertyDescription = "For attach-file: Absolute path to the file to attach"
+                , propertyRequired = False
+                }
+
+        -- session_id parameter for read-session capability
+        sessionIdParam =
+            ParamProperty
+                { propertyKey = "session_id"
+                , propertyType = StringParamType
+                , propertyDescription = "For read-session: Session ID (UUID) to read"
+                , propertyRequired = False
+                }
+
+        -- query parameter for search-sessions capability
+        queryParam =
+            ParamProperty
+                { propertyKey = "query"
+                , propertyType = StringParamType
+                , propertyDescription = "For search-sessions: Search query string"
+                , propertyRequired = False
+                }
+
+        hasCapability cap = cap `elem` box.toolboxCapabilities
+
+        -- Add optional parameters only if their respective capabilities are enabled
+        optionalParams =
+            (if hasCapability SystemToolAttachFile then [filepathParam] else [])
+                ++ (if hasCapability SystemToolReadSession then [sessionIdParam] else [])
+                ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
+     in
+        baseParams ++ optionalParams
 
 -- Helper to convert capability to text
 capabilityToText :: SystemToolCapability -> Text
@@ -1394,7 +1434,14 @@ systemTool box =
                 if cap == "attach-file"
                     then handleAttachFile tracer v
                     else do
-                        result <- SystemTools.executeQuery (Prod.contramap SystemToolsTrace tracer) box cap
+                        -- Extract optional parameters for session introspection capabilities
+                        let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
+                                Just (Aeson.String sid) -> Just sid
+                                _ -> Nothing
+                        let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
+                                Just (Aeson.String q) -> Just q
+                                _ -> Nothing
+                        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery
                         case result of
                             Left err -> pure $ SystemToolError call err
                             Right rsp -> pure $ SystemToolResult call rsp
@@ -1566,3 +1613,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

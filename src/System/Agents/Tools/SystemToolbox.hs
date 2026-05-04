@@ -56,6 +56,7 @@ module System.Agents.Tools.SystemToolbox (
 
     -- * Query execution
     executeQuery,
+    executeQueryWithParams,
     executeAttachFile,
     getCapabilityInfo,
 
@@ -84,12 +85,13 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isInfixOf)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Time as Time
+import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (doesFileExist, getCurrentDirectory, getModificationTime)
 import System.Environment (getEnvironment, lookupEnv)
@@ -110,6 +112,13 @@ import System.Agents.Media.Types (ApplicationType (..), AudioType (..), ImageTyp
 import System.Agents.Session.Types (
     Session (..),
     SessionId (..),
+    Turn (..),
+    UserTurnContent (..),
+    LlmTurnContent (..),
+    PartialUserTurnContent (..),
+    UserQuery (..),
+    LlmResponse (..),
+    SystemPrompt (..),
  )
 import qualified System.Agents.SessionStore as SessionStore
 
@@ -285,6 +294,8 @@ data QueryError
       InvalidSessionIdError !Text
     | -- | Access denied based on scope
       SessionAccessDeniedError !Text !SessionIntrospectionScope
+    | -- | Missing required parameter
+      MissingParameterError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -511,7 +522,35 @@ Returns:
 Note: For the 'attach-file' capability, use 'executeAttachFile' instead.
 -}
 executeQuery :: Tracer IO Trace -> Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeQuery tracer toolbox capabilityName = do
+executeQuery tracer toolbox capabilityName =
+    executeQueryWithParams tracer toolbox capabilityName Nothing Nothing
+
+{- | Execute a query for a specific capability with optional parameters.
+
+This extended version supports session introspection capabilities that require
+additional parameters:
+* 'read-session' - requires session_id
+* 'search-sessions' - requires query
+
+Parameters:
+* tracer - for logging/debugging
+* toolbox - the system toolbox
+* capabilityName - the capability to query
+* mSessionId - optional session ID for read-session
+* mQuery - optional search query for search-sessions
+
+Returns:
+* 'Right QueryResult' on successful execution
+* 'Left QueryError' if capability is not enabled or system info cannot be gathered
+-}
+executeQueryWithParams ::
+    Tracer IO Trace ->
+    Toolbox ->
+    Text ->
+    Maybe Text ->
+    Maybe Text ->
+    IO (Either QueryError QueryResult)
+executeQueryWithParams tracer toolbox capabilityName mSessionId mQuery = do
     runTracer tracer (SystemInfoRequestedTrace capabilityName)
     startTime <- getCurrentTime
 
@@ -526,8 +565,8 @@ executeQuery tracer toolbox capabilityName = do
             if capability `notElem` toolboxCapabilities toolbox
                 then pure $ Left $ CapabilityNotEnabledError capabilityName
                 else do
-                    -- Gather the information
-                    result <- getCapabilityInfoWithTimeout capability toolbox
+                    -- Gather the information with optional parameters
+                    result <- getCapabilityInfoWithTimeout capability toolbox mSessionId mQuery
                     endTime <- getCurrentTime
                     let execTime = diffUTCTime endTime startTime
 
@@ -591,10 +630,12 @@ on slow or blocking system calls.
 getCapabilityInfoWithTimeout ::
     SystemToolCapability ->
     Toolbox ->
+    Maybe Text ->
+    Maybe Text ->
     IO (Either Text (Text, Aeson.Value))
-getCapabilityInfoWithTimeout capability toolbox = do
+getCapabilityInfoWithTimeout capability toolbox mSessionId mQuery = do
     let timeoutMicros = defaultTimeoutSeconds * 1000000
-    result <- race (threadDelay timeoutMicros) (getCapabilityInfoInternal capability toolbox)
+    result <- race (threadDelay timeoutMicros) (getCapabilityInfoInternal capability toolbox mSessionId mQuery)
     case result of
         Left () -> pure $ Left "Timeout while gathering system information"
         Right val -> pure val
@@ -607,8 +648,10 @@ data as a JSON value.
 getCapabilityInfoInternal ::
     SystemToolCapability ->
     Toolbox ->
+    Maybe Text ->
+    Maybe Text ->
     IO (Either Text (Text, Aeson.Value))
-getCapabilityInfoInternal capability toolbox = do
+getCapabilityInfoInternal capability toolbox mSessionId mQuery = do
     result <- try $ do
         (name, value) <- case capability of
             SystemToolDate -> getDateInfo
@@ -621,8 +664,8 @@ getCapabilityInfoInternal capability toolbox = do
             SystemToolUptime -> getUptimeInfo
             SystemToolAttachFile -> error "Use executeAttachFile for attach-file capability"
             SystemToolListSessions -> getListSessionsInfo (toolboxSessionIntrospection toolbox)
-            SystemToolSearchSessions -> getSearchSessionsInfo (toolboxSessionIntrospection toolbox)
-            SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox)
+            SystemToolSearchSessions -> getSearchSessionsInfo (toolboxSessionIntrospection toolbox) mQuery
+            SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox) mSessionId
             SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
         pure (name, value)
     case result of
@@ -715,36 +758,202 @@ isSessionFileLocked path = do
 
 Returns matching sessions with relevance scores and snippet previews.
 -}
-getSearchSessionsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
-getSearchSessionsInfo Nothing = pure ("search-sessions", String "Session store not configured")
-getSearchSessionsInfo (Just _config) = do
-    -- For now, return a placeholder indicating search is available
-    -- Full implementation would use Session.Search.Index.executeSearchWithOptions
-    pure $
-        ( "search-sessions"
-        , Aeson.object
-            [ "message" .= ("Search capability available. Use executeSearchWithOptions from Session.Search.Query for full-text search." :: Text)
-            , "hint" .= ("Configure search index with SearchIndexConfig and call executeSearchWithOptions" :: Text)
-            ]
-        )
+getSearchSessionsInfo :: Maybe SessionIntrospectionConfig -> Maybe Text -> IO (Text, Aeson.Value)
+getSearchSessionsInfo Nothing _ = pure ("search-sessions", String "Session store not configured")
+getSearchSessionsInfo (Just _config) Nothing = 
+    pure ("search-sessions", Aeson.object ["error" .= ("Missing 'query' parameter for search-sessions" :: Text)])
+getSearchSessionsInfo (Just config) (Just searchQuery) = do
+    -- List all sessions from the store
+    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    
+    case allSessionsResult of
+        Left (e :: SomeException) -> do
+            pure ("search-sessions", Aeson.object ["error" .= Text.pack (show e), "results" .= ([] :: [Aeson.Value])])
+        Right allSessions -> do
+            -- Filter sessions based on scope first
+            let accessibleSessions = filterSessionsByScope config allSessions
+            
+            -- Perform simple text search across accessible sessions
+            let searchTerms = Text.words $ Text.toLower searchQuery
+            let matchingSessions = filter (sessionMatchesSearch searchTerms) accessibleSessions
+            
+            -- Apply limit
+            let limitedResults = take (introspectionMaxResults config) matchingSessions
+            
+-- Build result items
+            resultItems <- forM limitedResults $ \(_path, mSession, convId) -> do
+                let turnCount = maybe 0 (length . turns) mSession
+                let preview = generateSessionPreview mSession searchTerms
+                
+                pure $ Aeson.object
+                    [ "sessionId" .= conversationIdToText convId
+                    , "conversationId" .= conversationIdToText convId
+                    , "turnCount" .= turnCount
+                    , "preview" .= preview
+                    , "matchType" .= ("content" :: Text)
+                    ]
+            
+            pure $
+                ( "search-sessions"
+                , Aeson.object
+                    [ "query" .= searchQuery
+                    , "results" .= resultItems
+                    , "totalMatches" .= length matchingSessions
+                    , "scope" .= showScope (introspectionScope config)
+                    ]
+                )
+
+-- | Check if a session matches the search terms
+sessionMatchesSearch :: [Text] -> (FilePath, Maybe Session, ConversationId) -> Bool
+sessionMatchesSearch searchTerms (_, mSession, _) =
+    case mSession of
+        Nothing -> False
+        Just session -> any (termMatchesSession session) searchTerms
+
+-- | Check if a search term matches any content in the session
+termMatchesSession :: Session -> Text -> Bool
+termMatchesSession session term =
+    any (turnMatchesTerm term) (turns session)
+
+-- | Check if a turn matches the search term
+turnMatchesTerm :: Text -> Turn -> Bool
+turnMatchesTerm term turn =
+    let content = Text.toLower $ turnContentText turn
+    in term `Text.isInfixOf` content
+
+-- | Extract text content from a turn for searching
+turnContentText :: Turn -> Text
+turnContentText (UserTurn content _) =
+    let promptText = case userPrompt content of SystemPrompt t -> t
+        userQueryText = maybe "" (\(UserQuery t _) -> t) (userQuery content)
+     in promptText <> " " <> userQueryText
+turnContentText (LlmTurn content _) =
+    fromMaybe "" $ responseText $ llmResponse content
+turnContentText (PartialUserTurn content _) =
+    let promptText = case pUserPrompt content of SystemPrompt t -> t
+        userQueryText = maybe "" (\(UserQuery t _) -> t) (pUserQuery content)
+     in promptText <> " " <> userQueryText
+
+-- | Generate a preview of matching content from a session
+generateSessionPreview :: Maybe Session -> [Text] -> Text
+generateSessionPreview mSession searchTerms =
+    case mSession of
+        Nothing -> ""
+        Just session ->
+            let allContent = Text.intercalate " " $ map turnContentText (take 3 $ turns session)
+                lowerContent = Text.toLower allContent
+                -- Find first matching term and extract context around it
+                matchPositions = concatMap (\term -> findTermPositions term lowerContent 0) searchTerms
+            in case matchPositions of
+                [] -> Text.take 200 allContent <> "..."
+                (pos:_) ->
+                    let start = max 0 (pos - 100)
+                        end = min (Text.length allContent) (pos + 100)
+                    in "..." <> Text.take (end - start) (Text.drop start allContent) <> "..."
+
+-- | Find all positions of a term in text
+findTermPositions :: Text -> Text -> Int -> [Int]
+findTermPositions term txt offset =
+    case Text.breakOn term txt of
+        (_, "") -> [] -- Not found
+        (prefix, rest) ->
+            let pos = offset + Text.length prefix
+            in pos : findTermPositions term (Text.drop (Text.length term) rest) (pos + Text.length term)
 
 {- | Read session content.
 
 Returns: turns, tool calls, responses based on scope
 -}
-getReadSessionInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
-getReadSessionInfo Nothing = pure ("read-session", String "Session store not configured")
-getReadSessionInfo (Just config) = do
-    -- For now, return a placeholder
-    -- Full implementation would read specific session by ID and check scope
-    pure $
-        ( "read-session"
-        , Aeson.object
-            [ "message" .= ("Read session capability available. Session access is controlled by scope." :: Text)
-            , "currentScope" .= showScope (introspectionScope config)
-            , "hint" .= ("Use SessionStore.readSession with scope checking via canAccessSession" :: Text)
-            ]
-        )
+getReadSessionInfo :: Maybe SessionIntrospectionConfig -> Maybe Text -> IO (Text, Aeson.Value)
+getReadSessionInfo Nothing _ = pure ("read-session", String "Session store not configured")
+getReadSessionInfo (Just _config) Nothing = 
+    pure ("read-session", Aeson.object ["error" .= ("Missing 'session_id' parameter for read-session" :: Text)])
+getReadSessionInfo (Just config) (Just sessionIdText) = do
+    -- Parse the session ID from text
+    case parseSessionId sessionIdText of
+        Nothing -> 
+            pure ("read-session", Aeson.object ["error" .= ("Invalid session_id format: " <> sessionIdText)])
+        Just targetSessionId -> do
+            -- Convert SessionId to ConversationId for lookup
+            let targetConvId = sessionIdToConversationId targetSessionId
+            
+            -- Try to read the session
+            mSession <- SessionStore.readSession (introspectionStore config) targetConvId
+            
+            case mSession of
+                Nothing -> 
+                    pure ("read-session", Aeson.object 
+                        [ "error" .= ("Session not found or is currently locked: " <> sessionIdText)
+                        , "sessionId" .= sessionIdText
+                        ])
+                Just session -> do
+                    -- Check scope access
+                    if canAccessSession config session
+                        then do
+                            -- Build turn summaries
+                            let turnSummaries = map turnToSummary (turns session)
+                            
+                            pure ("read-session", Aeson.object
+                                [ "sessionId" .= sessionIdText
+                                , "conversationId" .= conversationIdToText targetConvId
+                                , "turnCount" .= length (turns session)
+                                , "turns" .= turnSummaries
+                                , "scope" .= showScope (introspectionScope config)
+                                , "access" .= ("granted" :: Text)
+                                ])
+                        else do
+                            pure ("read-session", Aeson.object
+                                [ "error" .= ("Access denied: session is outside configured scope" :: Text)
+                                , "sessionId" .= sessionIdText
+                                , "scope" .= showScope (introspectionScope config)
+                                , "access" .= ("denied" :: Text)
+                                ])
+
+-- | Parse a SessionId from text
+parseSessionId :: Text -> Maybe SessionId
+parseSessionId txt =
+    case UUID.fromText txt of
+        Just uuid -> Just $ SessionId uuid
+        Nothing -> Nothing
+
+-- | Convert a SessionId to a ConversationId
+sessionIdToConversationId :: SessionId -> ConversationId
+sessionIdToConversationId (SessionId uuid) = ConversationId uuid
+
+-- | Check if a session can be accessed based on the configured scope
+canAccessSession :: SessionIntrospectionConfig -> Session -> Bool
+canAccessSession config session =
+    case introspectionScope config of
+        ScopeAll -> True
+        ScopeParentsOnly -> isParentSession config (Just session)
+        ScopeChildrenOnly -> isChildSession config (Just session)
+        ScopeSubtree -> 
+            isParentSession config (Just session) || 
+            isChildSession config (Just session) || 
+            isCurrentSession config (Just session)
+
+-- | Convert a turn to a summary for output
+turnToSummary :: Turn -> Aeson.Value
+turnToSummary (UserTurn content _) =
+    Aeson.object
+        [ "type" .= ("user" :: Text)
+        , "prompt" .= case userPrompt content of SystemPrompt t -> t
+        , "query" .= fmap (\(UserQuery t _) -> t) (userQuery content)
+        , "toolCount" .= length (userTools content)
+        ]
+turnToSummary (LlmTurn content _) =
+    Aeson.object
+        [ "type" .= ("llm" :: Text)
+        , "response" .= responseText (llmResponse content)
+        , "toolCallCount" .= length (llmToolCalls content)
+        ]
+turnToSummary (PartialUserTurn content _) =
+    Aeson.object
+        [ "type" .= ("partial" :: Text)
+        , "prompt" .= case pUserPrompt content of SystemPrompt t -> t
+        , "completedCount" .= length (pCompletedResponses content)
+        , "pendingCount" .= length (pPendingCalls content)
+        ]
 
 {- | Get session statistics.
 
@@ -839,7 +1048,7 @@ getSessionModTime store convId = do
 
 -- | Helper to convert ConversationId to Text
 conversationIdToText :: ConversationId -> Text
-conversationIdToText (ConversationId uuid) = Text.pack $ show uuid
+conversationIdToText (ConversationId uuid) = UUID.toText uuid
 
 -------------------------------------------------------------------------------
 -- System Info Capabilities
@@ -1095,7 +1304,7 @@ with a default toolbox context (no env var filtering).
 getCapabilityInfo :: SystemToolCapability -> IO (Text, Aeson.Value)
 getCapabilityInfo capability = do
     let toolbox = Toolbox "" "" [capability] Nothing undefined Nothing
-    result <- getCapabilityInfoWithTimeout capability toolbox
+    result <- getCapabilityInfoWithTimeout capability toolbox Nothing Nothing
     case result of
         Left err -> pure (capabilityToName capability, String err)
         Right val -> pure val
