@@ -90,13 +90,14 @@ data FileResolution
 -- Parsing
 -------------------------------------------------------------------------------
 
--- | Parse all file references from a prompt text.
---
--- Recognizes the syntax @[[file:path]]@ and @[[file:path#L10-L20]]@.
---
--- >>> parseFileReferences "Check [[file:src/Main.hs]] and [[file:test/Main.hs#L1-L10]]"
--- [FileReference {filePath = "src/Main.hs", lineRange = Nothing},
---  FileReference {filePath = "test/Main.hs", lineRange = Just (LineRange 1 10)}]
+{- | Parse all file references from a prompt text.
+
+Recognizes the syntax @[[file:path]]@ and @[[file:path#L10-L20]]@.
+
+>>> parseFileReferences "Check [[file:src/Main.hs]] and [[file:test/Main.hs#L1-L10]]"
+[FileReference {filePath = "src/Main.hs", lineRange = Nothing},
+ FileReference {filePath = "test/Main.hs", lineRange = Just (LineRange 1 10)}]
+-}
 parseFileReferences :: Text -> [FileReference]
 parseFileReferences text = mapMaybe parseFileReference refs
   where
@@ -116,9 +117,10 @@ extractBrackets = go
                         (content, afterClose) ->
                             content : go (Text.drop 2 afterClose)
 
--- | Parse a single file reference from bracket content.
---
--- Expected format: @file:path@ or @file:path#L10-L20@
+{- | Parse a single file reference from bracket content.
+
+Expected format: @file:path@ or @file:path#L10-L20@
+-}
 parseFileReference :: Text -> Maybe FileReference
 parseFileReference content = do
     -- Must start with "file:"
@@ -129,12 +131,13 @@ parseFileReference content = do
         then Nothing
         else Just $ FileReference (Text.unpack path) range
 
--- | Parse optional line range from path.
---
--- Handles formats:
--- - @path#L10-L20@ - lines 10 to 20
--- - @path#L10-@ - lines 10 to end
--- - @path#L10@ - single line 10
+{- | Parse optional line range from path.
+
+Handles formats:
+- @path#L10-L20@ - lines 10 to 20
+- @path#L10-@ - lines 10 to end
+- @path#L10@ - single line 10
+-}
 parseRange :: Text -> (Text, Maybe LineRange)
 parseRange txt =
     case Text.breakOn "#L" txt of
@@ -143,12 +146,13 @@ parseRange txt =
             let rangeText = Text.drop 2 rangePart -- Remove "#L"
              in (path, parseLineRange rangeText)
 
--- | Parse a line range specification.
---
--- Formats:
--- - @10-20@ -> lines 10 to 20
--- - @10-@ -> lines 10 to end (represented as -1)
--- - @10@ -> single line 10
+{- | Parse a line range specification.
+
+Formats:
+- @10-20@ -> lines 10 to 20
+- @10-@ -> lines 10 to end (represented as -1)
+- @10@ -> single line 10
+-}
 parseLineRange :: Text -> Maybe LineRange
 parseLineRange txt
     | Text.null txt = Nothing
@@ -182,9 +186,10 @@ parseLineRange txt
 -- Resolution
 -------------------------------------------------------------------------------
 
--- | Resolve multiple file references to their content.
---
--- Returns a list of tuples containing the original reference and its resolution.
+{- | Resolve multiple file references to their content.
+
+Returns a list of tuples containing the original reference and its resolution.
+-}
 resolveReferences :: [FileReference] -> IO [(FileReference, FileResolution)]
 resolveReferences refs = mapM resolve refs
   where
@@ -211,9 +216,10 @@ resolveReference FileReference{..} = do
                                 Left err -> return $ ResolutionError err
                                 Right extracted -> return $ ResolutionSuccess extracted
 
--- | Extract a line range from file content.
---
--- Line numbers are 1-indexed. A range end of -1 means "to end of file".
+{- | Extract a line range from file content.
+
+Line numbers are 1-indexed. A range end of -1 means "to end of file".
+-}
 readFileRange :: Text -> LineRange -> Either Text Text
 readFileRange content (LineRange start end) = do
     let lines_ = Text.lines content
@@ -247,10 +253,11 @@ readFileRange content (LineRange start end) = do
 -- Inlining
 -------------------------------------------------------------------------------
 
--- | Inline resolved file references into the original prompt text.
---
--- Each @[[file:path]]@ marker is replaced with the formatted file content.
--- References that failed to resolve are replaced with error messages.
+{- | Inline resolved file references into the original prompt text.
+
+Each @[[file:path]]@ marker is replaced with the formatted file content.
+References that failed to resolve are replaced with error messages.
+-}
 inlineReferences :: Text -> [(FileReference, FileResolution)] -> Text
 inlineReferences = foldl' inlineOne
   where
@@ -279,9 +286,10 @@ referenceToMarker FileReference{..} =
                 then "#L" <> Text.pack (show start)
                 else "#L" <> Text.pack (show start) <> "-" <> Text.pack (show end)
 
--- | Format file content for inclusion in prompt.
---
--- Wraps the content in a markdown code block with file path annotation.
+{- | Format file content for inclusion in prompt.
+
+Wraps the content in a markdown code block with file path annotation.
+-}
 formatFileContent :: FileReference -> Text -> Text
 formatFileContent FileReference{..} content =
     let lang = guessLanguage filePath
@@ -341,9 +349,10 @@ guessLanguage path =
 -- Preview
 -------------------------------------------------------------------------------
 
--- | Generate a preview of which files will be included.
---
--- Useful for showing users what will be sent before actually sending.
+{- | Generate a preview of which files will be included.
+
+Useful for showing users what will be sent before actually sending.
+-}
 previewReferences :: [(FileReference, FileResolution)] -> Text
 previewReferences refs =
     if null refs
@@ -362,4 +371,3 @@ previewReferences refs =
     status (ResolutionSuccess content) =
         " [" <> Text.pack (show $ Text.count "\n" content) <> " lines]"
     status (ResolutionError err) = " [ERROR: " <> err <> "]"
-
