@@ -29,7 +29,7 @@ typeclass with full support for entities, components, events, and queries.
 -}
 module System.Agents.OS.Persistence.Sqlite (
     -- * SQLite Backend
-    SqliteBackend,
+    SqliteBackend (..),
     newSqliteBackend,
     closeSqliteBackend,
 
