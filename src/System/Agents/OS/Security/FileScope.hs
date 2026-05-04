@@ -40,7 +40,6 @@ Glob patterns follow standard Unix conventions:
 * @?@ matches any single character
 * @[abc]@ matches any character in the set
 * @[a-z]@ matches any character in the range
-
 -}
 module System.Agents.OS.Security.FileScope (
     -- * Core Types
@@ -533,8 +532,10 @@ scopeSummary :: FileScope -> String
 scopeSummary scope =
     let count = patternCount scope
         patterns = intercalate ", " $ map (Text.unpack . patternOriginal) (scopePatterns scope)
-     in "FileScope with " ++ show count ++ " patterns" ++
-        if null patterns then "" else ": " ++ patterns
+     in "FileScope with "
+            ++ show count
+            ++ " patterns"
+            ++ if null patterns then "" else ": " ++ patterns
 
 {- | Count the number of patterns in a scope.
 
@@ -553,4 +554,3 @@ patternCount = length . scopePatterns
 -}
 getPatterns :: FileScope -> [Text]
 getPatterns = map patternOriginal . scopePatterns
-

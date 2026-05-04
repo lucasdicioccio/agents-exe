@@ -1199,6 +1199,7 @@ data DeveloperToolCapability
     | -- | Traverse directory tree recursively
       DevToolTraverseDirectory
     deriving (Show, Ord, Eq, Generic)
+
 -- | Serialize DeveloperToolCapability as kebab-case strings.
 instance ToJSON DeveloperToolCapability where
     toJSON DevToolValidateTool = Aeson.String "validate-tool"

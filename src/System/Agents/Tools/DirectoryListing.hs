@@ -56,7 +56,6 @@ Each 'FileEntry' includes:
 * Size in bytes (for regular files)
 * Modification time
 * Permissions (Unix-style)
-
 -}
 module System.Agents.Tools.DirectoryListing (
     -- * Configuration Types
@@ -107,11 +106,11 @@ import System.FilePath (takeFileName, (</>))
 import System.FilePath.Glob (compile, match)
 import System.Posix.Files (
     FileStatus,
+    fileSize,
     getFileStatus,
     isDirectory,
     isRegularFile,
     isSymbolicLink,
-    fileSize,
  )
 
 import System.Agents.OS.Security.FileScope (
@@ -344,10 +343,10 @@ scopedTraverseDirectory scope path =
 listDirectoryRecursive ::
     FileScope ->
     ListDirectoryOp ->
+    -- | Root path (for calculating relative paths in results)
     FilePath ->
-    -- ^ Root path (for calculating relative paths in results)
+    -- | Current directory being listed
     FilePath ->
-    -- ^ Current directory being listed
     IO [FileEntry]
 listDirectoryRecursive scope op rootPath currentPath = do
     -- Get raw directory contents
@@ -369,10 +368,10 @@ listDirectoryRecursive scope op rootPath currentPath = do
 processEntry ::
     FileScope ->
     ListDirectoryOp ->
+    -- | Root path
     FilePath ->
-    -- ^ Root path
+    -- | Entry path
     FilePath ->
-    -- ^ Entry path
     IO [FileEntry]
 processEntry scope op rootPath entryPath = do
     -- Check if path is within scope
@@ -625,11 +624,11 @@ formatFilePermissions perms ftype =
             : [ if readable perms then 'r' else '-'
               , if writable perms then 'w' else '-'
               , if executable perms then 'x' else '-'
-              , if readable perms then 'r' else '-'  -- Group read (using same for simplicity)
-              , if writable perms then 'w' else '-'  -- Group write
+              , if readable perms then 'r' else '-' -- Group read (using same for simplicity)
+              , if writable perms then 'w' else '-' -- Group write
               , if executable perms then 'x' else '-' -- Group execute
-              , if readable perms then 'r' else '-'  -- Other read
-              , if writable perms then 'w' else '-'  -- Other write
+              , if readable perms then 'r' else '-' -- Other read
+              , if writable perms then 'w' else '-' -- Other write
               , if executable perms then 'x' else '-' -- Other execute
               ]
   where
@@ -638,4 +637,3 @@ formatFilePermissions perms ftype =
         Directory -> 'd'
         Symlink -> 'l'
         Other -> '?'
-
