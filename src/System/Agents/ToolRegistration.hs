@@ -894,6 +894,8 @@ and optional parameters:
 - 'filepath' for the 'attach-file' capability
 - 'session_id' for the 'read-session' capability
 - 'query' for the 'search-sessions' capability
+- 'take_n', 'drop_n', 'offset', 'limit' for session slicing (read-session)
+- 'include_thinking', 'include_tool_responses' for content filtering (read-session)
 
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
@@ -977,12 +979,65 @@ buildSystemToolParams box =
                 , propertyRequired = False
                 }
 
+        -- Slicing parameters for read-session capability
+        takeNParam =
+            ParamProperty
+                { propertyKey = "take_n"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Take last N turns (alternative to offset/limit)"
+                , propertyRequired = False
+                }
+
+        dropNParam =
+            ParamProperty
+                { propertyKey = "drop_n"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Drop first N turns (alternative to offset)"
+                , propertyRequired = False
+                }
+
+        offsetParam =
+            ParamProperty
+                { propertyKey = "offset"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Starting turn index (0-based, alternative to drop_n)"
+                , propertyRequired = False
+                }
+
+        limitParam =
+            ParamProperty
+                { propertyKey = "limit"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Max turns to return (alternative to take_n)"
+                , propertyRequired = False
+                }
+
+        -- Content control parameters for read-session capability
+        includeThinkingParam =
+            ParamProperty
+                { propertyKey = "include_thinking"
+                , propertyType = BoolParamType
+                , propertyDescription = "For read-session: Include LLM thinking/reasoning content (default: false)"
+                , propertyRequired = False
+                }
+
+        includeToolResponsesParam =
+            ParamProperty
+                { propertyKey = "include_tool_responses"
+                , propertyType = BoolParamType
+                , propertyDescription = "For read-session: Include tool call responses (default: false)"
+                , propertyRequired = False
+                }
+
         hasCapability cap = cap `elem` box.toolboxCapabilities
 
         -- Add optional parameters only if their respective capabilities are enabled
         optionalParams =
             (if hasCapability SystemToolAttachFile then [filepathParam] else [])
-                ++ (if hasCapability SystemToolReadSession then [sessionIdParam] else [])
+                ++ (if hasCapability SystemToolReadSession 
+                    then [ sessionIdParam, takeNParam, dropNParam, offsetParam 
+                         , limitParam, includeThinkingParam, includeToolResponsesParam ]
+                    else [])
                 ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
      in
         baseParams ++ optionalParams
@@ -1441,7 +1496,13 @@ systemTool box =
                         let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
                                 Just (Aeson.String q) -> Just q
                                 _ -> Nothing
-                        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery
+                        
+                        -- Extract read-session parameters
+                        let mReadParams = if cap == "read-session"
+                                then Just $ extractReadSessionParams v
+                                else Nothing
+                        
+                        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
                         case result of
                             Left err -> pure $ SystemToolError call err
                             Right rsp -> pure $ SystemToolResult call rsp
@@ -1471,6 +1532,32 @@ systemTool box =
                                     Right bytes ->
                                         pure $ BlobToolSuccess call bytes (Just mt)
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'filepath' parameter for attach-file capability")
+
+    -- Extract read-session parameters from the tool call arguments
+    extractReadSessionParams :: Aeson.Object -> SystemTools.ReadSessionParams
+    extractReadSessionParams v =
+        SystemTools.ReadSessionParams
+            { SystemTools.rspTakeN = parseIntParam "take_n" v
+            , SystemTools.rspDropN = parseIntParam "drop_n" v
+            , SystemTools.rspOffset = parseIntParam "offset" v
+            , SystemTools.rspLimit = parseIntParam "limit" v
+            , SystemTools.rspIncludeThinking = parseBoolParam "include_thinking" v
+            , SystemTools.rspIncludeToolResponses = parseBoolParam "include_tool_responses" v
+            }
+
+    -- Parse an optional integer parameter from the JSON object
+    parseIntParam :: Text -> Aeson.Object -> Maybe Int
+    parseIntParam key obj =
+        case KeyMap.lookup (AesonKey.fromText key) obj of
+            Just (Aeson.Number n) -> Just (round n)
+            _ -> Nothing
+
+    -- Parse an optional boolean parameter from the JSON object
+    parseBoolParam :: Text -> Aeson.Object -> Bool
+    parseBoolParam key obj =
+        case KeyMap.lookup (AesonKey.fromText key) obj of
+            Just (Aeson.Bool b) -> b
+            _ -> False
 
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
