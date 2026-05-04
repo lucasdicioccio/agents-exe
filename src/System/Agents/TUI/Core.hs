@@ -27,6 +27,7 @@ module System.Agents.TUI.Core (
     TuiState,
     SessionConfig (..),
     Tab (..),
+    mkSessionConfig,
     initUIState,
     initCore,
     updateConversationSession,
@@ -55,6 +56,7 @@ module System.Agents.TUI.Core (
     currentTab,
     helpContent,
     keyMapping,
+    sessionConfig,
 
     -- * Re-exports from KeyMapping
     EventName (..),
@@ -62,10 +64,20 @@ module System.Agents.TUI.Core (
     Modifiers (..),
     KeyBinding (..),
     KeyMapping,
+    TUIUserConfig (..),
     defaultKeyMapping,
+    defaultTUIUserConfig,
     matchesEvent,
     generateHelpContent,
     loadKeymapFromFile,
+
+    -- * Re-exports from MessageComposer
+    SendTrigger (..),
+    InputConfig (..),
+    defaultInputConfig,
+    shouldSendMessage,
+    willSendOnNextNewline,
+    stripSendTrigger,
 
     -- * Re-exports from Render
     tui_appDraw,
@@ -86,10 +98,11 @@ module System.Agents.TUI.Core (
     -- * Session loading
     loadSessionFiles,
 
-    -- * Main entry point
+    -- * Main entry points
     runTUI,
     runTUIWithConfig,
     runTUIWithKeymap,
+    runTUIWithUserConfig,
     fileSessionConfig,
 
     -- * OS-native helpers
@@ -147,16 +160,39 @@ import System.Agents.TUI.KeyMapping (
     KeyMapping,
     KeyName (..),
     Modifiers (..),
+    TUIUserConfig (..),
     defaultKeyMapping,
+    defaultTUIUserConfig,
     generateHelpContent,
     loadKeymapFromFile,
     matchesEvent,
+ )
+import System.Agents.TUI.MessageComposer (
+    InputConfig (..),
+    SendTrigger (..),
+    defaultInputConfig,
+    shouldSendMessage,
+    stripSendTrigger,
+    willSendOnNextNewline,
  )
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
 
 -------------------------------------------------------------------------------
--- Cursor and Start Event
+-- Session Configuration
+-------------------------------------------------------------------------------
+
+{- | Create a session configuration from a user config.
+
+This function creates a SessionConfig from the combined TUIUserConfig
+which includes both key mappings and input configuration.
+-}
+fileSessionConfig :: SessionStore -> LoadedApiKeys -> TUIUserConfig -> SessionConfig
+fileSessionConfig store apiKeys userConfig =
+    mkSessionConfig store apiKeys userConfig.userConfigKeymap userConfig.userConfigInput
+
+-------------------------------------------------------------------------------
+-- Application Setup
 -------------------------------------------------------------------------------
 
 -- | Choose cursor based on focus.
@@ -187,44 +223,46 @@ loadSessionFiles store = do
     pure [(path, mSess) | (path, mSess, _) <- sessions]
 
 -------------------------------------------------------------------------------
--- Session Configuration Helpers
+-- Main Entry Points
 -------------------------------------------------------------------------------
 
-{- | Create a session configuration with file-based persistence.
-| Create a session configuration with file-based persistence.
--}
-fileSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
-fileSessionConfig store apiKeys keymap =
-    SessionConfig
-        { sessionStore = store
-        , sessionApiKeys = apiKeys
-        , sessionKeyMapping = keymap
-        }
-
-{- | Initialize the TUI with props and optional conversation prefix (legacy API).
-For more control, use 'runTUIWithConfig' or 'runTUIWithKeymap' instead.
+{- | Initialize and run the TUI with default configuration.
 
 This function:
 1. Loads agent trees from the provided props
 2. Creates TuiAgents with OS-native structures
 3. Initializes the TUI with the agents and loaded sessions
-4. Uses the default key mapping
+4. Uses the default key mapping and input configuration
 -}
 runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
 runTUI tracer store apiKeys props =
-    runTUIWithKeymap tracer store apiKeys defaultKeyMapping props
+    runTUIWithUserConfig tracer store apiKeys defaultTUIUserConfig props
 
 {- | Initialize the TUI with a custom session configuration.
-Uses the keymap from the SessionConfig.
+Uses the keymap and input config from the SessionConfig.
 -}
 runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
 runTUIWithConfig tracer config props = do
     runTUIInternal tracer config props
 
--- | Initialize the TUI with a custom keymap.
+{- | Initialize the TUI with a custom keymap and default input config.
+
+For full control over both keymap and input configuration,
+use 'runTUIWithUserConfig' instead.
+-}
 runTUIWithKeymap :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> KeyMapping -> [Props] -> IO ()
 runTUIWithKeymap tracer store apiKeys keymap props = do
-    let config = fileSessionConfig store apiKeys keymap
+    let userConfig = TUIUserConfig keymap defaultInputConfig
+    runTUIWithUserConfig tracer store apiKeys userConfig props
+
+{- | Initialize the TUI with a complete user configuration.
+
+This is the most flexible entry point, allowing full customization of
+both key mappings and input configuration.
+-}
+runTUIWithUserConfig :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> TUIUserConfig -> [Props] -> IO ()
+runTUIWithUserConfig tracer store apiKeys userConfig props = do
+    let config = fileSessionConfig store apiKeys userConfig
     runTUIInternal tracer config props
 
 -- | Internal function to run the TUI with the given configuration.
@@ -261,6 +299,7 @@ runTUIInternal tracer config props = do
     -- Create core state with World and EventQueue for subcall visibility
     core0 <- initCore (Just world) (Just osEventQueue)
     coreTVar <- newTVarIO core0
+
     -- Generate help content from the keymap
     let helpText = generateHelpContent (sessionKeyMapping config)
 
@@ -268,8 +307,6 @@ runTUIInternal tracer config props = do
     -- Also initialize help content with keyboard shortcuts from the keymap
     let ui0 =
             (initUIState helpText tuiAgents sessions)
-                { _uiAgentTools = agentTools
-                }
                 { _uiAgentTools = agentTools
                 }
 
@@ -375,3 +412,4 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
+
