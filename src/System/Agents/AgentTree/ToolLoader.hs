@@ -53,7 +53,10 @@ import System.Agents.Base (
     PostgRESTToolboxDescription (..),
     SqliteToolboxDescription (..),
     SystemToolboxDescription (..),
+    SystemToolCapability (..),
+    SessionIntrospectionScope (..),
  )
+import System.Agents.SessionStore (SessionStore)
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
@@ -117,6 +120,9 @@ Returns a list of loading errors (empty if all tools loaded successfully).
 
 Note: Bash toolboxes and Skills directories are resolved relative to the
 execution's current working directory.
+
+The SessionStore is passed for configuring session introspection capabilities
+in the SystemToolbox (e.g., @list-sessions@, @search-sessions@).
 -}
 loadAgentTools ::
     Tracer IO Trace ->
@@ -124,12 +130,14 @@ loadAgentTools ::
     FilePath ->
     -- | Path to API keys file (for resolving ApiKey secret sources)
     FilePath ->
+    -- | Session store for session introspection capabilities
+    SessionStore ->
     -- | The agent configuration
     Agent ->
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
     IO [LoadingError]
-loadAgentTools tracer baseDir apiKeysFile agent toolsTVar = do
+loadAgentTools tracer baseDir apiKeysFile sessionStore agent toolsTVar = do
     errors <-
         catMaybes
             <$> sequence
@@ -137,7 +145,7 @@ loadAgentTools tracer baseDir apiKeysFile agent toolsTVar = do
                 , loadMcpServers tracer agent toolsTVar
                 , loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar
                 , loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar
-                , loadBuiltinToolboxes tracer agent toolsTVar
+                , loadBuiltinToolboxes tracer sessionStore agent toolsTVar
                 , loadSkillsTools tracer agent toolsTVar
                 ]
     pure errors
@@ -463,31 +471,37 @@ These toolboxes support activation via their configuration fields:
 - systemToolboxActivation
 - developerToolboxActivation
 - luaToolboxActivation
+
+The SessionStore is passed to configure session introspection capabilities
+in the SystemToolbox (e.g., @list-sessions@, @search-sessions@).
 -}
 loadBuiltinToolboxes ::
     Tracer IO Trace ->
+    -- | Session store for session introspection capabilities
+    SessionStore ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadBuiltinToolboxes tracer agent toolsTVar = do
+loadBuiltinToolboxes tracer sessionStore agent toolsTVar = do
     let toolboxes = fromMaybe [] (builtinToolboxes agent)
 
     if null toolboxes
         then pure Nothing
         else do
-            errors <- mapM (loadBuiltinToolbox tracer toolsTVar) toolboxes
+            errors <- mapM (loadBuiltinToolbox tracer sessionStore toolsTVar) toolboxes
             pure $ collectFirstError errors
 
 -- | Load a single builtin toolbox.
 loadBuiltinToolbox ::
     Tracer IO Trace ->
+    SessionStore ->
     TVar [ToolRegistration] ->
     BuiltinToolboxDescription ->
     IO (Maybe LoadingError)
-loadBuiltinToolbox tracer toolsTVar (SqliteToolbox desc) = loadSqliteToolbox tracer toolsTVar desc
-loadBuiltinToolbox tracer toolsTVar (SystemToolbox desc) = loadSystemToolbox tracer toolsTVar desc
-loadBuiltinToolbox tracer toolsTVar (DeveloperToolbox desc) = loadDeveloperToolbox tracer toolsTVar desc
-loadBuiltinToolbox tracer toolsTVar (LuaToolbox desc) = loadLuaToolbox tracer toolsTVar desc
+loadBuiltinToolbox tracer _sessionStore toolsTVar (SqliteToolbox desc) = loadSqliteToolbox tracer toolsTVar desc
+loadBuiltinToolbox tracer sessionStore toolsTVar (SystemToolbox desc) = loadSystemToolbox tracer sessionStore toolsTVar desc
+loadBuiltinToolbox tracer _sessionStore toolsTVar (DeveloperToolbox desc) = loadDeveloperToolbox tracer toolsTVar desc
+loadBuiltinToolbox tracer _sessionStore toolsTVar (LuaToolbox desc) = loadLuaToolbox tracer toolsTVar desc
 
 -------------------------------------------------------------------------------
 -- SQLite Toolbox Loading
@@ -523,12 +537,17 @@ loadSqliteToolbox tracer toolsTVar desc = do
 -- | Load a System toolbox and register its tools.
 loadSystemToolbox ::
     Tracer IO Trace ->
+    -- | Session store for session introspection capabilities
+    SessionStore ->
     TVar [ToolRegistration] ->
     SystemToolboxDescription ->
     IO (Maybe LoadingError)
-loadSystemToolbox tracer toolsTVar desc = do
-    -- Initialize the toolbox
-    initResult <- SystemToolbox.initializeToolbox (contramap SystemToolboxTrace tracer) desc
+loadSystemToolbox tracer sessionStore toolsTVar desc = do
+    -- Build session introspection config from the toolbox description
+    let mSessionConfig = buildSessionIntrospectionConfig sessionStore desc
+
+    -- Initialize the toolbox with session introspection config
+    initResult <- SystemToolbox.initializeToolboxWithSessionIntrospection (contramap SystemToolboxTrace tracer) desc mSessionConfig
 
     case initResult of
         Left err -> pure $ Just $ SystemLoadingError err
@@ -542,6 +561,36 @@ loadSystemToolbox tracer toolsTVar desc = do
                 Right registrations -> do
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing
+
+{- | Build session introspection configuration from the toolbox description.
+
+Returns @Just config@ if the toolbox has any session introspection capabilities
+enabled, otherwise returns @Nothing@.
+-}
+buildSessionIntrospectionConfig :: SessionStore -> SystemToolboxDescription -> Maybe SystemToolbox.SessionIntrospectionConfig
+buildSessionIntrospectionConfig store desc =
+    let caps = desc.systemToolboxCapabilities
+        hasSessionCaps = any isSessionCapability caps
+     in if hasSessionCaps
+            then
+                Just $
+                    SystemToolbox.SessionIntrospectionConfig
+                        { SystemToolbox.introspectionStore = store
+                        , SystemToolbox.introspectionCurrentSessionId = Nothing
+                        , SystemToolbox.introspectionCurrentForkedFrom = Nothing
+                        , SystemToolbox.introspectionScope = fromMaybe ScopeSubtree desc.systemToolboxSessionIntrospectionScope
+                        , SystemToolbox.introspectionMaxResults = fromMaybe 50 desc.systemToolboxSessionIntrospectionMaxResults
+                        , SystemToolbox.introspectionIncludeToolOutputs = fromMaybe True desc.systemToolboxSessionIntrospectionIncludeToolOutputs
+                        }
+            else Nothing
+  where
+    isSessionCapability cap =
+        cap `elem`
+            [ SystemToolListSessions
+            , SystemToolSearchSessions
+            , SystemToolReadSession
+            , SystemToolGetSessionStats
+            ]
 
 -------------------------------------------------------------------------------
 -- Developer Toolbox Loading
@@ -666,3 +715,4 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
+

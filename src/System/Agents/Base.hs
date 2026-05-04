@@ -724,6 +724,14 @@ data SystemToolCapability
       SystemToolUptime
     | -- | Attach a file to the conversation
       SystemToolAttachFile
+    | -- | List accessible sessions
+      SystemToolListSessions
+    | -- | Full-text search across sessions
+      SystemToolSearchSessions
+    | -- | Read session content
+      SystemToolReadSession
+    | -- | Get session statistics
+      SystemToolGetSessionStats
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -737,6 +745,10 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolProcessInfo = Aeson.String "process-info"
     toJSON SystemToolUptime = Aeson.String "uptime"
     toJSON SystemToolAttachFile = Aeson.String "attach-file"
+    toJSON SystemToolListSessions = Aeson.String "list-sessions"
+    toJSON SystemToolSearchSessions = Aeson.String "search-sessions"
+    toJSON SystemToolReadSession = Aeson.String "read-session"
+    toJSON SystemToolGetSessionStats = Aeson.String "get-session-stats"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -751,7 +763,44 @@ instance FromJSON SystemToolCapability where
             "process-info" -> return SystemToolProcessInfo
             "uptime" -> return SystemToolUptime
             "attach-file" -> return SystemToolAttachFile
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file."
+            "list-sessions" -> return SystemToolListSessions
+            "search-sessions" -> return SystemToolSearchSessions
+            "read-session" -> return SystemToolReadSession
+            "get-session-stats" -> return SystemToolGetSessionStats
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats."
+
+{- | Scope of accessible sessions for session introspection capabilities.
+
+Controls which sessions can be accessed when using session introspection
+capabilities like 'list-sessions', 'search-sessions', 'read-session', etc.
+-}
+data SessionIntrospectionScope
+    = -- | Can only see parent sessions (ancestors via forkedFromSessionId)
+      ScopeParentsOnly
+    | -- | Can only see child sessions (descendants)
+      ScopeChildrenOnly
+    | -- | Parents + current + children (default scope)
+      ScopeSubtree
+    | -- | All sessions (requires explicit opt-in)
+      ScopeAll
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Serialize SessionIntrospectionScope as kebab-case strings.
+instance ToJSON SessionIntrospectionScope where
+    toJSON ScopeParentsOnly = Aeson.String "parents-only"
+    toJSON ScopeChildrenOnly = Aeson.String "children-only"
+    toJSON ScopeSubtree = Aeson.String "subtree"
+    toJSON ScopeAll = Aeson.String "all"
+
+-- | Parse SessionIntrospectionScope from kebab-case strings.
+instance FromJSON SessionIntrospectionScope where
+    parseJSON = Aeson.withText "SessionIntrospectionScope" $ \txt ->
+        case txt of
+            "parents-only" -> return ScopeParentsOnly
+            "children-only" -> return ScopeChildrenOnly
+            "subtree" -> return ScopeSubtree
+            "all" -> return ScopeAll
+            other -> fail $ "Invalid SessionIntrospectionScope: " ++ Text.unpack other ++ ". Expected one of: parents-only, children-only, subtree, all."
 
 {- | Configuration for the system toolbox.
 
@@ -780,6 +829,12 @@ environment variables when the 'env-vars' capability is enabled.
 If not specified, all environment variables are exposed.
 
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
+
+Session introspection configuration:
+The optional session introspection fields control access to session history:
+- 'sessionIntrospectionScope': Which sessions are accessible (default: ScopeSubtree)
+- 'sessionIntrospectionMaxResults': Max sessions to return (default: 50)
+- 'sessionIntrospectionIncludeToolOutputs': Include tool outputs in read operations (default: True)
 -}
 data SystemToolboxDescription
     = SystemToolboxDescription
@@ -793,6 +848,12 @@ data SystemToolboxDescription
     -- ^ Optional regex/pattern to filter environment variables
     , systemToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , systemToolboxSessionIntrospectionScope :: Maybe SessionIntrospectionScope
+    -- ^ Scope of accessible sessions (default: ScopeSubtree)
+    , systemToolboxSessionIntrospectionMaxResults :: Maybe Int
+    -- ^ Max sessions to return in list operations (default: 50)
+    , systemToolboxSessionIntrospectionIncludeToolOutputs :: Maybe Bool
+    -- ^ Whether to include tool outputs in read operations (default: True)
     }
     deriving (Show, Ord, Eq, Generic)
 

@@ -67,7 +67,9 @@ handleTUI tracer sessionStore apiKeysFile mKeymapPath agentFiles = do
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = (Prod.contramap AgentTreeTrace tracer)
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
+                    , AgentTree.sessionStore = sessionStore
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUIWithKeymap (Prod.contramap TUITrace tracer) sessionStore apiKeys keymap agentPropsList
+

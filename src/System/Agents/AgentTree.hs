@@ -111,6 +111,7 @@ import System.Agents.Base (
  )
 import qualified System.Agents.Base as AgentsBase
 import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.SessionStore (SessionStore)
 
 -- OS Core imports
 
@@ -387,6 +388,8 @@ data Props = Props
     , interactiveTracer :: Tracer IO TreeTrace
     , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> ToolRegistration
     -- ^ Function to create a tool registration from an agent node
+    , sessionStore :: SessionStore
+    -- ^ Session store for session introspection capabilities (e.g., @list-sessions@)
     }
 
 -------------------------------------------------------------------------------
@@ -706,6 +709,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
                     (contramap ToolLoaderTrace props.interactiveTracer)
                     baseDir
                     props.apiKeysFile -- Pass the API keys file path for secret resolution
+                    props.sessionStore -- Pass the session store for session introspection
                     agent
                     (osNodeTools osNode)
             pure $ map convertToolLoaderError toolLoaderErrors
@@ -983,3 +987,4 @@ loadAgentTree props = do
 withAgentTree :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTree props continue = do
     loadAgentTree props >>= continue
+

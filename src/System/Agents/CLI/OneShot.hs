@@ -178,4 +178,6 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                         , AgentTree.rootAgentFile = agentFilePath
                         , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
                         , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
+                        , AgentTree.sessionStore = sessionStore
                         }
+

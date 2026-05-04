@@ -8,6 +8,7 @@ This module implements the system toolbox functionality, including:
 
 * System information gathering (date, OS info, environment variables, etc.)
 * File attachment capability for multi-modal LLM interactions
+* Session introspection capabilities (list-sessions, search-sessions, read-session, get-session-stats)
 * Capability-based access control
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
@@ -51,9 +52,11 @@ module System.Agents.Tools.SystemToolbox (
 
     -- * Initialization
     initializeToolbox,
+    initializeToolboxWithSessionIntrospection,
 
     -- * Query execution
     executeQuery,
+    executeQueryWithParams,
     executeAttachFile,
     getCapabilityInfo,
 
@@ -63,11 +66,20 @@ module System.Agents.Tools.SystemToolbox (
     -- * Media type detection
     detectMediaType,
     getFileExtension,
+
+    -- * Session introspection helpers
+    SessionIntrospectionConfig (..),
+    defaultSessionIntrospectionConfig,
+
+    -- * Read session parameters
+    ReadSessionParams (..),
+    defaultReadSessionParams,
 ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, bracket, IOException)
+import Control.Monad (forM)
 import Data.Aeson (ToJSON (..), Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -77,23 +89,43 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isInfixOf)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
+import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Time as Time
+import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Directory (doesFileExist, getCurrentDirectory)
+import System.Directory (doesFileExist, getCurrentDirectory, getModificationTime)
 import System.Environment (getEnvironment, lookupEnv)
 import System.FilePath (takeExtension)
-import System.IO.Error (isDoesNotExistError)
+import System.IO (IOMode(..), openBinaryFile, hClose)
+import System.IO.Error (isDoesNotExistError, ioeGetErrorString)
 import System.Posix.Process (getParentProcessID, getProcessID)
 import System.Posix.User (getEffectiveGroupID, getEffectiveUserID, getUserEntryForID, homeDirectory, userName, userShell)
 import qualified System.Process as Process
 
-import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..))
+import System.Agents.Base (
+    ConversationId (..),
+    SessionIntrospectionScope (..),
+    SystemToolCapability (..),
+    SystemToolboxDescription (..),
+ )
 import System.Agents.Media.Types (ApplicationType (..), AudioType (..), ImageType (..), MediaType (..), TextSubtype (..), VideoType (..))
+import System.Agents.Session.Types (
+    Session (..),
+    SessionId (..),
+    Turn (..),
+    UserTurnContent (..),
+    LlmTurnContent (..),
+    PartialUserTurnContent (..),
+    UserQuery (..),
+    LlmResponse (..),
+    SystemPrompt (..),
+    LlmToolCall (..),
+ )
+import qualified System.Agents.SessionStore as SessionStore
 
 -------------------------------------------------------------------------------
 -- Core Types
@@ -107,6 +139,7 @@ These events allow tracking of:
 * Query execution progress
 * System info retrieval timing
 * Capability errors
+* Session introspection operations
 -}
 data Trace
     = -- | System information was requested for a capability
@@ -121,7 +154,78 @@ data Trace
       SystemInfoRetrievedTrace !Text !NominalDiffTime
     | -- | Error occurred while retrieving system information
       SystemInfoErrorTrace !Text !Text
+    | -- | Session introspection was requested
+      SessionIntrospectionRequestedTrace !Text
+    | -- | Session introspection succeeded
+      SessionIntrospectionSuccessTrace !Text !Int
+    | -- | Session introspection failed
+      SessionIntrospectionErrorTrace !Text !Text
     deriving (Show)
+
+{- | Configuration for session introspection capabilities.
+
+This is passed to the toolbox to configure how session introspection
+operations should behave (scope, limits, etc.).
+-}
+data SessionIntrospectionConfig = SessionIntrospectionConfig
+    { introspectionStore :: SessionStore.SessionStore
+    -- ^ Session store for accessing session files
+    , introspectionCurrentSessionId :: Maybe SessionId
+    -- ^ Current session ID for scope filtering
+    , introspectionCurrentForkedFrom :: Maybe SessionId
+    -- ^ Current session's forkedFromSessionId for lineage tracking
+    , introspectionScope :: SessionIntrospectionScope
+    -- ^ Scope of accessible sessions
+    , introspectionMaxResults :: Int
+    -- ^ Max sessions to return in list operations
+    , introspectionIncludeToolOutputs :: Bool
+    -- ^ Whether to include tool outputs in read operations
+    }
+    deriving (Show)
+
+-- | Default session introspection configuration.
+defaultSessionIntrospectionConfig :: SessionStore.SessionStore -> SessionIntrospectionConfig
+defaultSessionIntrospectionConfig store =
+    SessionIntrospectionConfig
+        { introspectionStore = store
+        , introspectionCurrentSessionId = Nothing
+        , introspectionCurrentForkedFrom = Nothing
+        , introspectionScope = ScopeSubtree
+        , introspectionMaxResults = 50
+        , introspectionIncludeToolOutputs = True
+        }
+
+{- | Parameters for the read-session capability.
+
+Controls slicing and content filtering when reading session data.
+-}
+data ReadSessionParams = ReadSessionParams
+    { rspTakeN :: Maybe Int
+    -- ^ Take last N turns (alternative to offset/limit)
+    , rspDropN :: Maybe Int
+    -- ^ Drop first N turns (alternative to offset)
+    , rspOffset :: Maybe Int
+    -- ^ Starting turn index (0-based, alternative to drop_n)
+    , rspLimit :: Maybe Int
+    -- ^ Max turns to return (alternative to take_n)
+    , rspIncludeThinking :: Bool
+    -- ^ Include LLM thinking/reasoning content (default: false)
+    , rspIncludeToolResponses :: Bool
+    -- ^ Include tool call responses (default: false)
+    }
+    deriving (Show, Eq)
+
+-- | Default read session parameters.
+defaultReadSessionParams :: ReadSessionParams
+defaultReadSessionParams =
+    ReadSessionParams
+        { rspTakeN = Nothing
+        , rspDropN = Nothing
+        , rspOffset = Nothing
+        , rspLimit = Nothing
+        , rspIncludeThinking = False
+        , rspIncludeToolResponses = False
+        }
 
 {- | Description of a system tool.
 
@@ -145,6 +249,7 @@ The toolbox maintains:
 * List of enabled capabilities
 * Optional environment variable filter pattern
 * The original configuration description used to create this toolbox
+* Session introspection configuration (for session-related capabilities)
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -153,6 +258,8 @@ data Toolbox = Toolbox
     , toolboxEnvVarFilter :: Maybe Text
     , toolboxConfig :: SystemToolboxDescription
     -- ^ Original configuration description used to create this toolbox
+    , toolboxSessionIntrospection :: Maybe SessionIntrospectionConfig
+    -- ^ Configuration for session introspection capabilities
     }
 
 {- | Result of a system information query.
@@ -216,6 +323,16 @@ data QueryError
       FileTooLargeError !FilePath !Int
     | -- | Unsupported file type
       UnsupportedFileTypeError !FilePath !Text
+    | -- | Session store not configured for session introspection
+      SessionStoreNotConfiguredError
+    | -- | Session not found
+      SessionNotFoundError !Text
+    | -- | Invalid session ID format
+      InvalidSessionIdError !Text
+    | -- | Access denied based on scope
+      SessionAccessDeniedError !Text !SessionIntrospectionScope
+    | -- | Missing required parameter
+      MissingParameterError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -228,12 +345,36 @@ This function creates a 'Toolbox' value from a 'SystemToolboxDescription',
 validating the configuration and preparing the runtime state.
 
 Returns an error if the configuration is invalid.
+
+Note: This function does not configure session introspection. Use
+'initializeToolboxWithSessionIntrospection' if you need session-related
+capabilities like @list-sessions@, @search-sessions@, etc.
 -}
 initializeToolbox ::
     Tracer IO Trace ->
     SystemToolboxDescription ->
     IO (Either String Toolbox)
-initializeToolbox _tracer desc = do
+initializeToolbox tracer desc =
+    initializeToolboxWithSessionIntrospection tracer desc Nothing
+
+{- | Initialize a system toolbox with optional session introspection configuration.
+
+This function creates a 'Toolbox' value from a 'SystemToolboxDescription'
+and optionally configures session introspection capabilities.
+
+The session introspection configuration is required for session-related
+capabilities like @list-sessions@, @search-sessions@, @read-session@, and
+@get-session-stats@. If not provided, these capabilities will return
+"Session store not configured" errors.
+
+Returns an error if the configuration is invalid.
+-}
+initializeToolboxWithSessionIntrospection ::
+    Tracer IO Trace ->
+    SystemToolboxDescription ->
+    Maybe SessionIntrospectionConfig ->
+    IO (Either String Toolbox)
+initializeToolboxWithSessionIntrospection _tracer desc mSessionConfig = do
     -- Validate that we have at least one capability
     if null desc.systemToolboxCapabilities
         then pure $ Left "System toolbox must have at least one capability enabled"
@@ -245,6 +386,7 @@ initializeToolbox _tracer desc = do
                         , toolboxCapabilities = desc.systemToolboxCapabilities
                         , toolboxEnvVarFilter = desc.systemToolboxEnvVarFilter
                         , toolboxConfig = desc
+                        , toolboxSessionIntrospection = mSessionConfig
                         }
             pure $ Right toolbox
 
@@ -417,7 +559,37 @@ Returns:
 Note: For the 'attach-file' capability, use 'executeAttachFile' instead.
 -}
 executeQuery :: Tracer IO Trace -> Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeQuery tracer toolbox capabilityName = do
+executeQuery tracer toolbox capabilityName =
+    executeQueryWithParams tracer toolbox capabilityName Nothing Nothing Nothing
+
+{- | Execute a query for a specific capability with optional parameters.
+
+This extended version supports session introspection capabilities that require
+additional parameters:
+* 'read-session' - requires session_id
+* 'search-sessions' - requires query
+
+Parameters:
+* tracer - for logging/debugging
+* toolbox - the system toolbox
+* capabilityName - the capability to query
+* mSessionId - optional session ID for read-session
+* mQuery - optional search query for search-sessions
+* mReadParams - optional parameters for read-session slicing and filtering
+
+Returns:
+* 'Right QueryResult' on successful execution
+* 'Left QueryError' if capability is not enabled or system info cannot be gathered
+-}
+executeQueryWithParams ::
+    Tracer IO Trace ->
+    Toolbox ->
+    Text ->
+    Maybe Text ->
+    Maybe Text ->
+    Maybe ReadSessionParams ->
+    IO (Either QueryError QueryResult)
+executeQueryWithParams tracer toolbox capabilityName mSessionId mQuery mReadParams = do
     runTracer tracer (SystemInfoRequestedTrace capabilityName)
     startTime <- getCurrentTime
 
@@ -432,8 +604,8 @@ executeQuery tracer toolbox capabilityName = do
             if capability `notElem` toolboxCapabilities toolbox
                 then pure $ Left $ CapabilityNotEnabledError capabilityName
                 else do
-                    -- Gather the information
-                    result <- getCapabilityInfoWithTimeout capability toolbox
+                    -- Gather the information with optional parameters
+                    result <- getCapabilityInfoWithTimeout capability toolbox mSessionId mQuery mReadParams
                     endTime <- getCurrentTime
                     let execTime = diffUTCTime endTime startTime
 
@@ -463,6 +635,10 @@ capabilityFromName name = case name of
     "process-info" -> Just SystemToolProcessInfo
     "uptime" -> Just SystemToolUptime
     "attach-file" -> Just SystemToolAttachFile
+    "list-sessions" -> Just SystemToolListSessions
+    "search-sessions" -> Just SystemToolSearchSessions
+    "read-session" -> Just SystemToolReadSession
+    "get-session-stats" -> Just SystemToolGetSessionStats
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -476,6 +652,10 @@ capabilityToName SystemToolWorkingDirectory = "working-directory"
 capabilityToName SystemToolProcessInfo = "process-info"
 capabilityToName SystemToolUptime = "uptime"
 capabilityToName SystemToolAttachFile = "attach-file"
+capabilityToName SystemToolListSessions = "list-sessions"
+capabilityToName SystemToolSearchSessions = "search-sessions"
+capabilityToName SystemToolReadSession = "read-session"
+capabilityToName SystemToolGetSessionStats = "get-session-stats"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -489,10 +669,13 @@ on slow or blocking system calls.
 getCapabilityInfoWithTimeout ::
     SystemToolCapability ->
     Toolbox ->
+    Maybe Text ->
+    Maybe Text ->
+    Maybe ReadSessionParams ->
     IO (Either Text (Text, Aeson.Value))
-getCapabilityInfoWithTimeout capability toolbox = do
+getCapabilityInfoWithTimeout capability toolbox mSessionId mQuery mReadParams = do
     let timeoutMicros = defaultTimeoutSeconds * 1000000
-    result <- race (threadDelay timeoutMicros) (getCapabilityInfoInternal capability toolbox)
+    result <- race (threadDelay timeoutMicros) (getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams)
     case result of
         Left () -> pure $ Left "Timeout while gathering system information"
         Right val -> pure val
@@ -505,8 +688,11 @@ data as a JSON value.
 getCapabilityInfoInternal ::
     SystemToolCapability ->
     Toolbox ->
+    Maybe Text ->
+    Maybe Text ->
+    Maybe ReadSessionParams ->
     IO (Either Text (Text, Aeson.Value))
-getCapabilityInfoInternal capability toolbox = do
+getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
     result <- try $ do
         (name, value) <- case capability of
             SystemToolDate -> getDateInfo
@@ -518,10 +704,481 @@ getCapabilityInfoInternal capability toolbox = do
             SystemToolProcessInfo -> getProcessInfo
             SystemToolUptime -> getUptimeInfo
             SystemToolAttachFile -> error "Use executeAttachFile for attach-file capability"
+            SystemToolListSessions -> getListSessionsInfo (toolboxSessionIntrospection toolbox)
+            SystemToolSearchSessions -> getSearchSessionsInfo (toolboxSessionIntrospection toolbox) mQuery
+            SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox) mSessionId (fromMaybe defaultReadSessionParams mReadParams)
+            SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
         Right val -> pure $ Right val
+
+-------------------------------------------------------------------------------
+-- Session Introspection Capabilities
+-------------------------------------------------------------------------------
+
+{- | Check if an IOException indicates a "resource busy" (file locked) condition.
+This checks the error message for common patterns indicating a locked file.
+-}
+isResourceBusyError :: IOException -> Bool
+isResourceBusyError e = 
+    let errStr = ioeGetErrorString e
+        errTxt = Text.toLower $ Text.pack errStr
+    in "resource busy" `Text.isInfixOf` errTxt
+        || "file is locked" `Text.isInfixOf` errTxt
+        || "locked" `Text.isInfixOf` errTxt
+
+{- | List accessible sessions based on scope.
+
+Returns session IDs, timestamps, turn counts, and relationship info.
+Handles locked files gracefully by marking sessions that are currently
+being written to.
+-}
+getListSessionsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
+getListSessionsInfo Nothing = pure ("list-sessions", String "Session store not configured")
+getListSessionsInfo (Just config) = do
+    -- List all sessions from the store with error handling for locked files
+    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    
+    case allSessionsResult of
+        Left (e :: SomeException) -> do
+            -- If we can't list sessions at all, return an error
+            pure ("list-sessions", Aeson.object ["error" .= Text.pack (show e), "sessions" .= ([] :: [Aeson.Value])])
+        Right allSessions -> do
+            -- Filter sessions based on scope
+            let accessibleSessions = filterSessionsByScope config allSessions
+
+            -- Apply limit
+            let limitedSessions = take (introspectionMaxResults config) accessibleSessions
+
+            -- Build session info list, handling locked files gracefully
+            sessionInfos <- forM limitedSessions $ \(path, mSession, convId) -> do
+                -- Try to get modification time, handling locked files
+                mtimeResult <- try $ getSessionModTime (introspectionStore config) convId
+                let mtime = case mtimeResult of
+                        Left (_ :: SomeException) -> Nothing
+                        Right mt -> mt
+                
+                -- Check if session is locked (currently being edited)
+                isLocked <- isSessionFileLocked path
+                
+                let turnCount = maybe 0 (length . (.turns)) mSession
+                let isParent = isParentSession config mSession
+                let isChild = isChildSession config mSession
+                
+                pure $ Aeson.object
+                    [ "sessionId" .= conversationIdToText convId
+                    , "conversationId" .= conversationIdToText convId
+                    , "modificationTime" .= maybe "" (Text.pack . show) mtime
+                    , "turnCount" .= turnCount
+                    , "isParent" .= isParent
+                    , "isChild" .= isChild
+                    , "isLocked" .= isLocked
+                    , "status" .= if isLocked then ("active" :: Text) else ("idle" :: Text)
+                    ]
+
+            let totalAccessible = length accessibleSessions
+
+            pure $
+                ( "list-sessions"
+                , Aeson.object
+                    [ "sessions" .= sessionInfos
+                    , "totalAccessible" .= totalAccessible
+                    ]
+                )
+
+-- | Check if a session file is currently locked (being written to)
+isSessionFileLocked :: FilePath -> IO Bool
+isSessionFileLocked path = do
+    result <- try $ bracket (openBinaryFile path ReadMode) hClose (\_ -> pure ())
+    case result of
+        Left (ioe :: IOException) -> pure $ isResourceBusyError ioe
+        Right _ -> pure False
+
+{- | Search sessions using full-text search.
+
+Returns matching sessions with relevance scores and snippet previews.
+-}
+getSearchSessionsInfo :: Maybe SessionIntrospectionConfig -> Maybe Text -> IO (Text, Aeson.Value)
+getSearchSessionsInfo Nothing _ = pure ("search-sessions", String "Session store not configured")
+getSearchSessionsInfo (Just _config) Nothing = 
+    pure ("search-sessions", Aeson.object ["error" .= ("Missing 'query' parameter for search-sessions" :: Text)])
+getSearchSessionsInfo (Just config) (Just searchQuery) = do
+    -- List all sessions from the store
+    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    
+    case allSessionsResult of
+        Left (e :: SomeException) -> do
+            pure ("search-sessions", Aeson.object ["error" .= Text.pack (show e), "results" .= ([] :: [Aeson.Value])])
+        Right allSessions -> do
+            -- Filter sessions based on scope first
+            let accessibleSessions = filterSessionsByScope config allSessions
+            
+            -- Perform simple text search across accessible sessions
+            let searchTerms = Text.words $ Text.toLower searchQuery
+            let matchingSessions = filter (sessionMatchesSearch searchTerms) accessibleSessions
+            
+            -- Apply limit
+            let limitedResults = take (introspectionMaxResults config) matchingSessions
+            
+-- Build result items
+            resultItems <- forM limitedResults $ \(_path, mSession, convId) -> do
+                let turnCount = maybe 0 (length . (.turns)) mSession
+                let preview = generateSessionPreview mSession searchTerms
+                
+                pure $ Aeson.object
+                    [ "sessionId" .= conversationIdToText convId
+                    , "conversationId" .= conversationIdToText convId
+                    , "turnCount" .= turnCount
+                    , "preview" .= preview
+                    , "matchType" .= ("content" :: Text)
+                    ]
+            
+            pure $
+                ( "search-sessions"
+                , Aeson.object
+                    [ "query" .= searchQuery
+                    , "results" .= resultItems
+                    , "totalMatches" .= length matchingSessions
+                    , "scope" .= showScope (introspectionScope config)
+                    ]
+                )
+
+-- | Check if a session matches the search terms
+sessionMatchesSearch :: [Text] -> (FilePath, Maybe Session, ConversationId) -> Bool
+sessionMatchesSearch searchTerms (_, mSession, _) =
+    case mSession of
+        Nothing -> False
+        Just session -> any (termMatchesSession session) searchTerms
+
+-- | Check if a search term matches any content in the session
+termMatchesSession :: Session -> Text -> Bool
+termMatchesSession sess term =
+    any (turnMatchesTerm term) sess.turns
+
+-- | Check if a turn matches the search term
+turnMatchesTerm :: Text -> Turn -> Bool
+turnMatchesTerm term turn =
+    let content = Text.toLower $ turnContentText turn
+    in term `Text.isInfixOf` content
+
+-- | Extract text content from a turn for searching
+turnContentText :: Turn -> Text
+turnContentText (UserTurn content _) =
+    let promptText = case userPrompt content of SystemPrompt t -> t
+        userQueryText = maybe "" (\(UserQuery t _) -> t) (userQuery content)
+     in promptText <> " " <> userQueryText
+turnContentText (LlmTurn content _) =
+    fromMaybe "" $ responseText $ llmResponse content
+turnContentText (PartialUserTurn content _) =
+    let promptText = case pUserPrompt content of SystemPrompt t -> t
+        userQueryText = maybe "" (\(UserQuery t _) -> t) (pUserQuery content)
+     in promptText <> " " <> userQueryText
+
+-- | Generate a preview of matching content from a session
+generateSessionPreview :: Maybe Session -> [Text] -> Text
+generateSessionPreview mSession searchTerms =
+    case mSession of
+        Nothing -> ""
+        Just sess ->
+            let allContent = Text.intercalate " " $ map turnContentText (take 3 sess.turns)
+                lowerContent = Text.toLower allContent
+                -- Find first matching term and extract context around it
+                matchPositions = concatMap (\term -> findTermPositions term lowerContent 0) searchTerms
+            in case matchPositions of
+                [] -> Text.take 200 allContent <> "..."
+                (pos:_) ->
+                    let start = max 0 (pos - 100)
+                        end = min (Text.length allContent) (pos + 100)
+                    in "..." <> Text.take (end - start) (Text.drop start allContent) <> "..."
+
+-- | Find all positions of a term in text
+findTermPositions :: Text -> Text -> Int -> [Int]
+findTermPositions term txt offset =
+    case Text.breakOn term txt of
+        (_, "") -> [] -- Not found
+        (prefix, rest) ->
+            let pos = offset + Text.length prefix
+            in pos : findTermPositions term (Text.drop (Text.length term) rest) (pos + Text.length term)
+
+{- | Read session content and return condensed text format.
+
+Parameters:
+- take_n: Take last N turns
+- drop_n: Drop first N turns
+- offset: Starting turn index (alternative to drop_n)
+- limit: Max turns to return (alternative to take_n)
+- include_thinking: Include LLM thinking content (default: false)
+- include_tool_responses: Include tool call responses (default: false)
+
+Returns condensed text format suitable for LLM consumption.
+-}
+getReadSessionInfo :: Maybe SessionIntrospectionConfig -> Maybe Text -> ReadSessionParams -> IO (Text, Aeson.Value)
+getReadSessionInfo Nothing _ _ = pure ("read-session", String "Session store not configured")
+getReadSessionInfo (Just _config) Nothing _ = 
+    pure ("read-session", Aeson.object ["error" .= ("Missing 'session_id' parameter for read-session" :: Text)])
+getReadSessionInfo (Just config) (Just sessionIdText) params = do
+    -- Parse the session ID from text
+    case parseSessionId sessionIdText of
+        Nothing -> 
+            pure ("read-session", Aeson.object ["error" .= ("Invalid session_id format: " <> sessionIdText)])
+        Just targetSessionId -> do
+            -- Convert SessionId to ConversationId for lookup
+            let targetConvId = sessionIdToConversationId targetSessionId
+            
+            -- Try to read the session
+            mSession <- SessionStore.readSession (introspectionStore config) targetConvId
+            
+            case mSession of
+                Nothing -> 
+                    pure ("read-session", Aeson.object 
+                        [ "error" .= ("Session not found or is currently locked: " <> sessionIdText)
+                        , "sessionId" .= sessionIdText
+                        ])
+                Just sess -> do
+                    -- Check scope access
+                    if canAccessSession config sess
+                        then do
+                            -- Apply slicing to get the desired turns
+                            let slicedTurns = applySlicing params sess.turns
+                            
+                            -- Format turns as condensed text
+                            let formattedText = formatSessionAsCondensedText params slicedTurns
+                            
+                            -- Return as JSON with text content and metadata
+                            pure ("read-session", Aeson.object
+                                [ "sessionId" .= sessionIdText
+                                , "conversationId" .= conversationIdToText targetConvId
+                                , "totalTurns" .= length sess.turns
+                                , "returnedTurns" .= length slicedTurns
+                                , "content" .= formattedText
+                                , "format" .= ("condensed-text" :: Text)
+                                , "scope" .= showScope (introspectionScope config)
+                                , "access" .= ("granted" :: Text)
+                                ])
+                        else do
+                            pure ("read-session", Aeson.object
+                                [ "error" .= ("Access denied: session is outside configured scope" :: Text)
+                                , "sessionId" .= sessionIdText
+                                , "scope" .= showScope (introspectionScope config)
+                                , "access" .= ("denied" :: Text)
+                                ])
+
+-- | Apply slicing parameters to a list of turns.
+-- Sessions store turns newest-first (most recent turn is first in the list).
+-- For display purposes, we want chronological order (oldest first).
+applySlicing :: ReadSessionParams -> [Turn] -> [Turn]
+applySlicing params turnList =
+    let -- Reverse to get chronological order (oldest first)
+        chronological = reverse turnList
+        
+        -- Apply drop_n or offset
+        afterDrop = case (rspDropN params, rspOffset params) of
+            (Just n, _) -> drop n chronological
+            (_, Just off) -> drop off chronological
+            _ -> chronological
+        
+        -- Apply take_n or limit
+        afterTake = case (rspTakeN params, rspLimit params) of
+            (Just n, _) -> takeLast n afterDrop
+            (_, Just lim) -> take lim afterDrop
+            _ -> afterDrop
+    in afterTake
+  where
+    -- Take the last n elements from a list
+    takeLast :: Int -> [a] -> [a]
+    takeLast n xs = drop (max 0 (length xs - n)) xs
+
+-- | Format a list of turns as condensed text suitable for LLM consumption.
+formatSessionAsCondensedText :: ReadSessionParams -> [Turn] -> Text
+formatSessionAsCondensedText params turnList =
+    Text.intercalate "\n\n" $ zipWith (formatTurnCondensed params) [1..] turnList
+
+-- | Format a single turn in condensed format.
+formatTurnCondensed :: ReadSessionParams -> Int -> Turn -> Text
+formatTurnCondensed params turnNum turn = case turn of
+    UserTurn content _ ->
+        let -- User query
+            queryPart = case userQuery content of
+                Just (UserQuery q _) -> "[User] " <> truncateText 500 q
+                Nothing -> "[User] (no query)"
+            
+            -- Tool calls made by user (responses to LLM tool calls)
+            toolRespPart = if rspIncludeToolResponses params && not (null (userToolResponses content))
+                then let toolCount = length (userToolResponses content)
+                         toolNames = map (extractToolCallName . fst) (userToolResponses content)
+                         toolSummary = Text.intercalate ", " toolNames
+                     in "\n  [Tool Responses: " <> Text.pack (show toolCount) <> " tools - " <> toolSummary <> "]"
+                else ""
+        in "Turn " <> Text.pack (show turnNum) <> ": " <> queryPart <> toolRespPart
+    
+    LlmTurn content _ ->
+        let -- LLM response
+            respPart = case responseText (llmResponse content) of
+                Just txt -> "[LLM] " <> truncateText 500 txt
+                Nothing -> "[LLM] (no response)"
+            
+            -- Thinking/reasoning content
+            thinkingPart = if rspIncludeThinking params
+                then case responseThinking (llmResponse content) of
+                    Just thinking -> "\n  [Thinking] " <> truncateText 300 thinking
+                    Nothing -> ""
+                else ""
+            
+            -- Tool calls requested by LLM
+            toolCallPart = if not (null (llmToolCalls content))
+                then let toolCount = length (llmToolCalls content)
+                         toolNames = map extractToolCallName (llmToolCalls content)
+                         toolSummary = Text.intercalate ", " toolNames
+                     in "\n  [Tool Calls: " <> Text.pack (show toolCount) <> " - " <> toolSummary <> "]"
+                else ""
+        in "Turn " <> Text.pack (show turnNum) <> ": " <> respPart <> thinkingPart <> toolCallPart
+    
+    PartialUserTurn _ _ ->
+        "Turn " <> Text.pack (show turnNum) <> ": [Partial/In Progress]"
+
+-- | Truncate text to a maximum length with ellipsis.
+truncateText :: Int -> Text -> Text
+truncateText maxLen txt
+    | Text.length txt <= maxLen = txt
+    | otherwise = Text.take maxLen txt <> "..."
+
+-- | Extract tool name from a tool call.
+extractToolCallName :: LlmToolCall -> Text
+extractToolCallName (LlmToolCall val) =
+    case val of
+        Aeson.Object obj ->
+            case KeyMap.lookup "function" obj of
+                Just (Aeson.Object funcObj) ->
+                    case KeyMap.lookup "name" funcObj of
+                        Just (Aeson.String toolName) -> toolName
+                        _ -> "(unnamed)"
+                _ -> case KeyMap.lookup "name" obj of
+                    Just (Aeson.String toolName) -> toolName
+                    _ -> "(unnamed)"
+        _ -> "(unnamed)"
+
+-- | Parse a SessionId from text
+parseSessionId :: Text -> Maybe SessionId
+parseSessionId txt =
+    case UUID.fromText txt of
+        Just uuid -> Just $ SessionId uuid
+        Nothing -> Nothing
+
+-- | Convert a SessionId to a ConversationId
+sessionIdToConversationId :: SessionId -> ConversationId
+sessionIdToConversationId (SessionId uuid) = ConversationId uuid
+
+-- | Check if a session can be accessed based on the configured scope
+canAccessSession :: SessionIntrospectionConfig -> Session -> Bool
+canAccessSession config sess =
+    case introspectionScope config of
+        ScopeAll -> True
+        ScopeParentsOnly -> isParentSession config (Just sess)
+        ScopeChildrenOnly -> isChildSession config (Just sess)
+        ScopeSubtree -> 
+            isParentSession config (Just sess) || 
+            isChildSession config (Just sess) || 
+            isCurrentSession config (Just sess)
+
+{- | Get session statistics.
+
+Returns: turn counts, token usage, byte counts, trajectory signals
+-}
+getSessionStatsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
+getSessionStatsInfo Nothing = pure ("get-session-stats", String "Session store not configured")
+getSessionStatsInfo (Just config) = do
+    -- List all accessible sessions with error handling
+    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    
+    case allSessionsResult of
+        Left (_ :: SomeException) -> do
+            pure $ ("get-session-stats", Aeson.object 
+                [ "totalSessions" .= (0 :: Int)
+                , "totalTurnsAcrossAllSessions" .= (0 :: Int)
+                , "scope" .= showScope (introspectionScope config)
+                , "note" .= ("Could not access session store" :: Text)
+                ])
+        Right allSessions -> do
+            let accessibleSessions = filterSessionsByScope config allSessions
+
+            -- Calculate aggregate stats, handling Nothing sessions (locked/unreadable)
+            let totalTurns = sum [maybe 0 (length . (.turns)) mSession | (_, mSession, _) <- accessibleSessions]
+            let totalSessions = length accessibleSessions
+
+            pure $
+                ( "get-session-stats"
+                , Aeson.object
+                    [ "totalSessions" .= totalSessions
+                    , "totalTurnsAcrossAllSessions" .= totalTurns
+                    , "scope" .= showScope (introspectionScope config)
+                    , "note" .= ("Use SessionPrint.calculateStatistics for detailed per-session stats" :: Text)
+                    ]
+                )
+
+-- | Helper to convert scope to text
+showScope :: SessionIntrospectionScope -> Text
+showScope ScopeParentsOnly = "parents-only"
+showScope ScopeChildrenOnly = "children-only"
+showScope ScopeSubtree = "subtree"
+showScope ScopeAll = "all"
+
+-- | Filter sessions based on the configured scope
+filterSessionsByScope :: SessionIntrospectionConfig -> [(FilePath, Maybe Session, ConversationId)] -> [(FilePath, Maybe Session, ConversationId)]
+filterSessionsByScope config sessions =
+    case introspectionScope config of
+        ScopeAll -> sessions
+        _ -> filter (sessionMatchesScope config) sessions
+
+-- | Check if a session matches the configured scope
+sessionMatchesScope :: SessionIntrospectionConfig -> (FilePath, Maybe Session, ConversationId) -> Bool
+sessionMatchesScope config (_, mSession, _convId) =
+    case introspectionScope config of
+        ScopeAll -> True
+        ScopeParentsOnly -> isParentSession config mSession
+        ScopeChildrenOnly -> isChildSession config mSession
+        ScopeSubtree -> isParentSession config mSession || isChildSession config mSession || isCurrentSession config mSession
+
+-- | Check if a session is a parent (ancestor) of the current session
+isParentSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
+isParentSession config mSession =
+    case (introspectionCurrentForkedFrom config, mSession) of
+        (Just currentForkedFrom, Just sess) ->
+            sess.sessionId == currentForkedFrom
+        _ -> False
+
+-- | Check if a session is a child (descendant) of the current session
+isChildSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
+isChildSession config mSession =
+    case (introspectionCurrentSessionId config, mSession) of
+        (Just currentId, Just sess) ->
+            sess.forkedFromSessionId == Just currentId
+        _ -> False
+
+-- | Check if a session is the current session
+isCurrentSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
+isCurrentSession config mSession =
+    case (introspectionCurrentSessionId config, mSession) of
+        (Just currentId, Just sess) ->
+            sess.sessionId == currentId
+        _ -> False
+
+-- | Helper to get session modification time
+getSessionModTime :: SessionStore.SessionStore -> ConversationId -> IO (Maybe UTCTime)
+getSessionModTime store convId = do
+    let path = SessionStore.sessionFilePath store convId
+    result <- try $ getModificationTime path
+    case result of
+        Left (_ :: SomeException) -> pure Nothing
+        Right mtime -> pure $ Just mtime
+
+-- | Helper to convert ConversationId to Text
+conversationIdToText :: ConversationId -> Text
+conversationIdToText (ConversationId uuid) = UUID.toText uuid
+
+-------------------------------------------------------------------------------
+-- System Info Capabilities
+-------------------------------------------------------------------------------
 
 {- | Gather date/time information.
 
@@ -772,8 +1429,8 @@ with a default toolbox context (no env var filtering).
 -}
 getCapabilityInfo :: SystemToolCapability -> IO (Text, Aeson.Value)
 getCapabilityInfo capability = do
-    let toolbox = Toolbox "" "" [capability] Nothing undefined
-    result <- getCapabilityInfoWithTimeout capability toolbox
+    let toolbox = Toolbox "" "" [capability] Nothing undefined Nothing
+    result <- getCapabilityInfoWithTimeout capability toolbox Nothing Nothing Nothing
     case result of
         Left err -> pure (capabilityToName capability, String err)
         Right val -> pure val
@@ -841,3 +1498,4 @@ formatResults result =
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
+

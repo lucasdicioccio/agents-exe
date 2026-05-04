@@ -665,7 +665,7 @@ buildPostgRESTParamProperties params =
                         }
             Nothing -> Nothing
 
-        -- NEW: Request body for write operations (POST, PUT, PATCH)
+        -- Request body for write operations (POST, PUT, PATCH)
         bodyProp = case tpRequestBody params of
             Just schema ->
                 Just $
@@ -705,7 +705,7 @@ buildPostgRESTParamProperties params =
             [ fmap (\desc -> ParamProperty "order" (OpaqueParamType "string") desc False) (rsOrder rs)
             ]
 
-    -- NEW: Build the parameter type for the request body
+    -- Build the parameter type for the request body
     buildBodyParamType :: Schema -> ParamType
     buildBodyParamType schema =
         case schema.schemaType of
@@ -719,7 +719,7 @@ buildPostgRESTParamProperties params =
                 ObjectParamType (buildSchemaProperties schema)
             _ -> OpaqueParamType "object"
 
-    -- NEW: Build description for the request body parameter
+    -- Build description for the request body parameter
     buildBodyDescription :: Schema -> Text
     buildBodyDescription schema =
         let baseDesc = Maybe.fromMaybe "JSON request body for insert/update operations" schema.schemaDescription
@@ -729,14 +729,14 @@ buildPostgRESTParamProperties params =
                 _ -> ""
          in baseDesc <> typeHint
 
-    -- NEW: Build properties from schema for object validation
+    -- Build properties from schema for object validation
     buildSchemaProperties :: Schema -> [ParamProperty]
     buildSchemaProperties schema =
         case schema.schemaProperties of
             Just props -> map (\(k, v) -> schemaToParamProperty k v) (Map.toList props)
             Nothing -> []
 
-    -- NEW: Convert a schema property to ParamProperty
+    -- Convert a schema property to ParamProperty
     schemaToParamProperty :: Text -> Schema -> ParamProperty
     schemaToParamProperty name schema =
         ParamProperty
@@ -746,7 +746,7 @@ buildPostgRESTParamProperties params =
             , propertyRequired = maybe False (name `elem`) schema.schemaRequired
             }
 
-    -- NEW: Convert schema type to ParamType
+    -- Convert schema type to ParamType
     schemaTypeToParamType :: Schema -> ParamType
     schemaTypeToParamType schema =
         case schema.schemaType of
@@ -890,17 +890,12 @@ registerSqliteTools box =
 
 System tools expose functions based on configured capabilities.
 The tool accepts a 'capability' parameter to select which information to retrieve,
-and an optional 'filepath' parameter for the 'attach-file' capability.
-
-The activation is extracted from the toolbox configuration's
-'systemToolboxActivation' field.
--}
-
-{- | Register a SystemToolbox tool with the LLM system.
-
-System tools expose functions based on configured capabilities.
-The tool accepts a 'capability' parameter to select which information to retrieve,
-and an optional 'filepath' parameter for the 'attach-file' capability.
+and optional parameters:
+- 'filepath' for the 'attach-file' capability
+- 'session_id' for the 'read-session' capability
+- 'query' for the 'search-sessions' capability
+- 'take_n', 'drop_n', 'offset', 'limit' for session slicing (read-session)
+- 'include_thinking', 'include_tool_responses' for content filtering (read-session)
 
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
@@ -913,21 +908,8 @@ registerSystemTool box =
         tName = "system_info"
         llmName = system2LLMName box tName
 
-        -- Parameters: capability (required) and filepath (optional, for attach-file)
-        paramProps =
-            [ ParamProperty
-                { propertyKey = "capability"
-                , propertyType = StringParamType
-                , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
-                , propertyRequired = True
-                }
-            , ParamProperty
-                { propertyKey = "filepath"
-                , propertyType = StringParamType
-                , propertyDescription = "For attach-file: Absolute path to the file to attach"
-                , propertyRequired = False
-                }
-            ]
+        -- Build parameter properties based on enabled capabilities
+        paramProps = buildSystemToolParams box
 
         toolDescription =
             ToolDescription
@@ -957,6 +939,109 @@ registerSystemTool box =
                 , toolActivation = mbActivation
                 }
 
+-- | Build parameter properties for system tools based on enabled capabilities.
+buildSystemToolParams :: SystemTools.Toolbox -> [ParamProperty]
+buildSystemToolParams box =
+    let
+        baseParams =
+            [ ParamProperty
+                { propertyKey = "capability"
+                , propertyType = StringParamType
+                , propertyDescription = "Capability to query: " <> Text.intercalate ", " (map capabilityToText box.toolboxCapabilities)
+                , propertyRequired = True
+                }
+            ]
+
+        -- filepath parameter for attach-file capability
+        filepathParam =
+            ParamProperty
+                { propertyKey = "filepath"
+                , propertyType = StringParamType
+                , propertyDescription = "For attach-file: Absolute path to the file to attach"
+                , propertyRequired = False
+                }
+
+        -- session_id parameter for read-session capability
+        sessionIdParam =
+            ParamProperty
+                { propertyKey = "session_id"
+                , propertyType = StringParamType
+                , propertyDescription = "For read-session: Session ID (UUID) to read"
+                , propertyRequired = False
+                }
+
+        -- query parameter for search-sessions capability
+        queryParam =
+            ParamProperty
+                { propertyKey = "query"
+                , propertyType = StringParamType
+                , propertyDescription = "For search-sessions: Search query string"
+                , propertyRequired = False
+                }
+
+        -- Slicing parameters for read-session capability
+        takeNParam =
+            ParamProperty
+                { propertyKey = "take_n"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Take last N turns (alternative to offset/limit)"
+                , propertyRequired = False
+                }
+
+        dropNParam =
+            ParamProperty
+                { propertyKey = "drop_n"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Drop first N turns (alternative to offset)"
+                , propertyRequired = False
+                }
+
+        offsetParam =
+            ParamProperty
+                { propertyKey = "offset"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Starting turn index (0-based, alternative to drop_n)"
+                , propertyRequired = False
+                }
+
+        limitParam =
+            ParamProperty
+                { propertyKey = "limit"
+                , propertyType = NumberParamType
+                , propertyDescription = "For read-session: Max turns to return (alternative to take_n)"
+                , propertyRequired = False
+                }
+
+        -- Content control parameters for read-session capability
+        includeThinkingParam =
+            ParamProperty
+                { propertyKey = "include_thinking"
+                , propertyType = BoolParamType
+                , propertyDescription = "For read-session: Include LLM thinking/reasoning content (default: false)"
+                , propertyRequired = False
+                }
+
+        includeToolResponsesParam =
+            ParamProperty
+                { propertyKey = "include_tool_responses"
+                , propertyType = BoolParamType
+                , propertyDescription = "For read-session: Include tool call responses (default: false)"
+                , propertyRequired = False
+                }
+
+        hasCapability cap = cap `elem` box.toolboxCapabilities
+
+        -- Add optional parameters only if their respective capabilities are enabled
+        optionalParams =
+            (if hasCapability SystemToolAttachFile then [filepathParam] else [])
+                ++ (if hasCapability SystemToolReadSession 
+                    then [ sessionIdParam, takeNParam, dropNParam, offsetParam 
+                         , limitParam, includeThinkingParam, includeToolResponsesParam ]
+                    else [])
+                ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
+     in
+        baseParams ++ optionalParams
+
 -- Helper to convert capability to text
 capabilityToText :: SystemToolCapability -> Text
 capabilityToText SystemToolDate = "date"
@@ -968,6 +1053,10 @@ capabilityToText SystemToolWorkingDirectory = "working-directory"
 capabilityToText SystemToolProcessInfo = "process-info"
 capabilityToText SystemToolUptime = "uptime"
 capabilityToText SystemToolAttachFile = "attach-file"
+capabilityToText SystemToolListSessions = "list-sessions"
+capabilityToText SystemToolSearchSessions = "search-sessions"
+capabilityToText SystemToolReadSession = "read-session"
+capabilityToText SystemToolGetSessionStats = "get-session-stats"
 
 {- | Register all tools from a System toolbox.
 
@@ -1400,7 +1489,20 @@ systemTool box =
                 if cap == "attach-file"
                     then handleAttachFile tracer v
                     else do
-                        result <- SystemTools.executeQuery (Prod.contramap SystemToolsTrace tracer) box cap
+                        -- Extract optional parameters for session introspection capabilities
+                        let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
+                                Just (Aeson.String sid) -> Just sid
+                                _ -> Nothing
+                        let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
+                                Just (Aeson.String q) -> Just q
+                                _ -> Nothing
+                        
+                        -- Extract read-session parameters
+                        let mReadParams = if cap == "read-session"
+                                then Just $ extractReadSessionParams v
+                                else Nothing
+                        
+                        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
                         case result of
                             Left err -> pure $ SystemToolError call err
                             Right rsp -> pure $ SystemToolResult call rsp
@@ -1430,6 +1532,32 @@ systemTool box =
                                     Right bytes ->
                                         pure $ BlobToolSuccess call bytes (Just mt)
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'filepath' parameter for attach-file capability")
+
+    -- Extract read-session parameters from the tool call arguments
+    extractReadSessionParams :: Aeson.Object -> SystemTools.ReadSessionParams
+    extractReadSessionParams v =
+        SystemTools.ReadSessionParams
+            { SystemTools.rspTakeN = parseIntParam "take_n" v
+            , SystemTools.rspDropN = parseIntParam "drop_n" v
+            , SystemTools.rspOffset = parseIntParam "offset" v
+            , SystemTools.rspLimit = parseIntParam "limit" v
+            , SystemTools.rspIncludeThinking = parseBoolParam "include_thinking" v
+            , SystemTools.rspIncludeToolResponses = parseBoolParam "include_tool_responses" v
+            }
+
+    -- Parse an optional integer parameter from the JSON object
+    parseIntParam :: Text -> Aeson.Object -> Maybe Int
+    parseIntParam key obj =
+        case KeyMap.lookup (AesonKey.fromText key) obj of
+            Just (Aeson.Number n) -> Just (round n)
+            _ -> Nothing
+
+    -- Parse an optional boolean parameter from the JSON object
+    parseBoolParam :: Text -> Aeson.Object -> Bool
+    parseBoolParam key obj =
+        case KeyMap.lookup (AesonKey.fromText key) obj of
+            Just (Aeson.Bool b) -> b
+            _ -> False
 
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
@@ -1572,3 +1700,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+
