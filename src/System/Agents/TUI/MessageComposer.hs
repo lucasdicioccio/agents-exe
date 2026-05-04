@@ -193,4 +193,3 @@ loadInputConfig path = do
                 Right config -> do
                     hPutStrLn stderr $ "Loaded input config from: " ++ path
                     pure config
-

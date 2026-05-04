@@ -41,12 +41,12 @@ import System.Agents.Session.Types (
     TrajectorySignals (..),
     sessionTotalBytes,
  )
-import System.Agents.TUI.Types
 import System.Agents.TUI.MessageComposer (
     InputConfig (..),
     SendTrigger (..),
     willSendOnNextNewline,
  )
+import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Activation (Activation (..))
@@ -1131,4 +1131,3 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
-
