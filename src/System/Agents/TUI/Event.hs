@@ -840,8 +840,9 @@ handleConversationViewEvent _tracer ev keymap = do
         Vty.EvKey Vty.KPageDown _ -> vScrollPage (viewportScroll ConversationViewWidget) Down
         _ -> pure ()
 
--- | Handle session view scrolling.
--- | Handle session view scrolling.
+{- | Handle session view scrolling.
+| Handle session view scrolling.
+-}
 handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
 handleSessionViewEvent _tracer ev keymap =
     case ev of
@@ -866,6 +867,7 @@ handleSessionViewEvent _tracer ev keymap =
         Vty.EvKey Vty.KPageUp _ -> vScrollPage (viewportScroll SessionViewWidget) Up
         Vty.EvKey Vty.KPageDown _ -> vScrollPage (viewportScroll SessionViewWidget) Down
         _ -> pure ()
+
 -- | Handle agent info scrolling.
 handleAgentInfoEvent :: Vty.Event -> EventM N TuiState ()
 handleAgentInfoEvent ev =
