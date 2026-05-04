@@ -59,9 +59,11 @@ import System.Agents.TUI.Clipboard (
  )
 import System.Agents.TUI.FileBrowser (
     FileBrowserSelection (..),
+    FileBrowserEntry (..),
     fileBrowserSelection,
     handleFileBrowserEvent,
     newFileBrowser,
+    getSelectedEntry,
  )
 import System.Agents.TUI.KeyMapping (
     EventName (..),
@@ -256,7 +258,7 @@ handleFileBrowserDialogEvent ev =
         VtyEvent (Vty.EvKey Vty.KEsc []) -> do
             closeFileBrowserDialog
             showStatus StatusInfo "Attachment cancelled"
-        VtyEvent (Vty.EvKey Vty.KEnter []) -> handleFileBrowserSelection
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> handleFileBrowserEnter
         VtyEvent vtyEv -> do
             mFb <- use (tuiUI . fileBrowser)
             case mFb of
@@ -265,6 +267,45 @@ handleFileBrowserDialogEvent ev =
                     newFb <- liftIO $ handleFileBrowserEvent vtyEv fb
                     tuiUI . fileBrowser .= Just newFb
         _ -> pure ()
+
+-- | Handle Enter key in file browser.
+-- When a directory is selected, enter it. When a file is selected, attach it.
+handleFileBrowserEnter :: EventM N TuiState ()
+handleFileBrowserEnter = do
+    mFb <- use (tuiUI . fileBrowser)
+    case mFb of
+        Nothing -> do
+            closeFileBrowserDialog
+            showStatus StatusError "File browser not initialized"
+        Just fb -> do
+            case getSelectedEntry fb of
+                Nothing -> do
+                    closeFileBrowserDialog
+                    showStatus StatusWarning "No file selected"
+                Just entry ->
+                    if fbeIsDirectory entry
+                        then do
+                            -- Enter the directory
+                            newFb <- liftIO $ handleFileBrowserEvent (Vty.EvKey Vty.KEnter []) fb
+                            tuiUI . fileBrowser .= Just newFb
+                        else do
+                            -- Select the file for attachment
+                            result <- liftIO $ loadFileAsAttachment (fbePath entry)
+                            case result of
+                                Left err -> do
+                                    closeFileBrowserDialog
+                                    showStatus StatusError $ Text.pack err
+                                Right attachment -> do
+                                    mConv <- getFocusedConversation
+                                    case mConv of
+                                        Nothing -> do
+                                            closeFileBrowserDialog
+                                            showStatus StatusError "No conversation selected"
+                                        Just conv -> do
+                                            let convId = conversationId conv
+                                            tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                                            closeFileBrowserDialog
+                                            showStatus StatusInfo $ "Attached: " <> fromMaybe "unnamed" attachment.mediaFilename
 
 -- | Handle file selection from FileBrowser.
 handleFileBrowserSelection :: EventM N TuiState ()

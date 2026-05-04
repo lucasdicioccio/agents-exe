@@ -777,7 +777,8 @@ renderCustomFileBrowser fb =
                         if fbeIsDirectory entry
                             then fileBrowserDirectoryAttr
                             else fileBrowserRegularFileAttr
-         in withAttr attr $ txt $ marker <> fbeName entry
+            widget = withAttr attr $ txt $ marker <> fbeName entry
+         in if isSelected then visible widget else widget
 
 -- | Render help text for file browser.
 renderFileBrowserHelp :: FileBrowser WidgetName -> Widget N
