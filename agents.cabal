@@ -90,6 +90,7 @@ library agents-lib
                     , System.Agents.OS.Resources.Lua
                     , System.Agents.OS.Resources.Sqlite
                     , System.Agents.OS.Resources.Types
+                    , System.Agents.OS.Security.FileScope
                     , System.Agents.Tools
                     , System.Agents.Tools.Activation
                     , System.Agents.Tools.Activation.Session
@@ -98,6 +99,7 @@ library agents-lib
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.Cache
                     , System.Agents.Tools.Context
+                    , System.Agents.Tools.DirectoryListing
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.EndpointPredicate
                     , System.Agents.Tools.ExecuteToolCall
@@ -187,6 +189,7 @@ library agents-lib
                       filepath,
                       formatting,
                       free,
+                      Glob,
                       hashable,
                       hslua,
                       hslua-marshalling,
