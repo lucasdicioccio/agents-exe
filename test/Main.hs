@@ -16,16 +16,16 @@ import System.Agents.Tools.OpenAPI.Types as OpenAPI hiding (object, (.=))
 import System.Agents.Tools.OpenAPI.Resolver as Resolver
 import System.Agents.Tools.OpenAPI.Converter as Converter
 
-import Data.Aeson (decode, encode, Value(..), object, (.=))
+-- Import FileReferences tests
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import Data.Aeson (decode, encode, Value(..), object, (.=))
 import Test.Tasty
 import Test.Tasty.HUnit
-
 -- Import the comprehensive OpenAPI Toolbox tests
 import qualified OpenAPIToolboxTests
 -- Import PostgREST parsing tests
@@ -45,10 +45,10 @@ import qualified ToolPortalTests
 -- Import LuaToolbox security tests
 import qualified LuaToolboxSecurityTests
 -- Import LuaToolbox comprehensive tests
+-- Import LuaToolbox comprehensive tests
 import qualified LuaToolboxTests
 -- Import luaToJsonValue specific tests
 import qualified LuaToolboxJsonValueTests
--- Import LuaToolbox HTTP module tests
 import qualified LuaToolboxHttpTests
 -- Import OS Core ECS tests
 import qualified OS.CoreTests
