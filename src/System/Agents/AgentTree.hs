@@ -987,4 +987,3 @@ loadAgentTree props = do
 withAgentTree :: Props -> (LoadAgentResult -> IO a) -> IO a
 withAgentTree props continue = do
     loadAgentTree props >>= continue
-
