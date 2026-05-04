@@ -789,7 +789,8 @@ checkTripleNewlineTrigger = do
     config <- use sessionConfig
     let inputCfg = sessionInputConfig config
     msgLines <- use (tuiUI . messageEditor . to getEditContents)
-    let msgText = Text.unlines msgLines
+    -- Use intercalate instead of unlines to avoid trailing newline
+    let msgText = Text.intercalate "\n" msgLines
     when (shouldSendMessage inputCfg msgText) $ do
         -- Strip the trigger suffix before sending
         let cleanedText = stripSendTrigger inputCfg msgText
@@ -1646,3 +1647,4 @@ handleSendMessage = do
                         tuiUI . selectedAttachmentIndex .= Nothing
                         updateConversationStatus convId ConversationStatus_Active
             Nothing -> showStatus StatusWarning "No conversation selected"
+
