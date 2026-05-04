@@ -918,6 +918,7 @@ data DeveloperToolCapability
     | -- | Traverse directory tree recursively
       DevToolTraverseDirectory
     deriving (Show, Ord, Eq, Generic)
+
 -- | Serialize DeveloperToolCapability as kebab-case strings.
 instance ToJSON DeveloperToolCapability where
     toJSON DevToolValidateTool = Aeson.String "validate-tool"
@@ -931,6 +932,7 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolWriteFileRange = Aeson.String "write-file-range"
     toJSON DevToolListDirectory = Aeson.String "list-directory"
     toJSON DevToolTraverseDirectory = Aeson.String "traverse-directory"
+
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
     parseJSON = Aeson.withText "DeveloperToolCapability" $ \txt ->
@@ -947,6 +949,7 @@ instance FromJSON DeveloperToolCapability where
             "list-directory" -> return DevToolListDirectory
             "traverse-directory" -> return DevToolTraverseDirectory
             other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, list-directory, traverse-directory."
+
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.

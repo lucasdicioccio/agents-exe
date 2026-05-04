@@ -106,18 +106,18 @@ import System.Agents.Base (
     PostgRESTToolboxDescription,
  )
 import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.OS.Security.FileScope (
+    ScopeError (..),
+    scopeFromList,
+ )
 import System.Agents.Tools.Bash (LoadTrace)
 import qualified System.Agents.Tools.Bash as Bash
-import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 import System.Agents.Tools.DirectoryListing (
     ListDirectoryOp (..),
     scopedListDirectory,
     scopedTraverseDirectory,
  )
-import System.Agents.OS.Security.FileScope (
-    ScopeError (..),
-    scopeFromList,
- )
+import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
 -- Types and remaining implementation will be added in subsequent edits
 -- to avoid file corruption from large writes
@@ -352,12 +352,13 @@ initializeToolbox _tracer desc = do
     if null desc.developerToolboxCapabilities
         then pure $ Left "Developer toolbox must have at least one capability enabled"
         else do
-            let toolbox = Toolbox
-                    { toolboxName = desc.developerToolboxName
-                    , toolboxDescription = desc.developerToolboxDescription
-                    , toolboxCapabilities = desc.developerToolboxCapabilities
-                    , toolboxConfig = desc
-                    }
+            let toolbox =
+                    Toolbox
+                        { toolboxName = desc.developerToolboxName
+                        , toolboxDescription = desc.developerToolboxDescription
+                        , toolboxCapabilities = desc.developerToolboxCapabilities
+                        , toolboxConfig = desc
+                        }
             pure $ Right toolbox
 
 capabilityToName :: DeveloperToolCapability -> Text
@@ -564,4 +565,3 @@ makeHaskellToolTemplate toolSlug =
 
 mergeAgentWithOverrides :: Agent -> AgentOverrides -> Agent
 mergeAgentWithOverrides ref _ = ref
-
