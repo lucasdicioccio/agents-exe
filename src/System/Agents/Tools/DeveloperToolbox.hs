@@ -20,6 +20,8 @@ for:
 * Applying unified diff patches to files
 * Restoring files from snapshots
 * Getting comprehensive help documentation
+* Listing directory contents with metadata
+* Traversing directory trees with scope enforcement
 
 These tools help developers write and validate agents and tools.
 
@@ -51,6 +53,7 @@ module System.Agents.Tools.DeveloperToolbox (
     PatchResult (..),
     PatchError (..),
     Hunk (..),
+    DirectoryListingResult (..),
     RangeSpec (..),
     AgentOverrides (..),
     ToolConfig (..),
@@ -79,6 +82,8 @@ module System.Agents.Tools.DeveloperToolbox (
     executePatchFile,
     executeRestoreFile,
     executeHelp,
+    executeListDirectory,
+    executeTraverseDirectory,
 
     -- * Capability info
     getCapabilityInfo,
@@ -134,6 +139,7 @@ import System.Agents.Tools.DeveloperToolbox.Init
 -- Re-export capability execution functions
 
 import System.Agents.Tools.DeveloperToolbox.Create
+import System.Agents.Tools.DeveloperToolbox.Directory
 import System.Agents.Tools.DeveloperToolbox.Help
 import System.Agents.Tools.DeveloperToolbox.Patch
 import System.Agents.Tools.DeveloperToolbox.Read

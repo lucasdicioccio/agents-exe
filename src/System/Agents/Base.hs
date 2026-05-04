@@ -1194,8 +1194,11 @@ data DeveloperToolCapability
       DevToolSnapshot
     | -- | Restore a file from a snapshot
       DevToolRestoreFile
+    | -- | List directory contents with metadata
+      DevToolListDirectory
+    | -- | Traverse directory tree recursively
+      DevToolTraverseDirectory
     deriving (Show, Ord, Eq, Generic)
-
 -- | Serialize DeveloperToolCapability as kebab-case strings.
 instance ToJSON DeveloperToolCapability where
     toJSON DevToolValidateTool = Aeson.String "validate-tool"
@@ -1211,6 +1214,8 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolHelp = Aeson.String "help"
     toJSON DevToolSnapshot = Aeson.String "snapshot"
     toJSON DevToolRestoreFile = Aeson.String "restore-file"
+    toJSON DevToolListDirectory = Aeson.String "list-directory"
+    toJSON DevToolTraverseDirectory = Aeson.String "traverse-directory"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -1229,8 +1234,9 @@ instance FromJSON DeveloperToolCapability where
             "help" -> return DevToolHelp
             "snapshot" -> return DevToolSnapshot
             "restore-file" -> return DevToolRestoreFile
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file."
-
+            "list-directory" -> return DevToolListDirectory
+            "traverse-directory" -> return DevToolTraverseDirectory
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.

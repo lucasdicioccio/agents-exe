@@ -32,6 +32,8 @@ capabilityToName DevToolPatchFile = "patch-file"
 capabilityToName DevToolHelp = "help"
 capabilityToName DevToolSnapshot = "snapshot"
 capabilityToName DevToolRestoreFile = "restore-file"
+capabilityToName DevToolListDirectory = "list-directory"
+capabilityToName DevToolTraverseDirectory = "traverse-directory"
 
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
@@ -49,6 +51,8 @@ capabilityFromName name = case name of
     "help" -> Just DevToolHelp
     "snapshot" -> Just DevToolSnapshot
     "restore-file" -> Just DevToolRestoreFile
+    "list-directory" -> Just DevToolListDirectory
+    "traverse-directory" -> Just DevToolTraverseDirectory
     _ -> Nothing
 
 -- | Get information about a capability (name and description).
@@ -104,4 +108,12 @@ getCapabilityInfo DevToolSnapshot =
 getCapabilityInfo DevToolRestoreFile =
     ( "restore-file"
     , "Restores a file to a previous version using a snapshot reference (MD5 hash). Requires the 'snapshot' capability to be enabled to have stored snapshots available."
+    )
+getCapabilityInfo DevToolListDirectory =
+    ( "list-directory"
+    , "Lists directory contents with metadata (type, size, permissions, modification time)"
+    )
+getCapabilityInfo DevToolTraverseDirectory =
+    ( "traverse-directory"
+    , "Recursively traverses a directory tree and returns all entries within scope"
     )
