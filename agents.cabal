@@ -128,6 +128,7 @@ library agents-lib
                     , System.Agents.Tools.SystemToolbox
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
+                    , System.Agents.Prompt.FileReferences
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime
@@ -246,11 +247,9 @@ executable agents-exe
     default-language: Haskell2010
 
 executable agq
-    import:           warnings
     main-is:          Main.hs
     ghc-options:      -threaded
-    other-modules:    Agq.Config
-                    , Agq.DB
+    other-modules:    Agq.DB
                     , Agq.Schedule
                     , Agq.Run
                     , Agq.Commands
@@ -280,8 +279,8 @@ test-suite agents-tests
     other-modules:    ActivationSessionTests
                     , DeveloperToolboxTests
                     , EndpointPredicateTests
+                    , FileReferencesTests
                     , LuaToolboxSecurityTests
-                    , LuaToolboxTests
                     , LuaToolboxJsonValueTests
                     , LuaToolboxHttpTests
                     , McpImplementationTests
