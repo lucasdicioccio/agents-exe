@@ -10,6 +10,8 @@
 -- * File writing with line ranges
 -- * Multiple range operations
 -- * Edge cases (empty files, out-of-bounds ranges, etc.)
+-- * Indentation preservation in replacements
+-- * Line number handling (1-based, inclusive)
 --
 -- NOTE: Tests use temporary files to avoid corrupting shared resources.
 module DeveloperToolboxTests where
@@ -104,6 +106,8 @@ tests =
         , writeFileRangeTests
         , edgeCaseTests
         , multiRangeTests
+        , indentationTests
+        , lineNumberTests
         ]
 
 -------------------------------------------------------------------------------
@@ -621,4 +625,257 @@ testTrailingNewlinePreservation = withTempDir $ \tmpDir -> do
             assertBool "Should have REPLACED" $ "REPLACED" `Text.isInfixOf` content
             assertBool "Should have Line 1" $ "Line 1" `Text.isInfixOf` content
             assertBool "Should have Line 3" $ "Line 3" `Text.isInfixOf` content
+
+-------------------------------------------------------------------------------
+-- Indentation Preservation Tests
+-------------------------------------------------------------------------------
+
+-- | Tests for verifying that indentation is preserved in write-file-range operations
+indentationTests :: TestTree
+indentationTests =
+    testGroup
+        "Indentation Preservation"
+        [ testCase "Single line replacement preserves indentation" testIndentationPreservation
+        , testCase "Multi-range with indented content blocks" testMultiRangeIndentation
+        , testCase "Nested indentation preserved" testNestedIndentation
+        , testCase "Tab indentation preserved" testTabIndentation
+        ]
+
+-- | Test that indentation is preserved when replacing a single line
+testIndentationPreservation :: Assertion
+testIndentationPreservation = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        -- Content with significant indentation (Haskell-style code)
+        let indentedContent = "    let x = 1\n        y = 2\n    in x + y\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3" indentedContent
+        case result of
+            Left err -> assertFailure $ show err
+            Right _ -> do
+                content <- Text.readFile filePath
+                -- Verify 4-space indentation is preserved
+                assertBool "Should preserve 4-space indentation on first line" $
+                    "    let x = 1" `Text.isInfixOf` content
+                -- Verify 8-space indentation is preserved
+                assertBool "Should preserve 8-space indentation on second line" $
+                    "        y = 2" `Text.isInfixOf` content
+                -- Verify closing indentation is preserved
+                assertBool "Should preserve 4-space indentation on third line" $
+                    "    in x + y" `Text.isInfixOf` content
+
+-- | Test that indentation is preserved in multi-range operations with separator
+testMultiRangeIndentation :: Assertion
+testMultiRangeIndentation = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        -- Two blocks with different indentation levels
+        let block1 = "    block1 line1\n    block1 line2\n"
+        let block2 = "        block2 line1\n        block2 line2\n"
+        let content = block1 <> "---" <> block2
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2,8" content
+        case result of
+            Left err -> assertFailure $ show err
+            Right _ -> do
+                fileContent <- Text.readFile filePath
+                -- First block indentation (4 spaces) should be preserved
+                assertBool "First block indentation preserved" $
+                    "    block1 line1" `Text.isInfixOf` fileContent
+                -- Second block indentation (8 spaces) should be preserved
+                assertBool "Second block indentation preserved" $
+                    "        block2 line1" `Text.isInfixOf` fileContent
+
+-- | Test deeply nested indentation
+testNestedIndentation :: Assertion
+testNestedIndentation = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        -- Python-style nested indentation
+        let nestedContent = "def outer():\n    def inner():\n        if True:\n            return 42\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "5" nestedContent
+        case result of
+            Left err -> assertFailure $ show err
+            Right _ -> do
+                content <- Text.readFile filePath
+                -- Verify each level of indentation is preserved
+                assertBool "Should preserve 0-space indentation (def)" $
+                    "def outer():" `Text.isInfixOf` content
+                assertBool "Should preserve 4-space indentation (def inner)" $
+                    "    def inner():" `Text.isInfixOf` content
+                assertBool "Should preserve 8-space indentation (if)" $
+                    "        if True:" `Text.isInfixOf` content
+                assertBool "Should preserve 12-space indentation (return)" $
+                    "            return 42" `Text.isInfixOf` content
+
+-- | Test that tab indentation is preserved
+testTabIndentation :: Assertion
+testTabIndentation = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        -- Content with tab indentation
+        let tabContent = "\tfirst level\n\t\tsecond level\n\t\t\tthird level\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "7" tabContent
+        case result of
+            Left err -> assertFailure $ show err
+            Right _ -> do
+                content <- Text.readFile filePath
+                -- Verify tab indentation is preserved
+                assertBool "Should preserve single tab" $
+                    "\tfirst level" `Text.isInfixOf` content
+                assertBool "Should preserve double tab" $
+                    "\t\tsecond level" `Text.isInfixOf` content
+                assertBool "Should preserve triple tab" $
+                    "\t\t\tthird level" `Text.isInfixOf` content
+
+-------------------------------------------------------------------------------
+-- Line Number Handling Tests
+-------------------------------------------------------------------------------
+
+-- | Tests for verifying correct 1-based line number handling
+lineNumberTests :: TestTree
+lineNumberTests =
+    testGroup
+        "Line Number Handling (1-based, inclusive)"
+        [ testCase "Single line deletion (line 5)" testSingleLineDeletion
+        , testCase "Replace first line (line 1)" testReplaceFirstLine
+        , testCase "Replace last line" testReplaceLastLine
+        , testCase "Range deletion at boundaries" testRangeDeletionAtBoundaries
+        , testCase "Sequential line replacement" testSequentialLineReplacement
+        ]
+
+-- | Test that deleting a single specific line works correctly
+-- The test creates a 10-line file, deletes line 5, and verifies:
+-- 1. Line 5 is removed (no "Line 5" text in output)
+-- 2. Line 4 is still present
+-- 3. Line 6 is still present (shifted to position 5)
+-- 4. Total line count is 9 (one line deleted)
+testSingleLineDeletion :: Assertion
+testSingleLineDeletion = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "numbered.txt"
+    -- Create a file with numbered lines for precise verification
+    let numberedContent = Text.unlines $ map (\n -> "Line " <> Text.pack (show n)) [1..10]
+    Text.writeFile filePath numberedContent
+
+    -- Delete line 5
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "5" ""
+    case result of
+        Left err -> assertFailure $ show err
+        Right _ -> do
+            content <- Text.readFile filePath
+            let lines' = filter (/= "") (Text.lines content)  -- Filter empty lines from trailing newline
+            -- After deleting line 5, what was line 6 should now be at position 5
+            assertBool "Line 5 should be removed (no 'Line 5' in output)" $
+                not ("Line 5" `Text.isInfixOf` content)
+            assertBool "Line 4 should still be present" $
+                "Line 4" `Text.isInfixOf` content
+            assertBool "Line 6 should still be present (now at position 5 or later)" $
+                "Line 6" `Text.isInfixOf` content
+            -- Should have 9 lines after deletion (original 10 minus 1 deleted)
+            length lines' @?= 9
+
+-- | Test replacing the first line
+testReplaceFirstLine :: Assertion
+testReplaceFirstLine = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1" "NEW FIRST LINE\n"
+        case result of
+            Left err -> assertFailure $ show err
+            Right _ -> do
+                content <- Text.readFile filePath
+                let lines' = filter (/= "") (Text.lines content)
+                -- First line should be replaced
+                head lines' @?= "NEW FIRST LINE"
+                -- Original first line should be gone
+                assertBool "Should NOT have original first line" $
+                    not ("Line 1: First line" `Text.isInfixOf` Text.unlines (take 1 lines'))
+                -- Other lines should still be present
+                assertBool "Should still have line 2" $ "Second line" `Text.isInfixOf` content
+
+-- | Test replacing the last line (line 10 in a 10-line file)
+testReplaceLastLine :: Assertion
+testReplaceLastLine = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "10" "NEW LAST LINE\n"
+        case result of
+            Left err -> assertFailure $ show err
+            Right _ -> do
+                content <- Text.readFile filePath
+                let lines' = filter (/= "") (Text.lines content)
+                -- Last line should be replaced (line 10 is the 10th line)
+                last lines' @?= "NEW LAST LINE"
+                -- Original last line should be gone
+                assertBool "Should NOT have original last line (Tenth)" $
+                    not ("Tenth line" `Text.isInfixOf` content)
+                -- Line 9 should still exist
+                assertBool "Should still have Line 9" $ "Ninth line" `Text.isInfixOf` content
+
+-- | Test range deletions at file boundaries
+-- This test verifies that deleting ranges at the start and end of a file works correctly.
+testRangeDeletionAtBoundaries :: Assertion
+testRangeDeletionAtBoundaries = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "boundaries.txt"
+    let content = Text.unlines $ map (\n -> "Line " <> Text.pack (show n)) [1..10]
+    Text.writeFile filePath content
+
+    -- Delete lines 1-2 (start boundary)
+    result1 <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2" ""
+    case result1 of
+        Left err -> assertFailure $ show err
+        Right _ -> do
+            content1 <- Text.readFile filePath
+            let lines1 = filter (/= "") (Text.lines content1)
+            -- First two lines should be gone - use exact match to avoid matching "Line 10", "Line 11", etc.
+            assertBool "Line 1 should be removed (exact match)" $ 
+                not ("Line 1\n" `Text.isInfixOf` (content1 <> "\n"))
+            assertBool "Line 2 should be removed (exact match)" $ 
+                not ("Line 2\n" `Text.isInfixOf` (content1 <> "\n"))
+            -- What was Line 3 should now be first
+            assertBool "Line 3 should be first line now" $ head lines1 == "Line 3"
+            -- Should have 8 lines remaining (10 - 2)
+            length lines1 @?= 8
+
+    -- Delete lines 7-8 (end boundary of remaining 8 lines: lines 3-10 from original)
+    -- In the current file, lines 7-8 correspond to original lines 9-10
+    result2 <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "7-8" ""
+    case result2 of
+        Left err -> assertFailure $ show err
+        Right _ -> do
+            content2 <- Text.readFile filePath
+            let lines2 = filter (/= "") (Text.lines content2)
+            -- Original lines 9-10 should be gone (these are lines 7-8 in current file)
+            assertBool "Line 9 should be removed" $ not ("Line 9" `Text.isInfixOf` content2)
+            assertBool "Line 10 should be removed" $ not ("Line 10" `Text.isInfixOf` content2)
+            -- Lines 3-8 (original 3-8) should still exist
+            assertBool "Line 3 should still exist" $ "Line 3" `Text.isInfixOf` content2
+            assertBool "Line 8 should still exist" $ "Line 8" `Text.isInfixOf` content2
+            -- Should have 6 lines remaining (8 - 2)
+            length lines2 @?= 6
+
+-- | Test that sequential line replacements work correctly
+testSequentialLineReplacement :: Assertion
+testSequentialLineReplacement = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "sequential.txt"
+    let content = Text.unlines ["A", "B", "C", "D", "E"]
+    Text.writeFile filePath content
+
+    -- Replace lines 2 and 4 with specific content (applied bottom-to-top)
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2,4" "REPLACED_B\n---\nREPLACED_D\n"
+    case result of
+        Left err -> assertFailure $ show err
+        Right _ -> do
+            fileContent <- Text.readFile filePath
+            let lines' = filter (/= "") (Text.lines fileContent)
+            -- Verify structure (still 5 lines, 2 replaced)
+            assertBool "Line 1 (A) should be unchanged" $ "A" `elem` lines'
+            assertBool "Line 2 should be REPLACED_B" $ "REPLACED_B" `elem` lines'
+            assertBool "Line 3 (C) should be unchanged" $ "C" `elem` lines'
+            assertBool "Line 4 should be REPLACED_D" $ "REPLACED_D" `elem` lines'
+            assertBool "Line 5 (E) should be unchanged" $ "E" `elem` lines'
+            -- Verify originals are gone
+            assertBool "Original B should be removed" $ not ("B" `elem` lines')
+            assertBool "Original D should be removed" $ not ("D" `elem` lines')
 

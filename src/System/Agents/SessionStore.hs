@@ -33,7 +33,7 @@ module System.Agents.SessionStore (
     isSessionFile,
 ) where
 
-import Control.Exception (try, IOException)
+import Control.Exception (IOException, try)
 import Control.Monad (filterM)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
@@ -130,9 +130,9 @@ isResourceBusyError :: IOException -> Bool
 isResourceBusyError e =
     let errStr = ioeGetErrorString e
         errTxt = Text.toLower $ Text.pack errStr
-    in "resource busy" `Text.isInfixOf` errTxt
-        || "file is locked" `Text.isInfixOf` errTxt
-        || "locked" `Text.isInfixOf` errTxt
+     in "resource busy" `Text.isInfixOf` errTxt
+            || "file is locked" `Text.isInfixOf` errTxt
+            || "locked" `Text.isInfixOf` errTxt
 
 {- | Read a session from a file path.
 Returns 'Nothing' if:
@@ -153,14 +153,15 @@ readSessionFromFile path = do
             result <- try $ BSL.readFile path
             case result of
                 Left (e :: IOException)
-                    | isResourceBusyError e -> pure Nothing  -- File is locked, return Nothing
-                    | otherwise -> pure Nothing  -- Other IO errors, return Nothing
+                    | isResourceBusyError e -> pure Nothing -- File is locked, return Nothing
+                    | otherwise -> pure Nothing -- Other IO errors, return Nothing
                 Right dat ->
                     -- Force strict evaluation by using `seq` on the length.
                     -- This ensures the file handle is closed before we return,
                     -- preventing "resource busy" errors when listing sessions.
                     LByteString.length dat `seq`
-                    pure $ Aeson.decode =<< lastLine dat
+                        pure $
+                            Aeson.decode =<< lastLine dat
         else do
             pure Nothing
   where
@@ -275,4 +276,3 @@ listSessions store = do
     let sortedFiles = sortOn (Data.Ord.Down . sessionInfoModTime) sessionFiles
     -- Load each session file (locked/inaccessible files will return Nothing)
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sortedFiles
-

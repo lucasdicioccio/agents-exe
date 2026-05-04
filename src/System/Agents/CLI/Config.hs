@@ -314,4 +314,3 @@ addAndSaveKey path keyName keys = do
         Right () -> do
             Text.putStrLn $ "Created API key: " <> keyName
             Text.putStrLn $ "Please edit " <> Text.pack path <> " and set your actual API key value"
-

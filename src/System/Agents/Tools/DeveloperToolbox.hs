@@ -680,7 +680,9 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                 Left err -> pure $ Left err
                 Right ranges -> do
                     -- Split content by "---" separator
-                    let contentBlocks = map Text.strip $ Text.splitOn "---" contentTxt
+                    -- NOTE: We do NOT strip whitespace from content blocks to preserve
+                    -- indentation. This is intentional - stripping would corrupt code.
+                    let contentBlocks = Text.splitOn "---" contentTxt
 
                     if length contentBlocks /= length ranges && length ranges > 1
                         then

@@ -180,4 +180,3 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                         , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
                         , AgentTree.sessionStore = sessionStore
                         }
-
