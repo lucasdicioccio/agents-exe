@@ -83,6 +83,10 @@ import System.Agents.TUI.KeyMapping (
     generateHelpContent,
     matchesEvent,
  )
+import System.Agents.TUI.MessageComposer (
+    shouldSendMessage,
+    stripSendTrigger,
+ )
 import System.Agents.TUI.Render (sortConversationsForNesting)
 import System.Agents.TUI.Types (
     AppEvent (..),
@@ -777,9 +781,22 @@ handleMessageEditorEvent ev = do
     case ev of
         VtyEvent (Vty.EvKey Vty.KEnter mods)
             | Vty.MCtrl `elem` mods -> handleSendMessage
-        _ -> pure ()
+        _ -> checkTripleNewlineTrigger
 
--- | Handle conversation view scrolling and queue management.
+-- | Check if triple-newline trigger should send the message.
+checkTripleNewlineTrigger :: EventM N TuiState ()
+checkTripleNewlineTrigger = do
+    config <- use sessionConfig
+    let inputCfg = sessionInputConfig config
+    msgLines <- use (tuiUI . messageEditor . to getEditContents)
+    let msgText = Text.unlines msgLines
+    when (shouldSendMessage inputCfg msgText) $ do
+        -- Strip the trigger suffix before sending
+        let cleanedText = stripSendTrigger inputCfg msgText
+        tuiUI . messageEditor . editContentsL .= TextZipper.textZipper (Text.lines cleanedText) Nothing
+        handleSendMessage
+
+-- | Handle conversation view scrolling and turn navigation.
 handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
 handleConversationViewEvent _tracer ev keymap = do
     mConv <- getFocusedConversation
@@ -824,6 +841,7 @@ handleConversationViewEvent _tracer ev keymap = do
         _ -> pure ()
 
 -- | Handle session view scrolling.
+-- | Handle session view scrolling.
 handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
 handleSessionViewEvent _tracer ev keymap =
     case ev of
@@ -848,7 +866,6 @@ handleSessionViewEvent _tracer ev keymap =
         Vty.EvKey Vty.KPageUp _ -> vScrollPage (viewportScroll SessionViewWidget) Up
         Vty.EvKey Vty.KPageDown _ -> vScrollPage (viewportScroll SessionViewWidget) Down
         _ -> pure ()
-
 -- | Handle agent info scrolling.
 handleAgentInfoEvent :: Vty.Event -> EventM N TuiState ()
 handleAgentInfoEvent ev =

@@ -9,7 +9,7 @@ import Brick.Focus (focusGetCurrent)
 import qualified Brick.Util as BrickUtil
 import Brick.Widgets.Border (borderWithLabel, hBorder)
 import Brick.Widgets.Center (center)
-import Brick.Widgets.Edit (renderEditor)
+import Brick.Widgets.Edit (getEditContents, renderEditor)
 import Brick.Widgets.FileBrowser (
     fileBrowserAttr,
     fileBrowserCurrentDirectoryAttr,
@@ -23,13 +23,11 @@ import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, 
 import Control.Lens ((^.))
 import Data.List (intersperse)
 import qualified Data.Map.Strict as Map
-import Data.Set ()
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
-
 import System.Agents.AgentTree (OSAgentNode (..))
 import System.Agents.Base (Agent (..), ConversationId (..))
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
@@ -44,13 +42,14 @@ import System.Agents.Session.Types (
     sessionTotalBytes,
  )
 import System.Agents.TUI.Types
+import System.Agents.TUI.MessageComposer (
+    InputConfig (..),
+    SendTrigger (..),
+    willSendOnNextNewline,
+ )
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Activation (Activation (..))
-
--------------------------------------------------------------------------------
--- Attribute Names
--------------------------------------------------------------------------------
 
 -- | Attribute for focused widgets.
 focusedAttr :: AttrName
@@ -152,21 +151,25 @@ dialogAttr = attrName "dialog"
 subcallAttr :: AttrName
 subcallAttr = attrName "subcall"
 
--- | Attribute for selected subcall conversations.
-subcallSelectedAttr :: AttrName
-subcallSelectedAttr = attrName "subcallSelected"
+-- | Default attribute.
+defaultAttr :: AttrName
+defaultAttr = attrName "default"
 
--- | Attribute for nested tree branch lines.
+-- | Attribute for send indicator (ready to send state).
+sendIndicatorAttr :: AttrName
+sendIndicatorAttr = attrName "sendIndicator"
+
+-- | Attribute for tree branch lines.
 treeBranchAttr :: AttrName
 treeBranchAttr = attrName "treeBranch"
 
--- | Attribute for root conversation.
+-- | Attribute for root conversation items.
 rootConversationAttr :: AttrName
 rootConversationAttr = attrName "rootConversation"
 
--- | Default attribute (no styling).
-defaultAttr :: AttrName
-defaultAttr = attrName "default"
+-- | Attribute for selected subcall conversation items.
+subcallSelectedAttr :: AttrName
+subcallSelectedAttr = attrName "subcallSelected"
 
 -------------------------------------------------------------------------------
 -- Main Draw Function
@@ -592,33 +595,57 @@ render_messageEditor st =
         st
         MessageEditorWidget
         "Message"
-        ( renderEditor
+        $ renderEditor
             (txt . Text.unlines)
             (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
             (st ^. tuiUI . messageEditor)
-        )
 
--- | Render the message editor with attachment count in the label.
+-- | Render the message editor with attachment count and send indicator in the label.
 render_messageEditorWithAttachments :: TuiState -> Conversation -> Widget N
 render_messageEditorWithAttachments st conv =
     let attachmentCount = getAttachmentCount st conv
-        labelText =
+        inputCfg = sessionInputConfig (st ^. sessionConfig)
+        showIndicator = showSendIndicator inputCfg
+        trigger = sendTrigger inputCfg
+
+        -- Get current editor content to check for send indicator
+        editorContent = Text.unlines $ getEditContents (st ^. tuiUI . messageEditor)
+        willSend = willSendOnNextNewline inputCfg editorContent
+
+        -- Build the label text
+        baseLabel =
             if attachmentCount > 0
                 then "Message [" <> Text.pack (show attachmentCount) <> " 📎]"
                 else "Message"
+
+        -- Add mode indicator for triple-newline mode
+        modeLabel = case trigger of
+            TripleNewline -> baseLabel <> " (↵↵↵ to send)"
+            Keymap -> baseLabel
+
+        -- Add ready-to-send indicator
+        labelText =
+            if showIndicator && willSend
+                then modeLabel <> " [READY TO SEND]"
+                else modeLabel
+
+        -- Determine label attribute
+        labelAttr =
+            if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget
+                then
+                    if showIndicator && willSend
+                        then withAttr sendIndicatorAttr . withAttr focusedAttr
+                        else withAttr focusedAttr
+                else
+                    if showIndicator && willSend
+                        then withAttr sendIndicatorAttr
+                        else id
      in borderWithLabel
-            ( if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget
-                then withAttr focusedAttr (txt labelText)
-                else txt labelText
-            )
+            (labelAttr $ txt labelText)
             $ renderEditor
                 (txt . Text.unlines)
                 (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
                 (st ^. tuiUI . messageEditor)
-
--------------------------------------------------------------------------------
--- Attachment List Rendering
--------------------------------------------------------------------------------
 
 -- | Render the attachment list for a conversation.
 render_attachmentList :: TuiState -> Conversation -> Widget N
@@ -985,7 +1012,7 @@ formatBytes n
     | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
     | otherwise = Text.pack (show n) <> " B"
 
--- | Render a single turn with usage info (tokens preferred, bytes fallback).
+-- | Render a single turn with usage info (tokens or bytes fallback).
 render_turn :: (Int, Turn) -> Widget N
 render_turn (_k, turn) =
     case turn of
@@ -1074,12 +1101,11 @@ tui_appAttrMap _ =
         , (byteUsageAttr, BrickUtil.fg Vty.brightYellow `Vty.withStyle` Vty.dim)
         , (tokenUsageAttr, BrickUtil.fg Vty.brightGreen `Vty.withStyle` Vty.dim)
         , (signalMetricsAttr, BrickUtil.fg Vty.brightCyan `Vty.withStyle` Vty.dim)
-        , (attrName "help", BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.dim)
         , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (statusWarningAttr, BrickUtil.fg Vty.yellow)
         , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
         , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
-        , (activationAlwaysAttr, BrickUtil.fg Vty.brightGreen)
+        , (sendIndicatorAttr, BrickUtil.fg Vty.brightGreen `Vty.withStyle` Vty.bold)
         , (activationOnDemandAttr, BrickUtil.fg Vty.yellow)
         , (activationFirstNAttr, BrickUtil.fg Vty.cyan)
         , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
@@ -1105,3 +1131,4 @@ tui_appAttrMap _ =
         , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
         , (fileBrowserRegularFileAttr, Vty.defAttr)
         ]
+

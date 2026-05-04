@@ -27,6 +27,7 @@ module System.Agents.TUI.Core (
     TuiState,
     SessionConfig (..),
     Tab (..),
+    mkSessionConfig,
     initUIState,
     initCore,
     updateConversationSession,
@@ -55,6 +56,7 @@ module System.Agents.TUI.Core (
     currentTab,
     helpContent,
     keyMapping,
+    sessionConfig,
 
     -- * Re-exports from KeyMapping
     EventName (..),
@@ -66,6 +68,14 @@ module System.Agents.TUI.Core (
     matchesEvent,
     generateHelpContent,
     loadKeymapFromFile,
+
+    -- * Re-exports from MessageComposer
+    SendTrigger (..),
+    InputConfig (..),
+    defaultInputConfig,
+    shouldSendMessage,
+    willSendOnNextNewline,
+    stripSendTrigger,
 
     -- * Re-exports from Render
     tui_appDraw,
@@ -152,11 +162,31 @@ import System.Agents.TUI.KeyMapping (
     loadKeymapFromFile,
     matchesEvent,
  )
+import System.Agents.TUI.MessageComposer (
+    InputConfig (..),
+    SendTrigger (..),
+    defaultInputConfig,
+    shouldSendMessage,
+    stripSendTrigger,
+    willSendOnNextNewline,
+ )
 import System.Agents.TUI.Render
 import System.Agents.TUI.Types
 
 -------------------------------------------------------------------------------
--- Cursor and Start Event
+-- Session Configuration
+-------------------------------------------------------------------------------
+
+{- | Create a session configuration from components.
+
+This function creates a SessionConfig with the default input configuration.
+-}
+fileSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
+fileSessionConfig store apiKeys keymap =
+    mkSessionConfig store apiKeys keymap
+
+-------------------------------------------------------------------------------
+-- Application Setup
 -------------------------------------------------------------------------------
 
 -- | Choose cursor based on focus.
@@ -187,22 +217,10 @@ loadSessionFiles store = do
     pure [(path, mSess) | (path, mSess, _) <- sessions]
 
 -------------------------------------------------------------------------------
--- Session Configuration Helpers
+-- Main Entry Points
 -------------------------------------------------------------------------------
 
-{- | Create a session configuration with file-based persistence.
-| Create a session configuration with file-based persistence.
--}
-fileSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
-fileSessionConfig store apiKeys keymap =
-    SessionConfig
-        { sessionStore = store
-        , sessionApiKeys = apiKeys
-        , sessionKeyMapping = keymap
-        }
-
-{- | Initialize the TUI with props and optional conversation prefix (legacy API).
-For more control, use 'runTUIWithConfig' or 'runTUIWithKeymap' instead.
+{- | Initialize and run the TUI with default configuration.
 
 This function:
 1. Loads agent trees from the provided props
@@ -261,6 +279,7 @@ runTUIInternal tracer config props = do
     -- Create core state with World and EventQueue for subcall visibility
     core0 <- initCore (Just world) (Just osEventQueue)
     coreTVar <- newTVarIO core0
+
     -- Generate help content from the keymap
     let helpText = generateHelpContent (sessionKeyMapping config)
 
@@ -268,8 +287,6 @@ runTUIInternal tracer config props = do
     -- Also initialize help content with keyboard shortcuts from the keymap
     let ui0 =
             (initUIState helpText tuiAgents sessions)
-                { _uiAgentTools = agentTools
-                }
                 { _uiAgentTools = agentTools
                 }
 
@@ -375,3 +392,4 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
+
