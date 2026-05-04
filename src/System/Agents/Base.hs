@@ -913,6 +913,10 @@ data DeveloperToolCapability
       DevToolReadFileRange
     | -- | Replace line ranges in a file with new content
       DevToolWriteFileRange
+    | -- | List directory contents with metadata
+      DevToolListDirectory
+    | -- | Traverse directory tree recursively
+      DevToolTraverseDirectory
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
@@ -926,6 +930,8 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolCreateTool = Aeson.String "create-tool"
     toJSON DevToolReadFileRange = Aeson.String "read-file-range"
     toJSON DevToolWriteFileRange = Aeson.String "write-file-range"
+    toJSON DevToolListDirectory = Aeson.String "list-directory"
+    toJSON DevToolTraverseDirectory = Aeson.String "traverse-directory"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -940,7 +946,9 @@ instance FromJSON DeveloperToolCapability where
             "create-tool" -> return DevToolCreateTool
             "read-file-range" -> return DevToolReadFileRange
             "write-file-range" -> return DevToolWriteFileRange
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range."
+            "list-directory" -> return DevToolListDirectory
+            "traverse-directory" -> return DevToolTraverseDirectory
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, list-directory, traverse-directory."
 
 {- | Configuration for the developer toolbox.
 
