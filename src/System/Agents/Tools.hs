@@ -363,7 +363,7 @@ executeDeveloperCapability tracer box cap params = case cap of
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
-                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter. Valid formats: single line '5', range '1-10', 'head' (prepend), 'tail' (append), or multiple '1-10,20-30'")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
@@ -425,3 +425,4 @@ ioTool script =
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
+

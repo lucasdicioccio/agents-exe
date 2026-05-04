@@ -970,15 +970,6 @@ buildSystemToolParams box =
                 , propertyRequired = False
                 }
 
-        -- query parameter for search-sessions capability
-        queryParam =
-            ParamProperty
-                { propertyKey = "query"
-                , propertyType = StringParamType
-                , propertyDescription = "For search-sessions: Search query string"
-                , propertyRequired = False
-                }
-
         -- Slicing parameters for read-session capability
         takeNParam =
             ParamProperty
@@ -1026,6 +1017,15 @@ buildSystemToolParams box =
                 { propertyKey = "include_tool_responses"
                 , propertyType = BoolParamType
                 , propertyDescription = "For read-session: Include tool call responses (default: false)"
+                , propertyRequired = False
+                }
+
+        -- query parameter for search-sessions capability
+        queryParam =
+            ParamProperty
+                { propertyKey = "query"
+                , propertyType = StringParamType
+                , propertyDescription = "For search-sessions: Search query string"
                 , propertyRequired = False
                 }
 
@@ -1658,7 +1658,7 @@ executeDeveloperCapability tracer box cap params = case cap of
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
-                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter. Valid formats: single line '5', range '1-10', 'head' (prepend), 'tail' (append), or multiple '1-10,20-30'")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
