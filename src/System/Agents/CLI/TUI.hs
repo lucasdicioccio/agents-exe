@@ -73,4 +73,3 @@ handleTUI tracer sessionStore apiKeysFile mKeymapPath agentFiles = do
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
     TUI.runTUIWithUserConfig (Prod.contramap TUITrace tracer) sessionStore apiKeys userConfig agentPropsList
-

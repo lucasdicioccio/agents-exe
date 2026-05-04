@@ -51,10 +51,10 @@ import System.Agents.Base (
     PostgRESTServerDescription (..),
     PostgRESTServerOnDisk (..),
     PostgRESTToolboxDescription (..),
-    SqliteToolboxDescription (..),
-    SystemToolboxDescription (..),
-    SystemToolCapability (..),
     SessionIntrospectionScope (..),
+    SqliteToolboxDescription (..),
+    SystemToolCapability (..),
+    SystemToolboxDescription (..),
  )
 import System.Agents.SessionStore (SessionStore)
 import System.Agents.ToolRegistration (ToolRegistration)
@@ -585,12 +585,12 @@ buildSessionIntrospectionConfig store desc =
             else Nothing
   where
     isSessionCapability cap =
-        cap `elem`
-            [ SystemToolListSessions
-            , SystemToolSearchSessions
-            , SystemToolReadSession
-            , SystemToolGetSessionStats
-            ]
+        cap
+            `elem` [ SystemToolListSessions
+                   , SystemToolSearchSessions
+                   , SystemToolReadSession
+                   , SystemToolGetSessionStats
+                   ]
 
 -------------------------------------------------------------------------------
 -- Developer Toolbox Loading
@@ -715,4 +715,3 @@ collectFirstError = foldl go Nothing
     go acc@(Just _) _ = acc
     go Nothing (Just err) = Just err
     go Nothing Nothing = Nothing
-

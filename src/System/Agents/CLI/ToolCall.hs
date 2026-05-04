@@ -147,4 +147,3 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                         -- Output the result as JSON
                         LByteString.putStr $ Aeson.encode result'
                         LByteString.putStr "\n"
-

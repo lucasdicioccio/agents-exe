@@ -1034,10 +1034,18 @@ buildSystemToolParams box =
         -- Add optional parameters only if their respective capabilities are enabled
         optionalParams =
             (if hasCapability SystemToolAttachFile then [filepathParam] else [])
-                ++ (if hasCapability SystemToolReadSession 
-                    then [ sessionIdParam, takeNParam, dropNParam, offsetParam 
-                         , limitParam, includeThinkingParam, includeToolResponsesParam ]
-                    else [])
+                ++ ( if hasCapability SystemToolReadSession
+                        then
+                            [ sessionIdParam
+                            , takeNParam
+                            , dropNParam
+                            , offsetParam
+                            , limitParam
+                            , includeThinkingParam
+                            , includeToolResponsesParam
+                            ]
+                        else []
+                   )
                 ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
      in
         baseParams ++ optionalParams
@@ -1496,12 +1504,13 @@ systemTool box =
                         let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
                                 Just (Aeson.String q) -> Just q
                                 _ -> Nothing
-                        
+
                         -- Extract read-session parameters
-                        let mReadParams = if cap == "read-session"
-                                then Just $ extractReadSessionParams v
-                                else Nothing
-                        
+                        let mReadParams =
+                                if cap == "read-session"
+                                    then Just $ extractReadSessionParams v
+                                    else Nothing
+
                         result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
                         case result of
                             Left err -> pure $ SystemToolError call err
@@ -1700,4 +1709,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-
