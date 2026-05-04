@@ -3,7 +3,8 @@
 {- | Configurable keymap system for TUI event bindings.
 
 This module provides a flexible keymap system that allows users to customize
-keyboard shortcuts via a JSON configuration file.
+keyboard shortcuts via a JSON configuration file. It also includes input
+configuration for message composer behavior.
 -}
 module System.Agents.TUI.KeyMapping (
     -- * Event Names
@@ -31,6 +32,15 @@ module System.Agents.TUI.KeyMapping (
     KeyMapping (..),
     defaultKeyMapping,
 
+    -- * Input Configuration (re-exported from MessageComposer)
+    InputConfig,
+    SendTrigger (..),
+    defaultInputConfig,
+
+    -- * Combined TUI User Configuration
+    TUIUserConfig (..),
+    defaultTUIUserConfig,
+
     -- * Matching
     matchesEvent,
     keyBindingToVtyEvent,
@@ -56,6 +66,9 @@ import qualified Data.Text as Text
 import qualified Graphics.Vty as Vty
 import System.Directory (doesFileExist)
 import System.IO (hPutStrLn, stderr)
+
+-- Import from MessageComposer for re-export and integration
+import System.Agents.TUI.MessageComposer (InputConfig, SendTrigger (..), defaultInputConfig)
 
 -------------------------------------------------------------------------------
 -- Event Names
@@ -393,6 +406,63 @@ defaultKeyMapping =
             ]
 
 -------------------------------------------------------------------------------
+-- Combined TUI User Configuration
+-------------------------------------------------------------------------------
+
+{- | Combined TUI user configuration containing both key mappings and input settings.
+
+This is the top-level configuration type that users can customize via a JSON file.
+It includes both keyboard shortcuts (KeyMapping) and message composer behavior
+(InputConfig).
+
+Example JSON structure:
+
+@
+{
+  "keymap": {
+    "quit": [{"key": "q", "modifiers": {"ctrl": true}}],
+    "send-message": [{"key": "enter", "modifiers": {"meta": true}}]
+  },
+  "input": {
+    "send_trigger": "triple_newline",
+    "show_send_indicator": true
+  }
+}
+@
+-}
+data TUIUserConfig = TUIUserConfig
+    { userConfigKeymap :: KeyMapping
+    -- ^ Key mapping for keyboard shortcuts
+    , userConfigInput :: InputConfig
+    -- ^ Input configuration for message composer
+    }
+    deriving (Show, Eq)
+
+-- | Default TUI user configuration.
+defaultTUIUserConfig :: TUIUserConfig
+defaultTUIUserConfig =
+    TUIUserConfig
+        { userConfigKeymap = defaultKeyMapping
+        , userConfigInput = defaultInputConfig
+        }
+
+instance Default TUIUserConfig where
+    def = defaultTUIUserConfig
+
+instance ToJSON TUIUserConfig where
+    toJSON config =
+        Aeson.object
+            [ "keymap" .= userConfigKeymap config
+            , "input" .= userConfigInput config
+            ]
+
+instance FromJSON TUIUserConfig where
+    parseJSON = Aeson.withObject "TUIUserConfig" $ \v ->
+        TUIUserConfig
+            <$> v .:? "keymap" .!= defaultKeyMapping
+            <*> v .:? "input" .!= defaultInputConfig
+
+-------------------------------------------------------------------------------
 -- Matching
 -------------------------------------------------------------------------------
 
@@ -532,31 +602,44 @@ generateHelpContent keymap =
 
 {- | Load keymap from file, falling back to default on error.
 If the file doesn't exist or is invalid, prints a warning and returns the default.
+
+This function now loads the complete TUI user configuration including both
+key mappings and input configuration.
 -}
-loadKeymapFromFile :: FilePath -> IO KeyMapping
+loadKeymapFromFile :: FilePath -> IO TUIUserConfig
 loadKeymapFromFile path = do
     exists <- doesFileExist path
     if not exists
         then do
             hPutStrLn stderr $ "Warning: Keymap file not found: " ++ path
-            hPutStrLn stderr "Using default key bindings."
-            pure defaultKeyMapping
+            hPutStrLn stderr "Using default key bindings and input configuration."
+            pure defaultTUIUserConfig
         else do
             result <- Aeson.eitherDecodeFileStrict' path
             case result of
                 Left err -> do
                     hPutStrLn stderr $ "Warning: Failed to parse keymap file " ++ path ++ ": " ++ err
-                    hPutStrLn stderr "Using default key bindings."
-                    pure defaultKeyMapping
-                Right keymap -> do
+                    hPutStrLn stderr "Using default key bindings and input configuration."
+                    pure defaultTUIUserConfig
+                Right config -> do
                     hPutStrLn stderr $ "Loaded custom keymap from: " ++ path
-                    pure $ mergeWithDefault keymap
+                    pure $ mergeWithDefault config
 
-{- | Merge a partial keymap with the default.
+{- | Merge a partial user config with the default.
 Events not specified in the custom keymap will use default bindings.
+Input configuration fields not specified will use defaults.
 -}
-mergeWithDefault :: KeyMapping -> KeyMapping
-mergeWithDefault (KeyMapping custom) =
-    KeyMapping $ Map.unionWith (\customBindings _ -> customBindings) custom defaultBindings
+mergeWithDefault :: TUIUserConfig -> TUIUserConfig
+mergeWithDefault custom =
+    TUIUserConfig
+        { userConfigKeymap = mergeKeymap (userConfigKeymap custom) defaultKeyMapping
+        , userConfigInput = mergeInputConfig (userConfigInput custom) defaultInputConfig
+        }
   where
-    KeyMapping defaultBindings = defaultKeyMapping
+    mergeKeymap (KeyMapping customBindings) (KeyMapping defaultBindings) =
+        KeyMapping $ Map.unionWith (\customBindings' _ -> customBindings') customBindings defaultBindings
+
+    -- InputConfig only has simple fields, so we just use the custom one if it's different from default
+    -- The FromJSON instance already provides defaults for missing fields via .!=
+    mergeInputConfig customInput _defaultInput = customInput
+

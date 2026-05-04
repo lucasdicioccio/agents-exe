@@ -45,7 +45,7 @@ import System.FilePath (takeDirectory, (</>))
 import System.IO (stderr)
 
 import System.Agents.ApiKeys (ApiKey (..), ApiKeys (..))
-import System.Agents.TUI.KeyMapping (KeyMapping, defaultKeyMapping)
+import System.Agents.TUI.KeyMapping (TUIUserConfig, defaultTUIUserConfig)
 
 -------------------------------------------------------------------------------
 -- Data Types
@@ -208,12 +208,12 @@ handleKeymapConfig force opts = do
             -- Create directory if needed
             createDirectoryIfMissing True (takeDirectory filePath)
 
-            -- Write default keymap as JSON
+            -- Write default TUI user config (includes both keymap and input config) as JSON
             LByteString.writeFile filePath $
-                Aeson.encodePretty (defaultKeyMapping :: KeyMapping)
+                Aeson.encodePretty (defaultTUIUserConfig :: TUIUserConfig)
 
             Text.putStrLn $ "Created keymap file: " <> Text.pack filePath
-            Text.putStrLn "Edit this file to customize keyboard shortcuts"
+            Text.putStrLn "Edit this file to customize keyboard shortcuts and input behavior"
 
 -------------------------------------------------------------------------------
 -- API Key Config Handler
@@ -314,3 +314,4 @@ addAndSaveKey path keyName keys = do
         Right () -> do
             Text.putStrLn $ "Created API key: " <> keyName
             Text.putStrLn $ "Please edit " <> Text.pack path <> " and set your actual API key value"
+

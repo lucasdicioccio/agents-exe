@@ -64,7 +64,9 @@ module System.Agents.TUI.Core (
     Modifiers (..),
     KeyBinding (..),
     KeyMapping,
+    TUIUserConfig (..),
     defaultKeyMapping,
+    defaultTUIUserConfig,
     matchesEvent,
     generateHelpContent,
     loadKeymapFromFile,
@@ -96,10 +98,11 @@ module System.Agents.TUI.Core (
     -- * Session loading
     loadSessionFiles,
 
-    -- * Main entry point
+    -- * Main entry points
     runTUI,
     runTUIWithConfig,
     runTUIWithKeymap,
+    runTUIWithUserConfig,
     fileSessionConfig,
 
     -- * OS-native helpers
@@ -157,7 +160,9 @@ import System.Agents.TUI.KeyMapping (
     KeyMapping,
     KeyName (..),
     Modifiers (..),
+    TUIUserConfig (..),
     defaultKeyMapping,
+    defaultTUIUserConfig,
     generateHelpContent,
     loadKeymapFromFile,
     matchesEvent,
@@ -177,13 +182,14 @@ import System.Agents.TUI.Types
 -- Session Configuration
 -------------------------------------------------------------------------------
 
-{- | Create a session configuration from components.
+{- | Create a session configuration from a user config.
 
-This function creates a SessionConfig with the default input configuration.
+This function creates a SessionConfig from the combined TUIUserConfig
+which includes both key mappings and input configuration.
 -}
-fileSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
-fileSessionConfig store apiKeys keymap =
-    mkSessionConfig store apiKeys keymap
+fileSessionConfig :: SessionStore -> LoadedApiKeys -> TUIUserConfig -> SessionConfig
+fileSessionConfig store apiKeys userConfig =
+    mkSessionConfig store apiKeys userConfig.userConfigKeymap userConfig.userConfigInput
 
 -------------------------------------------------------------------------------
 -- Application Setup
@@ -226,23 +232,37 @@ This function:
 1. Loads agent trees from the provided props
 2. Creates TuiAgents with OS-native structures
 3. Initializes the TUI with the agents and loaded sessions
-4. Uses the default key mapping
+4. Uses the default key mapping and input configuration
 -}
 runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
 runTUI tracer store apiKeys props =
-    runTUIWithKeymap tracer store apiKeys defaultKeyMapping props
+    runTUIWithUserConfig tracer store apiKeys defaultTUIUserConfig props
 
 {- | Initialize the TUI with a custom session configuration.
-Uses the keymap from the SessionConfig.
+Uses the keymap and input config from the SessionConfig.
 -}
 runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
 runTUIWithConfig tracer config props = do
     runTUIInternal tracer config props
 
--- | Initialize the TUI with a custom keymap.
+{- | Initialize the TUI with a custom keymap and default input config.
+
+For full control over both keymap and input configuration,
+use 'runTUIWithUserConfig' instead.
+-}
 runTUIWithKeymap :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> KeyMapping -> [Props] -> IO ()
 runTUIWithKeymap tracer store apiKeys keymap props = do
-    let config = fileSessionConfig store apiKeys keymap
+    let userConfig = TUIUserConfig keymap defaultInputConfig
+    runTUIWithUserConfig tracer store apiKeys userConfig props
+
+{- | Initialize the TUI with a complete user configuration.
+
+This is the most flexible entry point, allowing full customization of
+both key mappings and input configuration.
+-}
+runTUIWithUserConfig :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> TUIUserConfig -> [Props] -> IO ()
+runTUIWithUserConfig tracer store apiKeys userConfig props = do
+    let config = fileSessionConfig store apiKeys userConfig
     runTUIInternal tracer config props
 
 -- | Internal function to run the TUI with the given configuration.
@@ -392,3 +412,4 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
+

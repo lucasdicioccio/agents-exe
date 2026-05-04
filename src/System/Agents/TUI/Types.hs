@@ -32,7 +32,7 @@ import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
 import System.Agents.TUI.KeyMapping (KeyMapping)
-import System.Agents.TUI.MessageComposer (InputConfig, defaultInputConfig)
+import System.Agents.TUI.MessageComposer (InputConfig)
 import System.Agents.ToolRegistration (ToolRegistration)
 
 -------------------------------------------------------------------------------
@@ -315,13 +315,13 @@ data SessionConfig = SessionConfig
     }
 
 -- | Create a session config with all required fields.
-mkSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
-mkSessionConfig store apiKeys keymap =
+mkSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> InputConfig -> SessionConfig
+mkSessionConfig store apiKeys keymap inputConfig =
     SessionConfig
         { sessionStore = store
         , sessionApiKeys = apiKeys
         , sessionKeyMapping = keymap
-        , sessionInputConfig = defaultInputConfig
+        , sessionInputConfig = inputConfig
         }
 
 -------------------------------------------------------------------------------
@@ -491,3 +491,4 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
+

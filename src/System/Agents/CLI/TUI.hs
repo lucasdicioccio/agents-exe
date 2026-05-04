@@ -54,10 +54,11 @@ handleTUI ::
 handleTUI tracer sessionStore apiKeysFile mKeymapPath agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
-    -- Load keymap if a path is provided, otherwise use default
-    keymap <- case mKeymapPath of
+    -- Load user config (keymap + input config) if a path is provided,
+    -- otherwise use the default configuration
+    userConfig <- case mKeymapPath of
         Just path -> TUI.loadKeymapFromFile path
-        Nothing -> pure TUI.defaultKeyMapping
+        Nothing -> pure TUI.defaultTUIUserConfig
 
     let oneAgent agentFile = do
             pure $
@@ -71,5 +72,5 @@ handleTUI tracer sessionStore apiKeysFile mKeymapPath agentFiles = do
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles
-    TUI.runTUIWithKeymap (Prod.contramap TUITrace tracer) sessionStore apiKeys keymap agentPropsList
+    TUI.runTUIWithUserConfig (Prod.contramap TUITrace tracer) sessionStore apiKeys userConfig agentPropsList
 
