@@ -32,6 +32,7 @@ import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (SessionStore)
 import System.Agents.TUI.KeyMapping (KeyMapping)
+import System.Agents.TUI.MessageComposer (InputConfig, defaultInputConfig)
 import System.Agents.ToolRegistration (ToolRegistration)
 
 -------------------------------------------------------------------------------
@@ -309,7 +310,19 @@ data SessionConfig = SessionConfig
     -- ^ API keys for agents
     , sessionKeyMapping :: KeyMapping
     -- ^ Key mapping for keyboard shortcuts
+    , sessionInputConfig :: InputConfig
+    -- ^ Input configuration for message editor
     }
+
+-- | Create a session config with all required fields.
+mkSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> SessionConfig
+mkSessionConfig store apiKeys keymap =
+    SessionConfig
+        { sessionStore = store
+        , sessionApiKeys = apiKeys
+        , sessionKeyMapping = keymap
+        , sessionInputConfig = defaultInputConfig
+        }
 
 -------------------------------------------------------------------------------
 -- Core State
@@ -478,3 +491,4 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
+
