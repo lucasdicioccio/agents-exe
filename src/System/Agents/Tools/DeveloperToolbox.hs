@@ -98,8 +98,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Text.IO as Text
-import System.Directory (Permissions (..), createDirectoryIfMissing, doesFileExist, getPermissions, setPermissions)
+import System.Directory (Permissions (..), createDirectoryIfMissing, doesFileExist, getPermissions, removeFile, renameFile, setPermissions)
 import System.FilePath (takeDirectory)
+import System.IO (hClose, hPutStr)
+import System.IO.Temp (withTempFile)
 
 import Prod.Tracer (Tracer (..))
 
@@ -591,7 +593,7 @@ getCapabilityInfo DevToolReadFileRange =
     )
 getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
-    , "Replaces line ranges in a file with new content (use '---' to separate multiple ranges)"
+    , "Replaces line ranges in a file with new content. Multiple ranges are processed sequentially (top-to-bottom) with automatic position adjustment. Use '---' to separate content blocks."
     )
 getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
@@ -1115,9 +1117,14 @@ formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
 
 {- | Execute write file range operation.
 
-Replaces line ranges in a file with new content. Multiple ranges are applied
-bottom-to-top so earlier line numbers stay valid. Content blocks for multiple
-ranges are separated by a line containing only "---".
+Replaces line ranges in a file with new content. Multiple ranges are processed
+atomically with sequential position tracking: edits are applied in ascending order
+(top-to-bottom), and line positions are adjusted after each edit to account for
+line count changes.
+
+This ensures that when replacing multiple ranges, the line numbers are interpreted
+relative to the original file, and each edit's effect on line positions is tracked
+for subsequent edits.
 
 Parameters:
 - path: Path to the file to modify
@@ -1125,6 +1132,11 @@ Parameters:
 - content: Replacement text (or multiple blocks separated by "---")
 
 Returns Right with WriteFileRangeResult on success, Left with error on failure.
+
+Example:
+  ranges="1-2,5-6", content="A\n---\nB\n"
+  - Replaces lines 1-2 with "A" 
+  - Then replaces what was originally lines 5-6 (now at new positions due to first edit) with "B"
 -}
 executeWriteFileRange ::
     Tracer IO Trace ->
@@ -1179,11 +1191,13 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                     -- Pair ranges with content blocks
                                     let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
 
-                                    -- Sort by start line in descending order (bottom-to-top)
-                                    let sortedPairs = sortOn (negate . rangeStartKey) rangeContentPairs
+                                    -- Sort by start line in ascending order (top-to-bottom)
+                                    -- This is crucial for correct position tracking
+                                    let sortedPairs = sortOn rangeStartKey rangeContentPairs
 
-                                    -- Apply each range replacement
-                                    let finalLines = foldl (applyRangeReplacement existingLines) existingLines sortedPairs
+                                    -- Apply edits sequentially with position tracking
+                                    -- foldl' passes (currentLines, offset) through each edit
+                                    let (finalLines, _) = foldl (applyRangeEdit existingLines) (existingLines, 0) sortedPairs
 
                                     -- Preserve trailing newline if original had one
                                     let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
@@ -1192,10 +1206,10 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                                 then Text.unlines finalLines
                                                 else Text.unlines finalLines
 
-                                    -- Write result
+                                    -- Write result atomically using a temp file
                                     writeResult <- try $ do
                                         createDirectoryIfMissing True (takeDirectory filePath)
-                                        Text.writeFile filePath output
+                                        writeFileAtomic filePath output
 
                                     case writeResult of
                                         Left (e :: SomeException) -> do
@@ -1220,29 +1234,69 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
     isHeadOrTail Tail = True
     isHeadOrTail _ = False
 
-    -- Get sort key for range (for bottom-to-top ordering)
+    -- Get sort key for range (for top-to-bottom ordering)
+    -- Head comes first (0), then line numbers, Tail comes last (maxBound)
     rangeStartKey :: (RangeSpec, Text) -> Int
     rangeStartKey (Head, _) = 0
     rangeStartKey (Lines (n, _), _) = n
     rangeStartKey (Tail, _) = maxBound
 
--- | Apply a range replacement to the lines.
-applyRangeReplacement :: [Text] -> [Text] -> (RangeSpec, Text) -> [Text]
-applyRangeReplacement originalLines currentLines (range, content) =
-    let newLines = Text.lines content
-     in case range of
-            Head -> newLines ++ currentLines
-            Tail -> currentLines ++ newLines
-            Lines (start, end) ->
-                let totalLines = length originalLines
-                    actualStart = max 1 start
-                    actualEnd = min end totalLines
-                 in if actualStart > actualEnd || actualStart > length currentLines
-                        then currentLines
-                        else
-                            let before = take (actualStart - 1) currentLines
-                                after = drop actualEnd currentLines
-                             in before ++ newLines ++ after
+    -- Apply a single range edit with position tracking
+    -- Takes the original file lines (for bounds checking), current state (lines, offset),
+    -- and the edit to apply. Returns the new state (updated lines, updated offset).
+    applyRangeEdit ::
+        [Text] ->
+        ([Text], Int) ->
+        (RangeSpec, Text) ->
+        ([Text], Int)
+    applyRangeEdit _originalLines (currentLines, offset) (range, content) =
+        let newLines = Text.lines content
+         in case range of
+                Head ->
+                    -- Prepend content: offset increases by number of lines added
+                    let newOffset = offset + length newLines
+                     in (newLines ++ currentLines, newOffset)
+                Tail ->
+                    -- Append content: offset increases by number of lines added
+                    -- (though subsequent Tail edits would be unusual)
+                    let newOffset = offset + length newLines
+                     in (currentLines ++ newLines, newOffset)
+                Lines (originalStart, originalEnd) ->
+                    -- Adjust positions based on running offset
+                    let adjustedStart = originalStart + offset
+                        adjustedEnd = originalEnd + offset
+                        -- Clamp to current file bounds
+                        actualStart = max 1 adjustedStart
+                        actualEnd = min adjustedEnd (length currentLines)
+                     in if actualStart > actualEnd || actualStart > length currentLines
+                            then -- Range is out of bounds after adjustment, skip
+                                (currentLines, offset)
+                            else
+                                let before = take (actualStart - 1) currentLines
+                                    after = drop actualEnd currentLines
+                                    linesRemoved = actualEnd - actualStart + 1
+                                    linesAdded = length newLines
+                                    newOffset = offset + (linesAdded - linesRemoved)
+                                 in (before ++ newLines ++ after, newOffset)
+
+-- | Write a file atomically by writing to a temp file and renaming.
+-- This ensures that readers never see a partially-written file.
+writeFileAtomic :: FilePath -> Text -> IO ()
+writeFileAtomic filePath content = do
+    let dir = takeDirectory filePath
+    -- Use a temp file in the same directory for atomic rename
+    withTempFile dir ".write-file-range-tmp-" $ \tmpPath tmpHandle -> do
+        hPutStr tmpHandle (Text.unpack content)
+        hClose tmpHandle
+        -- Atomic rename on POSIX systems
+        renameFileOverwrite tmpPath filePath
+  where
+    -- Cross-platform file rename that overwrites existing file
+    renameFileOverwrite :: FilePath -> FilePath -> IO ()
+    renameFileOverwrite src dst = do
+        dstExists <- doesFileExist dst
+        when dstExists $ removeFile dst
+        renameFile src dst
 
 -------------------------------------------------------------------------------
 -- Tool Execution - Validation
@@ -2313,3 +2367,4 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
+
