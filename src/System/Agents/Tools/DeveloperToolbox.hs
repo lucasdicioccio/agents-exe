@@ -593,7 +593,7 @@ getCapabilityInfo DevToolReadFileRange =
     )
 getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
-    , "Replaces line ranges in a file with new content. Multiple ranges are processed sequentially (top-to-bottom) with automatic position adjustment. Use '---' to separate content blocks."
+    , "Replaces specific lines in a file. Ranges are comma-separated line numbers (e.g., '2,5,8'). Content blocks are separated by '---'. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
     )
 getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
@@ -1117,26 +1117,47 @@ formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
 
 {- | Execute write file range operation.
 
-Replaces line ranges in a file with new content. Multiple ranges are processed
-atomically with sequential position tracking: edits are applied in ascending order
-(top-to-bottom), and line positions are adjusted after each edit to account for
-line count changes.
-
-This ensures that when replacing multiple ranges, the line numbers are interpreted
-relative to the original file, and each edit's effect on line positions is tracked
-for subsequent edits.
+Replaces specific lines in a file with new content. Unlike bash-write-file which
+replaces the entire file, this capability allows surgical line-by-line modifications.
 
 Parameters:
 - path: Path to the file to modify
-- ranges: Comma-separated ranges (e.g., "1-10", "5", "head", "tail")
-- content: Replacement text (or multiple blocks separated by "---")
+- ranges: Comma-separated line numbers (e.g., "2,5,8" for lines 2, 5, and 8)
+          Each number represents a single line to replace.
+- content: Replacement text with blocks separated by "---"
+           Each block corresponds to one line number in ranges.
+           Use empty content blocks to delete lines.
+
+Format:
+  ranges="2,5,8"
+  content="New line 2\n---\nNew line 5\n---\nNew line 8\n"
+
+The number of content blocks MUST equal the number of ranges. Use '---' as the separator.
+
+Examples:
+
+1. Replace single line:
+   ranges="5", content="new content for line 5"
+
+2. Replace multiple lines:
+   ranges="2,5,8"
+   content="replace line 2\n---\nreplace line 5\n---\nreplace line 8\n"
+
+3. Delete lines (empty content blocks):
+   ranges="3,7"
+   content="\n---\n"
+   This deletes lines 3 and 7.
+
+Processing:
+- Ranges are sorted and processed in ascending order (top-to-bottom)
+- Position tracking automatically adjusts for line count changes after each edit
+- If a range becomes out-of-bounds due to previous deletions, it's skipped
 
 Returns Right with WriteFileRangeResult on success, Left with error on failure.
 
-Example:
-  ranges="1-2,5-6", content="A\n---\nB\n"
-  - Replaces lines 1-2 with "A"
-  - Then replaces what was originally lines 5-6 (now at new positions due to first edit) with "B"
+Note: For complex multi-line edits or when context validation is needed,
+consider using patch-file instead, which provides atomic operations with
+unified diff format.
 -}
 executeWriteFileRange ::
     Tracer IO Trace ->
@@ -2368,3 +2389,4 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
+
