@@ -63,6 +63,7 @@ module System.Agents.ToolRegistration (
     mapArg,
 ) where
 
+import Data.Foldable (toList)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -1210,9 +1211,9 @@ buildDeveloperToolParams box =
         -- Add write-file-range params if enabled
         writeFileRangeParams =
             [ ParamProperty
-                { propertyKey = "content"
-                , propertyType = StringParamType
-                , propertyDescription = "For write-file-range: Replacement content. Use '---' to separate multiple ranges."
+                { propertyKey = "contentBlocks"
+                , propertyType = OpaqueParamType "array"
+                , propertyDescription = "For write-file-range: Array of content blocks, where each block corresponds to one range. Use empty strings to delete lines."
                 , propertyRequired = False
                 }
             ]
@@ -1677,11 +1678,11 @@ executeDeveloperCapability tracer box cap params = case cap of
             Just (Aeson.String filePath) -> do
                 case KeyMap.lookup (AesonKey.fromText "ranges") params of
                     Just (Aeson.String ranges) -> do
-                        let content = case KeyMap.lookup (AesonKey.fromText "content") params of
-                                Just (Aeson.String c) -> c
-                                _ -> ""
-                        -- Split content on '---' separator to get list of content blocks
-                        let contentBlocks = Text.splitOn "---" content
+                        -- Parse contentBlocks directly as an array of text values
+                        let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
+                                Just (Aeson.Array arr) ->
+                                    Maybe.mapMaybe parseTextValue (toList arr)
+                                _ -> []
                         result <- DeveloperTools.executeWriteFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks
                         case result of
                             Left err -> pure $ DeveloperToolError () err
@@ -1700,6 +1701,11 @@ executeDeveloperCapability tracer box cap params = case cap of
                     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'patch' parameter")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
+  where
+    -- Parse a JSON value as Text, returning Nothing for non-string values
+    parseTextValue :: Aeson.Value -> Maybe Text
+    parseTextValue (Aeson.String t) = Just t
+    parseTextValue _ = Nothing
 
 -------------------------------------------------------------------------------
 -- Schema adaptation helpers
