@@ -3,17 +3,28 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
-{- | Session storage management with configurable file prefix.
+{- | Session storage management with multi-location support.
 
 This module provides functionality to store and list sessions
-using a configurable file prefix and a default naming pattern
-of @conv.<uuid>.json@.
+using configurable file prefixes. Sessions can be read from multiple
+locations while always writing to a single designated location.
+
+The file naming pattern is @conv.<uuid>.json@.
+
+Multi-location support allows:
+- Reading sessions from multiple directories (e.g., project-local, global)
+- Writing all new sessions to a single unified location
+- Deduplication by ConversationId with priority based on location order
 -}
 module System.Agents.SessionStore (
     -- * Session Store
     SessionStore (..),
     defaultSessionStore,
     mkSessionStore,
+    mkSimpleSessionStore,
+
+    -- * Path resolution
+    resolveSessionPath,
 
     -- * Low-level operations, mostly to implement command-line bypasses
     readSessionFromFile,
@@ -21,6 +32,7 @@ module System.Agents.SessionStore (
 
     -- * File path operations
     sessionFilePath,
+    sessionWritePath,
 
     -- * Session storage operations
     storeSession,
@@ -38,11 +50,11 @@ import Control.Monad (filterM)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import Data.List (isInfixOf, isPrefixOf, sortOn)
+import Data.List (foldl', isInfixOf, isPrefixOf, sortOn)
 import Data.Ord (Down (..))
 import qualified Data.Text as Text
 import Data.Time (UTCTime)
-import System.Directory (doesFileExist, getModificationTime, listDirectory)
+import System.Directory (doesFileExist, getHomeDirectory, getModificationTime, listDirectory)
 import System.FilePath (takeFileName, (</>))
 import System.IO.Error (ioeGetErrorString)
 
@@ -63,24 +75,94 @@ defaultSessionPattern = "conv."
 defaultSessionSuffix :: String
 defaultSessionSuffix = ".json"
 
--- | Session store with configurable prefix filepath.
+{- | Session store with multi-location support.
+
+The store supports reading from multiple locations while writing
+to a single designated location. This enables:
+
+1. Unified view of sessions scattered across directories
+2. Project-local sessions overriding global ones
+3. Archived or shared sessions in separate directories
+
+Deduplication is done by ConversationId, with the first location
+in 'sessionReadPrefixes' having the highest priority.
+-}
 data SessionStore = SessionStore
-    { storePrefix :: FilePath
-    {- ^ The prefix for session files. This can be a directory path
-    or a path prefix. The directory component is extracted to find
-    sessions, and the file component is used as a prefix before
-    the default pattern.
-    -}
+    { sessionWritePrefix :: FilePath
+    -- ^ Directory where new sessions are written.
+    -- This path is used for all write operations.
+    , sessionReadPrefixes :: [FilePath]
+    -- ^ Directories to search for existing sessions, in priority order.
+    -- Earlier locations take precedence when the same session ID exists
+    -- in multiple locations.
     }
     deriving (Show, Eq)
 
--- | Create a ineffective session store.
+-- | Create an ineffective session store (no read or write locations).
 defaultSessionStore :: SessionStore
-defaultSessionStore = SessionStore ""
+defaultSessionStore = SessionStore "" []
 
--- | Create a new session store with the given prefix.
-mkSessionStore :: FilePath -> SessionStore
-mkSessionStore = SessionStore
+{- | Create a new session store with separate write and read locations.
+
+If the write location is not in the read locations list, it is automatically
+prepended to ensure newly written sessions are immediately readable.
+
+Example:
+
+> mkSessionStore "./sessions/" ["./sessions/", "~/.config/agents-exe/sessions/"]
+-}
+mkSessionStore :: FilePath -> [FilePath] -> SessionStore
+mkSessionStore writePrefix readPrefixes =
+    SessionStore
+        { sessionWritePrefix = writePrefix
+        , sessionReadPrefixes =
+            if writePrefix `elem` readPrefixes
+                then readPrefixes
+                else writePrefix : readPrefixes
+        }
+
+{- | Create a simple session store with a single location for both reading and writing.
+
+This is the backwards-compatible constructor for single-location stores.
+
+Example:
+
+> mkSimpleSessionStore "./sessions/"
+-}
+mkSimpleSessionStore :: FilePath -> SessionStore
+mkSimpleSessionStore prefix = mkSessionStore prefix [prefix]
+
+-------------------------------------------------------------------------------
+-- Path Resolution
+-------------------------------------------------------------------------------
+
+{- | Resolve a session path, expanding tilde (~) to the user's home directory.
+
+Examples:
+
+> resolveSessionPath "~/.config/agents-exe/sessions/"
+> -- Returns: "/home/user/.config/agents-exe/sessions/"
+
+> resolveSessionPath "./sessions/"
+> -- Returns: "./sessions/" (unchanged)
+-}
+resolveSessionPath :: FilePath -> IO FilePath
+resolveSessionPath path =
+    if "~" `isPrefixOf` path
+        then do
+            home <- getHomeDirectory
+            pure $ home ++ drop 1 path
+        else pure path
+
+{- | Resolve all paths in a SessionStore.
+
+This expands tilde (~) prefixes in both write and read locations.
+-}
+resolveSessionStorePaths :: SessionStore -> IO SessionStore
+resolveSessionStorePaths store = do
+    writePath <- resolveSessionPath store.sessionWritePrefix
+    readPaths <- mapM resolveSessionPath store.sessionReadPrefixes
+    pure $ SessionStore writePath readPaths
 
 -------------------------------------------------------------------------------
 -- File Path Operations
@@ -88,10 +170,24 @@ mkSessionStore = SessionStore
 
 {- | Generate the file path for a session given a ConversationId.
 The pattern is: @<prefix>conv.<uuid>.json@
+
+Note: This uses the first read prefix to construct the path.
+For write operations, use 'sessionWritePath' instead.
 -}
 sessionFilePath :: SessionStore -> ConversationId -> FilePath
 sessionFilePath store convId =
-    store.storePrefix ++ conversationIdToFileName convId
+    case sessionReadPrefixes store of
+        [] -> conversationIdToFileName convId
+        (prefix : _) -> prefix </> conversationIdToFileName convId
+
+{- | Generate the write file path for a session.
+
+This always uses the 'sessionWritePrefix' location, ensuring
+new sessions are written to the correct directory.
+-}
+sessionWritePath :: SessionStore -> ConversationId -> FilePath
+sessionWritePath store convId =
+    store.sessionWritePrefix </> conversationIdToFileName convId
 
 -- | Convert a ConversationId to a file name using the default pattern.
 conversationIdToFileName :: ConversationId -> FilePath
@@ -178,16 +274,27 @@ storeSessionToFile sess path = do
 -------------------------------------------------------------------------------
 
 -- | Store a session to disk at the appropriate path for the given ConversationId.
+-- Always writes to the 'sessionWritePrefix' location.
 storeSession :: SessionStore -> ConversationId -> Session -> IO ()
 storeSession store convId sess =
-    storeSessionToFile sess (sessionFilePath store convId)
+    storeSessionToFile sess (sessionWritePath store convId)
 
 {- | Read a session from disk for the given ConversationId.
-Returns 'Nothing' if the session file doesn't exist, is locked, or can't be parsed.
+
+Searches through all read locations in priority order.
+Returns 'Nothing' if the session file doesn't exist in any location,
+is locked, or can't be parsed.
 -}
 readSession :: SessionStore -> ConversationId -> IO (Maybe Session)
-readSession store convId =
-    readSessionFromFile (sessionFilePath store convId)
+readSession store convId = go (sessionReadPrefixes store)
+  where
+    go [] = pure Nothing
+    go (prefix : rest) = do
+        let path = prefix </> conversationIdToFileName convId
+        mSession <- readSessionFromFile path
+        case mSession of
+            Just session -> pure (Just session)
+            Nothing -> go rest
 
 -------------------------------------------------------------------------------
 -- Session File Discovery
@@ -215,34 +322,22 @@ isSessionFile name =
   where
     isSuffixOf suffix str = reverse suffix `isInfixOf` reverse str
 
-{- | Get the directory component from a prefix path.
-If the prefix contains path separators, returns the directory part.
-Otherwise, returns the current directory @".@".
+{- | Find all session files in a single directory.
+Returns files matching the @conv.<uuid>.json@ pattern with their metadata.
 -}
-getDirectoryFromPrefix :: FilePath -> FilePath
-getDirectoryFromPrefix prefix =
-    if '/' `elem` prefix || '\\' `elem` prefix
-        then case reverse $ dropWhile (\c -> c /= '/' && c /= '\\') $ reverse prefix of
-            "" -> "."
-            d -> d
-        else "."
-
-{- | Find all session files in the directory implied by the store prefix.
-Returns files matching the @conv.<uuid>.json@ pattern, sorted by
-modification time (most recent first).
-
-Note: This function uses getModificationTime which may fail for locked files.
-We handle this by catching exceptions and skipping locked/inaccessible files.
--}
-findSessionFiles :: SessionStore -> IO [SessionFileInfo]
-findSessionFiles store = do
-    let dir = getDirectoryFromPrefix store.storePrefix
-    entries <- listDirectory dir
-    let candidates = [dir </> entry | entry <- entries, isSessionFile entry]
-    -- Filter to only existing files and get modification times
-    existing <- filterM doesFileExist candidates
-    -- Build session info, handling locked files gracefully
-    catMaybes <$> mapM mkSessionInfo existing
+findSessionsInDir :: FilePath -> IO [SessionFileInfo]
+findSessionsInDir dir = do
+    exists <- doesFileExist dir
+    if exists
+        then -- If the path is a file, return empty list
+            pure []
+        else do
+            entries <- listDirectory dir
+            let candidates = [dir </> entry | entry <- entries, isSessionFile entry]
+            -- Filter to only existing files and get modification times
+            existing <- filterM doesFileExist candidates
+            -- Build session info, handling locked files gracefully
+            catMaybes <$> mapM mkSessionInfo existing
   where
     mkSessionInfo :: FilePath -> IO (Maybe SessionFileInfo)
     mkSessionInfo path = do
@@ -260,6 +355,45 @@ findSessionFiles store = do
     catMaybes :: [Maybe a] -> [a]
     catMaybes = foldr (maybe id (:)) []
 
+{- | Find all session files across all read locations.
+
+This function:
+1. Collects sessions from all read locations
+2. Deduplicates by ConversationId (first location wins)
+3. Returns sessions sorted by modification time (most recent first)
+
+The deduplication strategy ensures that if the same session exists
+in multiple locations, the one from the earliest location in
+'sessionReadPrefixes' is kept.
+-}
+findSessionFiles :: SessionStore -> IO [SessionFileInfo]
+findSessionFiles store = do
+    -- Resolve all paths first (expand tildes)
+    resolvedStore <- resolveSessionStorePaths store
+
+    -- Collect sessions from all read locations, preserving order
+    allSessions <- concat <$> mapM findSessionsInDir resolvedStore.sessionReadPrefixes
+
+    -- Deduplicate by ConversationId, keeping first occurrence (highest priority)
+    let deduplicated = dedupeBy sessionInfoConversationId allSessions
+
+    -- Sort by modification time (most recent first)
+    pure $ sortOn (Down . sessionInfoModTime) deduplicated
+
+{- | Deduplicate a list by a key function, keeping the first occurrence.
+
+The first occurrence of each key is kept, subsequent duplicates are discarded.
+This maintains the priority order of the input list.
+-}
+dedupeBy :: Eq k => (a -> k) -> [a] -> [a]
+dedupeBy keyFn = foldl' addItem []
+  where
+    addItem acc item =
+        let k = keyFn item
+         in if k `elem` map keyFn acc
+                then acc
+                else acc ++ [item]
+
 {- | List all sessions from files matching the store's prefix pattern.
 Returns a list of @(FilePath, Maybe Session, ConversationId)@ triples,
 sorted by file modification time (most recent first).
@@ -268,11 +402,14 @@ The 'Maybe Session' is 'Nothing' if:
 - The session file couldn't be parsed
 - The session file is locked (resource busy)
 - The session file is inaccessible
+
+This function aggregates sessions from all read locations and deduplicates
+by ConversationId. The first location in 'sessionReadPrefixes' has the
+highest priority for resolving duplicates.
 -}
 listSessions :: SessionStore -> IO [(FilePath, Maybe Session, ConversationId)]
 listSessions store = do
     sessionFiles <- findSessionFiles store
-    -- Sort by modification time (most recent first)
-    let sortedFiles = sortOn (Data.Ord.Down . sessionInfoModTime) sessionFiles
     -- Load each session file (locked/inaccessible files will return Nothing)
-    mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sortedFiles
+    mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sessionFiles
+
