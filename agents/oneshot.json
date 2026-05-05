@@ -45,8 +45,7 @@
     ],
     "bashToolboxes": [
         {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read"}},
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/write"}},
-        {"tag": "SingleTool", "contents": {"Path": "./qa-agent/tools/run-agents-exe"}}
+        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/write"}}
     ]
   }
 }

@@ -593,7 +593,7 @@ getCapabilityInfo DevToolReadFileRange =
     )
 getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
-    , "Replaces specific lines in a file. Ranges are comma-separated line numbers (e.g., '2,5,8'). Content blocks are separated by '---'. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
+    , "Replaces specific lines in a file. Ranges are comma-separated line numbers or ranges (e.g., '2,5,8' or '1-3,5'). Takes a list of content blocks, where each block corresponds to one range. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
     )
 getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
@@ -1123,30 +1123,28 @@ replaces the entire file, this capability allows surgical line-by-line modificat
 Parameters:
 - path: Path to the file to modify
 - ranges: Comma-separated line numbers (e.g., "2,5,8" for lines 2, 5, and 8)
-          Each number represents a single line to replace.
-- content: Replacement text with blocks separated by "---"
-           Each block corresponds to one line number in ranges.
-           Use empty content blocks to delete lines.
-
-Format:
-  ranges="2,5,8"
-  content="New line 2\n---\nNew line 5\n---\nNew line 8\n"
-
-The number of content blocks MUST equal the number of ranges. Use '---' as the separator.
+          Each number represents a single line to replace, or use ranges like "1-3".
+- contentBlocks: List of content blocks, where each block corresponds to one range.
+                 Use empty blocks to delete lines. Each block is treated as the
+                 replacement content for its corresponding range.
 
 Examples:
 
 1. Replace single line:
-   ranges="5", content="new content for line 5"
+   ranges="5", contentBlocks=["new content for line 5"]
 
 2. Replace multiple lines:
    ranges="2,5,8"
-   content="replace line 2\n---\nreplace line 5\n---\nreplace line 8\n"
+   contentBlocks=["replace line 2", "replace line 5", "replace line 8"]
 
 3. Delete lines (empty content blocks):
    ranges="3,7"
-   content="\n---\n"
+   contentBlocks=["", ""]
    This deletes lines 3 and 7.
+
+4. Replace ranges with multi-line content:
+   ranges="1-2,5-6"
+   contentBlocks=["new line 1\nnew line 2", "new line 5\nnew line 6"]
 
 Processing:
 - Ranges are sorted and processed in ascending order (top-to-bottom)
@@ -1163,10 +1161,12 @@ executeWriteFileRange ::
     Tracer IO Trace ->
     Toolbox ->
     FilePath ->
+    -- | Comma-separated line ranges (e.g., "1-3,5,7-9")
     Text ->
-    Text ->
+    -- | List of content blocks, one per range
+    [Text] ->
     IO (Either DeveloperToolError WriteFileRangeResult)
-executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
+executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
     if DevToolWriteFileRange `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "write-file-range"
         else do
@@ -1176,11 +1176,7 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
             case parseRanges rangesTxt of
                 Left err -> pure $ Left err
                 Right ranges -> do
-                    -- Split content by "---" separator
-                    -- NOTE: We do NOT strip whitespace from content blocks to preserve
-                    -- indentation. This is intentional - stripping would corrupt code.
-                    let contentBlocks = Text.splitOn "---" contentTxt
-
+                    -- Validate that number of content blocks matches number of ranges
                     if length contentBlocks /= length ranges && length ranges > 1
                         then
                             pure $
@@ -1190,7 +1186,7 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                             <> Text.pack (show $ length contentBlocks)
                                             <> ") must match number of ranges ("
                                             <> Text.pack (show $ length ranges)
-                                            <> "). Use '---' to separate blocks."
+                                            <> ")"
                         else do
                             -- Check if file exists
                             fileExists <- doesFileExist filePath
@@ -1239,7 +1235,7 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                             pure $ Left err
                                         Right () -> do
                                             let rangesModified = length ranges
-                                            let linesWritten = length $ Text.lines contentTxt
+                                            let linesWritten = sum $ map (length . Text.lines) contentBlocks
 
                                             runTracer tracer (WriteFileRangeCompletedTrace filePath rangesModified linesWritten)
 
@@ -1789,7 +1785,7 @@ makeBashToolTemplateFromConfig config =
         , ""
         , "# " <> toolConfigSlug config <> " - " <> toolConfigDescription config
         , ""
-        , "if [ \"$1\" == \"describe\" ]; then"
+        , descLine
         , "    cat <<'EOF'"
         , "{"
         , "  \"slug\": \"" <> toolConfigSlug config <> "\","
@@ -1809,9 +1805,13 @@ makeBashToolTemplateFromConfig config =
             ++ parseArgsCode (toolConfigArgs config)
             ++ [ ""
                , "# Main logic here"
-               , "echo \"Tool " <> toolConfigSlug config <> " executed\""
+               , execLine
                ]
   where
+    -- Build the if statement line properly without escaping issues
+    descLine = "if [ \"" <> "$" <> "1\" == \"describe\" ]; then"
+    execLine = "echo \"Tool " <> toolConfigSlug config <> " executed\""
+
     formatArgs [] = ["  "]
     formatArgs args =
         let formatted = zipWith (formatArg (length args)) [0 ..] args
@@ -1860,10 +1860,10 @@ makeBashToolTemplateFromConfig config =
                     ]
                 "dashdashequal" ->
                     [ varName <> "=\"\""
-                    , "while [[ $# -gt 0 ]]; do"
-                    , "    case $1 in"
+                    , "while [[ " <> "$" <> "# -gt 0 ]]; do"
+                    , "    case " <> "$" <> "1 in"
                     , "        " <> argFlag <> "=*)"
-                    , "            " <> varName <> "=\"${1#*=}\""
+                    , "            " <> varName <> "=\"${" <> "1#*=}\""
                     , "            shift"
                     , "            ;;"
                     , "        *)"
@@ -1875,10 +1875,10 @@ makeBashToolTemplateFromConfig config =
                 _ ->
                     -- dashdashspace (default)
                     [ varName <> "=\"\""
-                    , "while [[ $# -gt 0 ]]; do"
-                    , "    case $1 in"
+                    , "while [[ " <> "$" <> "# -gt 0 ]]; do"
+                    , "    case " <> "$" <> "1 in"
                     , "        " <> argFlag <> ")"
-                    , "            " <> varName <> "=\"$2\""
+                    , "            " <> varName <> "=\"" <> "$" <> "2\""
                     , "            shift 2"
                     , "            ;;"
                     , "        *)"
@@ -2134,7 +2134,7 @@ makeBashToolTemplate toolSlug =
         , ""
         , "# " <> toolSlug <> " - Tool description here"
         , ""
-        , "if [ \"$1\" == \"describe\" ]; then"
+        , descLine
         , "    cat <<'EOF'"
         , "{"
         , "  \"slug\": \"" <> toolSlug <> "\","
@@ -2157,10 +2157,10 @@ makeBashToolTemplate toolSlug =
         , ""
         , "# Parse arguments for 'run' command"
         , "EXAMPLE_ARG=\"\""
-        , "while [[ $# -gt 0 ]]; do"
-        , "    case $1 in"
+        , whileLine
+        , "    case " <> "$" <> "1 in"
         , "        --example-arg)"
-        , "            EXAMPLE_ARG=\"$2\""
+        , "            EXAMPLE_ARG=\"" <> "$" <> "2\""
         , "            shift 2"
         , "            ;;"
         , "        *)"
@@ -2170,8 +2170,12 @@ makeBashToolTemplate toolSlug =
         , "done"
         , ""
         , "# Main logic here"
-        , "echo \"Tool " <> toolSlug <> " executed with: $EXAMPLE_ARG\""
+        , execLine
         ]
+  where
+    descLine = "if [ \"" <> "$" <> "1\" == \"describe\" ]; then"
+    whileLine = "while [[ " <> "$" <> "# -gt 0 ]]; do"
+    execLine = "echo \"Tool " <> toolSlug <> " executed with: " <> "$" <> "EXAMPLE_ARG\""
 
 -- | Create a Python tool template
 makePythonToolTemplate :: Text -> Text

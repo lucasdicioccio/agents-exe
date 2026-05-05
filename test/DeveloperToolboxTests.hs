@@ -316,7 +316,7 @@ testWriteSingleLine :: Assertion
 testWriteSingleLine = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3" "REPLACED LINE\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3" ["REPLACED LINE\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -335,7 +335,7 @@ testWriteLineRange :: Assertion
 testWriteLineRange = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3-5" "NEW LINE A\nNEW LINE B\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3-5" ["NEW LINE A\nNEW LINE B\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -353,7 +353,7 @@ testWriteHead :: Assertion
 testWriteHead = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "head" "PREPENDED LINE\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "head" ["PREPENDED LINE\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -370,7 +370,7 @@ testWriteTail :: Assertion
 testWriteTail = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "tail" "APPENDED LINE\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "tail" ["APPENDED LINE\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -385,7 +385,7 @@ testWriteNewFileHead :: Assertion
 testWriteNewFileHead = withTempDir $ \tmpDir -> do
     toolbox <- testToolbox
     let newFile = tmpDir </> "new-file.txt"
-    result <- DeveloperToolbox.executeWriteFileRange silent toolbox newFile "head" "FIRST LINE\nSECOND LINE\n"
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox newFile "head" ["FIRST LINE\nSECOND LINE\n"]
     case result of
         Left err -> assertFailure $ show err
         Right writeResult -> do
@@ -398,7 +398,7 @@ testWriteNewFileTail :: Assertion
 testWriteNewFileTail = withTempDir $ \tmpDir -> do
     toolbox <- testToolbox
     let newFile = tmpDir </> "new-file-tail.txt"
-    result <- DeveloperToolbox.executeWriteFileRange silent toolbox newFile "tail" "ONLY LINE\n"
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox newFile "tail" ["ONLY LINE\n"]
     case result of
         Left err -> assertFailure $ show err
         Right writeResult -> do
@@ -411,7 +411,7 @@ testWriteFileNotFound = withTempDir $ \tmpDir -> do
     toolbox <- testToolbox
     let nonExistent = tmpDir </> "does-not-exist.txt"
     -- Trying to write to non-existent file without head/tail should fail
-    result <- DeveloperToolbox.executeWriteFileRange silent toolbox nonExistent "5" "content\n"
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox nonExistent "5" ["content\n"]
     case result of
         Left (FileNotFoundError _) -> pure ()
         _ -> assertFailure "Expected FileNotFoundError for non-existent file without head/tail"
@@ -420,7 +420,7 @@ testWriteLinesWrittenCount :: Assertion
 testWriteLinesWrittenCount = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2" "A\nB\nC\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2" ["A\nB\nC\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -452,7 +452,7 @@ testMultiRangeReplace = withTempDir $ \tmpDir ->
                 toolbox
                 filePath
                 "1-2,9-10"
-                "REPLACED FIRST\n---\nREPLACED LAST\n"
+                ["REPLACED FIRST\n", "REPLACED LAST\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -480,7 +480,7 @@ testMultiRangeWithSeparator = withTempDir $ \tmpDir ->
                 toolbox
                 filePath
                 "2,8"
-                "NEW LINE TWO\n---\nNEW LINE EIGHT\n"
+                ["NEW LINE TWO\n", "NEW LINE EIGHT\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -496,7 +496,7 @@ testMismatchedContentBlocks = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
         -- Try to replace two ranges but only provide one content block
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2,8-9" "ONLY ONE BLOCK\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2,8-9" ["ONLY ONE BLOCK\n"]
         case result of
             Left (InvalidRangeError _) -> pure ()
             _ -> assertFailure "Expected InvalidRangeError for mismatched content blocks"
@@ -532,7 +532,7 @@ testWriteEmptyFileHead :: Assertion
 testWriteEmptyFileHead = withTempDir $ \tmpDir ->
     withTestFile tmpDir emptyFileContent $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "head" "NEW CONTENT\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "head" ["NEW CONTENT\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -545,7 +545,7 @@ testWriteSingleLineFile = withTempDir $ \tmpDir ->
     withTestFile tmpDir singleLineContent $ \filePath -> do
         toolbox <- testToolbox
         -- Replace the only line
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1" "REPLACED\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1" ["REPLACED\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -558,7 +558,7 @@ testReplaceEntireFile :: Assertion
 testReplaceEntireFile = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-10" "ALL NEW\nCONTENT\nHERE\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-10" ["ALL NEW\nCONTENT\nHERE\n"]
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
@@ -574,7 +574,7 @@ testRangeAtEndOfFile = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
         -- Replace last two lines (9-10)
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "9-10" "NEW NINE\nNEW TEN\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "9-10" ["NEW NINE\nNEW TEN\n"]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -595,7 +595,7 @@ testOverlappingRanges = withTempDir $ \tmpDir ->
                 toolbox
                 filePath
                 "2-4,3-5"
-                "BLOCK A\n---\nBLOCK B\n"
+                ["BLOCK A\n", "BLOCK B\n"]
         case result of
             Left (InvalidRangeError _) ->
                 -- If overlapping ranges are rejected, that's valid
@@ -616,7 +616,7 @@ testTrailingNewlinePreservation = withTempDir $ \tmpDir -> do
     let filePath = tmpDir </> "no-newline.txt"
     -- Create file without trailing newline
     Text.writeFile filePath "Line 1\nLine 2\nLine 3"
-    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2" "REPLACED\n"
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2" ["REPLACED\n"]
     case result of
         Left err -> assertFailure $ show err
         Right _ -> do
@@ -648,7 +648,7 @@ testIndentationPreservation = withTempDir $ \tmpDir ->
         toolbox <- testToolbox
         -- Content with significant indentation (Haskell-style code)
         let indentedContent = "    let x = 1\n        y = 2\n    in x + y\n"
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3" indentedContent
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "3" [indentedContent]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -671,8 +671,7 @@ testMultiRangeIndentation = withTempDir $ \tmpDir ->
         -- Two blocks with different indentation levels
         let block1 = "    block1 line1\n    block1 line2\n"
         let block2 = "        block2 line1\n        block2 line2\n"
-        let content = block1 <> "---" <> block2
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2,8" content
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2,8" [block1, block2]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -691,7 +690,7 @@ testNestedIndentation = withTempDir $ \tmpDir ->
         toolbox <- testToolbox
         -- Python-style nested indentation
         let nestedContent = "def outer():\n    def inner():\n        if True:\n            return 42\n"
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "5" nestedContent
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "5" [nestedContent]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -713,7 +712,7 @@ testTabIndentation = withTempDir $ \tmpDir ->
         toolbox <- testToolbox
         -- Content with tab indentation
         let tabContent = "\tfirst level\n\t\tsecond level\n\t\t\tthird level\n"
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "7" tabContent
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "7" [tabContent]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -757,7 +756,7 @@ testSingleLineDeletion = withTempDir $ \tmpDir -> do
     Text.writeFile filePath numberedContent
 
     -- Delete line 5
-    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "5" ""
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "5" [""]
     case result of
         Left err -> assertFailure $ show err
         Right _ -> do
@@ -778,7 +777,7 @@ testReplaceFirstLine :: Assertion
 testReplaceFirstLine = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1" "NEW FIRST LINE\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1" ["NEW FIRST LINE\n"]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -797,7 +796,7 @@ testReplaceLastLine :: Assertion
 testReplaceLastLine = withTempDir $ \tmpDir ->
     withStandardTestFile tmpDir $ \filePath -> do
         toolbox <- testToolbox
-        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "10" "NEW LAST LINE\n"
+        result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "10" ["NEW LAST LINE\n"]
         case result of
             Left err -> assertFailure $ show err
             Right _ -> do
@@ -821,7 +820,7 @@ testRangeDeletionAtBoundaries = withTempDir $ \tmpDir -> do
     Text.writeFile filePath content
 
     -- Delete lines 1-2 (start boundary)
-    result1 <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2" ""
+    result1 <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "1-2" [""]
     case result1 of
         Left err -> assertFailure $ show err
         Right _ -> do
@@ -839,7 +838,7 @@ testRangeDeletionAtBoundaries = withTempDir $ \tmpDir -> do
 
     -- Delete lines 7-8 (end boundary of remaining 8 lines: lines 3-10 from original)
     -- In the current file, lines 7-8 correspond to original lines 9-10
-    result2 <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "7-8" ""
+    result2 <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "7-8" [""]
     case result2 of
         Left err -> assertFailure $ show err
         Right _ -> do
@@ -863,7 +862,7 @@ testSequentialLineReplacement = withTempDir $ \tmpDir -> do
     Text.writeFile filePath content
 
     -- Replace lines 2 and 4 with specific content (applied bottom-to-top)
-    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2,4" "REPLACED_B\n---\nREPLACED_D\n"
+    result <- DeveloperToolbox.executeWriteFileRange silent toolbox filePath "2,4" ["REPLACED_B\n", "REPLACED_D\n"]
     case result of
         Left err -> assertFailure $ show err
         Right _ -> do
