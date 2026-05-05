@@ -166,6 +166,7 @@ callResultToUserToolResponse _ result =
         DeveloperToolCreateResult _ createResult -> JsonResponse $ Aeson.toJSON createResult
         DeveloperToolReadFileRangeResult _ readResult -> JsonResponse $ Aeson.toJSON readResult
         DeveloperToolWriteFileRangeResult _ writeResult -> JsonResponse $ Aeson.toJSON writeResult
+        DeveloperToolPatchResult _ patchResult -> JsonResponse $ Aeson.toJSON patchResult
         DeveloperToolError _ err ->
             JsonResponse $ Aeson.object ["error" .= ("Developer tool error: " <> show err)]
         LuaToolResult _ toolResult -> JsonResponse toolResult
@@ -233,3 +234,4 @@ let session = ensureSessionVersion rawSession
 -}
 ensureSessionVersion :: Session -> Session
 ensureSessionVersion = migrateSessionToV2
+

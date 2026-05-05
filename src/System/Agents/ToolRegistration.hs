@@ -1091,6 +1091,7 @@ Developer tools expose functions based on configured capabilities:
 * show-spec: Display specification documentation
 * read-file-range: Read specific line ranges from a file
 * write-file-range: Replace line ranges in a file with new content
+* patch-file: Apply a unified diff patch to a file
 
 The tool accepts a 'capability' parameter to select which operation to perform.
 
@@ -1216,13 +1217,28 @@ buildDeveloperToolParams box =
                 }
             ]
 
+        -- Add patch-file params if enabled
+        patchFileParams =
+            [ ParamProperty
+                { propertyKey = "patch"
+                , propertyType = StringParamType
+                , propertyDescription = "For patch-file: Unified diff patch content to apply"
+                , propertyRequired = False
+                }
+            ]
+
         hasCapability cap = cap `elem` box.toolboxCapabilities
 
         fileRangeParams =
             if hasCapability DevToolReadFileRange || hasCapability DevToolWriteFileRange
                 then readFileRangeParams ++ writeFileRangeParams
                 else []
-     in baseParams ++ fileRangeParams
+
+        patchParams =
+            if hasCapability DevToolPatchFile
+                then patchFileParams
+                else []
+     in baseParams ++ fileRangeParams ++ patchParams
 
 -- Helper to convert developer capability to text
 devCapabilityToText :: DeveloperToolCapability -> Text
@@ -1235,6 +1251,7 @@ devCapabilityToText DevToolCreateAgent = "create-agent"
 devCapabilityToText DevToolCreateTool = "create-tool"
 devCapabilityToText DevToolReadFileRange = "read-file-range"
 devCapabilityToText DevToolWriteFileRange = "write-file-range"
+devCapabilityToText DevToolPatchFile = "patch-file"
 
 {- | Register all tools from a Developer toolbox.
 
@@ -1669,6 +1686,17 @@ executeDeveloperCapability tracer box cap params = case cap of
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
                     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "patch-file" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                case KeyMap.lookup (AesonKey.fromText "patch") params of
+                    Just (Aeson.String patchContent) -> do
+                        result <- DeveloperTools.executePatchFile (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) patchContent
+                        case result of
+                            Left err -> pure $ DeveloperToolError () err
+                            Right patchResult -> pure $ DeveloperToolPatchResult () patchResult
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'patch' parameter")
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
 
 -------------------------------------------------------------------------------
@@ -1709,3 +1737,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+

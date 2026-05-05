@@ -114,8 +114,8 @@ The portal allows tools to invoke other registered tools. Each invocation:
 5. Returns the result as a ToolResult
 
 When called with a parent context (Just ctx), the portal propagates OS
-integration fields (World, EventQueue) AND conversation identifiers
-(session ID, conversation ID, turn ID, call stack) to ensure proper
+integration fields (World, EventQueue, ParentConversation) AND conversation
+identifiers (session ID, conversation ID, turn ID, call stack) to ensure proper
 conversation tracking when tools call sub-agents.
 
 Example:
@@ -436,6 +436,12 @@ callResultToJson (DeveloperToolWriteFileRangeResult _ result) =
         , "data" .= result
         , "toolType" .= ("devtool-write-file-range" :: Text)
         ]
+callResultToJson (DeveloperToolPatchResult _ result) =
+    Aeson.object
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
+        , "toolType" .= ("devtool-patch" :: Text)
+        ]
 callResultToJson (DeveloperToolError _ err) =
     Aeson.object
         [ "type" .= ("error" :: Text)
@@ -454,3 +460,4 @@ callResultToJson (LuaToolError _ err) =
         , "error" .= err
         , "toolType" .= ("lua" :: Text)
         ]
+
