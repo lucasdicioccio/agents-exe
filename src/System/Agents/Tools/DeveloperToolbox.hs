@@ -354,20 +354,21 @@ instance ToJSON PatchResult where
 
 -- | Errors that can occur during patch operations.
 data PatchError
-    = PatchParseError !Text
-    -- ^ Invalid diff format
-    | PatchContextMismatch !Int !Text
-    -- ^ Line N context doesn't match
-    | PatchHunkOverlap !Int !Int
-    -- ^ Hunks at lines X and Y overlap
-    | PatchFileNotFound !FilePath
-    -- ^ File to patch not found
-    | PatchInvalidLineNumber !Int
-    -- ^ Line number out of valid range
+    = -- | Invalid diff format
+      PatchParseError !Text
+    | -- | Line N context doesn't match
+      PatchContextMismatch !Int !Text
+    | -- | Hunks at lines X and Y overlap
+      PatchHunkOverlap !Int !Int
+    | -- | File to patch not found
+      PatchFileNotFound !FilePath
+    | -- | Line number out of valid range
+      PatchInvalidLineNumber !Int
     deriving (Show, Eq)
 
--- | A hunk represents a single change section in a unified diff.
--- The context lines must match exactly for the hunk to be applied.
+{- | A hunk represents a single change section in a unified diff.
+The context lines must match exactly for the hunk to be applied.
+-}
 data Hunk = Hunk
     { hunkOldStart :: Int
     -- ^ Starting line number in the original file (1-based)
@@ -720,8 +721,9 @@ findOverlappingHunks (h : hs) =
             Just overlap -> Just (h, overlap)
             Nothing -> findOverlappingHunks hs
 
--- | Validate a single hunk against the file content.
--- Checks that context lines match exactly.
+{- | Validate a single hunk against the file content.
+Checks that context lines match exactly.
+-}
 validateHunk :: [Text] -> Hunk -> Either PatchError Hunk
 validateHunk fileLines hunk = do
     -- Validate line numbers are in range
@@ -763,8 +765,9 @@ validateHunk fileLines hunk = do
 
     Right hunk
 
--- | Apply a hunk to the file lines.
--- Assumes the hunk has been validated and lines are 1-based.
+{- | Apply a hunk to the file lines.
+Assumes the hunk has been validated and lines are 1-based.
+-}
 applyHunk :: Hunk -> [Text] -> [Text]
 applyHunk hunk lines' =
     let startIdx = hunkOldStart hunk - 1
@@ -810,8 +813,9 @@ parseUnifiedDiff patchText =
                     Left err -> Left err
                     Right hunks -> Right (hunk : hunks)
 
--- | Parse a single hunk from the diff lines.
--- Returns the parsed hunk and the remaining lines.
+{- | Parse a single hunk from the diff lines.
+Returns the parsed hunk and the remaining lines.
+-}
 parseHunk :: [Text] -> Either PatchError (Hunk, [Text])
 parseHunk [] = Left $ PatchParseError "Unexpected end of patch, expected hunk header"
 parseHunk (line : rest)
@@ -824,9 +828,10 @@ parseHunk (line : rest)
         -- Skip non-hunk lines (could be file names, etc.)
         parseHunk rest
 
--- | Parse hunk header line.
--- Format: @@ -oldStart,oldCount +newStart,newCount @@
--- Or: @@ -oldStart +newStart @@ (when count is 1)
+{- | Parse hunk header line.
+Format: @@ -oldStart,oldCount +newStart,newCount @@
+Or: @@ -oldStart +newStart @@ (when count is 1)
+-}
 parseHunkHeader :: Text -> Either PatchError (Int, Int, Int, Int)
 parseHunkHeader line =
     let stripped = Text.strip line
@@ -866,8 +871,9 @@ parseHunkHeader line =
                 then Just (read str :: Int)
                 else Nothing
 
--- | Parse the body of a hunk.
--- Accumulates context lines and changed lines, switching between states.
+{- | Parse the body of a hunk.
+Accumulates context lines and changed lines, switching between states.
+-}
 parseHunkBody ::
     Int ->
     Int ->
@@ -911,23 +917,10 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                 , hunkContextAfter = reverse ctxAfter
                                 }
                      in Right (hunk, lines')
-                else if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
-                    then
-                        -- Removed line
-                        let content = Text.drop 1 line
-                         in parseHunkBody
-                                oldStart
-                                oldCount
-                                newStart
-                                newStart
-                                ctxBefore
-                                (removed ++ [content])
-                                added
-                                []
-                                rest
-                    else if Text.isPrefixOf "+" line && not (Text.isPrefixOf "+++" line)
+                else
+                    if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
                         then
-                            -- Added line
+                            -- Removed line
                             let content = Text.drop 1 line
                              in parseHunkBody
                                     oldStart
@@ -935,38 +928,53 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                     newStart
                                     newStart
                                     ctxBefore
-                                    removed
-                                    (added ++ [content])
+                                    (removed ++ [content])
+                                    added
                                     []
                                     rest
                         else
-                            -- Context line (unchanged)
-                            let stripped = line
-                             in if null removed && null added
-                                    then
-                                        -- Still in context before section
-                                        parseHunkBody
-                                            oldStart
-                                            oldCount
-                                            newStart
-                                            newStart
-                                            (stripped : ctxBefore)
-                                            removed
-                                            added
-                                            ctxAfter
-                                            rest
-                                    else
-                                        -- In context after section
-                                        parseHunkBody
+                            if Text.isPrefixOf "+" line && not (Text.isPrefixOf "+++" line)
+                                then
+                                    -- Added line
+                                    let content = Text.drop 1 line
+                                     in parseHunkBody
                                             oldStart
                                             oldCount
                                             newStart
                                             newStart
                                             ctxBefore
                                             removed
-                                            added
-                                            (stripped : ctxAfter)
+                                            (added ++ [content])
+                                            []
                                             rest
+                                else
+                                    -- Context line (unchanged)
+                                    let stripped = line
+                                     in if null removed && null added
+                                            then
+                                                -- Still in context before section
+                                                parseHunkBody
+                                                    oldStart
+                                                    oldCount
+                                                    newStart
+                                                    newStart
+                                                    (stripped : ctxBefore)
+                                                    removed
+                                                    added
+                                                    ctxAfter
+                                                    rest
+                                            else
+                                                -- In context after section
+                                                parseHunkBody
+                                                    oldStart
+                                                    oldCount
+                                                    newStart
+                                                    newStart
+                                                    ctxBefore
+                                                    removed
+                                                    added
+                                                    (stripped : ctxAfter)
+                                                    rest
 
 -------------------------------------------------------------------------------
 -- Range Parsing
@@ -2305,4 +2313,3 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
-
