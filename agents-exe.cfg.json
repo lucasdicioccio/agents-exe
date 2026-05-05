@@ -3,6 +3,14 @@
 , "agentsLogs": {
     "logJsonPath": "logs.json"
   }
+, "sessions": {
+    "writeLocation": "./",
+    "readLocation": [
+      "./",
+      "./tasks-sessions/",
+      "./past-convs/"
+    ]
+  }  
 , "selfDescribeSlug": "root-project-agent"
 , "selfDescribeDescription": "the root project agent"
 }
