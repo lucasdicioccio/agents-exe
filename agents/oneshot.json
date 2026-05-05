@@ -33,13 +33,13 @@
         "path": "faq.json"
       }
     ],
-    "--builtinToolboxes": [
+    "builtinToolboxes": [
       {
         "tag": "DeveloperToolbox",
         "contents": {
           "Name": "dev",
           "Description": "Development utilities",
-          "Capabilities": ["read-file-range", "write-file-range"]
+          "Capabilities": ["read-file-range", "patch-file"]
         }
       }
     ],

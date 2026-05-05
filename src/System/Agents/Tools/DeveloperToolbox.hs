@@ -593,7 +593,7 @@ getCapabilityInfo DevToolReadFileRange =
     )
 getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
-    , "Replaces specific lines in a file. Ranges are comma-separated line numbers or ranges (e.g., '2,5,8' or '1-3,5'). Takes a list of content blocks, where each block corresponds to one range. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
+    , "Replaces specific lines in a file. Ranges are comma-separated line numbers or ranges (e.g., '2,5,8' or '1-3'). Takes a list of content blocks, where each block corresponds to one range. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
     )
 getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
@@ -789,8 +789,8 @@ The parser handles standard unified diff format:
 * File headers (--- and +++ lines) are ignored
 * Hunk headers start with @@
 * Context lines have no prefix
-* Removed lines start with -
-* Added lines start with +
+* Removed lines (- prefix)
+* Added lines (+ prefix)
 
 Returns Left with parse error or Right with list of hunks.
 -}
@@ -917,7 +917,7 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                 , hunkRemovedLines = removed
                                 , hunkAddedLines = added
                                 , hunkContextAfter = reverse ctxAfter
-                                }
+                        }
                      in Right (hunk, lines')
                 else
                     if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
@@ -1176,16 +1176,21 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
             case parseRanges rangesTxt of
                 Left err -> pure $ Left err
                 Right ranges -> do
-                    -- Validate that number of content blocks matches number of ranges
-                    if length contentBlocks /= length ranges && length ranges > 1
+                    -- Expand consecutive ranges so each line gets its own content block
+                    let expandedPairs = expandRangeContentPairs ranges (if null contentBlocks then [""] else contentBlocks)
+                    
+                    -- Validate that number of content blocks matches total lines after expansion
+                    let totalLinesInRanges = countTotalLines ranges
+                    let totalContentBlocks = length expandedPairs
+                    if totalContentBlocks /= totalLinesInRanges && totalLinesInRanges > 1
                         then
                             pure $
                                 Left $
                                     InvalidRangeError $
                                         "Number of content blocks ("
-                                            <> Text.pack (show $ length contentBlocks)
-                                            <> ") must match number of ranges ("
-                                            <> Text.pack (show $ length ranges)
+                                            <> Text.pack (show totalContentBlocks)
+                                            <> ") must match total lines in ranges ("
+                                            <> Text.pack (show totalLinesInRanges)
                                             <> ")"
                         else do
                             -- Check if file exists
@@ -1205,12 +1210,9 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
 
                                     let existingLines = Text.lines existingContent
 
-                                    -- Pair ranges with content blocks
-                                    let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
-
                                     -- Sort by start line in ascending order (top-to-bottom)
                                     -- This is crucial for correct position tracking
-                                    let sortedPairs = sortOn rangeStartKey rangeContentPairs
+                                    let sortedPairs = sortOn rangeStartKey expandedPairs
 
                                     -- Apply edits sequentially with position tracking
                                     -- foldl' passes (currentLines, offset) through each edit
@@ -1250,6 +1252,27 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
     isHeadOrTail Head = True
     isHeadOrTail Tail = True
     isHeadOrTail _ = False
+
+    -- Count total lines spanned by all ranges (excluding head/tail)
+    countTotalLines :: [RangeSpec] -> Int
+    countTotalLines = sum . map countLinesInRange
+      where
+        countLinesInRange Head = 0
+        countLinesInRange Tail = 0
+        countLinesInRange (Lines (start, end)) = end - start + 1
+
+    -- Expand range-content pairs so that consecutive ranges produce individual line entries
+    -- Each line in a multi-line range gets the same content block
+    expandRangeContentPairs :: [RangeSpec] -> [Text] -> [(RangeSpec, Text)]
+    expandRangeContentPairs [] _ = []
+    expandRangeContentPairs _ [] = []
+    expandRangeContentPairs (Head : rs) (c : cs) = (Head, c) : expandRangeContentPairs rs cs
+    expandRangeContentPairs (Tail : rs) (c : cs) = (Tail, c) : expandRangeContentPairs rs cs
+    expandRangeContentPairs (Lines (s, e) : rs) (c : cs)
+        | s == e = (Lines (s, s), c) : expandRangeContentPairs rs cs
+        | otherwise = 
+            -- Expand multi-line range: each line gets the same content
+            map (\n -> (Lines (n, n), c)) [s..e] ++ expandRangeContentPairs rs cs
 
     -- Get sort key for range (for top-to-bottom ordering)
     -- Head comes first (0), then line numbers, Tail comes last (maxBound)
