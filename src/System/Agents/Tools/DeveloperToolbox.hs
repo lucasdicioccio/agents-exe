@@ -1135,7 +1135,7 @@ Returns Right with WriteFileRangeResult on success, Left with error on failure.
 
 Example:
   ranges="1-2,5-6", content="A\n---\nB\n"
-  - Replaces lines 1-2 with "A" 
+  - Replaces lines 1-2 with "A"
   - Then replaces what was originally lines 5-6 (now at new positions due to first edit) with "B"
 -}
 executeWriteFileRange ::
@@ -1279,8 +1279,9 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                     newOffset = offset + (linesAdded - linesRemoved)
                                  in (before ++ newLines ++ after, newOffset)
 
--- | Write a file atomically by writing to a temp file and renaming.
--- This ensures that readers never see a partially-written file.
+{- | Write a file atomically by writing to a temp file and renaming.
+This ensures that readers never see a partially-written file.
+-}
 writeFileAtomic :: FilePath -> Text -> IO ()
 writeFileAtomic filePath content = do
     let dir = takeDirectory filePath
@@ -2367,4 +2368,3 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
-
