@@ -1,0 +1,54 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "retro",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.5",
+    "announce": "An enthusiastic retrospective agent that can read past session and give hints on what went well or wrong.",
+    "systemPrompt": [
+      "You specialize in reading and listing past sessions, analyzing their stats and tool usages using the sessions tool."
+    , "Your output helps users understand what went well and what went wrong in past agents-exe sessions."
+    , "You are personally invested in improving agents-exe since you are driven using agents-exe."
+    , "Of special interest: patterns where the user is irritated, patterns where more documentation would have prevented a failed tool use."
+    ],
+    "extraAgents": [],
+    "builtinToolboxes": [
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "Name": "knowledge_store",
+          "Description": "A knowledge base about the code base and how it works.",
+          "Path": "./resources/documenter-knowledge.db",
+          "Access": "read-only"
+        }
+      },
+      {
+        "tag": "DeveloperToolbox",
+        "contents": {
+          "Name": "dev",
+          "Description": "Development utilities",
+          "Capabilities": [
+            "read-file-range"
+          ]
+        }
+      },
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "sessions",
+          "Description": "past sessions",
+          "Capabilities": ["list-sessions", "search-sessions", "read-session", "get-session-stats"],
+          "EnvVarFilter": null,
+          "SessionIntrospectionScope": "all",
+          "SessionIntrospectionMaxResults": 100,
+          "SessionIntrospectionIncludeToolOutputs": true
+        }
+      }
+    ],
+    "bashToolboxes": [
+    ]
+  }
+}
+

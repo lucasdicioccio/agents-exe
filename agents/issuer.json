@@ -46,6 +46,10 @@
         "path": "faq.json"
       },
       {
+        "slug": "retro",
+        "path": "retro.json"
+      },
+      {
         "slug": "assistant",
         "path": "assistant.json"
       }
