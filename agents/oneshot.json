@@ -39,7 +39,7 @@
         "contents": {
           "Name": "dev",
           "Description": "Development utilities",
-          "Capabilities": ["read-file-range", "patch-file"]
+          "Capabilities": ["read-file-range", "write-file-range", "patch-file"]
         }
       }
     ],
