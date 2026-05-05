@@ -255,6 +255,74 @@ createExampleAgents agentsDir = do
     createDirectoryIfMissing True (agentsDir </> "tools")
 
 -------------------------------------------------------------------------------
+-- Sessions Configuration
+-------------------------------------------------------------------------------
+
+{- | Sessions configuration for multi-location session storage.
+
+This allows configuring separate read and write locations for sessions,
+enabling unified views of sessions scattered across multiple directories.
+
+Example configuration in agents-exe.cfg.json:
+
+> {
+>   "sessions": {
+>     "writeLocation": "./sessions/",
+>     "readLocations": [
+>       "./sessions/",
+>       "~/.config/agents-exe/sessions/"
+>     ]
+>   }
+> }
+-}
+data SessionsConfig = SessionsConfig
+    { sessionsWriteLocation :: FilePath
+    -- ^ Directory where new sessions are written
+    , sessionsReadLocations :: [FilePath]
+    -- ^ Directories to search for existing sessions
+    }
+    deriving (Show, Generic)
+
+instance Aeson.FromJSON SessionsConfig where
+    parseJSON = Aeson.withObject "SessionsConfig" $ \v ->
+        SessionsConfig
+            <$> v Aeson..: "writeLocation"
+            <*> v Aeson..:? "readLocations" Aeson..!= []
+
+-- | Default sessions directory name within config
+defaultSessionsDirName :: FilePath
+defaultSessionsDirName = "sessions"
+
+{- | Build a SessionStore from SessionsConfig.
+
+Resolves tilde (~) paths and creates the SessionStore.
+-}
+buildSessionStoreFromConfig :: SessionsConfig -> IO SessionStore.SessionStore
+buildSessionStoreFromConfig cfg = do
+    writePath <- SessionStore.resolveSessionPath cfg.sessionsWriteLocation
+    readPaths <- mapM SessionStore.resolveSessionPath cfg.sessionsReadLocations
+    pure $ SessionStore.mkSessionStore writePath readPaths
+
+{- | Build a simple SessionStore from a single prefix (backwards compatibility).
+
+This is used when the 'sessions' config is not present but
+'agentsLogs.logSessionsJsonPrefix' is set.
+-}
+buildSimpleSessionStore :: FilePath -> IO SessionStore.SessionStore
+buildSimpleSessionStore prefix = do
+    resolvedPath <- SessionStore.resolveSessionPath prefix
+    pure $ SessionStore.mkSimpleSessionStore resolvedPath
+
+{- | Create a default SessionStore in the config directory.
+
+This is used when no session configuration is provided at all.
+-}
+buildDefaultSessionStore :: FilePath -> IO SessionStore.SessionStore
+buildDefaultSessionStore cfgDir = do
+    let sessionsDir = cfgDir </> defaultSessionsDirName
+    pure $ SessionStore.mkSimpleSessionStore sessionsDir
+
+-------------------------------------------------------------------------------
 -- CLI Argument Parsing
 -------------------------------------------------------------------------------
 
@@ -265,7 +333,7 @@ data ArgParserArgs = ArgParserArgs
     , defaultLogJsonHttpEndpoint :: Maybe String
     , defaultLogJsonFilepath :: Maybe FilePath
     , defaultLogRawFilepath :: Maybe FilePath
-    , defaultLogSesionsJsonPrefix :: Maybe FilePath
+    , defaultSessionStore :: SessionStore.SessionStore
     , argPromptAliases :: Map Text AliasDefinition
     , defaultSelfDescribeSlug :: Maybe String
     , defaultSelfDescribeDescription :: Maybe String
@@ -302,6 +370,7 @@ data AgentsExeConfig = AgentsExeConfig
     , cfgSelfDescribeSlug :: Maybe String
     , cfgSelfDescribeDescription :: Maybe String
     , cfgKeymapPath :: Maybe FilePath
+    , cfgSessions :: Maybe SessionsConfig
     }
     deriving (Show, Generic)
 
@@ -316,6 +385,7 @@ instance Aeson.FromJSON AgentsExeConfig where
             <*> v Aeson..:? "selfDescribeSlug"
             <*> v Aeson..:? "selfDescribeDescription"
             <*> v Aeson..:? "keymap"
+            <*> v Aeson..:? "sessions"
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
 locateAgentsExeConfig :: IO (Maybe FilePath)
@@ -344,24 +414,31 @@ initArgParserArgs = do
     -- Ensure config structure exists before trying to load from it
     ensureConfigStructure defaultConfigDir secretKeysPath
 
-    maybe (initWithoutAgentsExeConfig defaultConfigDir) (initFromAgentsExeConfig homedir) agentsExecConfig
+    maybe (initWithoutAgentsExeConfig defaultConfigDir) (initFromAgentsExeConfig defaultConfigDir) agentsExecConfig
   where
     initFromAgentsExeConfig :: FilePath -> FilePath -> IO ArgParserArgs
-    initFromAgentsExeConfig homedir agentsexecfgpath = do
+    initFromAgentsExeConfig defaultCfgDir agentsexecfgpath = do
         zeconfig <- Aeson.eitherDecodeFileStrict' agentsexecfgpath :: IO (Either String AgentsExeConfig)
         case zeconfig of
             Left err -> error ("failed to load agents-exe config at " <> agentsexecfgpath <> " " <> err)
             Right obj -> do
-                let defaultconfigdir = homedir </> ".config/agents-exe"
+                -- Build session store from configuration
+                -- Priority: 1) cfgSessions, 2) agentsLogs.logSessionsJsonPrefix, 3) default
+                sessionStore <- case obj.cfgSessions of
+                    Just sessionsCfg -> buildSessionStoreFromConfig sessionsCfg
+                    Nothing -> case obj.agentsLogs >>= logSessionsJsonPrefix of
+                        Just prefix -> buildSimpleSessionStore prefix
+                        Nothing -> buildDefaultSessionStore defaultCfgDir
+
                 jsonPathss <- traverse FileLoader.listJsonDirectory obj.agentsDirectories
                 pure $
                     ArgParserArgs
-                        (fromMaybe defaultconfigdir obj.agentsConfigDir)
+                        (fromMaybe defaultCfgDir obj.agentsConfigDir)
                         (obj.agentsFiles <> mconcat jsonPathss)
                         (logJsonHttpEndpoint =<< obj.agentsLogs)
                         (logJsonPath =<< obj.agentsLogs)
                         (logRawPath =<< obj.agentsLogs)
-                        (logSessionsJsonPrefix =<< obj.agentsLogs)
+                        sessionStore
                         (resolveAliases obj.cfgPromptAliases)
                         obj.cfgSelfDescribeSlug
                         obj.cfgSelfDescribeDescription
@@ -384,7 +461,7 @@ initArgParserArgs = do
                 Nothing
                 Nothing
                 Nothing
-                (Just sessionsDir)
+                (SessionStore.mkSimpleSessionStore sessionsDir)
                 defaultAliases
                 Nothing
                 Nothing
@@ -397,11 +474,11 @@ data Prog = Prog
     , logFile :: FilePath
     , logHttp :: Maybe String
     , logJsonFile :: Maybe FilePath
-    , sessionsJsonPrefix :: Maybe FilePath
     , agentFiles :: [FilePath]
     , selectedAgentSlug :: Maybe Text
     , progPromptAliases :: Map Text AliasDefinition
     , mainCommand :: Command
+    , progSessionStore :: SessionStore.SessionStore
     }
 
 -- | Available commands
@@ -1235,14 +1312,6 @@ parseProgOptions argparserargs =
                     <> (maybe mempty value argparserargs.defaultLogJsonFilepath)
                 )
             )
-        <*> optional
-            ( strOption
-                ( long "session-json-file-prefix"
-                    <> metavar "SESSIONSJSONPREFIX"
-                    <> help "local JSON sessions file prefix"
-                    <> (maybe mempty value argparserargs.defaultLogSesionsJsonPrefix)
-                )
-            )
         <*> fmap
             (addDefaultAgentFiles argparserargs)
             ( many
@@ -1277,8 +1346,8 @@ parseProgOptions argparserargs =
                 <> command "mcp-server" (info parseMcpServer (idm))
                 <> command "session-print" (info parseSessionPrintCommand (progDesc "Print a session file in markdown format"))
                 <> command "session-edit" (info parseSessionEditCommand (progDesc "Edit a session file (reads JSON from STDIN, writes JSON to STDOUT)"))
-                <> command "session-index" (info (parseSessionIndexCommand sessionStore) (progDesc "Manage the session search index"))
-                <> command "session-search" (info (parseSessionSearchCommand sessionStore) (progDesc "Search session files with fuzzy matching"))
+                <> command "session-index" (info (parseSessionIndexCommand argparserargs.defaultSessionStore) (progDesc "Manage the session search index"))
+                <> command "session-search" (info (parseSessionSearchCommand argparserargs.defaultSessionStore) (progDesc "Search session files with fuzzy matching"))
                 <> command
                     "paths"
                     ( info
@@ -1312,9 +1381,7 @@ parseProgOptions argparserargs =
                         (progDesc "Call a tool from the first loaded agent with JSON payload from stdin")
                     )
             )
-  where
-    -- Session store for session-index and session-search commands
-    sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore argparserargs.defaultLogSesionsJsonPrefix
+        <*> pure argparserargs.defaultSessionStore
 
 -------------------------------------------------------------------------------
 -- Main Entry Point
@@ -1355,8 +1422,8 @@ main = do
 
         let baseTracer = showFileTracer `traceExtra` logHttpTracer `traceExtra` logFileJsonTracer
 
-        -- Initialize SessionStore from the session prefix argument
-        let sessionStore = maybe SessionStore.defaultSessionStore SessionStore.mkSessionStore pargs.sessionsJsonPrefix
+        -- Use the SessionStore from program configuration
+        let sessionStore = pargs.progSessionStore
 
         -- Resolve agent files based on selected slug
         resolvedAgentFiles <- resolveAgentFiles pargs.agentFiles pargs.selectedAgentSlug
@@ -1434,7 +1501,7 @@ runCommand pargs baseTracer sessionStore files =
         SessionSearch opts ->
             SessionSearchCmd.handleSessionSearch opts
         Paths opts ->
-            PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile pargs.sessionsJsonPrefix
+            PathsCmd.handlePaths opts pargs.configDir files pargs.apiKeysFile sessionStore
         Cowsay opts ->
             CowsayCmd.handleCowsay opts
         Spec opts ->

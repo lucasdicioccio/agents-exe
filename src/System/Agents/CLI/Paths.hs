@@ -33,6 +33,8 @@ import System.Directory (doesFileExist, getCurrentDirectory, getHomeDirectory)
 import System.Exit (exitSuccess)
 import System.FilePath (takeDirectory, (</>))
 
+import qualified System.Agents.SessionStore as SessionStore
+
 -------------------------------------------------------------------------------
 -- Data Types
 -------------------------------------------------------------------------------
@@ -49,8 +51,10 @@ data PathsInfo = PathsInfo
     -- ^ All agent JSON files that were loaded
     , apiKeysPath :: FilePath
     -- ^ Location of the API keys file
-    , sessionStoragePrefix :: Maybe FilePath
-    -- ^ Session file prefix/directory (if configured)
+    , sessionWriteLocation :: Maybe FilePath
+    -- ^ Session write location (directory where new sessions are written)
+    , sessionReadLocations :: [FilePath]
+    -- ^ Session read locations (directories searched for existing sessions)
     }
     deriving (Show, Eq, Generic)
 
@@ -78,7 +82,11 @@ instance Aeson.ToJSON PathsInfo where
                     ]
             , "agents" Aeson..= agentFilesPaths info
             , "apiKeys" Aeson..= apiKeysPath info
-            , "sessionStorage" Aeson..= sessionStoragePrefix info
+            , "sessionStorage"
+                Aeson..= Aeson.object
+                    [ "writeLocation" Aeson..= sessionWriteLocation info
+                    , "readLocations" Aeson..= sessionReadLocations info
+                    ]
             ]
 
 instance Aeson.FromJSON PathsInfo
@@ -100,10 +108,10 @@ collectPathsInfo ::
     [FilePath] ->
     -- | API keys file path
     FilePath ->
-    -- | Session prefix (if configured)
-    Maybe FilePath ->
+    -- | Session store
+    SessionStore.SessionStore ->
     IO PathsInfo
-collectPathsInfo activeCfgDir defaultCfgDir agents keys session = do
+collectPathsInfo activeCfgDir defaultCfgDir agents keys sessionStore = do
     -- Try to locate the config file via directory traversal
     mCfgFile <- locateAgentsExeConfig
 
@@ -114,7 +122,11 @@ collectPathsInfo activeCfgDir defaultCfgDir agents keys session = do
             , defaultCfgDirectory = defaultCfgDir
             , agentFilesPaths = agents
             , apiKeysPath = keys
-            , sessionStoragePrefix = session
+            , sessionWriteLocation =
+                if null sessionStore.sessionWritePrefix
+                    then Nothing
+                    else Just sessionStore.sessionWritePrefix
+            , sessionReadLocations = sessionStore.sessionReadPrefixes
             }
 
 {- | Find the agents-exe.cfg.json file by traversing up the directory tree.
@@ -155,8 +167,8 @@ formatPathsHuman info =
                , "  " <> Text.pack (apiKeysPath info)
                , ""
                , "Session Storage:"
-               , formatSessionPrefix (sessionStoragePrefix info)
                ]
+            ++ formatSessionStorage info
 
 -- | Format the config file line based on whether it was found.
 formatConfigFile :: Maybe FilePath -> Text
@@ -170,10 +182,24 @@ formatAgentFiles files = map formatAgentFile files
   where
     formatAgentFile path = "  - " <> Text.pack path
 
--- | Format the session prefix line.
-formatSessionPrefix :: Maybe FilePath -> Text
-formatSessionPrefix Nothing = "  (not configured)"
-formatSessionPrefix (Just path) = "  Prefix: " <> Text.pack path
+-- | Format session storage information.
+formatSessionStorage :: PathsInfo -> [Text]
+formatSessionStorage info
+    | null (sessionReadLocations info) && sessionWriteLocation info == Nothing =
+        ["  (not configured)"]
+    | otherwise =
+        [ "  Write location: " <> maybe "(not configured)" Text.pack (sessionWriteLocation info)
+        , "  Read locations:"
+        ]
+            ++ formatReadLocations (sessionReadLocations info)
+
+-- | Format the list of read locations.
+formatReadLocations :: [FilePath] -> [Text]
+formatReadLocations [] = ["    (none configured)"]
+formatReadLocations locations = map formatLocation (zip [1 :: Int ..] locations)
+  where
+    formatLocation (idx, path) =
+        "    " <> Text.pack (show idx) <> ". " <> Text.pack path
 
 -- | Format path information as JSON.
 formatPathsJson :: PathsInfo -> LByteChar8.ByteString
@@ -193,10 +219,10 @@ handlePaths ::
     [FilePath] ->
     -- | API keys file
     FilePath ->
-    -- | Session prefix
-    Maybe FilePath ->
+    -- | Session store
+    SessionStore.SessionStore ->
     IO ()
-handlePaths opts configDir agentFiles apiKeysFile sessionPrefix = do
+handlePaths opts configDir agentFiles apiKeysFile sessionStore = do
     homedir <- getHomeDirectory
     let defaultCfgDir = homedir </> ".config/agents-exe"
 
@@ -207,7 +233,7 @@ handlePaths opts configDir agentFiles apiKeysFile sessionPrefix = do
             defaultCfgDir
             agentFiles
             apiKeysFile
-            sessionPrefix
+            sessionStore
 
     -- Output based on format option
     case outputFormat opts of
