@@ -1,3 +1,4 @@
+-------------------------------------------------------------------------------
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -15,10 +16,15 @@ for:
 * Validating agent configurations
 * Creating agent configurations
 * Creating tool scripts
-* Reading specific line ranges from files
+* Reading specific line ranges from a file
 * Writing to specific line ranges in files
+* Applying unified diff patches to files
 
 These tools help developers write and validate agents and tools.
+
+The patch-file capability provides atomic, context-aware file modifications
+using unified diff format, addressing the fragility issues of write-file-range
+when making multiple edits.
 -}
 module System.Agents.Tools.DeveloperToolbox (
     -- * Core types
@@ -32,6 +38,9 @@ module System.Agents.Tools.DeveloperToolbox (
     CreateResult (..),
     ReadFileRangeResult (..),
     WriteFileRangeResult (..),
+    PatchResult (..),
+    PatchError (..),
+    Hunk (..),
     RangeSpec (..),
     AgentOverrides (..),
     ToolConfig (..),
@@ -51,6 +60,7 @@ module System.Agents.Tools.DeveloperToolbox (
     executeCreateTool,
     executeReadFileRange,
     executeWriteFileRange,
+    executePatchFile,
 
     -- * Capability info
     getCapabilityInfo,
@@ -59,6 +69,11 @@ module System.Agents.Tools.DeveloperToolbox (
 
     -- * Range parsing
     parseRanges,
+
+    -- * Patch parsing and validation
+    parseUnifiedDiff,
+    validateHunk,
+    applyHunk,
 
     -- * Template functions (exposed for testing)
     makeAgentTemplate,
@@ -77,7 +92,7 @@ import qualified Data.Aeson.Encode.Pretty as AesonPretty
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Char (isDigit)
 import Data.FileEmbed (embedStringFile)
-import Data.List (sortOn)
+import Data.List (find, sortOn)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -120,6 +135,7 @@ These events allow tracking of:
 * Tool creation
 * File range read operations
 * File range write operations
+* Patch file operations
 -}
 data Trace
     = -- | Tool validation started
@@ -158,6 +174,12 @@ data Trace
       WriteFileRangeStartedTrace !FilePath !Text
     | -- | Write file range completed
       WriteFileRangeCompletedTrace !FilePath !Int !Int
+    | -- | Patch file started
+      PatchFileStartedTrace !FilePath !Int
+    | -- | Patch file completed
+      PatchFileCompletedTrace !FilePath !Int !Int
+    | -- | Patch file error
+      PatchFileErrorTrace !Text !Text
     | -- | Error during operation
       DeveloperToolErrorTrace !Text !Text
     deriving (Show)
@@ -311,6 +333,62 @@ instance ToJSON WriteFileRangeResult where
             , "linesWritten" .= writeFileLinesWritten result
             ]
 
+-- | Result of a patch file operation.
+data PatchResult = PatchResult
+    { patchFilePath :: FilePath
+    , patchHunksApplied :: Int
+    , patchHunksRejected :: Int
+    , patchLinesChanged :: Int
+    }
+    deriving (Show)
+
+-- | JSON serialization for PatchResult.
+instance ToJSON PatchResult where
+    toJSON result =
+        Aeson.object
+            [ "path" .= patchFilePath result
+            , "hunksApplied" .= patchHunksApplied result
+            , "hunksRejected" .= patchHunksRejected result
+            , "linesChanged" .= patchLinesChanged result
+            ]
+
+-- | Errors that can occur during patch operations.
+data PatchError
+    = -- | Invalid diff format
+      PatchParseError !Text
+    | -- | Line N context doesn't match
+      PatchContextMismatch !Int !Text
+    | -- | Hunks at lines X and Y overlap
+      PatchHunkOverlap !Int !Int
+    | -- | File to patch not found
+      PatchFileNotFound !FilePath
+    | -- | Line number out of valid range
+      PatchInvalidLineNumber !Int
+    deriving (Show, Eq)
+
+{- | A hunk represents a single change section in a unified diff.
+The context lines must match exactly for the hunk to be applied.
+-}
+data Hunk = Hunk
+    { hunkOldStart :: Int
+    -- ^ Starting line number in the original file (1-based)
+    , hunkOldCount :: Int
+    -- ^ Number of lines the hunk applies to in the original file
+    , hunkNewStart :: Int
+    -- ^ Starting line number in the new file (1-based)
+    , hunkNewCount :: Int
+    -- ^ Number of lines the hunk produces in the new file
+    , hunkContextBefore :: [Text]
+    -- ^ Context lines before the changed lines (no prefix)
+    , hunkRemovedLines :: [Text]
+    -- ^ Lines to remove (from original file, - prefix in diff)
+    , hunkAddedLines :: [Text]
+    -- ^ Lines to add (to new file, + prefix in diff)
+    , hunkContextAfter :: [Text]
+    -- ^ Context lines after the changed lines (no prefix)
+    }
+    deriving (Show, Eq)
+
 -- | Override parameters for creating an agent from reference or scratch.
 data AgentOverrides = AgentOverrides
     { overrideSlug :: Maybe Text
@@ -412,6 +490,8 @@ data DeveloperToolError
       RangeOutOfBoundsError !Text
     | -- | Permission denied
       PermissionError !Text
+    | -- | Error during patch operation
+      PatchValidationError !PatchError
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
@@ -458,6 +538,7 @@ capabilityToName DevToolCreateAgent = "create-agent"
 capabilityToName DevToolCreateTool = "create-tool"
 capabilityToName DevToolReadFileRange = "read-file-range"
 capabilityToName DevToolWriteFileRange = "write-file-range"
+capabilityToName DevToolPatchFile = "patch-file"
 
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
@@ -471,6 +552,7 @@ capabilityFromName name = case name of
     "create-tool" -> Just DevToolCreateTool
     "read-file-range" -> Just DevToolReadFileRange
     "write-file-range" -> Just DevToolWriteFileRange
+    "patch-file" -> Just DevToolPatchFile
     _ -> Nothing
 
 -- | Get information about a capability (name and description).
@@ -511,6 +593,388 @@ getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
     , "Replaces line ranges in a file with new content (use '---' to separate multiple ranges)"
     )
+getCapabilityInfo DevToolPatchFile =
+    ( "patch-file"
+    , "Applies a unified diff patch to a file atomically with context validation"
+    )
+
+-------------------------------------------------------------------------------
+-- Patch File Operations
+-------------------------------------------------------------------------------
+
+{- | Execute patch file operation.
+
+Applies a unified diff patch to a file atomically. All hunks are validated
+before any changes are applied, ensuring no partial corruption.
+
+The patch format follows standard unified diff conventions:
+* @@ -oldStart,oldCount +newStart,newCount @@ header
+* Context lines (no prefix)
+* Removed lines (- prefix)
+* Added lines (+ prefix)
+
+Parameters:
+- path: Path to the file to patch
+- patch: Unified diff patch content
+
+Returns Right with PatchResult on success, Left with error on failure.
+
+Example patch:
+@
+--- a/src/File.hs
++++ b/src/File.hs
+@@ -10,5 +10,6 @@ func1 x =
+   line1
+   line2
+-  oldLine
++  newLine1
++  newLine2
+   line4
+   line5
+@
+-}
+executePatchFile ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    Text ->
+    IO (Either DeveloperToolError PatchResult)
+executePatchFile tracer toolbox filePath patchText = do
+    if DevToolPatchFile `notElem` toolboxCapabilities toolbox
+        then pure $ Left $ CapabilityNotEnabledError "patch-file"
+        else do
+            runTracer tracer (PatchFileStartedTrace filePath 0)
+
+            -- Check if file exists
+            fileExists <- doesFileExist filePath
+            if not fileExists
+                then do
+                    let err = PatchFileNotFound filePath
+                    runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
+                    pure $ Left $ PatchValidationError err
+                else do
+                    -- Parse the unified diff
+                    case parseUnifiedDiff patchText of
+                        Left err -> do
+                            runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
+                            pure $ Left $ PatchValidationError err
+                        Right hunks -> do
+                            -- Read current file content
+                            content <- Text.readFile filePath
+                            let lines' = Text.lines content
+
+                            -- Validate ALL hunks before applying any
+                            case validateAllHunks lines' hunks of
+                                Left err -> do
+                                    runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
+                                    pure $ Left $ PatchValidationError err
+                                Right validHunks -> do
+                                    -- Apply hunks bottom-to-top (descending line order)
+                                    -- to avoid line number shifts affecting other hunks
+                                    let sortedHunks = sortOn (negate . hunkOldStart) validHunks
+                                    let newLines = foldl (flip applyHunk) lines' sortedHunks
+
+                                    -- Count changes
+                                    let linesChanged = sum $ map hunkChangeCount validHunks
+
+                                    -- Write result
+                                    writeResult <- try $ do
+                                        Text.writeFile filePath (Text.unlines newLines)
+
+                                    case writeResult of
+                                        Left (e :: SomeException) -> do
+                                            let err = PermissionError $ Text.pack $ show e
+                                            runTracer tracer (DeveloperToolErrorTrace "patch-file" $ Text.pack $ show e)
+                                            pure $ Left err
+                                        Right () -> do
+                                            let applied = length validHunks
+                                            runTracer tracer (PatchFileCompletedTrace filePath applied 0)
+
+                                            pure $
+                                                Right $
+                                                    PatchResult
+                                                        { patchFilePath = filePath
+                                                        , patchHunksApplied = applied
+                                                        , patchHunksRejected = 0
+                                                        , patchLinesChanged = linesChanged
+                                                        }
+  where
+    hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
+
+-- | Validate all hunks, returning the first error or the list of valid hunks.
+validateAllHunks :: [Text] -> [Hunk] -> Either PatchError [Hunk]
+validateAllHunks fileLines hunks = do
+    -- First, check for overlapping hunks
+    case findOverlappingHunks hunks of
+        Just (h1, h2) -> Left $ PatchHunkOverlap (hunkOldStart h1) (hunkOldStart h2)
+        Nothing -> do
+            -- Then validate each hunk individually
+            mapM (validateHunk fileLines) hunks
+
+-- | Find any overlapping hunks in the list.
+findOverlappingHunks :: [Hunk] -> Maybe (Hunk, Hunk)
+findOverlappingHunks [] = Nothing
+findOverlappingHunks [_] = Nothing
+findOverlappingHunks (h : hs) =
+    let hEnd = hunkOldStart h + hunkOldCount h
+     in case find (\h' -> hunkOldStart h' < hEnd && hunkOldStart h' >= hunkOldStart h) hs of
+            Just overlap -> Just (h, overlap)
+            Nothing -> findOverlappingHunks hs
+
+{- | Validate a single hunk against the file content.
+Checks that context lines match exactly.
+-}
+validateHunk :: [Text] -> Hunk -> Either PatchError Hunk
+validateHunk fileLines hunk = do
+    -- Validate line numbers are in range
+    let totalLines = length fileLines
+    when (hunkOldStart hunk < 1) $ Left $ PatchInvalidLineNumber (hunkOldStart hunk)
+    when (hunkOldStart hunk > totalLines && hunkOldCount hunk > 0) $
+        Left $
+            PatchInvalidLineNumber (hunkOldStart hunk)
+
+    -- Check context before matches
+    let contextBeforeStart = hunkOldStart hunk - length (hunkContextBefore hunk)
+    let expectedContextBefore =
+            if contextBeforeStart < 1
+                then drop (1 - contextBeforeStart) (hunkContextBefore hunk)
+                else hunkContextBefore hunk
+    let actualContextBefore =
+            take (length expectedContextBefore) $
+                drop (max 0 (contextBeforeStart - 1)) fileLines
+
+    when (expectedContextBefore /= actualContextBefore) $
+        Left $
+            PatchContextMismatch (hunkOldStart hunk) "Context before hunk doesn't match"
+
+    -- Check removed lines match
+    let removedStart = hunkOldStart hunk - 1
+    let actualRemoved = take (hunkOldCount hunk) $ drop removedStart fileLines
+    when (hunkRemovedLines hunk /= actualRemoved) $
+        Left $
+            PatchContextMismatch (hunkOldStart hunk) "Removed lines don't match"
+
+    -- Check context after matches
+    let contextAfterStart = hunkOldStart hunk + hunkOldCount hunk
+    let expectedContextAfter = hunkContextAfter hunk
+    let actualContextAfter = take (length expectedContextAfter) $ drop (contextAfterStart - 1) fileLines
+
+    when (expectedContextAfter /= actualContextAfter) $
+        Left $
+            PatchContextMismatch contextAfterStart "Context after hunk doesn't match"
+
+    Right hunk
+
+{- | Apply a hunk to the file lines.
+Assumes the hunk has been validated and lines are 1-based.
+-}
+applyHunk :: Hunk -> [Text] -> [Text]
+applyHunk hunk lines' =
+    let startIdx = hunkOldStart hunk - 1
+        -- Everything before the hunk (including context before)
+        before = take (startIdx - length (hunkContextBefore hunk)) lines'
+        -- Context before + new lines + context after
+        newContent =
+            hunkContextBefore hunk ++ hunkAddedLines hunk ++ hunkContextAfter hunk
+        -- Everything after the hunk (skipping old removed lines)
+        afterStart = startIdx + hunkOldCount hunk + length (hunkContextAfter hunk)
+        after = drop afterStart lines'
+     in before ++ newContent ++ after
+
+{- | Parse a unified diff into a list of hunks.
+
+The parser handles standard unified diff format:
+* File headers (--- and +++ lines) are ignored
+* Hunk headers start with @@
+* Context lines have no prefix
+* Removed lines start with -
+* Added lines start with +
+
+Returns Left with parse error or Right with list of hunks.
+-}
+parseUnifiedDiff :: Text -> Either PatchError [Hunk]
+parseUnifiedDiff patchText =
+    let allLines = Text.lines patchText
+        -- Skip header lines (---, +++, empty lines at start)
+        nonHeaderLines = dropWhile isHeaderLine allLines
+     in parseHunks nonHeaderLines
+  where
+    isHeaderLine line =
+        Text.isPrefixOf "---" line
+            || Text.isPrefixOf "+++" line
+            || Text.null (Text.strip line)
+
+    parseHunks [] = Right []
+    parseHunks lines' =
+        case parseHunk lines' of
+            Left err -> Left err
+            Right (hunk, rest) ->
+                case parseHunks rest of
+                    Left err -> Left err
+                    Right hunks -> Right (hunk : hunks)
+
+{- | Parse a single hunk from the diff lines.
+Returns the parsed hunk and the remaining lines.
+-}
+parseHunk :: [Text] -> Either PatchError (Hunk, [Text])
+parseHunk [] = Left $ PatchParseError "Unexpected end of patch, expected hunk header"
+parseHunk (line : rest)
+    | Text.isPrefixOf "@@" line = do
+        -- Parse hunk header: @@ -start,count +start,count @@
+        (oldStart, oldCount, newStart, newCount) <- parseHunkHeader line
+        -- Parse the hunk body
+        parseHunkBody oldStart oldCount newStart newCount [] [] [] [] rest
+    | otherwise =
+        -- Skip non-hunk lines (could be file names, etc.)
+        parseHunk rest
+
+{- | Parse hunk header line.
+Format: @@ -oldStart,oldCount +newStart,newCount @@
+Or: @@ -oldStart +newStart @@ (when count is 1)
+-}
+parseHunkHeader :: Text -> Either PatchError (Int, Int, Int, Int)
+parseHunkHeader line =
+    let stripped = Text.strip line
+     in case Text.stripPrefix "@@ " stripped of
+            Nothing -> Left $ PatchParseError $ "Invalid hunk header: " <> line
+            Just afterAt ->
+                case Text.stripSuffix " @@" afterAt of
+                    Nothing -> Left $ PatchParseError $ "Invalid hunk header (missing @@ suffix): " <> line
+                    Just content -> parseHeaderContent content
+  where
+    parseHeaderContent content =
+        let parts = Text.words content
+         in case parts of
+                (oldPart : newPart : _) -> do
+                    (oldStart, oldCount) <- parseHunkRangePart oldPart '-'
+                    (newStart, newCount) <- parseHunkRangePart newPart '+'
+                    Right (oldStart, oldCount, newStart, newCount)
+                _ -> Left $ PatchParseError $ "Invalid hunk header content: " <> content
+
+    parseHunkRangePart part prefix =
+        case Text.stripPrefix (Text.singleton prefix) part of
+            Nothing -> Left $ PatchParseError $ "Expected " <> Text.singleton prefix <> " prefix in: " <> part
+            Just rangeStr ->
+                let rangeParts = Text.splitOn "," rangeStr
+                 in case rangeParts of
+                        [start] -> case readInt start of
+                            Just s -> Right (s, 1)
+                            Nothing -> Left $ PatchParseError $ "Invalid line number: " <> start
+                        [start, count] -> case (readInt start, readInt count) of
+                            (Just s, Just c) -> Right (s, c)
+                            _ -> Left $ PatchParseError $ "Invalid range: " <> rangeStr
+                        _ -> Left $ PatchParseError $ "Invalid range format: " <> rangeStr
+
+    readInt txt =
+        let str = Text.unpack txt
+         in if all isDigit str && not (null str)
+                then Just (read str :: Int)
+                else Nothing
+
+{- | Parse the body of a hunk.
+Accumulates context lines and changed lines, switching between states.
+-}
+parseHunkBody ::
+    Int ->
+    Int ->
+    Int ->
+    Int ->
+    [Text] ->
+    [Text] ->
+    [Text] ->
+    [Text] ->
+    [Text] ->
+    Either PatchError (Hunk, [Text])
+parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAfter lines' =
+    case lines' of
+        [] ->
+            -- End of patch, create the hunk
+            let hunk =
+                    Hunk
+                        { hunkOldStart = oldStart
+                        , hunkOldCount = oldCount
+                        , hunkNewStart = newStart
+                        , hunkNewCount = newStart + length added - oldStart
+                        , hunkContextBefore = reverse ctxBefore
+                        , hunkRemovedLines = removed
+                        , hunkAddedLines = added
+                        , hunkContextAfter = reverse ctxAfter
+                        }
+             in Right (hunk, [])
+        (line : rest) ->
+            if Text.isPrefixOf "@@" line
+                then
+                    -- Next hunk starts, finalize current hunk
+                    let hunk =
+                            Hunk
+                                { hunkOldStart = oldStart
+                                , hunkOldCount = oldCount
+                                , hunkNewStart = newStart
+                                , hunkNewCount = newStart + length added - oldStart
+                                , hunkContextBefore = reverse ctxBefore
+                                , hunkRemovedLines = removed
+                                , hunkAddedLines = added
+                                , hunkContextAfter = reverse ctxAfter
+                                }
+                     in Right (hunk, lines')
+                else
+                    if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
+                        then
+                            -- Removed line
+                            let content = Text.drop 1 line
+                             in parseHunkBody
+                                    oldStart
+                                    oldCount
+                                    newStart
+                                    newStart
+                                    ctxBefore
+                                    (removed ++ [content])
+                                    added
+                                    []
+                                    rest
+                        else
+                            if Text.isPrefixOf "+" line && not (Text.isPrefixOf "+++" line)
+                                then
+                                    -- Added line
+                                    let content = Text.drop 1 line
+                                     in parseHunkBody
+                                            oldStart
+                                            oldCount
+                                            newStart
+                                            newStart
+                                            ctxBefore
+                                            removed
+                                            (added ++ [content])
+                                            []
+                                            rest
+                                else
+                                    -- Context line (unchanged)
+                                    let stripped = line
+                                     in if null removed && null added
+                                            then
+                                                -- Still in context before section
+                                                parseHunkBody
+                                                    oldStart
+                                                    oldCount
+                                                    newStart
+                                                    newStart
+                                                    (stripped : ctxBefore)
+                                                    removed
+                                                    added
+                                                    ctxAfter
+                                                    rest
+                                            else
+                                                -- In context after section
+                                                parseHunkBody
+                                                    oldStart
+                                                    oldCount
+                                                    newStart
+                                                    newStart
+                                                    ctxBefore
+                                                    removed
+                                                    added
+                                                    (stripped : ctxAfter)
+                                                    rest
 
 -------------------------------------------------------------------------------
 -- Range Parsing
@@ -1496,6 +1960,7 @@ defaultDeveloperToolboxDescription =
                 , DevToolCreateTool
                 , DevToolReadFileRange
                 , DevToolWriteFileRange
+                , DevToolPatchFile
                 ]
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             }
