@@ -241,4 +241,3 @@ handlePaths opts configDir agentFiles apiKeysFile sessionStore = do
         PathsOutputHuman -> Text.putStrLn $ formatPathsHuman pathsInfo
 
     exitSuccess
-

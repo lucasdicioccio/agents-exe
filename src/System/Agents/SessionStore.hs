@@ -89,12 +89,14 @@ in 'sessionReadPrefixes' having the highest priority.
 -}
 data SessionStore = SessionStore
     { sessionWritePrefix :: FilePath
-    -- ^ Directory where new sessions are written.
-    -- This path is used for all write operations.
+    {- ^ Directory where new sessions are written.
+    This path is used for all write operations.
+    -}
     , sessionReadPrefixes :: [FilePath]
-    -- ^ Directories to search for existing sessions, in priority order.
-    -- Earlier locations take precedence when the same session ID exists
-    -- in multiple locations.
+    {- ^ Directories to search for existing sessions, in priority order.
+    Earlier locations take precedence when the same session ID exists
+    in multiple locations.
+    -}
     }
     deriving (Show, Eq)
 
@@ -273,8 +275,9 @@ storeSessionToFile sess path = do
 -- Session Storage Operations
 -------------------------------------------------------------------------------
 
--- | Store a session to disk at the appropriate path for the given ConversationId.
--- Always writes to the 'sessionWritePrefix' location.
+{- | Store a session to disk at the appropriate path for the given ConversationId.
+Always writes to the 'sessionWritePrefix' location.
+-}
 storeSession :: SessionStore -> ConversationId -> Session -> IO ()
 storeSession store convId sess =
     storeSessionToFile sess (sessionWritePath store convId)
@@ -385,7 +388,7 @@ findSessionFiles store = do
 The first occurrence of each key is kept, subsequent duplicates are discarded.
 This maintains the priority order of the input list.
 -}
-dedupeBy :: Eq k => (a -> k) -> [a] -> [a]
+dedupeBy :: (Eq k) => (a -> k) -> [a] -> [a]
 dedupeBy keyFn = foldl' addItem []
   where
     addItem acc item =
@@ -412,4 +415,3 @@ listSessions store = do
     sessionFiles <- findSessionFiles store
     -- Load each session file (locked/inaccessible files will return Nothing)
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sessionFiles
-
