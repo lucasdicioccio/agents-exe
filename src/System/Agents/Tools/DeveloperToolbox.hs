@@ -98,8 +98,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Text.IO as Text
-import System.Directory (Permissions (..), createDirectoryIfMissing, doesFileExist, getPermissions, setPermissions)
+import System.Directory (Permissions (..), createDirectoryIfMissing, doesFileExist, getPermissions, removeFile, renameFile, setPermissions)
 import System.FilePath (takeDirectory)
+import System.IO (hClose, hPutStr)
+import System.IO.Temp (withTempFile)
 
 import Prod.Tracer (Tracer (..))
 
@@ -591,7 +593,7 @@ getCapabilityInfo DevToolReadFileRange =
     )
 getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
-    , "Replaces line ranges in a file with new content (use '---' to separate multiple ranges)"
+    , "Replaces specific lines in a file. Ranges are comma-separated line numbers or ranges (e.g., '2,5,8' or '1-3'). Takes a list of content blocks, where each block corresponds to one range. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
     )
 getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
@@ -787,8 +789,8 @@ The parser handles standard unified diff format:
 * File headers (--- and +++ lines) are ignored
 * Hunk headers start with @@
 * Context lines have no prefix
-* Removed lines start with -
-* Added lines start with +
+* Removed lines (- prefix)
+* Added lines (+ prefix)
 
 Returns Left with parse error or Right with list of hunks.
 -}
@@ -915,7 +917,7 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                 , hunkRemovedLines = removed
                                 , hunkAddedLines = added
                                 , hunkContextAfter = reverse ctxAfter
-                                }
+                        }
                      in Right (hunk, lines')
                 else
                     if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
@@ -1115,25 +1117,56 @@ formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
 
 {- | Execute write file range operation.
 
-Replaces line ranges in a file with new content. Multiple ranges are applied
-bottom-to-top so earlier line numbers stay valid. Content blocks for multiple
-ranges are separated by a line containing only "---".
+Replaces specific lines in a file with new content. Unlike bash-write-file which
+replaces the entire file, this capability allows surgical line-by-line modifications.
 
 Parameters:
 - path: Path to the file to modify
-- ranges: Comma-separated ranges (e.g., "1-10", "5", "head", "tail")
-- content: Replacement text (or multiple blocks separated by "---")
+- ranges: Comma-separated line numbers (e.g., "2,5,8" for lines 2, 5, and 8)
+          Each number represents a single line to replace, or use ranges like "1-3".
+- contentBlocks: List of content blocks, where each block corresponds to one range.
+                 Use empty blocks to delete lines. Each block is treated as the
+                 replacement content for its corresponding range.
+
+Examples:
+
+1. Replace single line:
+   ranges="5", contentBlocks=["new content for line 5"]
+
+2. Replace multiple lines:
+   ranges="2,5,8"
+   contentBlocks=["replace line 2", "replace line 5", "replace line 8"]
+
+3. Delete lines (empty content blocks):
+   ranges="3,7"
+   contentBlocks=["", ""]
+   This deletes lines 3 and 7.
+
+4. Replace ranges with multi-line content:
+   ranges="1-2,5-6"
+   contentBlocks=["new line 1\nnew line 2", "new line 5\nnew line 6"]
+
+Processing:
+- Ranges are sorted and processed in ascending order (top-to-bottom)
+- Position tracking automatically adjusts for line count changes after each edit
+- If a range becomes out-of-bounds due to previous deletions, it's skipped
 
 Returns Right with WriteFileRangeResult on success, Left with error on failure.
+
+Note: For complex multi-line edits or when context validation is needed,
+consider using patch-file instead, which provides atomic operations with
+unified diff format.
 -}
 executeWriteFileRange ::
     Tracer IO Trace ->
     Toolbox ->
     FilePath ->
+    -- | Comma-separated line ranges (e.g., "1-3,5,7-9")
     Text ->
-    Text ->
+    -- | List of content blocks, one per range
+    [Text] ->
     IO (Either DeveloperToolError WriteFileRangeResult)
-executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
+executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
     if DevToolWriteFileRange `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "write-file-range"
         else do
@@ -1143,21 +1176,22 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
             case parseRanges rangesTxt of
                 Left err -> pure $ Left err
                 Right ranges -> do
-                    -- Split content by "---" separator
-                    -- NOTE: We do NOT strip whitespace from content blocks to preserve
-                    -- indentation. This is intentional - stripping would corrupt code.
-                    let contentBlocks = Text.splitOn "---" contentTxt
-
-                    if length contentBlocks /= length ranges && length ranges > 1
+                    -- Expand consecutive ranges so each line gets its own content block
+                    let expandedPairs = expandRangeContentPairs ranges (if null contentBlocks then [""] else contentBlocks)
+                    
+                    -- Validate that number of content blocks matches total lines after expansion
+                    let totalLinesInRanges = countTotalLines ranges
+                    let totalContentBlocks = length expandedPairs
+                    if totalContentBlocks /= totalLinesInRanges && totalLinesInRanges > 1
                         then
                             pure $
                                 Left $
                                     InvalidRangeError $
                                         "Number of content blocks ("
-                                            <> Text.pack (show $ length contentBlocks)
-                                            <> ") must match number of ranges ("
-                                            <> Text.pack (show $ length ranges)
-                                            <> "). Use '---' to separate blocks."
+                                            <> Text.pack (show totalContentBlocks)
+                                            <> ") must match total lines in ranges ("
+                                            <> Text.pack (show totalLinesInRanges)
+                                            <> ")"
                         else do
                             -- Check if file exists
                             fileExists <- doesFileExist filePath
@@ -1176,14 +1210,13 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
 
                                     let existingLines = Text.lines existingContent
 
-                                    -- Pair ranges with content blocks
-                                    let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
+                                    -- Sort by start line in ascending order (top-to-bottom)
+                                    -- This is crucial for correct position tracking
+                                    let sortedPairs = sortOn rangeStartKey expandedPairs
 
-                                    -- Sort by start line in descending order (bottom-to-top)
-                                    let sortedPairs = sortOn (negate . rangeStartKey) rangeContentPairs
-
-                                    -- Apply each range replacement
-                                    let finalLines = foldl (applyRangeReplacement existingLines) existingLines sortedPairs
+                                    -- Apply edits sequentially with position tracking
+                                    -- foldl' passes (currentLines, offset) through each edit
+                                    let (finalLines, _) = foldl (applyRangeEdit existingLines) (existingLines, 0) sortedPairs
 
                                     -- Preserve trailing newline if original had one
                                     let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
@@ -1192,10 +1225,10 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                                 then Text.unlines finalLines
                                                 else Text.unlines finalLines
 
-                                    -- Write result
+                                    -- Write result atomically using a temp file
                                     writeResult <- try $ do
                                         createDirectoryIfMissing True (takeDirectory filePath)
-                                        Text.writeFile filePath output
+                                        writeFileAtomic filePath output
 
                                     case writeResult of
                                         Left (e :: SomeException) -> do
@@ -1204,7 +1237,7 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
                                             pure $ Left err
                                         Right () -> do
                                             let rangesModified = length ranges
-                                            let linesWritten = length $ Text.lines contentTxt
+                                            let linesWritten = sum $ map (length . Text.lines) contentBlocks
 
                                             runTracer tracer (WriteFileRangeCompletedTrace filePath rangesModified linesWritten)
 
@@ -1220,29 +1253,91 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentTxt = do
     isHeadOrTail Tail = True
     isHeadOrTail _ = False
 
-    -- Get sort key for range (for bottom-to-top ordering)
+    -- Count total lines spanned by all ranges (excluding head/tail)
+    countTotalLines :: [RangeSpec] -> Int
+    countTotalLines = sum . map countLinesInRange
+      where
+        countLinesInRange Head = 0
+        countLinesInRange Tail = 0
+        countLinesInRange (Lines (start, end)) = end - start + 1
+
+    -- Expand range-content pairs so that consecutive ranges produce individual line entries
+    -- Each line in a multi-line range gets the same content block
+    expandRangeContentPairs :: [RangeSpec] -> [Text] -> [(RangeSpec, Text)]
+    expandRangeContentPairs [] _ = []
+    expandRangeContentPairs _ [] = []
+    expandRangeContentPairs (Head : rs) (c : cs) = (Head, c) : expandRangeContentPairs rs cs
+    expandRangeContentPairs (Tail : rs) (c : cs) = (Tail, c) : expandRangeContentPairs rs cs
+    expandRangeContentPairs (Lines (s, e) : rs) (c : cs)
+        | s == e = (Lines (s, s), c) : expandRangeContentPairs rs cs
+        | otherwise = 
+            -- Expand multi-line range: each line gets the same content
+            map (\n -> (Lines (n, n), c)) [s..e] ++ expandRangeContentPairs rs cs
+
+    -- Get sort key for range (for top-to-bottom ordering)
+    -- Head comes first (0), then line numbers, Tail comes last (maxBound)
     rangeStartKey :: (RangeSpec, Text) -> Int
     rangeStartKey (Head, _) = 0
     rangeStartKey (Lines (n, _), _) = n
     rangeStartKey (Tail, _) = maxBound
 
--- | Apply a range replacement to the lines.
-applyRangeReplacement :: [Text] -> [Text] -> (RangeSpec, Text) -> [Text]
-applyRangeReplacement originalLines currentLines (range, content) =
-    let newLines = Text.lines content
-     in case range of
-            Head -> newLines ++ currentLines
-            Tail -> currentLines ++ newLines
-            Lines (start, end) ->
-                let totalLines = length originalLines
-                    actualStart = max 1 start
-                    actualEnd = min end totalLines
-                 in if actualStart > actualEnd || actualStart > length currentLines
-                        then currentLines
-                        else
-                            let before = take (actualStart - 1) currentLines
-                                after = drop actualEnd currentLines
-                             in before ++ newLines ++ after
+    -- Apply a single range edit with position tracking
+    -- Takes the original file lines (for bounds checking), current state (lines, offset),
+    -- and the edit to apply. Returns the new state (updated lines, updated offset).
+    applyRangeEdit ::
+        [Text] ->
+        ([Text], Int) ->
+        (RangeSpec, Text) ->
+        ([Text], Int)
+    applyRangeEdit _originalLines (currentLines, offset) (range, content) =
+        let newLines = Text.lines content
+         in case range of
+                Head ->
+                    -- Prepend content: offset increases by number of lines added
+                    let newOffset = offset + length newLines
+                     in (newLines ++ currentLines, newOffset)
+                Tail ->
+                    -- Append content: offset increases by number of lines added
+                    -- (though subsequent Tail edits would be unusual)
+                    let newOffset = offset + length newLines
+                     in (currentLines ++ newLines, newOffset)
+                Lines (originalStart, originalEnd) ->
+                    -- Adjust positions based on running offset
+                    let adjustedStart = originalStart + offset
+                        adjustedEnd = originalEnd + offset
+                        -- Clamp to current file bounds
+                        actualStart = max 1 adjustedStart
+                        actualEnd = min adjustedEnd (length currentLines)
+                     in if actualStart > actualEnd || actualStart > length currentLines
+                            then -- Range is out of bounds after adjustment, skip
+                                (currentLines, offset)
+                            else
+                                let before = take (actualStart - 1) currentLines
+                                    after = drop actualEnd currentLines
+                                    linesRemoved = actualEnd - actualStart + 1
+                                    linesAdded = length newLines
+                                    newOffset = offset + (linesAdded - linesRemoved)
+                                 in (before ++ newLines ++ after, newOffset)
+
+{- | Write a file atomically by writing to a temp file and renaming.
+This ensures that readers never see a partially-written file.
+-}
+writeFileAtomic :: FilePath -> Text -> IO ()
+writeFileAtomic filePath content = do
+    let dir = takeDirectory filePath
+    -- Use a temp file in the same directory for atomic rename
+    withTempFile dir ".write-file-range-tmp-" $ \tmpPath tmpHandle -> do
+        hPutStr tmpHandle (Text.unpack content)
+        hClose tmpHandle
+        -- Atomic rename on POSIX systems
+        renameFileOverwrite tmpPath filePath
+  where
+    -- Cross-platform file rename that overwrites existing file
+    renameFileOverwrite :: FilePath -> FilePath -> IO ()
+    renameFileOverwrite src dst = do
+        dstExists <- doesFileExist dst
+        when dstExists $ removeFile dst
+        renameFile src dst
 
 -------------------------------------------------------------------------------
 -- Tool Execution - Validation
@@ -1713,7 +1808,7 @@ makeBashToolTemplateFromConfig config =
         , ""
         , "# " <> toolConfigSlug config <> " - " <> toolConfigDescription config
         , ""
-        , "if [ \"$1\" == \"describe\" ]; then"
+        , descLine
         , "    cat <<'EOF'"
         , "{"
         , "  \"slug\": \"" <> toolConfigSlug config <> "\","
@@ -1733,9 +1828,13 @@ makeBashToolTemplateFromConfig config =
             ++ parseArgsCode (toolConfigArgs config)
             ++ [ ""
                , "# Main logic here"
-               , "echo \"Tool " <> toolConfigSlug config <> " executed\""
+               , execLine
                ]
   where
+    -- Build the if statement line properly without escaping issues
+    descLine = "if [ \"" <> "$" <> "1\" == \"describe\" ]; then"
+    execLine = "echo \"Tool " <> toolConfigSlug config <> " executed\""
+
     formatArgs [] = ["  "]
     formatArgs args =
         let formatted = zipWith (formatArg (length args)) [0 ..] args
@@ -1784,10 +1883,10 @@ makeBashToolTemplateFromConfig config =
                     ]
                 "dashdashequal" ->
                     [ varName <> "=\"\""
-                    , "while [[ $# -gt 0 ]]; do"
-                    , "    case $1 in"
+                    , "while [[ " <> "$" <> "# -gt 0 ]]; do"
+                    , "    case " <> "$" <> "1 in"
                     , "        " <> argFlag <> "=*)"
-                    , "            " <> varName <> "=\"${1#*=}\""
+                    , "            " <> varName <> "=\"${" <> "1#*=}\""
                     , "            shift"
                     , "            ;;"
                     , "        *)"
@@ -1799,10 +1898,10 @@ makeBashToolTemplateFromConfig config =
                 _ ->
                     -- dashdashspace (default)
                     [ varName <> "=\"\""
-                    , "while [[ $# -gt 0 ]]; do"
-                    , "    case $1 in"
+                    , "while [[ " <> "$" <> "# -gt 0 ]]; do"
+                    , "    case " <> "$" <> "1 in"
                     , "        " <> argFlag <> ")"
-                    , "            " <> varName <> "=\"$2\""
+                    , "            " <> varName <> "=\"" <> "$" <> "2\""
                     , "            shift 2"
                     , "            ;;"
                     , "        *)"
@@ -2058,7 +2157,7 @@ makeBashToolTemplate toolSlug =
         , ""
         , "# " <> toolSlug <> " - Tool description here"
         , ""
-        , "if [ \"$1\" == \"describe\" ]; then"
+        , descLine
         , "    cat <<'EOF'"
         , "{"
         , "  \"slug\": \"" <> toolSlug <> "\","
@@ -2081,10 +2180,10 @@ makeBashToolTemplate toolSlug =
         , ""
         , "# Parse arguments for 'run' command"
         , "EXAMPLE_ARG=\"\""
-        , "while [[ $# -gt 0 ]]; do"
-        , "    case $1 in"
+        , whileLine
+        , "    case " <> "$" <> "1 in"
         , "        --example-arg)"
-        , "            EXAMPLE_ARG=\"$2\""
+        , "            EXAMPLE_ARG=\"" <> "$" <> "2\""
         , "            shift 2"
         , "            ;;"
         , "        *)"
@@ -2094,8 +2193,12 @@ makeBashToolTemplate toolSlug =
         , "done"
         , ""
         , "# Main logic here"
-        , "echo \"Tool " <> toolSlug <> " executed with: $EXAMPLE_ARG\""
+        , execLine
         ]
+  where
+    descLine = "if [ \"" <> "$" <> "1\" == \"describe\" ]; then"
+    whileLine = "while [[ " <> "$" <> "# -gt 0 ]]; do"
+    execLine = "echo \"Tool " <> toolSlug <> " executed with: " <> "$" <> "EXAMPLE_ARG\""
 
 -- | Create a Python tool template
 makePythonToolTemplate :: Text -> Text
@@ -2313,3 +2416,4 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
+

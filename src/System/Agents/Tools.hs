@@ -359,7 +359,9 @@ executeDeveloperCapability tracer box cap params = case cap of
                         let content = case KeyMap.lookup (AesonKey.fromText "content") params of
                                 Just (Aeson.String c) -> c
                                 _ -> ""
-                        result <- DeveloperTools.executeWriteFileRange (contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges content
+                        -- Split content on '---' separator to get list of content blocks
+                        let contentBlocks = Text.splitOn "---" content
+                        result <- DeveloperTools.executeWriteFileRange (contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
@@ -425,3 +427,4 @@ ioTool script =
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
+

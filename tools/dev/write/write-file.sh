@@ -6,11 +6,11 @@ if [[ "$1" == "describe" ]]; then
     cat << 'EOF'
 {
     "slug": "write-file",
-    "description": "Write content to a file. Optionally compiles or tests the code after writing. Use 'none' for the check action when making multiple edits that are not yet final, to avoid redundant compilation.",
+    "description": "Write full content to a file. Optionally compiles or tests the code after writing. Use 'none' for the check action when making multiple edits that are not yet final, to avoid redundant compilation.",
     "args": [
         {
             "name": "filepath",
-            "description": "The path to the file to write",
+            "description": "The path to the file to write, the file is entirely rewritten.",
             "type": "string",
             "backing_type": "string",
             "arity": "single",
