@@ -4,7 +4,7 @@ if [[ "$1" == "describe" ]]; then
     cat << 'EOF'
 {
     "slug": "read-file",
-    "description": "Read the contents of a file",
+    "description": "Read the contents of a file. Returns a special marker '(empty file)' when the file is empty.",
     "args": [
         {
             "name": "filepath",
@@ -29,8 +29,12 @@ if [[ "$1" == "run" ]]; then
         echo "Error: file not found: $2"
         exit 1
     fi
-    echo "----"
-    cat "$2"
+    # Output content or special marker for empty files
+    if [[ -s "$2" ]]; then
+        cat "$2"
+    else
+        echo "(empty file)"
+    fi
     exit 0
 fi
 
