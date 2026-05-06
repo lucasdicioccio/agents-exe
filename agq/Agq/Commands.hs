@@ -569,8 +569,6 @@ execTask cfg conn t = do
     let agentArgs =
             [ "--agent-file"
             , agentCfg
-            , "--session-json-file-prefix"
-            , convDir <> "/"
             , "run"
             , "--session-file"
             , sessFile
