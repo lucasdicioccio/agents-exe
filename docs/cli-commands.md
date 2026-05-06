@@ -18,7 +18,6 @@ agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS]
 | `--log-file FILE` | `agents-logfile` | Raw log output file |
 | `--log-http URL` | - | HTTP endpoint for JSON logs |
 | `--log-json-file FILE` | - | Local JSON log file |
-| `--session-json-file-prefix PREFIX` | - | Prefix for session JSON files |
 
 ## Commands
 
@@ -569,20 +568,20 @@ agents-exe list-tool-calls session.json
 agents-exe replay-tool-call \
   --session session.json \
   --tool-call 0 \
-  --tool ./tools/bash/read-file.sh
+  --tool ./tools/read-file.sh
 
 # Only validate without executing
 agents-exe replay-tool-call \
   --session session.json \
   --tool-call 1 \
-  --tool ./tools/bash/grep-files.sh \
+  --tool ./tools/grep-files.sh \
   --validate-only
 
 # Execute and show raw output
 agents-exe replay-tool-call \
   --session session.json \
   --tool-call 2 \
-  --tool ./tools/bash/write-file.sh \
+  --tool ./tools/write-file.sh \
   --raw
 ```
 
@@ -946,7 +945,12 @@ agents-exe paths [OPTIONS]
 
 **Description:**
 Displays configuration paths including config directory, agent files, 
-API keys file, and session storage location.
+API keys file, and session storage configuration.
+
+**Session Storage:**
+The session storage configuration supports multiple read locations:
+- **Write location**: Where new sessions are saved
+- **Read locations**: Directories searched for existing sessions (includes write location by default)
 
 **Examples:**
 
@@ -956,6 +960,28 @@ agents-exe paths
 
 # JSON output
 agents-exe paths --json
+```
+
+**Example output:**
+```
+Configuration:
+  File: /home/user/project/agents-exe.cfg.json
+  Directory: /home/user/project
+  Default: /home/user/.config/agents-exe
+
+Agent Files:
+  - ./main-agent.json
+  - ./secondary-agent.json
+
+API Keys:
+  /home/user/.config/agents-exe/secret-keys
+
+Session Storage:
+  Write location: ./sessions/
+  Read locations:
+    1. ./sessions/
+    2. ./.agents-sessions/
+    3. ~/.config/agents-exe/sessions/
 ```
 
 ### export
@@ -1171,8 +1197,15 @@ Project-level configuration in `agents-exe.cfg.json`:
   "agentsLogs": {
     "logJsonHttpEndpoint": "http://localhost:8080/log",
     "logJsonPath": "./logs/agents.json",
-    "logRawPath": "./logs/agents.log",
-    "logSessionsJsonPrefix": "./sessions/session"
+    "logRawPath": "./logs/agents.log"
+  },
+  "sessions": {
+    "writeLocation": "./sessions/",
+    "readLocations": [
+      "./sessions/",
+      "./.agents-sessions/",
+      "~/.config/agents-exe/sessions/"
+    ]
   }
 }
 ```
@@ -1180,6 +1213,21 @@ Project-level configuration in `agents-exe.cfg.json`:
 **Search order:**
 1. Current directory
 2. Parent directories (upward search)
+
+### Sessions Configuration
+
+The `sessions` section configures multi-location session storage:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `writeLocation` | `FilePath` | Directory where new sessions are written |
+| `readLocations` | `[FilePath]` | Directories to search for existing sessions |
+
+**Key behaviors:**
+- **Deduplication**: First location in `readLocations` has highest priority for duplicate session IDs
+- **Auto-prepending**: If `writeLocation` is not in `readLocations`, it's automatically prepended
+- **Tilde expansion**: Paths like `~/.config/agents-exe/sessions/` are resolved to the user's home directory
+- **Backwards compatibility**: If `sessions` is not present, falls back to `agentsLogs.logSessionsJsonPrefix` (deprecated)
 
 ## Environment Variables
 
