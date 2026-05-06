@@ -63,12 +63,12 @@ module System.Agents.ToolRegistration (
     mapArg,
 ) where
 
-import Data.Foldable (toList)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64
+import Data.Foldable (toList)
 import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
@@ -1745,4 +1745,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-

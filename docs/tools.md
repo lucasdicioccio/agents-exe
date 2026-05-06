@@ -38,8 +38,8 @@ The framework supports multiple tool types:
 | **OpenAPI Tools** | REST APIs | API integrations |
 | **PostgREST Tools** | Database endpoints | Database queries |
 | **SQLite Tools** | SQLite databases | Local SQL queries |
-| **System Tools** | System information | Runtime context |
-| **Developer Tools** | Development utilities | Agent/tool scaffolding |
+| **System Tools** | System information | Runtime context and session introspection |
+| **Developer Tools** | Development utilities | Agent/tool scaffolding, file editing |
 | **IO Tools** | Haskell functions | In-process operations |
 | **Lua Tools** | Lua scripts | Embedded scripting |
 | **Skills** | Progressive disclosure | Procedural knowledge |
@@ -488,6 +488,10 @@ The System Toolbox provides agents with contextual information about the running
 | `process-info` | Process ID, parent PID, process name |
 | `uptime` | System uptime |
 | `attach-file` | Attach a file to the conversation |
+| `list-sessions` | List accessible sessions (requires session introspection config) |
+| `search-sessions` | Full-text search across sessions (requires session introspection config) |
+| `read-session` | Read session content (requires session introspection config) |
+| `get-session-stats` | Get session statistics (requires session introspection config) |
 
 ### Configuration
 
@@ -532,6 +536,163 @@ The `attach-file` capability allows the agent to attach files to the conversatio
 **Limits:**
 - Maximum file size: 50MB
 
+### Session Introspection Capabilities
+
+The System Toolbox supports session introspection capabilities that allow agents to query, search, and read other sessions from the session store. This enables cross-session analysis and context sharing.
+
+#### Session Introspection Scope
+
+Access control is managed through `SessionIntrospectionScope`:
+
+| Scope | Description |
+|-------|-------------|
+| `parents-only` | Can only see parent sessions (ancestors via forkedFromSessionId) |
+| `children-only` | Can only see child sessions (descendants) |
+| `subtree` | Parents + current + children (default) |
+| `all` | All sessions (requires explicit opt-in) |
+
+#### Configuration with Session Introspection
+
+```json
+{
+  "tag": "SystemToolbox",
+  "contents": {
+    "name": "system",
+    "description": "System information and session memory",
+    "capabilities": [
+      "date",
+      "hostname",
+      "list-sessions",
+      "search-sessions",
+      "read-session",
+      "get-session-stats"
+    ],
+    "sessionIntrospectionScope": "subtree",
+    "sessionIntrospectionMaxResults": 50,
+    "sessionIntrospectionIncludeToolOutputs": false
+  }
+}
+```
+
+#### list-sessions
+
+Lists accessible sessions based on the configured scope.
+
+**Input:**
+```json
+{
+  "capability": "list-sessions"
+}
+```
+
+**Output:**
+```json
+{
+  "sessions": [
+    {
+      "sessionId": "uuid",
+      "conversationId": "uuid",
+      "modificationTime": "2024-01-15T10:30:00Z",
+      "turnCount": 15,
+      "isParent": false,
+      "isChild": true,
+      "isLocked": false,
+      "status": "idle"
+    }
+  ],
+  "totalAccessible": 42
+}
+```
+
+#### search-sessions
+
+Performs full-text search across accessible sessions.
+
+**Input:**
+```json
+{
+  "capability": "search-sessions",
+  "query": "error handling pattern"
+}
+```
+
+**Output:**
+```json
+{
+  "query": "error handling pattern",
+  "results": [
+    {
+      "sessionId": "uuid",
+      "conversationId": "uuid",
+      "turnCount": 15,
+      "preview": "...context around match...",
+      "matchType": "content"
+    }
+  ],
+  "totalMatches": 5,
+  "scope": "subtree"
+}
+```
+
+#### read-session
+
+Reads session content with optional slicing and filtering.
+
+**Input:**
+```json
+{
+  "capability": "read-session",
+  "session_id": "target-session-uuid",
+  "take_n": 10,
+  "include_thinking": false,
+  "include_tool_responses": true
+}
+```
+
+**Parameters:**
+- `session_id` (string, required): Session UUID to read
+- `take_n` (number, optional): Take last N turns (alternative to offset/limit)
+- `drop_n` (number, optional): Drop first N turns
+- `offset` (number, optional): Starting turn index (0-based)
+- `limit` (number, optional): Max turns to return
+- `include_thinking` (boolean, optional): Include LLM thinking/reasoning (default: false)
+- `include_tool_responses` (boolean, optional): Include tool call responses (default: false)
+
+**Output:**
+```json
+{
+  "sessionId": "target-session-uuid",
+  "conversationId": "uuid",
+  "totalTurns": 25,
+  "returnedTurns": 10,
+  "content": "Turn 1: [User] ...\nTurn 2: [LLM] ...",
+  "format": "condensed-text",
+  "scope": "subtree",
+  "access": "granted"
+}
+```
+
+#### get-session-stats
+
+Returns aggregate statistics about accessible sessions.
+
+**Input:**
+```json
+{
+  "capability": "get-session-stats"
+}
+```
+
+**Output:**
+```json
+{
+  "totalSessions": 42,
+  "totalTurnsAcrossAllSessions": 850,
+  "scope": "subtree",
+  "note": "Use SessionPrint.calculateStatistics for detailed per-session stats"
+}
+```
+
 ### Configuration Fields
 
 | Field | Type | Description |
@@ -540,10 +701,15 @@ The `attach-file` capability allows the agent to attach files to the conversatio
 | `description` | string | Human-readable description |
 | `capabilities` | [string] | List of enabled capabilities |
 | `envVarFilter` | string? | Optional substring filter for env vars |
+| `sessionIntrospectionScope` | string? | Scope of accessible sessions (default: "subtree") |
+| `sessionIntrospectionMaxResults` | number? | Max sessions to return (default: 50) |
+| `sessionIntrospectionIncludeToolOutputs` | boolean? | Include tool outputs in read operations (default: true) |
 
 ### Security Considerations
 
 - **Capability-based access**: Only enabled capabilities are exposed
+- **Session scope enforcement**: Strict access control via `SessionIntrospectionScope`
+- **ScopeAll requires explicit opt-in**: Must be explicitly configured, never default
 - **Env var filtering**: Use `envVarFilter` to limit variable exposure
 - **Read-only**: System tools gather information but cannot modify the system
 - **Linux-focused**: Initial implementation targets Linux systems
@@ -553,6 +719,7 @@ The `attach-file` capability allows the agent to attach files to the conversatio
 The system toolbox exposes a single tool named `system_{name}_system_info` with:
 
 - **Parameter**: `capability` (string) - Which system info to retrieve
+- **Additional parameters**: Vary by capability (see individual capability documentation)
 - **Returns**: JSON object with the requested information
 
 Example tool call:
@@ -590,6 +757,7 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
 | `show-spec` | Displays specification documentation |
 | `read-file-range` | Reads specific line ranges from a file |
 | `write-file-range` | Replaces line ranges in a file with new content |
+| `patch-file` | Applies a unified diff patch to a file |
 
 ### Configuration
 
@@ -601,7 +769,7 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range"]
+        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"]
       }
     }
   ]
@@ -745,44 +913,79 @@ The content includes line numbers prepended with a tab separator in the format `
 
 #### write-file-range
 
-Replaces line ranges in a file with new content. Multiple ranges can be modified in a single call.
+Replaces specific lines in a file with new content. Supports multiple ranges processed sequentially with position tracking.
 
 **Parameters:**
 ```json
 {
   "capability": "write-file-range",
   "path": "/path/to/file",
-  "ranges": "head,5-10,tail",
-  "content": "# New header\n---\n# Replaced middle\n---\n# New footer"
+  "ranges": "1-2,5-6",
+  "contentBlocks": ["new content for lines 1-2", "new content for lines 5-6"]
 }
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to modify |
-| `ranges` | string | Yes | Comma-separated ranges (e.g., `"1-10"`, `"5"`, `"head"`, `"tail"`, `"head,5-10,tail"`) |
-| `content` | string | Yes | Replacement text. Use `'---'` to separate multiple ranges. |
+| `ranges` | string | Yes | Comma-separated line numbers or ranges (e.g., `"2,5,8"` or `"1-3,7-9"`) |
+| `contentBlocks` | array[string] | Yes | Array of content blocks, one per range. Use empty strings to delete lines. |
 
 **Range Formats:**
 - Single line: `"5"` - Replaces line 5
 - Line range: `"1-10"` - Replaces lines 1 through 10
-- Multiple ranges: `"1-5,20-30"` - Replaces two separate ranges
+- Multiple ranges: `"1-5,20-30"` - Replaces multiple separate ranges
 - Head: `"head"` - Prepends content before line 1
 - Tail: `"tail"` - Appends content after last line
 
-**Multiple Ranges with Content Blocks:**
-When modifying multiple ranges, separate content blocks with a line containing only `---`:
+**Processing:**
+- Ranges are processed in **ascending order** (top-to-bottom)
+- Each edit's line numbers are adjusted by the running offset from previous edits
+- Position tracking ensures correct line targeting when adding/removing lines
+- File is written atomically (temp file + rename)
+
+**Examples:**
 
 ```json
+// Replace single line
 {
   "capability": "write-file-range",
-  "path": "/path/to/file",
-  "ranges": "1-3,10-12",
-  "content": "// New lines 1-3\n// replacement content\n// end of block 1\n---\n// New lines 10-12\n// replacement content\n// end of block 2"
+  "path": "File.hs",
+  "ranges": "5",
+  "contentBlocks": ["new content for line 5"]
+}
+
+// Replace multiple individual lines
+{
+  "capability": "write-file-range",
+  "path": "File.hs",
+  "ranges": "2,5,8",
+  "contentBlocks": [
+    "replace line 2",
+    "replace line 5",
+    "replace line 8"
+  ]
+}
+
+// Delete lines (empty content blocks)
+{
+  "capability": "write-file-range",
+  "path": "File.hs",
+  "ranges": "3,7",
+  "contentBlocks": ["", ""]
+}
+
+// Replace ranges with multi-line content
+{
+  "capability": "write-file-range",
+  "path": "File.hs",
+  "ranges": "1-2,5-6",
+  "contentBlocks": [
+    "new line 1\nnew line 2",
+    "new line 5\nnew line 6"
+  ]
 }
 ```
-
-**Important:** Ranges are applied bottom-to-top so earlier line numbers stay valid during the operation.
 
 **Returns:**
 ```json
@@ -797,12 +1000,61 @@ When modifying multiple ranges, separate content blocks with a line containing o
 - **Preserves trailing newline:** If the original file ends with a newline, the output will too
 - **Creates file for head/tail:** If file doesn't exist and using `head` or `tail`, creates the file
 - **Error for missing file:** Returns error if file doesn't exist for non-head/tail operations
-- **Bottom-to-top application:** Multiple ranges are processed in reverse order to maintain line number validity
+- **Sequential processing:** Multiple ranges are processed top-to-bottom with automatic position adjustment
 
 **Error Responses:**
 ```json
 {
-  "error": "Number of content blocks (1) must match number of ranges (2). Use '---' to separate blocks."
+  "error": "Number of content blocks (1) must match total lines in ranges (2)"
+}
+```
+
+#### patch-file
+
+Applies a unified diff patch to a file atomically with context validation.
+
+**Parameters:**
+```json
+{
+  "capability": "patch-file",
+  "path": "/path/to/file",
+  "patch": "--- a/src/File.hs\n+++ b/src/File.hs\n@@ -10,5 +10,6 @@ import Foo\n+import Data.Text (Text)\n@@ -100,5 +101,5 @@ func1 x =\n-  oldBody\n+  newBody"
+}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Path to the file to patch |
+| `patch` | string | Yes | Unified diff patch content |
+
+**Patch Format:**
+Follows standard unified diff format:
+- File headers (`---` and `+++` lines) are ignored
+- Hunk headers start with `@@` (e.g., `@@ -10,5 +11,6 @@`)
+- Context lines have no prefix
+- Removed lines start with `-`
+- Added lines start with `+`
+
+**Features:**
+- **Atomic application:** All hunks are validated before any changes are applied
+- **Context validation:** Each hunk's context lines must match exactly
+- **Overlap detection:** Hunks that would overlap are rejected
+- **Bottom-to-top application:** Hunks are applied in descending line order to avoid line number shifts
+
+**Returns:**
+```json
+{
+  "path": "/path/to/file",
+  "hunksApplied": 2,
+  "hunksRejected": 0,
+  "linesChanged": 3
+}
+```
+
+**Error Responses:**
+```json
+{
+  "error": "Context mismatch at line 100: Context before hunk doesn't match"
 }
 ```
 
@@ -828,6 +1080,14 @@ data WriteFileRangeResult = WriteFileRangeResult
     { writeFilePath :: FilePath
     , writeFileRangesModified :: Int
     , writeFileLinesWritten :: Int
+    }
+
+-- | Result of a patch file operation.
+data PatchResult = PatchResult
+    { patchFilePath :: FilePath
+    , patchHunksApplied :: Int
+    , patchHunksRejected :: Int
+    , patchLinesChanged :: Int
     }
 ```
 
@@ -1548,6 +1808,7 @@ data CallResult call
     | DeveloperToolCreateResult call CreateResult
     | DeveloperToolReadFileRangeResult call ReadFileRangeResult
     | DeveloperToolWriteFileRangeResult call WriteFileRangeResult
+    | DeveloperToolPatchResult call PatchResult
     | LuaToolResult call Aeson.Value
     | LuaToolError call Text
 ```
@@ -1695,6 +1956,11 @@ data QueryError
     | FileNotFoundError FilePath
     | FileTooLargeError FilePath Int
     | UnsupportedFileTypeError FilePath Text
+    | SessionStoreNotConfiguredError
+    | SessionNotFoundError Text
+    | InvalidSessionIdError Text
+    | SessionAccessDeniedError Text SessionIntrospectionScope
+    | MissingParameterError Text
 ```
 
 ### Developer Toolbox Errors
@@ -1709,6 +1975,18 @@ data DeveloperToolError
     | InvalidRangeError Text
     | RangeOutOfBoundsError Text
     | PermissionError Text
+    | PatchValidationError PatchError
+```
+
+### Patch Errors
+
+```haskell
+data PatchError
+    = PatchParseError Text
+    | PatchContextMismatch Int Text
+    | PatchHunkOverlap Int Int
+    | PatchFileNotFound FilePath
+    | PatchInvalidLineNumber Int
 ```
 
 ### Validation Errors
@@ -1749,6 +2027,9 @@ data PortalError
 15. **File range operations**: Use `read-file-range` and `write-file-range` for precise file editing rather than reading/writing entire files
 16. **Line numbers**: When using `read-file-range`, the output includes line numbers to help LLMs understand file structure
 17. **Range formatting**: Always use 1-based line numbers for ranges (e.g., "1-10" for lines 1 through 10)
+18. **Atomic file edits**: For complex multi-range edits, use `write-file-range` with contentBlocks array
+19. **Patch for context validation**: Use `patch-file` when context validation is needed before applying changes
+20. **Session introspection**: Enable session introspection capabilities in SystemToolbox for cross-session analysis
 
 ## Example: Complete Tool Configuration
 
@@ -1808,9 +2089,12 @@ data PortalError
       "tag": "SystemToolbox",
       "contents": {
         "name": "system",
-        "description": "System context",
-        "capabilities": ["date", "hostname", "working-directory", "attach-file"],
-        "envVarFilter": null
+        "description": "System context and session memory",
+        "capabilities": ["date", "hostname", "working-directory", "attach-file", "list-sessions", "search-sessions"],
+        "envVarFilter": null,
+        "sessionIntrospectionScope": "subtree",
+        "sessionIntrospectionMaxResults": 50,
+        "sessionIntrospectionIncludeToolOutputs": false
       }
     },
     {
@@ -1818,7 +2102,7 @@ data PortalError
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range"]
+        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"]
       }
     },
     {
@@ -1856,7 +2140,7 @@ data PortalError
 | `System.Agents.Tools.McpToolbox` | MCP server integration |
 | `System.Agents.Tools.OpenAPIToolbox` | OpenAPI conversion |
 | `System.Agents.Tools.SqliteToolbox` | SQLite tools |
-| `System.Agents.Tools.SystemToolbox` | System information |
+| `System.Agents.Tools.SystemToolbox` | System information and session introspection |
 | `System.Agents.Tools.DeveloperToolbox` | Development utilities |
 | `System.Agents.Tools.LuaToolbox` | Lua scripting |
 | `System.Agents.Tools.Skills.Toolbox` | Skills system |

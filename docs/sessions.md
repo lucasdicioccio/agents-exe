@@ -1,6 +1,6 @@
 # Session Management
 
-Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support.
+Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified read view.
 
 ## Overview
 
@@ -11,6 +11,12 @@ Sessions represent complete conversations between users and agents, including:
 - **Tool calls**: Records of tool invocations and results
 - **Media attachments**: Base64-encoded images, documents, audio, video
 - **Context**: Full conversation state for resumption
+
+The SessionStore now supports **multi-location storage**:
+- **Write location**: Single directory where new sessions are written
+- **Read locations**: Multiple directories searched for existing sessions
+- **Deduplication**: First location wins when sessions exist in multiple places
+- **Tilde expansion**: Paths like `~/.config/agents-exe/sessions/` are resolved automatically
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -35,6 +41,19 @@ Sessions represent complete conversations between users and agents, including:
 │  │   [📎 screenshot.png]                               │   │
 │  │   Assistant: "Found 2 files..."                     │   │
 │  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                  Multi-Location SessionStore                 │
+├─────────────────────────────────────────────────────────────┤
+│  Write Location: ./sessions/                                 │
+│  Read Locations:                                             │
+│    1. ./sessions/           (primary, write location)       │
+│    2. ./.agents-sessions/   (project-local archive)         │
+│    3. ~/.config/agents-exe/sessions/  (global storage)      │
+├─────────────────────────────────────────────────────────────┤
+│  Deduplication: First location wins by ConversationId       │
+│  Priority: ./sessions/ > ./.agents-sessions/ > ~/.config/   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -224,36 +243,159 @@ let toolResponse = MixedResponse
 
 ## Session Store
 
-The `SessionStore` module provides persistent storage:
+The `SessionStore` module provides persistent storage with multi-location support:
 
 ```haskell
 data SessionStore = SessionStore
-    { readSession :: SessionId -> IO (Maybe Session)
-    , writeSession :: Session -> IO ()
-    , listSessions :: IO [SessionId]
-    , deleteSession :: SessionId -> IO ()
-    }
-
--- Default file-based store
-mkSessionStore :: FilePath -> SessionStore
-mkSessionStore prefix = SessionStore
-    { readSession = \sid -> do
-        let path = sessionPath prefix sid
-        decodeFileStrict' path
-    , writeSession = \sess -> do
-        let path = sessionPath prefix (sessionId sess)
-        encodeFile path sess
-    , ...
+    { sessionWritePrefix :: FilePath
+    -- ^ Directory where new sessions are written
+    , sessionReadPrefixes :: [FilePath]
+    -- ^ Directories to search for existing sessions, in priority order
     }
 ```
+
+### Creating a SessionStore
+
+```haskell
+import System.Agents.SessionStore
+
+-- Create with separate write and read locations
+store <- mkSessionStore
+    "./sessions/"                              -- Write location
+    ["./sessions/", "~/.config/agents-exe/sessions/"]  -- Read locations
+
+-- Create simple single-location store (backwards compatible)
+simpleStore <- mkSimpleSessionStore "./sessions/"
+
+-- Resolve tilde paths automatically
+resolvedPath <- resolveSessionPath "~/.config/agents-exe/sessions/"
+-- Returns: "/home/user/.config/agents-exe/sessions/"
+```
+
+### Key Behaviors
+
+1. **Write Location**: All new sessions are written to `sessionWritePrefix`
+
+2. **Read Locations**: When reading sessions, all `sessionReadPrefixes` are searched in order
+
+3. **Auto-prepending**: If write location is not in read locations, it's automatically prepended to ensure newly written sessions are immediately readable
+
+4. **Deduplication**: When listing sessions, if the same session ID exists in multiple locations, the first occurrence (highest priority) is kept
+
+5. **Tilde Expansion**: Paths starting with `~` are automatically expanded to the user's home directory
+
+### Configuration
+
+Configure multi-location session storage in `agents-exe.cfg.json`:
+
+```json
+{
+  "agentsConfigDir": "~/.config/agents-exe",
+  "agentsFiles": [],
+  "sessions": {
+    "writeLocation": "./sessions/",
+    "readLocations": [
+      "./sessions/",
+      "./.agents-sessions/",
+      "./task-sessions/",
+      "~/.config/agents-exe/sessions/"
+    ]
+  }
+}
+```
+
+**Configuration Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sessions.writeLocation` | `FilePath` | Yes | Directory where new sessions are written |
+| `sessions.readLocations` | `[FilePath]` | Yes | Directories to search for existing sessions |
+
+**Backwards Compatibility:**
+- If `sessions` section is missing, falls back to `agentsLogs.logSessionsJsonPrefix` (deprecated)
+- If no prefix is configured, uses `~/.config/agents-exe/sessions/` as default
+
+### Use Cases
+
+#### Personal + Project Sessions
+
+```json
+{
+  "sessions": {
+    "writeLocation": "./sessions/",
+    "readLocations": [
+      "./sessions/",
+      "~/.config/agents-exe/sessions/"
+    ]
+  }
+}
+```
+- New sessions go to `./sessions/`
+- Can access personal history from home directory
+- Project sessions take precedence if ID conflicts
+
+#### Task-Based Organization
+
+```json
+{
+  "sessions": {
+    "writeLocation": "./task-sessions/current/",
+    "readLocations": [
+      "./task-sessions/current/",
+      "./task-sessions/archive/",
+      "./sessions/"
+    ]
+  }
+}
+```
+- Current task sessions in `current/`
+- Archived tasks still searchable
+- General project sessions as fallback
+
+#### Team Shared Sessions
+
+```json
+{
+  "sessions": {
+    "writeLocation": "./my-sessions/",
+    "readLocations": [
+      "./my-sessions/",
+      "./shared-sessions/",
+      "~/.config/agents-exe/sessions/"
+    ]
+  }
+}
+```
+- Personal work in `my-sessions/`
+- Team-shared sessions in `shared-sessions/`
+- Personal history available
 
 ### File Naming
 
+Sessions are stored with the pattern `conv.<uuid>.json`:
+
 ```
 sessions/
-├── session-550e8400-e29b-41d4-a716-446655440000.json
-├── session-6ba7b810-9dad-11d1-80b4-00c04fd430c8.json
-└── session-6ba7b811-9dad-11d1-80b4-00c04fd430c8.json
+├── conv.550e8400-e29b-41d4-a716-446655440000.json
+├── conv.6ba7b810-9dad-11d1-80b4-00c04fd430c8.json
+└── conv.6ba7b811-9dad-11d1-80b4-00c04fd430c8.json
+```
+
+### Session Store Operations
+
+```haskell
+-- Store a session (always writes to sessionWritePrefix)
+storeSession :: SessionStore -> ConversationId -> Session -> IO ()
+
+-- Read a session (searches all read locations in order)
+readSession :: SessionStore -> ConversationId -> IO (Maybe Session)
+
+-- List all sessions (aggregates from all read locations, deduplicated)
+listSessions :: SessionStore -> IO [(FilePath, Maybe Session, ConversationId)]
+
+-- Generate file path for a session
+sessionFilePath :: SessionStore -> ConversationId -> FilePath
+sessionWritePath :: SessionStore -> ConversationId -> FilePath
 ```
 
 ## Session Lifecycle
@@ -313,8 +455,8 @@ conversationLoop store runtime session = do
     -- Update session
     newSession <- addTurn session query toolResults
     
-    -- Persist
-    writeSession store newSession
+    -- Persist (always writes to write location)
+    storeSession store (conversationId newSession) newSession
     
     -- Continue
     conversationLoop store runtime newSession
@@ -407,7 +549,7 @@ conversationLoop store runtime session = do
 
 ```bash
 # Start with existing session
-agents-exe run --agent-file agent.json --session-file session-xxx.json
+agents-exe run --agent-file agent.json --session-file session.json
 ```
 
 ```haskell
@@ -434,7 +576,7 @@ mainOneShot store mPath mSession props prompt media = do
     -- Run conversation
     ...
     
-    -- Save session
+    -- Save session (to write location)
     writeSession store updatedSession
 ```
 
@@ -708,7 +850,7 @@ data SearchIndexConfig = SearchIndexConfig
     { indexDbPath :: FilePath
     -- ^ Path to the SQLite index database (default: .agents-search.db)
     , indexSessionStore :: SessionStore
-    -- ^ Session store to index
+    -- ^ Session store to index (supports multi-location stores)
     , indexIncludeToolOutputs :: Bool
     -- ^ Whether to include tool outputs in the index
     }
@@ -821,6 +963,7 @@ CREATE TABLE index_metadata (
 
 ```haskell
 -- | Create a new search index, replacing any existing index.
+-- Indexes sessions from ALL read locations in the SessionStore.
 createSearchIndex :: SearchIndexConfig -> IO ()
 
 -- | Incrementally update the search index.
@@ -837,6 +980,7 @@ removeSearchIndex :: SearchIndexConfig -> IO ()
 
 ```haskell
 -- | Execute a search query with the given options.
+-- Searches across all indexed sessions from all locations.
 executeSearchWithOptions :: SearchIndexConfig -> SearchOptions -> IO SearchResult
 
 -- | Execute a search query against the index.
@@ -867,7 +1011,7 @@ ORDER BY rank;
 ### CLI: session-index Command
 
 ```bash
-# Build the search index
+# Build the search index (includes all read locations)
 agents-exe session-index --build
 
 # Check index status
@@ -918,7 +1062,7 @@ agents-exe session-search "fix" \
 ### Search Workflow Example
 
 ```bash
-# 1. Build the initial index
+# 1. Build the initial index (aggregates all locations)
 agents-exe session-index --build
 
 # 2. Search for sessions about errors
@@ -996,12 +1140,26 @@ This allows tools to:
 ### File Store (Default)
 
 ```haskell
-fileSessionStore :: FilePath -> SessionStore
-fileSessionStore prefix = SessionStore
-    { readSession = \sid -> 
-        decodeFileStrict' (prefix ++ show sid ++ ".json")
-    , writeSession = \sess ->
-        encodeFile (prefix ++ show (sessionId sess) ++ ".json") sess
+fileSessionStore :: FilePath -> [FilePath] -> SessionStore
+fileSessionStore writePrefix readPrefixes = SessionStore
+    { sessionWritePrefix = writePrefix
+    , sessionReadPrefixes = 
+        if writePrefix `elem` readPrefixes
+            then readPrefixes
+            else writePrefix : readPrefixes
+    , readSession = \sid -> do
+        -- Search through read prefixes in order
+        let paths = map (</> sessionFileName sid) sessionReadPrefixes
+        findFirstExisting paths
+    , writeSession = \sess -> do
+        -- Always write to write prefix
+        let path = sessionWritePrefix </> sessionFileName (sessionId sess)
+        encodeFile path sess
+    , listSessions = do
+        -- Aggregate from all read prefixes, deduplicate
+        allSessions <- concat <$> mapM listSessionsInDir sessionReadPrefixes
+        let deduplicated = dedupeBy sessionId allSessions
+        sortOn modificationTime deduplicated
     , ...
     }
 ```
@@ -1050,6 +1208,14 @@ memorySessionStore = do
 3. **Use filters**: Combine text search with `--tool`, `--agent`, or date filters
 4. **JSON output**: Use `--json` for scripting and automation
 5. **Auto-update**: Use `--auto` flag to ensure fresh results
+
+### Multi-Location Best Practices
+
+1. **Write location priority**: Keep write location first in read locations for best performance
+2. **Archive old sessions**: Move old sessions to archive directories instead of deleting
+3. **Shared sessions**: Use shared directories for team collaboration
+4. **Tilde expansion**: Use `~` for portable home directory references
+5. **Deduplication awareness**: Understand that first location wins for duplicate IDs
 
 ### Media Best Practices
 
@@ -1100,7 +1266,12 @@ import System.Agents.Session.Search.Query
 -- Search for sessions with specific patterns
 searchSessions :: Text -> IO SearchResult
 searchSessions query = do
-    let config = defaultSearchIndexConfig defaultSessionStore
+    -- Create store with multi-location support
+    store <- mkSessionStore 
+        "./sessions/"
+        ["./sessions/", "~/.config/agents-exe/sessions/"]
+    
+    let config = defaultSearchIndexConfig store
     let opts = (defaultSearchOptions query)
             { searchJsonOutput = False
             , searchPreviewLines = 3
@@ -1111,7 +1282,8 @@ searchSessions query = do
 -- Find sessions that used specific tools
 findToolUsage :: [Text] -> IO SearchResult
 findToolUsage tools = do
-    let config = defaultSearchIndexConfig defaultSessionStore
+    store <- mkSimpleSessionStore "./sessions/"
+    let config = defaultSearchIndexConfig store
     let opts = (defaultSearchOptions "")
             { searchTools = tools
             , searchJsonOutput = True
@@ -1134,7 +1306,7 @@ findToolUsage tools = do
 | `System.Agents.Session.Search.Types` | Search configuration types |
 | `System.Agents.Session.Search.Index` | Index building and maintenance |
 | `System.Agents.Session.Search.Query` | Search query execution |
-| `System.Agents.SessionStore` | Persistent storage |
+| `System.Agents.SessionStore` | Persistent storage with multi-location support |
 | `System.Agents.SessionPrint` | Markdown printing and statistics |
 | `System.Agents.SessionPrint.Inject` | Session content injection |
 
