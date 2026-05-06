@@ -917,7 +917,7 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                 , hunkRemovedLines = removed
                                 , hunkAddedLines = added
                                 , hunkContextAfter = reverse ctxAfter
-                        }
+                                }
                      in Right (hunk, lines')
                 else
                     if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
@@ -1178,7 +1178,7 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
                 Right ranges -> do
                     -- Expand consecutive ranges so each line gets its own content block
                     let expandedPairs = expandRangeContentPairs ranges (if null contentBlocks then [""] else contentBlocks)
-                    
+
                     -- Validate that number of content blocks matches total lines after expansion
                     let totalLinesInRanges = countTotalLines ranges
                     let totalContentBlocks = length expandedPairs
@@ -1270,9 +1270,9 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
     expandRangeContentPairs (Tail : rs) (c : cs) = (Tail, c) : expandRangeContentPairs rs cs
     expandRangeContentPairs (Lines (s, e) : rs) (c : cs)
         | s == e = (Lines (s, s), c) : expandRangeContentPairs rs cs
-        | otherwise = 
+        | otherwise =
             -- Expand multi-line range: each line gets the same content
-            map (\n -> (Lines (n, n), c)) [s..e] ++ expandRangeContentPairs rs cs
+            map (\n -> (Lines (n, n), c)) [s .. e] ++ expandRangeContentPairs rs cs
 
     -- Get sort key for range (for top-to-bottom ordering)
     -- Head comes first (0), then line numbers, Tail comes last (maxBound)
@@ -2416,4 +2416,3 @@ toolConfigToAeson config =
         , "args" .= toolConfigArgs config
         , "empty-result" .= toolConfigEmptyResult config
         ]
-
