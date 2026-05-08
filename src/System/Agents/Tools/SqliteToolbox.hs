@@ -12,6 +12,7 @@ This module implements the SQLite toolbox functionality, including:
 * Snapshot mode for isolated conversation-scoped changes
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
+* Automatic VACUUM after write operations to optimize database file
 
 The toolbox can be configured to run in either read-only, read-write, or snapshot mode:
 * 'ReadOnly': Only SELECT queries are allowed
@@ -34,6 +35,13 @@ Snapshot Mode:
 * Each conversation gets its own isolated copy
 * Changes are persisted to the snapshot file but don't affect the original
 * The WAL file (if present) is also copied to ensure data integrity
+
+VACUUM Behavior:
+
+* After each write operation (INSERT, UPDATE, DELETE, CREATE, DROP, ALTER),
+  a VACUUM command is automatically executed to optimize the database file
+* VACUUM is NOT run after SELECT queries to avoid unnecessary overhead
+* This ensures the database file remains compact and well-organized
 
 Example usage:
 
@@ -129,6 +137,7 @@ These events allow tracking of:
 * Connection lifecycle
 * Concurrent access contention
 * Snapshot creation
+* VACUUM operations
 -}
 data Trace
     = -- | Database connection opened
@@ -151,6 +160,12 @@ data Trace
       SnapshotErrorTrace !FilePath !Text
     | -- | Empty database created for snapshot mode (original didn't exist)
       EmptyDatabaseCreatedTrace !FilePath
+    | -- | VACUUM operation started
+      VacuumStartedTrace !FilePath
+    | -- | VACUUM operation completed
+      VacuumCompletedTrace !FilePath !NominalDiffTime
+    | -- | VACUUM operation failed
+      VacuumErrorTrace !FilePath !Text
     deriving (Show)
 
 {- | State for snapshot mode connections.
@@ -301,6 +316,19 @@ fromBaseAccessMode :: SqliteAccessMode -> AccessMode
 fromBaseAccessMode SqliteReadOnly = ReadOnly
 fromBaseAccessMode SqliteReadWrite = ReadWrite
 fromBaseAccessMode SqliteSnapshot = Snapshot
+
+{- | Check if an operation is a write operation that should trigger VACUUM.
+
+Write operations include: Insert, Update, Delete, Create, Drop, Alter
+These operations may leave gaps or fragmentation in the database file
+that VACUUM can reclaim.
+
+SELECT and Other operations do not require VACUUM.
+-}
+isWriteOperation :: SqlOperation -> Bool
+isWriteOperation Select = False
+isWriteOperation Other = False
+isWriteOperation _ = True
 
 {- | Classify a SQL query by examining its first keyword.
 
@@ -655,6 +683,9 @@ or 'executeWriteQuery' for more explicit control.
 This function acquires the toolbox lock before executing the query,
 ensuring that only one query runs at a time within this toolbox instance.
 
+After write operations (INSERT, UPDATE, DELETE, CREATE, DROP, ALTER),
+a VACUUM command is automatically executed to optimize the database file.
+
 Returns:
 * 'Right QueryResult' on successful execution
 * 'Left QueryError' on access violation or database error
@@ -677,6 +708,9 @@ For snapshot mode:
 * If 'Nothing' is provided, returns an error (snapshot mode requires context)
 
 For read-only and read-write modes, the conversation context is ignored.
+
+After write operations, a VACUUM is automatically executed to optimize
+the database file.
 -}
 executeQueryWithContext ::
     Tracer IO Trace ->
@@ -691,9 +725,10 @@ executeQueryWithContext tracer toolbox mConvId query = do
             runTracer tracer (AccessViolationTrace query (classifyQuery query) (toolboxAccessMode toolbox))
             pure $ Left err
         Right () -> do
+            let operation = classifyQuery query
             -- Acquire lock to serialize access within this toolbox instance
             withMVar (toolboxLock toolbox) $ \() -> do
-                case toolboxAccessMode toolbox of
+                result <- case toolboxAccessMode toolbox of
                     Snapshot ->
                         case mConvId of
                             Nothing ->
@@ -701,14 +736,25 @@ executeQueryWithContext tracer toolbox mConvId query = do
                             Just convId ->
                                 executeSnapshotQueryInternal tracer toolbox convId query
                     _ ->
-                        executeStandardQueryInternal toolbox query
+                        executeStandardQueryInternal tracer toolbox query operation
+                
+                -- Run VACUUM after write operations (outside of inner locks)
+                case result of
+                    Right _ | isWriteOperation operation -> do
+                        vacuumResult <- runVacuum tracer toolbox mConvId
+                        case vacuumResult of
+                            Left vacErr -> runTracer tracer (VacuumErrorTrace (toolboxPath toolbox) (Text.pack $ show vacErr))
+                            Right _ -> pure ()
+                    _ -> pure ()
+                
+                pure result
 
 -- | Execute query on a standard (non-snapshot) toolbox.
-executeStandardQueryInternal :: Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeStandardQueryInternal toolbox query = do
+executeStandardQueryInternal :: Tracer IO Trace -> Toolbox -> Text -> SqlOperation -> IO (Either QueryError QueryResult)
+executeStandardQueryInternal tracer toolbox query operation = do
     case (toolboxConnection toolbox, toolboxDirectDb toolbox) of
         (Just conn, Just directDb) ->
-            executeQueryInternal conn directDb query
+            executeQueryInternal tracer conn directDb query operation
         _ ->
             pure $ Left $ ConnectionError "Database connection not initialized"
 
@@ -723,8 +769,9 @@ executeSnapshotQueryInternal tracer toolbox convId query =
             initResult <- ensureSnapshotInitialized tracer stateVar convId
             case initResult of
                 Left err -> pure $ Left err
-                Right (conn, directDb, _snapshotPath) ->
-                    executeQueryInternal conn directDb query
+                Right (conn, directDb, _snapshotPath) -> do
+                    let operation = classifyQuery query
+                    executeQueryInternal tracer conn directDb query operation
 
 {- | Execute a read-only (SELECT) query.
 
@@ -734,6 +781,9 @@ for additional safety when you only need to read data.
 
 Like 'executeQuery', this function acquires the toolbox lock before
 executing the query.
+
+VACUUM is NOT run after read-only queries since they don't modify
+the database.
 
 Returns:
 * 'Right QueryResult' on successful execution
@@ -749,8 +799,9 @@ executeReadOnlyQuery toolbox query =
                     Snapshot ->
                         -- For snapshot mode, we still need conversation context
                         pure $ Left $ SnapshotError "Use executeQueryWithContext for snapshot mode"
-                    _ ->
-                        executeStandardQueryInternal toolbox query
+                    _ -> do
+                        let tracer = Tracer (\_ -> pure ())
+                        executeStandardQueryInternal tracer toolbox query Select
         other -> do
             let err = AccessDeniedError $ "Expected SELECT query, got: " <> Text.pack (show other)
             pure $ Left err
@@ -763,29 +814,92 @@ before executing the query. Use this for explicit write operations.
 Like 'executeQuery', this function acquires the toolbox lock before
 executing the query.
 
+After successful write operations, a VACUUM is automatically executed
+to optimize the database file.
+
 Returns:
 * 'Right QueryResult' on successful execution
 * 'Left QueryError' if the toolbox is read-only or on database error
 -}
-executeWriteQuery :: Toolbox -> Text -> IO (Either QueryError QueryResult)
-executeWriteQuery toolbox query =
+executeWriteQuery :: Tracer IO Trace -> Toolbox -> Text -> IO (Either QueryError QueryResult)
+executeWriteQuery tracer toolbox query =
     case toolboxAccessMode toolbox of
         ReadOnly -> do
             let err = AccessDeniedError "Write operations not allowed in read-only mode"
             pure $ Left err
         ReadWrite ->
-            withMVar (toolboxLock toolbox) $ \() ->
-                executeStandardQueryInternal toolbox query
+            withMVar (toolboxLock toolbox) $ \() -> do
+                let operation = classifyQuery query
+                result <- executeStandardQueryInternal tracer toolbox query operation
+                -- Run VACUUM after successful write
+                case result of
+                    Right _ -> do
+                        vacuumResult <- runVacuum tracer toolbox Nothing
+                        case vacuumResult of
+                            Left vacErr -> runTracer tracer (VacuumErrorTrace (toolboxPath toolbox) (Text.pack $ show vacErr))
+                            Right _ -> pure ()
+                    _ -> pure ()
+                pure result
         Snapshot ->
             -- Snapshot mode requires conversation context
             pure $ Left $ SnapshotError "Use executeQueryWithContext for snapshot mode"
 
+{- | Run VACUUM on the database to optimize the file.
+
+This function rebuilds the database file, reclaiming unused space
+and defragmenting the data. It's automatically called after write
+operations.
+
+For snapshot mode, the conversation ID is required to identify
+which snapshot database to vacuum.
+-}
+runVacuum :: Tracer IO Trace -> Toolbox -> Maybe ConversationId -> IO (Either SomeException ())
+runVacuum tracer toolbox mConvId = do
+    let dbPath = toolboxPath toolbox
+    runTracer tracer (VacuumStartedTrace dbPath)
+    startTime <- getCurrentTime
+    
+    result <- try $ case toolboxAccessMode toolbox of
+        Snapshot ->
+            case mConvId of
+                Nothing -> pure ()  -- Can't vacuum snapshot without context
+                Just _convId ->
+                    case toolboxSnapshotState toolbox of
+                        Nothing -> pure ()
+                        Just stateVar -> do
+                            state <- withMVar stateVar pure
+                            case state of
+                                SnapshotInitialized conn _ _ -> do
+                                    _ <- SQLite.execute_ conn "VACUUM"
+                                    pure ()
+                                _ -> pure ()
+        _ ->
+            case toolboxConnection toolbox of
+                Just conn -> do
+                    _ <- SQLite.execute_ conn "VACUUM"
+                    pure ()
+                Nothing -> pure ()
+    
+    endTime <- getCurrentTime
+    let execTime = diffUTCTime endTime startTime
+    
+    case result of
+        Left e -> do
+            runTracer tracer (VacuumErrorTrace dbPath (Text.pack $ show e))
+            pure $ Left e
+        Right _ -> do
+            runTracer tracer (VacuumCompletedTrace dbPath execTime)
+            pure $ Right ()
+
 {- | Internal function to execute a query and extract results with column names.
 This function does NOT acquire the lock - callers must hold the lock.
+
+After write operations, callers should run VACUUM separately.
 -}
-executeQueryInternal :: Connection -> Direct.Database -> Text -> IO (Either QueryError QueryResult)
-executeQueryInternal _conn directDb query = do
+executeQueryInternal :: Tracer IO Trace -> Connection -> Direct.Database -> Text -> SqlOperation -> IO (Either QueryError QueryResult)
+executeQueryInternal tracer _conn directDb query _operation = do
     startTime <- getCurrentTime
+    runTracer tracer (QueryStartedTrace query)
 
     result <- try $ do
         let db = directDb
@@ -814,6 +928,8 @@ executeQueryInternal _conn directDb query = do
         endTime <- getCurrentTime
         let execTime = diffUTCTime endTime startTime
 
+        runTracer tracer (QueryCompletedTrace query execTime rowCount)
+
         pure $
             QueryResult
                 { resultColumns = columnNames
@@ -832,7 +948,9 @@ executeQueryInternal _conn directDb query = do
                 || "locked" `Text.isInfixOf` lowerErr
                 || "SQLITE_BUSY" `isInfixOf` errStr
                 then pure $ Left $ DatabaseLockedError $ "Database is locked by another process. Try again later. Original error: " <> errMsg
-                else pure $ Left $ SqlError errMsg
+                else do
+                    runTracer tracer (QueryErrorTrace query errMsg)
+                    pure $ Left $ SqlError errMsg
         Right qr -> pure $ Right qr
   where
     collectRows :: Direct.Statement -> Direct.ColumnCount -> IO [[Value]]
@@ -948,3 +1066,4 @@ _formatResultsAsObjects result =
 _rowToObject :: [Text] -> [Value] -> Value
 _rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
+
