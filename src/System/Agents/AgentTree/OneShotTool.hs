@@ -31,9 +31,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
-import qualified Data.Text.IO as TextIO
 import Data.Time (getCurrentTime)
-import qualified Data.UUID as UUID
 import Prod.Tracer (Tracer (..), contramap)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
@@ -213,11 +211,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         -- ctx.ctxConversationId is Base.ConversationId
         let parentBaseConvId = ctx.ctxConversationId
 
-        -- Debug logging
-        let parentShort = baseConvIdToShort parentBaseConvId
-        let callStackShort = Text.intercalate "/" $ map callStackEntryToShort (Ctx.ctxCallStack ctx)
-        debugLog $ "runSubAgent: parent=" <> parentShort <> " stack=[" <> callStackShort <> "]"
-
         -- Get the API key for this agent
         let apiKeyId = Base.apiKeyId agent
         let mApiKey = lookupApiKey apiKeyId apiKeys
@@ -237,10 +230,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         subcallBaseConvId <- newBaseConversationId
         let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
         let subcallCallStack = newEntry : parentCallStack
-
-        -- Debug logging
-        let subcallShort = baseConvIdToShort subcallBaseConvId
-        debugLog $ "runSubAgent: created subcall=" <> subcallShort <> " depth=" <> Text.pack (show $ length subcallCallStack)
 
         -- Extract OS integration fields from context
         let mWorld = Ctx.ctxWorld ctx
@@ -605,18 +594,3 @@ agentSetQuery query agent =
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =
     fromMaybe "" txt
-
--- | Append a debug message to debug.log file with timestamp.
-debugLog :: Text -> IO ()
-debugLog msg = do
-    now <- getCurrentTime
-    let line = Text.pack (show now) <> ": OneShotTool: " <> msg <> "\n"
-    TextIO.appendFile "debug.log" line
-
--- | Convert Base.ConversationId to short text for debugging.
-baseConvIdToShort :: Base.ConversationId -> Text
-baseConvIdToShort (Base.ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
-
--- | Convert CallStackEntry to short text for debugging.
-callStackEntryToShort :: CallStackEntry -> Text
-callStackEntryToShort entry = entry.callAgentSlug <> ":" <> baseConvIdToShort entry.callConversationId
