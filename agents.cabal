@@ -155,8 +155,22 @@ library agents-lib
                     , System.Agents.MCP.Server.Runtime
                     , System.Agents.TUI.Core
                     , System.Agents.TUI.Types
+                    , System.Agents.TUI.Types.Core
+                    , System.Agents.TUI.Types.Conversation
+                    , System.Agents.TUI.Types.State
                     , System.Agents.TUI.Render
+                    , System.Agents.TUI.Render.Attributes
+                    , System.Agents.TUI.Render.Conversation
+                    , System.Agents.TUI.Render.Dialog
+                    , System.Agents.TUI.Render.Layout
+                    , System.Agents.TUI.Render.Utils
+                    , System.Agents.TUI.Render.Widgets
                     , System.Agents.TUI.Event
+                    , System.Agents.TUI.Event.Dialog
+                    , System.Agents.TUI.Event.Navigation
+                    , System.Agents.TUI.Event.Conversation
+                    , System.Agents.TUI.Event.Queue
+                    , System.Agents.TUI.Event.Attachment
                     , System.Agents.TUI.Clipboard
                     , System.Agents.TUI.KeyMapping
                     , System.Agents.TUI.MessageComposer

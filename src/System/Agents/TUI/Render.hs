@@ -2,178 +2,132 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Rendering functions for the TUI application.
-module System.Agents.TUI.Render where
+--
+-- This module re-exports functionality from submodules:
+--
+-- * "System.Agents.TUI.Render.Attributes" - Attribute definitions
+-- * "System.Agents.TUI.Render.Conversation" - Conversation tree and view rendering
+-- * "System.Agents.TUI.Render.Dialog" - File attachment dialogs
+-- * "System.Agents.TUI.Render.Layout" - Main layout and tab rendering
+-- * "System.Agents.TUI.Render.Utils" - Utility rendering functions
+-- * "System.Agents.TUI.Render.Widgets" - UI widgets (agent list, editor, etc.)
+module System.Agents.TUI.Render (
+    -- Main entry point
+    tui_appDraw,
+    
+    -- Re-exported from Attributes
+    tui_appAttrMap,
+    focusedAttr,
+    userMessageAttr,
+    llmMessageAttr,
+    thinkingAttr,
+    statusInfoAttr,
+    statusWarningAttr,
+    statusErrorAttr,
+    byteUsageAttr,
+    tokenUsageAttr,
+    signalMetricsAttr,
+    pausedAttr,
+    activationAlwaysAttr,
+    activationOnDemandAttr,
+    activationFirstNAttr,
+    activationDefaultAttr,
+    activeTabAttr,
+    inactiveTabAttr,
+    queuedMessageAttr,
+    queuedMessageSelectedAttr,
+    selectedTurnAttr,
+    attachmentAttr,
+    attachmentSelectedAttr,
+    attachmentSizeAttr,
+    dialogAttr,
+    subcallAttr,
+    defaultAttr,
+    sendIndicatorAttr,
+    treeBranchAttr,
+    rootConversationAttr,
+    subcallSelectedAttr,
+    
+    -- Re-exported from Layout
+    render_ui,
+    render_mainLayout,
+    renderTabBar,
+    render_sidebar,
+    render_contentArea,
+    renderAgentsTab,
+    renderChatsTab,
+    renderHistoryTab,
+    renderHelpTab,
+    render_agentDetail,
+    render_conversationArea,
+    render_sessionArea,
+    render_shortcutsHelp,
+    render_statusBar,
+    statusAttr,
+    
+    -- Re-exported from Utils
+    borderWithFocus,
+    
+    -- Re-exported from Conversation
+    ConversationTree(..),
+    buildConversationForest,
+    sortConversationsForNesting,
+    render_conversationList,
+    renderConversationForest,
+    renderTreeNode,
+    renderNestedConversationItem,
+    getQueuedMessageCount,
+    getAttachmentCount,
+    makePrefix,
+    render_conversationView,
+    render_sessionView,
+    render_session,
+    render_turn_navigation,
+    render_navigable_turn,
+    render_session_usage,
+    renderSignalSummary,
+    aggregateSessionTokenUsage,
+    TokenUsageStats(..),
+    formatTokenStats,
+    formatTokenCount,
+    addThousandSeparators,
+    formatBytes,
+    render_turn,
+    render_usage,
+    
+    -- Re-exported from Dialog
+    renderFilePathDialog,
+    renderFileBrowserDialog,
+    
+    -- Re-exported from Widgets
+    render_agentList,
+    render_agentItem,
+    render_agentInfo,
+    render_sessionList,
+    render_sessionItem,
+    render_messageEditor,
+    render_messageEditorWithAttachments,
+    render_attachmentList,
+    getAttachments,
+    render_attachmentPanel,
+    render_attachment_item,
+    formatAttachmentSize,
+    render_queued_messages_manager,
+    render_queue_panel,
+    render_queued_message_list,
+    render_queued_item,
+) where
 
-import Brick
-import Brick.Focus (focusGetCurrent)
-import qualified Brick.Util as BrickUtil
-import Brick.Widgets.Border (borderWithLabel, hBorder)
-import Brick.Widgets.Center (center)
-import Brick.Widgets.Edit (getEditContents, renderEditor)
-import Brick.Widgets.FileBrowser (
-    fileBrowserAttr,
-    fileBrowserCurrentDirectoryAttr,
-    fileBrowserDirectoryAttr,
-    fileBrowserRegularFileAttr,
-    fileBrowserSelectedAttr,
-    fileBrowserSelectionInfoAttr,
-    renderFileBrowser,
- )
-import Brick.Widgets.List (listElements, listSelectedAttr, listSelectedElement, renderList)
+import Brick (Widget)
 import Control.Lens ((^.))
-import Data.List (intersperse)
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
-import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Vector as Vector
-import qualified Graphics.Vty as Vty
-import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..), ConversationId (..))
-import System.Agents.LLMs.OpenAI (TokenUsage (..))
-import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.Base hiding (Agent)
-import System.Agents.Session.Signals (calculateTrajectorySignals)
-import System.Agents.Session.Types (
-    ExecutionSignals (..),
-    InteractionSignals (..),
-    StepByteUsage (..),
-    TrajectorySignals (..),
-    sessionTotalBytes,
- )
-import System.Agents.TUI.MessageComposer (
-    InputConfig (..),
-    SendTrigger (..),
-    willSendOnNextNewline,
- )
-import System.Agents.TUI.Types
-import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
-import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Activation (Activation (..))
 
--- | Attribute for focused widgets.
-focusedAttr :: AttrName
-focusedAttr = attrName "focused"
-
--- | Attribute for user messages.
-userMessageAttr :: AttrName
-userMessageAttr = attrName "userMessage"
-
--- | Attribute for LLM messages.
-llmMessageAttr :: AttrName
-llmMessageAttr = attrName "llmMessage"
-
--- | Attribute for thinking/reasoning content.
-thinkingAttr :: AttrName
-thinkingAttr = attrName "thinking"
-
--- | Attribute for info status messages.
-statusInfoAttr :: AttrName
-statusInfoAttr = attrName "statusInfo"
-
--- | Attribute for warning status messages.
-statusWarningAttr :: AttrName
-statusWarningAttr = attrName "statusWarning"
-
--- | Attribute for error status messages.
-statusErrorAttr :: AttrName
-statusErrorAttr = attrName "statusError"
-
--- | Attribute for byte usage text (dimmed/smaller).
-byteUsageAttr :: AttrName
-byteUsageAttr = attrName "byteUsage"
-
--- | Attribute for token usage text.
-tokenUsageAttr :: AttrName
-tokenUsageAttr = attrName "tokenUsage"
-
--- | Attribute for signal metrics text.
-signalMetricsAttr :: AttrName
-signalMetricsAttr = attrName "signalMetrics"
-
--- | Attribute for paused conversation indicator.
-pausedAttr :: AttrName
-pausedAttr = attrName "paused"
-
--- | Attribute for always-on tool activation marker.
-activationAlwaysAttr :: AttrName
-activationAlwaysAttr = attrName "activationAlways"
-
--- | Attribute for on-demand tool activation marker.
-activationOnDemandAttr :: AttrName
-activationOnDemandAttr = attrName "activationOnDemand"
-
--- | Attribute for first-N steps tool activation marker.
-activationFirstNAttr :: AttrName
-activationFirstNAttr = attrName "activationFirstN"
-
--- | Attribute for default/no activation marker.
-activationDefaultAttr :: AttrName
-activationDefaultAttr = attrName "activationDefault"
-
--- | Attribute for the active tab in the tab bar.
-activeTabAttr :: AttrName
-activeTabAttr = attrName "activeTab"
-
--- | Attribute for inactive tabs in the tab bar.
-inactiveTabAttr :: AttrName
-inactiveTabAttr = attrName "inactiveTab"
-
--- | Attribute for queued messages.
-queuedMessageAttr :: AttrName
-queuedMessageAttr = attrName "queuedMessage"
-
--- | Attribute for selected queued messages.
-queuedMessageSelectedAttr :: AttrName
-queuedMessageSelectedAttr = attrName "queuedMessageSelected"
-
--- | Attribute for selected turn in navigation mode.
-selectedTurnAttr :: AttrName
-selectedTurnAttr = attrName "selectedTurn"
-
--- | Attribute for attachment items.
-attachmentAttr :: AttrName
-attachmentAttr = attrName "attachment"
-
--- | Attribute for selected attachment items.
-attachmentSelectedAttr :: AttrName
-attachmentSelectedAttr = attrName "attachmentSelected"
-
--- | Attribute for attachment file size.
-attachmentSizeAttr :: AttrName
-attachmentSizeAttr = attrName "attachmentSize"
-
--- | Attribute for dialog overlays.
-dialogAttr :: AttrName
-dialogAttr = attrName "dialog"
-
--- | Attribute for subcall conversations (dimmed).
-subcallAttr :: AttrName
-subcallAttr = attrName "subcall"
-
--- | Default attribute.
-defaultAttr :: AttrName
-defaultAttr = attrName "default"
-
--- | Attribute for send indicator (ready to send state).
-sendIndicatorAttr :: AttrName
-sendIndicatorAttr = attrName "sendIndicator"
-
--- | Attribute for tree branch lines.
-treeBranchAttr :: AttrName
-treeBranchAttr = attrName "treeBranch"
-
--- | Attribute for root conversation items.
-rootConversationAttr :: AttrName
-rootConversationAttr = attrName "rootConversation"
-
--- | Attribute for selected subcall conversation items.
-subcallSelectedAttr :: AttrName
-subcallSelectedAttr = attrName "subcallSelected"
-
--------------------------------------------------------------------------------
--- Main Draw Function
--------------------------------------------------------------------------------
+import System.Agents.TUI.Render.Attributes
+import System.Agents.TUI.Render.Conversation
+import System.Agents.TUI.Render.Dialog
+import System.Agents.TUI.Render.Layout
+import System.Agents.TUI.Render.Utils
+import System.Agents.TUI.Render.Widgets
+import System.Agents.TUI.Types (TuiState, N, tuiUI, attachmentDialogState, AttachmentDialogState(..))
 
 -- | Main application draw function.
 tui_appDraw :: TuiState -> [Widget N]
@@ -183,951 +137,3 @@ tui_appDraw st =
         AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
 
--- | Render the main UI based on current state.
-render_ui :: TuiState -> Widget N
-render_ui st = render_mainLayout st
-
--- | Main layout with tab bar, sidebar, and content area.
-render_mainLayout :: TuiState -> Widget N
-render_mainLayout st =
-    vBox
-        [ renderTabBar (st ^. tuiUI . currentTab)
-        , hBox
-            [ render_sidebar st
-            , render_contentArea st
-            ]
-        , render_statusBar (st ^. tuiUI . statusMessage)
-        ]
-
--- | Render the tab bar with all tabs, highlighting the active one.
-renderTabBar :: Tab -> Widget N
-renderTabBar activeTab =
-    let tabs = [AgentsTab, ChatsTab, HistoryTab, HelpTab]
-        renderTab tab =
-            let tabName = case tab of
-                    AgentsTab -> " Agents "
-                    ChatsTab -> " Chats "
-                    HistoryTab -> " History "
-                    HelpTab -> " Help "
-                tabAttr = if tab == activeTab then activeTabAttr else inactiveTabAttr
-             in withAttr tabAttr $ txt tabName
-        tabWidgets = map renderTab tabs
-        separator = withAttr inactiveTabAttr $ txt "│"
-     in hBorder <=> hBox (intersperse separator tabWidgets)
-
--- | Sidebar with agent and conversation lists.
-render_sidebar :: TuiState -> Widget N
-render_sidebar st =
-    hLimit 35 $
-        vBox
-            [ render_agentList st
-            , render_conversationList st
-            , render_sessionList st
-            ]
-
--- | Content area showing content based on the current tab.
-render_contentArea :: TuiState -> Widget N
-render_contentArea st =
-    case st ^. tuiUI . currentTab of
-        AgentsTab -> renderAgentsTab st
-        ChatsTab -> renderChatsTab st
-        HistoryTab -> renderHistoryTab st
-        HelpTab -> renderHelpTab st
-
--- | Render the Agents tab content.
-renderAgentsTab :: TuiState -> Widget N
-renderAgentsTab st =
-    case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
-        Just AgentListWidget -> render_agentDetail st
-        Just AgentInfoWidget -> render_agentDetail st
-        _ -> render_agentDetail st
-
--- | Render the Chats tab content.
-renderChatsTab :: TuiState -> Widget N
-renderChatsTab st =
-    case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
-        Just MessageEditorWidget -> render_conversationArea st
-        Just ConversationListWidget -> render_conversationArea st
-        Just ConversationViewWidget -> render_conversationArea st
-        Just AttachmentListWidget -> render_conversationArea st
-        _ -> render_conversationArea st
-
--- | Render the History tab content (sessions view).
-renderHistoryTab :: TuiState -> Widget N
-renderHistoryTab st =
-    case focusGetCurrent (st ^. tuiUI . uiFocusRing) of
-        Just SessionsListWidget -> render_sessionArea st
-        Just SessionViewWidget -> render_sessionArea st
-        _ -> render_sessionArea st
-
--- | Render the Help tab content.
-renderHelpTab :: TuiState -> Widget N
-renderHelpTab st =
-    borderWithLabel (txt " Help ") $
-        viewport AgentInfoWidget Both $
-            vBox $
-                map txt (st ^. tuiUI . helpContent)
-
--- | Agent detail view with info and tools.
-render_agentDetail :: TuiState -> Widget N
-render_agentDetail st =
-    vBox
-        [ render_agentInfo st
-        ]
-
--- | Conversation area with message input and conversation history.
-render_conversationArea :: TuiState -> Widget N
-render_conversationArea st =
-    case listSelectedElement (st ^. tuiUI . conversationList) of
-        Nothing ->
-            vBox
-                [ txt "Select or create a conversation (Ctrl+n)"
-                , render_messageEditor st
-                ]
-        Just (_, conv) ->
-            vBox
-                [ render_messageEditorWithAttachments st conv
-                , render_attachmentList st conv
-                , render_queued_messages_manager st conv
-                , render_conversationView st
-                , render_shortcutsHelp
-                ]
-
--- | Render shortcuts help bar.
-render_shortcutsHelp :: Widget N
-render_shortcutsHelp =
-    withAttr (attrName "help") $
-        hBox
-            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file"
-            ]
-
-{- | Make prefix for a conversation at a specific depth with tree branches.
-The Bool list indicates for each ancestor level (from root to immediate parent)
-whether that ancestor is a last child (True) or not (False).
--}
-makePrefix :: [Bool] -> Bool -> Text
-makePrefix ancestorIsLasts isLast
-    | null ancestorIsLasts = if isLast then "└─" else "├─"
-    | otherwise =
-        let
-            -- Build the continuation part from ancestors
-            -- For each ancestor: if it was the last child, use spaces ("  "),
-            -- otherwise use a vertical bar ("│ ") to show continuation
-            continuation = mconcat $ map (\isLastAncestor -> if isLastAncestor then "  " else "│ ") ancestorIsLasts
-         in
-            continuation <> (if isLast then "└─" else "├─")
-
--- | Sort conversations to ensure proper nesting order.
-sortConversationsForNesting :: [Conversation] -> [Conversation]
-sortConversationsForNesting convs =
-    let forest = buildConversationForest convs
-        -- Flatten maintaining tree order (pre-order traversal)
-        go [] = []
-        go (ConversationTree conv children : rest) =
-            conv : go children ++ go rest
-     in go forest
-
--- | Conversation area with message input and conversation history.
-render_sessionArea :: TuiState -> Widget N
-render_sessionArea st =
-    case listSelectedElement (st ^. tuiUI . sessionList) of
-        Nothing ->
-            vBox
-                [ txt "Select or resume a session (Ctrl+c)"
-                ]
-        Just _ ->
-            hBox
-                [ render_sessionView st
-                ]
-
--------------------------------------------------------------------------------
--- Status Bar Rendering
--------------------------------------------------------------------------------
-
--- | Render status bar if there's a message.
-render_statusBar :: Maybe StatusMessage -> Widget N
-render_statusBar Nothing = emptyWidget
-render_statusBar (Just msg) =
-    withAttr (statusAttr msg.statusSeverity) $
-        txt $
-            " " <> statusText msg
-
--- | Get the appropriate attribute for a status severity level.
-statusAttr :: StatusSeverity -> AttrName
-statusAttr StatusInfo = statusInfoAttr
-statusAttr StatusWarning = statusWarningAttr
-statusAttr StatusError = statusErrorAttr
-
--------------------------------------------------------------------------------
--- Agent List Rendering
--------------------------------------------------------------------------------
-
--- | Render the agent list.
-render_agentList :: TuiState -> Widget N
-render_agentList st =
-    borderWithFocus
-        st
-        AgentListWidget
-        "Agents"
-        (renderList render_agentItem hasFocus (st ^. tuiUI . agentList))
-  where
-    hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just AgentListWidget
-
--- | Render a single agent item.
-render_agentItem :: Bool -> TuiAgent -> Widget N
-render_agentItem _ agent =
-    txt $ " " <> agentSlug0
-  where
-    agentSlug0 = slug (osNodeConfig (tuiNode agent))
-
--- | Render the conversation list with nesting.
-render_conversationList :: TuiState -> Widget N
-render_conversationList st =
-    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
-        -- Create a custom rendering of the nested list
-        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
-        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
-            Just (_, conv) -> Just (conversationId conv)
-            Nothing -> Nothing
-        forest = buildConversationForest convs
-     in borderWithFocus
-            st
-            ConversationListWidget
-            "Conversations"
-            ( viewport ConversationListWidget Both $
-                vBox $
-                    renderConversationForest st selectedId hasFocus forest
-            )
-
-renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
-renderConversationForest st selectedId hasFocus trees =
-    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0 ..] trees)
-
-{- | Render a tree node recursively.
-The Bool list tracks for each ancestor whether it is a last child.
--}
-renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> [Bool] -> Bool -> ConversationTree -> [Widget N]
-renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (ConversationTree conv children) =
-    let isSelected = selectedId == Just (conversationId conv)
-        nodeWidget = renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv
-        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0 ..] children)
-     in nodeWidget : childWidgets
-
--- | Render a nested conversation item with tree branches.
-renderNestedConversationItem :: TuiState -> Bool -> Bool -> [Bool] -> Bool -> Conversation -> Widget N
-renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv =
-    let indicator = case conversationStatus conv of
-            ConversationStatus_Active -> "⟳ "
-            ConversationStatus_WaitingForInput ->
-                if isUnread then "● " else "○ "
-            ConversationStatus_Paused -> "⏸ "
-        -- Tree branch prefix based on ancestor status
-        branchPrefix = makePrefix ancestorIsLasts isLast
-        -- Selection marker
-        selectionMarker = if isSelected && hasFocus then "▶ " else "  "
-        baseText = branchPrefix <> indicator <> Text.take 20 (conversationName conv)
-        -- Add turn count
-        turnCount = case conversationSession conv of
-            Nothing -> 0
-            Just session -> length session.turns
-        turnSuffix = if turnCount > 0 then " (" <> Text.pack (show turnCount) <> ")" else ""
-        -- Add attachment count
-        attachmentCount = getAttachmentCount st conv
-        attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
-        -- Add queued message count
-        queueCount = getQueuedMessageCount st conv
-        queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
-        fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
-        -- Determine the appropriate attribute
-        attr =
-            if isSelected && hasFocus
-                then subcallSelectedAttr
-                else
-                    if isSelected
-                        then listSelectedAttr
-                        else
-                            if null ancestorIsLasts
-                                then rootConversationAttr
-                                else subcallAttr
-     in withAttr attr $ txt $ selectionMarker <> fullText
-  where
-    isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
-
--- | Get the number of queued messages for a conversation.
-getQueuedMessageCount :: TuiState -> Conversation -> Int
-getQueuedMessageCount st conv =
-    let buffered = st ^. tuiUI . uiBufferedMessages
-     in case Map.lookup (conversationId conv) buffered of
-            Nothing -> 0
-            Just msgs -> length msgs
-
--- | Get the number of attachments for a conversation.
-getAttachmentCount :: TuiState -> Conversation -> Int
-getAttachmentCount st conv =
-    let attachments = st ^. tuiUI . attachedFiles
-     in case Map.lookup (conversationId conv) attachments of
-            Nothing -> 0
-            Just atts -> length atts
-
--- | Tree structure for nested conversations.
-data ConversationTree = ConversationTree
-    { treeConversation :: Conversation
-    , treeChildren :: [ConversationTree]
-    }
-
-{- | Build a forest of conversation trees from a flat list.
-
-This function handles "orphaned" conversations - children whose parents
-are not in the list. This can happen due to async event ordering where
-a child subcall event arrives before its parent is fully registered.
-Such orphaned conversations are treated as temporary roots to ensure
-they remain visible in the TUI.
--}
-buildConversationForest :: [Conversation] -> [ConversationTree]
-buildConversationForest convs =
-    let
-        -- Build a set of all conversation IDs for quick lookup
-        convIds = Set.fromList $ map conversationId convs
-
-        -- Find root conversations:
-        -- 1. Conversations with no parent (parentId == Nothing), OR
-        -- 2. "Orphaned" conversations whose parent is not in the list
-        --    (this handles race conditions in async subcall creation)
-        isRoot c =
-            case conversationParentId c of
-                Nothing -> True
-                Just parentId -> not (Set.member parentId convIds)
-
-        roots = filter isRoot convs
-
-        -- Build tree recursively
-        buildTree conv =
-            ConversationTree
-                { treeConversation = conv
-                , treeChildren = map buildTree (findChildren conv)
-                }
-
-        -- Find all children of a given parent conversation
-        findChildren parent =
-            filter (\c -> conversationParentId c == Just (conversationId parent)) convs
-     in
-        map buildTree roots
-
--------------------------------------------------------------------------------
--- Session List Rendering
--------------------------------------------------------------------------------
-
--- | Render the session list.
-render_sessionList :: TuiState -> Widget N
-render_sessionList st =
-    borderWithFocus
-        st
-        SessionsListWidget
-        "Sessions"
-        (renderList (render_sessionItem st) hasFocus (st ^. tuiUI . sessionList))
-  where
-    hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
-
--- | Render a single session item.
-render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem _st _isSelected sess =
-    txt $ Text.pack $ " " <> show sess.sessionId
-
--- | Render agent information panel.
-render_agentInfo :: TuiState -> Widget N
-render_agentInfo st =
-    borderWithFocus
-        st
-        AgentInfoWidget
-        "Agent Info"
-        ( case st ^. tuiUI . selectedAgentInfo of
-            Nothing -> txt "No agent selected"
-            Just agent ->
-                let node = tuiNode agent
-                    agentCfg = osNodeConfig node
-                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . uiAgentTools)
-                 in viewport AgentInfoWidget Both $
-                        vBox $
-                            mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
-        )
-  where
-    agentHeader :: Agent -> [Widget N]
-    agentHeader agentCfg =
-        [ txt $ "# Slug: " <> slug agentCfg
-        , txt $ "# Announce: " <> announce agentCfg
-        , txt ""
-        , txt $ "# Model: " <> modelName agentCfg
-        , txt ""
-        ]
-    renderToolsSection :: Maybe [ToolRegistration] -> [Widget N]
-    renderToolsSection Nothing =
-        [ txt "# Tools: not loaded"
-        ]
-    renderToolsSection (Just toolz) =
-        [ txt "# Tools:"
-        , vBox $ map renderToolItem toolz
-        ]
-    renderToolItem :: ToolRegistration -> Widget N
-    renderToolItem tool =
-        let toolName = tool.declareTool.toolDescriptionName.getToolName
-            activation = toolActivation tool
-            activationMarker = renderActivationMarker activation
-         in hBox [txt "- ", activationMarker, txt $ " " <> toolName]
-    renderActivationMarker :: Maybe Activation -> Widget N
-    renderActivationMarker Nothing = withAttr activationDefaultAttr $ txt "[a]"
-    renderActivationMarker (Just activation) = case activation of
-        AlwaysActivated -> withAttr activationAlwaysAttr $ txt "[A]"
-        OnDemandActivated group -> withAttr activationOnDemandAttr $ txt $ "[D:" <> group <> "]"
-    agentPrompt :: Agent -> [Widget N]
-    agentPrompt agentCfg =
-        [ txt "# System Prompt:"
-        , txt $ Text.unlines $ systemPrompt agentCfg
-        ]
-
--------------------------------------------------------------------------------
--- Message Editor Rendering
--------------------------------------------------------------------------------
-
--- | Render the message input editor.
-render_messageEditor :: TuiState -> Widget N
-render_messageEditor st =
-    borderWithFocus
-        st
-        MessageEditorWidget
-        "Message"
-        $ renderEditor
-            (txt . Text.unlines)
-            (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
-            (st ^. tuiUI . messageEditor)
-
--- | Render the message editor with attachment count and send indicator in the label.
-render_messageEditorWithAttachments :: TuiState -> Conversation -> Widget N
-render_messageEditorWithAttachments st conv =
-    let attachmentCount = getAttachmentCount st conv
-        inputCfg = sessionInputConfig (st ^. sessionConfig)
-        showIndicator = showSendIndicator inputCfg
-        trigger = sendTrigger inputCfg
-
-        -- Get current editor content to check for send indicator
-        editorContent = Text.unlines $ getEditContents (st ^. tuiUI . messageEditor)
-        willSend = willSendOnNextNewline inputCfg editorContent
-
-        -- Build the label text
-        baseLabel =
-            if attachmentCount > 0
-                then "Message [" <> Text.pack (show attachmentCount) <> " 📎]"
-                else "Message"
-
-        -- Add mode indicator for triple-newline mode
-        modeLabel = case trigger of
-            TripleNewline -> baseLabel <> " (↵↵↵ to send)"
-            Keymap -> baseLabel
-
-        -- Add ready-to-send indicator
-        labelText =
-            if showIndicator && willSend
-                then modeLabel <> " [READY TO SEND]"
-                else modeLabel
-
-        -- Determine label attribute
-        labelAttr =
-            if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget
-                then
-                    if showIndicator && willSend
-                        then withAttr sendIndicatorAttr . withAttr focusedAttr
-                        else withAttr focusedAttr
-                else
-                    if showIndicator && willSend
-                        then withAttr sendIndicatorAttr
-                        else id
-     in borderWithLabel
-            (labelAttr $ txt labelText)
-            $ renderEditor
-                (txt . Text.unlines)
-                (focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just MessageEditorWidget)
-                (st ^. tuiUI . messageEditor)
-
--- | Render the attachment list for a conversation.
-render_attachmentList :: TuiState -> Conversation -> Widget N
-render_attachmentList st conv =
-    let attachments = getAttachments st conv
-     in if null attachments
-            then emptyWidget
-            else render_attachmentPanel st attachments
-
--- | Get attachments for a conversation.
-getAttachments :: TuiState -> Conversation -> [MediaAttachment]
-getAttachments st conv =
-    let atts = st ^. tuiUI . attachedFiles
-     in case Map.lookup (conversationId conv) atts of
-            Nothing -> []
-            Just xs -> xs
-
--- | Render the attachment panel.
-render_attachmentPanel :: TuiState -> [MediaAttachment] -> Widget N
-render_attachmentPanel st attachments =
-    borderWithFocus
-        st
-        AttachmentListWidget
-        (" Attachments (" <> Text.pack (show $ length attachments) <> ") ")
-        $ vBox
-            [ txt "Del/Backspace: remove | Ctrl+Shift+F: clear all"
-            , txt ""
-            , vBox $ zipWith (render_attachment_item selectedIdx) [0 ..] attachments
-            ]
-  where
-    selectedIdx = st ^. tuiUI . selectedAttachmentIndex
-
--- | Render a single attachment item.
-render_attachment_item :: Maybe Int -> Int -> MediaAttachment -> Widget N
-render_attachment_item selectedIdx idx att =
-    let isSelected = selectedIdx == Just idx
-        marker = if isSelected then "▶ " else "  "
-        filename = maybe "unnamed" id att.mediaFilename
-        mimeType = att.mediaMimeType
-        sizeStr = formatAttachmentSize att.mediaBase64Data
-        attr = if isSelected then attachmentSelectedAttr else attachmentAttr
-     in withAttr attr $
-            hBox
-                [ txt marker
-                , txt "📎 "
-                , txt filename
-                , txt " ("
-                , withAttr attachmentSizeAttr $ txt mimeType
-                , txt ", "
-                , withAttr attachmentSizeAttr $ txt sizeStr
-                , txt ")"
-                ]
-
--- | Format attachment size based on base64 data length.
-formatAttachmentSize :: Text -> Text
-formatAttachmentSize base64Data =
-    let base64Len = Text.length base64Data
-        originalBytes = (base64Len * 3) `div` 4
-     in formatBytes originalBytes
-
--------------------------------------------------------------------------------
--- File Path Dialog Rendering (Legacy)
--------------------------------------------------------------------------------
-
--- | Render the file path input dialog overlay.
-renderFilePathDialog :: TuiState -> Widget N
-renderFilePathDialog st =
-    center $
-        withAttr dialogAttr $
-            borderWithLabel (txt " Attach File (Ctrl+F) ") $
-                vBox
-                    [ txt "Enter file path (or mime/type;path for explicit type):"
-                    , txt ""
-                    , hLimit 60 $
-                        renderEditor
-                            (txt . Text.unlines)
-                            True
-                            (st ^. tuiUI . filePathInput)
-                    , txt ""
-                    , txt "Enter: confirm  Esc: cancel"
-                    ]
-
--------------------------------------------------------------------------------
--- File Browser Dialog Rendering
--------------------------------------------------------------------------------
-
--- | Render the file browser dialog overlay.
-renderFileBrowserDialog :: TuiState -> Widget N
-renderFileBrowserDialog st =
-    case st ^. tuiUI . fileBrowser of
-        Nothing -> renderFilePathDialog st
-        Just fb ->
-            center $
-                withAttr dialogAttr $
-                    borderWithLabel (txt " Attach File (Ctrl+F) ") $
-                        vBox
-                            [ hLimit 80 $ vLimit 20 $ renderFileBrowser True fb
-                            , txt ""
-                            , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
-                            ]
-
--------------------------------------------------------------------------------
--- Queued Messages Management Rendering
--------------------------------------------------------------------------------
-
--- | Render the queued messages management panel.
-render_queued_messages_manager :: TuiState -> Conversation -> Widget N
-render_queued_messages_manager st conv =
-    if conversationStatus conv /= ConversationStatus_Paused
-        then emptyWidget
-        else
-            let queuedMsgs = getQueuedMessages st conv
-                count = length queuedMsgs
-             in if count == 0
-                    then emptyWidget
-                    else render_queue_panel st count queuedMsgs
-
--- | Render the queue management UI panel.
-render_queue_panel :: TuiState -> Int -> [Text] -> Widget N
-render_queue_panel st count msgs =
-    borderWithFocus
-        st
-        QueuedMessageListWidget
-        (" Queued Messages (" <> Text.pack (show count) <> ") ")
-        $ vBox
-            [ txt "Ctrl+D: clear all | Del/Backspace: delete selected | Up/Down: select"
-            , txt ""
-            , render_queued_message_list selectedIdx msgs
-            ]
-  where
-    selectedIdx = st ^. tuiUI . queuedMessagesFocus
-
--- | Render the list of queued messages with selection.
-render_queued_message_list :: Maybe Int -> [Text] -> Widget N
-render_queued_message_list selectedIdx msgs =
-    vBox $ zipWith (render_queued_item selectedIdx) [0 ..] msgs
-
--- | Render a single queued message item.
-render_queued_item :: Maybe Int -> Int -> Text -> Widget N
-render_queued_item selectedIdx idx msg =
-    let isSelected = selectedIdx == Just idx
-        marker = if isSelected then "▶ " else "  "
-        truncated = Text.take 60 msg <> if Text.length msg > 60 then "..." else ""
-        attr = if isSelected then queuedMessageSelectedAttr else queuedMessageAttr
-     in withAttr attr $ txt $ marker <> truncated
-
--------------------------------------------------------------------------------
--- Conversation View Rendering
--------------------------------------------------------------------------------
-
--- | Render the conversation history view.
-render_conversationView :: TuiState -> Widget N
-render_conversationView st =
-    content
-  where
-    content =
-        case listSelectedElement (st ^. tuiUI . conversationList) of
-            Nothing -> txt "No conversation selected"
-            Just (_, conv) ->
-                let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session
-                        st
-                        ConversationViewWidget
-                        (conversationSession conv)
-                        mNavState
-
--- | Get the list of queued messages for a conversation.
-getQueuedMessages :: TuiState -> Conversation -> [Text]
-getQueuedMessages st conv =
-    let buffered = st ^. tuiUI . uiBufferedMessages
-     in case Map.lookup (conversationId conv) buffered of
-            Nothing -> []
-            Just msgs -> reverse msgs
-
--- | Render the session history view.
-render_sessionView :: TuiState -> Widget N
-render_sessionView st =
-    content
-  where
-    content =
-        case listSelectedElement (st ^. tuiUI . sessionList) of
-            Nothing -> txt "No session selected"
-            Just (_, session) ->
-                let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget (Just session) mNavState
-
--- | Render a session's turns.
-render_session :: TuiState -> WidgetName -> Maybe Session -> Maybe TurnNavigationState -> Widget N
-render_session _ _ Nothing _ =
-    vBox [txt "session not started yet"]
-render_session st w (Just session) mNavState =
-    case mNavState of
-        Nothing ->
-            borderWithFocus st w "Session" $
-                viewport w Both $
-                    vBox $
-                        [render_session_usage session]
-                            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
-        Just navState ->
-            render_turn_navigation session navState
-
--- | Render session in turn navigation mode.
-render_turn_navigation :: Session -> TurnNavigationState -> Widget N
-render_turn_navigation session navState =
-    let selectedIdx = navState ^. navSelectedTurnIndex
-        totalTurns = navState ^. navTotalTurns
-        headerText = "Turn Navigation (" <> Text.pack (show (selectedIdx + 1)) <> "/" <> Text.pack (show totalTurns) <> ") [Enter:exit F:fork]"
-        turnsWithIndices = zip [0 ..] session.turns
-        shownTurns = drop selectedIdx turnsWithIndices
-     in borderWithLabel (txt headerText) $
-            viewport TurnNavigationWidget Both $
-                vBox $
-                    [ txt "Up/Down: navigate  Enter: exit  F: fork from here"
-                    , txt ""
-                    ]
-                        ++ map (render_navigable_turn selectedIdx) shownTurns
-
--- | Render a single turn with selection indicator.
-render_navigable_turn :: Int -> (Int, Turn) -> Widget N
-render_navigable_turn selectedIdx (idx, turn) =
-    let isSelected = idx == selectedIdx
-        selectionMarker = if isSelected then "▶ " else "  "
-        turnWidget = render_turn (idx, turn)
-     in if isSelected
-            then withAttr selectedTurnAttr $ hBox [txt selectionMarker, turnWidget]
-            else hBox [txt selectionMarker, turnWidget]
-
--- | Render total session usage (tokens if available, else bytes), turn count, and signal metrics.
-render_session_usage :: Session -> Widget N
-render_session_usage session =
-    let turnCount = length session.turns
-        mTokenStats = aggregateSessionTokenUsage session
-        mSignals = Just (calculateTrajectorySignals session)
-     in if turnCount == 0
-            then emptyWidget
-            else
-                vBox
-                    [ case mTokenStats of
-                        Just tokenStats ->
-                            withAttr tokenUsageAttr $
-                                txt $
-                                    "Session total: " <> formatTokenStats tokenStats <> "  (" <> Text.pack (show turnCount) <> " turns)  "
-                        Nothing ->
-                            let totalBytes = sessionTotalBytes session
-                             in if totalBytes == 0
-                                    then emptyWidget
-                                    else
-                                        withAttr byteUsageAttr $
-                                            txt $
-                                                "Session total: " <> formatBytes totalBytes <> "  (" <> Text.pack (show turnCount) <> " turns)  "
-                    , renderSignalSummary mSignals
-                    ]
-
--- | Render compact signal summary for TUI header.
-renderSignalSummary :: Maybe TrajectorySignals -> Widget N
-renderSignalSummary Nothing = emptyWidget
-renderSignalSummary (Just signals) =
-    let score = trajInformativenessScore signals
-        is = trajInteraction signals
-        es = trajExecution signals
-        indicators =
-            concat
-                [ if sigDisengagementDetected is then ["⚠️ disengage"] else []
-                , if sigLoopDetected es then ["🔴 loop"] else []
-                , if sigFailureCount es > 0 then ["⚡" <> Text.pack (show (sigFailureCount es)) <> " fails"] else []
-                , if sigMisalignmentCount is > 0 then ["🔄" <> Text.pack (show (sigMisalignmentCount is)) <> " misalign"] else []
-                , if sigStagnationCount is > 0 then ["⏸️ " <> Text.pack (show (sigStagnationCount is)) <> " stagn"] else []
-                ]
-        scoreText = "Signals: " <> Text.pack (show score) <> "/100"
-        indicatorsText = if null indicators then "" else " | " <> Text.intercalate " | " indicators
-     in withAttr signalMetricsAttr $ txt $ scoreText <> indicatorsText
-
--- | Aggregate token usage across all turns in a session.
-aggregateSessionTokenUsage :: Session -> Maybe TokenUsageStats
-aggregateSessionTokenUsage session =
-    let allTokenUsages = collectTokenUsages session.turns
-     in if null allTokenUsages
-            then Nothing
-            else Just $ aggregateTokenUsages allTokenUsages
-  where
-    collectTokenUsages :: [Turn] -> [TokenUsage]
-    collectTokenUsages turnList =
-        [ usage
-        | turn <- turnList
-        , usage <- extractUsageFromTurn turn
-        ]
-
-extractUsageFromTurn :: Turn -> [TokenUsage]
-extractUsageFromTurn turn =
-    let mUsage = case turn of
-            UserTurn _ mStepUsage -> mStepUsage
-            LlmTurn _ mStepUsage -> mStepUsage
-            PartialUserTurn _ mStepUsage -> mStepUsage
-     in case mUsage of
-            Just stepUsage -> maybeToList (stepTokenUsage stepUsage)
-            Nothing -> []
-  where
-    maybeToList :: Maybe a -> [a]
-    maybeToList Nothing = []
-    maybeToList (Just x) = [x]
-
-aggregateTokenUsages :: [TokenUsage] -> TokenUsageStats
-aggregateTokenUsages usages =
-    TokenUsageStats
-        { statPromptTokens = sum $ map tokenPromptTokens usages
-        , statCompletionTokens = sum $ map tokenCompletionTokens usages
-        , statTotalTokens = sum $ map tokenTotalTokens usages
-        , statCachedTokens = sumMaybe $ map tokenCachedTokens usages
-        , statThinkingTokens = sumMaybe $ map tokenThinkingTokens usages
-        }
-
-sumMaybe :: [Maybe Int] -> Maybe Int
-sumMaybe ms =
-    let vs = [v | Just v <- ms]
-     in if null vs then Nothing else Just (sum vs)
-
--- | Token usage statistics aggregated across a session.
-data TokenUsageStats = TokenUsageStats
-    { statPromptTokens :: Int
-    , statCompletionTokens :: Int
-    , statTotalTokens :: Int
-    , statCachedTokens :: Maybe Int
-    , statThinkingTokens :: Maybe Int
-    }
-
--- | Format token stats for display.
-formatTokenStats :: TokenUsageStats -> Text
-formatTokenStats stats =
-    let baseText = formatTokenCount (statTotalTokens stats) <> " tokens"
-        details =
-            [ "in: " <> formatTokenCount (statPromptTokens stats)
-            , "out: " <> formatTokenCount (statCompletionTokens stats)
-            ]
-        withCached = case statCachedTokens stats of
-            Just n | n > 0 -> details ++ ["cached: " <> formatTokenCount n]
-            _ -> details
-        withThinking = case statThinkingTokens stats of
-            Just n | n > 0 -> withCached ++ ["think: " <> formatTokenCount n]
-            _ -> withCached
-     in baseText <> " (" <> Text.intercalate ", " withThinking <> ")"
-
--- | Format token count with thousands separator.
-formatTokenCount :: Int -> Text
-formatTokenCount n =
-    let numText = Text.pack (show n)
-     in addThousandSeparators numText
-
--- | Add thousand separators to a numeric text.
-addThousandSeparators :: Text -> Text
-addThousandSeparators numText =
-    let digits = Text.unpack numText
-        grouped = reverse $ group3 (reverse digits)
-     in Text.pack $ concat (intersperse "," grouped)
-  where
-    group3 :: String -> [String]
-    group3 [] = []
-    group3 s = take 3 s : group3 (drop 3 s)
-
--- | Format bytes in human-readable form.
-formatBytes :: Int -> Text
-formatBytes n
-    | n >= 1024 * 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024 * 1024))) <> " GiB"
-    | n >= 1024 * 1024 = Text.pack (show (n `div` (1024 * 1024))) <> " MiB"
-    | n >= 1024 = Text.pack (show (n `div` 1024)) <> " KiB"
-    | otherwise = Text.pack (show n) <> " B"
-
--- | Render a single turn with usage info (tokens or bytes fallback).
-render_turn :: (Int, Turn) -> Widget N
-render_turn (_k, turn) =
-    case turn of
-        UserTurn userTurn mUsage ->
-            withAttr userMessageAttr $
-                vBox
-                    [ txt $
-                        "> " <> case userTurn.userQuery of
-                            Just (UserQuery q _) -> q
-                            Nothing -> "(no query)"
-                    , render_usage mUsage
-                    , txt " "
-                    ]
-        LlmTurn llmTurn mUsage ->
-            withAttr llmMessageAttr $
-                vBox
-                    [ txt $
-                        "AI: " <> case llmTurn.llmResponse.responseText of
-                            Just txt0 -> txt0
-                            Nothing -> "(no response)"
-                    , case llmTurn.llmResponse.responseThinking of
-                        Just thinking -> withAttr thinkingAttr $ txt $ "Thinking: " <> thinking
-                        Nothing -> emptyWidget
-                    , render_usage mUsage
-                    , txt " "
-                    ]
-        PartialUserTurn partial mUsage ->
-            withAttr userMessageAttr $
-                vBox
-                    [ txt $
-                        "[Partial] > " <> case partial.pUserQuery of
-                            Just (UserQuery q _) -> q
-                            Nothing -> "(no query)"
-                    , render_usage mUsage
-                    , txt " "
-                    ]
-
--- | Render usage information for a turn (tokens or bytes).
-render_usage :: Maybe StepByteUsage -> Widget N
-render_usage Nothing = emptyWidget
-render_usage (Just usage) =
-    case usage.stepTokenUsage of
-        Just tokens ->
-            withAttr byteUsageAttr $
-                txt $
-                    "  [Tokens: " <> Text.pack (show $ tokenTotalTokens tokens) <> "]"
-        Nothing ->
-            if usage.stepTotalBytes > 0
-                then
-                    withAttr byteUsageAttr $
-                        txt $
-                            "  [" <> formatBytes usage.stepTotalBytes <> "]"
-                else emptyWidget
-
--- | Helper to extract text from SystemPrompt.
-getSystemPromptText :: SystemPrompt -> Text
-getSystemPromptText (SystemPrompt txt0) = txt0
-
--------------------------------------------------------------------------------
--- Helper Functions
--------------------------------------------------------------------------------
-
--- | Create a border that shows focus.
-borderWithFocus :: TuiState -> WidgetName -> Text -> Widget n -> Widget n
-borderWithFocus st widgetName labelText content =
-    let labelWidget =
-            if focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just widgetName
-                then withAttr focusedAttr (txt labelText)
-                else txt labelText
-     in borderWithLabel labelWidget content
-
--------------------------------------------------------------------------------
--- Attribute Map
--------------------------------------------------------------------------------
-
--- | Attribute map for styling.
-tui_appAttrMap :: TuiState -> AttrMap
-tui_appAttrMap _ =
-    attrMap
-        Vty.defAttr
-        [ (focusedAttr, BrickUtil.bg Vty.blue)
-        , (listSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.blue)
-        , (userMessageAttr, BrickUtil.fg Vty.green)
-        , (llmMessageAttr, BrickUtil.fg Vty.cyan)
-        , (thinkingAttr, BrickUtil.fg Vty.magenta `Vty.withStyle` Vty.italic)
-        , (byteUsageAttr, BrickUtil.fg Vty.brightYellow `Vty.withStyle` Vty.dim)
-        , (tokenUsageAttr, BrickUtil.fg Vty.brightGreen `Vty.withStyle` Vty.dim)
-        , (signalMetricsAttr, BrickUtil.fg Vty.brightCyan `Vty.withStyle` Vty.dim)
-        , (statusInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
-        , (statusWarningAttr, BrickUtil.fg Vty.yellow)
-        , (statusErrorAttr, BrickUtil.fg Vty.red `Vty.withStyle` Vty.bold)
-        , (pausedAttr, BrickUtil.fg Vty.yellow `Vty.withStyle` Vty.bold)
-        , (sendIndicatorAttr, BrickUtil.fg Vty.brightGreen `Vty.withStyle` Vty.bold)
-        , (activationOnDemandAttr, BrickUtil.fg Vty.yellow)
-        , (activationFirstNAttr, BrickUtil.fg Vty.cyan)
-        , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
-        , (activeTabAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
-        , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
-        , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
-        , (queuedMessageSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
-        , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
-        , (attachmentAttr, BrickUtil.fg Vty.cyan)
-        , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
-        , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
-        , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
-        , -- Tree and conversation hierarchy attributes
-          (treeBranchAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
-        , (rootConversationAttr, Vty.defAttr)
-        , (subcallAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
-        , (subcallSelectedAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
-        , -- FileBrowser attributes
-          (fileBrowserAttr, Vty.defAttr)
-        , (fileBrowserCurrentDirectoryAttr, BrickUtil.fg Vty.cyan)
-        , (fileBrowserSelectionInfoAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
-        , (fileBrowserSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
-        , (fileBrowserDirectoryAttr, BrickUtil.fg Vty.blue)
-        , (fileBrowserRegularFileAttr, Vty.defAttr)
-        ]
