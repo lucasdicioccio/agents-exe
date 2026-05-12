@@ -19,6 +19,9 @@ module System.Agents.TUI.Types.State
     , coreOSEventQueue
     , initCore
 
+      -- * Focus Ring
+    , buildFocusRingForTab
+
       -- * UI State
     , UIState (..)
     , uiFocusRing
@@ -113,7 +116,7 @@ data Core = Core
     -}
     , _coreOSEventQueue :: Maybe (TQueue OSEvent)
     {- ^ Optional OS event queue for subcall event emission. Enables the TUI
-    to receive notifications about subcall lifecycle (start, progress, completion).
+to receive notifications about subcall lifecycle (start, progress, completion).
     -}
     }
 
@@ -191,11 +194,29 @@ data UIState = UIState
 
 makeLenses ''UIState
 
+{- | Build a focus ring for a given tab.
+
+The ring includes base widgets plus tab-specific widgets inserted appropriately.
+The focus ring order is designed so that pressing Tab from a base widget
+will first visit the tab-specific widget(s) before moving to the next base widget.
+-}
+buildFocusRingForTab :: Tab -> FocusRing WidgetName
+buildFocusRingForTab tab =
+    case tab of
+        AgentsTab ->
+            focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
+        ChatsTab ->
+            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+        HistoryTab ->
+            focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
+        HelpTab ->
+            focusRing [AgentListWidget, ConversationListWidget, SessionsListWidget]
+
 -- | Initialize UI state with default values.
 initUIState :: [Text] -> [TuiAgent] -> [Session] -> UIState
 initUIState helpText agents sessions =
     UIState
-        { _uiFocusRing = focusRing [AgentListWidget]
+        { _uiFocusRing = buildFocusRingForTab AgentsTab
         , _currentTab = AgentsTab
         , _helpContent = helpText
         , _turnNavigation = Nothing

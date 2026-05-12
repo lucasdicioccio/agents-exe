@@ -52,6 +52,7 @@ module System.Agents.TUI.Event.Conversation (
 
 import Brick
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.Focus (focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents)
 import Brick.Widgets.List (listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
@@ -97,8 +98,10 @@ import System.Agents.TUI.Types (
     Tab (..),
     TuiAgent (..),
     TuiState,
+    WidgetName (..),
     agentList,
     attachedFiles,
+    buildFocusRingForTab,
     conversationId,
     conversationList,
     conversationName,
@@ -125,8 +128,10 @@ import System.Agents.TUI.Types (
     tuiTree,
     tuiUI,
     uiBufferedMessages,
+    uiFocusRing,
     unreadConversations,
     updateConversationSession,
+    zoomed,
  )
 import System.Agents.Tools.Context (CallStackEntry (..))
 
@@ -264,17 +269,21 @@ runConversation tracer baseTuiAgent session = do
                 , conversationSubcallDepth = 0
                 }
     liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
+    -- Insert the conversation at the top of the list and select it
     tuiUI . conversationList %= listInsert 0 conv
+    tuiUI . conversationList . listSelectedL .= Just 0
+    -- Mark as read since user just created it
+    tuiUI . unreadConversations %= Set.delete convId
 
-    -- Switch to chats tab
+    -- Switch to chats tab and focus message editor
     switchToChatsAndFocusMessage
 
 -- | Switch to the Chats tab and focus the message editor.
 switchToChatsAndFocusMessage :: EventM N TuiState ()
 switchToChatsAndFocusMessage = do
-    -- This is defined in Navigation module but we need it here
-    -- For now we just update the tab to ChatsTab
     tuiUI . currentTab .= ChatsTab
+    tuiUI . uiFocusRing .= focusSetCurrent MessageEditorWidget (buildFocusRingForTab ChatsTab)
+    tuiUI . zoomed .= False
 
 -------------------------------------------------------------------------------
 -- Send Message

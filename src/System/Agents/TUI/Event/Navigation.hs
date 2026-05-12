@@ -20,9 +20,7 @@ module System.Agents.TUI.Event.Navigation (
     toggleZoom,
     switchToChatsAndFocusMessage,
     
-    -- * Focus Ring Construction
-    baseFocusWidgets,
-    buildFocusRingForTab,
+    -- * Focus Ring Construction (re-exported from Types.State)
     buildFocusRingForTabPreserving,
     tabEntryWidget,
     focusRingElements,
@@ -35,7 +33,7 @@ module System.Agents.TUI.Event.Navigation (
 
 import Brick
 import Brick.BChan (writeBChan)
-import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusRing, focusSetCurrent)
+import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusSetCurrent)
 import Control.Lens ((%=), (.=), (^.), to, use)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
@@ -47,19 +45,22 @@ import System.Agents.TUI.KeyMapping (
     EventName (..),
     matchesEvent,
  )
-import System.Agents.TUI.Types (
+import System.Agents.TUI.Types.Core (
     AppEvent (..),
     N,
     StatusSeverity (..),
     Tab (..),
     TurnNavigationState (..),
-    TuiState,
     WidgetName (..),
+    navSelectedTurnIndex,
+    navTotalTurns,
+ )
+import System.Agents.TUI.Types.State (
+    TuiState,
+    buildFocusRingForTab,
     currentTab,
     eventChan,
     keyMapping,
-    navSelectedTurnIndex,
-    navTotalTurns,
     quitConfirmationPending,
     tuiUI,
     turnNavigation,
@@ -117,30 +118,6 @@ cycleTabBackward = do
 -------------------------------------------------------------------------------
 -- Focus Ring Construction
 -------------------------------------------------------------------------------
-
-{- | The base widgets that are always present in the focus ring.
-These correspond to the main navigation lists.
--}
-baseFocusWidgets :: [WidgetName]
-baseFocusWidgets = [AgentListWidget, ConversationListWidget, SessionsListWidget]
-
-{- | Build a focus ring for a given tab.
-The ring includes base widgets plus tab-specific widgets inserted appropriately.
-The focus ring order is designed so that pressing Tab from a base widget
-will first visit the tab-specific widget(s) before moving to the next base widget.
--}
-buildFocusRingForTab :: Tab -> FocusRing WidgetName
-buildFocusRingForTab tab =
-    -- Order: base widget, then its tab-specific widget(s), then next base widget, etc.
-    case tab of
-        AgentsTab ->
-            focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
-        ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
-        HistoryTab ->
-            focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
-        HelpTab ->
-            focusRing baseFocusWidgets
 
 {- | Get the default (entry) widget for a tab.
 This is the widget that should receive focus when switching to this tab.
