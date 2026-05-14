@@ -5,7 +5,7 @@
 -- | Unit tests for DeveloperToolbox ranged file read/write operations.
 --
 -- These tests verify:
--- * Range parsing (single lines, ranges, head/tail)
+-- * Range parsing (single lines, ranges, head/tail/whole, insert-after)
 -- * File reading with line ranges
 -- * File writing with line ranges
 -- * Multiple range operations
@@ -30,6 +30,7 @@ import Prod.Tracer (Tracer (..), silent)
 
 import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
+import System.Agents.Tools.DeveloperToolbox.Types (RangeSpec(..))
 
 -- | Test data: a simple multi-line file for testing
 testFileContent :: Text
@@ -104,6 +105,7 @@ tests =
         [ rangeParsingTests
         , readFileRangeTests
         , writeFileRangeTests
+        , wholeRangeTests
         , edgeCaseTests
         , multiRangeTests
         , indentationTests
@@ -122,11 +124,15 @@ rangeParsingTests =
         , testCase "Parse line range" testParseLineRange
         , testCase "Parse head" testParseHead
         , testCase "Parse tail" testParseTail
+        , testCase "Parse whole" testParseWhole
         , testCase "Parse multiple ranges" testParseMultipleRanges
         , testCase "Parse invalid range (start > end)" testParseInvalidRange
         , testCase "Parse invalid number" testParseInvalidNumber
         , testCase "Parse zero (invalid)" testParseZero
         , testCase "Parse empty string" testParseEmpty
+        , testCase "Parse insert-after single line" testParseInsertAfterSingle
+        , testCase "Parse insert-after range" testParseInsertAfterRange
+        , testCase "Parse multiple insert-after ranges" testParseMultipleInsertAfter
         ]
 
 testParseSingleLine :: Assertion
@@ -144,6 +150,10 @@ testParseHead =
 testParseTail :: Assertion
 testParseTail =
     DeveloperToolbox.parseRanges "tail" @?= Right [Tail]
+
+testParseWhole :: Assertion
+testParseWhole =
+    DeveloperToolbox.parseRanges "whole" @?= Right [Whole]
 
 testParseMultipleRanges :: Assertion
 testParseMultipleRanges =
@@ -171,6 +181,22 @@ testParseZero =
 testParseEmpty :: Assertion
 testParseEmpty =
     DeveloperToolbox.parseRanges "" @?= Right []
+
+-- | Test parsing insert-after single line (N+)
+testParseInsertAfterSingle :: Assertion
+testParseInsertAfterSingle =
+    DeveloperToolbox.parseRanges "5+" @?= Right [After 5]
+
+-- | Test parsing insert-after range (N-M+ means After M)
+testParseInsertAfterRange :: Assertion
+testParseInsertAfterRange =
+    DeveloperToolbox.parseRanges "2-5+" @?= Right [After 5]
+
+-- | Test parsing multiple insert-after ranges
+testParseMultipleInsertAfter :: Assertion
+testParseMultipleInsertAfter =
+    DeveloperToolbox.parseRanges "2+,5+"
+        @?= Right [After 2, After 5]
 
 -------------------------------------------------------------------------------
 -- Read File Range Tests
@@ -426,6 +452,112 @@ testWriteLinesWrittenCount = withTempDir $ \tmpDir ->
             Right writeResult -> do
                 -- linesWritten counts lines in the content parameter
                 writeFileLinesWritten writeResult @?= 3
+
+-------------------------------------------------------------------------------
+-- Whole Range Tests (for read-file-range)
+-------------------------------------------------------------------------------
+
+wholeRangeTests :: TestTree
+wholeRangeTests =
+    testGroup
+        "Whole Range Tests"
+        [ testCase "Read whole file returns all lines with line numbers" testReadWholeFile
+        , testCase "Read whole empty file returns empty" testReadWholeEmptyFile
+        , testCase "Read whole single line file" testReadWholeSingleLine
+        , testCase "Write whole overwrites entire file" testWriteWholeOverwrite
+        , testCase "Write whole creates new file" testWriteWholeNewFile
+        ]
+
+-- | Test that "whole" reads the entire file with line numbers
+testReadWholeFile :: Assertion
+testReadWholeFile = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        result <- DeveloperToolbox.executeReadFileRange silent toolbox filePath "whole"
+        case result of
+            Left err -> assertFailure $ show err
+            Right readResult -> do
+                -- Should have all 10 lines
+                readFileLinesRead readResult @?= 10
+                let content = readFileContent readResult
+                -- All lines should be present with line numbers
+                assertBool "Should contain line 1 with number" $ "1\tLine 1:" `Text.isInfixOf` content
+                assertBool "Should contain line 5 with number" $ "5\tLine 5:" `Text.isInfixOf` content
+                assertBool "Should contain line 10 with number" $ "10\tLine 10:" `Text.isInfixOf` content
+                -- Verify line numbers are correct (tab-separated)
+                assertBool "Should have First line" $ "First line" `Text.isInfixOf` content
+                assertBool "Should have Tenth line" $ "Tenth line" `Text.isInfixOf` content
+
+-- | Test that "whole" on empty file returns empty
+testReadWholeEmptyFile :: Assertion
+testReadWholeEmptyFile = withTempDir $ \tmpDir ->
+    withTestFile tmpDir emptyFileContent $ \filePath -> do
+        toolbox <- testToolbox
+        result <- DeveloperToolbox.executeReadFileRange silent toolbox filePath "whole"
+        case result of
+            Left err -> assertFailure $ show err
+            Right readResult -> do
+                readFileLinesRead readResult @?= 0
+                readFileContent readResult @?= ""
+
+-- | Test that "whole" on single line file works
+testReadWholeSingleLine :: Assertion
+testReadWholeSingleLine = withTempDir $ \tmpDir ->
+    withTestFile tmpDir singleLineContent $ \filePath -> do
+        toolbox <- testToolbox
+        result <- DeveloperToolbox.executeReadFileRange silent toolbox filePath "whole"
+        case result of
+            Left err -> assertFailure $ show err
+            Right readResult -> do
+                readFileLinesRead readResult @?= 1
+                let content = readFileContent readResult
+                assertBool "Should contain line number 1" $ "1\t" `Text.isInfixOf` content
+                assertBool "Should contain 'Only line'" $ "Only line" `Text.isInfixOf` content
+
+-- | Test that "whole" write overwrites entire file
+testWriteWholeOverwrite :: Assertion
+testWriteWholeOverwrite = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        result <- DeveloperToolbox.executeWriteFileRange
+                    silent
+                    toolbox
+                    filePath
+                    "whole"
+                    ["COMPLETELY NEW\nFILE CONTENT\nHERE\n"]
+        case result of
+            Left err -> assertFailure $ show err
+            Right writeResult -> do
+                writeFileRangesModified writeResult @?= 1
+                content <- Text.readFile filePath
+                -- New content should be present
+                assertBool "Should have COMPLETELY NEW" $ "COMPLETELY NEW" `Text.isInfixOf` content
+                assertBool "Should have FILE CONTENT" $ "FILE CONTENT" `Text.isInfixOf` content
+                -- Old content should be completely gone
+                assertBool "Should NOT have First line" $ not ("First line" `Text.isInfixOf` content)
+                assertBool "Should NOT have any old Line X:" $ not ("Line 1:" `Text.isInfixOf` content)
+                -- Verify line count
+                let lines' = Text.lines content
+                length lines' @?= 3
+
+-- | Test that "whole" write creates new file
+testWriteWholeNewFile :: Assertion
+testWriteWholeNewFile = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let newFile = tmpDir </> "whole-new-file.txt"
+    result <- DeveloperToolbox.executeWriteFileRange
+                silent
+                toolbox
+                newFile
+                "whole"
+                ["NEW FILE\nWITH WHOLE\n"]
+    case result of
+        Left err -> assertFailure $ show err
+        Right writeResult -> do
+            writeFileRangesModified writeResult @?= 1
+            content <- Text.readFile newFile
+            assertBool "Should have NEW FILE" $ "NEW FILE" `Text.isInfixOf` content
+            assertBool "Should have WITH WHOLE" $ "WITH WHOLE" `Text.isInfixOf` content
 
 -------------------------------------------------------------------------------
 -- Multi-Range Tests
@@ -784,7 +916,9 @@ testReplaceFirstLine = withTempDir $ \tmpDir ->
                 content <- Text.readFile filePath
                 let lines' = filter (/= "") (Text.lines content)
                 -- First line should be replaced
-                head lines' @?= "NEW FIRST LINE"
+                case lines' of
+                    (first : _) -> first @?= "NEW FIRST LINE"
+                    [] -> assertFailure "Expected non-empty file"
                 -- Original first line should be gone
                 assertBool "Should NOT have original first line" $
                     not ("Line 1: First line" `Text.isInfixOf` Text.unlines (take 1 lines'))
@@ -803,7 +937,9 @@ testReplaceLastLine = withTempDir $ \tmpDir ->
                 content <- Text.readFile filePath
                 let lines' = filter (/= "") (Text.lines content)
                 -- Last line should be replaced (line 10 is the 10th line)
-                last lines' @?= "NEW LAST LINE"
+                case reverse lines' of
+                    (last' : _) -> last' @?= "NEW LAST LINE"
+                    [] -> assertFailure "Expected non-empty file"
                 -- Original last line should be gone
                 assertBool "Should NOT have original last line (Tenth)" $
                     not ("Tenth line" `Text.isInfixOf` content)
@@ -832,7 +968,9 @@ testRangeDeletionAtBoundaries = withTempDir $ \tmpDir -> do
             assertBool "Line 2 should be removed (exact match)" $ 
                 not ("Line 2\n" `Text.isInfixOf` (content1 <> "\n"))
             -- What was Line 3 should now be first
-            assertBool "Line 3 should be first line now" $ head lines1 == "Line 3"
+            case lines1 of
+                (first : _) -> first @?= "Line 3"
+                [] -> assertFailure "Expected non-empty file"
             -- Should have 8 lines remaining (10 - 2)
             length lines1 @?= 8
 

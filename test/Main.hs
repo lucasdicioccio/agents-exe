@@ -68,6 +68,8 @@ import qualified OS.PersistenceTests
 import qualified ActivationSessionTests
 -- Import DeveloperToolbox tests
 import qualified DeveloperToolboxTests
+-- Import DeveloperToolbox write-range specific tests
+import qualified DeveloperToolboxWriteRangeTests
 
 main :: IO ()
 main = defaultMain tests
@@ -103,6 +105,7 @@ tests =
         , LuaToolboxJsonValueTests.luaToJsonValueTests
         , LuaToolboxHttpTests.luaToolboxHttpTests
         , DeveloperToolboxTests.tests
+        , DeveloperToolboxWriteRangeTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -375,11 +378,11 @@ agentSerializationTests =
                     , Base.announce = "A test agent"
                     , Base.systemPrompt = ["You are helpful"]
                     , Base.toolDirectory = Just "tools"
+                    , Base.builtinToolboxes = Just [builtinToolbox]
+                    , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
-                    , Base.builtinToolboxes = Just [builtinToolbox]
-                    , Base.bashToolboxes = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
                     , Base.extraAgents = Nothing

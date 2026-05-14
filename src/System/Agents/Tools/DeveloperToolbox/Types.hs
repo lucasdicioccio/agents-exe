@@ -20,6 +20,7 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     CreateResult (..),
     ReadFileRangeResult (..),
     WriteFileRangeResult (..),
+    RangeEditResult (..),
     PatchResult (..),
     PatchError (..),
     Hunk (..),
@@ -36,6 +37,7 @@ module System.Agents.Tools.DeveloperToolbox.Types (
 import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
+import qualified Data.Text as Text
 
 import System.Agents.Base (
     BashToolboxDescription,
@@ -238,6 +240,10 @@ data RangeSpec
       Head
     | -- | After last line (append)
       Tail
+    | -- | Entire file (overwrite/read all)
+      Whole
+    | -- | Insert after specified line (single line or end of range)
+      After Int
     deriving (Show, Eq)
 
 -- | Result of a read file range operation.
@@ -257,11 +263,47 @@ instance ToJSON ReadFileRangeResult where
             , "linesRead" .= readFileLinesRead result
             ]
 
--- | Result of a write file range operation.
+-- | Per-range edit result providing detailed feedback for each edit operation.
+data RangeEditResult = RangeEditResult
+    { rangeEditSpec :: Text
+    -- ^ Original range spec (e.g., "5", "1-3", "head", "tail")
+    , rangeEditOriginalStart :: Int
+    -- ^ Original start line (1-based, before any edits)
+    , rangeEditOriginalEnd :: Int
+    -- ^ Original end line (1-based, before any edits)
+    , rangeEditLinesWritten :: Int
+    -- ^ Number of lines written for this range
+    , rangeEditFinalStartLine :: Maybe Int
+    -- ^ Final start line after all edits applied (Nothing for deletions)
+    , rangeEditFinalEndLine :: Maybe Int
+    -- ^ Final end line after all edits applied (Nothing for deletions)
+    , rangeEditOperation :: Text
+    -- ^ Operation type: "prepend", "append", "replace", "delete", "overwrite", "skipped-out-of-bounds", "insert-after"
+    }
+    deriving (Show)
+
+-- | JSON serialization for RangeEditResult.
+instance ToJSON RangeEditResult where
+    toJSON result =
+        let originalLines = Text.pack (show (rangeEditOriginalStart result)) <> "-" <> Text.pack (show (rangeEditOriginalEnd result))
+        in Aeson.object
+            [ "range" .= rangeEditSpec result
+            , "originalLines" .= originalLines
+            , "linesWritten" .= rangeEditLinesWritten result
+            , "finalStartLine" .= rangeEditFinalStartLine result
+            , "finalEndLine" .= rangeEditFinalEndLine result
+            , "operation" .= rangeEditOperation result
+            ]
+
+-- | Result of a write file range operation with detailed per-range feedback.
 data WriteFileRangeResult = WriteFileRangeResult
     { writeFilePath :: FilePath
     , writeFileRangesModified :: Int
     , writeFileLinesWritten :: Int
+    , writeFileFinalLineCount :: Int
+    -- ^ Total lines in file after all edits
+    , writeFileRangeResults :: [RangeEditResult]
+    -- ^ Detailed results for each range
     }
     deriving (Show)
 
@@ -272,6 +314,8 @@ instance ToJSON WriteFileRangeResult where
             [ "path" .= writeFilePath result
             , "rangesModified" .= writeFileRangesModified result
             , "linesWritten" .= writeFileLinesWritten result
+            , "finalLineCount" .= writeFileFinalLineCount result
+            , "rangeResults" .= writeFileRangeResults result
             ]
 
 -- | Result of a patch file operation.

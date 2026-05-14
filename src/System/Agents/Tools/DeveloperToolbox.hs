@@ -40,6 +40,7 @@ module System.Agents.Tools.DeveloperToolbox (
     CreateResult (..),
     ReadFileRangeResult (..),
     WriteFileRangeResult (..),
+    RangeEditResult (..),
     PatchResult (..),
     PatchError (..),
     Hunk (..),

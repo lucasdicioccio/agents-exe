@@ -9,7 +9,9 @@ the read-file-range and write-file-range capabilities.
 Supported formats:
 - Single number: "5" -> Lines (5, 5)
 - Range: "1-10" -> Lines (1, 10)
-- Special: "head" -> Head, "tail" -> Tail
+- Insert after single: "5+" -> After 5 (insert after line 5)
+- Insert after range: "1-5+" -> After 5 (insert after line 5, end of range)
+- Special: "head" -> Head, "tail" -> Tail, "whole" -> Whole
 - Multiple: "1-10,20-30" -> [Lines (1, 10), Lines (20, 30)]
 -}
 module System.Agents.Tools.DeveloperToolbox.Range (
@@ -33,7 +35,8 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 Supports formats:
 - Single number: "5" -> Lines (5, 5)
 - Range: "1-10" -> Lines (1, 10)
-- Special: "head" -> Head, "tail" -> Tail
+- Insert after: "5+" -> After 5, "1-10+" -> After 10
+- Special: "head" -> Head, "tail" -> Tail, "whole" -> Whole
 - Multiple: "1-10,20-30" -> [Lines (1, 10), Lines (20, 30)]
 
 Returns Left with error message if parsing fails.
@@ -50,19 +53,47 @@ parseRangePart :: Text -> Either DeveloperToolError RangeSpec
 parseRangePart part
     | part == "head" = Right Head
     | part == "tail" = Right Tail
-    | "-" `Text.isInfixOf` part =
-        case Text.breakOn "-" part of
-            (startStr, rest) | not (Text.null rest) -> do
-                let endStr = Text.drop 1 rest
-                start <- parsePositiveInt startStr "Invalid start line"
-                end <- parsePositiveInt endStr "Invalid end line"
-                if start <= end
-                    then Right $ Lines (start, end)
-                    else Left $ InvalidRangeError $ "Start line must be <= end line in range: " <> part
-            _ -> Left $ InvalidRangeError $ "Invalid range format: " <> part
-    | otherwise = do
-        n <- parsePositiveInt part "Invalid line number"
-        Right $ Lines (n, n)
+    | part == "whole" = Right Whole
+    | "+" `Text.isSuffixOf` part = parseAfterRange part
+    | "-" `Text.isInfixOf` part = parseLineRange part
+    | otherwise = parseSingleLine part
+
+-- | Parse an insert-after range (N+ or N-M+).
+parseAfterRange :: Text -> Either DeveloperToolError RangeSpec
+parseAfterRange part =
+    let basePart = Text.dropEnd 1 part  -- Remove the trailing '+'
+     in if "-" `Text.isInfixOf` basePart
+            then -- Range form: "N-M+" means insert after M
+                case Text.breakOn "-" basePart of
+                    (_, "") -> Left $ InvalidRangeError $ "Invalid insert-after range format: " <> part
+                    (startStr, rest) -> do
+                        let endStr = Text.drop 1 rest
+                        _start <- parsePositiveInt startStr "Invalid start line in insert-after range"
+                        end <- parsePositiveInt endStr "Invalid end line in insert-after range"
+                        Right $ After end
+            else -- Single line form: "N+" means insert after N
+                do
+                    n <- parsePositiveInt basePart "Invalid line number in insert-after range"
+                    Right $ After n
+
+-- | Parse a line range (N-M).
+parseLineRange :: Text -> Either DeveloperToolError RangeSpec
+parseLineRange part =
+    case Text.breakOn "-" part of
+        (startStr, rest) | not (Text.null rest) -> do
+            let endStr = Text.drop 1 rest
+            start <- parsePositiveInt startStr "Invalid start line"
+            end <- parsePositiveInt endStr "Invalid end line"
+            if start <= end
+                then Right $ Lines (start, end)
+                else Left $ InvalidRangeError $ "Start line must be <= end line in range: " <> part
+        _ -> Left $ InvalidRangeError $ "Invalid range format: " <> part
+
+-- | Parse a single line number.
+parseSingleLine :: Text -> Either DeveloperToolError RangeSpec
+parseSingleLine part = do
+    n <- parsePositiveInt part "Invalid line number"
+    Right $ Lines (n, n)
 
 -- | Parse a positive integer from Text.
 parsePositiveInt :: Text -> Text -> Either DeveloperToolError Int

@@ -40,7 +40,7 @@ prepended as "{line_num}\t{line_content}".
 
 Parameters:
 - path: Path to the file to read
-- ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail")
+- ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail", "whole")
 
 Returns Right with ReadFileRangeResult on success, Left with error on failure.
 -}
@@ -102,6 +102,10 @@ extractLines allLines ranges =
 extractRange :: [Text] -> RangeSpec -> [(Int, Text)]
 extractRange _ Head = []
 extractRange _ Tail = []
+extractRange _ (After _) = []
+extractRange allLines Whole =
+    -- Return all lines with their line numbers
+    zip [1 ..] allLines
 extractRange allLines (Lines (start, end)) =
     let totalLines = length allLines
         actualStart = max 1 start
