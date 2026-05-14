@@ -139,6 +139,13 @@ library agents-lib
                     , System.Agents.Tools.Skills.Toolbox
                     , System.Agents.Tools.SqliteToolbox
                     , System.Agents.Tools.SystemToolbox
+                    , System.Agents.Tools.SystemToolbox.Attachment
+                    , System.Agents.Tools.SystemToolbox.Core
+                    , System.Agents.Tools.SystemToolbox.Formatting
+                    , System.Agents.Tools.SystemToolbox.Media
+                    , System.Agents.Tools.SystemToolbox.Session
+                    , System.Agents.Tools.SystemToolbox.SystemInfo
+                    , System.Agents.Tools.SystemToolbox.Types
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
@@ -374,5 +381,4 @@ benchmark os-benchmarks
                       text,
                       time,
                       unordered-containers
-
 
