@@ -35,7 +35,7 @@ if [[ "$1" == "run" ]]; then
         cabal build 2>&1
     elif [[ "$action" == "test" ]]; then
         echo "Running Haskell tests..."
-        timeout 1h cabal test 2>&1
+        timeout 1h cabal test --test-show-details=failures 2>&1
         if [[ $? -eq 124 ]]; then
             echo "NOTE: tests aborted for timeout (1hour)"
         fi
