@@ -94,15 +94,15 @@ module System.Agents.Tools.DeveloperToolbox (
     mergeAgentWithOverrides,
     mergeToolConfig,
     agentFromOverrides,
-    
+
     -- * Read file range helpers (exposed for testing)
     extractLines,
     extractRange,
     formatLineWithNumber,
-    
+
     -- * Default configuration
     defaultDeveloperToolboxDescription,
-    
+
     -- * Re-exports from Types (includes DeveloperToolCapability from Base)
     DeveloperToolCapability (..),
 ) where
@@ -114,13 +114,14 @@ import System.Agents.Tools.DeveloperToolbox.Types
 import System.Agents.Tools.DeveloperToolbox.Init
 
 -- Re-export capability execution functions
-import System.Agents.Tools.DeveloperToolbox.Validate
+
 import System.Agents.Tools.DeveloperToolbox.Create
-import System.Agents.Tools.DeveloperToolbox.Scaffold
-import System.Agents.Tools.DeveloperToolbox.Read
-import System.Agents.Tools.DeveloperToolbox.Write
 import System.Agents.Tools.DeveloperToolbox.Patch
+import System.Agents.Tools.DeveloperToolbox.Read
+import System.Agents.Tools.DeveloperToolbox.Scaffold
 import System.Agents.Tools.DeveloperToolbox.Spec
+import System.Agents.Tools.DeveloperToolbox.Validate
+import System.Agents.Tools.DeveloperToolbox.Write
 
 -- Re-export capabilities info
 import System.Agents.Tools.DeveloperToolbox.Capabilities
@@ -130,4 +131,3 @@ import System.Agents.Tools.DeveloperToolbox.Range
 
 -- Re-export templates
 import System.Agents.Tools.DeveloperToolbox.Templates
-

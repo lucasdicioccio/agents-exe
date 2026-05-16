@@ -11,7 +11,7 @@ import Control.Lens ((^.))
 import Data.Text (Text)
 
 import System.Agents.TUI.Render.Attributes (focusedAttr)
-import System.Agents.TUI.Types (TuiState, tuiUI, uiFocusRing, WidgetName)
+import System.Agents.TUI.Types (TuiState, WidgetName, tuiUI, uiFocusRing)
 
 -- | Create a border that shows focus.
 borderWithFocus :: TuiState -> WidgetName -> Text -> Widget n -> Widget n
@@ -21,4 +21,3 @@ borderWithFocus st widgetName labelText content =
                 then withAttr focusedAttr (txt labelText)
                 else txt labelText
      in borderWithLabel labelWidget content
-

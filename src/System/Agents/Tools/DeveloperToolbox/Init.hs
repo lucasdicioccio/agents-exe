@@ -42,4 +42,3 @@ initializeToolbox _tracer desc = do
                         , toolboxConfig = desc
                         }
             pure $ Right toolbox
-

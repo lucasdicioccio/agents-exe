@@ -16,11 +16,12 @@ module System.Agents.TUI.Event.Queue (
 import Brick
 import Brick.BChan (writeBChan)
 import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
-import Control.Lens ((%=), (.=), to, use, (^.))
+import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 
+import qualified Brick.Widgets.List as List
 import System.Agents.TUI.Types (
     AppEvent (..),
     Conversation (..),
@@ -38,7 +39,6 @@ import System.Agents.TUI.Types (
     tuiUI,
     uiBufferedMessages,
  )
-import qualified Brick.Widgets.List as List
 
 -- | Show a status message in the TUI.
 showStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
@@ -131,4 +131,3 @@ handleQueueNavigation direction = do
 -- | Delete an element at a specific index.
 deleteAt :: Int -> [a] -> [a]
 deleteAt idx xs = take idx xs ++ drop (idx + 1) xs
-

@@ -35,20 +35,20 @@ module System.Agents.FileSandbox (
     FileSandboxConfig (..),
     defaultFileSandboxConfig,
     fromAllowedPaths,
-    
+
     -- * Sandbox resource
     FileSandbox (..),
     AccessResult (..),
-    
+
     -- * Validation
     validateFileRead,
     validateFileWrite,
     validateFileAccess,
-    
+
     -- * Resource management
     createFileSandbox,
     lookupFileSandbox,
-    
+
     -- * Re-exports
     module System.Agents.FileSandbox.Predicate,
 ) where
@@ -69,10 +69,11 @@ import qualified System.Agents.OS.Resources.Types as ResTypes
 -- Sandbox Resource
 -------------------------------------------------------------------------------
 
--- | Runtime file sandbox resource.
---
--- Sandboxes are immutable after creation. To change permissions,
--- create a new sandbox with the updated configuration.
+{- | Runtime file sandbox resource.
+
+Sandboxes are immutable after creation. To change permissions,
+create a new sandbox with the updated configuration.
+-}
 data FileSandbox = FileSandbox
     { sandboxId :: ResourceId
     -- ^ Unique identifier for this sandbox
@@ -93,11 +94,12 @@ data AccessResult
 -- Validation
 -------------------------------------------------------------------------------
 
--- | Validate a file read operation against a sandbox.
---
--- This checks:
--- 1. The path predicate
--- 2. File size limits (if configured)
+{- | Validate a file read operation against a sandbox.
+
+This checks:
+1. The path predicate
+2. File size limits (if configured)
+-}
 validateFileRead :: FileSandbox -> FilePath -> IO AccessResult
 validateFileRead sandbox path = do
     -- Canonicalize path (resolves symlinks)
@@ -117,7 +119,7 @@ validateFileRead sandbox path = do
                         Just maxSize -> do
                             fileExists <- doesFileExist canonical
                             if not fileExists
-                                then pure AccessGranted  -- Size check only for existing files
+                                then pure AccessGranted -- Size check only for existing files
                                 else do
                                     sizeResult <- try $ getFileSize canonical
                                     case sizeResult of
@@ -128,11 +130,12 @@ validateFileRead sandbox path = do
                                                 then pure $ AccessDenied $ FileTooLarge canonical size maxSize
                                                 else pure AccessGranted
 
--- | Validate a file write operation against a sandbox.
---
--- For writes, we check:
--- 1. If the file exists, check write permission on the file itself
--- 2. If the file doesn't exist, check write permission on the parent directory
+{- | Validate a file write operation against a sandbox.
+
+For writes, we check:
+1. If the file exists, check write permission on the file itself
+2. If the file doesn't exist, check write permission on the parent directory
+-}
 validateFileWrite :: FileSandbox -> FilePath -> IO AccessResult
 validateFileWrite sandbox path = do
     canonicalResult <- try $ canonicalizePath path
@@ -151,7 +154,7 @@ validateFileWrite sandbox path = do
         case result of
             Left err -> pure $ AccessDenied err
             Right () -> pure AccessGranted
-    
+
     checkParentPermission :: FilePath -> IO AccessResult
     checkParentPermission p = do
         let parent = takeDirectory p
@@ -160,8 +163,9 @@ validateFileWrite sandbox path = do
             Left err -> pure $ AccessDenied err
             Right () -> pure AccessGranted
 
--- | General file access validation.
--- This checks only the predicate without size limits.
+{- | General file access validation.
+This checks only the predicate without size limits.
+-}
 validateFileAccess :: FileSandbox -> FilePath -> IO AccessResult
 validateFileAccess sandbox path = do
     result <- evaluatePredicate ((sandboxConfig sandbox).fsbPredicate) path
@@ -173,49 +177,54 @@ validateFileAccess sandbox path = do
 -- Resource Management
 -------------------------------------------------------------------------------
 
--- | Create a file sandbox resource in the OS registry.
---
--- The sandbox is registered as a resource with the current scope.
--- When the scope is cleaned up, the sandbox will be automatically removed.
+{- | Create a file sandbox resource in the OS registry.
+
+The sandbox is registered as a resource with the current scope.
+When the scope is cleaned up, the sandbox will be automatically removed.
+-}
 createFileSandbox :: ResTypes.ResourceContext -> FileSandboxConfig -> IO ResourceId
 createFileSandbox ctx config = do
     eid <- newEntityId
     let rid = ResourceId eid
     createdAt <- getCurrentTime
-    
+
     -- Convert Base config to ResourceTypes config for storage
-    let resConfig = ResTypes.FileSandboxConfig
-            { ResTypes.fsConfigName = fsbName config
-            , ResTypes.fsConfigDescription = Nothing
-            }
-    
+    let resConfig =
+            ResTypes.FileSandboxConfig
+                { ResTypes.fsConfigName = fsbName config
+                , ResTypes.fsConfigDescription = Nothing
+                }
+
     -- Register as OS resource
     -- Note: The handleAccess uses a dummy ResourceAccessor since the actual
     -- FileSandbox data is stored separately and retrieved via lookupFileSandbox
-    let handle = ResTypes.ResourceHandle
-            { ResTypes.handleId = rid
-            , ResTypes.handleCleanup = pure ()  -- Sandboxes are stateless
-            , ResTypes.handleAccess = \f -> f (ResTypes.ResourceAccessor ())
-            }
-    let info = ResTypes.ResourceInfo
-            { ResTypes.resourceId = rid
-            , ResTypes.resourceScope = ResTypes.ResourceScope (ResTypes.contextScope ctx)
-            , ResTypes.resourceType = ResTypes.FileSandboxResource resConfig
-            , ResTypes.resourceCreatedAt = createdAt
-            }
-    
+    let handle =
+            ResTypes.ResourceHandle
+                { ResTypes.handleId = rid
+                , ResTypes.handleCleanup = pure () -- Sandboxes are stateless
+                , ResTypes.handleAccess = \f -> f (ResTypes.ResourceAccessor ())
+                }
+    let info =
+            ResTypes.ResourceInfo
+                { ResTypes.resourceId = rid
+                , ResTypes.resourceScope = ResTypes.ResourceScope (ResTypes.contextScope ctx)
+                , ResTypes.resourceType = ResTypes.FileSandboxResource resConfig
+                , ResTypes.resourceCreatedAt = createdAt
+                }
+
     -- Store the FileSandbox in a separate registry (simplified: we just track the ID)
     atomically $ do
         modifyTVar' (ResTypes.registryHandles $ ResTypes.contextRegistry ctx) $
             HashMap.insert rid handle
         modifyTVar' (ResTypes.registryInfo $ ResTypes.contextRegistry ctx) $
             HashMap.insert rid info
-    
+
     pure rid
 
--- | Look up a file sandbox by ID.
--- Note: Currently returns Nothing as we don't store the full FileSandbox in the registry.
--- In a full implementation, we'd have a separate registry for FileSandbox data.
+{- | Look up a file sandbox by ID.
+Note: Currently returns Nothing as we don't store the full FileSandbox in the registry.
+In a full implementation, we'd have a separate registry for FileSandbox data.
+-}
 lookupFileSandbox :: ResTypes.ResourceRegistry -> ResourceId -> IO (Maybe FileSandbox)
 lookupFileSandbox registry rid = do
     -- For now, we can only check if the resource exists, not retrieve the full sandbox
@@ -229,4 +238,3 @@ lookupFileSandbox registry rid = do
             -- We found the handle but can't retrieve the original FileSandbox
             -- without storing it separately. Return Nothing for now.
             pure Nothing
-

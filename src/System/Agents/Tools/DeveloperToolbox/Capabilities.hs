@@ -87,4 +87,3 @@ getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
     , "Applies a unified diff patch to a file atomically with context validation"
     )
-

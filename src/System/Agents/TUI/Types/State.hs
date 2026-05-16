@@ -8,54 +8,54 @@ Description : State management types for the TUI
 This module defines types for application state and state transitions,
 including Core, UIState, TuiState, and initialization functions.
 -}
-module System.Agents.TUI.Types.State
-    ( -- * Core State
-      Core (..)
-    , coreConversations
-    , coreAgentTools
-    , coreBufferedMessages
-    , corePausedConversations
-    , coreWorld
-    , coreOSEventQueue
-    , initCore
+module System.Agents.TUI.Types.State (
+    -- * Core State
+    Core (..),
+    coreConversations,
+    coreAgentTools,
+    coreBufferedMessages,
+    corePausedConversations,
+    coreWorld,
+    coreOSEventQueue,
+    initCore,
 
-      -- * Focus Ring
-    , buildFocusRingForTab
+    -- * Focus Ring
+    buildFocusRingForTab,
 
-      -- * UI State
-    , UIState (..)
-    , uiFocusRing
-    , currentTab
-    , helpContent
-    , turnNavigation
-    , queuedMessagesFocus
-    , attachedFiles
-    , attachmentDialogState
-    , filePathInput
-    , selectedAttachmentIndex
-    , agentList
-    , conversationList
-    , sessionList
-    , messageEditor
-    , selectedAgentInfo
-    , statusMessage
-    , zoomed
-    , quitConfirmationPending
-    , unreadConversations
-    , fileBrowser
-    , auxiliaryTasks
-    , uiBufferedMessages
-    , uiAgentTools
-    , initUIState
+    -- * UI State
+    UIState (..),
+    uiFocusRing,
+    currentTab,
+    helpContent,
+    turnNavigation,
+    queuedMessagesFocus,
+    attachedFiles,
+    attachmentDialogState,
+    filePathInput,
+    selectedAttachmentIndex,
+    agentList,
+    conversationList,
+    sessionList,
+    messageEditor,
+    selectedAgentInfo,
+    statusMessage,
+    zoomed,
+    quitConfirmationPending,
+    unreadConversations,
+    fileBrowser,
+    auxiliaryTasks,
+    uiBufferedMessages,
+    uiAgentTools,
+    initUIState,
 
-      -- * TUI State
-    , TuiState (..)
-    , tuiCore
-    , tuiUI
-    , eventChan
-    , sessionConfig
-    , keyMapping
-    ) where
+    -- * TUI State
+    TuiState (..),
+    tuiCore,
+    tuiUI,
+    eventChan,
+    sessionConfig,
+    keyMapping,
+) where
 
 import Brick.BChan (BChan)
 import Brick.Focus (FocusRing, focusRing)
@@ -78,18 +78,18 @@ import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Base (Session)
 import System.Agents.TUI.KeyMapping (KeyMapping)
-import System.Agents.TUI.Types.Core
-    ( AuxiliaryTask
-    , SessionConfig (..)
-    , Tab (..)
-    , WidgetName (..)
-    , AttachmentDialogState (..)
-    , StatusMessage
-    , TurnNavigationState
-    , TuiAgent
-    , AppEvent
-    )
 import System.Agents.TUI.Types.Conversation (Conversation)
+import System.Agents.TUI.Types.Core (
+    AppEvent,
+    AttachmentDialogState (..),
+    AuxiliaryTask,
+    SessionConfig (..),
+    StatusMessage,
+    Tab (..),
+    TuiAgent,
+    TurnNavigationState,
+    WidgetName (..),
+ )
 import System.Agents.ToolRegistration (ToolRegistration)
 
 -------------------------------------------------------------------------------
@@ -116,7 +116,7 @@ data Core = Core
     -}
     , _coreOSEventQueue :: Maybe (TQueue OSEvent)
     {- ^ Optional OS event queue for subcall event emission. Enables the TUI
-to receive notifications about subcall lifecycle (start, progress, completion).
+    to receive notifications about subcall lifecycle (start, progress, completion).
     -}
     }
 
@@ -259,4 +259,3 @@ data TuiState = TuiState
     }
 
 makeLenses ''TuiState
-

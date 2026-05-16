@@ -10,19 +10,19 @@ in various languages and configurations.
 module System.Agents.Tools.DeveloperToolbox.Templates (
     -- * Agent templates
     makeAgentTemplate,
-    
+
     -- * Tool templates
     makeToolTemplate,
     makeBashToolTemplate,
     makePythonToolTemplate,
     makeHaskellToolTemplate,
-    
+
     -- * Config-based tool templates
     makeToolTemplateFromConfig,
     makeBashToolTemplateFromConfig,
     makePythonToolTemplateFromConfig,
     makeHaskellToolTemplateFromConfig,
-    
+
     -- * Template helpers
     toolConfigToAeson,
     defaultDeveloperToolboxDescription,
@@ -552,4 +552,3 @@ defaultDeveloperToolboxDescription =
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             , developerToolboxFileSandbox = Nothing -- Uses default: deny all
             }
-

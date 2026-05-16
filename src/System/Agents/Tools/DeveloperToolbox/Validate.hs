@@ -12,7 +12,7 @@ module System.Agents.Tools.DeveloperToolbox.Validate (
     -- * Validation execution
     executeValidateTool,
     executeValidateAgent,
-    
+
     -- * Validation helpers (exposed for testing)
     validateAgentStructure,
 ) where
@@ -33,10 +33,10 @@ import qualified System.Agents.FileLoader as FileLoader
 import System.Agents.Tools.Bash (LoadTrace)
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.DeveloperToolbox.Types (
+    AgentValidationResult (..),
     DeveloperToolError (..),
     Toolbox (..),
     ValidationResult (..),
-    AgentValidationResult (..),
  )
 
 -------------------------------------------------------------------------------
@@ -216,4 +216,3 @@ validateAgentStructure agent =
          in if hasAnySource
                 then []
                 else ["No tool sources configured (toolDirectory, bashToolboxes, mcpServers, openApiToolboxes, postgrestToolboxes, builtinToolboxes, or extraAgents)"]
-

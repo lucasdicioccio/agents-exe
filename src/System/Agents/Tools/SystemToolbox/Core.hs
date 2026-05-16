@@ -1,6 +1,6 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Core functionality for the SystemToolbox.
 
@@ -297,4 +297,3 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
         Right val -> pure $ Right val
-

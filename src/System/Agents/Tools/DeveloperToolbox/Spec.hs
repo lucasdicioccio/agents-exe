@@ -10,7 +10,7 @@ for various tool formats.
 module System.Agents.Tools.DeveloperToolbox.Spec (
     -- * Show spec
     executeShowSpec,
-    
+
     -- * Spec content
     bashToolsDocumentation,
 ) where
@@ -47,4 +47,3 @@ executeShowSpec toolbox specName = do
         else case specName of
             "bash-tools" -> pure $ Right bashToolsDocumentation
             _ -> pure $ Left $ InvalidTemplateError $ "Unknown spec: " <> specName
-

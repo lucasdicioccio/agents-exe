@@ -273,8 +273,9 @@ data ProcessConfig = ProcessConfig
 instance FromJSON ProcessConfig
 instance ToJSON ProcessConfig
 
--- | Configuration for file sandbox resources.
--- This is a placeholder; the full type is defined in System.Agents.FileSandbox.
+{- | Configuration for file sandbox resources.
+This is a placeholder; the full type is defined in System.Agents.FileSandbox.
+-}
 data FileSandboxConfig = FileSandboxConfig
     { fsConfigName :: Maybe Text
     , fsConfigDescription :: Maybe Text
@@ -379,4 +380,3 @@ data ResourceContext = ResourceContext
     { contextScope :: [ScopeLevel]
     , contextRegistry :: ResourceRegistry
     }
-

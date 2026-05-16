@@ -1,20 +1,20 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Rendering functions for the TUI application.
---
--- This module re-exports functionality from submodules:
---
--- * "System.Agents.TUI.Render.Attributes" - Attribute definitions
--- * "System.Agents.TUI.Render.Conversation" - Conversation tree and view rendering
--- * "System.Agents.TUI.Render.Dialog" - File attachment dialogs
--- * "System.Agents.TUI.Render.Layout" - Main layout and tab rendering
--- * "System.Agents.TUI.Render.Utils" - Utility rendering functions
--- * "System.Agents.TUI.Render.Widgets" - UI widgets (agent list, editor, etc.)
+{- | Rendering functions for the TUI application.
+
+This module re-exports functionality from submodules:
+
+* "System.Agents.TUI.Render.Attributes" - Attribute definitions
+* "System.Agents.TUI.Render.Conversation" - Conversation tree and view rendering
+* "System.Agents.TUI.Render.Dialog" - File attachment dialogs
+* "System.Agents.TUI.Render.Layout" - Main layout and tab rendering
+* "System.Agents.TUI.Render.Utils" - Utility rendering functions
+* "System.Agents.TUI.Render.Widgets" - UI widgets (agent list, editor, etc.)
+-}
 module System.Agents.TUI.Render (
     -- Main entry point
     tui_appDraw,
-    
     -- Re-exported from Attributes
     tui_appAttrMap,
     focusedAttr,
@@ -47,7 +47,6 @@ module System.Agents.TUI.Render (
     treeBranchAttr,
     rootConversationAttr,
     subcallSelectedAttr,
-    
     -- Re-exported from Layout
     render_ui,
     render_mainLayout,
@@ -64,12 +63,10 @@ module System.Agents.TUI.Render (
     render_shortcutsHelp,
     render_statusBar,
     statusAttr,
-    
     -- Re-exported from Utils
     borderWithFocus,
-    
     -- Re-exported from Conversation
-    ConversationTree(..),
+    ConversationTree (..),
     buildConversationForest,
     sortConversationsForNesting,
     render_conversationList,
@@ -87,18 +84,16 @@ module System.Agents.TUI.Render (
     render_session_usage,
     renderSignalSummary,
     aggregateSessionTokenUsage,
-    TokenUsageStats(..),
+    TokenUsageStats (..),
     formatTokenStats,
     formatTokenCount,
     addThousandSeparators,
     formatBytes,
     render_turn,
     render_usage,
-    
     -- Re-exported from Dialog
     renderFilePathDialog,
     renderFileBrowserDialog,
-    
     -- Re-exported from Widgets
     render_agentList,
     render_agentItem,
@@ -127,7 +122,7 @@ import System.Agents.TUI.Render.Dialog
 import System.Agents.TUI.Render.Layout
 import System.Agents.TUI.Render.Utils
 import System.Agents.TUI.Render.Widgets
-import System.Agents.TUI.Types (TuiState, N, tuiUI, attachmentDialogState, AttachmentDialogState(..))
+import System.Agents.TUI.Types (AttachmentDialogState (..), N, TuiState, attachmentDialogState, tuiUI)
 
 -- | Main application draw function.
 tui_appDraw :: TuiState -> [Widget N]
@@ -136,4 +131,3 @@ tui_appDraw st =
         AttachmentDialogPathInput -> [renderFilePathDialog st, render_ui st]
         AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
-

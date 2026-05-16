@@ -737,7 +737,7 @@ executeQueryWithContext tracer toolbox mConvId query = do
                                 executeSnapshotQueryInternal tracer toolbox convId query
                     _ ->
                         executeStandardQueryInternal tracer toolbox query operation
-                
+
                 -- Run VACUUM after write operations (outside of inner locks)
                 case result of
                     Right _ | isWriteOperation operation -> do
@@ -746,7 +746,7 @@ executeQueryWithContext tracer toolbox mConvId query = do
                             Left vacErr -> runTracer tracer (VacuumErrorTrace (toolboxPath toolbox) (Text.pack $ show vacErr))
                             Right _ -> pure ()
                     _ -> pure ()
-                
+
                 pure result
 
 -- | Execute query on a standard (non-snapshot) toolbox.
@@ -858,11 +858,11 @@ runVacuum tracer toolbox mConvId = do
     let dbPath = toolboxPath toolbox
     runTracer tracer (VacuumStartedTrace dbPath)
     startTime <- getCurrentTime
-    
+
     result <- try $ case toolboxAccessMode toolbox of
         Snapshot ->
             case mConvId of
-                Nothing -> pure ()  -- Can't vacuum snapshot without context
+                Nothing -> pure () -- Can't vacuum snapshot without context
                 Just _convId ->
                     case toolboxSnapshotState toolbox of
                         Nothing -> pure ()
@@ -879,10 +879,10 @@ runVacuum tracer toolbox mConvId = do
                     _ <- SQLite.execute_ conn "VACUUM"
                     pure ()
                 Nothing -> pure ()
-    
+
     endTime <- getCurrentTime
     let execTime = diffUTCTime endTime startTime
-    
+
     case result of
         Left e -> do
             runTracer tracer (VacuumErrorTrace dbPath (Text.pack $ show e))
@@ -1066,4 +1066,3 @@ _formatResultsAsObjects result =
 _rowToObject :: [Text] -> [Value] -> Value
 _rowToObject cols values =
     Object $ KeyMap.fromList $ zip (map AesonKey.fromText cols) values
-

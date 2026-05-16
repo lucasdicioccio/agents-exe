@@ -98,4 +98,3 @@ mediaTypeToMime (MediaText TextHTML) = "text/html"
 mediaTypeToMime (MediaText TextCSS) = "text/css"
 mediaTypeToMime (MediaText TextCSV) = "text/csv"
 mediaTypeToMime (MediaText TextMarkdown) = "text/markdown"
-

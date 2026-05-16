@@ -47,4 +47,3 @@ renderFileBrowserDialog st =
                             , txt ""
                             , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
                             ]
-

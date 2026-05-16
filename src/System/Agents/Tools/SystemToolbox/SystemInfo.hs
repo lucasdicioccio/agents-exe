@@ -1,5 +1,5 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | System information gathering capabilities.
 
@@ -347,4 +347,3 @@ safeReadProcess cmd args input = do
     case result of
         Left (_ :: SomeException) -> pure []
         Right output -> pure $ map Text.pack $ lines output
-

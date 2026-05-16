@@ -27,8 +27,9 @@ import System.Agents.FileSandbox.Predicate (PathPredicate (..), fromPathList)
 -- Note: FileSandboxConfig is defined here to avoid circular dependencies
 -- The full implementation is in System.Agents.FileSandbox
 
--- | Configuration for a file sandbox.
--- This is a simplified version; the full implementation is in FileSandbox module.
+{- | Configuration for a file sandbox.
+This is a simplified version; the full implementation is in FileSandbox module.
+-}
 data FileSandboxConfig = FileSandboxConfig
     { fsbPredicate :: PathPredicate
     -- ^ The predicate defining allowed file access
@@ -44,19 +45,21 @@ instance ToJSON FileSandboxConfig
 
 -- | Default sandbox configuration (denies all access).
 defaultFileSandboxConfig :: FileSandboxConfig
-defaultFileSandboxConfig = FileSandboxConfig
-    { fsbPredicate = AlwaysDeny
-    , fsbMaxFileSize = Just (50 * 1024 * 1024)  -- 50MB default
-    , fsbName = Nothing
-    }
+defaultFileSandboxConfig =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Just (50 * 1024 * 1024) -- 50MB default
+        , fsbName = Nothing
+        }
 
 -- | Migration function: Convert old allowedPaths to new sandbox config.
 fromAllowedPaths :: [FilePath] -> FileSandboxConfig
-fromAllowedPaths paths = FileSandboxConfig
-    { fsbPredicate = fromPathList paths
-    , fsbMaxFileSize = Nothing
-    , fsbName = Just "migrated-sandbox"
-    }
+fromAllowedPaths paths =
+    FileSandboxConfig
+        { fsbPredicate = fromPathList paths
+        , fsbMaxFileSize = Nothing
+        , fsbName = Just "migrated-sandbox"
+        }
 
 type AgentSlug = Text
 type AgentAnnounce = Text
@@ -917,11 +920,12 @@ instance FromJSON SystemToolboxDescription where
 
 -- | Default system file sandbox (denies all access).
 defaultSystemFileSandbox :: FileSandboxConfig
-defaultSystemFileSandbox = FileSandboxConfig
-    { fsbPredicate = AlwaysDeny
-    , fsbMaxFileSize = Just (50 * 1024 * 1024)  -- 50MB default
-    , fsbName = Just "system-attach-sandbox"
-    }
+defaultSystemFileSandbox =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Just (50 * 1024 * 1024) -- 50MB default
+        , fsbName = Just "system-attach-sandbox"
+        }
 
 -------------------------------------------------------------------------------
 -- Lua Toolbox Configuration
@@ -1094,8 +1098,9 @@ data DeveloperToolboxDescription
     , developerToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     , developerToolboxFileSandbox :: Maybe FileSandboxConfig
-    -- ^ File sandbox for read-file-range, write-file-range, patch-file
-    -- Default: deny all (secure by default)
+    {- ^ File sandbox for read-file-range, write-file-range, patch-file
+    Default: deny all (secure by default)
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1120,11 +1125,12 @@ instance FromJSON DeveloperToolboxDescription where
 
 -- | Default developer file sandbox (denies all access).
 defaultDeveloperFileSandbox :: FileSandboxConfig
-defaultDeveloperFileSandbox = FileSandboxConfig
-    { fsbPredicate = AlwaysDeny
-    , fsbMaxFileSize = Nothing
-    , fsbName = Just "developer-sandbox"
-    }
+defaultDeveloperFileSandbox =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Nothing
+        , fsbName = Just "developer-sandbox"
+        }
 
 {- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
 
@@ -1401,4 +1407,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-
