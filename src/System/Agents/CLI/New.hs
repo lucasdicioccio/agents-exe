@@ -63,6 +63,7 @@ defaultDeveloperToolbox =
                 , DevToolCreateTool
                 ]
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
+            , developerToolboxFileSandbox = Nothing -- Uses default: deny all
             }
 
 -- | Model preset configurations
@@ -519,3 +520,4 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
+

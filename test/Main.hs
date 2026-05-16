@@ -361,6 +361,7 @@ agentSerializationTests =
             let luaDesc = Base.LuaToolboxDescription
                     { Base.luaToolboxName = "lua"
                     , Base.luaToolboxDescription = "Lua interpreter"
+                    , Base.luaToolboxFileSandbox = Nothing
                     , Base.luaToolboxMaxMemoryMB = 256
                     , Base.luaToolboxMaxExecutionTimeSeconds = 300
                     , Base.luaToolboxAllowedTools = ["bash", "sqlite"]
