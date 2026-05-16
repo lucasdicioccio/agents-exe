@@ -47,7 +47,7 @@ rid <- createResource ctx (SqliteResource config) $ \rid -> do
     pure ResourceHandle
         { handleId = rid
         , handleCleanup = closeConnection conn
-        , handleAccess = \\f -> f (SqliteRes.SqliteAccessor conn)
+        , handleAccess = \f -> f (SqliteAccessor conn)
         }
 
 -- Later, cleanup all resources in a scope
@@ -86,7 +86,6 @@ module System.Agents.OS.Resources (
 
     -- * Resource access
     withResource,
-    lookupResourceHandle,
 
     -- * Registry operations
     getResourceCount,
@@ -130,12 +129,12 @@ The factory function receives the ResourceId so it can embed it in the handle.
 
 Example:
 @
-rid <- createResource ctx (SqliteResource config) $ \\rid -> do
+rid <- createResource ctx (SqliteResource config) $ \rid -> do
     conn <- openConnection config
     pure ResourceHandle
         { handleId = rid
         , handleCleanup = closeConnection conn
-        , handleAccess = \\f -> f (SqliteAccessor conn)
+        , handleAccess = \f -> f (SqliteAccessor conn)
         }
 @
 -}
@@ -177,14 +176,6 @@ This is a low-level operation. Prefer using 'createResource' for normal use.
 registerResourceHandle :: ResourceRegistry -> ResourceHandle -> ResourceInfo -> IO ()
 registerResourceHandle registry handle info =
     atomically $ registerResourceHandleSTM registry handle info
-
--- | STM version of registerResourceHandle
-registerResourceHandleSTM :: ResourceRegistry -> ResourceHandle -> ResourceInfo -> STM ()
-registerResourceHandleSTM registry handle info = do
-    modifyTVar' (registryHandles registry) $ \handles ->
-        HashMap.insert (handleId handle) handle handles
-    modifyTVar' (registryInfo registry) $ \infos ->
-        HashMap.insert (handleId handle) info infos
 
 -------------------------------------------------------------------------------
 -- Resource Cleanup
@@ -265,12 +256,7 @@ findResourcesInScope registry scopeLevel = do
     scopeMatches :: ScopeLevel -> ResourceScope -> Bool
     scopeMatches level (ResourceScope levels) = level `elem` levels
 
--- | Look up a resource handle by ID.
-lookupResourceHandle :: ResourceRegistry -> ResourceId -> IO (Maybe ResourceHandle)
-lookupResourceHandle registry rid =
-    atomically $ lookupResourceHandleSTM registry rid
-
--- | STM version of lookupResourceHandle
+-- | STM version of lookupResourceHandle (internal).
 lookupResourceHandleSTM :: ResourceRegistry -> ResourceId -> STM (Maybe ResourceHandle)
 lookupResourceHandleSTM registry rid = do
     handles <- readTVar (registryHandles registry)
@@ -283,7 +269,7 @@ and handles the resource not being found.
 
 Example:
 @
-result <- withResource registry rid $ \\accessor -> do
+result <- withResource registry rid $ \accessor -> do
     -- Use the accessor here
     queryDatabase accessor
 @

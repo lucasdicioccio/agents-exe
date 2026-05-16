@@ -9,48 +9,48 @@ Description : Core type definitions for the TUI system
 This module contains the fundamental type definitions used throughout the TUI system,
 including widget names, tabs, status messages, events, agent types, and configuration.
 -}
-module System.Agents.TUI.Types.Core
-    ( -- * Widget Names
-      WidgetName (..)
-    , N
+module System.Agents.TUI.Types.Core (
+    -- * Widget Names
+    WidgetName (..),
+    N,
 
-      -- * Tabs
-    , Tab (..)
+    -- * Tabs
+    Tab (..),
 
-      -- * Status Messages
-    , StatusSeverity (..)
-    , StatusMessage (..)
+    -- * Status Messages
+    StatusSeverity (..),
+    StatusMessage (..),
 
-      -- * Turn Navigation
-    , TurnNavigationState (..)
-    , navSession
-    , navSelectedTurnIndex
-    , navTotalTurns
+    -- * Turn Navigation
+    TurnNavigationState (..),
+    navSession,
+    navSelectedTurnIndex,
+    navTotalTurns,
 
-      -- * Attachment Dialog
-    , AttachmentDialogState (..)
+    -- * Attachment Dialog
+    AttachmentDialogState (..),
 
-      -- * Application Events
-    , AppEvent (..)
+    -- * Application Events
+    AppEvent (..),
 
-      -- * Agent Types
-    , TuiAgent (..)
-    , agentTree
+    -- * Agent Types
+    TuiAgent (..),
+    agentTree,
 
-      -- * Layout and Configuration
-    , LayoutMode (..)
-    , TUIConfig (..)
-    , Theme (..)
-    , Key (..)
-    , EventType (..)
+    -- * Layout and Configuration
+    LayoutMode (..),
+    TUIConfig (..),
+    Theme (..),
+    Key (..),
+    EventType (..),
 
-      -- * Auxiliary Tasks
-    , AuxiliaryTask (..)
+    -- * Auxiliary Tasks
+    AuxiliaryTask (..),
 
-      -- * Session Configuration
-    , SessionConfig (..)
-    , mkSessionConfig
-    ) where
+    -- * Session Configuration
+    SessionConfig (..),
+    mkSessionConfig,
+) where
 
 import Control.Concurrent.Async (Async)
 import Control.Lens (makeLenses)
@@ -299,4 +299,3 @@ mkSessionConfig store apiKeys keymap inputConfig =
         , sessionKeyMapping = keymap
         , sessionInputConfig = inputConfig
         }
-

@@ -11,15 +11,15 @@ This module provides functionality for scaffolding:
 module System.Agents.Tools.DeveloperToolbox.Scaffold (
     -- * Agent scaffolding
     executeScaffoldAgent,
-    
+
     -- * Tool scaffolding
     executeScaffoldTool,
 ) where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, when)
-import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Aeson.Encode.Pretty as AesonPretty
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
@@ -27,14 +27,14 @@ import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeDirectory)
 
 import System.Agents.Base (AgentDescription (..), DeveloperToolCapability (..))
+import System.Agents.Tools.DeveloperToolbox.Templates (
+    makeAgentTemplate,
+    makeToolTemplate,
+ )
 import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolError (..),
     ScaffoldResult (..),
     Toolbox (..),
- )
-import System.Agents.Tools.DeveloperToolbox.Templates (
-    makeAgentTemplate,
-    makeToolTemplate,
  )
 
 -------------------------------------------------------------------------------
@@ -143,4 +143,3 @@ executeScaffoldTool toolbox language toolSlug filePath force = do
                                 , scaffoldPath = filePath
                                 , scaffoldError = Nothing
                                 }
-

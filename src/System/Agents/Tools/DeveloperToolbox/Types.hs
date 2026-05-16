@@ -286,14 +286,14 @@ data RangeEditResult = RangeEditResult
 instance ToJSON RangeEditResult where
     toJSON result =
         let originalLines = Text.pack (show (rangeEditOriginalStart result)) <> "-" <> Text.pack (show (rangeEditOriginalEnd result))
-        in Aeson.object
-            [ "range" .= rangeEditSpec result
-            , "originalLines" .= originalLines
-            , "linesWritten" .= rangeEditLinesWritten result
-            , "finalStartLine" .= rangeEditFinalStartLine result
-            , "finalEndLine" .= rangeEditFinalEndLine result
-            , "operation" .= rangeEditOperation result
-            ]
+         in Aeson.object
+                [ "range" .= rangeEditSpec result
+                , "originalLines" .= originalLines
+                , "linesWritten" .= rangeEditLinesWritten result
+                , "finalStartLine" .= rangeEditFinalStartLine result
+                , "finalEndLine" .= rangeEditFinalEndLine result
+                , "operation" .= rangeEditOperation result
+                ]
 
 -- | Result of a write file range operation with detailed per-range feedback.
 data WriteFileRangeResult = WriteFileRangeResult
@@ -486,4 +486,3 @@ data DeveloperToolError
     | -- | Error during patch operation
       PatchValidationError !PatchError
     deriving (Show, Eq)
-

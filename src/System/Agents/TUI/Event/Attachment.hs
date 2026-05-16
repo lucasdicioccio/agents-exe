@@ -10,7 +10,7 @@ module System.Agents.TUI.Event.Attachment (
     handleAttachmentListEvent,
     handleRemoveSelectedAttachment,
     handleClearAllAttachments,
-    
+
     -- * Clipboard Paste
     handleClipboardPaste,
 ) where
@@ -18,7 +18,7 @@ module System.Agents.TUI.Event.Attachment (
 import Brick
 import Brick.BChan (writeBChan)
 import Brick.Widgets.Edit (editContentsL)
-import Control.Lens ((%=), (.=), to, use)
+import Control.Lens (to, use, (%=), (.=))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -28,6 +28,7 @@ import qualified Graphics.Vty as Vty
 
 import Prod.Tracer (Tracer)
 
+import qualified Brick.Widgets.List as List
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.TUI.Clipboard (
     ContentAction (..),
@@ -54,7 +55,6 @@ import System.Agents.TUI.Types (
     selectedAttachmentIndex,
     tuiUI,
  )
-import qualified Brick.Widgets.List as List
 
 -- | Show a status message in the TUI.
 showStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
@@ -194,4 +194,3 @@ handleClipboardPaste _tracer = do
 -- | Delete an element at a specific index.
 deleteAt :: Int -> [a] -> [a]
 deleteAt idx xs = take idx xs ++ drop (idx + 1) xs
-

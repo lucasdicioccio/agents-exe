@@ -1,5 +1,5 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | File attachment capability for multi-modal LLM interactions.
 
@@ -106,4 +106,3 @@ executeAttachFile tracer toolbox filePath = do
                                                         , attachBase64Data = base64Data
                                                         , attachFileSize = fileSize
                                                         }
-

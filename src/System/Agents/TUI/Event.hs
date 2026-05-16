@@ -10,11 +10,12 @@ which synchronizes tools between the legacy Runtime and OS Core.
 module System.Agents.TUI.Event (
     -- * Main Event Handler
     tui_appHandleEvent,
-    
+
     -- * Sub-module re-exports
+
     -- Dialog
     module System.Agents.TUI.Event.Dialog,
-    -- Navigation  
+    -- Navigation
     module System.Agents.TUI.Event.Navigation,
     -- Conversation
     module System.Agents.TUI.Event.Conversation,
@@ -22,17 +23,17 @@ module System.Agents.TUI.Event (
     module System.Agents.TUI.Event.Queue,
     -- Attachment
     module System.Agents.TUI.Event.Attachment,
-    
+
     -- * Types
     Trace (..),
-    
+
     -- * Utility Functions
     defaultHelpContent,
     initHelpContent,
     handleQuit,
     resetQuitConfirmation,
     showStatus,
-    
+
     -- * Internal Handlers (for sub-modules)
     handleNormalEvent,
     handleHeartbeat,
@@ -50,7 +51,7 @@ module System.Agents.TUI.Event (
     handleAgentInfoEvent,
     handleQueuedMessageListEvent,
     checkTripleNewlineTrigger,
-    
+
     -- * Markdown Export
     handleDumpSessionToMarkdown,
     handleViewSessionWithExternalViewer,
@@ -64,7 +65,7 @@ import Brick.Widgets.List (handleListEvent, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (readTVarIO)
-import Control.Lens ((%=), (.=), (^.), to, use)
+import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
@@ -130,8 +131,8 @@ import System.Agents.TUI.Types (
     TurnNavigationState (..),
     WidgetName (..),
     agentList,
-    auxiliaryTasks,
     attachmentDialogState,
+    auxiliaryTasks,
     conversationId,
     conversationList,
     conversationSession,
@@ -755,4 +756,3 @@ handleViewSessionWithExternalViewer orderPref = do
                 (Just _, Nothing) -> showStatus StatusWarning "No conversation selected"
                 (Nothing, _) -> showStatus StatusWarning "No session selected"
         Nothing -> showStatus StatusWarning "AGENT_MD_VIEWER not set"
-

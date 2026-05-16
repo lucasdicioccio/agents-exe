@@ -8,16 +8,16 @@ Description : Types for conversation management in the TUI
 This module defines types related to chat conversations and message handling,
 including conversation status, the Conversation type itself, and utility functions.
 -}
-module System.Agents.TUI.Types.Conversation
-    ( -- * Conversation Status
-      ConversationStatus (..)
+module System.Agents.TUI.Types.Conversation (
+    -- * Conversation Status
+    ConversationStatus (..),
 
-      -- * Conversation
-    , Conversation (..)
+    -- * Conversation
+    Conversation (..),
 
-      -- * Utility Functions
-    , updateConversationSession
-    ) where
+    -- * Utility Functions
+    updateConversationSession,
+) where
 
 import Brick.BChan (BChan)
 import Control.Concurrent (ThreadId)
@@ -95,4 +95,3 @@ updateConversationSession targetConvId newSession =
                 then conv{conversationSession = Just newSession}
                 else conv
         )
-

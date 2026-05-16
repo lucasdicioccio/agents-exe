@@ -1,6 +1,6 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Session introspection capabilities.
 
@@ -582,4 +582,3 @@ canAccessSession config sess =
             isParentSession config (Just sess)
                 || isChildSession config (Just sess)
                 || isCurrentSession config (Just sess)
-

@@ -22,6 +22,8 @@ import System.FilePath (takeDirectory)
 
 import Prod.Tracer (Tracer (..))
 
+import System.Agents.Tools.DeveloperToolbox.IO (writeFileAtomic)
+import System.Agents.Tools.DeveloperToolbox.Range (parseRanges)
 import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolCapability (..),
     DeveloperToolError (..),
@@ -31,8 +33,6 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     Trace (..),
     WriteFileRangeResult (..),
  )
-import System.Agents.Tools.DeveloperToolbox.Range (parseRanges)
-import System.Agents.Tools.DeveloperToolbox.IO (writeFileAtomic)
 
 {- | Execute write file range operation.
 
@@ -156,23 +156,26 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
                                                             let newLines = Text.lines content
                                                             let linesWritten = length newLines
                                                             let finalLineCount = length newLines
-                                                            let rangeResult = RangeEditResult
-                                                                    { rangeEditSpec = "whole"
-                                                                    , rangeEditOriginalStart = 1
-                                                                    , rangeEditOriginalEnd = 0  -- Will be set from original file below
-                                                                    , rangeEditLinesWritten = linesWritten
-                                                                    , rangeEditFinalStartLine = if linesWritten == 0 then Nothing else Just 1
-                                                                    , rangeEditFinalEndLine = if linesWritten == 0 then Nothing else Just linesWritten
-                                                                    , rangeEditOperation = "overwrite"
-                                                                    }
+                                                            let rangeResult =
+                                                                    RangeEditResult
+                                                                        { rangeEditSpec = "whole"
+                                                                        , rangeEditOriginalStart = 1
+                                                                        , rangeEditOriginalEnd = 0 -- Will be set from original file below
+                                                                        , rangeEditLinesWritten = linesWritten
+                                                                        , rangeEditFinalStartLine = if linesWritten == 0 then Nothing else Just 1
+                                                                        , rangeEditFinalEndLine = if linesWritten == 0 then Nothing else Just linesWritten
+                                                                        , rangeEditOperation = "overwrite"
+                                                                        }
                                                             runTracer tracer (WriteFileRangeCompletedTrace filePath 1 linesWritten)
-                                                            pure $ Right $ WriteFileRangeResult
-                                                                { writeFilePath = filePath
-                                                                , writeFileRangesModified = 1
-                                                                , writeFileLinesWritten = linesWritten
-                                                                , writeFileFinalLineCount = finalLineCount
-                                                                , writeFileRangeResults = [rangeResult]
-                                                                }
+                                                            pure $
+                                                                Right $
+                                                                    WriteFileRangeResult
+                                                                        { writeFilePath = filePath
+                                                                        , writeFileRangesModified = 1
+                                                                        , writeFileLinesWritten = linesWritten
+                                                                        , writeFileFinalLineCount = finalLineCount
+                                                                        , writeFileRangeResults = [rangeResult]
+                                                                        }
                                                 _ -> do
                                                     -- Read existing file or start empty
                                                     existingContent <-
@@ -243,13 +246,15 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
             hasAfter = any isAfterRange ranges
             hasLines = any isLineRange ranges
             specialCount = length $ filter (\r -> r == Head || r == Tail || r == Whole) ranges
-        in if hasWhole && (hasHead || hasTail || hasLines || hasAfter)
-            then Left $ InvalidRangeError "'whole' cannot be combined with other ranges. Use it alone."
-            else if (hasHead || hasTail) && (hasLines || hasAfter)
-                then Left $ InvalidRangeError "'head' and 'tail' cannot be combined with line number ranges. Use them separately."
-                else if specialCount > 1
-                    then Left $ InvalidRangeError "Only one 'head', 'tail', or 'whole' range is allowed."
-                    else Right ()
+         in if hasWhole && (hasHead || hasTail || hasLines || hasAfter)
+                then Left $ InvalidRangeError "'whole' cannot be combined with other ranges. Use it alone."
+                else
+                    if (hasHead || hasTail) && (hasLines || hasAfter)
+                        then Left $ InvalidRangeError "'head' and 'tail' cannot be combined with line number ranges. Use them separately."
+                        else
+                            if specialCount > 1
+                                then Left $ InvalidRangeError "Only one 'head', 'tail', or 'whole' range is allowed."
+                                else Right ()
 
     isLineRange (Lines _) = True
     isLineRange _ = False
@@ -263,10 +268,10 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
     -- Whole is handled separately and won't appear here
     rangeStartKey :: (RangeSpec, Text) -> Int
     rangeStartKey (Head, _) = 0
-    rangeStartKey (Lines (s, _), _) = s * 2  -- Even numbers for line ranges
-    rangeStartKey (After n, _) = n * 2 + 1   -- Odd numbers for insert-after (between lines)
+    rangeStartKey (Lines (s, _), _) = s * 2 -- Even numbers for line ranges
+    rangeStartKey (After n, _) = n * 2 + 1 -- Odd numbers for insert-after (between lines)
     rangeStartKey (Tail, _) = maxBound
-    rangeStartKey (Whole, _) = 0  -- Should not appear in normal processing
+    rangeStartKey (Whole, _) = 0 -- Should not appear in normal processing
 
     -- Apply a single range edit with position tracking
     -- Takes the original file line count (for bounds/original position info),
@@ -282,44 +287,44 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
             numNewLines = length newLines
             (newCurrentLines, newOffset, editResult) = case range of
                 Head ->
-                    let result = RangeEditResult
-                            { rangeEditSpec = "head"
-                            , rangeEditOriginalStart = 0
-                            , rangeEditOriginalEnd = 0
-                            , rangeEditLinesWritten = numNewLines
-                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
-                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
-                            , rangeEditOperation = "prepend"
-                            }
-                    in (newLines ++ currentLines, offset + numNewLines, result)
-
+                    let result =
+                            RangeEditResult
+                                { rangeEditSpec = "head"
+                                , rangeEditOriginalStart = 0
+                                , rangeEditOriginalEnd = 0
+                                , rangeEditLinesWritten = numNewLines
+                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
+                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
+                                , rangeEditOperation = "prepend"
+                                }
+                     in (newLines ++ currentLines, offset + numNewLines, result)
                 Tail ->
                     let finalStart = length currentLines + offset + 1
-                        result = RangeEditResult
-                            { rangeEditSpec = "tail"
-                            , rangeEditOriginalStart = origLineCount + 1
-                            , rangeEditOriginalEnd = origLineCount
-                            , rangeEditLinesWritten = numNewLines
-                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
-                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just (finalStart + numNewLines - 1)
-                            , rangeEditOperation = "append"
-                            }
-                    in (currentLines ++ newLines, offset + numNewLines, result)
-
+                        result =
+                            RangeEditResult
+                                { rangeEditSpec = "tail"
+                                , rangeEditOriginalStart = origLineCount + 1
+                                , rangeEditOriginalEnd = origLineCount
+                                , rangeEditLinesWritten = numNewLines
+                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
+                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just (finalStart + numNewLines - 1)
+                                , rangeEditOperation = "append"
+                                }
+                     in (currentLines ++ newLines, offset + numNewLines, result)
                 Whole ->
                     -- Overwrite entire file: replace all lines
                     -- This shouldn't happen in normal processing as Whole is handled separately
-                    let result = RangeEditResult
-                            { rangeEditSpec = "whole"
-                            , rangeEditOriginalStart = 1
-                            , rangeEditOriginalEnd = origLineCount
-                            , rangeEditLinesWritten = numNewLines
-                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
-                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
-                            , rangeEditOperation = "overwrite"
-                            }
-                    in (newLines, 0, result)
-
+                    let result =
+                            RangeEditResult
+                                { rangeEditSpec = "whole"
+                                , rangeEditOriginalStart = 1
+                                , rangeEditOriginalEnd = origLineCount
+                                , rangeEditLinesWritten = numNewLines
+                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
+                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
+                                , rangeEditOperation = "overwrite"
+                                }
+                     in (newLines, 0, result)
                 After origLine ->
                     -- Insert after the specified line
                     -- Adjust position based on running offset
@@ -329,18 +334,18 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
                         -- Calculate final position (1-based for display)
                         finalStart = insertPos + 1
                         finalEnd = insertPos + numNewLines
-                        result = RangeEditResult
-                            { rangeEditSpec = Text.pack (show origLine) <> "+"
-                            , rangeEditOriginalStart = origLine
-                            , rangeEditOriginalEnd = origLine
-                            , rangeEditLinesWritten = numNewLines
-                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
-                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
-                            , rangeEditOperation = "insert-after"
-                            }
+                        result =
+                            RangeEditResult
+                                { rangeEditSpec = Text.pack (show origLine) <> "+"
+                                , rangeEditOriginalStart = origLine
+                                , rangeEditOriginalEnd = origLine
+                                , rangeEditLinesWritten = numNewLines
+                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
+                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
+                                , rangeEditOperation = "insert-after"
+                                }
                         (before, after) = splitAt insertPos currentLines
-                    in (before ++ newLines ++ after, offset + numNewLines, result)
-
+                     in (before ++ newLines ++ after, offset + numNewLines, result)
                 Lines (origStart, origEnd) ->
                     -- Adjust positions based on running offset
                     let adjustedStart = origStart + offset
@@ -348,38 +353,41 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
                         -- Clamp to current file bounds
                         actualStart = max 1 adjustedStart
                         actualEnd = min adjustedEnd (length currentLines)
-                    in if actualStart > actualEnd || actualStart > length currentLines
-                        then -- Range is out of bounds after adjustment, skip
-                            let result = RangeEditResult
-                                    { rangeEditSpec = Text.pack (show origStart) <>
-                                        if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
-                                    , rangeEditOriginalStart = origStart
-                                    , rangeEditOriginalEnd = origEnd
-                                    , rangeEditLinesWritten = 0
-                                    , rangeEditFinalStartLine = Nothing
-                                    , rangeEditFinalEndLine = Nothing
-                                    , rangeEditOperation = "skipped-out-of-bounds"
-                                    }
-                            in (currentLines, offset, result)
-                        else
-                            let before = take (actualStart - 1) currentLines
-                                after = drop actualEnd currentLines
-                                linesRemoved = actualEnd - actualStart + 1
-                                linesAdded = numNewLines
-                                offsetDelta = offset + (linesAdded - linesRemoved)
-                                finalStart = actualStart
-                                finalEnd = actualStart + numNewLines - 1
-                                operation = if numNewLines == 0 then "delete" else "replace"
-                                result = RangeEditResult
-                                    { rangeEditSpec = Text.pack (show origStart) <>
-                                        if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
-                                    , rangeEditOriginalStart = origStart
-                                    , rangeEditOriginalEnd = origEnd
-                                    , rangeEditLinesWritten = numNewLines
-                                    , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
-                                    , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
-                                    , rangeEditOperation = operation
-                                    }
-                            in (before ++ newLines ++ after, offsetDelta, result)
-        in (newCurrentLines, newOffset, results ++ [editResult])
-
+                     in if actualStart > actualEnd || actualStart > length currentLines
+                            then -- Range is out of bounds after adjustment, skip
+                                let result =
+                                        RangeEditResult
+                                            { rangeEditSpec =
+                                                Text.pack (show origStart)
+                                                    <> if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
+                                            , rangeEditOriginalStart = origStart
+                                            , rangeEditOriginalEnd = origEnd
+                                            , rangeEditLinesWritten = 0
+                                            , rangeEditFinalStartLine = Nothing
+                                            , rangeEditFinalEndLine = Nothing
+                                            , rangeEditOperation = "skipped-out-of-bounds"
+                                            }
+                                 in (currentLines, offset, result)
+                            else
+                                let before = take (actualStart - 1) currentLines
+                                    after = drop actualEnd currentLines
+                                    linesRemoved = actualEnd - actualStart + 1
+                                    linesAdded = numNewLines
+                                    offsetDelta = offset + (linesAdded - linesRemoved)
+                                    finalStart = actualStart
+                                    finalEnd = actualStart + numNewLines - 1
+                                    operation = if numNewLines == 0 then "delete" else "replace"
+                                    result =
+                                        RangeEditResult
+                                            { rangeEditSpec =
+                                                Text.pack (show origStart)
+                                                    <> if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
+                                            , rangeEditOriginalStart = origStart
+                                            , rangeEditOriginalEnd = origEnd
+                                            , rangeEditLinesWritten = numNewLines
+                                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
+                                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
+                                            , rangeEditOperation = operation
+                                            }
+                                 in (before ++ newLines ++ after, offsetDelta, result)
+         in (newCurrentLines, newOffset, results ++ [editResult])

@@ -12,13 +12,13 @@ module System.Agents.TUI.Event.Dialog (
     openFilePathDialog,
     closeFilePathDialog,
     handleConfirmFileAttachment,
-    
+
     -- * File Browser Dialog
     handleFileBrowserDialogEvent,
     openFileBrowserDialog,
     closeFileBrowserDialog,
     handleFileBrowserSelection,
-    
+
     -- * File Loading
     loadMediaAttachment,
     loadFileAsAttachment,
@@ -35,7 +35,7 @@ import Brick.Widgets.FileBrowser (
     newFileBrowser,
     selectNonDirectories,
  )
-import Control.Lens ((%=), (.=), to, use, _Just)
+import Control.Lens (to, use, (%=), (.=), _Just)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Base64 as Base64
@@ -48,6 +48,7 @@ import qualified Data.Text.Zipper as TextZipper
 import qualified Graphics.Vty as Vty
 import System.FilePath (takeExtension, takeFileName)
 
+import qualified Brick.Widgets.List as List
 import System.Agents.CLI.PromptScript (parseMediaReference, resolveMediaType)
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.TUI.Types (
@@ -58,8 +59,8 @@ import System.Agents.TUI.Types (
     StatusSeverity (..),
     TuiState,
     WidgetName (..),
-    attachmentDialogState,
     attachedFiles,
+    attachmentDialogState,
     conversationId,
     conversationList,
     eventChan,
@@ -67,7 +68,6 @@ import System.Agents.TUI.Types (
     filePathInput,
     tuiUI,
  )
-import qualified Brick.Widgets.List as List
 
 -- | Show a status message in the TUI.
 showStatus :: StatusSeverity -> Text.Text -> EventM N TuiState ()
@@ -269,4 +269,3 @@ detectMimeType fp =
             ".yaml" -> "text/yaml"
             ".yml" -> "text/yaml"
             _ -> "application/octet-stream"
-

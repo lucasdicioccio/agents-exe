@@ -21,6 +21,46 @@ import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
+-- Import FileSandbox types for unified sandboxing
+import System.Agents.FileSandbox.Predicate (PathPredicate (..), fromPathList)
+
+-- Note: FileSandboxConfig is defined here to avoid circular dependencies
+-- The full implementation is in System.Agents.FileSandbox
+
+{- | Configuration for a file sandbox.
+This is a simplified version; the full implementation is in FileSandbox module.
+-}
+data FileSandboxConfig = FileSandboxConfig
+    { fsbPredicate :: PathPredicate
+    -- ^ The predicate defining allowed file access
+    , fsbMaxFileSize :: Maybe Integer
+    -- ^ Maximum file size in bytes (Nothing = no limit)
+    , fsbName :: Maybe Text
+    -- ^ Optional human-readable name for the sandbox
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance FromJSON FileSandboxConfig
+instance ToJSON FileSandboxConfig
+
+-- | Default sandbox configuration (denies all access).
+defaultFileSandboxConfig :: FileSandboxConfig
+defaultFileSandboxConfig =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Just (50 * 1024 * 1024) -- 50MB default
+        , fsbName = Nothing
+        }
+
+-- | Migration function: Convert old allowedPaths to new sandbox config.
+fromAllowedPaths :: [FilePath] -> FileSandboxConfig
+fromAllowedPaths paths =
+    FileSandboxConfig
+        { fsbPredicate = fromPathList paths
+        , fsbMaxFileSize = Nothing
+        , fsbName = Just "migrated-sandbox"
+        }
+
 type AgentSlug = Text
 type AgentAnnounce = Text
 
@@ -854,6 +894,8 @@ data SystemToolboxDescription
     -- ^ Max sessions to return in list operations (default: 50)
     , systemToolboxSessionIntrospectionIncludeToolOutputs :: Maybe Bool
     -- ^ Whether to include tool outputs in read operations (default: True)
+    , systemToolboxFileSandbox :: Maybe FileSandboxConfig
+    -- ^ File sandbox for attach-file capability (default: deny all)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -875,6 +917,15 @@ instance ToJSON SystemToolboxDescription where
 
 instance FromJSON SystemToolboxDescription where
     parseJSON = Aeson.genericParseJSON systemToolboxOptions
+
+-- | Default system file sandbox (denies all access).
+defaultSystemFileSandbox :: FileSandboxConfig
+defaultSystemFileSandbox =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Just (50 * 1024 * 1024) -- 50MB default
+        , fsbName = Just "system-attach-sandbox"
+        }
 
 -------------------------------------------------------------------------------
 -- Lua Toolbox Configuration
@@ -918,11 +969,13 @@ data LuaToolboxDescription = LuaToolboxDescription
     , luaToolboxAllowedTools :: [Text]
     -- ^ Whitelist of tool names that Lua scripts can call via the portal
     , luaToolboxAllowedPaths :: [FilePath]
-    -- ^ Whitelist of filesystem paths accessible to Lua scripts
+    -- ^ DEPRECATED: Use fileSandbox instead
     , luaToolboxAllowedHosts :: [Text]
     -- ^ Whitelist of network hosts accessible to Lua HTTP module
     , luaToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , luaToolboxFileSandbox :: Maybe FileSandboxConfig
+    -- ^ New unified file sandbox configuration
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -945,7 +998,12 @@ instance ToJSON LuaToolboxDescription where
 instance FromJSON LuaToolboxDescription where
     parseJSON = Aeson.genericParseJSON luaToolboxOptions
 
--------------------------------------------------------------------------------
+-- | Migration function: Convert old config to new sandbox format.
+migrateLuaSandbox :: LuaToolboxDescription -> FileSandboxConfig
+migrateLuaSandbox desc = case luaToolboxFileSandbox desc of
+    Just config -> config
+    Nothing -> fromAllowedPaths (luaToolboxAllowedPaths desc)
+
 -------------------------------------------------------------------------------
 -- Developer Toolbox Configuration
 -------------------------------------------------------------------------------
@@ -1039,6 +1097,10 @@ data DeveloperToolboxDescription
     -- ^ List of developer tool capabilities to expose
     , developerToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , developerToolboxFileSandbox :: Maybe FileSandboxConfig
+    {- ^ File sandbox for read-file-range, write-file-range, patch-file
+    Default: deny all (secure by default)
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1060,6 +1122,15 @@ instance ToJSON DeveloperToolboxDescription where
 
 instance FromJSON DeveloperToolboxDescription where
     parseJSON = Aeson.genericParseJSON developerToolboxOptions
+
+-- | Default developer file sandbox (denies all access).
+defaultDeveloperFileSandbox :: FileSandboxConfig
+defaultDeveloperFileSandbox =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Nothing
+        , fsbName = Just "developer-sandbox"
+        }
 
 {- | Wrapper type for builtin toolbox descriptions with tag-based JSON serialization.
 

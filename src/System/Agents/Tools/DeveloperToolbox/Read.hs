@@ -23,6 +23,7 @@ import System.Directory (doesFileExist)
 
 import Prod.Tracer (Tracer (..))
 
+import System.Agents.Tools.DeveloperToolbox.Range (parseRanges)
 import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolCapability (..),
     DeveloperToolError (..),
@@ -31,7 +32,6 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     Toolbox (..),
     Trace (..),
  )
-import System.Agents.Tools.DeveloperToolbox.Range (parseRanges)
 
 {- | Execute read file range operation.
 
@@ -117,4 +117,3 @@ extractRange allLines (Lines (start, end)) =
 -- | Format a line with its line number.
 formatLineWithNumber :: (Int, Text) -> Text
 formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
-

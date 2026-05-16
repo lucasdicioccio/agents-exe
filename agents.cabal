@@ -53,11 +53,13 @@ library agents-lib
                     , System.Agents.CLI.SessionIndex
                     , System.Agents.CLI.SessionSearch
                     , System.Agents.CLI.Spec
+                    , System.Agents.CLI.TUI
                     , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
-                    , System.Agents.CLI.TUI
                     , System.Agents.Combinators.ProgressiveDisclosure
                     , System.Agents.Combinators.StoreSessionProgress
+                    , System.Agents.FileSandbox
+                    , System.Agents.FileSandbox.Predicate
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
                     , System.Agents.FileNotification
