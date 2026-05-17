@@ -28,7 +28,8 @@ import Test.Tasty.HUnit
 
 import Prod.Tracer (Tracer (..), silent)
 
-import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..))
+import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..))
+import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import System.Agents.Tools.DeveloperToolbox.Types (RangeSpec(..))
 
@@ -56,7 +57,7 @@ emptyFileContent = ""
 singleLineContent :: Text
 singleLineContent = "Only line\n"
 
--- | Create a test toolbox with all capabilities enabled
+-- | Create a test toolbox with all capabilities enabled and sandbox allowing all file access
 testToolbox :: IO Toolbox
 testToolbox = do
     let desc =
@@ -68,6 +69,11 @@ testToolbox = do
                     , DevToolWriteFileRange
                     ]
                 , developerToolboxActivation = Nothing
+                , developerToolboxFileSandbox = Just FileSandboxConfig
+                    { fsbPredicate = AlwaysAllow
+                    , fsbMaxFileSize = Nothing
+                    , fsbName = Nothing
+                    }
                 }
     result <- DeveloperToolbox.initializeToolbox silent desc
     case result of

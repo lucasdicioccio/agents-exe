@@ -49,6 +49,7 @@ import System.Agents.Base (
     OpenAPIToolboxDescription,
     PostgRESTToolboxDescription,
  )
+import System.Agents.FileSandbox (FileSandbox)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
 -------------------------------------------------------------------------------
@@ -143,6 +144,7 @@ The toolbox maintains:
 * Toolbox name and description
 * List of enabled capabilities
 * The original configuration description used to create this toolbox
+* Optional file sandbox for file-related capabilities
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -150,6 +152,8 @@ data Toolbox = Toolbox
     , toolboxCapabilities :: [DeveloperToolCapability]
     , toolboxConfig :: DeveloperToolboxDescription
     -- ^ Original configuration description used to create this toolbox
+    , toolboxFileSandbox :: Maybe FileSandbox
+    -- ^ Optional file sandbox for read-file-range, write-file-range, patch-file
     }
 
 -------------------------------------------------------------------------------
@@ -483,6 +487,9 @@ data DeveloperToolError
       RangeOutOfBoundsError !Text
     | -- | Permission denied
       PermissionError !Text
+    | -- | File access denied by sandbox
+      FileAccessDeniedError !FilePath !Text
     | -- | Error during patch operation
       PatchValidationError !PatchError
     deriving (Show, Eq)
+

@@ -8,7 +8,6 @@ This module provides functionality to write to specific line ranges in files.
 Unlike full file writes, this allows surgical line-by-line modifications.
 -}
 module System.Agents.Tools.DeveloperToolbox.Write (
-    -- * Write file range
     executeWriteFileRange,
 ) where
 
@@ -22,6 +21,7 @@ import System.FilePath (takeDirectory)
 
 import Prod.Tracer (Tracer (..))
 
+import System.Agents.FileSandbox (AccessResult (..), validateFileWrite)
 import System.Agents.Tools.DeveloperToolbox.IO (writeFileAtomic)
 import System.Agents.Tools.DeveloperToolbox.Range (parseRanges)
 import System.Agents.Tools.DeveloperToolbox.Types (
@@ -38,6 +38,10 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 
 Replaces specific lines in a file with new content. Unlike bash-write-file which
 replaces the entire file, this capability allows surgical line-by-line modifications.
+
+When a file sandbox is configured, the filepath is validated against
+the sandbox before writing. Access is denied if the file is outside
+the allowed paths.
 
 Parameters:
 - path: Path to the file to modify
@@ -106,130 +110,153 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
         else do
             runTracer tracer (WriteFileRangeStartedTrace filePath rangesTxt)
 
-            -- Parse ranges
-            case parseRanges rangesTxt of
+            -- Validate against file sandbox if configured
+            case toolboxFileSandbox toolbox of
+                Just sandbox -> do
+                    accessResult <- validateFileWrite sandbox filePath
+                    case accessResult of
+                        AccessDenied err -> do
+                            let errMsg = FileAccessDeniedError filePath (Text.pack $ show err)
+                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show errMsg)
+                            pure $ Left errMsg
+                        AccessGranted -> proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks
+                Nothing ->
+                    -- No sandbox configured, proceed (backwards compatible behavior)
+                    proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks
+
+-- | Proceed with file write after validation.
+proceedWithWrite ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    Text ->
+    [Text] ->
+    IO (Either DeveloperToolError WriteFileRangeResult)
+proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
+    -- Parse ranges
+    case parseRanges rangesTxt of
+        Left err -> pure $ Left err
+        Right ranges -> do
+            -- Validate that head/tail/whole are not combined with other ranges
+            case validateSpecialRanges ranges of
                 Left err -> pure $ Left err
-                Right ranges -> do
-                    -- Validate that head/tail/whole are not combined with other ranges
-                    case validateSpecialRanges ranges of
-                        Left err -> pure $ Left err
-                        Right () -> do
-                            -- Validate that number of content blocks matches number of ranges
-                            -- Each range gets exactly one content block (even for multi-line ranges)
-                            let numRanges = length ranges
-                            let numContentBlocks = length (if null contentBlocks then [""] else contentBlocks)
-                            if numContentBlocks /= numRanges
-                                then
-                                    pure $
-                                        Left $
-                                            InvalidRangeError $
-                                                "Number of content blocks ("
-                                                    <> Text.pack (show numContentBlocks)
-                                                    <> ") must match number of ranges ("
-                                                    <> Text.pack (show numRanges)
-                                                    <> ")"
+                Right () -> do
+                    -- Validate that number of content blocks matches number of ranges
+                    -- Each range gets exactly one content block (even for multi-line ranges)
+                    let numRanges = length ranges
+                    let numContentBlocks = length (if null contentBlocks then [""] else contentBlocks)
+                    if numContentBlocks /= numRanges
+                        then
+                            pure $
+                                Left $
+                                    InvalidRangeError $
+                                        "Number of content blocks ("
+                                            <> Text.pack (show numContentBlocks)
+                                            <> ") must match number of ranges ("
+                                            <> Text.pack (show numRanges)
+                                            <> ")"
+                        else do
+                            -- Check if file exists
+                            fileExists <- doesFileExist filePath
+
+                            if not fileExists && not (any isSpecialRange ranges)
+                                then do
+                                    let err = FileNotFoundError filePath
+                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
+                                    pure $ Left err
                                 else do
-                                    -- Check if file exists
-                                    fileExists <- doesFileExist filePath
+                                    -- Handle "whole" as a special case - just write the content directly
+                                    case ranges of
+                                        [Whole] -> do
+                                            let content = case contentBlocks of
+                                                    (c : _) -> c
+                                                    [] -> ""
+                                            writeResult <- try $ do
+                                                createDirectoryIfMissing True (takeDirectory filePath)
+                                                writeFileAtomic filePath content
+                                            case writeResult of
+                                                Left (e :: SomeException) -> do
+                                                    let err = PermissionError $ Text.pack $ show e
+                                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                                                    pure $ Left err
+                                                Right () -> do
+                                                    let newLines = Text.lines content
+                                                    let linesWritten = length newLines
+                                                    let finalLineCount = length newLines
+                                                    let rangeResult =
+                                                            RangeEditResult
+                                                                { rangeEditSpec = "whole"
+                                                                , rangeEditOriginalStart = 1
+                                                                , rangeEditOriginalEnd = 0 -- Will be set from original file below
+                                                                , rangeEditLinesWritten = linesWritten
+                                                                , rangeEditFinalStartLine = if linesWritten == 0 then Nothing else Just 1
+                                                                , rangeEditFinalEndLine = if linesWritten == 0 then Nothing else Just linesWritten
+                                                                , rangeEditOperation = "overwrite"
+                                                                }
+                                                    runTracer tracer (WriteFileRangeCompletedTrace filePath 1 linesWritten)
+                                                    pure $
+                                                        Right $
+                                                            WriteFileRangeResult
+                                                                { writeFilePath = filePath
+                                                                , writeFileRangesModified = 1
+                                                                , writeFileLinesWritten = linesWritten
+                                                                , writeFileFinalLineCount = finalLineCount
+                                                                , writeFileRangeResults = [rangeResult]
+                                                                }
+                                        _ -> do
+                                            -- Read existing file or start empty
+                                            existingContent <-
+                                                if fileExists
+                                                    then Text.readFile filePath
+                                                    else pure ""
 
-                                    if not fileExists && not (any isSpecialRange ranges)
-                                        then do
-                                            let err = FileNotFoundError filePath
-                                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
-                                            pure $ Left err
-                                        else do
-                                            -- Handle "whole" as a special case - just write the content directly
-                                            case ranges of
-                                                [Whole] -> do
-                                                    let content = case contentBlocks of
-                                                            (c : _) -> c
-                                                            [] -> ""
-                                                    writeResult <- try $ do
-                                                        createDirectoryIfMissing True (takeDirectory filePath)
-                                                        writeFileAtomic filePath content
-                                                    case writeResult of
-                                                        Left (e :: SomeException) -> do
-                                                            let err = PermissionError $ Text.pack $ show e
-                                                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
-                                                            pure $ Left err
-                                                        Right () -> do
-                                                            let newLines = Text.lines content
-                                                            let linesWritten = length newLines
-                                                            let finalLineCount = length newLines
-                                                            let rangeResult =
-                                                                    RangeEditResult
-                                                                        { rangeEditSpec = "whole"
-                                                                        , rangeEditOriginalStart = 1
-                                                                        , rangeEditOriginalEnd = 0 -- Will be set from original file below
-                                                                        , rangeEditLinesWritten = linesWritten
-                                                                        , rangeEditFinalStartLine = if linesWritten == 0 then Nothing else Just 1
-                                                                        , rangeEditFinalEndLine = if linesWritten == 0 then Nothing else Just linesWritten
-                                                                        , rangeEditOperation = "overwrite"
-                                                                        }
-                                                            runTracer tracer (WriteFileRangeCompletedTrace filePath 1 linesWritten)
-                                                            pure $
-                                                                Right $
-                                                                    WriteFileRangeResult
-                                                                        { writeFilePath = filePath
-                                                                        , writeFileRangesModified = 1
-                                                                        , writeFileLinesWritten = linesWritten
-                                                                        , writeFileFinalLineCount = finalLineCount
-                                                                        , writeFileRangeResults = [rangeResult]
-                                                                        }
-                                                _ -> do
-                                                    -- Read existing file or start empty
-                                                    existingContent <-
-                                                        if fileExists
-                                                            then Text.readFile filePath
-                                                            else pure ""
+                                            let originalLines = Text.lines existingContent
+                                            let originalLineCount = length originalLines
 
-                                                    let originalLines = Text.lines existingContent
-                                                    let originalLineCount = length originalLines
+                                            -- Pair ranges with content blocks (1:1 mapping)
+                                            -- Multi-line ranges are kept as-is, not expanded
+                                            let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
 
-                                                    -- Pair ranges with content blocks (1:1 mapping)
-                                                    -- Multi-line ranges are kept as-is, not expanded
-                                                    let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
+                                            -- Sort by start line in ascending order (top-to-bottom)
+                                            -- This is crucial for correct position tracking
+                                            let sortedPairs = sortOn rangeStartKey rangeContentPairs
 
-                                                    -- Sort by start line in ascending order (top-to-bottom)
-                                                    -- This is crucial for correct position tracking
-                                                    let sortedPairs = sortOn rangeStartKey rangeContentPairs
+                                            -- Apply edits sequentially with position tracking
+                                            -- foldl passes (currentLines, offset, results) through each edit
+                                            let (finalLines, _, rangeResults) = foldl (applyRangeEdit originalLineCount) (originalLines, 0, []) sortedPairs
 
-                                                    -- Apply edits sequentially with position tracking
-                                                    -- foldl passes (currentLines, offset, results) through each edit
-                                                    let (finalLines, _, rangeResults) = foldl (applyRangeEdit originalLineCount) (originalLines, 0, []) sortedPairs
+                                            -- Preserve trailing newline if original had one
+                                            let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
+                                            let output =
+                                                    if hasTrailingNewline || null originalLines
+                                                        then Text.unlines finalLines
+                                                        else Text.unlines finalLines
 
-                                                    -- Preserve trailing newline if original had one
-                                                    let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
-                                                    let output =
-                                                            if hasTrailingNewline || null originalLines
-                                                                then Text.unlines finalLines
-                                                                else Text.unlines finalLines
+                                            -- Write result atomically using a temp file
+                                            writeResult <- try $ do
+                                                createDirectoryIfMissing True (takeDirectory filePath)
+                                                writeFileAtomic filePath output
 
-                                                    -- Write result atomically using a temp file
-                                                    writeResult <- try $ do
-                                                        createDirectoryIfMissing True (takeDirectory filePath)
-                                                        writeFileAtomic filePath output
+                                            case writeResult of
+                                                Left (e :: SomeException) -> do
+                                                    let err = PermissionError $ Text.pack $ show e
+                                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                                                    pure $ Left err
+                                                Right () -> do
+                                                    let finalLineCount = length finalLines
+                                                    let linesWritten = sum $ map rangeEditLinesWritten rangeResults
 
-                                                    case writeResult of
-                                                        Left (e :: SomeException) -> do
-                                                            let err = PermissionError $ Text.pack $ show e
-                                                            runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
-                                                            pure $ Left err
-                                                        Right () -> do
-                                                            let finalLineCount = length finalLines
-                                                            let linesWritten = sum $ map rangeEditLinesWritten rangeResults
+                                                    runTracer tracer (WriteFileRangeCompletedTrace filePath (length ranges) linesWritten)
 
-                                                            runTracer tracer (WriteFileRangeCompletedTrace filePath (length ranges) linesWritten)
-
-                                                            pure $
-                                                                Right $
-                                                                    WriteFileRangeResult
-                                                                        { writeFilePath = filePath
-                                                                        , writeFileRangesModified = length ranges
-                                                                        , writeFileLinesWritten = linesWritten
-                                                                        , writeFileFinalLineCount = finalLineCount
-                                                                        , writeFileRangeResults = rangeResults
-                                                                        }
+                                                    pure $
+                                                        Right $
+                                                            WriteFileRangeResult
+                                                                { writeFilePath = filePath
+                                                                , writeFileRangesModified = length ranges
+                                                                , writeFileLinesWritten = linesWritten
+                                                                , writeFileFinalLineCount = finalLineCount
+                                                                , writeFileRangeResults = rangeResults
+                                                                }
   where
     isSpecialRange Head = True
     isSpecialRange Tail = True
@@ -391,3 +418,4 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
                                             }
                                  in (before ++ newLines ++ after, offsetDelta, result)
          in (newCurrentLines, newOffset, results ++ [editResult])
+

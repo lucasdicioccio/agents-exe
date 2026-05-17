@@ -10,13 +10,24 @@ module System.Agents.Tools.DeveloperToolbox.Init (
     initializeToolbox,
 ) where
 
+import Data.Maybe (fromMaybe)
+import Data.Time (getCurrentTime)
 import Prod.Tracer (Tracer (..))
 
-import System.Agents.Base (DeveloperToolboxDescription (..))
+import System.Agents.Base (DeveloperToolCapability (..), DeveloperToolboxDescription (..), defaultDeveloperFileSandbox)
+import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.DeveloperToolbox.Types (
     Toolbox (..),
     Trace (..),
  )
+
+-- | File-related capabilities that require sandbox validation.
+fileCapabilities :: [DeveloperToolCapability]
+fileCapabilities =
+    [ DevToolReadFileRange
+    , DevToolWriteFileRange
+    , DevToolPatchFile
+    ]
 
 {- | Initialize a developer toolbox from a description.
 
@@ -34,11 +45,28 @@ initializeToolbox _tracer desc = do
     if null desc.developerToolboxCapabilities
         then pure $ Left "Developer toolbox must have at least one capability enabled"
         else do
+            -- Create file sandbox if any file-related capability is enabled
+            let config = fromMaybe defaultDeveloperFileSandbox desc.developerToolboxFileSandbox
+            mFileSandbox <-
+                if any (`elem` desc.developerToolboxCapabilities) fileCapabilities
+                    then do
+                        createdAt <- getCurrentTime
+                        let sandbox =
+                                FileSandbox
+                                    { sandboxId = error "sandboxId not used for validation"
+                                    , sandboxConfig = config
+                                    , sandboxCreatedAt = createdAt
+                                    }
+                        pure $ Just sandbox
+                    else pure Nothing
+
             let toolbox =
                     Toolbox
                         { toolboxName = desc.developerToolboxName
                         , toolboxDescription = desc.developerToolboxDescription
                         , toolboxCapabilities = desc.developerToolboxCapabilities
                         , toolboxConfig = desc
+                        , toolboxFileSandbox = mFileSandbox
                         }
             pure $ Right toolbox
+

@@ -41,6 +41,7 @@ import System.Agents.Base (
     SystemToolCapability (..),
     SystemToolboxDescription (..),
  )
+import System.Agents.FileSandbox (FileSandbox)
 import System.Agents.Media.Types (MediaType (..))
 import System.Agents.Session.Types (SessionId (..))
 import qualified System.Agents.SessionStore as SessionStore
@@ -180,6 +181,7 @@ The toolbox maintains:
 * Optional environment variable filter pattern
 * The original configuration description used to create this toolbox
 * Session introspection configuration (for session-related capabilities)
+* Optional file sandbox for attach-file capability
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -190,6 +192,8 @@ data Toolbox = Toolbox
     -- ^ Original configuration description used to create this toolbox
     , toolboxSessionIntrospection :: Maybe SessionIntrospectionConfig
     -- ^ Configuration for session introspection capabilities
+    , toolboxFileSandbox :: Maybe FileSandbox
+    -- ^ Optional file sandbox for attach-file capability
     }
 
 -------------------------------------------------------------------------------
@@ -261,6 +265,8 @@ data QueryError
       FileTooLargeError !FilePath !Int
     | -- | Unsupported file type
       UnsupportedFileTypeError !FilePath !Text
+    | -- | File access denied by sandbox
+      FileAccessDeniedError !FilePath !Text
     | -- | Session store not configured for session introspection
       SessionStoreNotConfiguredError
     | -- | Session not found
@@ -280,3 +286,4 @@ data QueryError
 -- | Format execution time as seconds with 3 decimal places.
 formatExecutionTime :: NominalDiffTime -> Double
 formatExecutionTime = realToFrac
+
