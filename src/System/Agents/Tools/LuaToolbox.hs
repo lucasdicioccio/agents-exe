@@ -142,7 +142,7 @@ import qualified HsLua as Lua
 
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
-import System.Agents.Base (LuaToolboxDescription (..))
+import System.Agents.Base (LuaToolboxDescription (..), migrateLuaSandbox)
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Import standard library modules
@@ -155,11 +155,7 @@ import qualified System.Agents.Tools.LuaToolbox.Modules.Tools as ToolsMod
 import System.Agents.Tools.LuaToolbox.Utils (luaToJsonValue, toName)
 
 -- Re-export module traces
-import System.Agents.Tools.LuaToolbox.Modules.Fs (
-    FsConfig (..),
-    FsTrace (..),
-    PathError (..),
- )
+import System.Agents.Tools.LuaToolbox.Modules.Fs (FsTrace (..))
 import System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     HttpTrace (..),
@@ -410,14 +406,13 @@ registerStandardModules moduleTracer lstate desc parentCtx portal = do
     -- Register time module
     TimeMod.registerTimeModule timeTracer lstate
 
-    -- Register fs module with sandboxing
-    -- Security: empty allowedPaths means NO filesystem access
+    -- Register fs module with unified sandbox
+    -- Security: uses the unified FileSandbox with predicate-based access control
+    let fsSandboxConfig = migrateLuaSandbox desc
     FsMod.registerFsModule
         fsTracer
         lstate
-        FsMod.FsConfig
-            { FsMod.fsAllowedPaths = desc.luaToolboxAllowedPaths
-            }
+        fsSandboxConfig
 
     -- Register http module with sandboxing
     -- Security: empty allowedHosts means NO network access
@@ -752,3 +747,4 @@ executeScriptInternal tracer lstate script maxTime = do
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
         Just val -> pure val
+

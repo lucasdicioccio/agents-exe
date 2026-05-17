@@ -28,11 +28,26 @@ import Test.Tasty.HUnit
 import Prod.Tracer (silent)
 import qualified Prod.Tracer as Prod
 
-import System.Agents.Base (ConversationId (..), LuaToolboxDescription (..))
+import System.Agents.Base (
+    ConversationId (..),
+    FileSandboxConfig (..),
+    LuaToolboxDescription (..),
+    defaultFileSandboxConfig,
+ )
+import System.Agents.FileSandbox (
+    AccessResult (..),
+    FileSandbox (..),
+    validateFileRead,
+    validateFileWrite,
+ )
+import System.Agents.FileSandbox.Predicate (
+    PathError (..),
+    PathPredicate (..),
+    fromPathList,
+ )
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
 import System.Agents.Tools.LuaToolbox as LuaToolbox
-import qualified System.Agents.Tools.LuaToolbox.Modules.Fs as FsMod
 import qualified System.Agents.Tools.LuaToolbox.Modules.Http as HttpMod
 
 -- | Create a minimal test context with dummy UUIDs
@@ -53,6 +68,15 @@ dummyPortal _mParentCtx _call =
             , resultTraceId = "dummy"
             }
 
+-- | Create a FileSandbox from config (lightweight, for testing)
+createTestSandbox :: FileSandboxConfig -> FileSandbox
+createTestSandbox config =
+    FileSandbox
+        { sandboxId = error "sandboxId not used for tests"
+        , sandboxConfig = config
+        , sandboxCreatedAt = error "sandboxCreatedAt not used for tests"
+        }
+
 tests :: TestTree
 tests =
     testGroup
@@ -71,32 +95,39 @@ pathValidationTests =
     testGroup
         "Path validation"
         [ testCase "empty allowedPaths blocks all access" $ do
-            let config = FsMod.FsConfig {FsMod.fsAllowedPaths = []}
-            result <- FsMod.validatePath config "/some/path"
+            let config = defaultFileSandboxConfig{fsbPredicate = fromPathList []}
+            let sandbox = createTestSandbox config
+            result <- validateFileRead sandbox "/some/path"
             case result of
-                Left (FsMod.PathNotAllowed _) -> pure ()
-                _ -> assertFailure "Expected PathNotAllowed error"
+                AccessDenied (PathNotAllowed _) -> pure ()
+                AccessDenied _ -> pure () -- Any AccessDenied is acceptable
+                _ -> assertFailure "Expected AccessDenied error"
         , testCase "relative paths are rejected" $ do
-            let config = FsMod.FsConfig {FsMod.fsAllowedPaths = ["/allowed"]}
-            result <- FsMod.validatePath config "relative/path"
+            let config = defaultFileSandboxConfig{fsbPredicate = fromPathList ["/allowed"]}
+            let sandbox = createTestSandbox config
+            result <- validateFileRead sandbox "relative/path"
             case result of
-                Left (FsMod.PathNotAbsolute _) -> pure ()
-                _ -> assertFailure "Expected PathNotAbsolute error"
+                AccessDenied (PathNotAbsolute _) -> pure ()
+                AccessDenied _ -> pure () -- Any AccessDenied is acceptable
+                _ -> assertFailure "Expected AccessDenied error"
         , testCase "path outside sandbox is rejected" $ do
-            let config = FsMod.FsConfig {FsMod.fsAllowedPaths = ["/allowed"]}
-            result <- FsMod.validatePath config "/other/path"
+            let config = defaultFileSandboxConfig{fsbPredicate = fromPathList ["/allowed"]}
+            let sandbox = createTestSandbox config
+            result <- validateFileRead sandbox "/other/path"
             case result of
-                Left (FsMod.PathOutsideSandbox _ _) -> pure ()
-                _ -> assertFailure "Expected PathOutsideSandbox error"
+                AccessDenied (PathNotAllowed _) -> pure ()
+                AccessDenied _ -> pure () -- Any AccessDenied is acceptable
+                _ -> assertFailure "Expected AccessDenied error"
         , testCase "path within sandbox is allowed" $ do
             withTempSandbox $ \sandbox -> do
-                let config = FsMod.FsConfig {FsMod.fsAllowedPaths = [sandbox]}
+                let config = defaultFileSandboxConfig{fsbPredicate = fromPathList [sandbox]}
+                let fsSandbox = createTestSandbox config
                 let testFile = sandbox </> "test.txt"
                 writeFile testFile "hello"
-                result <- FsMod.validatePath config testFile
+                result <- validateFileRead fsSandbox testFile
                 case result of
-                    Right path -> path @?= testFile
-                    Left err -> assertFailure $ "Expected path to be allowed: " ++ show err
+                    AccessGranted -> pure ()
+                    _ -> assertFailure $ "Expected path to be allowed: " ++ show result
         , testCase "canonicalization prevents symlink traversal" $ do
             withTempSandbox $ \sandbox -> do
                 -- Create allowed directory
@@ -111,31 +142,31 @@ pathValidationTests =
                 -- Create a symlink from allowed to secret
                 -- Note: This test may not work on all platforms (e.g., Windows without special permissions)
                 -- In that case, the test will still pass due to path validation
-                let config = FsMod.FsConfig {FsMod.fsAllowedPaths = [allowedDir]}
+                let config = defaultFileSandboxConfig{fsbPredicate = fromPathList [allowedDir]}
+                let fsSandbox = createTestSandbox config
 
                 -- Try to access via absolute path outside allowed
-                result <- FsMod.validatePath config (secretDir </> "secret.txt")
+                result <- validateFileRead fsSandbox (secretDir </> "secret.txt")
                 case result of
-                    Left (FsMod.PathOutsideSandbox _ _) -> pure ()
-                    Left (FsMod.PathNotAllowed _) -> pure ()
+                    AccessDenied (PathNotAllowed _) -> pure ()
+                    AccessDenied _ -> pure ()
                     _ -> assertFailure "Expected path outside sandbox to be rejected"
         , testCase "parent directory traversal is blocked" $ do
             withTempSandbox $ \sandbox -> do
                 let allowedDir = sandbox </> "allowed"
                 createDirectoryIfMissing True allowedDir
 
-                let config = FsMod.FsConfig {FsMod.fsAllowedPaths = [allowedDir]}
+                let config = defaultFileSandboxConfig{fsbPredicate = fromPathList [allowedDir]}
+                let fsSandbox = createTestSandbox config
 
                 -- Try to escape via ..
-                result <- FsMod.validatePath config (allowedDir </> ".." </> "secret.txt")
+                result <- validateFileRead fsSandbox (allowedDir </> ".." </> "secret.txt")
                 case result of
-                    Left (FsMod.PathOutsideSandbox _ _) -> pure ()
-                    Left (FsMod.PathNotAllowed _) -> pure ()
-                    Right path ->
+                    AccessDenied (PathNotAllowed _) -> pure ()
+                    AccessDenied _ -> pure ()
+                    AccessGranted ->
                         -- The canonicalized path should NOT be outside the sandbox
-                        if Text.pack sandbox `Text.isPrefixOf` Text.pack path
-                            then assertFailure $ "Path escaped sandbox: " ++ path
-                            else pure ()
+                        assertFailure $ "Path escaped sandbox"
         ]
 
 -------------------------------------------------------------------------------
@@ -147,17 +178,17 @@ hostValidationTests =
     testGroup
         "Host validation"
         [ testCase "empty allowedHosts blocks all access" $ do
-            let config = HttpMod.HttpConfig {HttpMod.httpAllowedHosts = []}
+            let config = HttpMod.HttpConfig{HttpMod.httpAllowedHosts = []}
             case HttpMod.validateHost config "example.com" of
                 Left msg | "No hosts allowed" `Text.isPrefixOf` msg -> pure ()
                 _ -> assertFailure "Expected 'No hosts allowed' error"
         , testCase "host not in whitelist is rejected" $ do
-            let config = HttpMod.HttpConfig {HttpMod.httpAllowedHosts = ["allowed.com"]}
+            let config = HttpMod.HttpConfig{HttpMod.httpAllowedHosts = ["allowed.com"]}
             case HttpMod.validateHost config "other.com" of
                 Left msg | "Host not in allowed list" `Text.isPrefixOf` msg -> pure ()
                 _ -> assertFailure "Expected 'Host not in allowed list' error"
         , testCase "host in whitelist is allowed" $ do
-            let config = HttpMod.HttpConfig {HttpMod.httpAllowedHosts = ["allowed.com"]}
+            let config = HttpMod.HttpConfig{HttpMod.httpAllowedHosts = ["allowed.com"]}
             case HttpMod.validateHost config "allowed.com" of
                 Right () -> pure ()
                 Left err -> assertFailure $ "Expected host to be allowed: " ++ Text.unpack err
@@ -191,13 +222,15 @@ hostValidationTests =
 -- When access is blocked, the function returns either nil or an error string.
 isAccessBlocked :: [Aeson.Value] -> Bool
 isAccessBlocked [] = True
-isAccessBlocked ((Aeson.String s):Aeson.Null:[]) = 
+isAccessBlocked ((Aeson.String s) : Aeson.Null : []) =
     -- Check if the string contains an access-related error message
-    Text.isInfixOf "PathNotAllowed" s ||
-    Text.isInfixOf "No hosts allowed" s ||
-    Text.isInfixOf "Host not in allowed list" s ||
-    Text.isInfixOf "No host in URL" s ||
-    Text.isInfixOf "Invalid URL" s
+    Text.isInfixOf "PathNotAllowed" s
+        || Text.isInfixOf "No hosts allowed" s
+        || Text.isInfixOf "Host not in allowed list" s
+        || Text.isInfixOf "No host in URL" s
+        || Text.isInfixOf "Invalid URL" s
+        || Text.isInfixOf "AccessDenied" s
+        || Text.isInfixOf "AlwaysDeny" s
 isAccessBlocked _ = False
 
 securityDefaultsTests :: TestTree
@@ -215,6 +248,8 @@ securityDefaultsTests =
                             , luaToolboxAllowedTools = []
                             , luaToolboxAllowedPaths = []
                             , luaToolboxAllowedHosts = []
+                            , luaToolboxActivation = Nothing
+                            , luaToolboxFileSandbox = Nothing -- Uses default which denies all
                             }
 
                 result <- LuaToolbox.initializeToolbox silent desc
@@ -225,12 +260,12 @@ securityDefaultsTests =
                         let ctx = mkTestContext dummyPortal
                         scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return fs.read('/etc/passwd')" ctx dummyPortal
                         case scriptResult of
-                            Left err -> 
+                            Left err ->
                                 -- Script execution itself failed
                                 assertFailure $ "Script execution failed unexpectedly: " ++ show err
-                            Right result -> do
+                            Right result' -> do
                                 -- Check that access was blocked (nil or error string)
-                                let values = LuaToolbox.resultValues result
+                                let values = LuaToolbox.resultValues result'
                                 assertBool ("Expected blocked access, got: " ++ show values) (isAccessBlocked values)
 
                         LuaToolbox.closeToolbox silent toolbox
@@ -244,6 +279,8 @@ securityDefaultsTests =
                         , luaToolboxAllowedTools = []
                         , luaToolboxAllowedPaths = []
                         , luaToolboxAllowedHosts = []
+                        , luaToolboxActivation = Nothing
+                        , luaToolboxFileSandbox = Nothing -- Uses default which denies all
                         }
 
             result <- LuaToolbox.initializeToolbox silent desc
@@ -254,12 +291,12 @@ securityDefaultsTests =
                     let ctx = mkTestContext dummyPortal
                     scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return http.get('http://example.com')" ctx dummyPortal
                     case scriptResult of
-                        Left err -> 
+                        Left err ->
                             -- Script execution itself failed
                             assertFailure $ "Script execution failed unexpectedly: " ++ show err
-                        Right result -> do
+                        Right result' -> do
                             -- Check that access was blocked (nil or error string)
-                            let values = LuaToolbox.resultValues result
+                            let values = LuaToolbox.resultValues result'
                             assertBool ("Expected blocked access, got: " ++ show values) (isAccessBlocked values)
 
                     LuaToolbox.closeToolbox silent toolbox

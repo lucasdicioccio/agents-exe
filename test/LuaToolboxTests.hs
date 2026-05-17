@@ -91,6 +91,7 @@ testLuaToolbox =
         , luaToolboxAllowedTools = []
         , luaToolboxAllowedPaths = []
         , luaToolboxAllowedHosts = []
+        , luaToolboxFileSandbox = Nothing
         }
 
 -- | Run an action with a test toolbox
