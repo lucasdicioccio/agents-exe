@@ -134,6 +134,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, bracket, try)
 import Control.Monad (replicateM, void, when)
+import Data.Maybe (fromMaybe)
 import qualified Data.Aeson as Aeson
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -142,7 +143,7 @@ import qualified HsLua as Lua
 
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
-import System.Agents.Base (LuaToolboxDescription (..), migrateLuaSandbox)
+import System.Agents.Base (LuaToolboxDescription (..), defaultFileSandboxConfig)
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Import standard library modules
@@ -408,7 +409,7 @@ registerStandardModules moduleTracer lstate desc parentCtx portal = do
 
     -- Register fs module with unified sandbox
     -- Security: uses the unified FileSandbox with predicate-based access control
-    let fsSandboxConfig = migrateLuaSandbox desc
+    let fsSandboxConfig = fromMaybe defaultFileSandboxConfig (luaToolboxFileSandbox desc)
     FsMod.registerFsModule
         fsTracer
         lstate

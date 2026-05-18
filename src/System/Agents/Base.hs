@@ -22,7 +22,7 @@ import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
 
 -- Import FileSandbox types for unified sandboxing
-import System.Agents.FileSandbox.Predicate (PathPredicate (..), fromPathList)
+import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 
 -- Note: FileSandboxConfig is defined here to avoid circular dependencies
 -- The full implementation is in System.Agents.FileSandbox
@@ -50,15 +50,6 @@ defaultFileSandboxConfig =
         { fsbPredicate = AlwaysDeny
         , fsbMaxFileSize = Just (50 * 1024 * 1024) -- 50MB default
         , fsbName = Nothing
-        }
-
--- | Migration function: Convert old allowedPaths to new sandbox config.
-fromAllowedPaths :: [FilePath] -> FileSandboxConfig
-fromAllowedPaths paths =
-    FileSandboxConfig
-        { fsbPredicate = fromPathList paths
-        , fsbMaxFileSize = Nothing
-        , fsbName = Just "migrated-sandbox"
         }
 
 type AgentSlug = Text
@@ -947,8 +938,12 @@ Example configuration:
     "maxMemoryMB": 256,
     "maxExecutionTimeSeconds": 300,
     "allowedTools": ["bash", "sqlite", "io"],
-    "allowedPaths": ["./repro", "./logs"],
     "allowedHosts": ["localhost", "127.0.0.1"],
+    "fileSandbox": {
+      "predicate": {"tag": "PathPrefix", "contents": "./repro"},
+      "maxFileSize": 10485760,
+      "name": "lua-sandbox"
+    },
     "lifetime": "conversation",
     "activation": "always"
   }
@@ -968,14 +963,12 @@ data LuaToolboxDescription = LuaToolboxDescription
     -- ^ Maximum script execution time in seconds
     , luaToolboxAllowedTools :: [Text]
     -- ^ Whitelist of tool names that Lua scripts can call via the portal
-    , luaToolboxAllowedPaths :: [FilePath]
-    -- ^ DEPRECATED: Use fileSandbox instead
     , luaToolboxAllowedHosts :: [Text]
     -- ^ Whitelist of network hosts accessible to Lua HTTP module
     , luaToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     , luaToolboxFileSandbox :: Maybe FileSandboxConfig
-    -- ^ New unified file sandbox configuration
+    -- ^ File sandbox configuration for Lua file system operations
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -997,12 +990,6 @@ instance ToJSON LuaToolboxDescription where
 
 instance FromJSON LuaToolboxDescription where
     parseJSON = Aeson.genericParseJSON luaToolboxOptions
-
--- | Migration function: Convert old config to new sandbox format.
-migrateLuaSandbox :: LuaToolboxDescription -> FileSandboxConfig
-migrateLuaSandbox desc = case luaToolboxFileSandbox desc of
-    Just config -> config
-    Nothing -> fromAllowedPaths (luaToolboxAllowedPaths desc)
 
 -------------------------------------------------------------------------------
 -- Developer Toolbox Configuration
@@ -1147,7 +1134,7 @@ Example configuration:
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
     {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
     {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent", "read-file-range", "write-file-range", "patch-file"]}},
-    {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "allowedPaths": [], "allowedHosts": []}}
+    {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "fileSandbox": {"predicate": {"tag": "AlwaysAllow"}, "maxFileSize": 10485760, "name": "lua-sandbox"}}}
   ]
 }
 @
@@ -1407,3 +1394,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+

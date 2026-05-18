@@ -365,7 +365,6 @@ agentSerializationTests =
                     , Base.luaToolboxMaxMemoryMB = 256
                     , Base.luaToolboxMaxExecutionTimeSeconds = 300
                     , Base.luaToolboxAllowedTools = ["bash", "sqlite"]
-                    , Base.luaToolboxAllowedPaths = ["./scripts"]
                     , Base.luaToolboxAllowedHosts = ["localhost"]
                     , Base.luaToolboxActivation = Nothing
                     }

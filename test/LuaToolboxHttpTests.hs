@@ -19,9 +19,15 @@ import Control.Exception (bracket)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import Data.List (find)
+import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), LuaToolboxDescription (..))
+import System.Agents.FileSandbox.Predicate (fromPathList)
+import System.Agents.Session.Types (SessionId (..), TurnId (..))
+import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
+import System.Agents.Tools.LuaToolbox as LuaToolbox
+import System.Agents.Tools.LuaToolbox.Modules.Http (
+    HttpConfig (..),
+    RequestOptions (..),
+ )
 import Data.Maybe (fromJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -33,15 +39,6 @@ import Test.Tasty.HUnit
 import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), silent)
 import qualified Prod.Tracer as Prod
-
-import System.Agents.Base (ConversationId (..), LuaToolboxDescription (..))
-import System.Agents.Session.Types (SessionId (..), TurnId (..))
-import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
-import System.Agents.Tools.LuaToolbox as LuaToolbox
-import System.Agents.Tools.LuaToolbox.Modules.Http (
-    HttpConfig (..),
-    RequestOptions (..),
- )
 
 -- | Create a minimal test context with dummy UUIDs
 mkTestContext :: ToolPortal -> ToolExecutionContext
@@ -84,7 +81,7 @@ testLuaToolboxHttp =
         , luaToolboxMaxMemoryMB = 64
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
-        , luaToolboxAllowedPaths = []
+        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = ["localhost", "127.0.0.1"]
         }
 
@@ -97,7 +94,7 @@ testLuaToolboxNoHttp =
         , luaToolboxMaxMemoryMB = 64
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
-        , luaToolboxAllowedPaths = []
+        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = []
         }
 

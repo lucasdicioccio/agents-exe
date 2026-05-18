@@ -246,14 +246,13 @@ securityDefaultsTests =
                             , luaToolboxMaxMemoryMB = 64
                             , luaToolboxMaxExecutionTimeSeconds = 5
                             , luaToolboxAllowedTools = []
-                            , luaToolboxAllowedPaths = []
+                            , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
                             , luaToolboxAllowedHosts = []
                             , luaToolboxActivation = Nothing
-                            , luaToolboxFileSandbox = Nothing -- Uses default which denies all
                             }
 
-                result <- LuaToolbox.initializeToolbox silent desc
-                case result of
+                initResult <- LuaToolbox.initializeToolbox silent desc
+                case initResult of
                     Left err -> assertFailure $ "Failed to initialize: " ++ err
                     Right toolbox -> do
                         -- Try to read a file - should return nil or error string
@@ -277,17 +276,15 @@ securityDefaultsTests =
                         , luaToolboxMaxMemoryMB = 64
                         , luaToolboxMaxExecutionTimeSeconds = 5
                         , luaToolboxAllowedTools = []
-                        , luaToolboxAllowedPaths = []
+                        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
                         , luaToolboxAllowedHosts = []
                         , luaToolboxActivation = Nothing
-                        , luaToolboxFileSandbox = Nothing -- Uses default which denies all
                         }
 
-            result <- LuaToolbox.initializeToolbox silent desc
-            case result of
+            initResult <- LuaToolbox.initializeToolbox silent desc
+            case initResult of
                 Left err -> assertFailure $ "Failed to initialize: " ++ err
                 Right toolbox -> do
-                    -- Try to make HTTP request - should return nil or error string
                     let ctx = mkTestContext dummyPortal
                     scriptResult <- LuaToolbox.executeScriptWithPortal Prod.tracePrint toolbox "return http.get('http://example.com')" ctx dummyPortal
                     case scriptResult of

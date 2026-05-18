@@ -34,7 +34,6 @@ module System.Agents.FileSandbox (
     -- * Configuration (re-exported from Base)
     FileSandboxConfig (..),
     defaultFileSandboxConfig,
-    fromAllowedPaths,
 
     -- * Sandbox resource
     FileSandbox (..),
@@ -60,7 +59,7 @@ import Data.Time (UTCTime, getCurrentTime)
 import System.Directory (canonicalizePath, doesFileExist, getFileSize)
 import System.FilePath (takeDirectory)
 
-import System.Agents.Base (FileSandboxConfig (..), defaultFileSandboxConfig, fromAllowedPaths)
+import System.Agents.Base (FileSandboxConfig (..), defaultFileSandboxConfig)
 import System.Agents.FileSandbox.Predicate
 import System.Agents.OS.Core.Types (ResourceId (..), newEntityId)
 import qualified System.Agents.OS.Resources.Types as ResTypes
@@ -238,3 +237,4 @@ lookupFileSandbox registry rid = do
             -- We found the handle but can't retrieve the original FileSandbox
             -- without storing it separately. Return Nothing for now.
             pure Nothing
+
