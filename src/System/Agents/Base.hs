@@ -925,7 +925,73 @@ defaultSystemFileSandbox =
 {- | Configuration for a Lua builtin toolbox.
 
 This describes a sandboxed Lua interpreter that can orchestrate other tools
-through the tool portal mechanism.
+through the tool portal mechanism. Each tool call creates a fresh, isolated
+Lua state that is destroyed immediately after execution.
+
+== Calling Convention
+
+The tool accepts a JSON object with:
+
+* @script@ (string, required): Lua source code to execute
+* @timeout@ (integer, optional): Override timeout in seconds
+
+The script's return value(s) are automatically converted to JSON:
+
+> -- Single return value
+> return 42  -- Returns: {"values": [42], "executionTime": 0.001}
+>
+> -- Multiple return values
+> return "status", {count = 5}  -- Returns: {"values": ["status", {"count": 5}], ...}
+>
+> -- Table/object return
+> return {name = "Alice", tags = {"a", "b"}}
+
+== Available Modules
+
+Six standard library modules are pre-registered and available via @require()@:
+
+* __json__: JSON encoding/decoding
+    * @json.encode(value)@ - Encode to JSON string
+    * @json.encode_pretty(value)@ - Pretty-print JSON
+    * @json.decode(str)@ - Decode JSON to Lua value
+
+* __text__: UTF-8 string utilities
+    * @text.split(str, delim)@, @text.find(str, pattern)@, @text.gsub(str, pat, repl)@
+    * @text.trim(str)@, @text.startswith(str, prefix)@, @text.endswith(str, suffix)@
+    * @text.lower(str)@, @text.upper(str)@, @text.len(str)@, @text.sub(str, start, end)@
+
+* __time__: Time functions
+    * @time.now()@ - Current timestamp (seconds since epoch)
+    * @time.sleep(seconds)@ - Sleep for specified duration
+    * @time.format(timestamp, format)@ - Format timestamp (e.g., "%Y-%m-%d %H:%M:%S")
+    * @time.diff(t1, t2)@ - Calculate difference in seconds
+
+* __fs__: Sandboxed filesystem (path-restricted by fileSandbox config)
+    * @fs.read(path)@, @fs.write(path, content)@, @fs.exists(path)@
+    * @fs.list(path)@, @fs.mkdir(path)@, @fs.isdir(path)@, @fs.isfile(path)@
+    * @fs.patch(path, search, replace)@ - Search and replace in file
+
+* __http__: HTTP requests (host-whitelisted by allowedHosts config)
+    * @http.get(url, [options])@, @http.post(url, body, [options])@
+    * @http.request({method, url, body, headers})@ - Generic request
+    * Returns: @{status, headers, body}@ table
+
+* __tools__: Tool portal for calling other tools (tool-whitelisted by allowedTools config)
+    * @tools.list()@ - Returns array of available tool names
+    * @tools.call(tool_name, args_table)@ - Call a tool, returns result table
+
+== Example Script
+
+> local json = require("json")
+> local tools = require("tools")
+>
+> local result = tools.call("bash_read_file", {filepath = "/path/to/file"})
+> if result.status == "ok" then
+>     local data = json.decode(result.result_txt)
+>     return {content = data.content, timestamp = os.time()}
+> else
+>     return {error = result.result_txt}
+> end
 
 Example configuration:
 
