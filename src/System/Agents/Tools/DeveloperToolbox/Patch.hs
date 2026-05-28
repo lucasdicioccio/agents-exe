@@ -452,4 +452,3 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                                     added
                                                     (stripped : ctxAfter)
                                                     rest
-

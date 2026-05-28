@@ -237,4 +237,3 @@ lookupFileSandbox registry rid = do
             -- We found the handle but can't retrieve the original FileSandbox
             -- without storing it separately. Return Nothing for now.
             pure Nothing
-

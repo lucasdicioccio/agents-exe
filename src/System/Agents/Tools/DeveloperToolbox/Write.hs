@@ -418,4 +418,3 @@ proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
                                             }
                                  in (before ++ newLines ++ after, offsetDelta, result)
          in (newCurrentLines, newOffset, results ++ [editResult])
-

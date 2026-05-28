@@ -140,6 +140,7 @@ data Trace
     | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
     | PostgRESToolboxTrace !PostgRESToolbox.Trace
     deriving (Show)
+
 -------------------------------------------------------------------------------
 
 {- | We register tools that will take a ToolExecutionContext for execution.
@@ -164,6 +165,7 @@ instance Show ToolRegistration where
             , show tr.toolActivation
             , ")"
             ]
+
 -- naming policy for IO tools
 io2LLMName :: forall a b. IOScript a b -> OpenAI.ToolName
 io2LLMName io = OpenAI.ToolName (mconcat ["io_", io.description.ioSlug])
@@ -1258,6 +1260,7 @@ registerDeveloperTools box =
     pure $ case registerDeveloperTool box of
         Left err -> Left err
         Right reg -> Right [reg]
+
 -------------------------------------------------------------------------------
 -- Lua Tool Registration
 -------------------------------------------------------------------------------
@@ -1306,25 +1309,27 @@ buildLuaToolDescription config =
 
         -- Tool name for examples
         toolPrefix = "lua_" <> config.luaToolboxName <> "_"
-    in
+     in
         config.luaToolboxDescription
-        <> "\n\nCALLING CONVENTION:\n"
-        <> "Parameters:\n"
-        <> "- script (string, required): Lua source code to execute\n"
-        <> "- timeout (integer, optional): Override timeout in seconds\n\n"
-        <> "Return format: JSON object with 'values' array and 'executionTime'\n"
-        <> "Example: return {status='ok', data=123} -> {\"values\": [{\"status\":\"ok\",\"data\":123}], \"executionTime\": 0.001}\n\n"
-        <> "AVAILABLE MODULES (use via require('modulename')):\n-"
-        <> moduleList
-        <> "\n\nEXAMPLE SCRIPT:\n"
-        <> "local json = require('json')\n"
-        <> "local tools = require('tools')\n"
-        <> "local result = tools.call('" <> toolPrefix <> "bash_read_file', {filepath='/path/to/file'})\n"
-        <> "if result.status == 'ok' then\n"
-        <> "  return json.decode(result.result_txt)\n"
-        <> "else\n"
-        <> "  return {error = result.result_txt}\n"
-        <> "end"
+            <> "\n\nCALLING CONVENTION:\n"
+            <> "Parameters:\n"
+            <> "- script (string, required): Lua source code to execute\n"
+            <> "- timeout (integer, optional): Override timeout in seconds\n\n"
+            <> "Return format: JSON object with 'values' array and 'executionTime'\n"
+            <> "Example: return {status='ok', data=123} -> {\"values\": [{\"status\":\"ok\",\"data\":123}], \"executionTime\": 0.001}\n\n"
+            <> "AVAILABLE MODULES (use via require('modulename')):\n-"
+            <> moduleList
+            <> "\n\nEXAMPLE SCRIPT:\n"
+            <> "local json = require('json')\n"
+            <> "local tools = require('tools')\n"
+            <> "local result = tools.call('"
+            <> toolPrefix
+            <> "bash_read_file', {filepath='/path/to/file'})\n"
+            <> "if result.status == 'ok' then\n"
+            <> "  return json.decode(result.result_txt)\n"
+            <> "else\n"
+            <> "  return {error = result.result_txt}\n"
+            <> "end"
 
 {- | Register a Lua toolbox with the LLM system.
 
@@ -1802,4 +1807,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-

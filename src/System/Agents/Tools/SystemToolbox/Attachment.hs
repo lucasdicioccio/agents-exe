@@ -138,4 +138,3 @@ proceedWithAttachment tracer filePath = do
                                                 , attachBase64Data = base64Data
                                                 , attachFileSize = fileSize
                                                 }
-

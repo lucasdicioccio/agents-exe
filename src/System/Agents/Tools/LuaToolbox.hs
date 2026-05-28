@@ -132,8 +132,8 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, bracket, try)
 import Control.Monad (replicateM, void, when)
-import Data.Maybe (fromMaybe)
 import qualified Data.Aeson as Aeson
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
@@ -753,4 +753,3 @@ executeScriptInternal tracer lstate script maxTime = do
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
         Just val -> pure val
-

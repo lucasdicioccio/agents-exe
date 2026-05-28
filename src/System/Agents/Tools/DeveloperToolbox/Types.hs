@@ -492,4 +492,3 @@ data DeveloperToolError
     | -- | Error during patch operation
       PatchValidationError !PatchError
     deriving (Show, Eq)
-
