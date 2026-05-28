@@ -25,7 +25,8 @@ import Test.Tasty.HUnit
 
 import Prod.Tracer (silent)
 
-import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..))
+import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..))
+import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 
 -- | Test data: a simple multi-line file for testing
@@ -44,7 +45,7 @@ testFileContent =
         , "Line 10: Tenth line"
         ]
 
--- | Create a test toolbox with all capabilities enabled
+-- | Create a test toolbox with all capabilities enabled and sandbox allowing all file access
 testToolbox :: IO Toolbox
 testToolbox = do
     let desc =
@@ -55,6 +56,11 @@ testToolbox = do
                     [ DevToolReadFileRange
                     , DevToolWriteFileRange
                     ]
+                , developerToolboxFileSandbox = Just FileSandboxConfig
+                    { fsbPredicate = AlwaysAllow
+                    , fsbMaxFileSize = Nothing
+                    , fsbName = Nothing
+                    }
                 , developerToolboxActivation = Nothing
                 }
     result <- DeveloperToolbox.initializeToolbox silent desc
@@ -84,6 +90,7 @@ withStandardTestFile tmpDir = withTestFile tmpDir testFileContent
 
 -------------------------------------------------------------------------------
 -- Test Suite
+-------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 
 tests :: TestTree

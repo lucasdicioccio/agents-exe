@@ -19,7 +19,6 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Maybe (fromJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.Vector as Vector
 import Test.Tasty
@@ -28,7 +27,8 @@ import Test.Tasty.HUnit
 import Prod.Tracer (Tracer (..), silent)
 import qualified Prod.Tracer as Prod
 
-import System.Agents.Base (ConversationId (..), LuaToolboxDescription (..))
+import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), LuaToolboxDescription (..))
+import System.Agents.FileSandbox.Predicate (fromPathList)
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
 import System.Agents.Tools.LuaToolbox as LuaToolbox
@@ -76,7 +76,7 @@ testLuaToolbox =
         , luaToolboxMaxMemoryMB = 64
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
-        , luaToolboxAllowedPaths = []
+        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = []
         }
 

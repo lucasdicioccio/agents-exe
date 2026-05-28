@@ -1,5 +1,5 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | File attachment capability for multi-modal LLM interactions.
 
@@ -22,6 +22,7 @@ import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (doesFileExist)
 
 import System.Agents.Base (SystemToolCapability (..))
+import System.Agents.FileSandbox (AccessResult (..), FileSandbox, validateFileRead)
 import System.Agents.Tools.SystemToolbox.Media (detectMediaType, getFileExtension, mediaTypeToMime)
 import System.Agents.Tools.SystemToolbox.Types (
     AttachFileResult (..),
@@ -43,9 +44,13 @@ maxFileSize = 50 * 1024 * 1024
 This function reads a file from disk and returns it as a base64-encoded
 attachment suitable for multi-modal LLM interactions.
 
+When a file sandbox is configured, the filepath is validated against
+the sandbox before reading. Access is denied if the file is outside
+the allowed paths.
+
 Returns:
 * 'Right AttachFileResult' on successful attachment
-* 'Left QueryError' if capability not enabled, file not found, or file too large
+* 'Left QueryError' if capability not enabled, file not found, access denied, or file too large
 -}
 executeAttachFile ::
     Tracer IO Trace ->
@@ -62,48 +67,74 @@ executeAttachFile tracer toolbox filePath = do
             runTracer tracer (FileAttachErrorTrace filePath "Capability not enabled")
             pure $ Left err
         else do
-            -- Check if file exists
-            fileExists <- doesFileExist filePath
-            if not fileExists
-                then do
-                    let err = FileNotFoundError filePath
-                    runTracer tracer (FileAttachErrorTrace filePath "File not found")
-                    pure $ Left err
-                else do
-                    -- Read file
-                    result <- try $ BS.readFile filePath
-                    case result of
-                        Left (e :: SomeException) -> do
-                            let errMsg = Text.pack $ show e
-                            runTracer tracer (FileAttachErrorTrace filePath errMsg)
-                            pure $ Left $ SystemInfoError $ "Failed to read file: " <> errMsg
-                        Right content -> do
-                            let fileSize = BS.length content
+            -- Validate against file sandbox if configured
+            case toolboxFileSandbox toolbox of
+                Just sandbox -> do
+                    accessResult <- validateFilePath sandbox filePath
+                    case accessResult of
+                        Left err -> do
+                            runTracer tracer (FileAttachErrorTrace filePath "Access denied by sandbox")
+                            pure $ Left err
+                        Right () -> proceedWithAttachment tracer filePath
+                Nothing ->
+                    -- No sandbox configured, proceed (backwards compatible behavior)
+                    proceedWithAttachment tracer filePath
 
-                            -- Check file size
-                            if fileSize > maxFileSize
-                                then do
-                                    runTracer tracer (FileAttachErrorTrace filePath "File too large")
-                                    pure $ Left $ FileTooLargeError filePath maxFileSize
-                                else do
-                                    -- Detect media type
-                                    case detectMediaType filePath of
-                                        Nothing -> do
-                                            let errMsg = "Unsupported file type: " <> getFileExtension filePath
-                                            runTracer tracer (FileAttachErrorTrace filePath errMsg)
-                                            pure $ Left $ UnsupportedFileTypeError filePath (getFileExtension filePath)
-                                        Just mediaType -> do
-                                            let mimeType = mediaTypeToMime mediaType
-                                            let base64Data = Text.decodeUtf8 $ B64.encode content
+-- | Validate a file path against the sandbox.
+validateFilePath :: FileSandbox -> FilePath -> IO (Either QueryError ())
+validateFilePath sandbox filePath = do
+    result <- validateFileRead sandbox filePath
+    case result of
+        AccessGranted -> pure $ Right ()
+        AccessDenied err -> pure $ Left $ FileAccessDeniedError filePath (Text.pack $ show err)
 
-                                            runTracer tracer (FileAttachSuccessTrace filePath mediaType fileSize)
+-- | Proceed with file attachment after validation.
+proceedWithAttachment ::
+    Tracer IO Trace ->
+    FilePath ->
+    IO (Either QueryError AttachFileResult)
+proceedWithAttachment tracer filePath = do
+    -- Check if file exists
+    fileExists <- doesFileExist filePath
+    if not fileExists
+        then do
+            let err = FileNotFoundError filePath
+            runTracer tracer (FileAttachErrorTrace filePath "File not found")
+            pure $ Left err
+        else do
+            -- Read file
+            result <- try $ BS.readFile filePath
+            case result of
+                Left (e :: SomeException) -> do
+                    let errMsg = Text.pack $ show e
+                    runTracer tracer (FileAttachErrorTrace filePath errMsg)
+                    pure $ Left $ SystemInfoError $ "Failed to read file: " <> errMsg
+                Right content -> do
+                    let fileSize = BS.length content
 
-                                            pure $
-                                                Right $
-                                                    AttachFileResult
-                                                        { attachFilePath = filePath
-                                                        , attachMimeType = mimeType
-                                                        , attachBase64Data = base64Data
-                                                        , attachFileSize = fileSize
-                                                        }
+                    -- Check file size
+                    if fileSize > maxFileSize
+                        then do
+                            runTracer tracer (FileAttachErrorTrace filePath "File too large")
+                            pure $ Left $ FileTooLargeError filePath maxFileSize
+                        else do
+                            -- Detect media type
+                            case detectMediaType filePath of
+                                Nothing -> do
+                                    let errMsg = "Unsupported file type: " <> getFileExtension filePath
+                                    runTracer tracer (FileAttachErrorTrace filePath errMsg)
+                                    pure $ Left $ UnsupportedFileTypeError filePath (getFileExtension filePath)
+                                Just mediaType -> do
+                                    let mimeType = mediaTypeToMime mediaType
+                                    let base64Data = Text.decodeUtf8 $ B64.encode content
 
+                                    runTracer tracer (FileAttachSuccessTrace filePath mediaType fileSize)
+
+                                    pure $
+                                        Right $
+                                            AttachFileResult
+                                                { attachFilePath = filePath
+                                                , attachMimeType = mimeType
+                                                , attachBase64Data = base64Data
+                                                , attachFileSize = fileSize
+                                                }

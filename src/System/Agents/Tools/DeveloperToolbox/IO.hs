@@ -11,12 +11,12 @@ module System.Agents.Tools.DeveloperToolbox.IO (
     writeFileAtomic,
 ) where
 
+import Data.Text (Text)
+import qualified Data.Text as Text
 import System.Directory (doesFileExist, removeFile, renameFile)
 import System.FilePath (takeDirectory)
 import System.IO (hClose, hPutStr)
 import System.IO.Temp (withTempFile)
-import Data.Text (Text)
-import qualified Data.Text as Text
 
 {- | Write a file atomically by writing to a temp file and renaming.
 This ensures that readers never see a partially-written file.
@@ -37,4 +37,3 @@ writeFileAtomic filePath content = do
         dstExists <- doesFileExist dst
         if dstExists then removeFile dst else return ()
         renameFile src dst
-

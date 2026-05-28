@@ -85,6 +85,7 @@ import System.Agents.Base (
     SqliteToolboxDescription (..),
     SystemToolCapability (..),
     SystemToolboxDescription (..),
+    defaultFileSandboxConfig,
  )
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import qualified System.Agents.MCP.Base as Mcp
@@ -107,14 +108,10 @@ import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.LuaToolbox as LuaTools
 import System.Agents.Tools.McpToolbox (callTool, mcpActivation)
 import qualified System.Agents.Tools.McpToolbox as McpTools
-import System.Agents.Tools.OpenAPI.Converter (
-    normalizeForLLM,
- )
+import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import System.Agents.Tools.OpenAPI.Types (Schema (..))
-import System.Agents.Tools.OpenAPIToolbox (
-    createToolHandler,
- )
+import System.Agents.Tools.OpenAPIToolbox (createToolHandler)
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import System.Agents.Tools.PostgREST.Converter (
     ColumnFilterSchema (..),
@@ -168,8 +165,6 @@ instance Show ToolRegistration where
             , show tr.toolActivation
             , ")"
             ]
-
--------------------------------------------------------------------------------
 
 -- naming policy for IO tools
 io2LLMName :: forall a b. IOScript a b -> OpenAI.ToolName
@@ -1270,6 +1265,72 @@ registerDeveloperTools box =
 -- Lua Tool Registration
 -------------------------------------------------------------------------------
 
+{- | Build a dynamic tool description for a Lua toolbox based on its configuration.
+
+This generates a comprehensive description that includes:
+* The user-provided short description
+* Calling convention (parameters and return format)
+* Available modules based on configuration
+* Security restrictions
+-}
+buildLuaToolDescription :: LuaToolboxDescription -> Text
+buildLuaToolDescription config =
+    let
+        -- Check which modules have actual functionality enabled
+        hasFileAccess = case config.luaToolboxFileSandbox of
+            Just _sandbox -> config.luaToolboxFileSandbox /= Just defaultFileSandboxConfig
+            Nothing -> False
+        hasHttpAccess = not (null config.luaToolboxAllowedHosts)
+        hasToolAccess = not (null config.luaToolboxAllowedTools)
+
+        -- Build module list dynamically
+        coreModules :: [Text]
+        coreModules =
+            [ "json (encode/decode)"
+            , "text (split, find, trim, etc.)"
+            , "time (now, sleep, format)"
+            ]
+
+        optionalModules :: [Text]
+        optionalModules =
+            [ if hasFileAccess
+                then "fs (read, write, list, etc. - path restricted)"
+                else "fs (disabled - no file sandbox configured)"
+            , if hasHttpAccess
+                then "http (get, post, request - host restricted to: " <> Text.intercalate ", " config.luaToolboxAllowedHosts <> ")"
+                else "http (disabled - no allowed hosts configured)"
+            , if hasToolAccess
+                then "tools (call other tools - whitelist: " <> Text.intercalate ", " config.luaToolboxAllowedTools <> ")"
+                else "tools (disabled - no allowed tools configured)"
+            ]
+
+        allModules = coreModules ++ optionalModules
+        moduleList = Text.intercalate "\n- " ("" : allModules)
+
+        -- Tool name for examples
+        toolPrefix = "lua_" <> config.luaToolboxName <> "_"
+     in
+        config.luaToolboxDescription
+            <> "\n\nCALLING CONVENTION:\n"
+            <> "Parameters:\n"
+            <> "- script (string, required): Lua source code to execute\n"
+            <> "- timeout (integer, optional): Override timeout in seconds\n\n"
+            <> "Return format: JSON object with 'values' array and 'executionTime'\n"
+            <> "Example: return {status='ok', data=123} -> {\"values\": [{\"status\":\"ok\",\"data\":123}], \"executionTime\": 0.001}\n\n"
+            <> "AVAILABLE MODULES (use via require('modulename')):\n-"
+            <> moduleList
+            <> "\n\nEXAMPLE SCRIPT:\n"
+            <> "local json = require('json')\n"
+            <> "local tools = require('tools')\n"
+            <> "local result = tools.call('"
+            <> toolPrefix
+            <> "bash_read_file', {filepath='/path/to/file'})\n"
+            <> "if result.status == 'ok' then\n"
+            <> "  return json.decode(result.result_txt)\n"
+            <> "else\n"
+            <> "  return {error = result.result_txt}\n"
+            <> "end"
+
 {- | Register a Lua toolbox with the LLM system.
 
 Lua toolboxes expose:
@@ -1305,8 +1366,9 @@ registerLuaTool box =
                 }
             ]
 
-        -- Extract the description from the toolbox config
-        luaDescription = luaToolboxDescription (LuaTools.toolboxConfig box)
+        -- Build dynamic description based on configuration
+        config = LuaTools.toolboxConfig box
+        luaDescription = buildLuaToolDescription config
 
         toolDescription =
             ToolDescription
@@ -1326,7 +1388,7 @@ registerLuaTool box =
                 else Nothing
 
         -- Extract activation from toolbox config
-        mbActivation = (LuaTools.toolboxConfig box).luaToolboxActivation
+        mbActivation = config.luaToolboxActivation
      in
         Right $
             ToolRegistration

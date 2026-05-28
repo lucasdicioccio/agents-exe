@@ -1267,22 +1267,22 @@ The Lua toolbox provides a sandboxed execution environment:
 
 ### Lua Standard Library Modules
 
-Scripts have access to these built-in modules:
+All modules are pre-registered as **global variables** - no `require()` needed.
+Simply use the module name directly (e.g., `json.encode()`, `text.split()`).
 
 | Module | Functions | Description |
 |--------|-----------|-------------|
-| `json` | `encode`, `decode`, `encode_pretty` | JSON manipulation |
-| `http` | `get`, `post`, `put`, `delete` | HTTP requests (host-restricted) |
-| `time` | `now`, `sleep`, `format` | Time utilities |
-| `fs` | `read_file`, `write_file`, `list_dir` | File system (sandboxed) |
-| `text` | `split`, `join`, `trim`, `match` | String utilities |
-| `tools` | `call` | Tool portal integration |
+| `json` | `json.encode`, `json.decode` | JSON manipulation |
+| `http` | `http.get`, `http.post`, `http.request` | HTTP requests (host-restricted) |
+| `time` | `time.now`, `time.sleep`, `time.format`, `time.diff` | Time utilities |
+| `fs` | `fs.read`, `fs.write`, `fs.list`, `fs.exists` | File system (sandboxed) |
+| `text` | `text.split`, `text.trim`, `text.upper`, `text.lower`, `text.find`, `text.gsub`, `text.startswith`, `text.endswith`, `text.len`, `text.sub` | String utilities |
+| `tools` | `tools.call`, `tools.list` | Tool portal integration |
 
 ### Example Lua Script
 
 ```lua
-local json = require("json")
-local tools = require("tools")
+-- Modules are pre-loaded as globals - no require() needed
 
 -- Call the recursive agent for complex reasoning
 local reasoning_result = tools.call("io_prompt_agent_local_lrmlua", {
@@ -1317,10 +1317,12 @@ The Lua toolbox exposes a single tool named `lua_{name}_execute`:
 
 ```json
 {
-  "script": "local json = require('json'); return json.encode({status='ok'})",
+  "script": "return json.encode({status='ok'})",
   "timeout": 60
 }
 ```
+
+Note: Modules (`json`, `text`, `time`, `fs`, `http`, `tools`) are available as pre-loaded global variables.
 
 ### Error Handling
 

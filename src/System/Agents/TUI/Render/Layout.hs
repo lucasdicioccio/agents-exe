@@ -20,9 +20,9 @@ import System.Agents.TUI.Render.Conversation (
 import System.Agents.TUI.Render.Widgets (
     render_agentDetail,
     render_agentList,
+    render_attachmentList,
     render_messageEditor,
     render_messageEditorWithAttachments,
-    render_attachmentList,
     render_queued_messages_manager,
     render_sessionList,
  )
@@ -165,4 +165,3 @@ render_sessionArea st =
             hBox
                 [ render_sessionView st
                 ]
-

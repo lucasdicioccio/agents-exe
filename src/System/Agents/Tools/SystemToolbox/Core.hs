@@ -1,6 +1,6 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Core functionality for the SystemToolbox.
 
@@ -36,7 +36,8 @@ import qualified Data.Text as Text
 import Data.Time (diffUTCTime, getCurrentTime)
 import Prod.Tracer (Tracer (..), runTracer)
 
-import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..))
+import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..), defaultFileSandboxConfig)
+import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.SystemToolbox.Session (
     getListSessionsInfo,
     getReadSessionInfo,
@@ -107,6 +108,21 @@ initializeToolboxWithSessionIntrospection _tracer desc mSessionConfig = do
     if null desc.systemToolboxCapabilities
         then pure $ Left "System toolbox must have at least one capability enabled"
         else do
+            -- Create file sandbox if attach-file capability is enabled
+            let config = fromMaybe defaultFileSandboxConfig desc.systemToolboxFileSandbox
+            mFileSandbox <-
+                if SystemToolAttachFile `elem` desc.systemToolboxCapabilities
+                    then do
+                        createdAt <- getCurrentTime
+                        let sandbox =
+                                FileSandbox
+                                    { sandboxId = error "sandboxId not used for validation" -- We don't need ID for validation
+                                    , sandboxConfig = config
+                                    , sandboxCreatedAt = createdAt
+                                    }
+                        pure $ Just sandbox
+                    else pure Nothing
+
             let toolbox =
                     Toolbox
                         { toolboxName = desc.systemToolboxName
@@ -115,6 +131,7 @@ initializeToolboxWithSessionIntrospection _tracer desc mSessionConfig = do
                         , toolboxEnvVarFilter = desc.systemToolboxEnvVarFilter
                         , toolboxConfig = desc
                         , toolboxSessionIntrospection = mSessionConfig
+                        , toolboxFileSandbox = mFileSandbox
                         }
             pure $ Right toolbox
 
@@ -297,4 +314,3 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
         Right val -> pure $ Right val
-

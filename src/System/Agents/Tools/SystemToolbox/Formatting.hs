@@ -47,4 +47,3 @@ formatResults result =
             , "data" .= resultData result
             , "executionTime" .= formatExecutionTime (resultExecutionTime result)
             ]
-

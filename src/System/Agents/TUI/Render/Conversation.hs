@@ -452,4 +452,3 @@ render_usage (Just usage) =
                         txt $
                             "  [" <> formatBytes usage.stepTotalBytes <> "]"
                 else emptyWidget
-

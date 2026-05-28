@@ -24,7 +24,7 @@ import System.Agents.TUI.MessageComposer (
     willSendOnNextNewline,
  )
 import System.Agents.TUI.Render.Attributes
-import System.Agents.TUI.Render.Conversation (getAttachmentCount, formatBytes)
+import System.Agents.TUI.Render.Conversation (formatBytes, getAttachmentCount)
 import System.Agents.TUI.Render.Utils (borderWithFocus)
 import System.Agents.TUI.Types
 import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
@@ -313,4 +313,3 @@ render_queued_item selectedIdx idx msg =
         truncated = Text.take 60 msg <> if Text.length msg > 60 then "..." else ""
         attr = if isSelected then queuedMessageSelectedAttr else queuedMessageAttr
      in withAttr attr $ txt $ marker <> truncated
-

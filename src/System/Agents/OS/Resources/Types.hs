@@ -64,6 +64,7 @@ module System.Agents.OS.Resources.Types (
     ResourceType (..),
     ResourceHandle (..),
     ResourceAccessor (..),
+    FileSandboxAccessor (..),
     ResourceRegistry (..),
     ResourceContext (..),
 
@@ -73,16 +74,19 @@ module System.Agents.OS.Resources.Types (
     LuaConfig (..),
     HttpManagerConfig (..),
     ProcessConfig (..),
+    FileSandboxConfig (..),
 
     -- * Registry operations
     newResourceRegistry,
     generateResourceId,
+    registerResourceHandleSTM,
+    lookupResourceHandle,
 
     -- * Component IDs
     resourceInfoComponentId,
 ) where
 
-import Control.Concurrent.STM (STM, TVar, newTVar)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVar, readTVar)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -211,6 +215,7 @@ data ResourceType
     | LuaResource LuaConfig
     | HttpManagerResource HttpManagerConfig
     | ProcessResource ProcessConfig
+    | FileSandboxResource FileSandboxConfig
     deriving (Show, Eq, Generic)
 
 instance FromJSON ResourceType
@@ -268,6 +273,18 @@ data ProcessConfig = ProcessConfig
 instance FromJSON ProcessConfig
 instance ToJSON ProcessConfig
 
+{- | Configuration for file sandbox resources.
+This is a placeholder; the full type is defined in System.Agents.FileSandbox.
+-}
+data FileSandboxConfig = FileSandboxConfig
+    { fsConfigName :: Maybe Text
+    , fsConfigDescription :: Maybe Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON FileSandboxConfig
+instance ToJSON FileSandboxConfig
+
 {- | A handle to an actual resource.
 
 The handle contains:
@@ -296,6 +313,13 @@ newtype ResourceAccessor = ResourceAccessor
     { unResourceAccessor :: ()
     }
 
+{- | Accessor for file sandbox resources.
+Wraps the FileSandboxConfig for access through the resource handle.
+-}
+newtype FileSandboxAccessor = FileSandboxAccessor
+    { unFileSandboxAccessor :: FileSandboxConfig
+    }
+
 -- This is a placeholder. In practice, specific resource modules
 -- will define their own accessor types (e.g., SqliteAccessor).
 
@@ -320,6 +344,18 @@ newResourceRegistry = do
     info <- newTVar HashMap.empty
     counter <- newTVar 0
     pure ResourceRegistry{registryHandles = handles, registryInfo = info, registryCounter = counter}
+
+-- | Register a resource handle and its info in the registry.
+registerResourceHandleSTM :: ResourceRegistry -> ResourceHandle -> ResourceInfo -> STM ()
+registerResourceHandleSTM registry handle info = do
+    modifyTVar' (registryHandles registry) $ HashMap.insert (handleId handle) handle
+    modifyTVar' (registryInfo registry) $ HashMap.insert (handleId handle) info
+
+-- | Look up a resource handle by ID.
+lookupResourceHandle :: ResourceRegistry -> ResourceId -> IO (Maybe ResourceHandle)
+lookupResourceHandle registry rid = do
+    handles <- atomically $ readTVar $ registryHandles registry
+    pure $ HashMap.lookup rid handles
 
 {- | Generate a new unique ResourceId.
 

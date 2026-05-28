@@ -61,7 +61,7 @@ parseRangePart part
 -- | Parse an insert-after range (N+ or N-M+).
 parseAfterRange :: Text -> Either DeveloperToolError RangeSpec
 parseAfterRange part =
-    let basePart = Text.dropEnd 1 part  -- Remove the trailing '+'
+    let basePart = Text.dropEnd 1 part -- Remove the trailing '+'
      in if "-" `Text.isInfixOf` basePart
             then -- Range form: "N-M+" means insert after M
                 case Text.breakOn "-" basePart of
@@ -106,4 +106,3 @@ parsePositiveInt txt errPrefix =
                         then Right n
                         else Left $ InvalidRangeError $ errPrefix <> " (must be positive): " <> txt
             else Left $ InvalidRangeError $ errPrefix <> ": " <> txt
-

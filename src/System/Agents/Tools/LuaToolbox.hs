@@ -38,20 +38,19 @@ The toolbox is designed to be safe for LLM-generated code by:
 
 Standard library modules available to Lua scripts:
 
-* @json@: JSON encoding/decoding with 'json.encode' and 'json.decode'
-* @text@: UTF-8 string utilities (split, find, trim, etc.)
-* @time@: Time functions (now, sleep, format, diff)
-* @fs@: Sandboxed filesystem operations (read, write, list, patch, etc.)
-* @http@: HTTP requests with host whitelisting (get, post, request)
-* @tools@: Tool portal integration for calling other tools with tracing
+All modules are pre-registered as global variables - no @require()@ needed.
+Just use the global directly (e.g., @json.encode@, @text.split@).
+
+* @json@: JSON encoding/decoding with @json.encode@ and @json.decode@
+* @text@: UTF-8 string utilities (@text.split@, @text.find@, @text.trim@, etc.)
+* @time@: Time functions (@time.now@, @time.sleep@, @time.format@, @time.diff@)
+* @fs@: Sandboxed filesystem operations (@fs.read@, @fs.write@, @fs.list@, @fs.patch@, etc.)
+* @http@: HTTP requests with host whitelisting (@http.get@, @http.post@, @http.request@)
+* @tools@: Tool portal integration for calling other tools (@tools.call@, @tools.list@)
 
 Example Lua script using modules:
 
-> local json = require("json")
-> local text = require("text")
-> local time = require("time")
-> local fs = require("fs")
-> local tools = require("tools")
+> -- No require() needed - modules are pre-loaded as globals
 >
 > -- Read and parse a JSON file
 > local data = json.decode(fs.read("/allowed/path/config.json"))
@@ -81,8 +80,7 @@ Scripts that relied on persistence across calls must use SQLite:
 -- Call 2: return users[1]  -- Returns "alice"
 
 -- AFTER (explicit persistence):
-local json = require("json")
-local tools = require("tools")
+-- No require() needed - json and tools are pre-loaded globals
 
 -- Save
 tools.call("sqlite_memory_query", {
@@ -135,6 +133,7 @@ import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, bracket, try)
 import Control.Monad (replicateM, void, when)
 import qualified Data.Aeson as Aeson
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
@@ -142,7 +141,7 @@ import qualified HsLua as Lua
 
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
-import System.Agents.Base (LuaToolboxDescription (..))
+import System.Agents.Base (LuaToolboxDescription (..), defaultFileSandboxConfig)
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Import standard library modules
@@ -155,11 +154,7 @@ import qualified System.Agents.Tools.LuaToolbox.Modules.Tools as ToolsMod
 import System.Agents.Tools.LuaToolbox.Utils (luaToJsonValue, toName)
 
 -- Re-export module traces
-import System.Agents.Tools.LuaToolbox.Modules.Fs (
-    FsConfig (..),
-    FsTrace (..),
-    PathError (..),
- )
+import System.Agents.Tools.LuaToolbox.Modules.Fs (FsTrace (..))
 import System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
     HttpTrace (..),
@@ -388,7 +383,7 @@ registerStandardModules ::
     Tracer IO LuaModuleTrace ->
     Lua.State ->
     LuaToolboxDescription ->
-    -- | Parent execution context for OS field propagation
+    -- | Parent execution context for OS integration field propagation
     ToolExecutionContext ->
     ToolPortal ->
     IO ()
@@ -410,14 +405,13 @@ registerStandardModules moduleTracer lstate desc parentCtx portal = do
     -- Register time module
     TimeMod.registerTimeModule timeTracer lstate
 
-    -- Register fs module with sandboxing
-    -- Security: empty allowedPaths means NO filesystem access
+    -- Register fs module with unified sandbox
+    -- Security: uses the unified FileSandbox with predicate-based access control
+    let fsSandboxConfig = fromMaybe defaultFileSandboxConfig (luaToolboxFileSandbox desc)
     FsMod.registerFsModule
         fsTracer
         lstate
-        FsMod.FsConfig
-            { FsMod.fsAllowedPaths = desc.luaToolboxAllowedPaths
-            }
+        fsSandboxConfig
 
     -- Register http module with sandboxing
     -- Security: empty allowedHosts means NO network access
@@ -466,16 +460,16 @@ The safe subset includes:
 * Coroutine support (coroutine library)
 * Error handling (pcall, xpcall)
 * Basic io (print, tostring, tonumber, etc.)
-* require - for loading our pre-registered modules
 
-This also configures the package.path to prevent loading external Lua files.
+Note: The 'require' function is kept available but will not work for
+loading external modules since package.path is empty. Our pre-registered
+modules (json, text, time, fs, http, tools) are available as globals.
 -}
 configureSandbox :: Lua.State -> IO ()
 configureSandbox lstate = Lua.runWith lstate $ do
     Lua.openlibs -- First load all standard libraries
 
     -- Then remove dangerous functions from global namespace
-    -- Note: We keep 'require' for our pre-registered modules
     removeGlobals
         [ "dofile"
         , "loadfile"
@@ -496,6 +490,7 @@ configureSandbox lstate = Lua.runWith lstate $ do
     withTable "io" $
         removeFields
             [ "popen"
+            , "open"
             , "tmpfile"
             ]
 
@@ -539,6 +534,9 @@ but set package.path and package.cpath to empty strings to
 prevent loading external files.
 
 The preload table is also cleared to prevent loading of C modules.
+
+Note: Our modules (json, text, time, fs, http, tools) are registered
+as global variables, so no require() is needed to access them.
 -}
 configurePackagePath :: Lua.Lua ()
 configurePackagePath = do
@@ -624,13 +622,16 @@ This function provides maximum isolation:
 * No memory accumulation across calls
 * No way for call N to influence call N+1
 * No shared locks (safe for recursive agent calls)
+
+Note: Modules (json, text, time, fs, http, tools) are available as
+global variables - no require() call is needed.
 -}
 executeScriptWithPortal ::
     Tracer IO Trace ->
     Toolbox ->
     -- | Lua script source
     Text.Text ->
-    -- | Parent execution context for OS field propagation
+    -- | Parent execution context for OS integration field propagation
     ToolExecutionContext ->
     -- | Tool portal for calling other tools
     ToolPortal ->
@@ -681,7 +682,7 @@ OS integration field propagation.
 createFreshState ::
     Tracer IO Trace ->
     LuaToolboxDescription ->
-    -- | Parent execution context for OS field propagation
+    -- | Parent execution context for OS integration field propagation
     ToolExecutionContext ->
     ToolPortal ->
     IO Lua.State

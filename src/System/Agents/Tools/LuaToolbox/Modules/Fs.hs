@@ -1,26 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Sandboxed filesystem module for LuaToolbox with enhanced path validation.
+{- | Sandboxed filesystem module for LuaToolbox using unified FileSandbox.
 
-This module provides filesystem operations that are sandboxed to specific
-allowed paths. Key security features:
+This module provides filesystem operations that are sandboxed using the
+unified FileSandbox mechanism from System.Agents.FileSandbox. Key security
+features:
 
 * Path canonicalization to prevent symlink traversal attacks
-* Absolute path requirement
-* Whitelist-based access control
-* Secure default: empty whitelist means NO access
+* Predicate-based access control (PathPredicate)
+* Unified sandbox validation via validateFileRead/validateFileWrite
+* Secure default: AlwaysDeny predicate means NO access by default
 * fs.patch() for code patching with diff generation
 
-Path validation uses canonicalizePath which resolves symlinks, making it
-resistant to traversal attacks through symlinks.
+The sandbox configuration comes from FileSandboxConfig which uses
+PathPredicate for flexible access control (directories, path patterns, etc.).
 -}
 module System.Agents.Tools.LuaToolbox.Modules.Fs (
-    FsConfig (..),
-    PathError (..),
     FsTrace (..),
     registerFsModule,
-    validatePath,
 ) where
 
 import Control.Exception (IOException, try)
@@ -33,13 +31,21 @@ import qualified Data.Text.IO as TextIO
 import qualified HsLua as Lua
 import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (
-    canonicalizePath,
     createDirectoryIfMissing,
     doesDirectoryExist,
     doesFileExist,
     listDirectory,
  )
-import System.FilePath (isAbsolute, takeDirectory)
+import System.FilePath (takeDirectory)
+
+import System.Agents.Base (FileSandboxConfig (..))
+import System.Agents.FileSandbox (
+    AccessResult (..),
+    FileSandbox (..),
+    validateFileAccess,
+    validateFileRead,
+    validateFileWrite,
+ )
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -79,38 +85,12 @@ useful for debugging and logging.
 data PathError
     = -- | Path is not in the allowed whitelist
       PathNotAllowed FilePath
-    | -- | Path is not absolute (must start with /)
-      PathNotAbsolute FilePath
-    | -- | Path escapes the sandbox directory (child, parent)
-      PathOutsideSandbox FilePath FilePath
     | -- | IO error during path validation
       PathIOError FilePath String
     deriving (Show, Eq)
 
-{- | Filesystem module configuration with path sandboxing.
-
-Security defaults:
-* Empty allowedPaths means NO filesystem access
-* All paths in allowedPaths should be absolute and canonical
-* Canonicalization is performed on each path check
-
-Example:
-@
-FsConfig
-    { fsAllowedPaths = ["/home/user/allowed", "/tmp/sandbox"]
-    }
-@
--}
-data FsConfig = FsConfig
-    { fsAllowedPaths :: [FilePath]
-    {- ^ Whitelist of allowed paths. If empty, NO paths are allowed (secure default).
-    Paths should be absolute and canonical.
-    -}
-    }
-    deriving (Show, Eq)
-
 -- | Register the fs module in the Lua state.
-registerFsModule :: Tracer IO FsTrace -> Lua.State -> FsConfig -> IO ()
+registerFsModule :: Tracer IO FsTrace -> Lua.State -> FileSandboxConfig -> IO ()
 registerFsModule tracer lstate config = Lua.runWith lstate $ do
     Lua.newtable
 
@@ -148,60 +128,40 @@ registerFsModule tracer lstate config = Lua.runWith lstate $ do
 
     Lua.setglobal (Lua.Name "fs")
 
-{- | Validate and canonicalize a path against allowed paths.
-
-This function performs the following security checks:
-1. Path must be absolute
-2. Path is canonicalized (resolves symlinks, .., etc.)
-3. Canonical path must be within one of the allowed paths
-
-Returns the canonical path if valid, or an error.
--}
-validatePath :: FsConfig -> FilePath -> IO (Either PathError FilePath)
-validatePath config path = do
-    -- Path must be absolute
-    if not (isAbsolute path)
-        then pure $ Left $ PathNotAbsolute path
-        else do
-            -- Canonicalize to resolve symlinks, .., etc.
-            -- This is crucial for preventing symlink traversal attacks
-            canonical <- canonicalizePath path
-
-            -- Check against allowed paths
-            if null (fsAllowedPaths config)
-                then pure $ Left $ PathNotAllowed canonical
-                else
-                    if any (isPathWithin canonical) (fsAllowedPaths config)
-                        then pure $ Right canonical
-                        else pure $ Left $ PathOutsideSandbox canonical (show $ fsAllowedPaths config)
-  where
-    -- Check if child is within parent (handles path separator edge cases)
-    isPathWithin :: FilePath -> FilePath -> Bool
-    isPathWithin child parent =
-        let parent' = if last parent == '/' then parent else parent ++ "/"
-         in child == parent || take (length parent') child == parent'
+-- | Create a FileSandbox from config (lightweight, no resource registration).
+createSandbox :: FileSandboxConfig -> FileSandbox
+createSandbox config =
+    FileSandbox
+        { sandboxId = error "sandboxId not used for Lua FS"
+        , sandboxConfig = config
+        , sandboxCreatedAt = error "sandboxCreatedAt not used for Lua FS"
+        }
 
 -- | Read file contents with enhanced error handling.
-luaRead :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaRead :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaRead tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
 
     let path = Text.unpack $ Text.decodeUtf8 pathBytes
+    let sandbox = createSandbox config
 
-    validation <- liftIO $ validatePath config path
-    case validation of
-        Left err -> do
+    -- Validate using unified sandbox
+    accessResult <- liftIO $ validateFileRead sandbox path
+    case accessResult of
+        AccessDenied _ -> do
+            let err = PathNotAllowed path
             liftIO $ runTracer tracer (FsReadTrace path (Left err))
             Lua.pushnil
             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
-        Right validPath -> do
-            result <- liftIO $ try $ BS.readFile validPath
+        AccessGranted -> do
+            result <- liftIO $ try $ BS.readFile path
             case result of
                 Left (e :: IOException) -> do
-                    liftIO $ runTracer tracer (FsReadTrace path (Left $ PathIOError path (show e)))
+                    let err = PathIOError path (show e)
+                    liftIO $ runTracer tracer (FsReadTrace path (Left err))
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                     pure 2
@@ -211,7 +171,7 @@ luaRead tracer config = do
                     pure 1
 
 -- | Write file contents with enhanced error handling.
-luaWrite :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaWrite :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaWrite tracer config = do
     top <- Lua.gettop
     let topInt = getStackInt top
@@ -229,16 +189,19 @@ luaWrite tracer config = do
             Lua.pop topInt
 
             let path = Text.unpack $ Text.decodeUtf8 pathBytes
-            validation <- liftIO $ validatePath config path
+            let sandbox = createSandbox config
 
-            case validation of
-                Left err -> do
-                    liftIO $ runTracer tracer (FsWriteTrace path False (Just $ show err))
+            -- Validate using unified sandbox
+            accessResult <- liftIO $ validateFileWrite sandbox path
+            case accessResult of
+                AccessDenied _ -> do
+                    let errMsg = show $ PathNotAllowed path
+                    liftIO $ runTracer tracer (FsWriteTrace path False (Just errMsg))
                     Lua.pushboolean False
-                    Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
+                    Lua.pushstring (Text.encodeUtf8 $ Text.pack errMsg)
                     pure 2
-                Right validPath -> do
-                    let parentDir = takeDirectory validPath
+                AccessGranted -> do
+                    let parentDir = takeDirectory path
                     parentResult <- liftIO $ try $ createDirectoryIfMissing True parentDir
                     case parentResult of
                         Left (e :: IOException) -> do
@@ -247,7 +210,7 @@ luaWrite tracer config = do
                             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show e)
                             pure 2
                         Right () -> do
-                            result <- liftIO $ try $ BS.writeFile validPath content
+                            result <- liftIO $ try $ BS.writeFile path content
                             case result of
                                 Left (e :: IOException) -> do
                                     liftIO $ runTracer tracer (FsWriteTrace path False (Just $ show e))
@@ -260,46 +223,51 @@ luaWrite tracer config = do
                                     pure 1
 
 -- | Check if path exists.
-luaExists :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaExists :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaExists tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
 
     let path = Text.unpack $ Text.decodeUtf8 pathBytes
-    validation <- liftIO $ validatePath config path
+    let sandbox = createSandbox config
 
-    case validation of
-        Left _ -> do
+    -- Validate using unified sandbox
+    accessResult <- liftIO $ validateFileAccess sandbox path
+    case accessResult of
+        AccessDenied _ -> do
             liftIO $ runTracer tracer (FsExistsTrace path False)
             Lua.pushboolean False
             pure 1
-        Right validPath -> do
-            fileExists <- liftIO $ doesFileExist validPath
-            dirExists <- liftIO $ doesDirectoryExist validPath
+        AccessGranted -> do
+            fileExists <- liftIO $ doesFileExist path
+            dirExists <- liftIO $ doesDirectoryExist path
             let exists = fileExists || dirExists
             liftIO $ runTracer tracer (FsExistsTrace path exists)
             Lua.pushboolean exists
             pure 1
 
 -- | List directory contents.
-luaList :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaList :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaList tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
 
     let path = Text.unpack $ Text.decodeUtf8 pathBytes
-    validation <- liftIO $ validatePath config path
+    let sandbox = createSandbox config
 
-    case validation of
-        Left err -> do
+    -- Validate using unified sandbox
+    accessResult <- liftIO $ validateFileAccess sandbox path
+    case accessResult of
+        AccessDenied _ -> do
+            let err = PathNotAllowed path
             liftIO $ runTracer tracer (FsListTrace path (Left err))
             Lua.pushnil
             Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
             pure 2
-        Right validPath -> do
-            isDir <- liftIO $ doesDirectoryExist validPath
+        AccessGranted -> do
+            isDir <- liftIO $ doesDirectoryExist path
             if not isDir
                 then do
                     liftIO $ runTracer tracer (FsListTrace path (Left $ PathIOError path "Not a directory"))
@@ -307,7 +275,7 @@ luaList tracer config = do
                     Lua.pushstring "Not a directory"
                     pure 2
                 else do
-                    result <- liftIO $ try $ listDirectory validPath
+                    result <- liftIO $ try $ listDirectory path
                     case result of
                         Left (e :: IOException) -> do
                             liftIO $ runTracer tracer (FsListTrace path (Left $ PathIOError path (show e)))
@@ -320,23 +288,26 @@ luaList tracer config = do
                             pure 1
 
 -- | Create directory.
-luaMkdir :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaMkdir :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaMkdir tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
 
     let path = Text.unpack $ Text.decodeUtf8 pathBytes
-    validation <- liftIO $ validatePath config path
+    let sandbox = createSandbox config
 
-    case validation of
-        Left err -> do
-            liftIO $ runTracer tracer (FsMkdirTrace path False (Just $ show err))
+    -- Validate using unified sandbox
+    accessResult <- liftIO $ validateFileWrite sandbox path
+    case accessResult of
+        AccessDenied _ -> do
+            let errMsg = show $ PathNotAllowed path
+            liftIO $ runTracer tracer (FsMkdirTrace path False (Just errMsg))
             Lua.pushboolean False
-            Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
+            Lua.pushstring (Text.encodeUtf8 $ Text.pack errMsg)
             pure 2
-        Right validPath -> do
-            result <- liftIO $ try $ createDirectoryIfMissing True validPath
+        AccessGranted -> do
+            result <- liftIO $ try $ createDirectoryIfMissing True path
             case result of
                 Left (e :: IOException) -> do
                     liftIO $ runTracer tracer (FsMkdirTrace path False (Just $ show e))
@@ -349,43 +320,47 @@ luaMkdir tracer config = do
                     pure 1
 
 -- | Check if path is a directory.
-luaIsDir :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaIsDir :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaIsDir tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
 
     let path = Text.unpack $ Text.decodeUtf8 pathBytes
-    validation <- liftIO $ validatePath config path
+    let sandbox = createSandbox config
 
-    case validation of
-        Left _ -> do
+    -- Validate using unified sandbox
+    accessResult <- liftIO $ validateFileAccess sandbox path
+    case accessResult of
+        AccessDenied _ -> do
             liftIO $ runTracer tracer (FsIsDirTrace path False)
             Lua.pushboolean False
             pure 1
-        Right validPath -> do
-            isDir <- liftIO $ doesDirectoryExist validPath
+        AccessGranted -> do
+            isDir <- liftIO $ doesDirectoryExist path
             liftIO $ runTracer tracer (FsIsDirTrace path isDir)
             Lua.pushboolean isDir
             pure 1
 
 -- | Check if path is a file.
-luaIsFile :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaIsFile :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaIsFile tracer config = do
     -- Get path from top of stack
     pathBytes <- Lua.tostring' (Lua.nthTop 1)
     Lua.pop 1
 
     let path = Text.unpack $ Text.decodeUtf8 pathBytes
-    validation <- liftIO $ validatePath config path
+    let sandbox = createSandbox config
 
-    case validation of
-        Left _ -> do
+    -- Validate using unified sandbox
+    accessResult <- liftIO $ validateFileAccess sandbox path
+    case accessResult of
+        AccessDenied _ -> do
             liftIO $ runTracer tracer (FsIsFileTrace path False)
             Lua.pushboolean False
             pure 1
-        Right validPath -> do
-            isFile <- liftIO $ doesFileExist validPath
+        AccessGranted -> do
+            isFile <- liftIO $ doesFileExist path
             liftIO $ runTracer tracer (FsIsFileTrace path isFile)
             Lua.pushboolean isFile
             pure 1
@@ -399,7 +374,7 @@ Returns:
 * error: empty string on success, error message on failure
 * diff: unified diff of changes (or nil if no changes)
 -}
-luaPatch :: Tracer IO FsTrace -> FsConfig -> Lua.LuaE Lua.Exception Lua.NumResults
+luaPatch :: Tracer IO FsTrace -> FileSandboxConfig -> Lua.LuaE Lua.Exception Lua.NumResults
 luaPatch tracer config = do
     top <- Lua.gettop
     let topInt = getStackInt top
@@ -422,22 +397,24 @@ luaPatch tracer config = do
             let search = Text.decodeUtf8 searchBytes
             let replace = Text.decodeUtf8 replaceBytes
 
-            validation <- liftIO $ validatePath config path
-            case validation of
-                Left err -> do
-                    liftIO $ runTracer tracer (FsPatchTrace path search replace False 0 (Just $ show err))
+            let sandbox = createSandbox config
+            accessResult <- liftIO $ validateFileWrite sandbox path
+            case accessResult of
+                AccessDenied _ -> do
+                    let errMsg = show $ PathNotAllowed path
+                    liftIO $ runTracer tracer (FsPatchTrace path search replace False 0 (Just errMsg))
                     Lua.pushboolean False
-                    Lua.pushstring (Text.encodeUtf8 $ Text.pack $ show err)
+                    Lua.pushstring (Text.encodeUtf8 $ Text.pack errMsg)
                     Lua.pushnil
                     pure 3
-                Right validPath -> do
+                AccessGranted -> do
                     result <- liftIO $ try $ do
-                        content <- TextIO.readFile validPath
+                        content <- TextIO.readFile path
                         let newContent = Text.replace search replace content
                         let count = Text.count search content
                         if count > 0
                             then do
-                                TextIO.writeFile validPath newContent
+                                TextIO.writeFile path newContent
                                 let diff = generateDiff search replace content newContent count
                                 pure (True, count, diff)
                             else

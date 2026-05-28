@@ -35,6 +35,7 @@ import System.Directory (doesFileExist)
 
 import Prod.Tracer (Tracer (..))
 
+import System.Agents.FileSandbox (AccessResult (..), validateFileWrite)
 import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolCapability (..),
     DeveloperToolError (..),
@@ -54,9 +55,13 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 Applies a unified diff patch to a file atomically. All hunks are validated
 before any changes are applied, ensuring no partial corruption.
 
+When a file sandbox is configured, the filepath is validated against
+the sandbox before patching. Access is denied if the file is outside
+the allowed paths.
+
 The patch format follows standard unified diff conventions:
 * @@ -oldStart,oldCount +newStart,newCount @@ header
-* Context lines (no prefix)
+* Context lines have no prefix
 * Removed lines (- prefix)
 * Added lines (+ prefix)
 
@@ -92,59 +97,80 @@ executePatchFile tracer toolbox filePath patchText = do
         else do
             runTracer tracer (PatchFileStartedTrace filePath 0)
 
-            -- Check if file exists
-            fileExists <- doesFileExist filePath
-            if not fileExists
-                then do
-                    let err = PatchFileNotFound filePath
+            -- Validate against file sandbox if configured
+            case toolboxFileSandbox toolbox of
+                Just sandbox -> do
+                    accessResult <- validateFileWrite sandbox filePath
+                    case accessResult of
+                        AccessDenied err -> do
+                            let errMsg = FileAccessDeniedError filePath (Text.pack $ show err)
+                            runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show errMsg)
+                            pure $ Left errMsg
+                        AccessGranted -> proceedWithPatch tracer filePath patchText
+                Nothing ->
+                    -- No sandbox configured, proceed (backwards compatible behavior)
+                    proceedWithPatch tracer filePath patchText
+
+-- | Proceed with patch operation after validation.
+proceedWithPatch ::
+    Tracer IO Trace ->
+    FilePath ->
+    Text ->
+    IO (Either DeveloperToolError PatchResult)
+proceedWithPatch tracer filePath patchText = do
+    -- Check if file exists
+    fileExists <- doesFileExist filePath
+    if not fileExists
+        then do
+            let err = PatchFileNotFound filePath
+            runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
+            pure $ Left $ PatchValidationError err
+        else do
+            -- Parse the unified diff
+            case parseUnifiedDiff patchText of
+                Left err -> do
                     runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
                     pure $ Left $ PatchValidationError err
-                else do
-                    -- Parse the unified diff
-                    case parseUnifiedDiff patchText of
+                Right hunks -> do
+                    -- Read current file content
+                    content <- Text.readFile filePath
+                    let lines' = Text.lines content
+
+                    -- Validate ALL hunks before applying any
+                    case validateAllHunks lines' hunks of
                         Left err -> do
                             runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
                             pure $ Left $ PatchValidationError err
-                        Right hunks -> do
-                            -- Read current file content
-                            content <- Text.readFile filePath
-                            let lines' = Text.lines content
+                        Right validHunks -> do
+                            -- Apply hunks bottom-to-top (descending line order)
+                            -- to avoid line number shifts affecting other hunks
+                            let sortedHunks = sortOn (negate . hunkOldStart) validHunks
+                            let newLines = foldl (flip applyHunk) lines' sortedHunks
 
-                            -- Validate ALL hunks before applying any
-                            case validateAllHunks lines' hunks of
-                                Left err -> do
-                                    runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
-                                    pure $ Left $ PatchValidationError err
-                                Right validHunks -> do
-                                    -- Apply hunks bottom-to-top (descending line order)
-                                    -- to avoid line number shifts affecting other hunks
-                                    let sortedHunks = sortOn (negate . hunkOldStart) validHunks
-                                    let newLines = foldl (flip applyHunk) lines' sortedHunks
+                            -- Count changes
+                            let linesChanged = sum $ map hunkChangeCount validHunks
 
-                                    -- Count changes
-                                    let linesChanged = sum $ map hunkChangeCount validHunks
+                            -- Write result
+                            writeResult <- try $ do
+                                Text.writeFile filePath (Text.unlines newLines)
 
-                                    -- Write result
-                                    writeResult <- try $ do
-                                        Text.writeFile filePath (Text.unlines newLines)
+                            case writeResult of
+                                Left (e :: SomeException) -> do
+                                    let err = PermissionError $ Text.pack $ show e
+                                    runTracer tracer (DeveloperToolErrorTrace "patch-file" $ Text.pack $ show e)
+                                    pure $ Left err
+                                Right () -> do
+                                    let applied = length validHunks
+                                    runTracer tracer (PatchFileCompletedTrace filePath applied 0)
 
-                                    case writeResult of
-                                        Left (e :: SomeException) -> do
-                                            let err = PermissionError $ Text.pack $ show e
-                                            runTracer tracer (DeveloperToolErrorTrace "patch-file" $ Text.pack $ show e)
-                                            pure $ Left err
-                                        Right () -> do
-                                            let applied = length validHunks
-                                            runTracer tracer (PatchFileCompletedTrace filePath applied 0)
-
-                                            pure $
-                                                Right $
-                                                    PatchResult
-                                                        { patchFilePath = filePath
-                                                        , patchHunksApplied = applied
-                                                        , patchHunksRejected = 0
-                                                        , patchLinesChanged = linesChanged
-                                                        }
+                                    pure $
+                                        Right $
+                                            PatchResult
+                                                { patchFilePath = filePath
+                                                , patchHunksApplied = applied
+                                                , patchHunksRejected = 0
+                                                , patchLinesChanged = linesChanged
+                                                }
   where
     hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
 
@@ -426,4 +452,3 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                                     added
                                                     (stripped : ctxAfter)
                                                     rest
-

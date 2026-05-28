@@ -14,8 +14,8 @@ module System.Agents.Tools.DeveloperToolbox.Create (
     executeCreateAgent,
     agentFromOverrides,
     mergeAgentWithOverrides,
-    
-    -- * Tool creation  
+
+    -- * Tool creation
     executeCreateTool,
     mergeToolConfig,
 ) where
@@ -47,18 +47,18 @@ import System.Agents.Base (
 import qualified System.Agents.FileLoader as FileLoader
 import System.Agents.Tools.Bash (LoadTrace)
 import qualified System.Agents.Tools.Bash as Bash
+import System.Agents.Tools.DeveloperToolbox.Templates (
+    makeToolTemplateFromConfig,
+ )
 import System.Agents.Tools.DeveloperToolbox.Types (
     AgentOverrides (..),
     CreateResult (..),
     DeveloperToolError (..),
     ScriptArg (..),
-    Toolbox (..),
     ToolConfig (..),
+    Toolbox (..),
  )
 import System.Agents.Tools.DeveloperToolbox.Validate (validateAgentStructure)
-import System.Agents.Tools.DeveloperToolbox.Templates (
-    makeToolTemplateFromConfig,
- )
 
 -------------------------------------------------------------------------------
 -- Agent Creation
@@ -341,4 +341,3 @@ mergeToolConfig ref config =
                 Bash.DashDashSpace -> "dashdashspace"
                 Bash.DashDashEqual -> "dashdashequal"
             }
-

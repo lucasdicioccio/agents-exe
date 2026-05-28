@@ -10,19 +10,19 @@ module System.Agents.TUI.Event.Conversation (
     -- * New Conversation
     handleNewConversationFromEditor,
     handleNewConversation,
-    
+
     -- * Restored Conversation
     handleRestoredConversation,
-    
+
     -- * Run Conversation
     runConversation,
-    
+
     -- * Types
     Trace (..),
-    
+
     -- * Send Message
     handleSendMessage,
-    
+
     -- * Subcall Management
     createSubcallConversationEntry,
     handleSubcallStarted,
@@ -30,22 +30,22 @@ module System.Agents.TUI.Event.Conversation (
     handleSubcallCompleted,
     handleSubcallFailed,
     findAgentBySlug,
-    
+
     -- * Conversation Updates
     handleConversationUpdated,
     handleConversationNeedsInput,
     updateConversationStatus,
-    
+
     -- * Pause/Resume
     handleTogglePauseConversation,
     isConversationPaused,
-    
+
     -- * Progress Callbacks
     buildOnProgress,
     readAndClearBufferedMessagesSTM,
     readAndClearBufferedMessages,
     addBufferedMessage,
-    
+
     -- * Core State Manipulation
     appendConversation,
 ) where
@@ -58,7 +58,7 @@ import Brick.Widgets.List (listInsert, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
-import Control.Lens ((%=), (.=), to, use, (^.))
+import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
@@ -561,4 +561,3 @@ appendConversation conv c = c{_coreConversations = conv : (c ^. coreConversation
 -- | Extract short identifier from ConversationId for debugging.
 shortConvId :: ConversationId -> Text.Text
 shortConvId (ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
-

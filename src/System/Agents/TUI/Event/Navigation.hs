@@ -12,20 +12,20 @@ module System.Agents.TUI.Event.Navigation (
     cycleTabBackward,
     nextTab,
     prevTab,
-    
+
     -- * Focus Management
     cycleFocusForward,
     cycleFocusBackward,
     updateTabFromFocus,
     toggleZoom,
     switchToChatsAndFocusMessage,
-    
+
     -- * Focus Ring Construction (re-exported from Types.State)
     buildFocusRingForTabPreserving,
     tabEntryWidget,
     focusRingElements,
     widgetToTab,
-    
+
     -- * Turn Navigation
     handleTurnNavigationEvent,
     handleForkAtTurn,
@@ -34,7 +34,7 @@ module System.Agents.TUI.Event.Navigation (
 import Brick
 import Brick.BChan (writeBChan)
 import Brick.Focus (FocusRing, focusGetCurrent, focusNext, focusPrev, focusSetCurrent)
-import Control.Lens ((%=), (.=), (^.), to, use)
+import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as Text
@@ -241,4 +241,3 @@ handleForkAtTurn _navState = do
     -- This is a placeholder - the actual implementation is in Event.hs
     -- which has access to the Tracer and can call runConversation
     showStatus StatusWarning "Fork not available from Navigation module"
-
