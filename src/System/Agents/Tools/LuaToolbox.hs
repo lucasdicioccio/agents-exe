@@ -492,6 +492,7 @@ configureSandbox lstate = Lua.runWith lstate $ do
     withTable "io" $
         removeFields
             [ "popen"
+            , "open"
             , "tmpfile"
             ]
 
