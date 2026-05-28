@@ -39,13 +39,50 @@
         "contents": {
           "Name": "dev",
           "Description": "Development utilities",
-          "Capabilities": ["read-file-range", "write-file-range", "patch-file"]
+          "Capabilities": [
+            "read-file-range",
+            "write-file-range",
+            "patch-file"
+          ],
+          "FileSandbox": {
+            "fsbName": "code-access",
+            "--fsbPredicate": {
+              "tag": "AlwaysAllow"
+            },
+            "fsbPredicate": {
+              "tag": "Any",
+              "contents": [
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./src"
+                },
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./test"
+                },
+                {
+                  "tag": "FileExactly",
+                  "contents": "./agents.cabal"
+                }
+              ]
+            }
+          }
         }
       }
     ],
     "bashToolboxes": [
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/read"}},
-        {"tag": "FileSystemDirectory", "contents": {"Path": "tools/dev/write"}}
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/read"
+        }
+      },
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/write"
+        }
+      }
     ]
   }
 }

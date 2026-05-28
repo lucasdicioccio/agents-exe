@@ -27,6 +27,12 @@ Example usage:
 Predicates are evaluated against the *symlink path* (not resolved target).
 This is intentional for security - symlinks are followed but the predicate
 applies to the path the user provided.
+
+Path normalization: All paths in predicates (both the allowed paths stored
+in the predicate and the test path) are made absolute and normalized before
+comparison. This ensures that relative paths like "./README.md" are correctly
+matched against absolute paths like "/home/user/project/README.md" when
+evaluated from the appropriate base directory.
 -}
 module System.Agents.FileSandbox.Predicate (
     -- * Path validation errors
@@ -37,7 +43,6 @@ module System.Agents.FileSandbox.Predicate (
 
     -- * Evaluation
     evaluatePredicate,
-    evaluatePredicate',
 
     -- * Smart constructors
     fromPathList,
@@ -49,8 +54,8 @@ module System.Agents.FileSandbox.Predicate (
 import Control.Exception (IOException, try)
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
-import System.Directory (canonicalizePath, doesDirectoryExist, getFileSize)
-import System.FilePath (isRelative, normalise, splitDirectories, takeExtension, takeFileName)
+import System.Directory (canonicalizePath, doesDirectoryExist, getCurrentDirectory, getFileSize)
+import System.FilePath (isAbsolute, isRelative, normalise, splitDirectories, takeExtension, takeFileName, (</>))
 
 -- | Path validation error types.
 data PathError
@@ -78,6 +83,10 @@ instance ToJSON PathError
 Predicates are evaluated against the *symlink path* (not resolved).
 This is intentional for security - symlinks are followed but the predicate
 applies to the path the user provided.
+
+Note: When predicates contain relative paths (e.g., "./src" or "README.md"),
+they will be resolved relative to the base directory provided during evaluation.
+This ensures consistent matching regardless of how paths are expressed.
 -}
 data PathPredicate
     = -- | Exact file path match (after canonicalization)
@@ -119,23 +128,63 @@ data PathPredicate
 instance FromJSON PathPredicate
 instance ToJSON PathPredicate
 
+{- | Make a path absolute using the given base directory.
+
+If the path is already absolute, it is normalized and returned.
+If the path is relative, it is joined with the base directory and then normalized.
+-}
+makeAbsolutePath :: FilePath -> FilePath -> FilePath
+makeAbsolutePath baseDir path
+    | isAbsolute path = normalise path
+    | otherwise = normalise (baseDir </> path)
+
+{- | Convert all relative paths in a predicate to absolute paths.
+
+This recursively processes the predicate structure, converting any relative
+paths to absolute ones using the provided base directory.
+-}
+normalizePredicatePaths :: FilePath -> PathPredicate -> PathPredicate
+normalizePredicatePaths baseDir = go
+  where
+    go :: PathPredicate -> PathPredicate
+    go (FileExactly p) = FileExactly (makeAbsolutePath baseDir p)
+    go (DirectoryExactly p) = DirectoryExactly (makeAbsolutePath baseDir p)
+    go (DirectoryRecursive p) = DirectoryRecursive (makeAbsolutePath baseDir p)
+    go (DirectoryShallow p) = DirectoryShallow (makeAbsolutePath baseDir p)
+    go (ChildOf p) = ChildOf (makeAbsolutePath baseDir p)
+    go (And left right) = And (go left) (go right)
+    go (Or left right) = Or (go left) (go right)
+    go (Not inner) = Not (go inner)
+    go (Any predicates) = Any (map go predicates)
+    go (All predicates) = All (map go predicates)
+    go other = other  -- FilePattern, FileExtension, FileSizeLessThan, AlwaysAllow, AlwaysDeny
+
 {- | Evaluate a predicate against a file path.
 
 The path should be absolute. It will be canonicalized before evaluation.
+Relative paths in the predicate are resolved relative to the current working directory.
 Returns Right () if allowed, Left PathError if denied.
 -}
 evaluatePredicate :: PathPredicate -> FilePath -> IO (Either PathError ())
 evaluatePredicate predicate path = do
+    -- Get current directory as base for resolving relative paths in predicate
+    baseDir <- getCurrentDirectory
+    let normalizedPred = normalizePredicatePaths baseDir predicate
     -- First, canonicalize the path to resolve symlinks, .., etc.
     canonical <- try $ canonicalizePath path
     case canonical of
         Left (e :: IOException) ->
             pure $ Left $ PathIOError path (show e)
         Right canonicalPath ->
-            evaluatePredicate' predicate canonicalPath
+            evaluatePredicate' normalizedPred canonicalPath
 
 {- | Evaluate a predicate against an already-canonicalized path.
-This is useful when you want to avoid re-canonicalizing for performance.
+
+This is useful when you want to avoid re-canonicalizing for performance
+or when you need to control the base directory for relative path resolution.
+
+Note: The predicate should already have its paths normalized (made absolute)
+before calling this function. Use 'normalizePredicatePaths' if needed.
 -}
 evaluatePredicate' :: PathPredicate -> FilePath -> IO (Either PathError ())
 evaluatePredicate' predicate path = do
@@ -147,7 +196,7 @@ evaluatePredicate' predicate path = do
     eval :: PathPredicate -> FilePath -> IO (Either PathError ())
     eval AlwaysAllow _ = pure $ Right ()
     eval AlwaysDeny _ = pure $ Left $ PathNotAllowed "Access denied by policy"
-    eval (FileExactly allowed) p =
+    eval (FileExactly allowed) p = do
         pure $
             if normalise allowed == normalise p
                 then Right ()
@@ -298,3 +347,4 @@ allowDirectory path = DirectoryShallow path
 -- | Create a predicate that allows recursive access to a directory.
 allowRecursive :: FilePath -> PathPredicate
 allowRecursive path = DirectoryRecursive path
+
