@@ -108,7 +108,7 @@ validateFileRead sandbox path = do
             pure $ AccessDenied $ PathIOError path (show e)
         Right canonical -> do
             -- Check predicate (applied to canonical path)
-            predResult <- evaluatePredicate' ((sandboxConfig sandbox).fsbPredicate) canonical
+            predResult <- evaluatePredicate ((sandboxConfig sandbox).fsbPredicate) canonical
             case predResult of
                 Left err -> pure $ AccessDenied err
                 Right () -> do
@@ -149,7 +149,7 @@ validateFileWrite sandbox path = do
   where
     checkFilePermission :: FilePath -> IO AccessResult
     checkFilePermission p = do
-        result <- evaluatePredicate' ((sandboxConfig sandbox).fsbPredicate) p
+        result <- evaluatePredicate ((sandboxConfig sandbox).fsbPredicate) p
         case result of
             Left err -> pure $ AccessDenied err
             Right () -> pure AccessGranted
@@ -157,7 +157,7 @@ validateFileWrite sandbox path = do
     checkParentPermission :: FilePath -> IO AccessResult
     checkParentPermission p = do
         let parent = takeDirectory p
-        result <- evaluatePredicate' ((sandboxConfig sandbox).fsbPredicate) parent
+        result <- evaluatePredicate ((sandboxConfig sandbox).fsbPredicate) parent
         case result of
             Left err -> pure $ AccessDenied err
             Right () -> pure AccessGranted
