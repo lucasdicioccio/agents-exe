@@ -471,6 +471,162 @@ Each SQLite toolbox exposes a single `sqlite_{name}_query` tool:
 - Write operations are allowed but logged
 - No DDL by default (configurable)
 
+## File Sandbox System
+
+The file sandbox system provides secure, configurable file access control for tools that need to read from or write to the filesystem. It is used by the System Toolbox (for `attach-file`), Developer Toolbox (for `read-file-range`, `write-file-range`, `patch-file`), and Lua Toolbox (for the `fs` module).
+
+### Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    File Sandbox System                           │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ SystemToolbox│  │DeveloperToolbox│  │ LuaToolbox │             │
+│  │ (attach-file)│  │(read/write/   │  │ (fs.*)     │             │
+│  │              │  │ patch-file)   │  │            │             │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘             │
+│         │                 │                  │                    │
+│         └─────────────────┼──────────────────┘                    │
+│                           │                                       │
+│                    ┌──────▼──────┐                                │
+│                    │ FileSandbox │                                │
+│                    │  (validate) │                                │
+│                    └──────┬──────┘                                │
+│                           │                                       │
+│                    ┌──────▼──────┐                                │
+│                    │PathPredicate│                                │
+│                    │  (access)   │                                │
+│                    └─────────────┘                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### FileSandboxConfig
+
+Each sandboxed toolbox accepts an optional `fileSandbox` configuration:
+
+```haskell
+data FileSandboxConfig = FileSandboxConfig
+    { fsbPredicate :: PathPredicate     -- Defines allowed file paths
+    , fsbMaxFileSize :: Maybe Integer   -- Max file size in bytes (Nothing = no limit)
+    , fsbName :: Maybe Text             -- Human-readable name for the sandbox
+    }
+```
+
+**Default Configuration (Secure by Default):**
+
+```haskell
+defaultFileSandboxConfig :: FileSandboxConfig
+defaultFileSandboxConfig = FileSandboxConfig
+    { fsbPredicate = AlwaysDeny          -- Deny all access by default
+    , fsbMaxFileSize = Just (50 * 1024 * 1024)  -- 50MB default limit
+    , fsbName = Nothing
+    }
+```
+
+### PathPredicate DSL
+
+The `PathPredicate` DSL provides a rich, composable language for defining file access permissions:
+
+```haskell
+data PathPredicate
+    = FileExactly FilePath              -- Exact file match
+    | DirectoryExactly FilePath         -- Exact directory match (contents not included)
+    | DirectoryRecursive FilePath       -- Directory and all subdirectories
+    | DirectoryShallow FilePath         -- Directory contents only (not subdirectories)
+    | FilePattern String                -- Glob pattern on filename (*, ? wildcards)
+    | FileExtension [String]            -- File extension whitelist (no leading dot)
+    | FileSizeLessThan Integer          -- Maximum file size in bytes
+    | ChildOf FilePath                  -- Path within a parent directory
+    | And PathPredicate PathPredicate   -- Logical AND
+    | Or PathPredicate PathPredicate    -- Logical OR
+    | Not PathPredicate                 -- Logical NOT
+    | Any [PathPredicate]               -- OR of all predicates
+    | All [PathPredicate]               -- AND of all predicates
+    | AlwaysAllow                       -- Allow all (use sparingly)
+    | AlwaysDeny                        -- Deny all (secure default)
+```
+
+### Predicate Examples
+
+**Allow specific files and directories:**
+
+```json
+{
+  "predicate": {
+    "tag": "Any",
+    "contents": [
+      {"tag": "DirectoryRecursive", "contents": "./src"},
+      {"tag": "FileExactly", "contents": "./package.yaml"},
+      {"tag": "FileExactly", "contents": "./README.md"}
+    ]
+  }
+}
+```
+
+**Allow only Haskell source files under 1MB:**
+
+```json
+{
+  "predicate": {
+    "tag": "And",
+    "contents": [
+      {"tag": "DirectoryRecursive", "contents": "./src"},
+      {"tag": "FileExtension", "contents": ["hs", "lhs"]},
+      {"tag": "FileSizeLessThan", "contents": 1048576}
+    ]
+  }
+}
+```
+
+**Allow any file in project except build artifacts:**
+
+```json
+{
+  "predicate": {
+    "tag": "And",
+    "contents": [
+      {"tag": "DirectoryRecursive", "contents": "./my-project"},
+      {"tag": "Not", "contents": {"tag": "DirectoryRecursive", "contents": "./my-project/dist"}}
+    ]
+  }
+}
+```
+
+**Glob pattern matching:**
+
+```json
+{
+  "predicate": {
+    "tag": "Any",
+    "contents": [
+      {"tag": "FilePattern", "contents": "*.md"},
+      {"tag": "FilePattern", "contents": "test-*.json"}
+    ]
+  }
+}
+```
+
+### Path Handling
+
+All paths are canonicalized before validation:
+
+1. **Symlinks are resolved** - The predicate is applied to the canonical path
+2. **Relative paths are resolved** - Relative paths in predicates are resolved relative to the current working directory
+3. **Path normalization** - `..` and `.` components are resolved, duplicate slashes removed
+
+**Important:** The predicate applies to the canonical path, not the symlink path. This prevents symlink traversal attacks where a symlink inside an allowed directory points outside the sandbox.
+
+### Security Features
+
+| Feature | Description |
+|---------|-------------|
+| **Default Deny** | All access is denied unless explicitly allowed (`AlwaysDeny` is default) |
+| **Immutable** | Sandboxes cannot be modified after creation |
+| **Canonicalization** | All paths are canonicalized before validation (resolves symlinks, `..`, etc.) |
+| **Size Limits** | Optional file size limits prevent resource exhaustion |
+| **Composable** | Predicates can be combined with logical operators for complex rules |
+
 ## System Toolbox (Builtin)
 
 The System Toolbox provides agents with contextual information about the running system through a configurable set of capabilities.
@@ -504,7 +660,12 @@ The System Toolbox provides agents with contextual information about the running
         "name": "system",
         "description": "System context and information",
         "capabilities": ["date", "operating-system", "running-user", "hostname", "attach-file"],
-        "envVarFilter": null
+        "envVarFilter": null,
+        "fileSandbox": {
+          "predicate": {"tag": "DirectoryRecursive", "contents": "./project"},
+          "maxFileSize": 52428800,
+          "name": "system-sandbox"
+        }
       }
     }
   ]
@@ -535,6 +696,9 @@ The `attach-file` capability allows the agent to attach files to the conversatio
 
 **Limits:**
 - Maximum file size: 50MB
+
+**Sandbox Behavior:**
+When `attach-file` is enabled, a file sandbox must be configured to specify which files can be attached. If no sandbox is configured, the capability will deny all file access.
 
 ### Session Introspection Capabilities
 
@@ -704,6 +868,7 @@ Returns aggregate statistics about accessible sessions.
 | `sessionIntrospectionScope` | string? | Scope of accessible sessions (default: "subtree") |
 | `sessionIntrospectionMaxResults` | number? | Max sessions to return (default: 50) |
 | `sessionIntrospectionIncludeToolOutputs` | boolean? | Include tool outputs in read operations (default: true) |
+| `fileSandbox` | object? | File sandbox for attach-file capability (default: deny all) |
 
 ### Security Considerations
 
@@ -769,12 +934,41 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"]
+        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"],
+        "fileSandbox": {
+          "predicate": {"tag": "DirectoryRecursive", "contents": "./src"},
+          "maxFileSize": null,
+          "name": "developer-sandbox"
+        }
       }
     }
   ]
 }
 ```
+
+### File Sandbox for Developer Tools
+
+The `read-file-range`, `write-file-range`, and `patch-file` capabilities require a file sandbox to be configured. These capabilities operate on file content and need explicit permission to access the filesystem.
+
+**Example: Allow editing source files only:**
+
+```json
+{
+  "fileSandbox": {
+    "predicate": {
+      "tag": "Any",
+      "contents": [
+        {"tag": "DirectoryRecursive", "contents": "./src"},
+        {"tag": "DirectoryRecursive", "contents": "./test"},
+        {"tag": "FileExactly", "contents": "./package.yaml"}
+      ]
+    },
+    "maxFileSize": 10485760
+  }
+}
+```
+
+**Security Note:** The write capabilities (`write-file-range`, `patch-file`) validate write access against the sandbox. For new files, the parent directory must be within the sandbox. For existing files, the file itself must be within the sandbox.
 
 ### Tool Interface
 
@@ -1224,7 +1418,12 @@ The Lua toolbox enables a powerful pattern called **Recursive Language Models (L
           "allowedHosts": [
             "localhost",
             "127.0.0.1"
-          ]
+          ],
+          "fileSandbox": {
+            "predicate": {"tag": "DirectoryRecursive", "contents": "./repro-cases"},
+            "maxFileSize": 10485760,
+            "name": "lua-fs-sandbox"
+          }
         }
       },
       {
@@ -1250,8 +1449,37 @@ The Lua toolbox enables a powerful pattern called **Recursive Language Models (L
 | `maxMemoryMB` | integer | Maximum Lua heap memory in megabytes |
 | `maxExecutionTimeSeconds` | integer | Maximum script execution time in seconds |
 | `allowedTools` | [string] | Whitelist of tool names Lua scripts can call via the portal |
-| `allowedPaths` | [string] | Whitelist of filesystem paths accessible to Lua scripts |
+| `allowedPaths` | [string] | **Deprecated**, use `fileSandbox` instead |
 | `allowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module |
+| `fileSandbox` | object? | File sandbox configuration for Lua `fs` module |
+
+### File Sandbox for Lua
+
+The Lua `fs` module uses the unified file sandbox system. When `fileSandbox` is configured, all filesystem operations (`fs.read`, `fs.write`, `fs.list`, etc.) are validated against the sandbox.
+
+**Migration from `allowedPaths`:**
+
+The legacy `allowedPaths` field is deprecated. Migrate to `fileSandbox`:
+
+```json
+// Old (deprecated)
+{
+  "allowedPaths": ["./data", "./scripts"]
+}
+
+// New (recommended)
+{
+  "fileSandbox": {
+    "predicate": {
+      "tag": "Any",
+      "contents": [
+        {"tag": "DirectoryRecursive", "contents": "./data"},
+        {"tag": "DirectoryRecursive", "contents": "./scripts"}
+      ]
+    }
+  }
+}
+```
 
 ### Security Features
 
@@ -1259,7 +1487,7 @@ The Lua toolbox provides a sandboxed execution environment:
 
 - **Memory limits**: Lua state memory is constrained via allocator hooks
 - **Timeout enforcement**: Scripts that exceed `maxExecutionTimeSeconds` are terminated
-- **Path sandboxing**: Filesystem access restricted to `allowedPaths` (prevents symlink traversal)
+- **Path sandboxing**: Filesystem access restricted to `fileSandbox` configuration
 - **Host whitelisting**: HTTP requests limited to `allowedHosts`
 - **Tool whitelist**: Only tools in `allowedTools` can be called through the portal
 - **Dangerous functions removed**: `os.execute`, `io.popen`, `loadfile`, `dofile`, etc. are removed
@@ -1279,10 +1507,35 @@ Simply use the module name directly (e.g., `json.encode()`, `text.split()`).
 | `text` | `text.split`, `text.trim`, `text.upper`, `text.lower`, `text.find`, `text.gsub`, `text.startswith`, `text.endswith`, `text.len`, `text.sub` | String utilities |
 | `tools` | `tools.call`, `tools.list` | Tool portal integration |
 
+### fs Module and Sandbox
+
+The `fs` module respects the file sandbox configuration:
+
+```lua
+-- These operations are validated against the fileSandbox
+local content = fs.read("./data/file.txt")      -- Must be in sandbox
+fs.write("./output/result.txt", "data")          -- Must be in sandbox
+local files = fs.list("./scripts")               -- Must be in sandbox
+local exists = fs.exists("./README.md")          -- Must be in sandbox
+```
+
+**Sandbox Validation:**
+- `fs.read`: Validates read permission via `validateFileRead`
+- `fs.write`: Validates write permission via `validateFileWrite`
+- `fs.list`, `fs.exists`, `fs.isdir`, `fs.isfile`: Validates access permission
+- `fs.mkdir`: Validates write permission on parent directory
+- `fs.patch`: Validates write permission on the file
+
 ### Example Lua Script
 
 ```lua
 -- Modules are pre-loaded as globals - no require() needed
+
+-- Read a file (validated against fileSandbox)
+local content = fs.read("./repro-cases/input.json")
+if not content then
+    return {error = "Failed to read file"}
+end
 
 -- Call the recursive agent for complex reasoning
 local reasoning_result = tools.call("io_prompt_agent_local_lrmlua", {
@@ -1297,6 +1550,9 @@ if reasoning_result.status == "ok" then
     local db_result = tools.call("sqlite_shared_working_memory_query", {
         sql = "INSERT INTO analysis_results (content) VALUES ('" .. analysis.summary .. "')"
     })
+    
+    -- Write results (validated against fileSandbox)
+    fs.write("./repro-cases/output.json", json.encode(analysis))
     
     return {
         success = true,
@@ -2032,6 +2288,9 @@ data PortalError
 18. **Atomic file edits**: For complex multi-range edits, use `write-file-range` with contentBlocks array
 19. **Patch for context validation**: Use `patch-file` when context validation is needed before applying changes
 20. **Session introspection**: Enable session introspection capabilities in SystemToolbox for cross-session analysis
+21. **File sandbox configuration**: Always configure `fileSandbox` for SystemToolbox (attach-file), DeveloperToolbox (read/write/patch), and LuaToolbox (fs module)
+22. **Secure by default**: The default file sandbox denies all access (`AlwaysDeny`). Explicitly configure allowed paths.
+23. **Path canonicalization**: The file sandbox canonicalizes all paths, so predicates apply to resolved paths (not symlink paths)
 
 ## Example: Complete Tool Configuration
 
@@ -2096,7 +2355,12 @@ data PortalError
         "envVarFilter": null,
         "sessionIntrospectionScope": "subtree",
         "sessionIntrospectionMaxResults": 50,
-        "sessionIntrospectionIncludeToolOutputs": false
+        "sessionIntrospectionIncludeToolOutputs": false,
+        "fileSandbox": {
+          "predicate": {"tag": "DirectoryRecursive", "contents": "./project"},
+          "maxFileSize": 52428800,
+          "name": "system-sandbox"
+        }
       }
     },
     {
@@ -2104,7 +2368,19 @@ data PortalError
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"]
+        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"],
+        "fileSandbox": {
+          "predicate": {
+            "tag": "Any",
+            "contents": [
+              {"tag": "DirectoryRecursive", "contents": "./src"},
+              {"tag": "DirectoryRecursive", "contents": "./test"},
+              {"tag": "FileExactly", "contents": "./package.yaml"}
+            ]
+          },
+          "maxFileSize": 10485760,
+          "name": "developer-sandbox"
+        }
       }
     },
     {
@@ -2115,8 +2391,12 @@ data PortalError
         "maxMemoryMB": 256,
         "maxExecutionTimeSeconds": 300,
         "allowedTools": ["bash_read_file", "sqlite_analytics_query", "system_system_attach_file"],
-        "allowedPaths": ["./scripts", "./data"],
-        "allowedHosts": ["localhost"]
+        "allowedHosts": ["localhost"],
+        "fileSandbox": {
+          "predicate": {"tag": "DirectoryRecursive", "contents": "./scripts"},
+          "maxFileSize": 10485760,
+          "name": "lua-sandbox"
+        }
       }
     }
   ],
@@ -2151,5 +2431,7 @@ data PortalError
 | `System.Agents.ToolPortal` | Inter-tool communication |
 | `System.Agents.ToolRegistration` | Tool registration |
 | `System.Agents.ToolSchema` | Schema definitions |
+| `System.Agents.FileSandbox` | File sandbox resource management |
+| `System.Agents.FileSandbox.Predicate` | Path predicate DSL |
 | `System.Agents.OS.Events` | OS event types for subcall visibility |
 
