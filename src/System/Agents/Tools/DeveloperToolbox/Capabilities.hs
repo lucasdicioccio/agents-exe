@@ -29,6 +29,7 @@ capabilityToName DevToolCreateTool = "create-tool"
 capabilityToName DevToolReadFileRange = "read-file-range"
 capabilityToName DevToolWriteFileRange = "write-file-range"
 capabilityToName DevToolPatchFile = "patch-file"
+capabilityToName DevToolHelp = "help"
 
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
@@ -43,6 +44,7 @@ capabilityFromName name = case name of
     "read-file-range" -> Just DevToolReadFileRange
     "write-file-range" -> Just DevToolWriteFileRange
     "patch-file" -> Just DevToolPatchFile
+    "help" -> Just DevToolHelp
     _ -> Nothing
 
 -- | Get information about a capability (name and description).
@@ -87,3 +89,8 @@ getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
     , "Applies a unified diff patch to a file atomically with context validation"
     )
+getCapabilityInfo DevToolHelp =
+    ( "help"
+    , "Returns detailed documentation for all activated developer toolbox capabilities"
+    )
+

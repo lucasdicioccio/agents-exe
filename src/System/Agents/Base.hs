@@ -1087,6 +1087,8 @@ data DeveloperToolCapability
       DevToolWriteFileRange
     | -- | Apply a unified diff patch to a file
       DevToolPatchFile
+    | -- | Get detailed help for developer tools
+      DevToolHelp
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
@@ -1101,6 +1103,7 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolReadFileRange = Aeson.String "read-file-range"
     toJSON DevToolWriteFileRange = Aeson.String "write-file-range"
     toJSON DevToolPatchFile = Aeson.String "patch-file"
+    toJSON DevToolHelp = Aeson.String "help"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -1116,7 +1119,8 @@ instance FromJSON DeveloperToolCapability where
             "read-file-range" -> return DevToolReadFileRange
             "write-file-range" -> return DevToolWriteFileRange
             "patch-file" -> return DevToolPatchFile
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file."
+            "help" -> return DevToolHelp
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help."
 
 {- | Configuration for the developer toolbox.
 
@@ -1131,7 +1135,7 @@ Example configuration:
   "contents": {
     "name": "developer",
     "description": "Tools for developing agents and tools",
-    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"],
+    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file", "help"],
     "lifetime": "conversation",
     "activation": "always"
   }
@@ -1199,7 +1203,7 @@ Example configuration:
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
     {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
-    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent", "read-file-range", "write-file-range", "patch-file"]}},
+    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent", "read-file-range", "write-file-range", "patch-file", "help"]}},
     {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "fileSandbox": {"predicate": {"tag": "AlwaysAllow"}, "maxFileSize": 10485760, "name": "lua-sandbox"}}}
   ]
 }
