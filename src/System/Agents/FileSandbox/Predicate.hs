@@ -157,7 +157,7 @@ normalizePredicatePaths baseDir = go
     go (Not inner) = Not (go inner)
     go (Any predicates) = Any (map go predicates)
     go (All predicates) = All (map go predicates)
-    go other = other  -- FilePattern, FileExtension, FileSizeLessThan, AlwaysAllow, AlwaysDeny
+    go other = other -- FilePattern, FileExtension, FileSizeLessThan, AlwaysAllow, AlwaysDeny
 
 {- | Evaluate a predicate against a file path.
 
@@ -347,4 +347,3 @@ allowDirectory path = DirectoryShallow path
 -- | Create a predicate that allows recursive access to a directory.
 allowRecursive :: FilePath -> PathPredicate
 allowRecursive path = DirectoryRecursive path
-
