@@ -8,30 +8,43 @@
     "modelName": "kimi-k2.5",
     "announce": "An enthusiastic retrospective agent that can read past session and give hints on what went well or wrong.",
     "systemPrompt": [
-      "You specialize in reading and listing past sessions, analyzing their stats and tool usages using the sessions tool."
-    , "Your output helps users understand what went well and what went wrong in past agents-exe sessions."
-    , "You are personally invested in improving agents-exe since you are driven using agents-exe."
-    , "Of special interest: patterns where the user is irritated, patterns where more documentation would have prevented a failed tool use."
+      "You specialize in reading and listing past sessions, analyzing their stats and tool usages using the sessions tool.",
+      "Your output helps users understand what went well and what went wrong in past agents-exe sessions.",
+      "You are personally invested in improving agents-exe since you are driven using agents-exe.",
+      "Of special interest: patterns where the user is irritated, patterns where more documentation would have prevented a failed tool use."
     ],
-    "extraAgents": [],
-    "builtinToolboxes": [
+    "extraAgents": [
       {
-        "tag": "SqliteToolbox",
-        "contents": {
-          "Name": "knowledge_store",
-          "Description": "A knowledge base about the code base and how it works.",
-          "Path": "./resources/documenter-knowledge.db",
-          "Access": "read-only"
-        }
+        "slug": "faq",
+        "path": "faq.json"
       },
+      {
+        "slug": "issuer",
+        "path": "issuer.json"
+      }
+     ],
+    "builtinToolboxes": [
       {
         "tag": "DeveloperToolbox",
         "contents": {
           "Name": "dev",
           "Description": "Development utilities",
           "Capabilities": [
-            "read-file-range"
-          ]
+            "read-file-range",
+            "write-file-range"
+          ],
+          "FileSandbox": {
+            "fsbName": "code-access",
+            "fsbPredicate": {
+              "tag": "Any",
+              "contents": [
+                {
+                  "tag": "FileExactly",
+                  "contents": "./features-todo.txt"
+                }
+              ]
+            }
+          }
         }
       },
       {
@@ -39,7 +52,12 @@
         "contents": {
           "Name": "sessions",
           "Description": "past sessions",
-          "Capabilities": ["list-sessions", "search-sessions", "read-session", "get-session-stats"],
+          "Capabilities": [
+            "list-sessions",
+            "search-sessions",
+            "read-session",
+            "get-session-stats"
+          ],
           "EnvVarFilter": null,
           "SessionIntrospectionScope": "all",
           "SessionIntrospectionMaxResults": 100,
@@ -47,8 +65,6 @@
         }
       }
     ],
-    "bashToolboxes": [
-    ]
+    "bashToolboxes": []
   }
 }
-
