@@ -1089,6 +1089,10 @@ data DeveloperToolCapability
       DevToolPatchFile
     | -- | Get detailed help for developer tools
       DevToolHelp
+    | -- | Enable snapshot functionality for file edits
+      DevToolSnapshot
+    | -- | Restore a file from a snapshot
+      DevToolRestoreFile
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
@@ -1104,6 +1108,8 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolWriteFileRange = Aeson.String "write-file-range"
     toJSON DevToolPatchFile = Aeson.String "patch-file"
     toJSON DevToolHelp = Aeson.String "help"
+    toJSON DevToolSnapshot = Aeson.String "snapshot"
+    toJSON DevToolRestoreFile = Aeson.String "restore-file"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -1120,7 +1126,9 @@ instance FromJSON DeveloperToolCapability where
             "write-file-range" -> return DevToolWriteFileRange
             "patch-file" -> return DevToolPatchFile
             "help" -> return DevToolHelp
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help."
+            "snapshot" -> return DevToolSnapshot
+            "restore-file" -> return DevToolRestoreFile
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file."
 
 {- | Configuration for the developer toolbox.
 
@@ -1135,7 +1143,7 @@ Example configuration:
   "contents": {
     "name": "developer",
     "description": "Tools for developing agents and tools",
-    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file", "help"],
+    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"],
     "lifetime": "conversation",
     "activation": "always"
   }
@@ -1203,7 +1211,7 @@ Example configuration:
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
     {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
-    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent", "read-file-range", "write-file-range", "patch-file", "help"]}},
+    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"]}},
     {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "fileSandbox": {"predicate": {"tag": "AlwaysAllow"}, "maxFileSize": 10485760, "name": "lua-sandbox"}}}
   ]
 }
@@ -1464,3 +1472,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+

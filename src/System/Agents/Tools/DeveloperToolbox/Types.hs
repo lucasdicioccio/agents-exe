@@ -28,7 +28,13 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     AgentOverrides (..),
     ToolConfig (..),
     ScriptArg (..),
+    Snapshot (..),
+    SnapshotRef (..),
+    SnapshotStore,
+    RestoreResult (..),
     defaultAgentOverrides,
+    makeSnapshot,
+    emptySnapshotStore,
 
     -- * Re-exported capability types
     DeveloperToolCapability (..),
@@ -36,9 +42,14 @@ module System.Agents.Tools.DeveloperToolbox.Types (
 
 import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import Data.ByteString.Lazy (fromStrict)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
-
+import Data.Digest.Pure.MD5 (md5)
 import System.Agents.Base (
     BashToolboxDescription,
     BuiltinToolboxDescription (..),
@@ -51,6 +62,52 @@ import System.Agents.Base (
  )
 import System.Agents.FileSandbox (FileSandbox)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
+import Control.Concurrent.STM (TVar, newTVarIO)
+
+-------------------------------------------------------------------------------
+-- Snapshot Types
+-------------------------------------------------------------------------------
+
+{- | A reference to a snapshot, using MD5 hash of the content.
+This serves as both identifier and content verification.
+-}
+newtype SnapshotRef = SnapshotRef { unSnapshotRef :: Text }
+    deriving (Show, Eq, Ord)
+
+-- | JSON serialization for SnapshotRef.
+instance ToJSON SnapshotRef where
+    toJSON (SnapshotRef ref) = Aeson.toJSON ref
+
+{- | A snapshot of file content stored in memory.
+Snapshots are keyed by their MD5 hash for deduplication and integrity.
+-}
+data Snapshot = Snapshot
+    { snapshotRef :: SnapshotRef
+    -- ^ MD5 hash reference for this snapshot
+    , snapshotContent :: ByteString
+    -- ^ Raw file content
+    , snapshotSize :: Int
+    -- ^ Size in bytes
+    }
+    deriving (Show)
+
+-- | Create a snapshot from file content, computing the MD5 hash.
+makeSnapshot :: ByteString -> Snapshot
+makeSnapshot content =
+    let hash = md5 (fromStrict content)
+        hashText = Text.pack (show hash)
+     in Snapshot
+            { snapshotRef = SnapshotRef hashText
+            , snapshotContent = content
+            , snapshotSize = BS.length content
+            }
+
+-- | In-memory store for snapshots, keyed by reference.
+type SnapshotStore = TVar (Map SnapshotRef Snapshot)
+
+-- | Create an empty snapshot store.
+emptySnapshotStore :: IO SnapshotStore
+emptySnapshotStore = newTVarIO Map.empty
 
 -------------------------------------------------------------------------------
 -- Trace Events
@@ -68,6 +125,8 @@ These events allow tracking of:
 * File range read operations
 * File range write operations
 * Patch file operations
+* Snapshot operations
+* Restore operations
 -}
 data Trace
     = -- | Tool validation started
@@ -112,6 +171,12 @@ data Trace
       PatchFileCompletedTrace !FilePath !Int !Int
     | -- | Patch file error
       PatchFileErrorTrace !Text !Text
+    | -- | Snapshot taken before edit
+      SnapshotTakenTrace !FilePath !SnapshotRef
+    | -- | File restored from snapshot
+      FileRestoredTrace !FilePath !SnapshotRef
+    | -- | Snapshot not found
+      SnapshotNotFoundTrace !SnapshotRef
     | -- | Error during operation
       DeveloperToolErrorTrace !Text !Text
     deriving (Show)
@@ -145,6 +210,7 @@ The toolbox maintains:
 * List of enabled capabilities
 * The original configuration description used to create this toolbox
 * Optional file sandbox for file-related capabilities
+* Optional snapshot store for snapshot-enabled operations
 -}
 data Toolbox = Toolbox
     { toolboxName :: Text
@@ -154,6 +220,8 @@ data Toolbox = Toolbox
     -- ^ Original configuration description used to create this toolbox
     , toolboxFileSandbox :: Maybe FileSandbox
     -- ^ Optional file sandbox for read-file-range, write-file-range, patch-file
+    , toolboxSnapshotStore :: Maybe SnapshotStore
+    -- ^ Optional snapshot store for snapshot-enabled file operations
     }
 
 -------------------------------------------------------------------------------
@@ -308,6 +376,8 @@ data WriteFileRangeResult = WriteFileRangeResult
     -- ^ Total lines in file after all edits
     , writeFileRangeResults :: [RangeEditResult]
     -- ^ Detailed results for each range
+    , writeFileSnapshotRef :: Maybe SnapshotRef
+    -- ^ Reference to snapshot of file content before edit (if snapshot enabled)
     }
     deriving (Show)
 
@@ -320,6 +390,7 @@ instance ToJSON WriteFileRangeResult where
             , "linesWritten" .= writeFileLinesWritten result
             , "finalLineCount" .= writeFileFinalLineCount result
             , "rangeResults" .= writeFileRangeResults result
+            , "snapshotRef" .= writeFileSnapshotRef result
             ]
 
 -- | Result of a patch file operation.
@@ -328,6 +399,8 @@ data PatchResult = PatchResult
     , patchHunksApplied :: Int
     , patchHunksRejected :: Int
     , patchLinesChanged :: Int
+    , patchSnapshotRef :: Maybe SnapshotRef
+    -- ^ Reference to snapshot of file content before patch (if snapshot enabled)
     }
     deriving (Show)
 
@@ -339,6 +412,26 @@ instance ToJSON PatchResult where
             , "hunksApplied" .= patchHunksApplied result
             , "hunksRejected" .= patchHunksRejected result
             , "linesChanged" .= patchLinesChanged result
+            , "snapshotRef" .= patchSnapshotRef result
+            ]
+
+-- | Result of a restore file operation.
+data RestoreResult = RestoreResult
+    { restoreFilePath :: FilePath
+    , restoreSnapshotRef :: SnapshotRef
+    , restoreSuccess :: Bool
+    , restoreError :: Maybe Text
+    }
+    deriving (Show)
+
+-- | JSON serialization for RestoreResult.
+instance ToJSON RestoreResult where
+    toJSON result =
+        Aeson.object
+            [ "path" .= restoreFilePath result
+            , "snapshotRef" .= restoreSnapshotRef result
+            , "success" .= restoreSuccess result
+            , "error" .= restoreError result
             ]
 
 -- | Errors that can occur during patch operations.
@@ -491,4 +584,9 @@ data DeveloperToolError
       FileAccessDeniedError !FilePath !Text
     | -- | Error during patch operation
       PatchValidationError !PatchError
+    | -- | Snapshot not found
+      SnapshotNotFoundError !SnapshotRef
+    | -- | Restore operation failed
+      RestoreError !Text
     deriving (Show, Eq)
+

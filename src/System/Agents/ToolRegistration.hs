@@ -1089,6 +1089,8 @@ Developer tools expose functions based on configured capabilities:
 * write-file-range: Replace line ranges in a file with new content
 * patch-file: Apply a unified diff patch to a file
 * help: Get detailed help for all activated capabilities
+* snapshot: Enable snapshot functionality for file edits
+* restore-file: Restore a file from a snapshot
 
 The tool accepts a 'capability' parameter to select which operation to perform.
 
@@ -1171,7 +1173,7 @@ buildDeveloperToolParams box =
             , ParamProperty
                 { propertyKey = "file_path"
                 , propertyType = StringParamType
-                , propertyDescription = "For scaffold operations: Output file path"
+                , propertyDescription = "For scaffold operations, restore-file: Output file path or path to restore"
                 , propertyRequired = False
                 }
             , ParamProperty
@@ -1186,6 +1188,12 @@ buildDeveloperToolParams box =
                 , propertyDescription = "For show-spec: Spec name (bash-tools)"
                 , propertyRequired = False
                 }
+            , ParamProperty
+                { propertyKey = "snapshot_ref"
+                , propertyType = StringParamType
+                , propertyDescription = "For restore-file: MD5 hash reference of the snapshot to restore from"
+                , propertyRequired = False
+                }
             ]
 
         -- Add read-file-range params if enabled
@@ -1193,7 +1201,7 @@ buildDeveloperToolParams box =
             [ ParamProperty
                 { propertyKey = "path"
                 , propertyType = StringParamType
-                , propertyDescription = "For read-file-range: Path to the file to read"
+                , propertyDescription = "For read-file-range, write-file-range, patch-file, restore-file: Path to the file"
                 , propertyRequired = False
                 }
             , ParamProperty
@@ -1232,15 +1240,10 @@ buildDeveloperToolParams box =
         hasCapability cap = cap `elem` box.toolboxCapabilities
 
         fileRangeParams =
-            if hasCapability DevToolReadFileRange || hasCapability DevToolWriteFileRange
-                then readFileRangeParams ++ writeFileRangeParams
+            if hasCapability DevToolReadFileRange || hasCapability DevToolWriteFileRange || hasCapability DevToolPatchFile || hasCapability DevToolRestoreFile
+                then readFileRangeParams ++ writeFileRangeParams ++ patchFileParams
                 else []
-
-        patchParams =
-            if hasCapability DevToolPatchFile
-                then patchFileParams
-                else []
-     in baseParams ++ fileRangeParams ++ patchParams
+     in baseParams ++ fileRangeParams
 
 -- Helper to convert developer capability to text
 devCapabilityToText :: DeveloperToolCapability -> Text
@@ -1255,6 +1258,8 @@ devCapabilityToText DevToolReadFileRange = "read-file-range"
 devCapabilityToText DevToolWriteFileRange = "write-file-range"
 devCapabilityToText DevToolPatchFile = "patch-file"
 devCapabilityToText DevToolHelp = "help"
+devCapabilityToText DevToolSnapshot = "snapshot"
+devCapabilityToText DevToolRestoreFile = "restore-file"
 
 {- | Register all tools from a Developer toolbox.
 
@@ -1769,6 +1774,23 @@ executeDeveloperCapability tracer box cap params = case cap of
                             Right patchResult -> pure $ DeveloperToolPatchResult () patchResult
                     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'patch' parameter")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "restore-file" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                case KeyMap.lookup (AesonKey.fromText "snapshot_ref") params of
+                    Just (Aeson.String refText) -> do
+                        let ref = DeveloperTools.SnapshotRef refText
+                        result <- DeveloperTools.executeRestoreFile (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ref
+                        case result of
+                            Left err -> pure $ DeveloperToolError () err
+                            Right restoreResult -> pure $ DeveloperToolResult () (DeveloperTools.ValidationResult 
+                                { DeveloperTools.validationPath = DeveloperTools.restoreFilePath restoreResult
+                                , DeveloperTools.validationValid = DeveloperTools.restoreSuccess restoreResult
+                                , DeveloperTools.validationSlug = Just $ DeveloperTools.unSnapshotRef $ DeveloperTools.restoreSnapshotRef restoreResult
+                                , DeveloperTools.validationError = DeveloperTools.restoreError restoreResult
+                                })
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'snapshot_ref' parameter")
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     "help" -> do
         -- Generate and return the help message based on activated capabilities
         let helpText = generateDeveloperToolboxHelp box
@@ -2099,7 +2121,7 @@ formatCapabilityHelp DevToolWriteFileRange = Text.unlines
     , "      \"contentBlocks\": [\"new content at end\"]"
     , "    }"
     , ""
-    , "Returns: Result with lines written and final line count."
+    , "Returns: Result with lines written, final line count, and snapshotRef (if snapshot enabled)."
     ]
 formatCapabilityHelp DevToolPatchFile = Text.unlines
     [ "--------------------------------------------------------------------------------"
@@ -2134,7 +2156,52 @@ formatCapabilityHelp DevToolPatchFile = Text.unlines
     , "  - Overlap detection: Rejects overlapping hunks"
     , "  - Bottom-to-top: Applied in reverse order to avoid line shifts"
     , ""
-    , "Returns: Result with hunks applied/rejected counts."
+    , "Returns: Result with hunks applied/rejected counts and snapshotRef (if snapshot enabled)."
+    ]
+formatCapabilityHelp DevToolSnapshot = Text.unlines
+    [ "--------------------------------------------------------------------------------"
+    , "CAPABILITY: snapshot"
+    , "--------------------------------------------------------------------------------"
+    , ""
+    , "Description: Enables snapshot functionality for write-file-range and patch-file."
+    , "             When enabled, file content is stored in RAM before edits,"
+    , "             allowing rollback via restore-file using the returned"
+    , "             snapshot reference (MD5 hash)."
+    , ""
+    , "Note: This is an enabling capability. It doesn't have its own operation,"
+    , "      but automatically enables snapshot behavior in write-file-range and"
+    , "      patch-file operations."
+    , ""
+    , "Snapshot references are returned in:"
+    , "  - write-file-range: writeFileSnapshotRef field"
+    , "  - patch-file: patchSnapshotRef field"
+    , ""
+    , "Use the snapshot reference with restore-file to roll back changes."
+    ]
+formatCapabilityHelp DevToolRestoreFile = Text.unlines
+    [ "--------------------------------------------------------------------------------"
+    , "CAPABILITY: restore-file"
+    , "--------------------------------------------------------------------------------"
+    , ""
+    , "Description: Restores a file to a previous version using a snapshot"
+    , "             reference (MD5 hash). Requires the 'snapshot' capability to"
+    , "             be enabled to have stored snapshots available."
+    , ""
+    , "Parameters:"
+    , "  - path        (string, required): Path to the file to restore"
+    , "  - snapshot_ref (string, required): MD5 hash reference of the snapshot"
+    , ""
+    , "Usage:"
+    , "  {"
+    , "    \"capability\": \"restore-file\","
+    , "    \"path\": \"./src/File.hs\","
+    , "    \"snapshot_ref\": \"d41d8cd98f00b204e9800998ecf8427e\""
+    , "  }"
+    , ""
+    , "Returns: Success confirmation with the snapshot reference used."
+    , ""
+    , "Note: The snapshot reference is obtained from a previous write-file-range"
+    , "      or patch-file operation that had the snapshot capability enabled."
     ]
 
 -------------------------------------------------------------------------------

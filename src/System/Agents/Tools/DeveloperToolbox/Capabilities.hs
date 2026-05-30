@@ -30,6 +30,8 @@ capabilityToName DevToolReadFileRange = "read-file-range"
 capabilityToName DevToolWriteFileRange = "write-file-range"
 capabilityToName DevToolPatchFile = "patch-file"
 capabilityToName DevToolHelp = "help"
+capabilityToName DevToolSnapshot = "snapshot"
+capabilityToName DevToolRestoreFile = "restore-file"
 
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
@@ -45,6 +47,8 @@ capabilityFromName name = case name of
     "write-file-range" -> Just DevToolWriteFileRange
     "patch-file" -> Just DevToolPatchFile
     "help" -> Just DevToolHelp
+    "snapshot" -> Just DevToolSnapshot
+    "restore-file" -> Just DevToolRestoreFile
     _ -> Nothing
 
 -- | Get information about a capability (name and description).
@@ -92,5 +96,13 @@ getCapabilityInfo DevToolPatchFile =
 getCapabilityInfo DevToolHelp =
     ( "help"
     , "Returns detailed documentation for all activated developer toolbox capabilities"
+    )
+getCapabilityInfo DevToolSnapshot =
+    ( "snapshot"
+    , "Enables snapshot functionality for write-file-range and patch-file. When enabled, file content is stored in RAM before edits, allowing rollback via restore-file using the returned snapshot reference (MD5 hash)."
+    )
+getCapabilityInfo DevToolRestoreFile =
+    ( "restore-file"
+    , "Restores a file to a previous version using a snapshot reference (MD5 hash). Requires the 'snapshot' capability to be enabled to have stored snapshots available."
     )
 

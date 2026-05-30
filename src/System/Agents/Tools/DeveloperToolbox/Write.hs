@@ -29,10 +29,17 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolError (..),
     RangeEditResult (..),
     RangeSpec (..),
+    Snapshot (..),
+    SnapshotRef (..),
     Toolbox (..),
     Trace (..),
     WriteFileRangeResult (..),
+    makeSnapshot,
  )
+
+import qualified Data.ByteString as BS
+import Control.Concurrent.STM (atomically, modifyTVar')
+import qualified Data.Map.Strict as Map
 
 {- | Execute write file range operation.
 
@@ -132,7 +139,7 @@ proceedWithWrite ::
     Text ->
     [Text] ->
     IO (Either DeveloperToolError WriteFileRangeResult)
-proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
+proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks = do
     -- Parse ranges
     case parseRanges rangesTxt of
         Left err -> pure $ Left err
@@ -171,6 +178,8 @@ proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
                                             let content = case contentBlocks of
                                                     (c : _) -> c
                                                     [] -> ""
+                                            -- Take snapshot before write if snapshot enabled
+                                            mSnapshotRef <- takeSnapshotBeforeEdit tracer toolbox filePath
                                             writeResult <- try $ do
                                                 createDirectoryIfMissing True (takeDirectory filePath)
                                                 writeFileAtomic filePath content
@@ -202,6 +211,7 @@ proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
                                                                 , writeFileLinesWritten = linesWritten
                                                                 , writeFileFinalLineCount = finalLineCount
                                                                 , writeFileRangeResults = [rangeResult]
+                                                                , writeFileSnapshotRef = mSnapshotRef
                                                                 }
                                         _ -> do
                                             -- Read existing file or start empty
@@ -212,6 +222,9 @@ proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
 
                                             let originalLines = Text.lines existingContent
                                             let originalLineCount = length originalLines
+
+                                            -- Take snapshot before edit if snapshot enabled
+                                            mSnapshotRef <- takeSnapshotBeforeEdit tracer toolbox filePath
 
                                             -- Pair ranges with content blocks (1:1 mapping)
                                             -- Multi-line ranges are kept as-is, not expanded
@@ -256,6 +269,7 @@ proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
                                                                 , writeFileLinesWritten = linesWritten
                                                                 , writeFileFinalLineCount = finalLineCount
                                                                 , writeFileRangeResults = rangeResults
+                                                                , writeFileSnapshotRef = mSnapshotRef
                                                                 }
   where
     isSpecialRange Head = True
@@ -418,3 +432,25 @@ proceedWithWrite tracer _toolbox filePath rangesTxt contentBlocks = do
                                             }
                                  in (before ++ newLines ++ after, offsetDelta, result)
          in (newCurrentLines, newOffset, results ++ [editResult])
+
+-- | Take a snapshot of the file before editing, if snapshot capability is enabled.
+-- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+takeSnapshotBeforeEdit :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
+takeSnapshotBeforeEdit tracer toolbox filePath =
+    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
+        (Just store, True) -> do
+            -- Check if file exists
+            fileExists <- doesFileExist filePath
+            if fileExists
+                then do
+                    -- Read file content and create snapshot
+                    content <- BS.readFile filePath
+                    let snapshot = makeSnapshot content
+                    let ref = snapshotRef snapshot
+                    -- Store snapshot in the store
+                    atomically $ modifyTVar' store (Map.insert ref snapshot)
+                    runTracer tracer (SnapshotTakenTrace filePath ref)
+                    pure $ Just ref
+                else pure Nothing
+        _ -> pure Nothing
+

@@ -103,11 +103,13 @@ library agents-lib
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.DeveloperToolbox.Capabilities
                     , System.Agents.Tools.DeveloperToolbox.Create
+                    , System.Agents.Tools.DeveloperToolbox.Help
                     , System.Agents.Tools.DeveloperToolbox.Init
                     , System.Agents.Tools.DeveloperToolbox.IO
                     , System.Agents.Tools.DeveloperToolbox.Patch
                     , System.Agents.Tools.DeveloperToolbox.Range
                     , System.Agents.Tools.DeveloperToolbox.Read
+                    , System.Agents.Tools.DeveloperToolbox.Restore
                     , System.Agents.Tools.DeveloperToolbox.Scaffold
                     , System.Agents.Tools.DeveloperToolbox.Spec
                     , System.Agents.Tools.DeveloperToolbox.Templates
@@ -214,6 +216,7 @@ library agents-lib
                       conduit-extra,
                       containers,
                       contravariant,
+                      crypto-api,
                       data-clist,
                       data-default,
                       deepseq,
@@ -239,6 +242,7 @@ library agents-lib
                       process,
                       process-extras,
                       prodapi,
+                      pureMD5,
                       resource-pool,
                       fsnotify,
                       regex-tdfa,

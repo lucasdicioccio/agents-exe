@@ -19,6 +19,7 @@ import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.DeveloperToolbox.Types (
     Toolbox (..),
     Trace (..),
+    emptySnapshotStore,
  )
 
 -- | File-related capabilities that require sandbox validation.
@@ -60,6 +61,12 @@ initializeToolbox _tracer desc = do
                         pure $ Just sandbox
                     else pure Nothing
 
+            -- Create snapshot store if snapshot capability is enabled
+            mSnapshotStore <-
+                if DevToolSnapshot `elem` desc.developerToolboxCapabilities
+                    then Just <$> emptySnapshotStore
+                    else pure Nothing
+
             let toolbox =
                     Toolbox
                         { toolboxName = desc.developerToolboxName
@@ -67,5 +74,7 @@ initializeToolbox _tracer desc = do
                         , toolboxCapabilities = desc.developerToolboxCapabilities
                         , toolboxConfig = desc
                         , toolboxFileSandbox = mFileSandbox
+                        , toolboxSnapshotStore = mSnapshotStore
                         }
             pure $ Right toolbox
+

@@ -26,8 +26,11 @@ module System.Agents.Tools.DeveloperToolbox.Patch (
 
 import Control.Exception (SomeException, try)
 import Control.Monad (when)
+import Control.Concurrent.STM (atomically, modifyTVar')
+import qualified Data.ByteString as BS
 import Data.Char (isDigit)
 import Data.List (find, sortOn)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
@@ -42,8 +45,11 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     Hunk (..),
     PatchError (..),
     PatchResult (..),
+    Snapshot (..),
+    SnapshotRef (..),
     Toolbox (..),
     Trace (..),
+    makeSnapshot,
  )
 
 -------------------------------------------------------------------------------
@@ -106,18 +112,19 @@ executePatchFile tracer toolbox filePath patchText = do
                             let errMsg = FileAccessDeniedError filePath (Text.pack $ show err)
                             runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show errMsg)
                             pure $ Left errMsg
-                        AccessGranted -> proceedWithPatch tracer filePath patchText
+                        AccessGranted -> proceedWithPatch tracer toolbox filePath patchText
                 Nothing ->
                     -- No sandbox configured, proceed (backwards compatible behavior)
-                    proceedWithPatch tracer filePath patchText
+                    proceedWithPatch tracer toolbox filePath patchText
 
 -- | Proceed with patch operation after validation.
 proceedWithPatch ::
     Tracer IO Trace ->
+    Toolbox ->
     FilePath ->
     Text ->
     IO (Either DeveloperToolError PatchResult)
-proceedWithPatch tracer filePath patchText = do
+proceedWithPatch tracer toolbox filePath patchText = do
     -- Check if file exists
     fileExists <- doesFileExist filePath
     if not fileExists
@@ -142,6 +149,9 @@ proceedWithPatch tracer filePath patchText = do
                             runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
                             pure $ Left $ PatchValidationError err
                         Right validHunks -> do
+                            -- Take snapshot before patch if snapshot enabled
+                            mSnapshotRef <- takeSnapshotBeforePatch tracer toolbox filePath
+
                             -- Apply hunks bottom-to-top (descending line order)
                             -- to avoid line number shifts affecting other hunks
                             let sortedHunks = sortOn (negate . hunkOldStart) validHunks
@@ -170,9 +180,31 @@ proceedWithPatch tracer filePath patchText = do
                                                 , patchHunksApplied = applied
                                                 , patchHunksRejected = 0
                                                 , patchLinesChanged = linesChanged
+                                                , patchSnapshotRef = mSnapshotRef
                                                 }
   where
     hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
+
+-- | Take a snapshot of the file before patching, if snapshot capability is enabled.
+-- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+takeSnapshotBeforePatch :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
+takeSnapshotBeforePatch tracer toolbox filePath =
+    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
+        (Just store, True) -> do
+            -- Check if file exists
+            fileExists <- doesFileExist filePath
+            if fileExists
+                then do
+                    -- Read file content and create snapshot
+                    content <- BS.readFile filePath
+                    let snapshot = makeSnapshot content
+                    let ref = snapshotRef snapshot
+                    -- Store snapshot in the store
+                    atomically $ modifyTVar' store (Map.insert ref snapshot)
+                    runTracer tracer (SnapshotTakenTrace filePath ref)
+                    pure $ Just ref
+                else pure Nothing
+        _ -> pure Nothing
 
 -- | Validate all hunks, returning the first error or the list of valid hunks.
 validateAllHunks :: [Text] -> [Hunk] -> Either PatchError [Hunk]
@@ -452,3 +484,4 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                                     added
                                                     (stripped : ctxAfter)
                                                     rest
+
