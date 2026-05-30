@@ -1198,7 +1198,12 @@ buildDeveloperToolParams box =
             , ParamProperty
                 { propertyKey = "ranges"
                 , propertyType = StringParamType
-                , propertyDescription = "For read-file-range: Line ranges (e.g., '1-10', '5', 'head', 'tail'). Omit to read entire file."
+                , propertyDescription =
+                    "Line ranges for file operations. "
+                    <> "Range formats: 'N' (single line), 'N-M' (range), 'N+' (after line N), 'head' (prepend), 'tail' (append), 'whole' (entire file). "
+                    <> "IMPORTANT: To CREATE a new file, use ranges='head'. "
+                    <> "For read-file-range: Omit ranges to read entire file. "
+                    <> "For write-file-range: Use contentBlocks array with one block per range."
                 , propertyRequired = False
                 }
             ]
@@ -1807,3 +1812,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+
