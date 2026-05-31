@@ -34,11 +34,7 @@
       "docs/ai-assistant-guidelines.md - Detailed reference",
       "",
       "=== FAQ AGENT ===",
-      "You can ask questions to the FAQ agent who has access to an extensive knowledge base about the project.",
-      "",
-      "=== ASSISTANT AGENT ===",
-      "You have access to an 'assistant' agent which acts as project-manager for the agents-exe project. Always mention that you are working for the agents-exe project when prompting it.",
-      ""
+      "You can ask questions to the FAQ agent who has access to an extensive knowledge base about the project."
     ],
     "extraAgents": [
       {
@@ -48,10 +44,6 @@
       {
         "slug": "retro",
         "path": "retro.json"
-      },
-      {
-        "slug": "assistant",
-        "path": "assistant.json"
       }
     ],
     "bashToolboxes": [
