@@ -13,6 +13,11 @@ Supported formats:
 - Insert after range: "1-5+" -> After 5 (insert after line 5, end of range)
 - Special: "head" -> Head, "tail" -> Tail, "whole" -> Whole
 - Multiple: "1-10,20-30" -> [Lines (1, 10), Lines (20, 30)]
+
+Default behavior:
+- Empty string or "whole" -> Reads/writes entire file
+- For read-file-range, omitting ranges defaults to reading the whole file
+- For write-file-range, "head" creates new files, "tail" appends, "whole" overwrites
 -}
 module System.Agents.Tools.DeveloperToolbox.Range (
     -- * Range parsing
@@ -33,17 +38,24 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 {- | Parse a ranges string into a list of RangeSpec.
 
 Supports formats:
+- Empty string "" -> [Whole] (default to entire file)
+- "whole" -> Whole (entire file)
 - Single number: "5" -> Lines (5, 5)
 - Range: "1-10" -> Lines (1, 10)
 - Insert after: "5+" -> After 5, "1-10+" -> After 10
-- Special: "head" -> Head, "tail" -> Tail, "whole" -> Whole
+- Special: "head" -> Head, "tail" -> Tail
 - Multiple: "1-10,20-30" -> [Lines (1, 10), Lines (20, 30)]
 
 Returns Left with error message if parsing fails.
+
+Note: An empty string now defaults to [Whole] for better UX when ranges
+parameter is omitted in read-file-range. This provides intuitive behavior
+where omitting ranges reads the entire file.
 -}
 parseRanges :: Text -> Either DeveloperToolError [RangeSpec]
 parseRanges txt
-    | Text.null txt = Right []
+    -- Default to whole file when ranges is empty (not provided)
+    | Text.null txt = Right [Whole]
     | otherwise =
         let parts = map Text.strip $ Text.splitOn "," txt
          in mapM parseRangePart parts
@@ -106,3 +118,4 @@ parsePositiveInt txt errPrefix =
                         then Right n
                         else Left $ InvalidRangeError $ errPrefix <> " (must be positive): " <> txt
             else Left $ InvalidRangeError $ errPrefix <> ": " <> txt
+

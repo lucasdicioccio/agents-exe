@@ -1225,6 +1225,12 @@ buildDeveloperToolParams box =
                 , propertyDescription = "For write-file-range: Array of content blocks, where each block corresponds to one range. Use empty strings to delete lines."
                 , propertyRequired = False
                 }
+            , ParamProperty
+                { propertyKey = "expected_snapshot_ref"
+                , propertyType = StringParamType
+                , propertyDescription = "For write-file-range, patch-file: Optional MD5 hash for optimistic locking. Operation fails if current file content doesn't match this hash. Use value from previous operation's beforeSnapshotRef or afterSnapshotRef."
+                , propertyRequired = False
+                }
             ]
 
         -- Add patch-file params if enabled
@@ -1757,7 +1763,11 @@ executeDeveloperCapability tracer box cap params = case cap of
                                 Just (Aeson.Array arr) ->
                                     Maybe.mapMaybe parseTextValue (toList arr)
                                 _ -> []
-                        result <- DeveloperTools.executeWriteFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks
+                        -- Parse optional expected_snapshot_ref for optimistic locking
+                        let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
+                                Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
+                                _ -> Nothing
+                        result <- DeveloperTools.executeWriteFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
@@ -1768,7 +1778,11 @@ executeDeveloperCapability tracer box cap params = case cap of
             Just (Aeson.String filePath) -> do
                 case KeyMap.lookup (AesonKey.fromText "patch") params of
                     Just (Aeson.String patchContent) -> do
-                        result <- DeveloperTools.executePatchFile (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) patchContent
+                        -- Parse optional expected_snapshot_ref for optimistic locking
+                        let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
+                                Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
+                                _ -> Nothing
+                        result <- DeveloperTools.executePatchFile (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) patchContent mExpectedSnapshotRef
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right patchResult -> pure $ DeveloperToolPatchResult () patchResult
@@ -2067,6 +2081,8 @@ formatCapabilityHelp DevToolWriteFileRange = Text.unlines
     , "                   - 'whole'   - Replace entire file"
     , "  - contentBlocks (array, required): Array of content strings, one per range."
     , "                   Use empty string '' to delete lines."
+    , "  - expected_snapshot_ref (string, optional): MD5 hash for optimistic locking."
+    , "                   Operation fails if current file content doesn't match."
     , ""
     , "CRITICAL USAGE NOTES:"
     , ""
@@ -2078,6 +2094,10 @@ formatCapabilityHelp DevToolWriteFileRange = Text.unlines
     , "  3. After each edit, subsequent ranges automatically adjust for line count changes."
     , ""
     , "  4. Number of contentBlocks MUST match number of ranges."
+    , ""
+    , "  5. OPTIMISTIC LOCKING: Pass expected_snapshot_ref from previous operation"
+    , "     to prevent editing stale content. Get snapshot refs by enabling the"
+    , "     'snapshot' capability."
     , ""
     , "Usage Examples:"
     , ""
@@ -2105,23 +2125,17 @@ formatCapabilityHelp DevToolWriteFileRange = Text.unlines
     , "      \"contentBlocks\": [\"\", \"\"]"
     , "    }"
     , ""
-    , "  Multiple edits (processed top-to-bottom):"
+    , "  Safe edit with optimistic locking:"
     , "    {"
     , "      \"capability\": \"write-file-range\","
     , "      \"path\": \"./file.txt\","
-    , "      \"ranges\": \"1-2,5-6\","
-    , "      \"contentBlocks\": [\"new lines 1-2\", \"new lines 5-6\"]"
+    , "      \"ranges\": \"5\","
+    , "      \"contentBlocks\": [\"new line\"],"
+    , "      \"expected_snapshot_ref\": \"a1b2c3d4e5f6...\""
     , "    }"
     , ""
-    , "  Append to end:"
-    , "    {"
-    , "      \"capability\": \"write-file-range\","
-    , "      \"path\": \"./file.txt\","
-    , "      \"ranges\": \"tail\","
-    , "      \"contentBlocks\": [\"new content at end\"]"
-    , "    }"
-    , ""
-    , "Returns: Result with lines written, final line count, and snapshotRef (if snapshot enabled)."
+    , "Returns: Result with lines written, final line count, beforeSnapshotRef,"
+    , "         and afterSnapshotRef (if snapshot enabled)."
     ]
 formatCapabilityHelp DevToolPatchFile = Text.unlines
     [ "--------------------------------------------------------------------------------"
@@ -2135,6 +2149,8 @@ formatCapabilityHelp DevToolPatchFile = Text.unlines
     , "Parameters:"
     , "  - path  (string, required): Path to the file to patch"
     , "  - patch (string, required): Unified diff patch content"
+    , "  - expected_snapshot_ref (string, optional): MD5 hash for optimistic locking."
+    , "                   Operation fails if current file content doesn't match."
     , ""
     , "Patch Format (Unified Diff):"
     , "  - File headers (--- and +++) are ignored"
@@ -2156,7 +2172,8 @@ formatCapabilityHelp DevToolPatchFile = Text.unlines
     , "  - Overlap detection: Rejects overlapping hunks"
     , "  - Bottom-to-top: Applied in reverse order to avoid line shifts"
     , ""
-    , "Returns: Result with hunks applied/rejected counts and snapshotRef (if snapshot enabled)."
+    , "Returns: Result with hunks applied/rejected counts, beforeSnapshotRef,"
+    , "         and afterSnapshotRef (if snapshot enabled)."
     ]
 formatCapabilityHelp DevToolSnapshot = Text.unlines
     [ "--------------------------------------------------------------------------------"
@@ -2173,10 +2190,11 @@ formatCapabilityHelp DevToolSnapshot = Text.unlines
     , "      patch-file operations."
     , ""
     , "Snapshot references are returned in:"
-    , "  - write-file-range: writeFileSnapshotRef field"
-    , "  - patch-file: patchSnapshotRef field"
+    , "  - write-file-range: beforeSnapshotRef and afterSnapshotRef fields"
+    , "  - patch-file: beforeSnapshotRef and afterSnapshotRef fields"
     , ""
-    , "Use the snapshot reference with restore-file to roll back changes."
+    , "Use the snapshot reference with restore-file to roll back changes, or"
+    , "pass it as expected_snapshot_ref to subsequent operations for optimistic locking."
     ]
 formatCapabilityHelp DevToolRestoreFile = Text.unlines
     [ "--------------------------------------------------------------------------------"

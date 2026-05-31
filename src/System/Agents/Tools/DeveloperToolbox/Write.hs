@@ -6,6 +6,10 @@ Write file range capability for the DeveloperToolbox.
 
 This module provides functionality to write to specific line ranges in files.
 Unlike full file writes, this allows surgical line-by-line modifications.
+
+Optimistic locking is supported via optional expectedSnapshotRef parameter.
+When provided, the operation verifies the current file content matches before
+making any changes, preventing concurrent edit conflicts.
 -}
 module System.Agents.Tools.DeveloperToolbox.Write (
     executeWriteFileRange,
@@ -46,6 +50,12 @@ import qualified Data.Map.Strict as Map
 Replaces specific lines in a file with new content. Unlike bash-write-file which
 replaces the entire file, this capability allows surgical line-by-line modifications.
 
+Optimistic Locking:
+When expectedSnapshotRef is provided, the operation first reads the current file
+content and computes its MD5 hash. If the hash doesn't match expectedSnapshotRef,
+a SnapshotMismatchError is returned without making any changes. This prevents
+lost updates when multiple agents/processes edit the same file.
+
 When a file sandbox is configured, the filepath is validated against
 the sandbox before writing. Access is denied if the file is outside
 the allowed paths.
@@ -59,6 +69,9 @@ Parameters:
 - contentBlocks: List of content blocks, where each block corresponds to one range.
                  Use empty blocks to delete lines. Each block is treated as the
                  replacement content for its corresponding range.
+- expectedSnapshotRef: Optional MD5 hash of expected file content. If provided,
+                       the operation fails with SnapshotMismatchError if the
+                       current content doesn't match. Use this for optimistic locking.
 
 Examples:
 
@@ -90,6 +103,9 @@ Examples:
    ranges="whole"
    contentBlocks=["entire new file content"]
 
+8. Safe edit with optimistic locking:
+   ranges="5", contentBlocks=["new line"], expectedSnapshotRef="a1b2c3d4..."
+
 Processing:
 - Ranges are sorted and processed in ascending order (top-to-bottom)
 - Position tracking automatically adjusts for line count changes after each edit
@@ -110,8 +126,10 @@ executeWriteFileRange ::
     Text ->
     -- | List of content blocks, one per range
     [Text] ->
+    -- | Optional expected snapshot reference for optimistic locking
+    Maybe SnapshotRef ->
     IO (Either DeveloperToolError WriteFileRangeResult)
-executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
+executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks mExpectedSnapshotRef = do
     if DevToolWriteFileRange `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "write-file-range"
         else do
@@ -126,10 +144,10 @@ executeWriteFileRange tracer toolbox filePath rangesTxt contentBlocks = do
                             let errMsg = FileAccessDeniedError filePath (Text.pack $ show err)
                             runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show errMsg)
                             pure $ Left errMsg
-                        AccessGranted -> proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks
+                        AccessGranted -> proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks mExpectedSnapshotRef
                 Nothing ->
                     -- No sandbox configured, proceed (backwards compatible behavior)
-                    proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks
+                    proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks mExpectedSnapshotRef
 
 -- | Proceed with file write after validation.
 proceedWithWrite ::
@@ -138,8 +156,9 @@ proceedWithWrite ::
     FilePath ->
     Text ->
     [Text] ->
+    Maybe SnapshotRef ->
     IO (Either DeveloperToolError WriteFileRangeResult)
-proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks = do
+proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks mExpectedSnapshotRef = do
     -- Parse ranges
     case parseRanges rangesTxt of
         Left err -> pure $ Left err
@@ -172,266 +191,320 @@ proceedWithWrite tracer toolbox filePath rangesTxt contentBlocks = do
                                     runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show err)
                                     pure $ Left err
                                 else do
-                                    -- Handle "whole" as a special case - just write the content directly
-                                    case ranges of
-                                        [Whole] -> do
-                                            let content = case contentBlocks of
-                                                    (c : _) -> c
-                                                    [] -> ""
-                                            -- Take snapshot before write if snapshot enabled
-                                            mSnapshotRef <- takeSnapshotBeforeEdit tracer toolbox filePath
-                                            writeResult <- try $ do
-                                                createDirectoryIfMissing True (takeDirectory filePath)
-                                                writeFileAtomic filePath content
-                                            case writeResult of
-                                                Left (e :: SomeException) -> do
-                                                    let err = PermissionError $ Text.pack $ show e
-                                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
-                                                    pure $ Left err
-                                                Right () -> do
-                                                    let newLines = Text.lines content
-                                                    let linesWritten = length newLines
-                                                    let finalLineCount = length newLines
-                                                    let rangeResult =
-                                                            RangeEditResult
-                                                                { rangeEditSpec = "whole"
-                                                                , rangeEditOriginalStart = 1
-                                                                , rangeEditOriginalEnd = 0 -- Will be set from original file below
-                                                                , rangeEditLinesWritten = linesWritten
-                                                                , rangeEditFinalStartLine = if linesWritten == 0 then Nothing else Just 1
-                                                                , rangeEditFinalEndLine = if linesWritten == 0 then Nothing else Just linesWritten
-                                                                , rangeEditOperation = "overwrite"
-                                                                }
-                                                    runTracer tracer (WriteFileRangeCompletedTrace filePath 1 linesWritten)
-                                                    pure $
-                                                        Right $
-                                                            WriteFileRangeResult
-                                                                { writeFilePath = filePath
-                                                                , writeFileRangesModified = 1
-                                                                , writeFileLinesWritten = linesWritten
-                                                                , writeFileFinalLineCount = finalLineCount
-                                                                , writeFileRangeResults = [rangeResult]
-                                                                , writeFileSnapshotRef = mSnapshotRef
-                                                                }
-                                        _ -> do
-                                            -- Read existing file or start empty
-                                            existingContent <-
-                                                if fileExists
-                                                    then Text.readFile filePath
-                                                    else pure ""
+                                    -- Handle optimistic locking if expectedSnapshotRef is provided
+                                    case mExpectedSnapshotRef of
+                                        Just expectedRef -> do
+                                            checkResult <- checkSnapshotMatch tracer filePath expectedRef
+                                            case checkResult of
+                                                Left err -> pure $ Left err
+                                                Right () -> proceedWithEdits tracer toolbox filePath ranges contentBlocks
+                                        Nothing -> proceedWithEdits tracer toolbox filePath ranges contentBlocks
 
-                                            let originalLines = Text.lines existingContent
-                                            let originalLineCount = length originalLines
+-- | Check if a range spec is a special range (Head, Tail, Whole, or After).
+isSpecialRange :: RangeSpec -> Bool
+isSpecialRange Head = True
+isSpecialRange Tail = True
+isSpecialRange Whole = True
+isSpecialRange (After _) = True
+isSpecialRange _ = False
 
-                                            -- Take snapshot before edit if snapshot enabled
-                                            mSnapshotRef <- takeSnapshotBeforeEdit tracer toolbox filePath
-
-                                            -- Pair ranges with content blocks (1:1 mapping)
-                                            -- Multi-line ranges are kept as-is, not expanded
-                                            let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
-
-                                            -- Sort by start line in ascending order (top-to-bottom)
-                                            -- This is crucial for correct position tracking
-                                            let sortedPairs = sortOn rangeStartKey rangeContentPairs
-
-                                            -- Apply edits sequentially with position tracking
-                                            -- foldl passes (currentLines, offset, results) through each edit
-                                            let (finalLines, _, rangeResults) = foldl (applyRangeEdit originalLineCount) (originalLines, 0, []) sortedPairs
-
-                                            -- Preserve trailing newline if original had one
-                                            let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
-                                            let output =
-                                                    if hasTrailingNewline || null originalLines
-                                                        then Text.unlines finalLines
-                                                        else Text.unlines finalLines
-
-                                            -- Write result atomically using a temp file
-                                            writeResult <- try $ do
-                                                createDirectoryIfMissing True (takeDirectory filePath)
-                                                writeFileAtomic filePath output
-
-                                            case writeResult of
-                                                Left (e :: SomeException) -> do
-                                                    let err = PermissionError $ Text.pack $ show e
-                                                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
-                                                    pure $ Left err
-                                                Right () -> do
-                                                    let finalLineCount = length finalLines
-                                                    let linesWritten = sum $ map rangeEditLinesWritten rangeResults
-
-                                                    runTracer tracer (WriteFileRangeCompletedTrace filePath (length ranges) linesWritten)
-
-                                                    pure $
-                                                        Right $
-                                                            WriteFileRangeResult
-                                                                { writeFilePath = filePath
-                                                                , writeFileRangesModified = length ranges
-                                                                , writeFileLinesWritten = linesWritten
-                                                                , writeFileFinalLineCount = finalLineCount
-                                                                , writeFileRangeResults = rangeResults
-                                                                , writeFileSnapshotRef = mSnapshotRef
-                                                                }
+-- | Validate that head/tail/whole are not combined with other ranges.
+validateSpecialRanges :: [RangeSpec] -> Either DeveloperToolError ()
+validateSpecialRanges ranges =
+    let hasHead = any (== Head) ranges
+        hasTail = any (== Tail) ranges
+        hasWhole = any (== Whole) ranges
+        hasAfter = any isAfterRange ranges
+        hasLines = any isLineRange ranges
+        specialCount = length $ filter (\r -> r == Head || r == Tail || r == Whole) ranges
+     in if hasWhole && (hasHead || hasTail || hasLines || hasAfter)
+            then Left $ InvalidRangeError "'whole' cannot be combined with other ranges. Use it alone."
+            else
+                if (hasHead || hasTail) && (hasLines || hasAfter)
+                    then Left $ InvalidRangeError "'head' and 'tail' cannot be combined with line number ranges. Use them separately."
+                    else
+                        if specialCount > 1
+                            then Left $ InvalidRangeError "Only one 'head', 'tail', or 'whole' range is allowed."
+                            else Right ()
   where
-    isSpecialRange Head = True
-    isSpecialRange Tail = True
-    isSpecialRange Whole = True
-    isSpecialRange (After _) = True
-    isSpecialRange _ = False
-
-    -- Validate that head/tail/whole are not combined with other ranges
-    validateSpecialRanges :: [RangeSpec] -> Either DeveloperToolError ()
-    validateSpecialRanges ranges =
-        let hasHead = any (== Head) ranges
-            hasTail = any (== Tail) ranges
-            hasWhole = any (== Whole) ranges
-            hasAfter = any isAfterRange ranges
-            hasLines = any isLineRange ranges
-            specialCount = length $ filter (\r -> r == Head || r == Tail || r == Whole) ranges
-         in if hasWhole && (hasHead || hasTail || hasLines || hasAfter)
-                then Left $ InvalidRangeError "'whole' cannot be combined with other ranges. Use it alone."
-                else
-                    if (hasHead || hasTail) && (hasLines || hasAfter)
-                        then Left $ InvalidRangeError "'head' and 'tail' cannot be combined with line number ranges. Use them separately."
-                        else
-                            if specialCount > 1
-                                then Left $ InvalidRangeError "Only one 'head', 'tail', or 'whole' range is allowed."
-                                else Right ()
-
     isLineRange (Lines _) = True
     isLineRange _ = False
 
     isAfterRange (After _) = True
     isAfterRange _ = False
 
-    -- Get sort key for range (for top-to-bottom ordering)
-    -- Head comes first (0), then line numbers (sorted by start), After comes after its line number
-    -- (using n*2+1 to place it between line n and line n+1), Tail comes last (maxBound)
-    -- Whole is handled separately and won't appear here
-    rangeStartKey :: (RangeSpec, Text) -> Int
-    rangeStartKey (Head, _) = 0
-    rangeStartKey (Lines (s, _), _) = s * 2 -- Even numbers for line ranges
-    rangeStartKey (After n, _) = n * 2 + 1 -- Odd numbers for insert-after (between lines)
-    rangeStartKey (Tail, _) = maxBound
-    rangeStartKey (Whole, _) = 0 -- Should not appear in normal processing
+-- | Check if current file content matches expected snapshot (optimistic locking).
+checkSnapshotMatch ::
+    Tracer IO Trace ->
+    FilePath ->
+    SnapshotRef ->
+    IO (Either DeveloperToolError ())
+checkSnapshotMatch tracer filePath expectedRef = do
+    fileExists <- doesFileExist filePath
+    if not fileExists
+        then do
+            -- File doesn't exist, treat as mismatch
+            let actualRef = SnapshotRef "file-not-found"
+            let err = SnapshotMismatchError expectedRef actualRef
+            runTracer tracer (SnapshotMismatchTrace filePath expectedRef actualRef)
+            pure $ Left err
+        else do
+            content <- BS.readFile filePath
+            let actualSnapshot = makeSnapshot content
+            let actualRef = snapshotRef actualSnapshot
+            if actualRef == expectedRef
+                then pure $ Right ()
+                else do
+                    let err = SnapshotMismatchError expectedRef actualRef
+                    runTracer tracer (SnapshotMismatchTrace filePath expectedRef actualRef)
+                    pure $ Left err
 
-    -- Apply a single range edit with position tracking
-    -- Takes the original file line count (for bounds/original position info),
-    -- current state (lines, offset, results), and the edit to apply.
-    -- Returns the new state (updated lines, updated offset, updated results).
-    applyRangeEdit ::
-        Int ->
-        ([Text], Int, [RangeEditResult]) ->
-        (RangeSpec, Text) ->
-        ([Text], Int, [RangeEditResult])
-    applyRangeEdit origLineCount (currentLines, offset, results) (range, content) =
-        let newLines = Text.lines content
-            numNewLines = length newLines
-            (newCurrentLines, newOffset, editResult) = case range of
-                Head ->
-                    let result =
-                            RangeEditResult
-                                { rangeEditSpec = "head"
-                                , rangeEditOriginalStart = 0
-                                , rangeEditOriginalEnd = 0
-                                , rangeEditLinesWritten = numNewLines
-                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
-                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
-                                , rangeEditOperation = "prepend"
-                                }
-                     in (newLines ++ currentLines, offset + numNewLines, result)
-                Tail ->
-                    let finalStart = length currentLines + offset + 1
-                        result =
-                            RangeEditResult
-                                { rangeEditSpec = "tail"
-                                , rangeEditOriginalStart = origLineCount + 1
-                                , rangeEditOriginalEnd = origLineCount
-                                , rangeEditLinesWritten = numNewLines
-                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
-                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just (finalStart + numNewLines - 1)
-                                , rangeEditOperation = "append"
-                                }
-                     in (currentLines ++ newLines, offset + numNewLines, result)
-                Whole ->
-                    -- Overwrite entire file: replace all lines
-                    -- This shouldn't happen in normal processing as Whole is handled separately
-                    let result =
+-- | Proceed with actual file edits after all validations pass.
+proceedWithEdits ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    [RangeSpec] ->
+    [Text] ->
+    IO (Either DeveloperToolError WriteFileRangeResult)
+proceedWithEdits tracer toolbox filePath ranges contentBlocks = do
+    -- Handle "whole" as a special case - just write the content directly
+    case ranges of
+        [Whole] -> do
+            let content = case contentBlocks of
+                    (c : _) -> c
+                    [] -> ""
+            -- Take snapshot before write if snapshot enabled
+            mBeforeSnapshotRef <- takeSnapshotBeforeEdit tracer toolbox filePath
+            writeResult <- try $ do
+                createDirectoryIfMissing True (takeDirectory filePath)
+                writeFileAtomic filePath content
+            case writeResult of
+                Left (e :: SomeException) -> do
+                    let err = PermissionError $ Text.pack $ show e
+                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                    pure $ Left err
+                Right () -> do
+                    let newLines = Text.lines content
+                    let linesWritten = length newLines
+                    let finalLineCount = length newLines
+                    let rangeResult =
                             RangeEditResult
                                 { rangeEditSpec = "whole"
                                 , rangeEditOriginalStart = 1
-                                , rangeEditOriginalEnd = origLineCount
-                                , rangeEditLinesWritten = numNewLines
-                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
-                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
+                                , rangeEditOriginalEnd = 0 -- Will be set from original file below
+                                , rangeEditLinesWritten = linesWritten
+                                , rangeEditFinalStartLine = if linesWritten == 0 then Nothing else Just 1
+                                , rangeEditFinalEndLine = if linesWritten == 0 then Nothing else Just linesWritten
                                 , rangeEditOperation = "overwrite"
                                 }
-                     in (newLines, 0, result)
-                After origLine ->
-                    -- Insert after the specified line
-                    -- Adjust position based on running offset
-                    let adjustedLine = origLine + offset
-                        -- Clamp to valid range (0 to length, where 0 means before first line, like head)
-                        insertPos = max 0 (min adjustedLine (length currentLines))
-                        -- Calculate final position (1-based for display)
-                        finalStart = insertPos + 1
-                        finalEnd = insertPos + numNewLines
-                        result =
-                            RangeEditResult
-                                { rangeEditSpec = Text.pack (show origLine) <> "+"
-                                , rangeEditOriginalStart = origLine
-                                , rangeEditOriginalEnd = origLine
-                                , rangeEditLinesWritten = numNewLines
-                                , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
-                                , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
-                                , rangeEditOperation = "insert-after"
+                    -- Take after snapshot if snapshot enabled
+                    mAfterSnapshotRef <- takeSnapshotAfterEdit toolbox filePath
+                    runTracer tracer (WriteFileRangeCompletedTrace filePath 1 linesWritten)
+                    pure $
+                        Right $
+                            WriteFileRangeResult
+                                { writeFilePath = filePath
+                                , writeFileRangesModified = 1
+                                , writeFileLinesWritten = linesWritten
+                                , writeFileFinalLineCount = finalLineCount
+                                , writeFileRangeResults = [rangeResult]
+                                , writeFileBeforeSnapshotRef = mBeforeSnapshotRef
+                                , writeFileAfterSnapshotRef = mAfterSnapshotRef
                                 }
-                        (before, after) = splitAt insertPos currentLines
-                     in (before ++ newLines ++ after, offset + numNewLines, result)
-                Lines (origStart, origEnd) ->
-                    -- Adjust positions based on running offset
-                    let adjustedStart = origStart + offset
-                        adjustedEnd = origEnd + offset
-                        -- Clamp to current file bounds
-                        actualStart = max 1 adjustedStart
-                        actualEnd = min adjustedEnd (length currentLines)
-                     in if actualStart > actualEnd || actualStart > length currentLines
-                            then -- Range is out of bounds after adjustment, skip
-                                let result =
-                                        RangeEditResult
-                                            { rangeEditSpec =
-                                                Text.pack (show origStart)
-                                                    <> if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
-                                            , rangeEditOriginalStart = origStart
-                                            , rangeEditOriginalEnd = origEnd
-                                            , rangeEditLinesWritten = 0
-                                            , rangeEditFinalStartLine = Nothing
-                                            , rangeEditFinalEndLine = Nothing
-                                            , rangeEditOperation = "skipped-out-of-bounds"
-                                            }
-                                 in (currentLines, offset, result)
-                            else
-                                let before = take (actualStart - 1) currentLines
-                                    after = drop actualEnd currentLines
-                                    linesRemoved = actualEnd - actualStart + 1
-                                    linesAdded = numNewLines
-                                    offsetDelta = offset + (linesAdded - linesRemoved)
-                                    finalStart = actualStart
-                                    finalEnd = actualStart + numNewLines - 1
-                                    operation = if numNewLines == 0 then "delete" else "replace"
-                                    result =
-                                        RangeEditResult
-                                            { rangeEditSpec =
-                                                Text.pack (show origStart)
-                                                    <> if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
-                                            , rangeEditOriginalStart = origStart
-                                            , rangeEditOriginalEnd = origEnd
-                                            , rangeEditLinesWritten = numNewLines
-                                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
-                                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
-                                            , rangeEditOperation = operation
-                                            }
-                                 in (before ++ newLines ++ after, offsetDelta, result)
-         in (newCurrentLines, newOffset, results ++ [editResult])
+        _ -> do
+            -- Read existing file or start empty
+            fileExists <- doesFileExist filePath
+            existingContent <-
+                if fileExists
+                    then Text.readFile filePath
+                    else pure ""
+
+            let originalLines = Text.lines existingContent
+            let originalLineCount = length originalLines
+
+            -- Take snapshot before edit if snapshot enabled
+            mBeforeSnapshotRef <- takeSnapshotBeforeEdit tracer toolbox filePath
+
+            -- Pair ranges with content blocks (1:1 mapping)
+            -- Multi-line ranges are kept as-is, not expanded
+            let rangeContentPairs = zip ranges (if null contentBlocks then [""] else contentBlocks)
+
+            -- Sort by start line in ascending order (top-to-bottom)
+            -- This is crucial for correct position tracking
+            let sortedPairs = sortOn rangeStartKey rangeContentPairs
+
+            -- Apply edits sequentially with position tracking
+            -- foldl passes (currentLines, offset, results) through each edit
+            let (finalLines, _, rangeResults) = foldl (applyRangeEdit originalLineCount) (originalLines, 0, []) sortedPairs
+
+            -- Preserve trailing newline if original had one
+            let hasTrailingNewline = not (Text.null existingContent) && Text.last existingContent == '\n'
+            let output =
+                    if hasTrailingNewline || null originalLines
+                        then Text.unlines finalLines
+                        else Text.unlines finalLines
+
+            -- Write result atomically using a temp file
+            writeResult <- try $ do
+                createDirectoryIfMissing True (takeDirectory filePath)
+                writeFileAtomic filePath output
+
+            case writeResult of
+                Left (e :: SomeException) -> do
+                    let err = PermissionError $ Text.pack $ show e
+                    runTracer tracer (DeveloperToolErrorTrace "write-file-range" $ Text.pack $ show e)
+                    pure $ Left err
+                Right () -> do
+                    let finalLineCount = length finalLines
+                    let linesWritten = sum $ map rangeEditLinesWritten rangeResults
+
+                    -- Take after snapshot if snapshot enabled
+                    mAfterSnapshotRef <- takeSnapshotAfterEdit toolbox filePath
+
+                    runTracer tracer (WriteFileRangeCompletedTrace filePath (length ranges) linesWritten)
+
+                    pure $
+                        Right $
+                            WriteFileRangeResult
+                                { writeFilePath = filePath
+                                , writeFileRangesModified = length ranges
+                                , writeFileLinesWritten = linesWritten
+                                , writeFileFinalLineCount = finalLineCount
+                                , writeFileRangeResults = rangeResults
+                                , writeFileBeforeSnapshotRef = mBeforeSnapshotRef
+                                , writeFileAfterSnapshotRef = mAfterSnapshotRef
+                                }
+
+-- | Get sort key for range (for top-to-bottom ordering).
+-- Head comes first (0), then line numbers (sorted by start), After comes after its line number
+-- (using n*2+1 to place it between line n and line n+1), Tail comes last (maxBound)
+-- Whole is handled separately and won't appear here
+rangeStartKey :: (RangeSpec, Text) -> Int
+rangeStartKey (Head, _) = 0
+rangeStartKey (Lines (s, _), _) = s * 2 -- Even numbers for line ranges
+rangeStartKey (After n, _) = n * 2 + 1 -- Odd numbers for insert-after (between lines)
+rangeStartKey (Tail, _) = maxBound
+rangeStartKey (Whole, _) = 0 -- Should not appear in normal processing
+
+-- | Apply a single range edit with position tracking.
+-- Takes the original file line count (for bounds/original position info),
+-- current state (lines, offset, results), and the edit to apply.
+-- Returns the new state (updated lines, updated offset, updated results).
+applyRangeEdit ::
+    Int ->
+    ([Text], Int, [RangeEditResult]) ->
+    (RangeSpec, Text) ->
+    ([Text], Int, [RangeEditResult])
+applyRangeEdit origLineCount (currentLines, offset, results) (range, content) =
+    let newLines = Text.lines content
+        numNewLines = length newLines
+        (newCurrentLines, newOffset, editResult) = case range of
+            Head ->
+                let result =
+                        RangeEditResult
+                            { rangeEditSpec = "head"
+                            , rangeEditOriginalStart = 0
+                            , rangeEditOriginalEnd = 0
+                            , rangeEditLinesWritten = numNewLines
+                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
+                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
+                            , rangeEditOperation = "prepend"
+                            }
+                 in (newLines ++ currentLines, offset + numNewLines, result)
+            Tail ->
+                let finalStart = length currentLines + offset + 1
+                    result =
+                        RangeEditResult
+                            { rangeEditSpec = "tail"
+                            , rangeEditOriginalStart = origLineCount + 1
+                            , rangeEditOriginalEnd = origLineCount
+                            , rangeEditLinesWritten = numNewLines
+                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
+                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just (finalStart + numNewLines - 1)
+                            , rangeEditOperation = "append"
+                            }
+                 in (currentLines ++ newLines, offset + numNewLines, result)
+            Whole ->
+                -- Overwrite entire file: replace all lines
+                -- This shouldn't happen in normal processing as Whole is handled separately
+                let result =
+                        RangeEditResult
+                            { rangeEditSpec = "whole"
+                            , rangeEditOriginalStart = 1
+                            , rangeEditOriginalEnd = origLineCount
+                            , rangeEditLinesWritten = numNewLines
+                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just 1
+                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just numNewLines
+                            , rangeEditOperation = "overwrite"
+                            }
+                 in (newLines, 0, result)
+            After origLine ->
+                -- Insert after the specified line
+                -- Adjust position based on running offset
+                let adjustedLine = origLine + offset
+                    -- Clamp to valid range (0 to length, where 0 means before first line, like head)
+                    insertPos = max 0 (min adjustedLine (length currentLines))
+                    -- Calculate final position (1-based for display)
+                    finalStart = insertPos + 1
+                    finalEnd = insertPos + numNewLines
+                    result =
+                        RangeEditResult
+                            { rangeEditSpec = Text.pack (show origLine) <> "+"
+                            , rangeEditOriginalStart = origLine
+                            , rangeEditOriginalEnd = origLine
+                            , rangeEditLinesWritten = numNewLines
+                            , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
+                            , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
+                            , rangeEditOperation = "insert-after"
+                            }
+                    (before, after) = splitAt insertPos currentLines
+                 in (before ++ newLines ++ after, offset + numNewLines, result)
+            Lines (origStart, origEnd) ->
+                -- Adjust positions based on running offset
+                let adjustedStart = origStart + offset
+                    adjustedEnd = origEnd + offset
+                    -- Clamp to current file bounds
+                    actualStart = max 1 adjustedStart
+                    actualEnd = min adjustedEnd (length currentLines)
+                 in if actualStart > actualEnd || actualStart > length currentLines
+                        then -- Range is out of bounds after adjustment, skip
+                            let result =
+                                    RangeEditResult
+                                        { rangeEditSpec =
+                                            Text.pack (show origStart)
+                                                <> if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
+                                        , rangeEditOriginalStart = origStart
+                                        , rangeEditOriginalEnd = origEnd
+                                        , rangeEditLinesWritten = 0
+                                        , rangeEditFinalStartLine = Nothing
+                                        , rangeEditFinalEndLine = Nothing
+                                        , rangeEditOperation = "skipped-out-of-bounds"
+                                        }
+                             in (currentLines, offset, result)
+                        else
+                            let before = take (actualStart - 1) currentLines
+                                after = drop actualEnd currentLines
+                                linesRemoved = actualEnd - actualStart + 1
+                                linesAdded = numNewLines
+                                offsetDelta = offset + (linesAdded - linesRemoved)
+                                finalStart = actualStart
+                                finalEnd = actualStart + numNewLines - 1
+                                operation = if numNewLines == 0 then "delete" else "replace"
+                                result =
+                                    RangeEditResult
+                                        { rangeEditSpec =
+                                            Text.pack (show origStart)
+                                                <> if origStart == origEnd then "" else "-" <> Text.pack (show origEnd)
+                                        , rangeEditOriginalStart = origStart
+                                        , rangeEditOriginalEnd = origEnd
+                                        , rangeEditLinesWritten = numNewLines
+                                        , rangeEditFinalStartLine = if numNewLines == 0 then Nothing else Just finalStart
+                                        , rangeEditFinalEndLine = if numNewLines == 0 then Nothing else Just finalEnd
+                                        , rangeEditOperation = operation
+                                        }
+                             in (before ++ newLines ++ after, offsetDelta, result)
+     in (newCurrentLines, newOffset, results ++ [editResult])
 
 -- | Take a snapshot of the file before editing, if snapshot capability is enabled.
 -- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
@@ -452,5 +525,20 @@ takeSnapshotBeforeEdit tracer toolbox filePath =
                     runTracer tracer (SnapshotTakenTrace filePath ref)
                     pure $ Just ref
                 else pure Nothing
+        _ -> pure Nothing
+
+-- | Take a snapshot of the file after editing, if snapshot capability is enabled.
+-- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+takeSnapshotAfterEdit :: Toolbox -> FilePath -> IO (Maybe SnapshotRef)
+takeSnapshotAfterEdit toolbox filePath =
+    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
+        (Just store, True) -> do
+            -- Read file content and create snapshot
+            content <- BS.readFile filePath
+            let snapshot = makeSnapshot content
+            let ref = snapshotRef snapshot
+            -- Store snapshot in the store
+            atomically $ modifyTVar' store (Map.insert ref snapshot)
+            pure $ Just ref
         _ -> pure Nothing
 

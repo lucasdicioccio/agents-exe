@@ -45,9 +45,15 @@ the allowed paths.
 
 Parameters:
 - path: Path to the file to read
-- ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail", "whole")
+- ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail", "whole").
+          If omitted or empty, defaults to reading the entire file (equivalent to "whole").
 
 Returns Right with ReadFileRangeResult on success, Left with error on failure.
+
+The result includes metadata fields to help distinguish between different scenarios:
+- totalFileSize: Total file size in bytes
+- totalLineCount: Total number of lines in the file
+- rangesParsed: The normalized range specifications that were applied
 -}
 executeReadFileRange ::
     Tracer IO Trace ->
@@ -90,7 +96,7 @@ proceedWithRead tracer filePath rangesTxt = do
             runTracer tracer (DeveloperToolErrorTrace "read-file-range" $ Text.pack $ show err)
             pure $ Left err
         else do
-            -- Parse ranges
+            -- Parse ranges (empty string defaults to [Whole])
             case parseRanges rangesTxt of
                 Left err -> pure $ Left err
                 Right ranges -> do
@@ -103,9 +109,12 @@ proceedWithRead tracer filePath rangesTxt = do
                             pure $ Left err
                         Right content -> do
                             let allLines = Text.lines content
+                            let totalLineCount = length allLines
+                            let totalFileSize = Text.length content
                             let resultLines = extractLines allLines ranges
                             let output = Text.unlines $ map formatLineWithNumber resultLines
                             let linesRead = length resultLines
+                            let rangesParsed = map rangeSpecToText ranges
 
                             runTracer tracer (ReadFileRangeCompletedTrace filePath linesRead)
 
@@ -115,7 +124,21 @@ proceedWithRead tracer filePath rangesTxt = do
                                         { readFilePath = filePath
                                         , readFileContent = output
                                         , readFileLinesRead = linesRead
+                                        , readFileTotalSize = totalFileSize
+                                        , readFileTotalLines = totalLineCount
+                                        , readFileRangesParsed = rangesParsed
                                         }
+
+-- | Convert a RangeSpec to its text representation.
+rangeSpecToText :: RangeSpec -> Text
+rangeSpecToText Head = "head"
+rangeSpecToText Tail = "tail"
+rangeSpecToText Whole = "whole"
+rangeSpecToText (After n) = Text.pack (show n) <> "+"
+rangeSpecToText (Lines (start, end)) =
+    if start == end
+        then Text.pack (show start)
+        else Text.pack (show start) <> "-" <> Text.pack (show end)
 
 {- | Extract lines based on range specifications.
 Returns list of (lineNumber, lineContent) pairs.
@@ -143,3 +166,4 @@ extractRange allLines (Lines (start, end)) =
 -- | Format a line with its line number.
 formatLineWithNumber :: (Int, Text) -> Text
 formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
+

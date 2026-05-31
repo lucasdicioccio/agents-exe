@@ -12,6 +12,10 @@ The patch format follows standard unified diff conventions:
 * Context lines (no prefix)
 * Removed lines (- prefix)
 * Added lines (+ prefix)
+
+Optimistic locking is supported via optional expectedSnapshotRef parameter.
+When provided, the operation verifies the current file content matches before
+making any changes, preventing concurrent edit conflicts.
 -}
 module System.Agents.Tools.DeveloperToolbox.Patch (
     -- * Patch execution
@@ -61,6 +65,12 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 Applies a unified diff patch to a file atomically. All hunks are validated
 before any changes are applied, ensuring no partial corruption.
 
+Optimistic Locking:
+When expectedSnapshotRef is provided, the operation first reads the current file
+content and computes its MD5 hash. If the hash doesn't match expectedSnapshotRef,
+a SnapshotMismatchError is returned without making any changes. This prevents
+lost updates when multiple agents/processes edit the same file.
+
 When a file sandbox is configured, the filepath is validated against
 the sandbox before patching. Access is denied if the file is outside
 the allowed paths.
@@ -74,6 +84,9 @@ The patch format follows standard unified diff conventions:
 Parameters:
 - path: Path to the file to patch
 - patch: Unified diff patch content
+- expectedSnapshotRef: Optional MD5 hash of expected file content. If provided,
+                       the operation fails with SnapshotMismatchError if the
+                       current content doesn't match. Use this for optimistic locking.
 
 Returns Right with PatchResult on success, Left with error on failure.
 
@@ -96,8 +109,10 @@ executePatchFile ::
     Toolbox ->
     FilePath ->
     Text ->
+    -- | Optional expected snapshot reference for optimistic locking
+    Maybe SnapshotRef ->
     IO (Either DeveloperToolError PatchResult)
-executePatchFile tracer toolbox filePath patchText = do
+executePatchFile tracer toolbox filePath patchText mExpectedSnapshotRef = do
     if DevToolPatchFile `notElem` toolboxCapabilities toolbox
         then pure $ Left $ CapabilityNotEnabledError "patch-file"
         else do
@@ -112,10 +127,10 @@ executePatchFile tracer toolbox filePath patchText = do
                             let errMsg = FileAccessDeniedError filePath (Text.pack $ show err)
                             runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show errMsg)
                             pure $ Left errMsg
-                        AccessGranted -> proceedWithPatch tracer toolbox filePath patchText
+                        AccessGranted -> proceedWithPatch tracer toolbox filePath patchText mExpectedSnapshotRef
                 Nothing ->
                     -- No sandbox configured, proceed (backwards compatible behavior)
-                    proceedWithPatch tracer toolbox filePath patchText
+                    proceedWithPatch tracer toolbox filePath patchText mExpectedSnapshotRef
 
 -- | Proceed with patch operation after validation.
 proceedWithPatch ::
@@ -123,8 +138,9 @@ proceedWithPatch ::
     Toolbox ->
     FilePath ->
     Text ->
+    Maybe SnapshotRef ->
     IO (Either DeveloperToolError PatchResult)
-proceedWithPatch tracer toolbox filePath patchText = do
+proceedWithPatch tracer toolbox filePath patchText mExpectedSnapshotRef = do
     -- Check if file exists
     fileExists <- doesFileExist filePath
     if not fileExists
@@ -133,55 +149,94 @@ proceedWithPatch tracer toolbox filePath patchText = do
             runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
             pure $ Left $ PatchValidationError err
         else do
-            -- Parse the unified diff
-            case parseUnifiedDiff patchText of
+            -- Handle optimistic locking if expectedSnapshotRef is provided
+            case mExpectedSnapshotRef of
+                Just expectedRef -> do
+                    checkResult <- checkSnapshotMatch tracer filePath expectedRef
+                    case checkResult of
+                        Left err -> pure $ Left err
+                        Right () -> proceedWithPatchApplication tracer toolbox filePath patchText
+                Nothing -> proceedWithPatchApplication tracer toolbox filePath patchText
+
+-- | Check if current file content matches expected snapshot (optimistic locking).
+checkSnapshotMatch ::
+    Tracer IO Trace ->
+    FilePath ->
+    SnapshotRef ->
+    IO (Either DeveloperToolError ())
+checkSnapshotMatch tracer filePath expectedRef = do
+    content <- BS.readFile filePath
+    let actualSnapshot = makeSnapshot content
+    let actualRef = snapshotRef actualSnapshot
+    if actualRef == expectedRef
+        then pure $ Right ()
+        else do
+            let err = SnapshotMismatchError expectedRef actualRef
+            runTracer tracer (SnapshotMismatchTrace filePath expectedRef actualRef)
+            pure $ Left err
+
+-- | Proceed with actual patch application after all validations pass.
+proceedWithPatchApplication ::
+    Tracer IO Trace ->
+    Toolbox ->
+    FilePath ->
+    Text ->
+    IO (Either DeveloperToolError PatchResult)
+proceedWithPatchApplication tracer toolbox filePath patchText = do
+    -- Parse the unified diff
+    case parseUnifiedDiff patchText of
+        Left err -> do
+            runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
+            pure $ Left $ PatchValidationError err
+        Right hunks -> do
+            -- Read current file content
+            content <- Text.readFile filePath
+            let lines' = Text.lines content
+
+            -- Validate ALL hunks before applying any
+            case validateAllHunks lines' hunks of
                 Left err -> do
                     runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
                     pure $ Left $ PatchValidationError err
-                Right hunks -> do
-                    -- Read current file content
-                    content <- Text.readFile filePath
-                    let lines' = Text.lines content
+                Right validHunks -> do
+                    -- Take snapshot before patch if snapshot enabled
+                    mBeforeSnapshotRef <- takeSnapshotBeforePatch tracer toolbox filePath
 
-                    -- Validate ALL hunks before applying any
-                    case validateAllHunks lines' hunks of
-                        Left err -> do
-                            runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
-                            pure $ Left $ PatchValidationError err
-                        Right validHunks -> do
-                            -- Take snapshot before patch if snapshot enabled
-                            mSnapshotRef <- takeSnapshotBeforePatch tracer toolbox filePath
+                    -- Apply hunks bottom-to-top (descending line order)
+                    -- to avoid line number shifts affecting other hunks
+                    let sortedHunks = sortOn (negate . hunkOldStart) validHunks
+                    let newLines = foldl (flip applyHunk) lines' sortedHunks
 
-                            -- Apply hunks bottom-to-top (descending line order)
-                            -- to avoid line number shifts affecting other hunks
-                            let sortedHunks = sortOn (negate . hunkOldStart) validHunks
-                            let newLines = foldl (flip applyHunk) lines' sortedHunks
+                    -- Count changes
+                    let linesChanged = sum $ map hunkChangeCount validHunks
 
-                            -- Count changes
-                            let linesChanged = sum $ map hunkChangeCount validHunks
+                    -- Write result
+                    writeResult <- try $ do
+                        Text.writeFile filePath (Text.unlines newLines)
 
-                            -- Write result
-                            writeResult <- try $ do
-                                Text.writeFile filePath (Text.unlines newLines)
+                    case writeResult of
+                        Left (e :: SomeException) -> do
+                            let err = PermissionError $ Text.pack $ show e
+                            runTracer tracer (DeveloperToolErrorTrace "patch-file" $ Text.pack $ show e)
+                            pure $ Left err
+                        Right () -> do
+                            let applied = length validHunks
 
-                            case writeResult of
-                                Left (e :: SomeException) -> do
-                                    let err = PermissionError $ Text.pack $ show e
-                                    runTracer tracer (DeveloperToolErrorTrace "patch-file" $ Text.pack $ show e)
-                                    pure $ Left err
-                                Right () -> do
-                                    let applied = length validHunks
-                                    runTracer tracer (PatchFileCompletedTrace filePath applied 0)
+                            -- Take after snapshot if snapshot enabled
+                            mAfterSnapshotRef <- takeSnapshotAfterPatch tracer toolbox filePath
 
-                                    pure $
-                                        Right $
-                                            PatchResult
-                                                { patchFilePath = filePath
-                                                , patchHunksApplied = applied
-                                                , patchHunksRejected = 0
-                                                , patchLinesChanged = linesChanged
-                                                , patchSnapshotRef = mSnapshotRef
-                                                }
+                            runTracer tracer (PatchFileCompletedTrace filePath applied 0)
+
+                            pure $
+                                Right $
+                                    PatchResult
+                                        { patchFilePath = filePath
+                                        , patchHunksApplied = applied
+                                        , patchHunksRejected = 0
+                                        , patchLinesChanged = linesChanged
+                                        , patchBeforeSnapshotRef = mBeforeSnapshotRef
+                                        , patchAfterSnapshotRef = mAfterSnapshotRef
+                                        }
   where
     hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
 
@@ -204,6 +259,21 @@ takeSnapshotBeforePatch tracer toolbox filePath =
                     runTracer tracer (SnapshotTakenTrace filePath ref)
                     pure $ Just ref
                 else pure Nothing
+        _ -> pure Nothing
+
+-- | Take a snapshot of the file after patching, if snapshot capability is enabled.
+-- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+takeSnapshotAfterPatch :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
+takeSnapshotAfterPatch _tracer toolbox filePath =
+    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
+        (Just store, True) -> do
+            -- Read file content and create snapshot
+            content <- BS.readFile filePath
+            let snapshot = makeSnapshot content
+            let ref = snapshotRef snapshot
+            -- Store snapshot in the store
+            atomically $ modifyTVar' store (Map.insert ref snapshot)
+            pure $ Just ref
         _ -> pure Nothing
 
 -- | Validate all hunks, returning the first error or the list of valid hunks.

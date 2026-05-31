@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 {- | Provides some abstraction of tools that agents can use.
 
@@ -39,7 +40,8 @@ import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString.Char8 as CByteString
-import Data.Maybe (fromMaybe)
+import Data.Foldable (toList)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as Text
 import Prod.Tracer (Tracer, contramap)
 
@@ -59,16 +61,23 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 
 -------------------------------------------------------------------------------
-type Tool call = ToolBase.Tool Trace call
+type Tool call = ToolBase.Tool ToolsTrace call
 
-data Trace
-    = BashToolsLoadTrace !BashTools.LoadTrace
-    | BashToolsRunTrace !BashTools.RunTrace
-    | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
-    | SystemToolsTrace !SystemTools.Trace
-    | DeveloperToolsTrace !DeveloperTools.Trace
-    | PostgRESToolboxTrace !PostgRESToolbox.Trace
-    | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
+-- | Trace type for Tools module - renamed to avoid conflicts
+newtype ToolsTrace = ToolsTrace
+    { unToolsTrace :: TraceInner
+    }
+    deriving (Show)
+
+-- | Inner trace data type with concrete constructors
+data TraceInner
+    = BashToolsLoadTraceInner !BashTools.LoadTrace
+    | BashToolsRunTraceInner !BashTools.RunTrace
+    | IOToolsTraceInner (IOTools.Trace Aeson.Value ByteString)
+    | SystemToolsTraceInner !SystemTools.Trace
+    | DeveloperToolsTraceInner !DeveloperTools.Trace
+    | PostgRESToolboxTraceInner !PostgRESToolbox.Trace
+    | OpenAPIToolboxTraceInner !OpenAPIToolbox.Trace
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -98,7 +107,7 @@ bashTool script =
   where
     call = ()
     run tracer ctx v = do
-        ret <- BashTools.runValue (contramap BashToolsRunTrace tracer) script (Just ctx) v
+        ret <- BashTools.runValue (contramap (\t -> ToolsTrace (BashToolsRunTraceInner t)) tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
@@ -170,7 +179,7 @@ openapiTool toolbox apiTool =
   where
     call = ()
     run tracer _ctx args = do
-        result <- OpenAPIToolbox.handleToolCall (contramap OpenAPIToolboxTrace tracer) toolbox apiTool args
+        result <- OpenAPIToolbox.handleToolCall (contramap (\t -> ToolsTrace (OpenAPIToolboxTraceInner t)) tracer) toolbox apiTool args
         case result of
             Left err -> do
                 pure $ OpenAPIToolError call (Text.unpack err)
@@ -207,13 +216,13 @@ postgrestTool ::
     Tool ()
 postgrestTool toolbox prTool =
     ToolBase.Tool
-        { ToolBase.toolDef = PostgRESTool (PostgRESToolbox.toolboxName toolbox) (PostgREST.prtPath prTool)
+        { ToolBase.toolDef = ToolBase.PostgRESTool (PostgRESToolbox.toolboxName toolbox) (PostgREST.prtPath prTool)
         , ToolBase.toolRun = run
         }
   where
     call = ()
     run tracer _ctx args = do
-        result <- PostgRESToolbox.handleToolCall (contramap PostgRESToolboxTrace tracer) toolbox prTool args
+        result <- PostgRESToolbox.handleToolCall (contramap (\t -> ToolsTrace (PostgRESToolboxTraceInner t)) tracer) toolbox prTool args
         case result of
             Left err -> do
                 pure $ PostgRESToolError call (Text.unpack err)
@@ -244,7 +253,7 @@ systemTool box =
     run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery (contramap SystemToolsTrace tracer) box cap
+                result <- SystemTools.executeQuery (contramap (\t -> ToolsTrace (SystemToolsTraceInner t)) tracer) box cap
                 case result of
                     Left err -> pure $ SystemToolError call err
                     Right rsp -> pure $ SystemToolResult call rsp
@@ -264,9 +273,10 @@ agents and tools. The tool accepts parameters based on the capability:
 * scaffold-tool: { "language": "bash", "slug": "my-tool", "file_path": "my-tool.sh", "force": false }
 * show-spec: { "spec_name": "bash-tools" }
 * read-file-range: { "path": "/path/to/file", "ranges": "1-10,20-30" }
-* write-file-range: { "path": "/path/to/file", "ranges": "head,5-10,tail", "content": "new content" }
+* write-file-range: { "path": "/path/to/file", "ranges": "head,5-10,tail", "contentBlocks": ["new content"] }
+* patch-file: { "path": "/path/to/file", "patch": "..." }
 -}
-developerTool :: Tracer IO Trace -> DeveloperTools.Toolbox -> Tool ()
+developerTool :: Tracer IO ToolsTrace -> DeveloperTools.Toolbox -> Tool ()
 developerTool tracer box =
     ToolBase.Tool
         { ToolBase.toolDef = DeveloperTool toolDesc
@@ -288,12 +298,12 @@ developerTool tracer box =
         pure $ DeveloperToolError call (DeveloperTools.ValidationError "Arguments must be a JSON object")
 
 -- | Execute a developer tool capability
-executeDeveloperCapability :: Tracer IO Trace -> DeveloperTools.Toolbox -> Text.Text -> Aeson.Object -> IO (CallResult ())
+executeDeveloperCapability :: Tracer IO ToolsTrace -> DeveloperTools.Toolbox -> Text.Text -> Aeson.Object -> IO (CallResult ())
 executeDeveloperCapability tracer box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
             Just (Aeson.String toolPath) -> do
-                result <- DeveloperTools.executeValidateTool (contramap BashToolsLoadTrace tracer) box (Text.unpack toolPath)
+                result <- DeveloperTools.executeValidateTool (contramap (\t -> ToolsTrace (BashToolsLoadTraceInner t)) tracer) box (Text.unpack toolPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult
@@ -346,7 +356,7 @@ executeDeveloperCapability tracer box cap params = case cap of
                 let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
                         Just (Aeson.String r) -> r
                         _ -> ""
-                result <- DeveloperTools.executeReadFileRange (contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges
+                result <- DeveloperTools.executeReadFileRange (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) ranges
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
@@ -356,18 +366,42 @@ executeDeveloperCapability tracer box cap params = case cap of
             Just (Aeson.String filePath) -> do
                 case KeyMap.lookup (AesonKey.fromText "ranges") params of
                     Just (Aeson.String ranges) -> do
-                        let content = case KeyMap.lookup (AesonKey.fromText "content") params of
-                                Just (Aeson.String c) -> c
-                                _ -> ""
-                        -- Split content on '---' separator to get list of content blocks
-                        let contentBlocks = Text.splitOn "---" content
-                        result <- DeveloperTools.executeWriteFileRange (contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks
+                        -- Parse contentBlocks from array
+                        let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
+                                Just (Aeson.Array arr) ->
+                                    mapMaybe parseTextValue (toList arr)
+                                _ -> []
+                        -- Parse optional expected_snapshot_ref for optimistic locking
+                        let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
+                                Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
+                                _ -> Nothing
+                        result <- DeveloperTools.executeWriteFileRange (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
                     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "patch-file" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String filePath) -> do
+                case KeyMap.lookup (AesonKey.fromText "patch") params of
+                    Just (Aeson.String patchContent) -> do
+                        -- Parse optional expected_snapshot_ref for optimistic locking
+                        let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
+                                Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
+                                _ -> Nothing
+                        result <- DeveloperTools.executePatchFile (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) patchContent mExpectedSnapshotRef
+                        case result of
+                            Left err -> pure $ DeveloperToolError () err
+                            Right patchResult -> pure $ DeveloperToolPatchResult () patchResult
+                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'patch' parameter")
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
+  where
+    -- Parse a JSON value as Text, returning Nothing for non-string values
+    parseTextValue :: Aeson.Value -> Maybe Text.Text
+    parseTextValue (Aeson.String t) = Just t
+    parseTextValue _ = Nothing
 
 -------------------------------------------------------------------------------
 
@@ -422,8 +456,9 @@ ioTool script =
     call = ()
     run tracer ctx v = do
         -- we trace the original input object
-        let adaptTrace = IOToolsTrace . IOTools.adaptTraceInput (const v)
-        ret <- IOTools.runValue (contramap adaptTrace tracer) script ctx v
+        let adaptTrace t = IOToolsTraceInner (IOTools.adaptTraceInput (const v) t)
+        ret <- IOTools.runValue (contramap (\t -> ToolsTrace (adaptTrace t)) tracer) script ctx v
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
+

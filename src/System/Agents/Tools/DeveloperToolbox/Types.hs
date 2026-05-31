@@ -177,6 +177,8 @@ data Trace
       FileRestoredTrace !FilePath !SnapshotRef
     | -- | Snapshot not found
       SnapshotNotFoundTrace !SnapshotRef
+    | -- | Snapshot mismatch detected (optimistic locking)
+      SnapshotMismatchTrace !FilePath !SnapshotRef !SnapshotRef
     | -- | Error during operation
       DeveloperToolErrorTrace !Text !Text
     deriving (Show)
@@ -319,10 +321,24 @@ data RangeSpec
     deriving (Show, Eq)
 
 -- | Result of a read file range operation.
+--
+-- Includes metadata fields to help distinguish between:
+-- - Empty files (totalLineCount = 0, totalFileSize = 0)
+-- - Out-of-bounds ranges (linesRead = 0, but totalLineCount > 0)
+-- - Successfully read ranges (linesRead > 0)
 data ReadFileRangeResult = ReadFileRangeResult
     { readFilePath :: FilePath
+    -- ^ Path to the file that was read
     , readFileContent :: Text
+    -- ^ Content read (with line numbers prepended as "N\tcontent")
     , readFileLinesRead :: Int
+    -- ^ Number of lines actually returned in the content
+    , readFileTotalSize :: Int
+    -- ^ Total file size in bytes
+    , readFileTotalLines :: Int
+    -- ^ Total number of lines in the file
+    , readFileRangesParsed :: [Text]
+    -- ^ Normalized range specifications that were applied
     }
     deriving (Show)
 
@@ -333,6 +349,9 @@ instance ToJSON ReadFileRangeResult where
             [ "path" .= readFilePath result
             , "content" .= readFileContent result
             , "linesRead" .= readFileLinesRead result
+            , "totalFileSize" .= readFileTotalSize result
+            , "totalLineCount" .= readFileTotalLines result
+            , "rangesParsed" .= readFileRangesParsed result
             ]
 
 -- | Per-range edit result providing detailed feedback for each edit operation.
@@ -368,16 +387,25 @@ instance ToJSON RangeEditResult where
                 ]
 
 -- | Result of a write file range operation with detailed per-range feedback.
+--
+-- Includes both before and after snapshot references for optimistic locking.
+-- The beforeSnapshotRef references the state of the file before the edit,
+-- while afterSnapshotRef references the state after the edit.
 data WriteFileRangeResult = WriteFileRangeResult
     { writeFilePath :: FilePath
+    -- ^ Path to the file that was modified
     , writeFileRangesModified :: Int
+    -- ^ Number of ranges that were processed
     , writeFileLinesWritten :: Int
+    -- ^ Total number of lines written across all ranges
     , writeFileFinalLineCount :: Int
     -- ^ Total lines in file after all edits
     , writeFileRangeResults :: [RangeEditResult]
     -- ^ Detailed results for each range
-    , writeFileSnapshotRef :: Maybe SnapshotRef
+    , writeFileBeforeSnapshotRef :: Maybe SnapshotRef
     -- ^ Reference to snapshot of file content before edit (if snapshot enabled)
+    , writeFileAfterSnapshotRef :: Maybe SnapshotRef
+    -- ^ Reference to snapshot of file content after edit (if snapshot enabled)
     }
     deriving (Show)
 
@@ -390,17 +418,26 @@ instance ToJSON WriteFileRangeResult where
             , "linesWritten" .= writeFileLinesWritten result
             , "finalLineCount" .= writeFileFinalLineCount result
             , "rangeResults" .= writeFileRangeResults result
-            , "snapshotRef" .= writeFileSnapshotRef result
+            , "beforeSnapshotRef" .= writeFileBeforeSnapshotRef result
+            , "afterSnapshotRef" .= writeFileAfterSnapshotRef result
             ]
 
 -- | Result of a patch file operation.
+--
+-- Includes both before and after snapshot references for optimistic locking.
 data PatchResult = PatchResult
     { patchFilePath :: FilePath
+    -- ^ Path to the file that was patched
     , patchHunksApplied :: Int
+    -- ^ Number of hunks successfully applied
     , patchHunksRejected :: Int
+    -- ^ Number of hunks rejected
     , patchLinesChanged :: Int
-    , patchSnapshotRef :: Maybe SnapshotRef
+    -- ^ Total number of lines changed
+    , patchBeforeSnapshotRef :: Maybe SnapshotRef
     -- ^ Reference to snapshot of file content before patch (if snapshot enabled)
+    , patchAfterSnapshotRef :: Maybe SnapshotRef
+    -- ^ Reference to snapshot of file content after patch (if snapshot enabled)
     }
     deriving (Show)
 
@@ -412,7 +449,8 @@ instance ToJSON PatchResult where
             , "hunksApplied" .= patchHunksApplied result
             , "hunksRejected" .= patchHunksRejected result
             , "linesChanged" .= patchLinesChanged result
-            , "snapshotRef" .= patchSnapshotRef result
+            , "beforeSnapshotRef" .= patchBeforeSnapshotRef result
+            , "afterSnapshotRef" .= patchAfterSnapshotRef result
             ]
 
 -- | Result of a restore file operation.
@@ -588,5 +626,13 @@ data DeveloperToolError
       SnapshotNotFoundError !SnapshotRef
     | -- | Restore operation failed
       RestoreError !Text
+    | -- | Snapshot mismatch (optimistic locking failure)
+      -- Expected snapshot doesn't match actual file content
+      SnapshotMismatchError
+        { snapshotMismatchExpected :: !SnapshotRef
+        -- ^ Expected snapshot reference provided by caller
+        , snapshotMismatchActual :: !SnapshotRef
+        -- ^ Actual snapshot of current file content
+        }
     deriving (Show, Eq)
 
