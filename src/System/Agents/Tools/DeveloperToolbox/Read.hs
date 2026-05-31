@@ -166,4 +166,3 @@ extractRange allLines (Lines (start, end)) =
 -- | Format a line with its line number.
 formatLineWithNumber :: (Int, Text) -> Text
 formatLineWithNumber (n, line) = Text.pack (show n) <> "\t" <> line
-

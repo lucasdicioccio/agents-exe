@@ -41,8 +41,8 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     makeSnapshot,
  )
 
-import qualified Data.ByteString as BS
 import Control.Concurrent.STM (atomically, modifyTVar')
+import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 
 {- | Execute write file range operation.
@@ -376,10 +376,11 @@ proceedWithEdits tracer toolbox filePath ranges contentBlocks = do
                                 , writeFileAfterSnapshotRef = mAfterSnapshotRef
                                 }
 
--- | Get sort key for range (for top-to-bottom ordering).
--- Head comes first (0), then line numbers (sorted by start), After comes after its line number
--- (using n*2+1 to place it between line n and line n+1), Tail comes last (maxBound)
--- Whole is handled separately and won't appear here
+{- | Get sort key for range (for top-to-bottom ordering).
+Head comes first (0), then line numbers (sorted by start), After comes after its line number
+(using n*2+1 to place it between line n and line n+1), Tail comes last (maxBound)
+Whole is handled separately and won't appear here
+-}
 rangeStartKey :: (RangeSpec, Text) -> Int
 rangeStartKey (Head, _) = 0
 rangeStartKey (Lines (s, _), _) = s * 2 -- Even numbers for line ranges
@@ -387,10 +388,11 @@ rangeStartKey (After n, _) = n * 2 + 1 -- Odd numbers for insert-after (between 
 rangeStartKey (Tail, _) = maxBound
 rangeStartKey (Whole, _) = 0 -- Should not appear in normal processing
 
--- | Apply a single range edit with position tracking.
--- Takes the original file line count (for bounds/original position info),
--- current state (lines, offset, results), and the edit to apply.
--- Returns the new state (updated lines, updated offset, updated results).
+{- | Apply a single range edit with position tracking.
+Takes the original file line count (for bounds/original position info),
+current state (lines, offset, results), and the edit to apply.
+Returns the new state (updated lines, updated offset, updated results).
+-}
 applyRangeEdit ::
     Int ->
     ([Text], Int, [RangeEditResult]) ->
@@ -506,8 +508,9 @@ applyRangeEdit origLineCount (currentLines, offset, results) (range, content) =
                              in (before ++ newLines ++ after, offsetDelta, result)
      in (newCurrentLines, newOffset, results ++ [editResult])
 
--- | Take a snapshot of the file before editing, if snapshot capability is enabled.
--- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+{- | Take a snapshot of the file before editing, if snapshot capability is enabled.
+Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+-}
 takeSnapshotBeforeEdit :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotBeforeEdit tracer toolbox filePath =
     case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
@@ -527,8 +530,9 @@ takeSnapshotBeforeEdit tracer toolbox filePath =
                 else pure Nothing
         _ -> pure Nothing
 
--- | Take a snapshot of the file after editing, if snapshot capability is enabled.
--- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+{- | Take a snapshot of the file after editing, if snapshot capability is enabled.
+Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+-}
 takeSnapshotAfterEdit :: Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotAfterEdit toolbox filePath =
     case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
@@ -541,4 +545,3 @@ takeSnapshotAfterEdit toolbox filePath =
             atomically $ modifyTVar' store (Map.insert ref snapshot)
             pure $ Just ref
         _ -> pure Nothing
-

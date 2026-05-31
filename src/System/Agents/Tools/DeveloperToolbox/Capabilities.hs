@@ -105,4 +105,3 @@ getCapabilityInfo DevToolRestoreFile =
     ( "restore-file"
     , "Restores a file to a previous version using a snapshot reference (MD5 hash). Requires the 'snapshot' capability to be enabled to have stored snapshots available."
     )
-

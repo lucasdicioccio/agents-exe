@@ -40,16 +40,17 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolCapability (..),
 ) where
 
+import Control.Concurrent.STM (TVar, newTVarIO)
 import Data.Aeson (ToJSON (..), (.=))
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.ByteString.Lazy (fromStrict)
+import Data.Digest.Pure.MD5 (md5)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Digest.Pure.MD5 (md5)
 import System.Agents.Base (
     BashToolboxDescription,
     BuiltinToolboxDescription (..),
@@ -62,7 +63,6 @@ import System.Agents.Base (
  )
 import System.Agents.FileSandbox (FileSandbox)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
-import Control.Concurrent.STM (TVar, newTVarIO)
 
 -------------------------------------------------------------------------------
 -- Snapshot Types
@@ -71,7 +71,7 @@ import Control.Concurrent.STM (TVar, newTVarIO)
 {- | A reference to a snapshot, using MD5 hash of the content.
 This serves as both identifier and content verification.
 -}
-newtype SnapshotRef = SnapshotRef { unSnapshotRef :: Text }
+newtype SnapshotRef = SnapshotRef {unSnapshotRef :: Text}
     deriving (Show, Eq, Ord)
 
 -- | JSON serialization for SnapshotRef.
@@ -320,12 +320,13 @@ data RangeSpec
       After Int
     deriving (Show, Eq)
 
--- | Result of a read file range operation.
---
--- Includes metadata fields to help distinguish between:
--- - Empty files (totalLineCount = 0, totalFileSize = 0)
--- - Out-of-bounds ranges (linesRead = 0, but totalLineCount > 0)
--- - Successfully read ranges (linesRead > 0)
+{- | Result of a read file range operation.
+
+Includes metadata fields to help distinguish between:
+- Empty files (totalLineCount = 0, totalFileSize = 0)
+- Out-of-bounds ranges (linesRead = 0, but totalLineCount > 0)
+- Successfully read ranges (linesRead > 0)
+-}
 data ReadFileRangeResult = ReadFileRangeResult
     { readFilePath :: FilePath
     -- ^ Path to the file that was read
@@ -386,11 +387,12 @@ instance ToJSON RangeEditResult where
                 , "operation" .= rangeEditOperation result
                 ]
 
--- | Result of a write file range operation with detailed per-range feedback.
---
--- Includes both before and after snapshot references for optimistic locking.
--- The beforeSnapshotRef references the state of the file before the edit,
--- while afterSnapshotRef references the state after the edit.
+{- | Result of a write file range operation with detailed per-range feedback.
+
+Includes both before and after snapshot references for optimistic locking.
+The beforeSnapshotRef references the state of the file before the edit,
+while afterSnapshotRef references the state after the edit.
+-}
 data WriteFileRangeResult = WriteFileRangeResult
     { writeFilePath :: FilePath
     -- ^ Path to the file that was modified
@@ -422,9 +424,10 @@ instance ToJSON WriteFileRangeResult where
             , "afterSnapshotRef" .= writeFileAfterSnapshotRef result
             ]
 
--- | Result of a patch file operation.
---
--- Includes both before and after snapshot references for optimistic locking.
+{- | Result of a patch file operation.
+
+Includes both before and after snapshot references for optimistic locking.
+-}
 data PatchResult = PatchResult
     { patchFilePath :: FilePath
     -- ^ Path to the file that was patched
@@ -626,8 +629,9 @@ data DeveloperToolError
       SnapshotNotFoundError !SnapshotRef
     | -- | Restore operation failed
       RestoreError !Text
-    | -- | Snapshot mismatch (optimistic locking failure)
-      -- Expected snapshot doesn't match actual file content
+    | {- | Snapshot mismatch (optimistic locking failure)
+      Expected snapshot doesn't match actual file content
+      -}
       SnapshotMismatchError
         { snapshotMismatchExpected :: !SnapshotRef
         -- ^ Expected snapshot reference provided by caller
@@ -635,4 +639,3 @@ data DeveloperToolError
         -- ^ Actual snapshot of current file content
         }
     deriving (Show, Eq)
-

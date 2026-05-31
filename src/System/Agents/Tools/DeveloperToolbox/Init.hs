@@ -77,4 +77,3 @@ initializeToolbox _tracer desc = do
                         , toolboxSnapshotStore = mSnapshotStore
                         }
             pure $ Right toolbox
-
