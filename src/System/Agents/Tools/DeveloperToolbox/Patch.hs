@@ -28,9 +28,9 @@ module System.Agents.Tools.DeveloperToolbox.Patch (
     applyHunk,
 ) where
 
+import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Exception (SomeException, try)
 import Control.Monad (when)
-import Control.Concurrent.STM (atomically, modifyTVar')
 import qualified Data.ByteString as BS
 import Data.Char (isDigit)
 import Data.List (find, sortOn)
@@ -240,8 +240,9 @@ proceedWithPatchApplication tracer toolbox filePath patchText = do
   where
     hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
 
--- | Take a snapshot of the file before patching, if snapshot capability is enabled.
--- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+{- | Take a snapshot of the file before patching, if snapshot capability is enabled.
+Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+-}
 takeSnapshotBeforePatch :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotBeforePatch tracer toolbox filePath =
     case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
@@ -261,8 +262,9 @@ takeSnapshotBeforePatch tracer toolbox filePath =
                 else pure Nothing
         _ -> pure Nothing
 
--- | Take a snapshot of the file after patching, if snapshot capability is enabled.
--- Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+{- | Take a snapshot of the file after patching, if snapshot capability is enabled.
+Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+-}
 takeSnapshotAfterPatch :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotAfterPatch _tracer toolbox filePath =
     case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
@@ -554,4 +556,3 @@ parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAf
                                                     added
                                                     (stripped : ctxAfter)
                                                     rest
-

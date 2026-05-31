@@ -11,8 +11,8 @@ module System.Agents.Tools.DeveloperToolbox.Restore (
     executeRestoreFile,
 ) where
 
-import Control.Exception (SomeException, try)
 import Control.Concurrent.STM (atomically, readTVar)
+import Control.Exception (SomeException, try)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -108,11 +108,11 @@ proceedWithRestore tracer toolbox filePath ref = do
                             runTracer tracer (DeveloperToolErrorTrace "restore-file" $ Text.pack $ show e)
                             pure $ Left err
                         Right () -> do
-                            pure $ Right $
-                                RestoreResult
-                                    { restoreFilePath = filePath
-                                    , restoreSnapshotRef = ref
-                                    , restoreSuccess = True
-                                    , restoreError = Nothing
-                                    }
-
+                            pure $
+                                Right $
+                                    RestoreResult
+                                        { restoreFilePath = filePath
+                                        , restoreSnapshotRef = ref
+                                        , restoreSuccess = True
+                                        , restoreError = Nothing
+                                        }
