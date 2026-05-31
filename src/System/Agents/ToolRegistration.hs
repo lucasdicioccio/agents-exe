@@ -1111,7 +1111,10 @@ registerDeveloperTool box =
         toolDescription =
             ToolDescription
                 { toolDescriptionName = llmName
-                , toolDescriptionText = "Developer tools for writing and validating agents and tools: " <> box.toolboxDescription
+                , toolDescriptionText =
+                    "Developer tools for writing and validating agents and tools. "
+                        <> "Use the 'help' capability to get detailed documentation for all available capabilities. "
+                        <> box.toolboxDescription
                 , toolDescriptionParamProperties = paramProps
                 }
 
@@ -1688,7 +1691,6 @@ developerTool box =
             _ -> pure $ DeveloperToolError call (DeveloperTools.ValidationError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ DeveloperToolError call (DeveloperTools.ValidationError "Arguments must be a JSON object")
-
 -- | Execute a developer tool capability
 executeDeveloperCapability :: Tracer IO Trace -> DeveloperTools.Toolbox -> Text -> Aeson.Object -> IO (CallResult ())
 executeDeveloperCapability tracer box cap params = case cap of
