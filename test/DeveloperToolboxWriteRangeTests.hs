@@ -831,7 +831,7 @@ testFinalLinePositions = withTempDir $ \tmpDir -> do
 
 -- | Test that multi-range edit reports shifted positions when lines are added
 testShiftedPositions :: Assertion
-testFinalLinePositionsShifted = withTempDir $ \tmpDir -> do
+testShiftedPositions = withTempDir $ \tmpDir -> do
     toolbox <- testToolbox
     let filePath = tmpDir </> "shifted.txt"
     let content = Text.unlines ["A", "B", "C", "D", "E"]

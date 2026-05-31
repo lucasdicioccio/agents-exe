@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 {- | Provides some abstraction of tools that agents can use.
 
@@ -68,38 +69,7 @@ newtype ToolsTrace = ToolsTrace
     }
     deriving (Show)
 
-data TraceInner
-    = BashToolsLoadTrace !BashTools.LoadTrace
-    | BashToolsRunTrace !BashTools.RunTrace
-    | IOToolsTrace (IOTools.Trace Aeson.Value ByteString)
-    | SystemToolsTrace !SystemTools.Trace
-    | DeveloperToolsTrace !DeveloperTools.Trace
-    | PostgRESToolboxTrace !PostgRESToolbox.Trace
-    | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
-    deriving (Show)
-
--- Helper pattern synonyms for backwards compatibility
-pattern BashToolsLoadTrace :: BashTools.LoadTrace -> ToolsTrace
-pattern BashToolsLoadTrace x = ToolsTrace (BashToolsLoadTraceInner x)
-
-pattern BashToolsRunTrace :: BashTools.RunTrace -> ToolsTrace
-pattern BashToolsRunTrace x = ToolsTrace (BashToolsRunTraceInner x)
-
-pattern IOToolsTrace :: IOTools.Trace Aeson.Value ByteString -> ToolsTrace
-pattern IOToolsTrace x = ToolsTrace (IOToolsTraceInner x)
-
-pattern SystemToolsTrace :: SystemTools.Trace -> ToolsTrace
-pattern SystemToolsTrace x = ToolsTrace (SystemToolsTraceInner x)
-
-pattern DeveloperToolsTrace :: DeveloperTools.Trace -> ToolsTrace
-pattern DeveloperToolsTrace x = ToolsTrace (DeveloperToolsTraceInner x)
-
-pattern PostgRESToolboxTrace :: PostgRESToolbox.Trace -> ToolsTrace
-pattern PostgRESToolboxTrace x = ToolsTrace (PostgRESToolboxTraceInner x)
-
-pattern OpenAPIToolboxTrace :: OpenAPIToolbox.Trace -> ToolsTrace
-pattern OpenAPIToolboxTrace x = ToolsTrace (OpenAPIToolboxTraceInner x)
-
+-- | Inner trace data type with concrete constructors
 data TraceInner
     = BashToolsLoadTraceInner !BashTools.LoadTrace
     | BashToolsRunTraceInner !BashTools.RunTrace
@@ -137,7 +107,7 @@ bashTool script =
   where
     call = ()
     run tracer ctx v = do
-        ret <- BashTools.runValue (contramap (ToolsTrace . BashToolsRunTraceInner) tracer) script (Just ctx) v
+        ret <- BashTools.runValue (contramap (\t -> ToolsTrace (BashToolsRunTraceInner t)) tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
@@ -209,7 +179,7 @@ openapiTool toolbox apiTool =
   where
     call = ()
     run tracer _ctx args = do
-        result <- OpenAPIToolbox.handleToolCall (contramap (ToolsTrace . OpenAPIToolboxTraceInner) tracer) toolbox apiTool args
+        result <- OpenAPIToolbox.handleToolCall (contramap (\t -> ToolsTrace (OpenAPIToolboxTraceInner t)) tracer) toolbox apiTool args
         case result of
             Left err -> do
                 pure $ OpenAPIToolError call (Text.unpack err)
@@ -252,7 +222,7 @@ postgrestTool toolbox prTool =
   where
     call = ()
     run tracer _ctx args = do
-        result <- PostgRESToolbox.handleToolCall (contramap (ToolsTrace . PostgRESToolboxTraceInner) tracer) toolbox prTool args
+        result <- PostgRESToolbox.handleToolCall (contramap (\t -> ToolsTrace (PostgRESToolboxTraceInner t)) tracer) toolbox prTool args
         case result of
             Left err -> do
                 pure $ PostgRESToolError call (Text.unpack err)
@@ -283,7 +253,7 @@ systemTool box =
     run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                result <- SystemTools.executeQuery (contramap (ToolsTrace . SystemToolsTraceInner) tracer) box cap
+                result <- SystemTools.executeQuery (contramap (\t -> ToolsTrace (SystemToolsTraceInner t)) tracer) box cap
                 case result of
                     Left err -> pure $ SystemToolError call err
                     Right rsp -> pure $ SystemToolResult call rsp
@@ -333,7 +303,7 @@ executeDeveloperCapability tracer box cap params = case cap of
     "validate-tool" -> do
         case KeyMap.lookup (AesonKey.fromText "tool_path") params of
             Just (Aeson.String toolPath) -> do
-                result <- DeveloperTools.executeValidateTool (contramap (ToolsTrace . BashToolsLoadTraceInner) tracer) box (Text.unpack toolPath)
+                result <- DeveloperTools.executeValidateTool (contramap (\t -> ToolsTrace (BashToolsLoadTraceInner t)) tracer) box (Text.unpack toolPath)
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right valResult -> pure $ DeveloperToolResult () valResult
@@ -386,7 +356,7 @@ executeDeveloperCapability tracer box cap params = case cap of
                 let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
                         Just (Aeson.String r) -> r
                         _ -> ""
-                result <- DeveloperTools.executeReadFileRange (contramap (ToolsTrace . DeveloperToolsTraceInner) tracer) box (Text.unpack filePath) ranges
+                result <- DeveloperTools.executeReadFileRange (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) ranges
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
@@ -405,7 +375,7 @@ executeDeveloperCapability tracer box cap params = case cap of
                         let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
                                 Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
                                 _ -> Nothing
-                        result <- DeveloperTools.executeWriteFileRange (contramap (ToolsTrace . DeveloperToolsTraceInner) tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef
+                        result <- DeveloperTools.executeWriteFileRange (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
@@ -420,7 +390,7 @@ executeDeveloperCapability tracer box cap params = case cap of
                         let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
                                 Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
                                 _ -> Nothing
-                        result <- DeveloperTools.executePatchFile (contramap (ToolsTrace . DeveloperToolsTraceInner) tracer) box (Text.unpack filePath) patchContent mExpectedSnapshotRef
+                        result <- DeveloperTools.executePatchFile (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) patchContent mExpectedSnapshotRef
                         case result of
                             Left err -> pure $ DeveloperToolError () err
                             Right patchResult -> pure $ DeveloperToolPatchResult () patchResult
@@ -486,11 +456,9 @@ ioTool script =
     call = ()
     run tracer ctx v = do
         -- we trace the original input object
-        let adaptTrace = IOToolsTraceInner . IOTools.adaptTraceInput (const v)
-        ret <- IOTools.runValue (contramap (ToolsTrace . adaptTrace) tracer) script ctx v
+        let adaptTrace t = IOToolsTraceInner (IOTools.adaptTraceInput (const v) t)
+        ret <- IOTools.runValue (contramap (\t -> ToolsTrace (adaptTrace t)) tracer) script ctx v
         case ret of
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
-
-{-# COMPLETE BashToolsLoadTrace, BashToolsRunTrace, IOToolsTrace, SystemToolsTrace, DeveloperToolsTrace, PostgRESToolboxTrace, OpenAPIToolboxTrace #-}
 
