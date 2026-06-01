@@ -1553,21 +1553,20 @@ sqliteTool box =
     call = ()
 
     -- Build tool description from toolbox
+    -- Build tool description from toolbox
     toolDesc =
         SqliteTools.ToolDescription
             { SqliteTools.toolDescriptionName = "query"
             , SqliteTools.toolDescriptionDescription = box.toolboxDescription
             , SqliteTools.toolDescriptionToolboxName = box.toolboxName
-            , SqliteTools.toolDescriptionDatabasePath = box.toolboxPath
             }
 
     run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
     run tracer ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "sql") v of
             Just (Aeson.String query) -> do
-                -- Get conversation ID from context for snapshot mode
-                let mConvId = Just (Context.ctxConversationId ctx)
-                result <- SqliteTools.executeQueryWithContext (Prod.contramap SqliteToolsTrace tracer) box mConvId query
+                let input = SqliteTools.SqliteQueryInput{SqliteTools.inputSql = query, SqliteTools.inputRestoreFrom = Nothing}
+                result <- SqliteTools.executeQuery (Prod.contramap SqliteToolsTrace tracer) box ctx input
                 case result of
                     Left err -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
@@ -1575,7 +1574,6 @@ sqliteTool box =
     run _tracer _ctx _ = do
         pure $ SqliteToolError call (SqliteTools.SqlError "Arguments must be a JSON object")
 
--- | Builder for a SystemToolbox-based tool.
 systemTool :: SystemTools.Toolbox -> Tool ()
 systemTool box =
     ToolBase.Tool

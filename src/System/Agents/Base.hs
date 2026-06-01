@@ -5,7 +5,7 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
@@ -630,83 +630,163 @@ instance FromJSON PostgRESTToolboxDescription where
 -- Builtin Toolbox Configuration
 -------------------------------------------------------------------------------
 
-{- | Access mode for SQLite databases.
+{- | Lifetime scope for versioned SQLite databases
 
-Controls whether the database is opened in read-only, read-write, or snapshot mode.
-This affects both file permissions and SQLite's internal locking behavior.
-
-* 'SqliteReadOnly': Open database in read-only mode. No modifications allowed.
-* 'SqliteReadWrite': Open database in read-write mode. Both reads and writes allowed.
-* 'SqliteSnapshot': Create a copy of the database for this conversation and open it
-  in read-write mode. Changes are isolated to the conversation lifetime.
+Controls how database versions are shared across the conversation lifecycle:
+* 'LifetimeConversation': One version per conversation - all tool calls share state
+* 'LifetimeTurn': Versions per turn - tool calls within a turn share state
+* 'LifetimeToolCall': Each tool call gets an isolated fresh copy
 -}
-data SqliteAccessMode
-    = -- | Open database in read-only mode. No modifications allowed.
-      SqliteReadOnly
-    | -- | Open database in read-write mode. Both reads and writes allowed.
-      SqliteReadWrite
-    | {- | Create a snapshot copy for this conversation, opened in read-write mode.
-      The snapshot is created on first use using the conversation ID as suffix.
-      -}
-      SqliteSnapshot
-    deriving (Show, Ord, Eq, Generic)
+data SqliteLifetime
+    = -- | One version per conversation - all tool calls share the same database state
+      LifetimeConversation
+    | -- | Versions per turn - tool calls within the same turn share state
+      LifetimeTurn
+    | -- | Each tool call gets isolated fresh copy
+      LifetimeToolCall
+    deriving (Show, Eq, Ord, Generic)
 
--- | Serialize SqliteAccessMode as kebab-case strings.
-instance ToJSON SqliteAccessMode where
-    toJSON SqliteReadOnly = Aeson.String "read-only"
-    toJSON SqliteReadWrite = Aeson.String "read-write"
-    toJSON SqliteSnapshot = Aeson.String "snapshot"
+-- | Serialize SqliteLifetime as kebab-case strings.
+instance ToJSON SqliteLifetime where
+    toJSON LifetimeConversation = Aeson.String "conversation"
+    toJSON LifetimeTurn = Aeson.String "turn"
+    toJSON LifetimeToolCall = Aeson.String "tool-call"
 
--- | Parse SqliteAccessMode from kebab-case strings.
-instance FromJSON SqliteAccessMode where
-    parseJSON = Aeson.withText "SqliteAccessMode" $ \txt ->
+-- | Parse SqliteLifetime from kebab-case strings.
+instance FromJSON SqliteLifetime where
+    parseJSON = Aeson.withText "SqliteLifetime" $ \txt ->
         case txt of
-            "read-only" -> return SqliteReadOnly
-            "read-write" -> return SqliteReadWrite
-            "snapshot" -> return SqliteSnapshot
-            other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only', 'read-write', or 'snapshot'."
+            "conversation" -> return LifetimeConversation
+            "turn" -> return LifetimeTurn
+            "tool-call" -> return LifetimeToolCall
+            other -> fail $ "Invalid SqliteLifetime: " ++ Text.unpack other ++ ". Expected 'conversation', 'turn', or 'tool-call'."
+
+{- | Version handle for restoration (serializable to JSON).
+
+A version handle uniquely identifies a specific database state that
+can be restored in subsequent tool calls. This enables LLMs to:
+* Branch from specific database states
+* Rollback to previous states
+* Reference immutable snapshots
+-}
+data SqliteVersionHandle = SqliteVersionHandle
+    { vhSessionId :: !Text
+    -- ^ Session UUID as text
+    , vhTurnId :: !Text
+    -- ^ Turn UUID as text
+    , vhToolCallIndex :: !Int
+    -- ^ Index within turn (0, 1, 2...)
+    , vhToolboxName :: !Text
+    -- ^ Toolbox identifier
+    , vhTimestamp :: !Text
+    -- ^ ISO8601 timestamp for debugging
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SqliteVersionHandle
+instance FromJSON SqliteVersionHandle
+
+{- | Enhanced SQLite versioning configuration.
+
+Replaces the old 'SqliteAccessMode' with hierarchical versioning support.
+
+* 'SqliteNoVersioning': Direct read-write, no versioning (backward compatible with read-write mode)
+* 'SqliteVersioned': Versioned with hierarchical storage and restoration capabilities
+-}
+data SqliteVersioningConfig
+    = -- | Direct read-write, no versioning - operates on the original database directly
+      SqliteNoVersioning
+    | SqliteVersioned
+        { vLifetime :: !SqliteLifetime
+        -- ^ Lifetime scope for versioned databases
+        , vStorageRoot :: !(Maybe FilePath)
+        -- ^ Optional custom storage root. Default: ~/.agents/sqlite-versions (or XDG equivalent)
+        , vBasePath :: !FilePath
+        -- ^ Template/source database path - the original database to copy from
+        }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SqliteVersioningConfig where
+    toJSON SqliteNoVersioning = Aeson.object ["tag" .= ("SqliteNoVersioning" :: Text)]
+    toJSON (SqliteVersioned lifetime mRoot base) =
+        Aeson.object
+            [ "tag" .= ("SqliteVersioned" :: Text)
+            , "lifetime" .= lifetime
+            , "storageRoot" .= mRoot
+            , "basePath" .= base
+            ]
+
+instance FromJSON SqliteVersioningConfig where
+    parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "SqliteNoVersioning" -> return SqliteNoVersioning
+            "SqliteVersioned" ->
+                SqliteVersioned
+                    <$> v .: "lifetime"
+                    <*> v .:? "storageRoot"
+                    <*> v .: "basePath"
+            other -> fail $ "Unknown SqliteVersioningConfig tag: " ++ Text.unpack other
 
 {- | Configuration for a SQLite builtin toolbox.
 
 This describes a SQLite database to load as a builtin toolbox.
 The toolbox provides tools for querying and optionally modifying
-the SQLite database.
+the SQLite database with optional hierarchical versioning.
 
-Example configuration:
+Example configuration (versioned with conversation lifetime):
 
 @
 {
-  "name": "memory",
-  "description": "a set of memories",
-  "path": "/path/to/memories.sqlite",
-  "access": "read-write",
-  "lifetime": "conversation",
-  "activation": "always"
+  "tag": "SqliteToolbox",
+  "contents": {
+    "name": "memory",
+    "description": "a set of memories",
+    "versioning": {
+      "tag": "SqliteVersioned",
+      "lifetime": "conversation",
+      "storageRoot": null,
+      "basePath": "/path/to/memories.sqlite"
+    },
+    "activation": "always"
+  }
 }
 @
 
-The 'access' field controls whether the database is opened in
-read-only, read-write, or snapshot mode. Use 'read-only' for safety when
-the agent should only query data, 'read-write' when the agent
-needs to modify the database directly, and 'snapshot' when you want
-isolated changes per conversation.
+Example configuration (no versioning - direct access):
+
+@
+{
+  "tag": "SqliteToolbox",
+  "contents": {
+    "name": "analytics",
+    "description": "Analytics database",
+    "versioning": {
+      "tag": "SqliteNoVersioning"
+    },
+    "activation": "always"
+  }
+}
+@
+
+Migration from old 'access' field:
+- "access": "read-only" -> Use with caution; consider if versioning is needed
+- "access": "read-write" -> SqliteNoVersioning (direct access)
+- "access": "snapshot" -> SqliteVersioned with LifetimeConversation
 
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
-data SqliteToolboxDescription
-    = SqliteToolboxDescription
-    { sqliteToolboxName :: Text
+data SqliteToolboxDescription = SqliteToolboxDescription
+    { sqliteToolboxName :: !Text
     -- ^ Unique name for this toolbox instance (used as tool prefix)
-    , sqliteToolboxDescription :: Text
+    , sqliteToolboxDescription :: !Text
     -- ^ Human-readable description of the database contents/purpose
-    , sqliteToolboxPath :: FilePath
-    -- ^ Path to the SQLite database file
-    , sqliteToolboxAccess :: SqliteAccessMode
-    -- ^ Access mode: read-only, read-write, or snapshot
-    , sqliteToolboxActivation :: Maybe Activation
+    , sqliteToolboxVersioning :: !SqliteVersioningConfig
+    -- ^ Versioning configuration - replaces the old 'sqliteToolboxAccess' field
+    , sqliteToolboxActivation :: !(Maybe Activation)
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
-    deriving (Show, Ord, Eq, Generic)
+    deriving (Show, Eq, Ord, Generic)
 
 -- | Custom JSON options for SqliteToolboxDescription to use camelCase field names
 sqliteToolboxOptions :: Aeson.Options
