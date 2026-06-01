@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Widget rendering functions for agents, sessions, message editor, attachments, and queued messages.
+-- | Widget rendering functions for agents, sessions, message editor, attachments, queued messages, and buffers.
 module System.Agents.TUI.Render.Widgets where
 
 import Brick
@@ -18,6 +18,7 @@ import System.Agents.AgentTree (OSAgentNode (..))
 import System.Agents.Base (Agent (..))
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base (Session (..))
+import System.Agents.TUI.Buffer (Buffer, bufferContent)
 import System.Agents.TUI.MessageComposer (
     InputConfig (..),
     SendTrigger (..),
@@ -313,3 +314,46 @@ render_queued_item selectedIdx idx msg =
         truncated = Text.take 60 msg <> if Text.length msg > 60 then "..." else ""
         attr = if isSelected then queuedMessageSelectedAttr else queuedMessageAttr
      in withAttr attr $ txt $ marker <> truncated
+
+-------------------------------------------------------------------------------
+-- Buffer Rendering
+-------------------------------------------------------------------------------
+
+-- | Render the buffer list widget below message editor.
+render_buffer_manager :: TuiState -> Widget N
+render_buffer_manager st =
+    let bufs = st ^. tuiUI . buffers
+        count = length bufs
+     in if count == 0
+            then emptyWidget
+            else render_buffer_panel st count bufs
+
+-- | Render the buffer panel with controls hint.
+render_buffer_panel :: TuiState -> Int -> [Buffer] -> Widget N
+render_buffer_panel st count bufs =
+    borderWithFocus
+        st
+        BufferListWidget
+        (" Buffers (" <> Text.pack (show count) <> ") ")
+        $ vBox
+            [ txt "Enter: resume | Del: delete | Ctrl+Shift+K: clear all"
+            , txt ""
+            , render_buffer_list selectedIdx bufs
+            ]
+  where
+    selectedIdx = st ^. tuiUI . bufferFocus
+
+-- | Render the list of buffers with selection.
+render_buffer_list :: Maybe Int -> [Buffer] -> Widget N
+render_buffer_list selectedIdx bufs =
+    vBox $ zipWith (render_buffer_item selectedIdx) [0 ..] bufs
+
+-- | Render a single buffer item with preview.
+render_buffer_item :: Maybe Int -> Int -> Buffer -> Widget N
+render_buffer_item selectedIdx idx buf =
+    let isSelected = selectedIdx == Just idx
+        marker = if isSelected then "▶ " else "  "
+        preview = Text.take 50 (buf ^. bufferContent)
+        displayText = if Text.null preview then "(empty)" else preview
+        attr = if isSelected then bufferSelectedAttr else bufferAttr
+     in withAttr attr $ txt $ marker <> displayText

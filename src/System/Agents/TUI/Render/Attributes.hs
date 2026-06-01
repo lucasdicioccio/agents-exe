@@ -110,6 +110,14 @@ attachmentSelectedAttr = attrName "attachmentSelected"
 attachmentSizeAttr :: AttrName
 attachmentSizeAttr = attrName "attachmentSize"
 
+-- | Attribute for buffer items.
+bufferAttr :: AttrName
+bufferAttr = attrName "buffer"
+
+-- | Attribute for selected buffer items.
+bufferSelectedAttr :: AttrName
+bufferSelectedAttr = attrName "bufferSelected"
+
 -- | Attribute for dialog overlays.
 dialogAttr :: AttrName
 dialogAttr = attrName "dialog"
@@ -167,6 +175,8 @@ tui_appAttrMap _ =
         , (attachmentAttr, BrickUtil.fg Vty.cyan)
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentSizeAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
+        , (bufferAttr, BrickUtil.fg Vty.cyan)
+        , (bufferSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (dialogAttr, Vty.defAttr `Vty.withBackColor` Vty.black)
         , -- Tree and conversation hierarchy attributes
           (treeBranchAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
