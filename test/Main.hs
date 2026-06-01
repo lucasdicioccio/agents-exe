@@ -294,8 +294,7 @@ agentSerializationTests =
             let sqliteDesc = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "memory"
                     , Base.sqliteToolboxDescription = "a set of memories"
-                    , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
-                    , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/memories.sqlite"
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.SqliteToolbox sqliteDesc
@@ -324,15 +323,13 @@ agentSerializationTests =
             let sqliteDesc1 = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "memory"
                     , Base.sqliteToolboxDescription = "a set of memories"
-                    , Base.sqliteToolboxPath = "/path/to/memories.sqlite"
-                    , Base.sqliteToolboxAccess = Base.SqliteReadWrite
+                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/memories.sqlite"
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let sqliteDesc2 = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "guidelines"
                     , Base.sqliteToolboxDescription = "a set of guidelines"
-                    , Base.sqliteToolboxPath = "/path/to/guidelines.sqlite"
-                    , Base.sqliteToolboxAccess = Base.SqliteReadOnly
+                    , Base.sqliteToolboxVersioning = Base.SqliteNoVersioning
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolboxes = [Base.SqliteToolbox sqliteDesc1, Base.SqliteToolbox sqliteDesc2]
@@ -390,16 +387,31 @@ agentSerializationTests =
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
-        , testCase "SqliteAccessMode round-trip" $ do
-            let readOnly = Base.SqliteReadOnly
-            let jsonRO = encode readOnly
-            let mReadOnly = decode jsonRO :: Maybe Base.SqliteAccessMode
-            mReadOnly @?= Just Base.SqliteReadOnly
+        , testCase "SqliteLifetime round-trip" $ do
+            let lifetimeConv = Base.LifetimeConversation
+            let jsonConv = encode lifetimeConv
+            let mLifetimeConv = decode jsonConv :: Maybe Base.SqliteLifetime
+            mLifetimeConv @?= Just Base.LifetimeConversation
             
-            let readWrite = Base.SqliteReadWrite
-            let jsonRW = encode readWrite
-            let mReadWrite = decode jsonRW :: Maybe Base.SqliteAccessMode
-            mReadWrite @?= Just Base.SqliteReadWrite
+            let lifetimeTurn = Base.LifetimeTurn
+            let jsonTurn = encode lifetimeTurn
+            let mLifetimeTurn = decode jsonTurn :: Maybe Base.SqliteLifetime
+            mLifetimeTurn @?= Just Base.LifetimeTurn
+            
+            let lifetimeToolCall = Base.LifetimeToolCall
+            let jsonToolCall = encode lifetimeToolCall
+            let mLifetimeToolCall = decode jsonToolCall :: Maybe Base.SqliteLifetime
+            mLifetimeToolCall @?= Just Base.LifetimeToolCall
+        , testCase "SqliteVersioningConfig round-trip" $ do
+            let noVersioning = Base.SqliteNoVersioning
+            let jsonNoVer = encode noVersioning
+            let mNoVer = decode jsonNoVer :: Maybe Base.SqliteVersioningConfig
+            mNoVer @?= Just Base.SqliteNoVersioning
+            
+            let versioned = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/db.sqlite"
+            let jsonVer = encode versioned
+            let mVer = decode jsonVer :: Maybe Base.SqliteVersioningConfig
+            mVer @?= Just (Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/db.sqlite")
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
