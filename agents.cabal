@@ -182,6 +182,7 @@ library agents-lib
                     , System.Agents.TUI.Types.Core
                     , System.Agents.TUI.Types.Conversation
                     , System.Agents.TUI.Types.State
+                    , System.Agents.TUI.Buffer
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Render.Attributes
                     , System.Agents.TUI.Render.Conversation

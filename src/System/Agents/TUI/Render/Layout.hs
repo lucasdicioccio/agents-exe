@@ -21,6 +21,7 @@ import System.Agents.TUI.Render.Widgets (
     render_agentDetail,
     render_agentList,
     render_attachmentList,
+    render_buffer_manager,
     render_messageEditor,
     render_messageEditorWithAttachments,
     render_queued_messages_manager,
@@ -95,6 +96,7 @@ renderChatsTab st =
         Just ConversationListWidget -> render_conversationArea st
         Just ConversationViewWidget -> render_conversationArea st
         Just AttachmentListWidget -> render_conversationArea st
+        Just BufferListWidget -> render_conversationArea st
         _ -> render_conversationArea st
 
 -- | Render the History tab content (sessions view).
@@ -126,6 +128,7 @@ render_conversationArea st =
             vBox
                 [ render_messageEditorWithAttachments st conv
                 , render_attachmentList st conv
+                , render_buffer_manager st
                 , render_queued_messages_manager st conv
                 , render_conversationView st
                 , render_shortcutsHelp
@@ -136,7 +139,7 @@ render_shortcutsHelp :: Widget N
 render_shortcutsHelp =
     withAttr (attrName "help") $
         hBox
-            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file"
+            [ txt "Ctrl+E: pause | Ctrl+p: export md | Ctrl+[r|t]: view md | Ctrl+F: attach file | Ctrl+K: save buffer"
             ]
 
 -- | Render status bar if there's a message.
@@ -165,3 +168,4 @@ render_sessionArea st =
             hBox
                 [ render_sessionView st
                 ]
+

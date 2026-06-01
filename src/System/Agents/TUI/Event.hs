@@ -50,42 +50,47 @@ module System.Agents.TUI.Event (
     handleSessionViewEvent,
     handleAgentInfoEvent,
     handleQueuedMessageListEvent,
+    handleBufferListEvent,
     checkTripleNewlineTrigger,
 
     -- * Markdown Export
     handleDumpSessionToMarkdown,
     handleViewSessionWithExternalViewer,
+
+    -- * Buffer Operations
+    handleSaveBuffer,
+    handleResumeBuffer,
+    handleDeleteSelectedBuffer,
+    handleClearAllBuffers,
 ) where
 
 import Brick
 import Brick.BChan (writeBChan)
-import Brick.Focus (focusGetCurrent)
+import Brick.Focus (focusGetCurrent, focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (readTVarIO)
 import Control.Lens (to, use, (%=), (.=), (^.))
-import Control.Monad (filterM, when)
+import Control.Monad (filterM, unless, when)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
-import Data.Time (diffUTCTime, getCurrentTime)
 import qualified Data.Vector as Vector
+import Data.Time (diffUTCTime, getCurrentTime)
 import qualified Graphics.Vty as Vty
+import Prod.Tracer (Tracer (..))
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath ((<.>))
 import System.IO (hPutStrLn, stderr)
-import System.IO.Temp (writeSystemTempFile)
-import System.Process (readProcessWithExitCode)
-
-import Prod.Tracer (Tracer (..))
-
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
+import System.Process (readProcessWithExitCode)
 import System.Agents.Base (AgentId (..), ConversationId (..))
 import System.Agents.Session.Base (
     Session (..),
@@ -97,8 +102,17 @@ import System.Agents.SessionPrint (
     PrintVisibility (..),
     SessionPrintOptions (..),
     formatSessionAsMarkdown,
+    nTurns,
+    noFunnyStamp,
+    orderPreference,
+    repeatSystemPrompt,
+    repeatTools,
+    sessionPrintFile,
+    showToolCallArguments,
+    showToolCallResults,
  )
 import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.TUI.Buffer (bufferContent, newBufferWithContent)
 import System.Agents.TUI.Event.Attachment
 import System.Agents.TUI.Event.Conversation
 import System.Agents.TUI.Event.Dialog
@@ -123,9 +137,9 @@ import System.Agents.TUI.Types (
     Conversation (..),
     ConversationStatus (..),
     N,
-    SessionConfig (..),
     StatusMessage (..),
     StatusSeverity (..),
+    Tab (..),
     TuiAgent (..),
     TuiState,
     TurnNavigationState (..),
@@ -133,6 +147,9 @@ import System.Agents.TUI.Types (
     agentList,
     attachmentDialogState,
     auxiliaryTasks,
+    bufferFocus,
+    buffers,
+    buildFocusRingForTab,
     conversationId,
     conversationList,
     conversationSession,
@@ -148,8 +165,12 @@ import System.Agents.TUI.Types (
     queuedMessagesFocus,
     quitConfirmationPending,
     selectedAgentInfo,
+    selectedAgentInfo,
     sessionConfig,
+    sessionInputConfig,
     sessionList,
+    sessionStore,
+    statusMessage,
     statusMessage,
     tuiAgentId,
     tuiCore,
@@ -172,6 +193,8 @@ defaultHelpContent = generateHelpContent defaultKeyMapping
 initHelpContent :: [Text.Text]
 initHelpContent = defaultHelpContent
 
+-------------------------------------------------------------------------------
+-- Quit Confirmation
 -------------------------------------------------------------------------------
 -- Quit Confirmation
 -------------------------------------------------------------------------------
@@ -340,6 +363,14 @@ handleNormalEvent tracer ev = do
             | matchesEvent keymap EventClearQueuedMessages vtyEv -> do
                 resetQuitConfirmation
                 handleClearQueuedMessages
+        VtyEvent vtyEv
+            | matchesEvent keymap EventSaveBuffer vtyEv -> do
+                resetQuitConfirmation
+                handleSaveBuffer
+        VtyEvent vtyEv
+            | matchesEvent keymap EventClearBuffers vtyEv -> do
+                resetQuitConfirmation
+                handleClearAllBuffers
         VtyEvent vtyEv -> do
             resetQuitConfirmation
             currentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
@@ -353,6 +384,7 @@ handleNormalEvent tracer ev = do
                 Just AgentInfoWidget -> handleAgentInfoEvent vtyEv
                 Just QueuedMessageListWidget -> handleQueuedMessageListEvent vtyEv keymap
                 Just AttachmentListWidget -> handleAttachmentListEvent vtyEv keymap
+                Just BufferListWidget -> handleBufferListEvent vtyEv keymap
                 _ -> pure ()
         _ -> pure ()
 
@@ -566,6 +598,109 @@ handleQueuedMessageListEvent ev keymap = do
                                         handleClearQueuedMessages
                                 _ -> pure ()
 
+-- | Handle buffer list navigation and actions.
+handleBufferListEvent :: Vty.Event -> KeyMapping -> EventM N TuiState ()
+handleBufferListEvent ev keymap = do
+    bufs <- use (tuiUI . buffers)
+    let count = length bufs
+    case ev of
+        Vty.EvKey key mods
+            | matchesEvent keymap EventResumeBuffer (Vty.EvKey key mods) ->
+                handleResumeBuffer
+        Vty.EvKey key mods
+            | matchesEvent keymap EventDeleteItem (Vty.EvKey key mods) ->
+                handleDeleteSelectedBuffer
+        Vty.EvKey key mods
+            | matchesEvent keymap EventClearBuffers (Vty.EvKey key mods) ->
+                handleClearAllBuffers
+        Vty.EvKey key mods
+            | matchesEvent keymap EventNavigateUp (Vty.EvKey key mods) ->
+                tuiUI . bufferFocus %= \mIdx -> case mIdx of
+                    Nothing -> Just (count - 1)
+                    Just idx -> Just (max 0 (idx - 1))
+        Vty.EvKey key mods
+            | matchesEvent keymap EventNavigateDown (Vty.EvKey key mods) ->
+                tuiUI . bufferFocus %= \mIdx -> case mIdx of
+                    Nothing -> Just 0
+                    Just idx -> Just (min (count - 1) (idx + 1))
+        _ -> pure ()
+
+-------------------------------------------------------------------------------
+-- Buffer Operations
+-------------------------------------------------------------------------------
+
+-- | Save current message editor content as a new buffer.
+handleSaveBuffer :: EventM N TuiState ()
+handleSaveBuffer = do
+    msgLines <- use (tuiUI . messageEditor . to getEditContents)
+    let msgText = Text.strip $ Text.unlines msgLines
+    if Text.null msgText
+        then showStatus StatusWarning "No content to save"
+        else do
+            buffer <- liftIO $ newBufferWithContent msgText
+            tuiUI . buffers %= (buffer :) -- Add to front
+            tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+            showStatus StatusInfo "Saved to buffer"
+
+-- | Resume editing selected buffer (swap with current editor content).
+handleResumeBuffer :: EventM N TuiState ()
+handleResumeBuffer = do
+    mIdx <- use (tuiUI . bufferFocus)
+    bufs <- use (tuiUI . buffers)
+    case mIdx of
+        Nothing -> showStatus StatusWarning "Select a buffer first"
+        Just idx | idx < 0 || idx >= length bufs ->
+            showStatus StatusError "Invalid buffer selection"
+        Just idx -> do
+            let selectedBuffer = bufs List.!! idx
+            -- 1. Save current editor content to a new buffer (swap)
+            currentLines <- use (tuiUI . messageEditor . to getEditContents)
+            let currentText = Text.strip $ Text.unlines currentLines
+            unless (Text.null currentText) $ do
+                newBuffer <- liftIO $ newBufferWithContent currentText
+                tuiUI . buffers %= (newBuffer :)
+            -- 2. Load selected buffer content into editor
+            tuiUI . messageEditor . editContentsL .=
+                TextZipper.textZipper (Text.lines $ selectedBuffer ^. bufferContent) Nothing
+            -- 3. Remove selected buffer from list
+            tuiUI . buffers %= deleteAt idx
+            tuiUI . bufferFocus .= Nothing
+            -- 4. Refocus message editor for immediate editing
+            tuiUI . uiFocusRing .= focusSetCurrent MessageEditorWidget
+                (buildFocusRingForTab ChatsTab)
+            showStatus StatusInfo "Buffer resumed"
+
+-- | Delete the currently selected buffer.
+handleDeleteSelectedBuffer :: EventM N TuiState ()
+handleDeleteSelectedBuffer = do
+    mIdx <- use (tuiUI . bufferFocus)
+    case mIdx of
+        Nothing -> showStatus StatusWarning "Select a buffer first"
+        Just idx -> do
+            bufs <- use (tuiUI . buffers)
+            if idx < 0 || idx >= length bufs
+                then pure ()
+                else do
+                    tuiUI . buffers %= deleteAt idx
+                    let newCount = length bufs - 1
+                    tuiUI . bufferFocus .= if newCount == 0
+                        then Nothing
+                        else Just (min idx (newCount - 1))
+                    showStatus StatusInfo "Buffer deleted"
+
+-- | Clear all buffers.
+handleClearAllBuffers :: EventM N TuiState ()
+handleClearAllBuffers = do
+    tuiUI . buffers .= []
+    tuiUI . bufferFocus .= Nothing
+    showStatus StatusInfo "All buffers cleared"
+
+-- | Delete an element at a specific index.
+deleteAt :: Int -> [a] -> [a]
+deleteAt _ [] = []
+deleteAt 0 (_:xs) = xs
+deleteAt n (x:xs) = x : deleteAt (n - 1) xs
+
 -------------------------------------------------------------------------------
 -- Status Messages
 -------------------------------------------------------------------------------
@@ -743,7 +878,9 @@ handleViewSessionWithExternalViewer orderPref = do
             case (mSession, mConvId) of
                 (Just session, Just convId) -> do
                     let markdown = formatSessionMarkdown orderPref session
-                    tempFile <- liftIO $ writeSystemTempFile "session-view-" (Text.unpack markdown)
+                    -- Create a temp file with a unique name based on session id
+                    let tempFile = "/tmp/session-view-" ++ show session.sessionId ++ ".md"
+                    liftIO $ writeFile tempFile (Text.unpack markdown)
                     asyncHandle <- liftIO $ async $ do
                         result <- readProcessWithExitCode viewerCmd [tempFile] ""
                         case result of

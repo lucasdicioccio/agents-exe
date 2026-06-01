@@ -94,6 +94,8 @@ data WidgetName
       AttachmentListWidget
     | -- | For the file path input dialog
       FilePathInputWidget
+    | -- | For the inline buffer list below the message editor
+      BufferListWidget
     deriving (Show, Eq, Ord)
 
 -- | Type alias for widget names.
@@ -299,3 +301,4 @@ mkSessionConfig store apiKeys keymap inputConfig =
         , sessionKeyMapping = keymap
         , sessionInputConfig = inputConfig
         }
+

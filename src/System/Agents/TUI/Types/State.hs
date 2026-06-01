@@ -46,6 +46,8 @@ module System.Agents.TUI.Types.State (
     auxiliaryTasks,
     uiBufferedMessages,
     uiAgentTools,
+    buffers,
+    bufferFocus,
     initUIState,
 
     -- * TUI State
@@ -77,6 +79,7 @@ import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Base (Session)
+import System.Agents.TUI.Buffer (Buffer)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.TUI.Types.Conversation (Conversation)
 import System.Agents.TUI.Types.Core (
@@ -190,6 +193,10 @@ data UIState = UIState
     -- ^ Copy of buffered messages from Core for UI rendering
     , _uiAgentTools :: [(AgentId, [ToolRegistration])]
     -- ^ Tools per agent for display (mirror of Core's coreAgentTools)
+    , _buffers :: [Buffer]
+    -- ^ Global in-memory buffers (most recent first)
+    , _bufferFocus :: Maybe Int
+    -- ^ Index of selected buffer in the widget
     }
 
 makeLenses ''UIState
@@ -206,7 +213,7 @@ buildFocusRingForTab tab =
         AgentsTab ->
             focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
         ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, BufferListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
         HistoryTab ->
             focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
         HelpTab ->
@@ -238,6 +245,8 @@ initUIState helpText agents sessions =
         , _auxiliaryTasks = []
         , _uiBufferedMessages = Map.empty
         , _uiAgentTools = []
+        , _buffers = []
+        , _bufferFocus = Nothing
         }
 
 -------------------------------------------------------------------------------
@@ -259,3 +268,4 @@ data TuiState = TuiState
     }
 
 makeLenses ''TuiState
+

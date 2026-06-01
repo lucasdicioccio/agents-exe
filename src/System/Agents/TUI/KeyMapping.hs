@@ -103,6 +103,9 @@ data EventName
     | EventNavigateDown
     | EventDeleteItem
     | EventOpenConversation
+    | EventSaveBuffer
+    | EventResumeBuffer
+    | EventClearBuffers
     deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | All possible event names.
@@ -136,6 +139,9 @@ eventNameToText EventNavigateUp = "navigate-up"
 eventNameToText EventNavigateDown = "navigate-down"
 eventNameToText EventDeleteItem = "delete-item"
 eventNameToText EventOpenConversation = "open-conversation"
+eventNameToText EventSaveBuffer = "save-buffer"
+eventNameToText EventResumeBuffer = "resume-buffer"
+eventNameToText EventClearBuffers = "clear-buffers"
 
 -- | Parse an EventName from its JSON key representation.
 eventNameFromText :: Text -> Maybe EventName
@@ -164,6 +170,9 @@ eventNameFromText "navigate-up" = Just EventNavigateUp
 eventNameFromText "navigate-down" = Just EventNavigateDown
 eventNameFromText "delete-item" = Just EventDeleteItem
 eventNameFromText "open-conversation" = Just EventOpenConversation
+eventNameFromText "save-buffer" = Just EventSaveBuffer
+eventNameFromText "resume-buffer" = Just EventResumeBuffer
+eventNameFromText "clear-buffers" = Just EventClearBuffers
 eventNameFromText _ = Nothing
 
 instance ToJSON EventName where
@@ -403,6 +412,9 @@ defaultKeyMapping =
             , (EventNavigateDown, [KeyBinding KeyDown noModifiers])
             , (EventDeleteItem, [KeyBinding KeyDelete noModifiers, KeyBinding KeyBackspace noModifiers])
             , (EventOpenConversation, [KeyBinding KeyEnter noModifiers])
+            , (EventSaveBuffer, [KeyBinding (KeyChar 'k') ctrlModifier])
+            , (EventResumeBuffer, [KeyBinding KeyEnter noModifiers])
+            , (EventClearBuffers, [KeyBinding (KeyChar 'K') (Modifiers True False True)])
             ]
 
 -------------------------------------------------------------------------------
@@ -554,6 +566,11 @@ generateHelpContent keymap =
     , "  " <> formatBindings EventDeleteItem <> " - Remove selected attachment"
     , "  " <> formatBindings EventNavigateUp <> "/" <> formatBindings EventNavigateDown <> " - Select attachment"
     , ""
+    , "Buffers:"
+    , "  " <> formatBindings EventSaveBuffer <> " - Save current message as buffer"
+    , "  " <> formatBindings EventResumeBuffer <> " - Resume editing selected buffer"
+    , "  " <> formatBindings EventClearBuffers <> " - Clear all buffers"
+    , ""
     , "Queue Management (when paused):"
     , "  " <> formatBindings EventClearQueuedMessages <> " - Clear all queued messages"
     , "  " <> formatBindings EventDeleteItem <> " - Delete selected queued message"
@@ -642,3 +659,4 @@ mergeWithDefault custom =
     -- InputConfig only has simple fields, so we just use the custom one if it's different from default
     -- The FromJSON instance already provides defaults for missing fields via .!=
     mergeInputConfig customInput _defaultInput = customInput
+

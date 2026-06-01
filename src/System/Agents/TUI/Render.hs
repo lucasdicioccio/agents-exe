@@ -40,6 +40,8 @@ module System.Agents.TUI.Render (
     attachmentAttr,
     attachmentSelectedAttr,
     attachmentSizeAttr,
+    bufferAttr,
+    bufferSelectedAttr,
     dialogAttr,
     subcallAttr,
     defaultAttr,
@@ -111,6 +113,10 @@ module System.Agents.TUI.Render (
     render_queue_panel,
     render_queued_message_list,
     render_queued_item,
+    render_buffer_manager,
+    render_buffer_panel,
+    render_buffer_list,
+    render_buffer_item,
 ) where
 
 import Brick (Widget)
@@ -131,3 +137,4 @@ tui_appDraw st =
         AttachmentDialogPathInput -> [renderFilePathDialog st, render_ui st]
         AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
+
