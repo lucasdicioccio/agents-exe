@@ -638,12 +638,12 @@ Controls how database versions are shared across the conversation lifecycle:
 * 'LifetimeToolCall': Each tool call gets an isolated fresh copy
 -}
 data SqliteLifetime
-    = LifetimeConversation
-    -- ^ One version per conversation - all tool calls share the same database state
-    | LifetimeTurn
-    -- ^ Versions per turn - tool calls within the same turn share state
-    | LifetimeToolCall
-    -- ^ Each tool call gets isolated fresh copy
+    = -- | One version per conversation - all tool calls share the same database state
+      LifetimeConversation
+    | -- | Versions per turn - tool calls within the same turn share state
+      LifetimeTurn
+    | -- | Each tool call gets isolated fresh copy
+      LifetimeToolCall
     deriving (Show, Eq, Ord, Generic)
 
 -- | Serialize SqliteLifetime as kebab-case strings.
@@ -680,7 +680,8 @@ data SqliteVersionHandle = SqliteVersionHandle
     -- ^ Toolbox identifier
     , vhTimestamp :: !Text
     -- ^ ISO8601 timestamp for debugging
-    } deriving (Show, Eq, Ord, Generic)
+    }
+    deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON SqliteVersionHandle
 instance FromJSON SqliteVersionHandle
@@ -693,8 +694,8 @@ Replaces the old 'SqliteAccessMode' with hierarchical versioning support.
 * 'SqliteVersioned': Versioned with hierarchical storage and restoration capabilities
 -}
 data SqliteVersioningConfig
-    = SqliteNoVersioning
-    -- ^ Direct read-write, no versioning - operates on the original database directly
+    = -- | Direct read-write, no versioning - operates on the original database directly
+      SqliteNoVersioning
     | SqliteVersioned
         { vLifetime :: !SqliteLifetime
         -- ^ Lifetime scope for versioned databases
@@ -707,22 +708,24 @@ data SqliteVersioningConfig
 
 instance ToJSON SqliteVersioningConfig where
     toJSON SqliteNoVersioning = Aeson.object ["tag" .= ("SqliteNoVersioning" :: Text)]
-    toJSON (SqliteVersioned lifetime mRoot base) = Aeson.object
-        [ "tag" .= ("SqliteVersioned" :: Text)
-        , "lifetime" .= lifetime
-        , "storageRoot" .= mRoot
-        , "basePath" .= base
-        ]
+    toJSON (SqliteVersioned lifetime mRoot base) =
+        Aeson.object
+            [ "tag" .= ("SqliteVersioned" :: Text)
+            , "lifetime" .= lifetime
+            , "storageRoot" .= mRoot
+            , "basePath" .= base
+            ]
 
 instance FromJSON SqliteVersioningConfig where
     parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
         tag <- v .: "tag"
         case (tag :: Text) of
             "SqliteNoVersioning" -> return SqliteNoVersioning
-            "SqliteVersioned" -> SqliteVersioned
-                <$> v .: "lifetime"
-                <*> v .:? "storageRoot"
-                <*> v .: "basePath"
+            "SqliteVersioned" ->
+                SqliteVersioned
+                    <$> v .: "lifetime"
+                    <*> v .:? "storageRoot"
+                    <*> v .: "basePath"
             other -> fail $ "Unknown SqliteVersioningConfig tag: " ++ Text.unpack other
 
 {- | Configuration for a SQLite builtin toolbox.
@@ -1549,4 +1552,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-

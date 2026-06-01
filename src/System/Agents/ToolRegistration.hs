@@ -1565,7 +1565,7 @@ sqliteTool box =
     run tracer ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "sql") v of
             Just (Aeson.String query) -> do
-                let input = SqliteTools.SqliteQueryInput { SqliteTools.inputSql = query, SqliteTools.inputRestoreFrom = Nothing }
+                let input = SqliteTools.SqliteQueryInput{SqliteTools.inputSql = query, SqliteTools.inputRestoreFrom = Nothing}
                 result <- SqliteTools.executeQuery (Prod.contramap SqliteToolsTrace tracer) box ctx input
                 case result of
                     Left err -> pure $ SqliteToolError call err
@@ -1573,6 +1573,7 @@ sqliteTool box =
             _ -> pure $ SqliteToolError call (SqliteTools.SqlError "Missing 'sql' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SqliteToolError call (SqliteTools.SqlError "Arguments must be a JSON object")
+
 systemTool :: SystemTools.Toolbox -> Tool ()
 systemTool box =
     ToolBase.Tool
