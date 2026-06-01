@@ -9,28 +9,29 @@ import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar)
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, when)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
-import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, formatTime, defaultTimeLocale, getCurrentTime)
+import Data.Time (NominalDiffTime, UTCTime, defaultTimeLocale, diffUTCTime, formatTime, getCurrentTime)
 import qualified Data.UUID as UUID
 import Database.SQLite.Simple (Connection)
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite3 as Direct
-import Prod.Tracer (Tracer(..), runTracer)
+import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (copyFile, createDirectoryIfMissing, doesFileExist)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 
 import System.Agents.Base (
-    SqliteVersionHandle(..), 
-    SqliteVersioningConfig(..), SqliteLifetime(..),
-    SqliteToolboxDescription(..)
-    )
-import System.Agents.Session.Types (SessionId(..), TurnId(..))
-import System.Agents.Tools.Context (ToolExecutionContext(..))
+    SqliteLifetime (..),
+    SqliteToolboxDescription (..),
+    SqliteVersionHandle (..),
+    SqliteVersioningConfig (..),
+ )
+import System.Agents.Session.Types (SessionId (..), TurnId (..))
+import System.Agents.Tools.Context (ToolExecutionContext (..))
 
 -- Types
 data Trace = ConnectionOpenedTrace FilePath | QueryStartedTrace Text
@@ -42,7 +43,8 @@ data SqlOperation = Select | Insert | Update | Delete | Create | Drop | Alter | 
 data SqliteQueryInput = SqliteQueryInput
     { inputSql :: Text
     , inputRestoreFrom :: Maybe SqliteVersionHandle
-    } deriving (Show)
+    }
+    deriving (Show)
 
 instance FromJSON SqliteQueryInput where
     parseJSON = Aeson.withObject "SqliteQueryInput" $ \v ->
@@ -54,15 +56,18 @@ data QueryResult = QueryResult
     , resultRowCount :: Int
     , resultExecutionTime :: NominalDiffTime
     , resultVersionHandle :: Maybe SqliteVersionHandle
-    } deriving (Show)
+    }
+    deriving (Show)
 
 instance ToJSON QueryResult where
-    toJSON result = Aeson.object $
-        [ "columns" .= resultColumns result
-        , "rows" .= resultRows result
-        , "rowCount" .= resultRowCount result
-        , "executionTime" .= resultExecutionTime result
-        ] ++ ["versionHandle" .= h | Just h <- [resultVersionHandle result]]
+    toJSON result =
+        Aeson.object $
+            [ "columns" .= resultColumns result
+            , "rows" .= resultRows result
+            , "rowCount" .= resultRowCount result
+            , "executionTime" .= resultExecutionTime result
+            ]
+                ++ ["versionHandle" .= h | Just h <- [resultVersionHandle result]]
 
 data QueryError = SqlError Text | ConnectionError Text | RestoreError Text
     deriving (Show, Eq)
@@ -79,7 +84,8 @@ data ToolDescription = ToolDescription
     { toolDescriptionName :: Text
     , toolDescriptionDescription :: Text
     , toolDescriptionToolboxName :: Text
-    } deriving (Show)
+    }
+    deriving (Show)
 
 -- Path resolution
 getDefaultStorageRoot :: IO FilePath
@@ -106,7 +112,7 @@ turnIdToPath :: TurnId -> String
 turnIdToPath (TurnId uuid) = map (\c -> if c == '-' then '_' else c) (show uuid)
 
 buildVersionPath :: FilePath -> SqliteLifetime -> SessionId -> TurnId -> Int -> Text -> FilePath
-buildVersionPath root lifetime session turn idx name = 
+buildVersionPath root lifetime session turn idx name =
     let sessionDir = root </> sessionIdToPath session
         turnComponent = case lifetime of
             LifetimeConversation -> "shared"
@@ -114,7 +120,7 @@ buildVersionPath root lifetime session turn idx name =
         callComponent = case lifetime of
             LifetimeToolCall -> "call-" ++ show idx
             _ -> "current"
-    in sessionDir </> turnComponent </> callComponent </> Text.unpack name ++ ".sqlite"
+     in sessionDir </> turnComponent </> callComponent </> Text.unpack name ++ ".sqlite"
 
 resolveVersionPath :: SqliteVersioningConfig -> Text -> SqliteVersionHandle -> IO (Either QueryError FilePath)
 resolveVersionPath config expectedName handle =
@@ -160,19 +166,19 @@ withConnection path action = do
 
 -- Query classification
 classifyQuery :: Text -> SqlOperation
-classifyQuery query = 
+classifyQuery query =
     let stripped = Text.dropWhile (`elem` [' ', '\t', '\n', '\r']) query
-        firstWord = Text.toUpper $ Text.takeWhile (`elem` (['A'..'Z'] ++ ['a'..'z'])) stripped
-    in case firstWord of
-        "SELECT" -> Select
-        "INSERT" -> Insert
-        "UPDATE" -> Update
-        "DELETE" -> Delete
-        "CREATE" -> Create
-        "DROP" -> Drop
-        "ALTER" -> Alter
-        "WITH" -> Select
-        _ -> Other
+        firstWord = Text.toUpper $ Text.takeWhile (`elem` (['A' .. 'Z'] ++ ['a' .. 'z'])) stripped
+     in case firstWord of
+            "SELECT" -> Select
+            "INSERT" -> Insert
+            "UPDATE" -> Update
+            "DELETE" -> Delete
+            "CREATE" -> Create
+            "DROP" -> Drop
+            "ALTER" -> Alter
+            "WITH" -> Select
+            _ -> Other
 
 isWriteOperation :: SqlOperation -> Bool
 isWriteOperation Select = False
@@ -190,17 +196,19 @@ initializeToolbox _tracer desc = do
                 conn <- SQLite.open basePath
                 SQLite.close conn
         SqliteNoVersioning -> pure ()
-    pure $ Right $ Toolbox
-        { toolboxName = sqliteToolboxName desc
-        , toolboxDescription = sqliteToolboxDescription desc
-        , toolboxConfig = desc
-        , toolboxLock = lock
-        , toolboxWriteCounter = counter
-        }
+    pure $
+        Right $
+            Toolbox
+                { toolboxName = sqliteToolboxName desc
+                , toolboxDescription = sqliteToolboxDescription desc
+                , toolboxConfig = desc
+                , toolboxLock = lock
+                , toolboxWriteCounter = counter
+                }
 
 -- Query execution
 executeQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteQueryInput -> IO (Either QueryError QueryResult)
-executeQuery tracer toolbox ctx input = 
+executeQuery tracer toolbox ctx input =
     withMVar (toolboxLock toolbox) $ \() -> do
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
             SqliteNoVersioning -> executeDirectQuery tracer toolbox input
@@ -222,7 +230,7 @@ executeVersionedQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> S
 executeVersionedQuery tracer toolbox ctx lifetime basePath input = do
     runTracer tracer (QueryStartedTrace (inputSql input))
     startTime <- getCurrentTime
-    
+
     sourcePath <- case inputRestoreFrom input of
         Just handle -> do
             let config = sqliteToolboxVersioning (toolboxConfig toolbox)
@@ -231,59 +239,68 @@ executeVersionedQuery tracer toolbox ctx lifetime basePath input = do
                 Right path -> pure path
                 Left _ -> pure basePath
         Nothing -> pure basePath
-    
+
     let operation = classifyQuery (inputSql input)
-    callIdx <- if isWriteOperation operation
-        then atomically $ do
-            idx <- readTVar (toolboxWriteCounter toolbox)
-            modifyTVar' (toolboxWriteCounter toolbox) (+1)
-            pure idx
-        else pure 0
-    
+    callIdx <-
+        if isWriteOperation operation
+            then atomically $ do
+                idx <- readTVar (toolboxWriteCounter toolbox)
+                modifyTVar' (toolboxWriteCounter toolbox) (+ 1)
+                pure idx
+            else pure 0
+
     root <- getStorageRoot (sqliteToolboxVersioning (toolboxConfig toolbox))
     let targetPath = buildVersionPath root lifetime (ctxSessionId ctx) (ctxTurnId ctx) callIdx (toolboxName toolbox)
-    
+
     targetExists <- doesFileExist targetPath
     unless targetExists $ copyDatabaseWithWAL sourcePath targetPath
-    
+
     result <- executeOnPath tracer targetPath (inputSql input) startTime
-    
+
     timestamp <- formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" <$> getCurrentTime
-    let _mHandle = if isWriteOperation operation
-        then Just $ SqliteVersionHandle
-            { vhSessionId = Text.pack $ sessionIdToPath (ctxSessionId ctx)
-            , vhTurnId = Text.pack $ turnIdToPath (ctxTurnId ctx)
-            , vhToolCallIndex = callIdx
-            , vhToolboxName = toolboxName toolbox
-            , vhTimestamp = Text.pack timestamp
-            }
-        else Nothing
-    
+    let _mHandle =
+            if isWriteOperation operation
+                then
+                    Just $
+                        SqliteVersionHandle
+                            { vhSessionId = Text.pack $ sessionIdToPath (ctxSessionId ctx)
+                            , vhTurnId = Text.pack $ turnIdToPath (ctxTurnId ctx)
+                            , vhToolCallIndex = callIdx
+                            , vhToolboxName = toolboxName toolbox
+                            , vhTimestamp = Text.pack timestamp
+                            }
+                else Nothing
+
     pure $ case result of
         Left err -> Left err
-        Right r -> Right $ r { resultVersionHandle = Nothing }
+        Right r -> Right $ r{resultVersionHandle = Nothing}
 
 executeOnPath :: Tracer IO Trace -> FilePath -> Text -> UTCTime -> IO (Either QueryError QueryResult)
 executeOnPath _tracer path query startTime = do
     directDb <- Direct.open (Text.pack path)
     stmt <- Direct.prepare directDb query
     colCount <- Direct.columnCount stmt
-    columnNames <- mapM (\i -> do
-        mName <- Direct.columnName stmt i
-        pure $ maybe (Text.pack $ "column_" ++ show i) id mName
-        ) [0 .. fromIntegral colCount - 1]
+    columnNames <-
+        mapM
+            ( \i -> do
+                mName <- Direct.columnName stmt i
+                pure $ maybe (Text.pack $ "column_" ++ show i) id mName
+            )
+            [0 .. fromIntegral colCount - 1]
     rows <- collectRows stmt colCount
     Direct.finalize stmt
     Direct.close directDb
     endTime <- getCurrentTime
     let execTime = diffUTCTime endTime startTime
-    pure $ Right $ QueryResult
-        { resultColumns = columnNames
-        , resultRows = rows
-        , resultRowCount = length rows
-        , resultExecutionTime = execTime
-        , resultVersionHandle = Nothing
-        }
+    pure $
+        Right $
+            QueryResult
+                { resultColumns = columnNames
+                , resultRows = rows
+                , resultRowCount = length rows
+                , resultExecutionTime = execTime
+                , resultVersionHandle = Nothing
+                }
   where
     collectRows stmt colCount = do
         stepResult <- Direct.step stmt
@@ -327,23 +344,26 @@ executeViaDirect tracer conn query startTime = do
         Right r -> pure r
 
 makeToolDescription :: Toolbox -> ToolDescription
-makeToolDescription toolbox = ToolDescription
-    { toolDescriptionName = toolboxName toolbox <> "_query"
-    , toolDescriptionDescription = "Execute SQL on " <> toolboxDescription toolbox
-    , toolDescriptionToolboxName = toolboxName toolbox
-    }
+makeToolDescription toolbox =
+    ToolDescription
+        { toolDescriptionName = toolboxName toolbox <> "_query"
+        , toolDescriptionDescription = "Execute SQL on " <> toolboxDescription toolbox
+        , toolDescriptionToolboxName = toolboxName toolbox
+        }
 
 buildToolSchema :: Toolbox -> Aeson.Value
-buildToolSchema toolbox = Aeson.object
-    [ "name" .= ("sqlite_" <> toolboxName toolbox <> "_query")
-    , "description" .= (toolboxDescription toolbox <> " Supports restore_from for versioned rollbacks.")
-    , "parameters" .= Aeson.object
-        [ "type" .= ("object" :: Text)
-        , "properties" .= Aeson.object
-            [ "sql" .= Aeson.object ["type" .= ("string" :: Text), "description" .= ("SQL query to execute" :: Text)]
-            , "restore_from" .= Aeson.object ["type" .= ("object" :: Text), "description" .= ("Version handle for restoration" :: Text)]
-            ]
-        , "required" .= (["sql"] :: [Text])
+buildToolSchema toolbox =
+    Aeson.object
+        [ "name" .= ("sqlite_" <> toolboxName toolbox <> "_query")
+        , "description" .= (toolboxDescription toolbox <> " Supports restore_from for versioned rollbacks.")
+        , "parameters"
+            .= Aeson.object
+                [ "type" .= ("object" :: Text)
+                , "properties"
+                    .= Aeson.object
+                        [ "sql" .= Aeson.object ["type" .= ("string" :: Text), "description" .= ("SQL query to execute" :: Text)]
+                        , "restore_from" .= Aeson.object ["type" .= ("object" :: Text), "description" .= ("Version handle for restoration" :: Text)]
+                        ]
+                , "required" .= (["sql"] :: [Text])
+                ]
         ]
-    ]
-
