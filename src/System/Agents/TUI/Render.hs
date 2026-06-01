@@ -137,4 +137,3 @@ tui_appDraw st =
         AttachmentDialogPathInput -> [renderFilePathDialog st, render_ui st]
         AttachmentDialogFileBrowser -> [renderFileBrowserDialog st, render_ui st]
         AttachmentDialogClosed -> [render_ui st]
-

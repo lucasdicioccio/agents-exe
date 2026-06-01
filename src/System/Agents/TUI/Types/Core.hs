@@ -301,4 +301,3 @@ mkSessionConfig store apiKeys keymap inputConfig =
         , sessionKeyMapping = keymap
         , sessionInputConfig = inputConfig
         }
-

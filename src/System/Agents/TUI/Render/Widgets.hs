@@ -357,4 +357,3 @@ render_buffer_item selectedIdx idx buf =
         displayText = if Text.null preview then "(empty)" else preview
         attr = if isSelected then bufferSelectedAttr else bufferAttr
      in withAttr attr $ txt $ marker <> displayText
-

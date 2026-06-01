@@ -268,4 +268,3 @@ data TuiState = TuiState
     }
 
 makeLenses ''TuiState
-

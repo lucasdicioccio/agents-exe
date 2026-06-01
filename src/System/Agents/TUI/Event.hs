@@ -81,16 +81,11 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import qualified Data.Text.Zipper as TextZipper
-import qualified Data.Vector as Vector
 import Data.Time (diffUTCTime, getCurrentTime)
+import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import Prod.Tracer (Tracer (..))
-import System.Environment (lookupEnv)
-import System.Exit (ExitCode (..))
-import System.FilePath ((<.>))
-import System.IO (hPutStrLn, stderr)
 import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
-import System.Process (readProcessWithExitCode)
 import System.Agents.Base (AgentId (..), ConversationId (..))
 import System.Agents.Session.Base (
     Session (..),
@@ -165,12 +160,10 @@ import System.Agents.TUI.Types (
     queuedMessagesFocus,
     quitConfirmationPending,
     selectedAgentInfo,
-    selectedAgentInfo,
     sessionConfig,
     sessionInputConfig,
     sessionList,
     sessionStore,
-    statusMessage,
     statusMessage,
     tuiAgentId,
     tuiCore,
@@ -182,6 +175,11 @@ import System.Agents.TUI.Types (
     uiFocusRing,
     unreadConversations,
  )
+import System.Environment (lookupEnv)
+import System.Exit (ExitCode (..))
+import System.FilePath ((<.>))
+import System.IO (hPutStrLn, stderr)
+import System.Process (readProcessWithExitCode)
 
 {- | Default keyboard shortcuts help content.
 Generated from the default key mapping.
@@ -649,8 +647,9 @@ handleResumeBuffer = do
     bufs <- use (tuiUI . buffers)
     case mIdx of
         Nothing -> showStatus StatusWarning "Select a buffer first"
-        Just idx | idx < 0 || idx >= length bufs ->
-            showStatus StatusError "Invalid buffer selection"
+        Just idx
+            | idx < 0 || idx >= length bufs ->
+                showStatus StatusError "Invalid buffer selection"
         Just idx -> do
             let selectedBuffer = bufs List.!! idx
             -- 1. Save current editor content to a new buffer (swap)
@@ -660,14 +659,16 @@ handleResumeBuffer = do
                 newBuffer <- liftIO $ newBufferWithContent currentText
                 tuiUI . buffers %= (newBuffer :)
             -- 2. Load selected buffer content into editor
-            tuiUI . messageEditor . editContentsL .=
-                TextZipper.textZipper (Text.lines $ selectedBuffer ^. bufferContent) Nothing
+            tuiUI . messageEditor . editContentsL
+                .= TextZipper.textZipper (Text.lines $ selectedBuffer ^. bufferContent) Nothing
             -- 3. Remove selected buffer from list
             tuiUI . buffers %= deleteAt idx
             tuiUI . bufferFocus .= Nothing
             -- 4. Refocus message editor for immediate editing
-            tuiUI . uiFocusRing .= focusSetCurrent MessageEditorWidget
-                (buildFocusRingForTab ChatsTab)
+            tuiUI . uiFocusRing
+                .= focusSetCurrent
+                    MessageEditorWidget
+                    (buildFocusRingForTab ChatsTab)
             showStatus StatusInfo "Buffer resumed"
 
 -- | Delete the currently selected buffer.
@@ -683,9 +684,10 @@ handleDeleteSelectedBuffer = do
                 else do
                     tuiUI . buffers %= deleteAt idx
                     let newCount = length bufs - 1
-                    tuiUI . bufferFocus .= if newCount == 0
-                        then Nothing
-                        else Just (min idx (newCount - 1))
+                    tuiUI . bufferFocus
+                        .= if newCount == 0
+                            then Nothing
+                            else Just (min idx (newCount - 1))
                     showStatus StatusInfo "Buffer deleted"
 
 -- | Clear all buffers.
@@ -698,8 +700,8 @@ handleClearAllBuffers = do
 -- | Delete an element at a specific index.
 deleteAt :: Int -> [a] -> [a]
 deleteAt _ [] = []
-deleteAt 0 (_:xs) = xs
-deleteAt n (x:xs) = x : deleteAt (n - 1) xs
+deleteAt 0 (_ : xs) = xs
+deleteAt n (x : xs) = x : deleteAt (n - 1) xs
 
 -------------------------------------------------------------------------------
 -- Status Messages

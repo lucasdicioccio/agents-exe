@@ -168,4 +168,3 @@ render_sessionArea st =
             hBox
                 [ render_sessionView st
                 ]
-

@@ -659,4 +659,3 @@ mergeWithDefault custom =
     -- InputConfig only has simple fields, so we just use the custom one if it's different from default
     -- The FromJSON instance already provides defaults for missing fields via .!=
     mergeInputConfig customInput _defaultInput = customInput
-

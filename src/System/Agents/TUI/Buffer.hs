@@ -49,7 +49,8 @@ data Buffer = Buffer
     { _bufferId :: BufferId
     , _bufferContent :: Text
     , _bufferCreatedAt :: UTCTime
-    , _bufferParentBuffer :: Maybe BufferId  -- ^ For future versioning support
+    , _bufferParentBuffer :: Maybe BufferId
+    -- ^ For future versioning support
     }
     deriving (Show, Eq)
 
@@ -98,4 +99,3 @@ updateBufferContent newContent buffer = do
             { _bufferContent = newContent
             , _bufferCreatedAt = now
             }
-
