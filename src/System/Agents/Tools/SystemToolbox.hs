@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- | Provides a runtime for gathering system information.
 
@@ -8,6 +10,7 @@ This module implements the system toolbox functionality, including:
 * System information gathering (date, OS info, environment variables, etc.)
 * File attachment capability for multi-modal LLM interactions
 * Session introspection capabilities (list-sessions, search-sessions, read-session, get-session-stats)
+* Directory listing with metadata, filtering, and scope enforcement
 * Capability-based access control
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
@@ -51,6 +54,10 @@ module System.Agents.Tools.SystemToolbox (
     QueryError (..),
     QueryResult (..),
     AttachFileResult (..),
+    ListDirectoryResult (..),
+    DirEntry (..),
+    EntryType (..),
+    OrderBy (..),
 
     -- * Initialization (re-exported from Core)
     initializeToolbox,
@@ -68,6 +75,8 @@ module System.Agents.Tools.SystemToolbox (
     -- * File attachment (re-exported from Attachment)
     executeAttachFile,
     maxFileSize,
+    executeListDirectory,
+    getCapabilityInfo,
 
     -- * Media type detection (re-exported from Media)
     detectMediaType,

@@ -98,6 +98,8 @@ data CallResult call
       SqliteToolError call SqliteTools.QueryError
     | -- | System tool executed successfully with query results
       SystemToolResult call SystemTools.QueryResult
+    | -- | System tool list directory result
+      SystemToolListDirectoryResult call SystemTools.ListDirectoryResult
     | -- | System tool execution failed
       SystemToolError call SystemTools.QueryError
     | -- | Developer tool validation result
@@ -143,6 +145,7 @@ mapCallResult f c =
         (SqliteToolResult callCtx r) -> SqliteToolResult (f callCtx) r
         (SqliteToolError callCtx e) -> SqliteToolError (f callCtx) e
         (SystemToolResult v r) -> SystemToolResult (f v) r
+        (SystemToolListDirectoryResult v r) -> SystemToolListDirectoryResult (f v) r
         (SystemToolError v e) -> SystemToolError (f v) e
         (DeveloperToolResult v r) -> DeveloperToolResult (f v) r
         (DeveloperToolScaffoldResult v r) -> DeveloperToolScaffoldResult (f v) r
@@ -180,6 +183,7 @@ extractCall (PostgRESToolError c _) = c
 extractCall (SqliteToolResult c _) = c
 extractCall (SqliteToolError c _) = c
 extractCall (SystemToolResult c _) = c
+extractCall (SystemToolListDirectoryResult c _) = c
 extractCall (SystemToolError c _) = c
 extractCall (DeveloperToolResult c _) = c
 extractCall (DeveloperToolScaffoldResult c _) = c
@@ -236,6 +240,8 @@ callResultByteSize (SqliteToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 callResultByteSize (SystemToolResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (SystemToolListDirectoryResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (SystemToolError _ err) =
     fromIntegral (LByteString.length (Aeson.encode (Aeson.String (Text.pack $ show err))))
 callResultByteSize (DeveloperToolResult _ result) =
@@ -268,3 +274,4 @@ multiple tool results in a single step.
 -}
 sumToolResponseBytes :: [CallResult call] -> Int
 sumToolResponseBytes = sum . map callResultByteSize
+

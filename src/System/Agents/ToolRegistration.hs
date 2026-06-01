@@ -946,6 +946,7 @@ and optional parameters:
 - 'query' for the 'search-sessions' capability
 - 'take_n', 'drop_n', 'offset', 'limit' for session slicing (read-session)
 - 'include_thinking', 'include_tool_responses' for content filtering (read-session)
+- 'path', 'recursive', 'include_hidden', 'order_by', 'limit' for the 'list-directory' capability
 
 The activation is extracted from the toolbox configuration's
 'systemToolboxActivation' field.
@@ -964,7 +965,7 @@ registerSystemTool box =
         toolDescription =
             ToolDescription
                 { toolDescriptionName = llmName
-                , toolDescriptionText = "Provides system information and file attachment: " <> box.toolboxDescription
+                , toolDescriptionText = "Provides system information, file attachment, and directory listing: " <> box.toolboxDescription
                 , toolDescriptionParamProperties = paramProps
                 }
 
@@ -1081,6 +1082,37 @@ buildSystemToolParams box =
 
         hasCapability cap = cap `elem` box.toolboxCapabilities
 
+        -- list-directory parameters
+        listDirParams =
+            if hasCapability SystemToolListDirectory
+                then
+                    [ ParamProperty
+                        { propertyKey = "path"
+                        , propertyType = StringParamType
+                        , propertyDescription = "For list-directory: Directory path to list"
+                        , propertyRequired = False
+                        }
+                    , ParamProperty
+                        { propertyKey = "recursive"
+                        , propertyType = BoolParamType
+                        , propertyDescription = "For list-directory: Include subdirectories recursively (default: false)"
+                        , propertyRequired = False
+                        }
+                    , ParamProperty
+                        { propertyKey = "include_hidden"
+                        , propertyType = BoolParamType
+                        , propertyDescription = "For list-directory: Include hidden files/dotfiles (default: false)"
+                        , propertyRequired = False
+                        }
+                    , ParamProperty
+                        { propertyKey = "order_by"
+                        , propertyType = StringParamType
+                        , propertyDescription = "For list-directory: Sort order - 'name', 'size', 'mod_time', or 'type' (default: 'name')"
+                        , propertyRequired = False
+                        }
+                    ]
+                else []
+
         -- Add optional parameters only if their respective capabilities are enabled
         optionalParams =
             (if hasCapability SystemToolAttachFile then [filepathParam] else [])
@@ -1097,6 +1129,7 @@ buildSystemToolParams box =
                         else []
                    )
                 ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
+                ++ listDirParams
      in
         baseParams ++ optionalParams
 
@@ -1115,6 +1148,7 @@ capabilityToText SystemToolListSessions = "list-sessions"
 capabilityToText SystemToolSearchSessions = "search-sessions"
 capabilityToText SystemToolReadSession = "read-session"
 capabilityToText SystemToolGetSessionStats = "get-session-stats"
+capabilityToText SystemToolListDirectory = "list-directory"
 
 {- | Register all tools from a System toolbox.
 
@@ -1323,6 +1357,8 @@ devCapabilityToText DevToolPatchFile = "patch-file"
 devCapabilityToText DevToolHelp = "help"
 devCapabilityToText DevToolSnapshot = "snapshot"
 devCapabilityToText DevToolRestoreFile = "restore-file"
+devCapabilityToText DevToolListDirectory = "list-directory"
+devCapabilityToText DevToolTraverseDirectory = "traverse-directory"
 
 {- | Register all tools from a Developer toolbox.
 
@@ -1674,28 +1710,30 @@ systemTool box =
     run tracer _ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
-                -- Check if this is the attach-file capability
+                -- Route based on capability
                 if cap == "attach-file"
                     then handleAttachFile tracer v
-                    else do
-                        -- Extract optional parameters for session introspection capabilities
-                        let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
-                                Just (Aeson.String sid) -> Just sid
-                                _ -> Nothing
-                        let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
-                                Just (Aeson.String q) -> Just q
-                                _ -> Nothing
+                    else if cap == "list-directory"
+                        then handleListDirectory tracer v
+                        else do
+                            -- Extract optional parameters for session introspection capabilities
+                            let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
+                                    Just (Aeson.String sid) -> Just sid
+                                    _ -> Nothing
+                            let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
+                                    Just (Aeson.String q) -> Just q
+                                    _ -> Nothing
 
-                        -- Extract read-session parameters
-                        let mReadParams =
-                                if cap == "read-session"
-                                    then Just $ extractReadSessionParams v
-                                    else Nothing
+                            -- Extract read-session parameters
+                            let mReadParams =
+                                    if cap == "read-session"
+                                        then Just $ extractReadSessionParams v
+                                        else Nothing
 
-                        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
-                        case result of
-                            Left err -> pure $ SystemToolError call err
-                            Right rsp -> pure $ SystemToolResult call rsp
+                            result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
+                            case result of
+                                Left err -> pure $ SystemToolError call err
+                                Right rsp -> pure $ SystemToolResult call rsp
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
@@ -1748,6 +1786,30 @@ systemTool box =
         case KeyMap.lookup (AesonKey.fromText key) obj of
             Just (Aeson.Bool b) -> b
             _ -> False
+
+    -- Handle the list-directory capability
+    handleListDirectory :: Tracer IO Trace -> Aeson.Object -> IO (CallResult ())
+    handleListDirectory tracer params = do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String dirPath) -> do
+                let recursive = case KeyMap.lookup (AesonKey.fromText "recursive") params of
+                        Just (Aeson.Bool b) -> b
+                        _ -> False
+                let includeHidden = case KeyMap.lookup (AesonKey.fromText "include_hidden") params of
+                        Just (Aeson.Bool b) -> b
+                        _ -> False
+                let orderBy = case KeyMap.lookup (AesonKey.fromText "order_by") params of
+                        Just (Aeson.String o) -> maybe SystemTools.OrderByName id (SystemTools.parseOrderBy o)
+                        _ -> SystemTools.OrderByName
+                let mLimit = case KeyMap.lookup (AesonKey.fromText "limit") params of
+                        Just (Aeson.Number n) -> Just (round n :: Int)
+                        _ -> Nothing
+
+                result <- SystemTools.executeListDirectory (Prod.contramap SystemToolsTrace tracer) box (Text.unpack dirPath) recursive includeHidden orderBy mLimit
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right listResult -> pure $ SystemToolListDirectoryResult call listResult
+            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'path' parameter for list-directory capability")
 
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
@@ -2364,3 +2426,4 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
+
