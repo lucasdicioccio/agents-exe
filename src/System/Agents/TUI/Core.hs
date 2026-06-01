@@ -57,6 +57,15 @@ module System.Agents.TUI.Core (
     helpContent,
     keyMapping,
     sessionConfig,
+    buffers,
+    bufferFocus,
+
+    -- * Re-exports from Buffer
+    Buffer,
+    BufferId,
+    newBuffer,
+    newBufferWithContent,
+    updateBufferContent,
 
     -- * Re-exports from KeyMapping
     EventName (..),
@@ -144,6 +153,13 @@ import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration)
 
 -- Import from submodules
+import System.Agents.TUI.Buffer (
+    Buffer,
+    BufferId,
+    newBuffer,
+    newBufferWithContent,
+    updateBufferContent,
+ )
 import System.Agents.TUI.Event (
     Trace (..),
     cycleTabBackward,
