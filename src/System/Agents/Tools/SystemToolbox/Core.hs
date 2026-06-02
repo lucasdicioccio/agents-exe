@@ -237,6 +237,7 @@ capabilityFromName name = case name of
     "search-sessions" -> Just SystemToolSearchSessions
     "read-session" -> Just SystemToolReadSession
     "get-session-stats" -> Just SystemToolGetSessionStats
+    "list-directory" -> Just SystemToolListDirectory
     _ -> Nothing
 
 -- | Get the name for a capability.

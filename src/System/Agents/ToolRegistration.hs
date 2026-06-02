@@ -1713,7 +1713,9 @@ systemTool box =
                 -- Route based on capability
                 if cap == "attach-file"
                     then handleAttachFile tracer v
-                    else do
+                    else if cap == "list-directory"
+                        then handleListDirectory tracer v
+                        else do
                             -- Extract optional parameters for session introspection capabilities
                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                     Just (Aeson.String sid) -> Just sid
@@ -1758,6 +1760,26 @@ systemTool box =
                                     Right bytes ->
                                         pure $ BlobToolSuccess call bytes (Just mt)
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'filepath' parameter for attach-file capability")
+
+    -- Handle the list-directory capability
+    handleListDirectory :: Tracer IO Trace -> Aeson.Object -> IO (CallResult ())
+    handleListDirectory tracer params = do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String dirPath) -> do
+                let doRecurse = case KeyMap.lookup (AesonKey.fromText "recursive") params of
+                        Just (Aeson.Bool b) -> b
+                        _ -> False
+                let doHidden = case KeyMap.lookup (AesonKey.fromText "include_hidden") params of
+                        Just (Aeson.Bool b) -> b
+                        _ -> False
+                let namePatterns = case KeyMap.lookup (AesonKey.fromText "name_patterns") params of
+                        Just (Aeson.Array arr) -> [t | Aeson.String t <- foldr (:) [] arr]
+                        _ -> []
+                result <- SystemTools.executeListDirectory (Prod.contramap SystemToolsTrace tracer) box (Text.unpack dirPath) doRecurse doHidden namePatterns
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right listResult -> pure $ SystemToolResult call (SystemTools.QueryResult "list-directory" listResult 0)
+            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'path' parameter for list-directory capability")
 
     -- Extract read-session parameters from the tool call arguments
     extractReadSessionParams :: Aeson.Object -> SystemTools.ReadSessionParams
