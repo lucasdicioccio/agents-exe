@@ -54,10 +54,6 @@ module System.Agents.Tools.SystemToolbox (
     QueryError (..),
     QueryResult (..),
     AttachFileResult (..),
-    ListDirectoryResult (..),
-    DirEntry (..),
-    EntryType (..),
-    OrderBy (..),
 
     -- * Initialization (re-exported from Core)
     initializeToolbox,
@@ -75,8 +71,6 @@ module System.Agents.Tools.SystemToolbox (
     -- * File attachment (re-exported from Attachment)
     executeAttachFile,
     maxFileSize,
-    executeListDirectory,
-    getCapabilityInfo,
 
     -- * Media type detection (re-exported from Media)
     detectMediaType,

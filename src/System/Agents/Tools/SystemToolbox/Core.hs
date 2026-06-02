@@ -254,6 +254,7 @@ capabilityToName SystemToolListSessions = "list-sessions"
 capabilityToName SystemToolSearchSessions = "search-sessions"
 capabilityToName SystemToolReadSession = "read-session"
 capabilityToName SystemToolGetSessionStats = "get-session-stats"
+capabilityToName SystemToolListDirectory = "list-directory"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -310,6 +311,7 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolSearchSessions -> getSearchSessionsInfo (toolboxSessionIntrospection toolbox) mQuery
             SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox) mSessionId (fromMaybe defaultReadSessionParams mReadParams)
             SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
+            SystemToolListDirectory -> pure ("list-directory", Aeson.String "list-directory capability not yet implemented for system toolbox")
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e

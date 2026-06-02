@@ -447,6 +447,41 @@ buildCapabilityHelp cap = case cap of
             , "Note: Requires the 'snapshot' capability to be enabled to have stored snapshots."
             , ""
             ]
+    DevToolListDirectory ->
+        Text.unlines
+            [ "list-directory"
+            , "--------------"
+            , "Lists directory contents with metadata."
+            , ""
+            , "Parameters:"
+            , "  - path (string, required): Directory path to list"
+            , "  - recursive (bool, optional): Recurse into subdirectories (default: false)"
+            , "  - include_hidden (bool, optional): Include hidden files/dotfiles (default: false)"
+            , "  - name_patterns (array of strings, optional): Glob patterns to filter by name"
+            , ""
+            , "Returns: DirectoryListingResult with:"
+            , "  - path: The directory path listed"
+            , "  - entries: Array of file entry metadata objects"
+            , "  - entryCount: Number of entries returned"
+            , "  - recursive: Whether recursive listing was used"
+            , ""
+            ]
+    DevToolTraverseDirectory ->
+        Text.unlines
+            [ "traverse-directory"
+            , "------------------"
+            , "Recursively traverses a directory tree and returns all entries within scope."
+            , ""
+            , "Parameters:"
+            , "  - path (string, required): Root directory path to traverse"
+            , ""
+            , "Returns: DirectoryListingResult with:"
+            , "  - path: The root directory path"
+            , "  - entries: Array of all file entry metadata objects"
+            , "  - entryCount: Total number of entries found"
+            , "  - recursive: Always true"
+            , ""
+            ]
 
 -- | Get short name for a capability.
 capabilityToShortName :: DeveloperToolCapability -> Text
@@ -463,6 +498,8 @@ capabilityToShortName DevToolPatchFile = "patch-file"
 capabilityToShortName DevToolHelp = "help"
 capabilityToShortName DevToolSnapshot = "snapshot"
 capabilityToShortName DevToolRestoreFile = "restore-file"
+capabilityToShortName DevToolListDirectory = "list-directory"
+capabilityToShortName DevToolTraverseDirectory = "traverse-directory"
 
 {- | Build comprehensive help text for all capabilities.
 

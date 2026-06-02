@@ -157,7 +157,6 @@ callResultToUserToolResponse _ result =
         SqliteToolError _ err ->
             JsonResponse $ Aeson.object ["error" .= ("SQLite tool error: " <> show err)]
         SystemToolResult _ toolResult -> JsonResponse $ Aeson.toJSON toolResult
-        SystemToolListDirectoryResult _ listResult -> JsonResponse $ Aeson.toJSON listResult
         SystemToolError _ err ->
             JsonResponse $ Aeson.object ["error" .= ("System tool error: " <> show err)]
         DeveloperToolResult _ valResult -> JsonResponse $ Aeson.toJSON valResult

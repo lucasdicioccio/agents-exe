@@ -1713,9 +1713,7 @@ systemTool box =
                 -- Route based on capability
                 if cap == "attach-file"
                     then handleAttachFile tracer v
-                    else if cap == "list-directory"
-                        then handleListDirectory tracer v
-                        else do
+                    else do
                             -- Extract optional parameters for session introspection capabilities
                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                     Just (Aeson.String sid) -> Just sid
@@ -1787,29 +1785,6 @@ systemTool box =
             Just (Aeson.Bool b) -> b
             _ -> False
 
-    -- Handle the list-directory capability
-    handleListDirectory :: Tracer IO Trace -> Aeson.Object -> IO (CallResult ())
-    handleListDirectory tracer params = do
-        case KeyMap.lookup (AesonKey.fromText "path") params of
-            Just (Aeson.String dirPath) -> do
-                let recursive = case KeyMap.lookup (AesonKey.fromText "recursive") params of
-                        Just (Aeson.Bool b) -> b
-                        _ -> False
-                let includeHidden = case KeyMap.lookup (AesonKey.fromText "include_hidden") params of
-                        Just (Aeson.Bool b) -> b
-                        _ -> False
-                let orderBy = case KeyMap.lookup (AesonKey.fromText "order_by") params of
-                        Just (Aeson.String o) -> maybe SystemTools.OrderByName id (SystemTools.parseOrderBy o)
-                        _ -> SystemTools.OrderByName
-                let mLimit = case KeyMap.lookup (AesonKey.fromText "limit") params of
-                        Just (Aeson.Number n) -> Just (round n :: Int)
-                        _ -> Nothing
-
-                result <- SystemTools.executeListDirectory (Prod.contramap SystemToolsTrace tracer) box (Text.unpack dirPath) recursive includeHidden orderBy mLimit
-                case result of
-                    Left err -> pure $ SystemToolError call err
-                    Right listResult -> pure $ SystemToolListDirectoryResult call listResult
-            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'path' parameter for list-directory capability")
 
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
@@ -2386,6 +2361,39 @@ formatCapabilityHelp DevToolRestoreFile =
         , ""
         , "Note: The snapshot reference is obtained from a previous write-file-range"
         , "      or patch-file operation that had the snapshot capability enabled."
+        ]
+formatCapabilityHelp DevToolListDirectory =
+    Text.unlines
+        [ "--------------------------------------------------------------------------------"
+        , "CAPABILITY: list-directory"
+        , "--------------------------------------------------------------------------------"
+        , ""
+        , "Description: Lists directory contents with metadata (type, size, permissions,"
+        , "             modification time). Supports filtering by name pattern."
+        , ""
+        , "Parameters:"
+        , "  - path           (string, required): Directory path to list"
+        , "  - recursive      (bool, optional):   Recurse into subdirectories (default: false)"
+        , "  - include_hidden (bool, optional):   Include hidden files/dotfiles (default: false)"
+        , "  - name_patterns  (array, optional):  Glob patterns to filter by name"
+        , ""
+        , "Returns: DirectoryListingResult with path, entries, entryCount, recursive."
+        , ""
+        ]
+formatCapabilityHelp DevToolTraverseDirectory =
+    Text.unlines
+        [ "--------------------------------------------------------------------------------"
+        , "CAPABILITY: traverse-directory"
+        , "--------------------------------------------------------------------------------"
+        , ""
+        , "Description: Recursively traverses a directory tree and returns all entries"
+        , "             within the configured scope."
+        , ""
+        , "Parameters:"
+        , "  - path (string, required): Root directory path to traverse"
+        , ""
+        , "Returns: DirectoryListingResult with path, entries, entryCount, recursive."
+        , ""
         ]
 
 -------------------------------------------------------------------------------

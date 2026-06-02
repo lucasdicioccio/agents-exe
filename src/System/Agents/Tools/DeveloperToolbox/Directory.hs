@@ -18,7 +18,7 @@ import qualified Data.Text as Text
 import System.Agents.OS.Security.FileScope (scopeFromList)
 import System.Agents.Tools.DeveloperToolbox.Types
 import System.Agents.Tools.DirectoryListing (
-    FileFilter (..),
+    FileFilter (NameFilter),
     ListDirectoryOp (..),
     scopedListDirectory,
     scopedTraverseDirectory,
@@ -32,13 +32,13 @@ executeListDirectory ::
     Bool ->
     [Text] ->
     IO (Either DeveloperToolError DirectoryListingResult)
-executeListDirectory _toolbox path recursive includeHidden namePatterns = do
+executeListDirectory _toolbox path doRecurse doHidden namePatterns = do
     let scope = scopeFromList []
         op = ListDirectoryOp
             { targetPath = path
             , filters = map NameFilter namePatterns
-            , recursive = recursive
-            , includeHidden = includeHidden
+            , recursive = doRecurse
+            , includeHidden = doHidden
             }
     result <- scopedListDirectory scope op
     case result of
@@ -49,7 +49,7 @@ executeListDirectory _toolbox path recursive includeHidden namePatterns = do
                 { listingPath = path
                 , listingEntries = map Aeson.toJSON entries
                 , listingEntryCount = length entries
-                , listingRecursive = recursive
+                , listingRecursive = doRecurse
                 }
 
 -- | Recursively traverse a directory tree within scope.

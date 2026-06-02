@@ -388,7 +388,6 @@ callResultToJson (SystemToolResult _ result) =
         , "data" .= result
         , "toolType" .= ("system" :: Text)
         ]
-callResultToJson (SystemToolListDirectoryResult _ result) = Aeson.toJSON result
 callResultToJson (SystemToolError _ err) =
     Aeson.object
         [ "type" .= ("error" :: Text)
