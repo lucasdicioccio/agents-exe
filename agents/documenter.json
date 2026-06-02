@@ -116,8 +116,7 @@
         "contents": {
           "Name": "knowledge_store",
           "Description": "A knowledge base about the code base and how it works.",
-          "Path": "./resources/documenter-knowledge.db",
-          "Access": "read-write"
+          "Versioning": {"tag": "SqliteReadWrite", "path": "./resources/documenter-knowledge.db"}
         }
       },
       {

@@ -5,7 +5,7 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
@@ -630,83 +630,184 @@ instance FromJSON PostgRESTToolboxDescription where
 -- Builtin Toolbox Configuration
 -------------------------------------------------------------------------------
 
-{- | Access mode for SQLite databases.
+{- | Sharing scope for versioned SQLite databases.
 
-Controls whether the database is opened in read-only, read-write, or snapshot mode.
-This affects both file permissions and SQLite's internal locking behavior.
-
-* 'SqliteReadOnly': Open database in read-only mode. No modifications allowed.
-* 'SqliteReadWrite': Open database in read-write mode. Both reads and writes allowed.
-* 'SqliteSnapshot': Create a copy of the database for this conversation and open it
-  in read-write mode. Changes are isolated to the conversation lifetime.
+Controls at what granularity the "current head" (latest written snapshot) is shared:
+* 'SharingGlobal': One persistent chain shared across all conversations — never resets
+* 'SharingConversation': One chain per conversation — resets to basePath each new session
+* 'SharingTurn': One chain per turn — resets to basePath each new turn
+* 'SharingToolCall': Fully isolated per tool call — always starts from basePath, no chaining
 -}
-data SqliteAccessMode
-    = -- | Open database in read-only mode. No modifications allowed.
-      SqliteReadOnly
-    | -- | Open database in read-write mode. Both reads and writes allowed.
-      SqliteReadWrite
-    | {- | Create a snapshot copy for this conversation, opened in read-write mode.
-      The snapshot is created on first use using the conversation ID as suffix.
-      -}
-      SqliteSnapshot
-    deriving (Show, Ord, Eq, Generic)
+data SqliteSharing
+    = SharingGlobal
+    | SharingConversation
+    | SharingTurn
+    | SharingToolCall
+    deriving (Show, Eq, Ord, Generic)
 
--- | Serialize SqliteAccessMode as kebab-case strings.
-instance ToJSON SqliteAccessMode where
-    toJSON SqliteReadOnly = Aeson.String "read-only"
-    toJSON SqliteReadWrite = Aeson.String "read-write"
-    toJSON SqliteSnapshot = Aeson.String "snapshot"
+instance ToJSON SqliteSharing where
+    toJSON SharingGlobal       = Aeson.String "global"
+    toJSON SharingConversation = Aeson.String "conversation"
+    toJSON SharingTurn         = Aeson.String "turn"
+    toJSON SharingToolCall     = Aeson.String "tool-call"
 
--- | Parse SqliteAccessMode from kebab-case strings.
-instance FromJSON SqliteAccessMode where
-    parseJSON = Aeson.withText "SqliteAccessMode" $ \txt ->
+instance FromJSON SqliteSharing where
+    parseJSON = Aeson.withText "SqliteSharing" $ \txt ->
         case txt of
-            "read-only" -> return SqliteReadOnly
-            "read-write" -> return SqliteReadWrite
-            "snapshot" -> return SqliteSnapshot
-            other -> fail $ "Invalid SqliteAccessMode: " ++ Text.unpack other ++ ". Expected 'read-only', 'read-write', or 'snapshot'."
+            "global"       -> return SharingGlobal
+            "conversation" -> return SharingConversation
+            "turn"         -> return SharingTurn
+            "tool-call"    -> return SharingToolCall
+            other -> fail $ "Invalid SqliteSharing: " ++ Text.unpack other ++ ". Expected 'global', 'conversation', 'turn', or 'tool-call'."
+
+{- | Version handle for restoration (serializable to JSON).
+
+A version handle uniquely identifies a specific database state that
+can be restored in subsequent tool calls. This enables LLMs to:
+* Branch from specific database states
+* Rollback to previous states
+* Reference immutable snapshots
+-}
+data SqliteVersionHandle = SqliteVersionHandle
+    { vhSessionId :: !Text
+    -- ^ Session UUID as text
+    , vhTurnId :: !Text
+    -- ^ Turn UUID as text
+    , vhToolCallIndex :: !Int
+    -- ^ Index within turn (0, 1, 2...)
+    , vhToolboxName :: !Text
+    -- ^ Toolbox identifier
+    , vhTimestamp :: !Text
+    -- ^ ISO8601 timestamp for debugging
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SqliteVersionHandle where
+    toJSON h = Aeson.object
+        [ "session_id"       .= vhSessionId h
+        , "turn_id"          .= vhTurnId h
+        , "tool_call_index"  .= vhToolCallIndex h
+        , "toolbox_name"     .= vhToolboxName h
+        , "timestamp"        .= vhTimestamp h
+        ]
+
+instance FromJSON SqliteVersionHandle where
+    parseJSON = Aeson.withObject "SqliteVersionHandle" $ \v ->
+        SqliteVersionHandle
+            <$> v .:  "session_id"
+            <*> v .:  "turn_id"
+            <*> v .:  "tool_call_index"
+            <*> v .:  "toolbox_name"
+            <*> (v .:? "timestamp" Aeson..!= "")
+
+{- | Enhanced SQLite versioning configuration.
+
+Replaces the old 'SqliteAccessMode' with hierarchical versioning support.
+
+* 'SqliteReadOnly': Direct read-only access, no versioning - only SELECT queries allowed
+* 'SqliteReadWrite': Direct read-write access, no versioning - all queries allowed
+* 'SqliteVersioned': Versioned with hierarchical storage and restoration capabilities
+-}
+data SqliteVersioningConfig
+    = -- | Direct read-only access - only SELECT queries allowed
+      SqliteReadOnly !FilePath
+    | -- | Direct read-write access - all queries allowed
+      SqliteReadWrite !FilePath
+    | SqliteVersioned
+        { vSharing :: !SqliteSharing
+        -- ^ Sharing scope — determines when the write chain resets to basePath
+        , vStorageRoot :: !(Maybe FilePath)
+        -- ^ Optional custom storage root. Default: ~/.agents/sqlite-versions (or XDG equivalent)
+        , vBasePath :: !FilePath
+        -- ^ Template/source database path - the original database to copy from
+        }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SqliteVersioningConfig where
+    toJSON (SqliteReadOnly path) = Aeson.object ["tag" .= ("SqliteReadOnly" :: Text), "path" .= path]
+    toJSON (SqliteReadWrite path) = Aeson.object ["tag" .= ("SqliteReadWrite" :: Text), "path" .= path]
+    toJSON (SqliteVersioned sharing mRoot base) =
+        Aeson.object
+            [ "tag" .= ("SqliteVersioned" :: Text)
+            , "shared" .= sharing
+            , "storageRoot" .= mRoot
+            , "basePath" .= base
+            ]
+
+instance FromJSON SqliteVersioningConfig where
+    parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
+        tag <- v .: "tag"
+        case (tag :: Text) of
+            "SqliteReadOnly"     -> SqliteReadOnly  <$> v .: "path"
+            "SqliteReadWrite"    -> SqliteReadWrite <$> v .: "path"
+            "SqliteNoVersioning" -> SqliteReadWrite <$> v .: "path"
+            "SqliteVersioned"    ->
+                SqliteVersioned
+                    <$> v .: "shared"
+                    <*> v .:? "storageRoot"
+                    <*> v .: "basePath"
+            other -> fail $ "Unknown SqliteVersioningConfig tag: " ++ Text.unpack other
 
 {- | Configuration for a SQLite builtin toolbox.
 
 This describes a SQLite database to load as a builtin toolbox.
 The toolbox provides tools for querying and optionally modifying
-the SQLite database.
+the SQLite database with optional hierarchical versioning.
 
-Example configuration:
+Example configuration (versioned with conversation lifetime):
 
 @
 {
-  "name": "memory",
-  "description": "a set of memories",
-  "path": "/path/to/memories.sqlite",
-  "access": "read-write",
-  "lifetime": "conversation",
-  "activation": "always"
+  "tag": "SqliteToolbox",
+  "contents": {
+    "name": "memory",
+    "description": "a set of memories",
+    "versioning": {
+      "tag": "SqliteVersioned",
+      "lifetime": "conversation",
+      "storageRoot": null,
+      "basePath": "/path/to/memories.sqlite"
+    },
+    "activation": "always"
+  }
 }
 @
 
-The 'access' field controls whether the database is opened in
-read-only, read-write, or snapshot mode. Use 'read-only' for safety when
-the agent should only query data, 'read-write' when the agent
-needs to modify the database directly, and 'snapshot' when you want
-isolated changes per conversation.
+Example configuration (read-only direct access):
+
+@
+{
+  "tag": "SqliteToolbox",
+  "contents": {
+    "name": "analytics",
+    "description": "Analytics database",
+    "versioning": {
+      "tag": "SqliteReadOnly",
+      "path": "/path/to/analytics.sqlite"
+    },
+    "activation": "always"
+  }
+}
+@
+
+Migration from old 'access' field:
+- "access": "read-only" -> SqliteReadOnly with path
+- "access": "read-write" -> SqliteReadWrite with path
+- "access": "snapshot" -> SqliteVersioned with LifetimeConversation
 
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
-data SqliteToolboxDescription
-    = SqliteToolboxDescription
-    { sqliteToolboxName :: Text
+data SqliteToolboxDescription = SqliteToolboxDescription
+    { sqliteToolboxName :: !Text
     -- ^ Unique name for this toolbox instance (used as tool prefix)
-    , sqliteToolboxDescription :: Text
+    , sqliteToolboxDescription :: !Text
     -- ^ Human-readable description of the database contents/purpose
-    , sqliteToolboxPath :: FilePath
-    -- ^ Path to the SQLite database file
-    , sqliteToolboxAccess :: SqliteAccessMode
-    -- ^ Access mode: read-only, read-write, or snapshot
-    , sqliteToolboxActivation :: Maybe Activation
+    , sqliteToolboxVersioning :: !SqliteVersioningConfig
+    -- ^ Versioning configuration - replaces the old 'sqliteToolboxAccess' field
+    , sqliteToolboxActivation :: !(Maybe Activation)
     -- ^ Optional activation mode (default: AlwaysActivated)
     }
-    deriving (Show, Ord, Eq, Generic)
+    deriving (Show, Eq, Ord, Generic)
 
 -- | Custom JSON options for SqliteToolboxDescription to use camelCase field names
 sqliteToolboxOptions :: Aeson.Options

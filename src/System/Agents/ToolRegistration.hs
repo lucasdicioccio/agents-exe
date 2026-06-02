@@ -68,6 +68,7 @@ import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64
+import Data.ByteString.Lazy (toStrict)
 import Data.Foldable (toList)
 import Data.Foldable.WithIndex (ifoldl')
 import qualified Data.Map.Strict as Map
@@ -83,6 +84,7 @@ import System.Agents.Base (
     DeveloperToolboxDescription (..),
     LuaToolboxDescription (..),
     SqliteToolboxDescription (..),
+    SqliteVersioningConfig (..),
     SystemToolCapability (..),
     SystemToolboxDescription (..),
     defaultFileSandboxConfig,
@@ -828,20 +830,35 @@ registerSqliteTool box =
         tName = "query"
         llmName = sqlite2LLMName box tName
 
-        -- Single parameter: the SQL query
+        isVersioned = case (SqliteTools.toolboxConfig box).sqliteToolboxVersioning of
+            SqliteVersioned{} -> True
+            _                 -> False
+
+        versionedNote
+            | isVersioned = " Write operations return a versionHandle; pass it as restore_from to branch from that state."
+            | otherwise   = ""
+
         paramProps =
             [ ParamProperty
                 { propertyKey = "sql"
                 , propertyType = StringParamType
-                , propertyDescription = "SQL query to execute (SELECT for read-only, any valid SQL for read-write or snapshot)"
+                , propertyDescription = "SQL query to execute"
                 , propertyRequired = True
                 }
             ]
+            ++ [ ParamProperty
+                    { propertyKey = "restore_from"
+                    , propertyType = OpaqueParamType "object"
+                    , propertyDescription = "Pass the versionHandle object returned by a previous write to branch from that snapshot instead of the current head"
+                    , propertyRequired = False
+                    }
+               | isVersioned
+               ]
 
         toolDescription =
             ToolDescription
                 { toolDescriptionName = llmName
-                , toolDescriptionText = box.toolboxDescription
+                , toolDescriptionText = box.toolboxDescription <> versionedNote
                 , toolDescriptionParamProperties = paramProps
                 }
 
@@ -866,17 +883,54 @@ registerSqliteTool box =
                 , toolActivation = mbActivation
                 }
 
-{- | Register all tools from a SQLite toolbox.
+-- | Register the promote tool for a versioned SQLite toolbox.
+registerSqlitePromoteTool ::
+    SqliteTools.Toolbox ->
+    Maybe ToolRegistration
+registerSqlitePromoteTool box =
+    case (SqliteTools.toolboxConfig box).sqliteToolboxVersioning of
+        SqliteVersioned{} -> Just reg
+        _                 -> Nothing
+  where
+    llmName = sqlite2LLMName box "promote"
+    paramProps =
+        [ ParamProperty
+            { propertyKey = "restore_from"
+            , propertyType = OpaqueParamType "object"
+            , propertyDescription = "Version handle to promote (optional, promotes current head if omitted)"
+            , propertyRequired = False
+            }
+        ]
+    toolDescription =
+        ToolDescription
+            { toolDescriptionName = llmName
+            , toolDescriptionText = "Promote a snapshot of " <> box.toolboxDescription <> " to become the new baseline (writes it back to the source path)."
+            , toolDescriptionParamProperties = paramProps
+            }
+    tool' = sqlitePromoteTool box
+    find :: ToolCall -> Maybe (Tool ToolCall)
+    find call =
+        if call.callToolName == getToolName llmName
+            then Just $ mapToolResult (const call) tool'
+            else Nothing
+    mbActivation = (SqliteTools.toolboxConfig box).sqliteToolboxActivation
+    reg = ToolRegistration
+            { innerTool = mapToolResult (const ()) tool'
+            , declareTool = toolDescription
+            , findTool = find
+            , toolActivation = mbActivation
+            }
 
-Currently SQLite toolboxes expose a single query tool.
--}
+{- | Register all tools from a SQLite toolbox. -}
 registerSqliteTools ::
     SqliteTools.Toolbox ->
     IO (Either String [ToolRegistration])
 registerSqliteTools box =
     pure $ case registerSqliteTool box of
-        Left err -> Left err
-        Right reg -> Right [reg]
+        Left err  -> Left err
+        Right reg ->
+            let extras = maybe [] (: []) (registerSqlitePromoteTool box)
+            in Right (reg : extras)
 
 -------------------------------------------------------------------------------
 -- System Tool Registration
@@ -1540,6 +1594,37 @@ ioTool script =
             Left err -> pure $ IOToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
 
+-- | Builder for the SQLite promote tool.
+sqlitePromoteTool ::
+    SqliteTools.Toolbox ->
+    Tool ()
+sqlitePromoteTool box =
+    ToolBase.Tool
+        { ToolBase.toolDef = SqliteTool toolDesc
+        , ToolBase.toolRun = run
+        }
+  where
+    call = ()
+
+    toolDesc =
+        SqliteTools.ToolDescription
+            { SqliteTools.toolDescriptionName = "promote"
+            , SqliteTools.toolDescriptionDescription = box.toolboxDescription
+            , SqliteTools.toolDescriptionToolboxName = box.toolboxName
+            }
+
+    run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+    run _tracer ctx v =
+        case Aeson.fromJSON v of
+            Aeson.Error err -> pure $ SqliteToolError call (SqliteTools.SqlError $ Text.pack err)
+            Aeson.Success input -> do
+                result <- SqliteTools.promoteSnapshot box ctx input
+                case result of
+                    Left err  -> pure $ SqliteToolError call err
+                    Right rsp ->
+                        let bs = toStrict $ Aeson.encode rsp
+                        in pure $ BlobToolSuccess call bs Nothing
+
 -- | Builder for a tool based on a SQLite toolbox.
 sqliteTool ::
     SqliteTools.Toolbox ->
@@ -1553,29 +1638,24 @@ sqliteTool box =
     call = ()
 
     -- Build tool description from toolbox
+    -- Build tool description from toolbox
     toolDesc =
         SqliteTools.ToolDescription
             { SqliteTools.toolDescriptionName = "query"
             , SqliteTools.toolDescriptionDescription = box.toolboxDescription
             , SqliteTools.toolDescriptionToolboxName = box.toolboxName
-            , SqliteTools.toolDescriptionDatabasePath = box.toolboxPath
             }
 
     run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-    run tracer ctx (Aeson.Object v) = do
-        case KeyMap.lookup (AesonKey.fromText "sql") v of
-            Just (Aeson.String query) -> do
-                -- Get conversation ID from context for snapshot mode
-                let mConvId = Just (Context.ctxConversationId ctx)
-                result <- SqliteTools.executeQueryWithContext (Prod.contramap SqliteToolsTrace tracer) box mConvId query
+    run tracer ctx v =
+        case Aeson.fromJSON v of
+            Aeson.Error err -> pure $ SqliteToolError call (SqliteTools.SqlError $ Text.pack err)
+            Aeson.Success input -> do
+                result <- SqliteTools.executeQuery (Prod.contramap SqliteToolsTrace tracer) box ctx input
                 case result of
-                    Left err -> pure $ SqliteToolError call err
+                    Left err  -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
-            _ -> pure $ SqliteToolError call (SqliteTools.SqlError "Missing 'sql' parameter or invalid type")
-    run _tracer _ctx _ = do
-        pure $ SqliteToolError call (SqliteTools.SqlError "Arguments must be a JSON object")
 
--- | Builder for a SystemToolbox-based tool.
 systemTool :: SystemTools.Toolbox -> Tool ()
 systemTool box =
     ToolBase.Tool

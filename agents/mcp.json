@@ -120,8 +120,7 @@
         "contents": {
           "Name": "knowledge_store",
           "Description": "A knowledge base about the code base and how it works.",
-          "Path": "./resources/documenter-knowledge.db",
-          "Access": "read-only"
+          "Versioning": {"path": "./resources/documenter-knowledge.db", "tag": "SqliteReadOnly"}
         }
       },
       {
@@ -129,8 +128,7 @@
         "contents": {
           "Name": "question_store",
           "Description": "A knowledge base about the questions you've been asked in the past.",
-          "Path": "./resources/faq.db",
-          "Access": "read-write"
+          "Versioning": {"path": "./resources/faq.db", "tag": "SqliteReadWrite"}
         }
       }
     ],
