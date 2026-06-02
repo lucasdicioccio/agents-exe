@@ -682,8 +682,23 @@ data SqliteVersionHandle = SqliteVersionHandle
     }
     deriving (Show, Eq, Ord, Generic)
 
-instance ToJSON SqliteVersionHandle
-instance FromJSON SqliteVersionHandle
+instance ToJSON SqliteVersionHandle where
+    toJSON h = Aeson.object
+        [ "session_id"       .= vhSessionId h
+        , "turn_id"          .= vhTurnId h
+        , "tool_call_index"  .= vhToolCallIndex h
+        , "toolbox_name"     .= vhToolboxName h
+        , "timestamp"        .= vhTimestamp h
+        ]
+
+instance FromJSON SqliteVersionHandle where
+    parseJSON = Aeson.withObject "SqliteVersionHandle" $ \v ->
+        SqliteVersionHandle
+            <$> v .:  "session_id"
+            <*> v .:  "turn_id"
+            <*> v .:  "tool_call_index"
+            <*> v .:  "toolbox_name"
+            <*> (v .:? "timestamp" Aeson..!= "")
 
 {- | Enhanced SQLite versioning configuration.
 

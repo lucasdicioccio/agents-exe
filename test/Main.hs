@@ -294,7 +294,7 @@ agentSerializationTests =
             let sqliteDesc = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "memory"
                     , Base.sqliteToolboxDescription = "a set of memories"
-                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/memories.sqlite"
+                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/memories.sqlite"
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.SqliteToolbox sqliteDesc
@@ -323,7 +323,7 @@ agentSerializationTests =
             let sqliteDesc1 = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "memory"
                     , Base.sqliteToolboxDescription = "a set of memories"
-                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/memories.sqlite"
+                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/memories.sqlite"
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let sqliteDesc2 = Base.SqliteToolboxDescription
@@ -387,31 +387,36 @@ agentSerializationTests =
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
-        , testCase "SqliteLifetime round-trip" $ do
-            let lifetimeConv = Base.LifetimeConversation
-            let jsonConv = encode lifetimeConv
-            let mLifetimeConv = decode jsonConv :: Maybe Base.SqliteLifetime
-            mLifetimeConv @?= Just Base.LifetimeConversation
-            
-            let lifetimeTurn = Base.LifetimeTurn
-            let jsonTurn = encode lifetimeTurn
-            let mLifetimeTurn = decode jsonTurn :: Maybe Base.SqliteLifetime
-            mLifetimeTurn @?= Just Base.LifetimeTurn
-            
-            let lifetimeToolCall = Base.LifetimeToolCall
-            let jsonToolCall = encode lifetimeToolCall
-            let mLifetimeToolCall = decode jsonToolCall :: Maybe Base.SqliteLifetime
-            mLifetimeToolCall @?= Just Base.LifetimeToolCall
+        , testCase "SqliteSharing round-trip" $ do
+            let sharingConv = Base.SharingConversation
+            let jsonConv = encode sharingConv
+            let mSharingConv = decode jsonConv :: Maybe Base.SqliteSharing
+            mSharingConv @?= Just Base.SharingConversation
+
+            let sharingTurn = Base.SharingTurn
+            let jsonTurn = encode sharingTurn
+            let mSharingTurn = decode jsonTurn :: Maybe Base.SqliteSharing
+            mSharingTurn @?= Just Base.SharingTurn
+
+            let sharingToolCall = Base.SharingToolCall
+            let jsonToolCall = encode sharingToolCall
+            let mSharingToolCall = decode jsonToolCall :: Maybe Base.SqliteSharing
+            mSharingToolCall @?= Just Base.SharingToolCall
+
+            let sharingGlobal = Base.SharingGlobal
+            let jsonGlobal = encode sharingGlobal
+            let mSharingGlobal = decode jsonGlobal :: Maybe Base.SqliteSharing
+            mSharingGlobal @?= Just Base.SharingGlobal
         , testCase "SqliteVersioningConfig round-trip" $ do
             let noVersioning = Base.SqliteReadWrite "/path/to/db.sqlite"
             let jsonNoVer = encode noVersioning
             let mNoVer = decode jsonNoVer :: Maybe Base.SqliteVersioningConfig
             mNoVer @?= Just (Base.SqliteReadWrite "/path/to/db.sqlite")
             
-            let versioned = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/db.sqlite"
+            let versioned = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite"
             let jsonVer = encode versioned
             let mVer = decode jsonVer :: Maybe Base.SqliteVersioningConfig
-            mVer @?= Just (Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/db.sqlite")
+            mVer @?= Just (Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite")
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8

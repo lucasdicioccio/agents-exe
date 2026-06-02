@@ -83,6 +83,7 @@ import System.Agents.Base (
     DeveloperToolboxDescription (..),
     LuaToolboxDescription (..),
     SqliteToolboxDescription (..),
+    SqliteVersioningConfig (..),
     SystemToolCapability (..),
     SystemToolboxDescription (..),
     defaultFileSandboxConfig,
@@ -828,20 +829,35 @@ registerSqliteTool box =
         tName = "query"
         llmName = sqlite2LLMName box tName
 
-        -- Single parameter: the SQL query
+        isVersioned = case (SqliteTools.toolboxConfig box).sqliteToolboxVersioning of
+            SqliteVersioned{} -> True
+            _                 -> False
+
+        versionedNote
+            | isVersioned = " Write operations return a versionHandle; pass it as restore_from to branch from that state."
+            | otherwise   = ""
+
         paramProps =
             [ ParamProperty
                 { propertyKey = "sql"
                 , propertyType = StringParamType
-                , propertyDescription = "SQL query to execute (SELECT for read-only, any valid SQL for read-write or snapshot)"
+                , propertyDescription = "SQL query to execute"
                 , propertyRequired = True
                 }
             ]
+            ++ [ ParamProperty
+                    { propertyKey = "restore_from"
+                    , propertyType = OpaqueParamType "object"
+                    , propertyDescription = "Pass the versionHandle object returned by a previous write to branch from that snapshot instead of the current head"
+                    , propertyRequired = False
+                    }
+               | isVersioned
+               ]
 
         toolDescription =
             ToolDescription
                 { toolDescriptionName = llmName
-                , toolDescriptionText = box.toolboxDescription
+                , toolDescriptionText = box.toolboxDescription <> versionedNote
                 , toolDescriptionParamProperties = paramProps
                 }
 
@@ -1562,17 +1578,14 @@ sqliteTool box =
             }
 
     run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-    run tracer ctx (Aeson.Object v) = do
-        case KeyMap.lookup (AesonKey.fromText "sql") v of
-            Just (Aeson.String query) -> do
-                let input = SqliteTools.SqliteQueryInput{SqliteTools.inputSql = query, SqliteTools.inputRestoreFrom = Nothing}
+    run tracer ctx v =
+        case Aeson.fromJSON v of
+            Aeson.Error err -> pure $ SqliteToolError call (SqliteTools.SqlError $ Text.pack err)
+            Aeson.Success input -> do
                 result <- SqliteTools.executeQuery (Prod.contramap SqliteToolsTrace tracer) box ctx input
                 case result of
-                    Left err -> pure $ SqliteToolError call err
+                    Left err  -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
-            _ -> pure $ SqliteToolError call (SqliteTools.SqlError "Missing 'sql' parameter or invalid type")
-    run _tracer _ctx _ = do
-        pure $ SqliteToolError call (SqliteTools.SqlError "Arguments must be a JSON object")
 
 systemTool :: SystemTools.Toolbox -> Tool ()
 systemTool box =
