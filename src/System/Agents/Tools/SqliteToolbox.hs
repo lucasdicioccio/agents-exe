@@ -16,8 +16,6 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
 import Data.Time (NominalDiffTime, UTCTime, defaultTimeLocale, diffUTCTime, formatTime, getCurrentTime)
 import qualified Data.UUID as UUID
-import Database.SQLite.Simple (Connection)
-import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite3 as Direct
 import Prod.Tracer (Tracer (..), runTracer)
 import System.Directory (copyFile, createDirectoryIfMissing, doesFileExist)
@@ -78,6 +76,8 @@ data Toolbox = Toolbox
     , toolboxConfig :: SqliteToolboxDescription
     , toolboxLock :: MVar ()
     , toolboxWriteCounter :: TVar Int
+    , toolboxDirectDb :: Maybe Direct.Database
+    -- ^ Persistent connection for ReadOnly/ReadWrite modes; Nothing for Versioned
     }
 
 data ToolDescription = ToolDescription
@@ -151,20 +151,6 @@ copyDatabaseWithWAL src dst = do
     copyFileIfExists (src ++ "-wal") (dst ++ "-wal")
     copyFileIfExists (src ++ "-shm") (dst ++ "-shm")
 
-withConnection :: FilePath -> (Connection -> IO a) -> IO (Either QueryError a)
-withConnection path action = do
-    result <- try @SomeException $ do
-        conn <- SQLite.open path
-        _ <- SQLite.execute_ conn "PRAGMA journal_mode = WAL"
-        _ <- SQLite.execute_ conn "PRAGMA foreign_keys = ON"
-        _ <- SQLite.execute_ conn "PRAGMA busy_timeout = 5000"
-        a <- action conn
-        SQLite.close conn
-        pure a
-    case result of
-        Left e -> pure $ Left $ ConnectionError $ Text.pack $ show e
-        Right a -> pure $ Right a
-
 -- Query classification
 classifyQuery :: Text -> SqlOperation
 classifyQuery query =
@@ -185,47 +171,74 @@ isWriteOperation :: SqlOperation -> Bool
 isWriteOperation Select = False
 isWriteOperation _ = True
 
+openDirectDb :: Tracer IO Trace -> FilePath -> IO Direct.Database
+openDirectDb tracer path = do
+    runTracer tracer (ConnectionOpenedTrace path)
+    db <- Direct.open (Text.pack path)
+    Direct.exec db "PRAGMA journal_mode = WAL"
+    Direct.exec db "PRAGMA foreign_keys = ON"
+    Direct.exec db "PRAGMA busy_timeout = 5000"
+    pure db
+
 -- Initialization
 initializeToolbox :: Tracer IO Trace -> SqliteToolboxDescription -> IO (Either String Toolbox)
-initializeToolbox _tracer desc = do
+initializeToolbox tracer desc = do
     lock <- newMVar ()
     counter <- newTVarIO 0
-    case sqliteToolboxVersioning desc of
+    mDbResult <- case sqliteToolboxVersioning desc of
+        SqliteReadOnly path -> do
+            r <- try @SomeException $ openDirectDb tracer path
+            pure $ case r of
+                Left e  -> Left $ "Failed to open read-only database: " ++ show e
+                Right db -> Right (Just db)
+        SqliteReadWrite path -> do
+            r <- try @SomeException $ openDirectDb tracer path
+            pure $ case r of
+                Left e  -> Left $ "Failed to open read-write database: " ++ show e
+                Right db -> Right (Just db)
         SqliteVersioned _ _ basePath -> do
             exists <- doesFileExist basePath
             unless exists $ do
-                conn <- SQLite.open basePath
-                SQLite.close conn
-        SqliteReadOnly _ -> pure ()
-        SqliteReadWrite _ -> pure ()
-    pure $
-        Right $
-            Toolbox
-                { toolboxName = sqliteToolboxName desc
-                , toolboxDescription = sqliteToolboxDescription desc
-                , toolboxConfig = desc
-                , toolboxLock = lock
-                , toolboxWriteCounter = counter
-                }
+                db <- Direct.open (Text.pack basePath)
+                Direct.close db
+            pure $ Right Nothing
+    case mDbResult of
+        Left err -> pure $ Left err
+        Right mDb ->
+            pure $
+                Right $
+                    Toolbox
+                        { toolboxName = sqliteToolboxName desc
+                        , toolboxDescription = sqliteToolboxDescription desc
+                        , toolboxConfig = desc
+                        , toolboxLock = lock
+                        , toolboxWriteCounter = counter
+                        , toolboxDirectDb = mDb
+                        }
 
 -- Query execution
 executeQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteQueryInput -> IO (Either QueryError QueryResult)
 executeQuery tracer toolbox ctx input =
     withMVar (toolboxLock toolbox) $ \() -> do
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
-            SqliteReadOnly path -> executeDirectQuery tracer False path input
-            SqliteReadWrite path -> executeDirectQuery tracer True path input
+            SqliteReadOnly  _ -> executeDirectQuery tracer toolbox False input
+            SqliteReadWrite _ -> executeDirectQuery tracer toolbox True  input
             SqliteVersioned lifetime _ basePath -> executeVersionedQuery tracer toolbox ctx lifetime basePath input
 
-executeDirectQuery :: Tracer IO Trace -> Bool -> FilePath -> SqliteQueryInput -> IO (Either QueryError QueryResult)
-executeDirectQuery tracer allowWrites path input = do
+executeDirectQuery :: Tracer IO Trace -> Toolbox -> Bool -> SqliteQueryInput -> IO (Either QueryError QueryResult)
+executeDirectQuery tracer toolbox allowWrites input = do
     let op = classifyQuery (inputSql input)
     if not allowWrites && isWriteOperation op
         then pure $ Left $ SqlError "Write operation not allowed in read-only mode"
-        else do
-            runTracer tracer (QueryStartedTrace (inputSql input))
-            startTime <- getCurrentTime
-            withConnection path $ \conn -> executeViaDirect tracer conn (inputSql input) startTime
+        else case toolboxDirectDb toolbox of
+            Nothing -> pure $ Left $ ConnectionError "No persistent connection for direct-access toolbox"
+            Just db -> do
+                runTracer tracer (QueryStartedTrace (inputSql input))
+                startTime <- getCurrentTime
+                result <- try @SomeException $ executeWithDb db (inputSql input) startTime
+                pure $ case result of
+                    Left e  -> Left $ SqlError $ Text.pack $ show e
+                    Right r -> Right r
 
 executeVersionedQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteLifetime -> FilePath -> SqliteQueryInput -> IO (Either QueryError QueryResult)
 executeVersionedQuery tracer toolbox ctx lifetime basePath input = do
@@ -276,10 +289,9 @@ executeVersionedQuery tracer toolbox ctx lifetime basePath input = do
         Left err -> Left err
         Right r -> Right $ r{resultVersionHandle = Nothing}
 
-executeOnPath :: Tracer IO Trace -> FilePath -> Text -> UTCTime -> IO (Either QueryError QueryResult)
-executeOnPath _tracer path query startTime = do
-    directDb <- Direct.open (Text.pack path)
-    stmt <- Direct.prepare directDb query
+executeWithDb :: Direct.Database -> Text -> UTCTime -> IO QueryResult
+executeWithDb db query startTime = do
+    stmt <- Direct.prepare db query
     colCount <- Direct.columnCount stmt
     columnNames <-
         mapM
@@ -290,18 +302,16 @@ executeOnPath _tracer path query startTime = do
             [0 .. fromIntegral colCount - 1]
     rows <- collectRows stmt colCount
     Direct.finalize stmt
-    Direct.close directDb
     endTime <- getCurrentTime
     let execTime = diffUTCTime endTime startTime
     pure $
-        Right $
-            QueryResult
-                { resultColumns = columnNames
-                , resultRows = rows
-                , resultRowCount = length rows
-                , resultExecutionTime = execTime
-                , resultVersionHandle = Nothing
-                }
+        QueryResult
+            { resultColumns = columnNames
+            , resultRows = rows
+            , resultRowCount = length rows
+            , resultExecutionTime = execTime
+            , resultVersionHandle = Nothing
+            }
   where
     collectRows stmt colCount = do
         stepResult <- Direct.step stmt
@@ -311,6 +321,17 @@ executeOnPath _tracer path query startTime = do
                 rest <- collectRows stmt colCount
                 pure (row : rest)
             Direct.Done -> pure []
+
+executeOnPath :: Tracer IO Trace -> FilePath -> Text -> UTCTime -> IO (Either QueryError QueryResult)
+executeOnPath tracer path query startTime = do
+    result <- try @SomeException $ do
+        db <- openDirectDb tracer path
+        r <- executeWithDb db query startTime
+        Direct.close db
+        pure r
+    pure $ case result of
+        Left e  -> Left $ SqlError $ Text.pack $ show e
+        Right r -> Right r
 
 sqlColumnToJson :: Direct.Statement -> Direct.ColumnIndex -> IO Aeson.Value
 sqlColumnToJson stmt colIdx = do
@@ -329,20 +350,6 @@ sqlColumnToJson stmt colIdx = do
             val <- Direct.columnBlob stmt colIdx
             pure $ Aeson.String (TextEnc.decodeUtf8 val)
         Direct.NullColumn -> pure Aeson.Null
-
-executeViaDirect :: Tracer IO Trace -> Connection -> Text -> UTCTime -> IO QueryResult
-executeViaDirect tracer conn query startTime = do
-    result <- try @SomeException $ do
-        let q = SQLite.Query query
-        _ <- SQLite.execute_ conn q
-        endTime <- getCurrentTime
-        let execTime = diffUTCTime endTime startTime
-        pure $ QueryResult [] [] 0 execTime Nothing
-    case result of
-        Left e -> do
-            runTracer tracer (QueryStartedTrace (Text.pack $ show e))
-            pure $ QueryResult [] [] 0 0 Nothing
-        Right r -> pure r
 
 makeToolDescription :: Toolbox -> ToolDescription
 makeToolDescription toolbox =
