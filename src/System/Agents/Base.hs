@@ -690,12 +690,15 @@ instance FromJSON SqliteVersionHandle
 
 Replaces the old 'SqliteAccessMode' with hierarchical versioning support.
 
-* 'SqliteNoVersioning': Direct read-write, no versioning (backward compatible with read-write mode)
+* 'SqliteReadOnly': Direct read-only access, no versioning - only SELECT queries allowed
+* 'SqliteReadWrite': Direct read-write access, no versioning - all queries allowed
 * 'SqliteVersioned': Versioned with hierarchical storage and restoration capabilities
 -}
 data SqliteVersioningConfig
-    = -- | Direct read-write, no versioning - operates on the original database directly
-      SqliteNoVersioning
+    = -- | Direct read-only access - only SELECT queries allowed
+      SqliteReadOnly !FilePath
+    | -- | Direct read-write access - all queries allowed
+      SqliteReadWrite !FilePath
     | SqliteVersioned
         { vLifetime :: !SqliteLifetime
         -- ^ Lifetime scope for versioned databases
@@ -707,7 +710,8 @@ data SqliteVersioningConfig
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON SqliteVersioningConfig where
-    toJSON SqliteNoVersioning = Aeson.object ["tag" .= ("SqliteNoVersioning" :: Text)]
+    toJSON (SqliteReadOnly path) = Aeson.object ["tag" .= ("SqliteReadOnly" :: Text), "path" .= path]
+    toJSON (SqliteReadWrite path) = Aeson.object ["tag" .= ("SqliteReadWrite" :: Text), "path" .= path]
     toJSON (SqliteVersioned lifetime mRoot base) =
         Aeson.object
             [ "tag" .= ("SqliteVersioned" :: Text)
@@ -720,7 +724,8 @@ instance FromJSON SqliteVersioningConfig where
     parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
         tag <- v .: "tag"
         case (tag :: Text) of
-            "SqliteNoVersioning" -> return SqliteNoVersioning
+            "SqliteReadOnly" -> SqliteReadOnly <$> v .: "path"
+            "SqliteReadWrite" -> SqliteReadWrite <$> v .: "path"
             "SqliteVersioned" ->
                 SqliteVersioned
                     <$> v .: "lifetime"
@@ -753,7 +758,7 @@ Example configuration (versioned with conversation lifetime):
 }
 @
 
-Example configuration (no versioning - direct access):
+Example configuration (read-only direct access):
 
 @
 {
@@ -762,7 +767,8 @@ Example configuration (no versioning - direct access):
     "name": "analytics",
     "description": "Analytics database",
     "versioning": {
-      "tag": "SqliteNoVersioning"
+      "tag": "SqliteReadOnly",
+      "path": "/path/to/analytics.sqlite"
     },
     "activation": "always"
   }
@@ -770,8 +776,8 @@ Example configuration (no versioning - direct access):
 @
 
 Migration from old 'access' field:
-- "access": "read-only" -> Use with caution; consider if versioning is needed
-- "access": "read-write" -> SqliteNoVersioning (direct access)
+- "access": "read-only" -> SqliteReadOnly with path
+- "access": "read-write" -> SqliteReadWrite with path
 - "access": "snapshot" -> SqliteVersioned with LifetimeConversation
 
 The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').

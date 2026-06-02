@@ -329,7 +329,7 @@ agentSerializationTests =
             let sqliteDesc2 = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "guidelines"
                     , Base.sqliteToolboxDescription = "a set of guidelines"
-                    , Base.sqliteToolboxVersioning = Base.SqliteNoVersioning
+                    , Base.sqliteToolboxVersioning = Base.SqliteReadOnly "/path/to/guidelines.sqlite"
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolboxes = [Base.SqliteToolbox sqliteDesc1, Base.SqliteToolbox sqliteDesc2]
@@ -403,10 +403,10 @@ agentSerializationTests =
             let mLifetimeToolCall = decode jsonToolCall :: Maybe Base.SqliteLifetime
             mLifetimeToolCall @?= Just Base.LifetimeToolCall
         , testCase "SqliteVersioningConfig round-trip" $ do
-            let noVersioning = Base.SqliteNoVersioning
+            let noVersioning = Base.SqliteReadWrite "/path/to/db.sqlite"
             let jsonNoVer = encode noVersioning
             let mNoVer = decode jsonNoVer :: Maybe Base.SqliteVersioningConfig
-            mNoVer @?= Just Base.SqliteNoVersioning
+            mNoVer @?= Just (Base.SqliteReadWrite "/path/to/db.sqlite")
             
             let versioned = Base.SqliteVersioned Base.LifetimeConversation Nothing "/path/to/db.sqlite"
             let jsonVer = encode versioned

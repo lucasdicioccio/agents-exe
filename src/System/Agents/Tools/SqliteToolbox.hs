@@ -100,7 +100,8 @@ getDefaultStorageRoot = do
                 Nothing -> pure "/tmp/agents-sqlite-versions"
 
 getStorageRoot :: SqliteVersioningConfig -> IO FilePath
-getStorageRoot SqliteNoVersioning = fail "Cannot get storage root for non-versioned toolbox"
+getStorageRoot (SqliteReadOnly _) = fail "Cannot get storage root for non-versioned toolbox"
+getStorageRoot (SqliteReadWrite _) = fail "Cannot get storage root for non-versioned toolbox"
 getStorageRoot (SqliteVersioned _ mRoot _) = case mRoot of
     Just path -> pure path
     Nothing -> getDefaultStorageRoot
@@ -195,7 +196,8 @@ initializeToolbox _tracer desc = do
             unless exists $ do
                 conn <- SQLite.open basePath
                 SQLite.close conn
-        SqliteNoVersioning -> pure ()
+        SqliteReadOnly _ -> pure ()
+        SqliteReadWrite _ -> pure ()
     pure $
         Right $
             Toolbox
@@ -211,20 +213,19 @@ executeQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteQuer
 executeQuery tracer toolbox ctx input =
     withMVar (toolboxLock toolbox) $ \() -> do
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
-            SqliteNoVersioning -> executeDirectQuery tracer toolbox input
+            SqliteReadOnly path -> executeDirectQuery tracer False path input
+            SqliteReadWrite path -> executeDirectQuery tracer True path input
             SqliteVersioned lifetime _ basePath -> executeVersionedQuery tracer toolbox ctx lifetime basePath input
 
-executeDirectQuery :: Tracer IO Trace -> Toolbox -> SqliteQueryInput -> IO (Either QueryError QueryResult)
-executeDirectQuery tracer toolbox input = do
-    let basePath = case sqliteToolboxVersioning (toolboxConfig toolbox) of
-            SqliteVersioned _ _ path -> path
-            SqliteNoVersioning -> error "executeDirectQuery called with versioned config"
-    runTracer tracer (QueryStartedTrace (inputSql input))
-    startTime <- getCurrentTime
-    result <- withConnection basePath $ \conn -> executeViaDirect tracer conn (inputSql input) startTime
-    pure $ case result of
-        Left err -> Left err
-        Right r -> Right r
+executeDirectQuery :: Tracer IO Trace -> Bool -> FilePath -> SqliteQueryInput -> IO (Either QueryError QueryResult)
+executeDirectQuery tracer allowWrites path input = do
+    let op = classifyQuery (inputSql input)
+    if not allowWrites && isWriteOperation op
+        then pure $ Left $ SqlError "Write operation not allowed in read-only mode"
+        else do
+            runTracer tracer (QueryStartedTrace (inputSql input))
+            startTime <- getCurrentTime
+            withConnection path $ \conn -> executeViaDirect tracer conn (inputSql input) startTime
 
 executeVersionedQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteLifetime -> FilePath -> SqliteQueryInput -> IO (Either QueryError QueryResult)
 executeVersionedQuery tracer toolbox ctx lifetime basePath input = do
