@@ -32,6 +32,7 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     SnapshotRef (..),
     SnapshotStore,
     RestoreResult (..),
+    DirectoryListingResult (..),
     defaultAgentOverrides,
     makeSnapshot,
     emptySnapshotStore,
@@ -512,6 +513,25 @@ data Hunk = Hunk
     }
     deriving (Show, Eq)
 
+-- | Result of a directory listing or traversal operation.
+data DirectoryListingResult = DirectoryListingResult
+    { listingPath :: FilePath
+    , listingEntries :: [Aeson.Value]
+    , listingEntryCount :: Int
+    , listingRecursive :: Bool
+    }
+    deriving (Show)
+
+-- | JSON serialization for DirectoryListingResult.
+instance ToJSON DirectoryListingResult where
+    toJSON result =
+        Aeson.object
+            [ "path" .= listingPath result
+            , "entries" .= listingEntries result
+            , "entryCount" .= listingEntryCount result
+            , "recursive" .= listingRecursive result
+            ]
+
 -------------------------------------------------------------------------------
 -- Agent/Tool Configuration Types
 -------------------------------------------------------------------------------
@@ -629,6 +649,8 @@ data DeveloperToolError
       SnapshotNotFoundError !SnapshotRef
     | -- | Restore operation failed
       RestoreError !Text
+    | -- | Directory scope error
+      DirectoryScopeError !Text
     | {- | Snapshot mismatch (optimistic locking failure)
       Expected snapshot doesn't match actual file content
       -}

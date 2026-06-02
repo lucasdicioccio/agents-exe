@@ -234,3 +234,4 @@ let session = ensureSessionVersion rawSession
 -}
 ensureSessionVersion :: Session -> Session
 ensureSessionVersion = migrateSessionToV2
+

@@ -460,10 +460,6 @@ This describes a PostgREST API to load as a toolbox.
 PostgREST exposes PostgreSQL databases as REST APIs and provides
 an OpenAPI/Swagger spec at the root endpoint.
 
-The toolbox will fetch the spec from 'postgrestSpecUrl' and make
-all table endpoints available as tools to the agent, with special
-handling for row filters, pagination, ordering, and column selection.
-
 The spec URL can be either:
 * An HTTP/HTTPS URL (e.g., "http://localhost:3000/")
 * A file URL (e.g., "file:///path/to/postgrest-spec.json")
@@ -864,6 +860,8 @@ data SystemToolCapability
       SystemToolReadSession
     | -- | Get session statistics
       SystemToolGetSessionStats
+    | -- | List directory contents with metadata
+      SystemToolListDirectory
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -881,6 +879,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolSearchSessions = Aeson.String "search-sessions"
     toJSON SystemToolReadSession = Aeson.String "read-session"
     toJSON SystemToolGetSessionStats = Aeson.String "get-session-stats"
+    toJSON SystemToolListDirectory = Aeson.String "list-directory"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -899,7 +898,8 @@ instance FromJSON SystemToolCapability where
             "search-sessions" -> return SystemToolSearchSessions
             "read-session" -> return SystemToolReadSession
             "get-session-stats" -> return SystemToolGetSessionStats
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats."
+            "list-directory" -> return SystemToolListDirectory
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
@@ -1194,6 +1194,10 @@ data DeveloperToolCapability
       DevToolSnapshot
     | -- | Restore a file from a snapshot
       DevToolRestoreFile
+    | -- | List directory contents with metadata
+      DevToolListDirectory
+    | -- | Traverse directory tree recursively
+      DevToolTraverseDirectory
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
@@ -1211,6 +1215,8 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolHelp = Aeson.String "help"
     toJSON DevToolSnapshot = Aeson.String "snapshot"
     toJSON DevToolRestoreFile = Aeson.String "restore-file"
+    toJSON DevToolListDirectory = Aeson.String "list-directory"
+    toJSON DevToolTraverseDirectory = Aeson.String "traverse-directory"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -1229,8 +1235,9 @@ instance FromJSON DeveloperToolCapability where
             "help" -> return DevToolHelp
             "snapshot" -> return DevToolSnapshot
             "restore-file" -> return DevToolRestoreFile
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file."
-
+            "list-directory" -> return DevToolListDirectory
+            "traverse-directory" -> return DevToolTraverseDirectory
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.
@@ -1573,3 +1580,4 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
+
