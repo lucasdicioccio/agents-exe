@@ -50,6 +50,27 @@ instance FromJSON SqliteQueryInput where
     parseJSON = Aeson.withObject "SqliteQueryInput" $ \v ->
         SqliteQueryInput <$> v .: "sql" <*> v .:? "restore_from"
 
+data PromoteInput = PromoteInput
+    { promoteRestoreFrom :: Maybe SqliteVersionHandle
+    }
+    deriving (Show)
+
+instance FromJSON PromoteInput where
+    parseJSON = Aeson.withObject "PromoteInput" $ \v ->
+        PromoteInput <$> v .:? "restore_from"
+
+data PromoteResult = PromoteResult
+    { promotedFrom :: FilePath
+    , promotedTo   :: FilePath
+    }
+    deriving (Show)
+
+instance ToJSON PromoteResult where
+    toJSON r = Aeson.object
+        [ "promoted_from" .= promotedFrom r
+        , "promoted_to"   .= promotedTo r
+        ]
+
 data QueryResult = QueryResult
     { resultColumns :: [Text]
     , resultRows :: [[Aeson.Value]]
@@ -377,6 +398,30 @@ sqlColumnToJson stmt colIdx = do
             val <- Direct.columnBlob stmt colIdx
             pure $ Aeson.String (TextEnc.decodeUtf8 val)
         Direct.NullColumn -> pure Aeson.Null
+
+-- | Promote a snapshot (or the current head) to basePath, making it the new baseline.
+promoteSnapshot :: Toolbox -> ToolExecutionContext -> PromoteInput -> IO (Either QueryError PromoteResult)
+promoteSnapshot toolbox ctx input =
+    withMVar (toolboxLock toolbox) $ \() ->
+        case sqliteToolboxVersioning (toolboxConfig toolbox) of
+            SqliteReadOnly  _ -> pure $ Left $ SqlError "Cannot promote a read-only toolbox"
+            SqliteReadWrite _ -> pure $ Left $ SqlError "Cannot promote a read-write toolbox (writes go directly to the file)"
+            SqliteVersioned sharing _ basePath -> do
+                let config  = sqliteToolboxVersioning (toolboxConfig toolbox)
+                let headKey = sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx)
+                sourcePath <- case promoteRestoreFrom input of
+                    Just handle -> do
+                        result <- resolveVersionPath config (toolboxName toolbox) handle
+                        pure $ case result of
+                            Right path -> path
+                            Left _     -> basePath
+                    Nothing -> case headKey of
+                        Nothing  -> pure basePath
+                        Just key -> Map.findWithDefault basePath key <$> readTVarIO (toolboxVersionedHeads toolbox)
+                result <- try @SomeException $ copyDatabaseWithWAL sourcePath basePath
+                pure $ case result of
+                    Left e  -> Left $ SqlError $ Text.pack $ show e
+                    Right _ -> Right $ PromoteResult { promotedFrom = sourcePath, promotedTo = basePath }
 
 makeToolDescription :: Toolbox -> ToolDescription
 makeToolDescription toolbox =
