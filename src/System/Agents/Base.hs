@@ -630,36 +630,35 @@ instance FromJSON PostgRESTToolboxDescription where
 -- Builtin Toolbox Configuration
 -------------------------------------------------------------------------------
 
-{- | Lifetime scope for versioned SQLite databases
+{- | Sharing scope for versioned SQLite databases.
 
-Controls how database versions are shared across the conversation lifecycle:
-* 'LifetimeConversation': One version per conversation - all tool calls share state
-* 'LifetimeTurn': Versions per turn - tool calls within a turn share state
-* 'LifetimeToolCall': Each tool call gets an isolated fresh copy
+Controls at what granularity the "current head" (latest written snapshot) is shared:
+* 'SharingGlobal': One persistent chain shared across all conversations — never resets
+* 'SharingConversation': One chain per conversation — resets to basePath each new session
+* 'SharingTurn': One chain per turn — resets to basePath each new turn
+* 'SharingToolCall': Fully isolated per tool call — always starts from basePath, no chaining
 -}
-data SqliteLifetime
-    = -- | One version per conversation - all tool calls share the same database state
-      LifetimeConversation
-    | -- | Versions per turn - tool calls within the same turn share state
-      LifetimeTurn
-    | -- | Each tool call gets isolated fresh copy
-      LifetimeToolCall
+data SqliteSharing
+    = SharingGlobal
+    | SharingConversation
+    | SharingTurn
+    | SharingToolCall
     deriving (Show, Eq, Ord, Generic)
 
--- | Serialize SqliteLifetime as kebab-case strings.
-instance ToJSON SqliteLifetime where
-    toJSON LifetimeConversation = Aeson.String "conversation"
-    toJSON LifetimeTurn = Aeson.String "turn"
-    toJSON LifetimeToolCall = Aeson.String "tool-call"
+instance ToJSON SqliteSharing where
+    toJSON SharingGlobal       = Aeson.String "global"
+    toJSON SharingConversation = Aeson.String "conversation"
+    toJSON SharingTurn         = Aeson.String "turn"
+    toJSON SharingToolCall     = Aeson.String "tool-call"
 
--- | Parse SqliteLifetime from kebab-case strings.
-instance FromJSON SqliteLifetime where
-    parseJSON = Aeson.withText "SqliteLifetime" $ \txt ->
+instance FromJSON SqliteSharing where
+    parseJSON = Aeson.withText "SqliteSharing" $ \txt ->
         case txt of
-            "conversation" -> return LifetimeConversation
-            "turn" -> return LifetimeTurn
-            "tool-call" -> return LifetimeToolCall
-            other -> fail $ "Invalid SqliteLifetime: " ++ Text.unpack other ++ ". Expected 'conversation', 'turn', or 'tool-call'."
+            "global"       -> return SharingGlobal
+            "conversation" -> return SharingConversation
+            "turn"         -> return SharingTurn
+            "tool-call"    -> return SharingToolCall
+            other -> fail $ "Invalid SqliteSharing: " ++ Text.unpack other ++ ". Expected 'global', 'conversation', 'turn', or 'tool-call'."
 
 {- | Version handle for restoration (serializable to JSON).
 
@@ -700,8 +699,8 @@ data SqliteVersioningConfig
     | -- | Direct read-write access - all queries allowed
       SqliteReadWrite !FilePath
     | SqliteVersioned
-        { vLifetime :: !SqliteLifetime
-        -- ^ Lifetime scope for versioned databases
+        { vSharing :: !SqliteSharing
+        -- ^ Sharing scope — determines when the write chain resets to basePath
         , vStorageRoot :: !(Maybe FilePath)
         -- ^ Optional custom storage root. Default: ~/.agents/sqlite-versions (or XDG equivalent)
         , vBasePath :: !FilePath
@@ -712,10 +711,10 @@ data SqliteVersioningConfig
 instance ToJSON SqliteVersioningConfig where
     toJSON (SqliteReadOnly path) = Aeson.object ["tag" .= ("SqliteReadOnly" :: Text), "path" .= path]
     toJSON (SqliteReadWrite path) = Aeson.object ["tag" .= ("SqliteReadWrite" :: Text), "path" .= path]
-    toJSON (SqliteVersioned lifetime mRoot base) =
+    toJSON (SqliteVersioned sharing mRoot base) =
         Aeson.object
             [ "tag" .= ("SqliteVersioned" :: Text)
-            , "lifetime" .= lifetime
+            , "shared" .= sharing
             , "storageRoot" .= mRoot
             , "basePath" .= base
             ]
@@ -724,11 +723,12 @@ instance FromJSON SqliteVersioningConfig where
     parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
         tag <- v .: "tag"
         case (tag :: Text) of
-            "SqliteReadOnly" -> SqliteReadOnly <$> v .: "path"
-            "SqliteReadWrite" -> SqliteReadWrite <$> v .: "path"
-            "SqliteVersioned" ->
+            "SqliteReadOnly"     -> SqliteReadOnly  <$> v .: "path"
+            "SqliteReadWrite"    -> SqliteReadWrite <$> v .: "path"
+            "SqliteNoVersioning" -> SqliteReadWrite <$> v .: "path"
+            "SqliteVersioned"    ->
                 SqliteVersioned
-                    <$> v .: "lifetime"
+                    <$> v .: "shared"
                     <*> v .:? "storageRoot"
                     <*> v .: "basePath"
             other -> fail $ "Unknown SqliteVersioningConfig tag: " ++ Text.unpack other
