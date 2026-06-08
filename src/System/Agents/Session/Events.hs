@@ -35,7 +35,6 @@ Read events from the SystemToolbox:
 @
 events <- getSessionEvents world convId (Just 100)
 @
-
 -}
 module System.Agents.Session.Events (
     -- * Event Types
@@ -344,4 +343,3 @@ drainEvents queue = go []
 -- STM import helper
 atomically :: STM a -> IO a
 atomically = Control.Concurrent.STM.atomically
-

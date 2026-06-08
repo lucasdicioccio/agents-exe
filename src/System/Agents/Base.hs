@@ -733,18 +733,18 @@ data SqliteSharing
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON SqliteSharing where
-    toJSON SharingGlobal       = Aeson.String "global"
+    toJSON SharingGlobal = Aeson.String "global"
     toJSON SharingConversation = Aeson.String "conversation"
-    toJSON SharingTurn         = Aeson.String "turn"
-    toJSON SharingToolCall     = Aeson.String "tool-call"
+    toJSON SharingTurn = Aeson.String "turn"
+    toJSON SharingToolCall = Aeson.String "tool-call"
 
 instance FromJSON SqliteSharing where
     parseJSON = Aeson.withText "SqliteSharing" $ \txt ->
         case txt of
-            "global"       -> return SharingGlobal
+            "global" -> return SharingGlobal
             "conversation" -> return SharingConversation
-            "turn"         -> return SharingTurn
-            "tool-call"    -> return SharingToolCall
+            "turn" -> return SharingTurn
+            "tool-call" -> return SharingToolCall
             other -> fail $ "Invalid SqliteSharing: " ++ Text.unpack other ++ ". Expected 'global', 'conversation', 'turn', or 'tool-call'."
 
 {- | Version handle for restoration (serializable to JSON).
@@ -770,21 +770,22 @@ data SqliteVersionHandle = SqliteVersionHandle
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON SqliteVersionHandle where
-    toJSON h = Aeson.object
-        [ "session_id"       .= vhSessionId h
-        , "turn_id"          .= vhTurnId h
-        , "tool_call_index"  .= vhToolCallIndex h
-        , "toolbox_name"     .= vhToolboxName h
-        , "timestamp"        .= vhTimestamp h
-        ]
+    toJSON h =
+        Aeson.object
+            [ "session_id" .= vhSessionId h
+            , "turn_id" .= vhTurnId h
+            , "tool_call_index" .= vhToolCallIndex h
+            , "toolbox_name" .= vhToolboxName h
+            , "timestamp" .= vhTimestamp h
+            ]
 
 instance FromJSON SqliteVersionHandle where
     parseJSON = Aeson.withObject "SqliteVersionHandle" $ \v ->
         SqliteVersionHandle
-            <$> v .:  "session_id"
-            <*> v .:  "turn_id"
-            <*> v .:  "tool_call_index"
-            <*> v .:  "toolbox_name"
+            <$> v .: "session_id"
+            <*> v .: "turn_id"
+            <*> v .: "tool_call_index"
+            <*> v .: "toolbox_name"
             <*> (v .:? "timestamp" Aeson..!= "")
 
 {- | Enhanced SQLite versioning configuration.
@@ -825,10 +826,10 @@ instance FromJSON SqliteVersioningConfig where
     parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
         tag <- v .: "tag"
         case (tag :: Text) of
-            "SqliteReadOnly"     -> SqliteReadOnly  <$> v .: "path"
-            "SqliteReadWrite"    -> SqliteReadWrite <$> v .: "path"
+            "SqliteReadOnly" -> SqliteReadOnly <$> v .: "path"
+            "SqliteReadWrite" -> SqliteReadWrite <$> v .: "path"
             "SqliteNoVersioning" -> SqliteReadWrite <$> v .: "path"
-            "SqliteVersioned"    ->
+            "SqliteVersioned" ->
                 SqliteVersioned
                     <$> v .: "shared"
                     <*> v .:? "storageRoot"
@@ -962,6 +963,7 @@ data SystemToolCapability
     | -- | List directory contents with metadata
       SystemToolListDirectory
     | -- Phase 1: Ongoing Session Control
+
       -- | Inject message to ongoing session
       SystemToolInjectMessage
     | -- | Pause an ongoing session
@@ -971,6 +973,7 @@ data SystemToolCapability
     | -- | Fork an ongoing session
       SystemToolForkConversation
     | -- Phase 2: Ongoing Session Observation
+
       -- | List in-memory ongoing sessions
       SystemToolListOngoingSessions
     | -- | Read in-memory session state + events
@@ -1373,6 +1376,7 @@ instance FromJSON DeveloperToolCapability where
             "list-directory" -> return DevToolListDirectory
             "traverse-directory" -> return DevToolTraverseDirectory
             other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
+
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.
@@ -1715,4 +1719,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-
