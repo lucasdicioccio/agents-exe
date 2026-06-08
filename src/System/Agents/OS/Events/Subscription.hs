@@ -98,8 +98,8 @@ import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
 import System.Agents.Base (AgentId, ConversationId, ToolCallId)
-import System.Agents.Session.Events (InputSource (..), SessionEvent (..))
 import System.Agents.OS.Core.World (World)
+import System.Agents.Session.Events (InputSource (..), SessionEvent (..))
 
 -------------------------------------------------------------------------------
 -- Subscription Identifiers
@@ -195,8 +195,7 @@ textToSubscriber txt = case Text.splitOn ":" txt of
 -- Event Filters
 -------------------------------------------------------------------------------
 
-{- | Categories of session events for filtering.
--}
+-- | Categories of session events for filtering.
 data SessionEventType
     = TypeTurnEvent
     | TypeToolCallEvent
@@ -223,8 +222,7 @@ instance FromJSON SessionEventType where
     parseJSON (Aeson.String "session-control") = pure TypeSessionControlEvent
     parseJSON _ = fail "Invalid SessionEventType"
 
-{- | Filter for turn lifecycle status.
--}
+-- | Filter for turn lifecycle status.
 data TurnStatusFilter
     = TurnStatusAny
     | TurnStatusStarted
@@ -248,8 +246,7 @@ instance FromJSON TurnStatusFilter where
     parseJSON (Aeson.String "active") = pure TurnStatusActive
     parseJSON _ = fail "Invalid TurnStatusFilter"
 
-{- | Boolean combinators for composing filters.
--}
+-- | Boolean combinators for composing filters.
 data FilterCombinator
     = FilterAnd SessionEventFilter SessionEventFilter
     | FilterOr SessionEventFilter SessionEventFilter
@@ -299,11 +296,12 @@ instance ToJSON SessionEventFilter where
     toJSON (FilterToolCall mName) = Aeson.object ["tool-call" .= mName]
     toJSON (FilterToolCallWithArg toolName argName argValue) =
         Aeson.object
-            [ "tool-call-with-arg" .= Aeson.object
-                [ "tool" .= toolName
-                , "arg" .= argName
-                , "value" .= argValue
-                ]
+            [ "tool-call-with-arg"
+                .= Aeson.object
+                    [ "tool" .= toolName
+                    , "arg" .= argName
+                    , "value" .= argValue
+                    ]
             ]
     toJSON (FilterLlmResponseContains txt) = Aeson.object ["llm-contains" .= txt]
     toJSON (FilterUserInputMatches txt) = Aeson.object ["user-matches" .= txt]
@@ -433,8 +431,7 @@ newSubscriptionRegistry = do
 -- Subscription Lifecycle
 -------------------------------------------------------------------------------
 
-{- | Errors that can occur during subscription operations.
--}
+-- | Errors that can occur during subscription operations.
 data SubscriptionError
     = SessionNotFound ConversationId
     | SubscriptionQuotaExceeded SubscriberId
@@ -460,10 +457,10 @@ subscribeToSessionEvents ::
     SubscriberId ->
     ConversationId ->
     SessionEventFilter ->
+    -- | TTL in seconds (Nothing = no expiry)
     Maybe Int ->
-    -- ^ TTL in seconds (Nothing = no expiry)
+    -- | Current time
     UTCTime ->
-    -- ^ Current time
     STM (Either SubscriptionError EventSubscription)
 subscribeToSessionEvents registry subscriber sessionId filterSpec mTtlSeconds now = do
     -- Check subscriber quota
@@ -509,7 +506,7 @@ subscribeToSessionEvents registry subscriber sessionId filterSpec mTtlSeconds no
     addSeconds secs = addUTCTime (fromIntegral secs)
 
     addUTCTime :: Double -> UTCTime -> UTCTime
-    addUTCTime secs time = time  -- Simplified - use time library properly in production
+    addUTCTime secs time = time -- Simplified - use time library properly in production
 
 -- | Generate a new subscription ID (STM version for atomicity).
 generateSubscriptionId :: SubscriptionRegistry -> STM SubscriptionId
@@ -519,7 +516,7 @@ generateSubscriptionId registry = do
     writeTVar registry.registryNextId (counter + 1)
     -- Create a deterministic UUID from the counter
     -- In production, use IO-based UUID generation outside STM
-    pure $ SubscriptionId $ UUID.nil  -- Placeholder
+    pure $ SubscriptionId $ UUID.nil -- Placeholder
 
 -- | Cancel a subscription and remove it from the registry.
 unsubscribeFromSessionEvents ::
@@ -552,8 +549,8 @@ listSubscriptions registry subscriber = do
 -- | Remove expired subscriptions and return the count removed.
 cleanupExpiredSubscriptions ::
     SubscriptionRegistry ->
+    -- | Current time
     UTCTime ->
-    -- ^ Current time
     STM Int
 cleanupExpiredSubscriptions registry now = do
     subs <- readTVar registry.registrySubscriptions
@@ -658,8 +655,9 @@ eventTypeMatches event eventType = case eventType of
             SessionResumedEvent{} -> True
             _ -> False
 
--- | Check if an argument at a dot-notation path matches an expected value.
--- Supports paths like "config.path.to.value"
+{- | Check if an argument at a dot-notation path matches an expected value.
+Supports paths like "config.path.to.value"
+-}
 argMatchesPath :: Text -> Value -> Value -> Bool
 argMatchesPath path expected rootValue =
     case getValueAtPath (Text.splitOn "." path) rootValue of
@@ -674,4 +672,3 @@ getValueAtPath (key : rest) (Aeson.Object obj) =
         Just val -> getValueAtPath rest val
         Nothing -> Nothing
 getValueAtPath _ _ = Nothing
-

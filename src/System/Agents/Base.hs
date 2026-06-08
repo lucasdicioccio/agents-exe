@@ -976,8 +976,8 @@ data SystemToolCapability
 
       -- | List in-memory ongoing sessions
       SystemToolListOngoingSessions
-      -- | Read in-memory session state + events
-      SystemToolReadOngoingSession
+        -- | Read in-memory session state + events
+        SystemToolReadOngoingSession
     | -- Phase 3 & 4: Event Subscriptions and Wait-For
 
       -- | Subscribe to session events

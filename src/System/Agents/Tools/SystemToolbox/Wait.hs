@@ -95,28 +95,27 @@ import GHC.Generics (Generic)
 import Prod.Tracer (Tracer, runTracer)
 
 import System.Agents.Base (ConversationId)
-import System.Agents.Session.Events (SessionEvent (..), UserToolResponse (..))
 import System.Agents.OS.Events.Subscription (
     EventSubscription (..),
     FilterCombinator (..),
     SessionEventFilter (..),
     SessionEventType (..),
+    SubscriberId (..),
+    SubscriptionError (..),
     SubscriptionId,
     SubscriptionRegistry,
-    SubscriptionError (..),
-    SubscriberId (..),
     SystemComponentId (..),
     subscribeToSessionEvents,
     unsubscribeFromSessionEvents,
  )
+import System.Agents.Session.Events (SessionEvent (..), UserToolResponse (..))
 import System.Agents.Tools.SystemToolbox.Types (Toolbox, Trace (..))
 
 -------------------------------------------------------------------------------
 -- Wait Parameters
 -------------------------------------------------------------------------------
 
-{- | Name matching specification for event type selectors.
--}
+-- | Name matching specification for event type selectors.
 data Named
     = NamedExact Text
     | NamedPattern Text
@@ -137,8 +136,7 @@ instance FromJSON Named where
     parseJSON (Aeson.String name) = pure $ NamedExact name
     parseJSON _ = fail "Invalid Named"
 
-{- | Combinators for composing event type selectors.
--}
+-- | Combinators for composing event type selectors.
 data EventCombinator
     = EventOr
     | EventAnd
@@ -194,8 +192,7 @@ instance FromJSON EventTypeSelector where
             _ -> fail "Invalid EventTypeSelector"
     parseJSON _ = fail "Invalid EventTypeSelector"
 
-{- | Combinators for event conditions.
--}
+-- | Combinators for event conditions.
 data ConditionCombinator
     = ConditionAnd EventCondition EventCondition
     | ConditionOr EventCondition EventCondition
@@ -269,8 +266,7 @@ instance FromJSON EventCondition where
             _ -> fail "Invalid EventCondition"
     parseJSON _ = fail "Invalid EventCondition"
 
-{- | Parameters for the @system_wait_for_event@ tool.
--}
+-- | Parameters for the @system_wait_for_event@ tool.
 data WaitForEventParams = WaitForEventParams
     { waitTargetSession :: ConversationId
     -- ^ Which session to watch
@@ -300,8 +296,7 @@ maxWaitTimeoutSeconds = 3600
 -- Wait Results
 -------------------------------------------------------------------------------
 
-{- | Result of a wait operation.
--}
+-- | Result of a wait operation.
 data WaitForEventResult
     = WaitSucceeded
         { waitEvent :: SessionEvent
@@ -383,8 +378,8 @@ the result. Handles timeouts, event buffering, and cleanup.
 waitForEvent ::
     Tracer IO Trace ->
     Toolbox ->
+    -- | Must include SubscriptionRegistry in the toolbox
     WaitForEventParams ->
-    -- ^ Must include SubscriptionRegistry in the toolbox
     IO WaitForEventResult
 waitForEvent tracer toolbox params = do
     runTracer tracer $ SystemInfoRequestedTrace "wait-for-event"
@@ -417,8 +412,8 @@ access to the SubscriptionRegistry from the toolbox.
 waitForEventImpl ::
     SubscriptionRegistry ->
     WaitForEventParams ->
+    -- | Timeout in microseconds
     Int ->
-    -- ^ Timeout in microseconds
     IO WaitForEventResult
 waitForEventImpl registry params timeoutMicros = do
     startTime <- getCurrentTime
@@ -429,16 +424,17 @@ waitForEventImpl registry params timeoutMicros = do
 
     -- Subscribe
     subResult <- atomically $ do
-        now <- pure startTime  -- Would need actual time in STM
+        now <- pure startTime -- Would need actual time in STM
         subscribeToSessionEvents registry subscriber params.waitTargetSession filterSpec Nothing now
 
     case subResult of
         Left err -> pure $ WaitError $ Text.pack $ show err
         Right subscription -> do
             -- Race between timeout and event arrival
-            result <- race
-                (threadDelay timeoutMicros)
-                (waitForMatchingEvent subscription params)
+            result <-
+                race
+                    (threadDelay timeoutMicros)
+                    (waitForMatchingEvent subscription params)
 
             -- Cleanup subscription
             atomically $ unsubscribeFromSessionEvents registry subscription.subId
@@ -450,9 +446,10 @@ waitForEventImpl registry params timeoutMicros = do
             case result of
                 Left () -> do
                     -- Timeout - collect buffered events if enabled
-                    buffered <- if params.waitBufferEvents
-                        then atomically $ drainQueue subscription.subDeliveryQueue
-                        else pure []
+                    buffered <-
+                        if params.waitBufferEvents
+                            then atomically $ drainQueue subscription.subDeliveryQueue
+                            else pure []
                     pure $ WaitTimeout buffered elapsedMs
                 Right event ->
                     pure $ WaitSucceeded event elapsedMs
@@ -472,7 +469,7 @@ selectorToFilter SelectAnyToolCall = FilterEventType TypeToolCallEvent
 selectorToFilter (SelectToolCall named) =
     case named of
         NamedExact name -> FilterToolCall (Just name)
-        NamedPattern _ -> FilterToolCall Nothing  -- Pattern matching not in base filter
+        NamedPattern _ -> FilterToolCall Nothing -- Pattern matching not in base filter
 selectorToFilter SelectAnyUserInput = FilterEventType TypeUserInteractionEvent
 selectorToFilter SelectAnyLlmResponse = FilterEventType TypeLlmInteractionEvent
 selectorToFilter SelectTurnCompletion = FilterTurnStatus TurnStatusCompleted
@@ -480,7 +477,7 @@ selectorToFilter (EventTypeCombinator comb selectors) =
     case selectors of
         [] -> FilterAll
         [s] -> selectorToFilter s
-        (s:ss) ->
+        (s : ss) ->
             let baseFilter = selectorToFilter s
                 restFilter = selectorToFilter (EventTypeCombinator comb ss)
              in FilterCombinator $ case comb of
@@ -524,8 +521,7 @@ eventMatchesParams event params =
             Just cond -> eventMatchesCondition event cond
      in typeMatches && conditionMatches
 
-{- | Check if an event matches a type selector.
--}
+-- | Check if an event matches a type selector.
 eventMatchesSelector :: SessionEvent -> EventTypeSelector -> Bool
 eventMatchesSelector event selector = case selector of
     SelectAnyToolCall ->
@@ -541,7 +537,7 @@ eventMatchesSelector event selector = case selector of
             ToolCallRequestedEvent _ name _ ->
                 case named of
                     NamedExact expected -> name == expected
-                    NamedPattern _ -> True  -- Pattern matching would need regex
+                    NamedPattern _ -> True -- Pattern matching would need regex
             ToolCallExecutingEvent{} -> True
             ToolCallCompletedEvent{} -> True
             ToolCallFailedEvent{} -> True
@@ -564,8 +560,7 @@ eventMatchesSelector event selector = case selector of
             EventOr -> any (eventMatchesSelector event) selectors
             EventAnd -> all (eventMatchesSelector event) selectors
 
-{- | Check if an event matches a condition.
--}
+-- | Check if an event matches a condition.
 eventMatchesCondition :: SessionEvent -> EventCondition -> Bool
 eventMatchesCondition event condition = case condition of
     ToolCallArgCondition argPath expectedValue ->
@@ -629,13 +624,12 @@ resultContains searchText response = case response of
 
 -- | Check if a content part contains search text.
 partContains :: Text -> a -> Bool
-partContains _ _ = False  -- Simplified - would need ContentPart type
+partContains _ _ = False -- Simplified - would need ContentPart type
 
 -- | Extract response text from LLM response (placeholder).
 responseText :: a -> Maybe Text
-responseText _ = Nothing  -- Placeholder - would need LlmResponse type
+responseText _ = Nothing -- Placeholder - would need LlmResponse type
 
 -- | Extract thinking content from LLM response (placeholder).
 responseThinking :: a -> Maybe Text
-responseThinking _ = Nothing  -- Placeholder - would need LlmResponse type
-
+responseThinking _ = Nothing -- Placeholder - would need LlmResponse type

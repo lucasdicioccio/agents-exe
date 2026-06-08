@@ -64,7 +64,6 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 import System.Agents.Base (ConversationId)
-import System.Agents.Session.Events (SessionEvent (..))
 import System.Agents.OS.Events.Subscription (
     EventSubscription (..),
     FilterCombinator (..),
@@ -75,6 +74,7 @@ import System.Agents.OS.Events.Subscription (
     TurnStatusFilter (..),
     filterMatchesEvent,
  )
+import System.Agents.Session.Events (SessionEvent (..))
 
 -------------------------------------------------------------------------------
 -- Event Routing
@@ -229,8 +229,11 @@ eventMatchesFilter = filterMatchesEvent
 -- Note: These helper functions are available from the Subscription module
 -- but are included here for documentation purposes:
 --
--- * filterMatchesEvent - Core matching logic
--- * eventTypeMatches - Match event to event type category
--- * argMatchesPath - Match JSON argument at a path
--- * getValueAtPath - Get value from JSON at a dot-notation path
 
+-- * filterMatchesEvent - Core matching logic
+
+-- * eventTypeMatches - Match event to event type category
+
+-- * argMatchesPath - Match JSON argument at a path
+
+-- * getValueAtPath - Get value from JSON at a dot-notation path
