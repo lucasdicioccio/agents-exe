@@ -1134,6 +1134,7 @@ buildSystemToolParams box =
         baseParams ++ optionalParams
 
 -- Helper to convert capability to text
+-- Helper to convert capability to text
 capabilityToText :: SystemToolCapability -> Text
 capabilityToText SystemToolDate = "date"
 capabilityToText SystemToolOperatingSystem = "operating-system"
@@ -1149,6 +1150,13 @@ capabilityToText SystemToolSearchSessions = "search-sessions"
 capabilityToText SystemToolReadSession = "read-session"
 capabilityToText SystemToolGetSessionStats = "get-session-stats"
 capabilityToText SystemToolListDirectory = "list-directory"
+-- Phase 1 & 2: Ongoing session capabilities
+capabilityToText SystemToolInjectMessage = "inject-message"
+capabilityToText SystemToolPauseConversation = "pause-conversation"
+capabilityToText SystemToolResumeConversation = "resume-conversation"
+capabilityToText SystemToolForkConversation = "fork-conversation"
+capabilityToText SystemToolListOngoingSessions = "list-ongoing-sessions"
+capabilityToText SystemToolReadOngoingSession = "read-ongoing-session"
 
 {- | Register all tools from a System toolbox.
 
@@ -1161,6 +1169,8 @@ registerSystemTools box =
     pure $ case registerSystemTool box of
         Left err -> Left err
         Right reg -> Right [reg]
+
+-------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------
 -- Developer Tool Registration

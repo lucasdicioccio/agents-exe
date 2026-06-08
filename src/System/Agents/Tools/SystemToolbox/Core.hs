@@ -238,6 +238,13 @@ capabilityFromName name = case name of
     "read-session" -> Just SystemToolReadSession
     "get-session-stats" -> Just SystemToolGetSessionStats
     "list-directory" -> Just SystemToolListDirectory
+    -- Phase 1 & 2: Ongoing session capabilities
+    "inject-message" -> Just SystemToolInjectMessage
+    "pause-conversation" -> Just SystemToolPauseConversation
+    "resume-conversation" -> Just SystemToolResumeConversation
+    "fork-conversation" -> Just SystemToolForkConversation
+    "list-ongoing-sessions" -> Just SystemToolListOngoingSessions
+    "read-ongoing-session" -> Just SystemToolReadOngoingSession
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -256,6 +263,13 @@ capabilityToName SystemToolSearchSessions = "search-sessions"
 capabilityToName SystemToolReadSession = "read-session"
 capabilityToName SystemToolGetSessionStats = "get-session-stats"
 capabilityToName SystemToolListDirectory = "list-directory"
+-- Phase 1 & 2: Ongoing session capabilities
+capabilityToName SystemToolInjectMessage = "inject-message"
+capabilityToName SystemToolPauseConversation = "pause-conversation"
+capabilityToName SystemToolResumeConversation = "resume-conversation"
+capabilityToName SystemToolForkConversation = "fork-conversation"
+capabilityToName SystemToolListOngoingSessions = "list-ongoing-sessions"
+capabilityToName SystemToolReadOngoingSession = "read-ongoing-session"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -313,7 +327,15 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox) mSessionId (fromMaybe defaultReadSessionParams mReadParams)
             SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
             SystemToolListDirectory -> pure ("list-directory", Aeson.String "list-directory capability not yet implemented for system toolbox")
+            -- Phase 1 & 2: Ongoing session capabilities (not yet implemented)
+            SystemToolInjectMessage -> pure ("inject-message", Aeson.String "Ongoing session control not yet implemented")
+            SystemToolPauseConversation -> pure ("pause-conversation", Aeson.String "Ongoing session control not yet implemented")
+            SystemToolResumeConversation -> pure ("resume-conversation", Aeson.String "Ongoing session control not yet implemented")
+            SystemToolForkConversation -> pure ("fork-conversation", Aeson.String "Ongoing session control not yet implemented")
+            SystemToolListOngoingSessions -> pure ("list-ongoing-sessions", Aeson.String "Ongoing session observation not yet implemented")
+            SystemToolReadOngoingSession -> pure ("read-ongoing-session", Aeson.String "Ongoing session observation not yet implemented")
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
         Right val -> pure $ Right val
+
