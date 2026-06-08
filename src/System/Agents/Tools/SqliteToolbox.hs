@@ -61,15 +61,16 @@ instance FromJSON PromoteInput where
 
 data PromoteResult = PromoteResult
     { promotedFrom :: FilePath
-    , promotedTo   :: FilePath
+    , promotedTo :: FilePath
     }
     deriving (Show)
 
 instance ToJSON PromoteResult where
-    toJSON r = Aeson.object
-        [ "promoted_from" .= promotedFrom r
-        , "promoted_to"   .= promotedTo r
-        ]
+    toJSON r =
+        Aeson.object
+            [ "promoted_from" .= promotedFrom r
+            , "promoted_to" .= promotedTo r
+            ]
 
 data QueryResult = QueryResult
     { resultColumns :: [Text]
@@ -132,11 +133,11 @@ getDefaultStorageRoot = do
                 Nothing -> pure "/tmp/agents-sqlite-versions"
 
 getStorageRoot :: SqliteVersioningConfig -> IO FilePath
-getStorageRoot (SqliteReadOnly _)  = fail "Cannot get storage root for non-versioned toolbox"
+getStorageRoot (SqliteReadOnly _) = fail "Cannot get storage root for non-versioned toolbox"
 getStorageRoot (SqliteReadWrite _) = fail "Cannot get storage root for non-versioned toolbox"
 getStorageRoot (SqliteVersioned _ mRoot _) = case mRoot of
     Just path -> pure path
-    Nothing   -> getDefaultStorageRoot
+    Nothing -> getDefaultStorageRoot
 
 sessionIdToPath :: SessionId -> String
 sessionIdToPath (SessionId uuid) = map (\c -> if c == '-' then '_' else c) (show uuid)
@@ -155,10 +156,10 @@ buildSnapshotPath root session turn idx name =
 
 -- | HeadKey for a given sharing scope.
 sharingToHeadKey :: SqliteSharing -> SessionId -> TurnId -> Maybe HeadKey
-sharingToHeadKey SharingGlobal       _       _    = Just GlobalHead
-sharingToHeadKey SharingConversation session _    = Just (ConversationHead session)
-sharingToHeadKey SharingTurn         session turn = Just (TurnHead session turn)
-sharingToHeadKey SharingToolCall     _       _    = Nothing
+sharingToHeadKey SharingGlobal _ _ = Just GlobalHead
+sharingToHeadKey SharingConversation session _ = Just (ConversationHead session)
+sharingToHeadKey SharingTurn session turn = Just (TurnHead session turn)
+sharingToHeadKey SharingToolCall _ _ = Nothing
 
 resolveVersionPath :: SqliteVersioningConfig -> Text -> SqliteVersionHandle -> IO (Either QueryError FilePath)
 resolveVersionPath config expectedName handle =
@@ -220,19 +221,19 @@ openDirectDb tracer path = do
 -- Initialization
 initializeToolbox :: Tracer IO Trace -> SqliteToolboxDescription -> IO (Either String Toolbox)
 initializeToolbox tracer desc = do
-    lock    <- newMVar ()
+    lock <- newMVar ()
     counter <- newTVarIO 0
-    heads   <- newTVarIO Map.empty
+    heads <- newTVarIO Map.empty
     mDbResult <- case sqliteToolboxVersioning desc of
         SqliteReadOnly path -> do
             r <- try @SomeException $ openDirectDb tracer path
             pure $ case r of
-                Left e   -> Left $ "Failed to open read-only database: " ++ show e
+                Left e -> Left $ "Failed to open read-only database: " ++ show e
                 Right db -> Right (Just db)
         SqliteReadWrite path -> do
             r <- try @SomeException $ openDirectDb tracer path
             pure $ case r of
-                Left e   -> Left $ "Failed to open read-write database: " ++ show e
+                Left e -> Left $ "Failed to open read-write database: " ++ show e
                 Right db -> Right (Just db)
         SqliteVersioned _ _ basePath -> do
             exists <- doesFileExist basePath
@@ -246,12 +247,12 @@ initializeToolbox tracer desc = do
             pure $
                 Right $
                     Toolbox
-                        { toolboxName          = sqliteToolboxName desc
-                        , toolboxDescription   = sqliteToolboxDescription desc
-                        , toolboxConfig        = desc
-                        , toolboxLock          = lock
-                        , toolboxWriteCounter  = counter
-                        , toolboxDirectDb      = mDb
+                        { toolboxName = sqliteToolboxName desc
+                        , toolboxDescription = sqliteToolboxDescription desc
+                        , toolboxConfig = desc
+                        , toolboxLock = lock
+                        , toolboxWriteCounter = counter
+                        , toolboxDirectDb = mDb
                         , toolboxVersionedHeads = heads
                         }
 
@@ -260,8 +261,8 @@ executeQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteQuer
 executeQuery tracer toolbox ctx input =
     withMVar (toolboxLock toolbox) $ \() -> do
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
-            SqliteReadOnly  _ -> executeDirectQuery tracer toolbox False input
-            SqliteReadWrite _ -> executeDirectQuery tracer toolbox True  input
+            SqliteReadOnly _ -> executeDirectQuery tracer toolbox False input
+            SqliteReadWrite _ -> executeDirectQuery tracer toolbox True input
             SqliteVersioned sharing _ basePath -> executeVersionedQuery tracer toolbox ctx sharing basePath input
 
 executeDirectQuery :: Tracer IO Trace -> Toolbox -> Bool -> SqliteQueryInput -> IO (Either QueryError QueryResult)
@@ -276,7 +277,7 @@ executeDirectQuery tracer toolbox allowWrites input = do
                 startTime <- getCurrentTime
                 result <- try @SomeException $ executeWithDb db (inputSql input) startTime
                 pure $ case result of
-                    Left e  -> Left $ SqlError $ Text.pack $ show e
+                    Left e -> Left $ SqlError $ Text.pack $ show e
                     Right r -> Right r
 
 executeVersionedQuery :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteSharing -> FilePath -> SqliteQueryInput -> IO (Either QueryError QueryResult)
@@ -284,7 +285,7 @@ executeVersionedQuery tracer toolbox ctx sharing basePath input = do
     runTracer tracer (QueryStartedTrace (inputSql input))
     startTime <- getCurrentTime
 
-    let config  = sqliteToolboxVersioning (toolboxConfig toolbox)
+    let config = sqliteToolboxVersioning (toolboxConfig toolbox)
     let headKey = sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx)
 
     -- Resolve source: restore_from > current head > basePath
@@ -293,9 +294,9 @@ executeVersionedQuery tracer toolbox ctx sharing basePath input = do
             result <- resolveVersionPath config (toolboxName toolbox) handle
             pure $ case result of
                 Right path -> path
-                Left _     -> basePath
+                Left _ -> basePath
         Nothing -> case headKey of
-            Nothing  -> pure basePath
+            Nothing -> pure basePath
             Just key -> Map.findWithDefault basePath key <$> readTVarIO (toolboxVersionedHeads toolbox)
 
     let operation = classifyQuery (inputSql input)
@@ -317,22 +318,23 @@ executeVersionedQuery tracer toolbox ctx sharing basePath input = do
 
             -- Advance head for this sharing scope
             case headKey of
-                Nothing  -> pure ()
+                Nothing -> pure ()
                 Just key -> atomically $ modifyTVar' (toolboxVersionedHeads toolbox) (Map.insert key snapshotPath)
 
             -- Build version handle so the LLM can reference this snapshot
             timestamp <- formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" <$> getCurrentTime
-            let handle = SqliteVersionHandle
-                    { vhSessionId      = Text.pack $ sessionIdToPath (ctxSessionId ctx)
-                    , vhTurnId         = Text.pack $ turnIdToPath (ctxTurnId ctx)
-                    , vhToolCallIndex  = callIdx
-                    , vhToolboxName    = toolboxName toolbox
-                    , vhTimestamp      = Text.pack timestamp
-                    }
+            let handle =
+                    SqliteVersionHandle
+                        { vhSessionId = Text.pack $ sessionIdToPath (ctxSessionId ctx)
+                        , vhTurnId = Text.pack $ turnIdToPath (ctxTurnId ctx)
+                        , vhToolCallIndex = callIdx
+                        , vhToolboxName = toolboxName toolbox
+                        , vhTimestamp = Text.pack timestamp
+                        }
 
             pure $ case result of
                 Left err -> Left err
-                Right r  -> Right $ r{resultVersionHandle = Just handle}
+                Right r -> Right $ r{resultVersionHandle = Just handle}
         else do
             -- Read: run on current source, no snapshot, no head update
             executeOnPath tracer sourcePath (inputSql input) startTime
@@ -378,7 +380,7 @@ executeOnPath tracer path query startTime = do
         Direct.close db
         pure r
     pure $ case result of
-        Left e  -> Left $ SqlError $ Text.pack $ show e
+        Left e -> Left $ SqlError $ Text.pack $ show e
         Right r -> Right r
 
 sqlColumnToJson :: Direct.Statement -> Direct.ColumnIndex -> IO Aeson.Value
@@ -404,24 +406,24 @@ promoteSnapshot :: Toolbox -> ToolExecutionContext -> PromoteInput -> IO (Either
 promoteSnapshot toolbox ctx input =
     withMVar (toolboxLock toolbox) $ \() ->
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
-            SqliteReadOnly  _ -> pure $ Left $ SqlError "Cannot promote a read-only toolbox"
+            SqliteReadOnly _ -> pure $ Left $ SqlError "Cannot promote a read-only toolbox"
             SqliteReadWrite _ -> pure $ Left $ SqlError "Cannot promote a read-write toolbox (writes go directly to the file)"
             SqliteVersioned sharing _ basePath -> do
-                let config  = sqliteToolboxVersioning (toolboxConfig toolbox)
+                let config = sqliteToolboxVersioning (toolboxConfig toolbox)
                 let headKey = sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx)
                 sourcePath <- case promoteRestoreFrom input of
                     Just handle -> do
                         result <- resolveVersionPath config (toolboxName toolbox) handle
                         pure $ case result of
                             Right path -> path
-                            Left _     -> basePath
+                            Left _ -> basePath
                     Nothing -> case headKey of
-                        Nothing  -> pure basePath
+                        Nothing -> pure basePath
                         Just key -> Map.findWithDefault basePath key <$> readTVarIO (toolboxVersionedHeads toolbox)
                 result <- try @SomeException $ copyDatabaseWithWAL sourcePath basePath
                 pure $ case result of
-                    Left e  -> Left $ SqlError $ Text.pack $ show e
-                    Right _ -> Right $ PromoteResult { promotedFrom = sourcePath, promotedTo = basePath }
+                    Left e -> Left $ SqlError $ Text.pack $ show e
+                    Right _ -> Right $ PromoteResult{promotedFrom = sourcePath, promotedTo = basePath}
 
 makeToolDescription :: Toolbox -> ToolDescription
 makeToolDescription toolbox =

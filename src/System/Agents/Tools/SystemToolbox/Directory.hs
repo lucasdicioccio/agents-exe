@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | Directory listing capability for the system toolbox. -}
+-- | Directory listing capability for the system toolbox.
 module System.Agents.Tools.SystemToolbox.Directory (
     executeListDirectory,
 ) where
@@ -22,15 +22,7 @@ import System.FilePath (takeFileName, (</>))
 
 import System.Agents.Base (SystemToolCapability (..))
 import System.Agents.FileSandbox (AccessResult (..), validateFileRead)
-import System.Agents.Tools.DirectoryListing (
-    FileEntry (..),
-    FileFilter (NameFilter),
-    FileType (..),
-    applyFilters,
-    formatFilePermissions,
-    isHiddenFile,
- )
-import System.Agents.Tools.DirectoryListing (ListDirectoryOp (..))
+import System.Agents.Tools.DirectoryListing (FileEntry (..), FileFilter (NameFilter), FileType (..), ListDirectoryOp (..), applyFilters, formatFilePermissions, isHiddenFile)
 import System.Agents.Tools.SystemToolbox.Types (
     QueryError (..),
     Toolbox (..),
@@ -56,17 +48,16 @@ executeListDirectory tracer toolbox path doRecurse doHidden namePatterns = do
     runTracer tracer $ SystemInfoRequestedTrace "list-directory"
     if SystemToolListDirectory `notElem` toolbox.toolboxCapabilities
         then pure $ Left $ CapabilityNotEnabledError "list-directory"
-        else
-            case toolbox.toolboxFileSandbox of
-                Just sandbox -> do
-                    accessResult <- validateFileRead sandbox path
-                    case accessResult of
-                        AccessDenied err ->
-                            pure $ Left $ SystemInfoError $ "Access denied: " <> Text.pack (show err)
-                        AccessGranted ->
-                            proceedWithListing path doRecurse doHidden namePatterns
-                Nothing ->
-                    proceedWithListing path doRecurse doHidden namePatterns
+        else case toolbox.toolboxFileSandbox of
+            Just sandbox -> do
+                accessResult <- validateFileRead sandbox path
+                case accessResult of
+                    AccessDenied err ->
+                        pure $ Left $ SystemInfoError $ "Access denied: " <> Text.pack (show err)
+                    AccessGranted ->
+                        proceedWithListing path doRecurse doHidden namePatterns
+            Nothing ->
+                proceedWithListing path doRecurse doHidden namePatterns
 
 proceedWithListing ::
     FilePath ->
@@ -84,12 +75,14 @@ proceedWithListing path doRecurse doHidden namePatterns = do
                 Left (e :: SomeException) ->
                     pure $ Left $ SystemInfoError $ Text.pack $ show e
                 Right entries ->
-                    pure $ Right $ Aeson.object
-                        [ "path" Aeson..= path
-                        , "entries" Aeson..= map Aeson.toJSON entries
-                        , "entryCount" Aeson..= length entries
-                        , "recursive" Aeson..= doRecurse
-                        ]
+                    pure $
+                        Right $
+                            Aeson.object
+                                [ "path" Aeson..= path
+                                , "entries" Aeson..= map Aeson.toJSON entries
+                                , "entryCount" Aeson..= length entries
+                                , "recursive" Aeson..= doRecurse
+                                ]
 
 collectEntries ::
     FilePath ->
@@ -101,12 +94,13 @@ collectEntries dir doRecurse doHidden namePatterns = do
     names <- listDirectory dir
     let paths = map (dir </>) names
     let visible = if doHidden then paths else filter (not . isHiddenFile . takeFileName) paths
-    let op = ListDirectoryOp
-            { targetPath = dir
-            , filters = map NameFilter namePatterns
-            , recursive = doRecurse
-            , includeHidden = doHidden
-            }
+    let op =
+            ListDirectoryOp
+                { targetPath = dir
+                , filters = map NameFilter namePatterns
+                , recursive = doRecurse
+                , includeHidden = doHidden
+                }
     entries <- concat <$> mapM (processEntry op doRecurse) visible
     pure entries
 
@@ -119,15 +113,16 @@ processEntry op doRecurse entryPath = do
     mtime <- getModificationTime entryPath
     perms <- getPermissions entryPath
     let ftype = if isDir then Directory else File
-    let entry = FileEntry
-            { fileEntryPath = entryPath
-            , fileEntryType = ftype
-            , fileEntrySize = Nothing
-            , fileEntryModifiedTime = mtime
-            , fileEntryPermissions = formatFilePermissions perms ftype
-            }
+    let entry =
+            FileEntry
+                { fileEntryPath = entryPath
+                , fileEntryType = ftype
+                , fileEntrySize = Nothing
+                , fileEntryModifiedTime = mtime
+                , fileEntryPermissions = formatFilePermissions perms ftype
+                }
     mFiltered <- applyFilters op entry
-    let thisEntry = maybe [] (:[]) mFiltered
+    let thisEntry = maybe [] (: []) mFiltered
     children <-
         if isDir && doRecurse
             then collectEntries entryPath doRecurse (op.includeHidden) (nameFiltersOf op.filters)

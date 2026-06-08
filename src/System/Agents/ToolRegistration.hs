@@ -832,11 +832,11 @@ registerSqliteTool box =
 
         isVersioned = case (SqliteTools.toolboxConfig box).sqliteToolboxVersioning of
             SqliteVersioned{} -> True
-            _                 -> False
+            _ -> False
 
         versionedNote
             | isVersioned = " Write operations return a versionHandle; pass it as restore_from to branch from that state."
-            | otherwise   = ""
+            | otherwise = ""
 
         paramProps =
             [ ParamProperty
@@ -846,14 +846,14 @@ registerSqliteTool box =
                 , propertyRequired = True
                 }
             ]
-            ++ [ ParamProperty
-                    { propertyKey = "restore_from"
-                    , propertyType = OpaqueParamType "object"
-                    , propertyDescription = "Pass the versionHandle object returned by a previous write to branch from that snapshot instead of the current head"
-                    , propertyRequired = False
-                    }
-               | isVersioned
-               ]
+                ++ [ ParamProperty
+                        { propertyKey = "restore_from"
+                        , propertyType = OpaqueParamType "object"
+                        , propertyDescription = "Pass the versionHandle object returned by a previous write to branch from that snapshot instead of the current head"
+                        , propertyRequired = False
+                        }
+                   | isVersioned
+                   ]
 
         toolDescription =
             ToolDescription
@@ -890,7 +890,7 @@ registerSqlitePromoteTool ::
 registerSqlitePromoteTool box =
     case (SqliteTools.toolboxConfig box).sqliteToolboxVersioning of
         SqliteVersioned{} -> Just reg
-        _                 -> Nothing
+        _ -> Nothing
   where
     llmName = sqlite2LLMName box "promote"
     paramProps =
@@ -914,23 +914,24 @@ registerSqlitePromoteTool box =
             then Just $ mapToolResult (const call) tool'
             else Nothing
     mbActivation = (SqliteTools.toolboxConfig box).sqliteToolboxActivation
-    reg = ToolRegistration
+    reg =
+        ToolRegistration
             { innerTool = mapToolResult (const ()) tool'
             , declareTool = toolDescription
             , findTool = find
             , toolActivation = mbActivation
             }
 
-{- | Register all tools from a SQLite toolbox. -}
+-- | Register all tools from a SQLite toolbox.
 registerSqliteTools ::
     SqliteTools.Toolbox ->
     IO (Either String [ToolRegistration])
 registerSqliteTools box =
     pure $ case registerSqliteTool box of
-        Left err  -> Left err
+        Left err -> Left err
         Right reg ->
             let extras = maybe [] (: []) (registerSqlitePromoteTool box)
-            in Right (reg : extras)
+             in Right (reg : extras)
 
 -------------------------------------------------------------------------------
 -- System Tool Registration
@@ -1134,6 +1135,7 @@ buildSystemToolParams box =
         baseParams ++ optionalParams
 
 -- Helper to convert capability to text
+-- Helper to convert capability to text
 capabilityToText :: SystemToolCapability -> Text
 capabilityToText SystemToolDate = "date"
 capabilityToText SystemToolOperatingSystem = "operating-system"
@@ -1149,6 +1151,13 @@ capabilityToText SystemToolSearchSessions = "search-sessions"
 capabilityToText SystemToolReadSession = "read-session"
 capabilityToText SystemToolGetSessionStats = "get-session-stats"
 capabilityToText SystemToolListDirectory = "list-directory"
+-- Phase 1 & 2: Ongoing session capabilities
+capabilityToText SystemToolInjectMessage = "inject-message"
+capabilityToText SystemToolPauseConversation = "pause-conversation"
+capabilityToText SystemToolResumeConversation = "resume-conversation"
+capabilityToText SystemToolForkConversation = "fork-conversation"
+capabilityToText SystemToolListOngoingSessions = "list-ongoing-sessions"
+capabilityToText SystemToolReadOngoingSession = "read-ongoing-session"
 
 {- | Register all tools from a System toolbox.
 
@@ -1161,6 +1170,8 @@ registerSystemTools box =
     pure $ case registerSystemTool box of
         Left err -> Left err
         Right reg -> Right [reg]
+
+-------------------------------------------------------------------------------
 
 -------------------------------------------------------------------------------
 -- Developer Tool Registration
@@ -1656,10 +1667,10 @@ sqlitePromoteTool box =
             Aeson.Success input -> do
                 result <- SqliteTools.promoteSnapshot box ctx input
                 case result of
-                    Left err  -> pure $ SqliteToolError call err
+                    Left err -> pure $ SqliteToolError call err
                     Right rsp ->
                         let bs = toStrict $ Aeson.encode rsp
-                        in pure $ BlobToolSuccess call bs Nothing
+                         in pure $ BlobToolSuccess call bs Nothing
 
 -- | Builder for a tool based on a SQLite toolbox.
 sqliteTool ::
@@ -1689,7 +1700,7 @@ sqliteTool box =
             Aeson.Success input -> do
                 result <- SqliteTools.executeQuery (Prod.contramap SqliteToolsTrace tracer) box ctx input
                 case result of
-                    Left err  -> pure $ SqliteToolError call err
+                    Left err -> pure $ SqliteToolError call err
                     Right rsp -> pure $ SqliteToolResult call rsp
 
 systemTool :: SystemTools.Toolbox -> Tool ()
@@ -1713,27 +1724,28 @@ systemTool box =
                 -- Route based on capability
                 if cap == "attach-file"
                     then handleAttachFile tracer v
-                    else if cap == "list-directory"
-                        then handleListDirectory tracer v
-                        else do
-                            -- Extract optional parameters for session introspection capabilities
-                            let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
-                                    Just (Aeson.String sid) -> Just sid
-                                    _ -> Nothing
-                            let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
-                                    Just (Aeson.String q) -> Just q
-                                    _ -> Nothing
+                    else
+                        if cap == "list-directory"
+                            then handleListDirectory tracer v
+                            else do
+                                -- Extract optional parameters for session introspection capabilities
+                                let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
+                                        Just (Aeson.String sid) -> Just sid
+                                        _ -> Nothing
+                                let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
+                                        Just (Aeson.String q) -> Just q
+                                        _ -> Nothing
 
-                            -- Extract read-session parameters
-                            let mReadParams =
-                                    if cap == "read-session"
-                                        then Just $ extractReadSessionParams v
-                                        else Nothing
+                                -- Extract read-session parameters
+                                let mReadParams =
+                                        if cap == "read-session"
+                                            then Just $ extractReadSessionParams v
+                                            else Nothing
 
-                            result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
-                            case result of
-                                Left err -> pure $ SystemToolError call err
-                                Right rsp -> pure $ SystemToolResult call rsp
+                                result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
+                                case result of
+                                    Left err -> pure $ SystemToolError call err
+                                    Right rsp -> pure $ SystemToolResult call rsp
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
@@ -1806,7 +1818,6 @@ systemTool box =
         case KeyMap.lookup (AesonKey.fromText key) obj of
             Just (Aeson.Bool b) -> b
             _ -> False
-
 
 -- | Builder for a DeveloperToolbox-based tool.
 developerTool :: DeveloperTools.Toolbox -> Tool ()
@@ -2456,4 +2467,3 @@ data PropertyHelper
 instance Aeson.FromJSON PropertyHelper where
     parseJSON = Aeson.withObject "PropertyHelper" $ \o ->
         PropertyHelper <$> o Aeson..: "type" <*> o Aeson..: "description"
-
