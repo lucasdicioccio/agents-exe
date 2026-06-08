@@ -245,8 +245,10 @@ capabilityFromName name = case name of
     "fork-conversation" -> Just SystemToolForkConversation
     "list-ongoing-sessions" -> Just SystemToolListOngoingSessions
     "read-ongoing-session" -> Just SystemToolReadOngoingSession
+    -- Phase 3 & 4: Event subscriptions and wait-for
+    "subscribe-events" -> Just SystemToolSubscribeEvents
+    "wait-for-event" -> Just SystemToolWaitForEvent
     _ -> Nothing
-
 -- | Get the name for a capability.
 capabilityToName :: SystemToolCapability -> Text
 capabilityToName SystemToolDate = "date"
@@ -270,6 +272,9 @@ capabilityToName SystemToolResumeConversation = "resume-conversation"
 capabilityToName SystemToolForkConversation = "fork-conversation"
 capabilityToName SystemToolListOngoingSessions = "list-ongoing-sessions"
 capabilityToName SystemToolReadOngoingSession = "read-ongoing-session"
+-- Phase 3 & 4: Ongoing session capabilities
+capabilityToName SystemToolSubscribeEvents = "subscribe-events"
+capabilityToName SystemToolWaitForEvent = "wait-for-event"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -334,7 +339,9 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolForkConversation -> pure ("fork-conversation", Aeson.String "Ongoing session control not yet implemented")
             SystemToolListOngoingSessions -> pure ("list-ongoing-sessions", Aeson.String "Ongoing session observation not yet implemented")
             SystemToolReadOngoingSession -> pure ("read-ongoing-session", Aeson.String "Ongoing session observation not yet implemented")
+            -- Phase 3 & 4: Event subscriptions and wait-for (not yet implemented)
+            SystemToolSubscribeEvents -> pure ("subscribe-events", Aeson.String "Event subscriptions not yet implemented")
+            SystemToolWaitForEvent -> pure ("wait-for-event", Aeson.String "Wait-for-event not yet implemented - use waitForEvent function directly")
         pure (name, value)
-    case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e
         Right val -> pure $ Right val

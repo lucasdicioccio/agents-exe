@@ -976,8 +976,14 @@ data SystemToolCapability
 
       -- | List in-memory ongoing sessions
       SystemToolListOngoingSessions
-    | -- | Read in-memory session state + events
+      -- | Read in-memory session state + events
       SystemToolReadOngoingSession
+    | -- Phase 3 & 4: Event Subscriptions and Wait-For
+
+      -- | Subscribe to session events
+      SystemToolSubscribeEvents
+    | -- | Wait for specific event in a session
+      SystemToolWaitForEvent
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -1001,11 +1007,16 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolPauseConversation = Aeson.String "pause-conversation"
     toJSON SystemToolResumeConversation = Aeson.String "resume-conversation"
     toJSON SystemToolForkConversation = Aeson.String "fork-conversation"
+    -- Phase 1 & 2
+    toJSON SystemToolInjectMessage = Aeson.String "inject-message"
+    toJSON SystemToolPauseConversation = Aeson.String "pause-conversation"
+    toJSON SystemToolResumeConversation = Aeson.String "resume-conversation"
+    toJSON SystemToolForkConversation = Aeson.String "fork-conversation"
     toJSON SystemToolListOngoingSessions = Aeson.String "list-ongoing-sessions"
     toJSON SystemToolReadOngoingSession = Aeson.String "read-ongoing-session"
-
--- | Parse SystemToolCapability from kebab-case strings.
-instance FromJSON SystemToolCapability where
+    -- Phase 3 & 4
+    toJSON SystemToolSubscribeEvents = Aeson.String "subscribe-events"
+    toJSON SystemToolWaitForEvent = Aeson.String "wait-for-event"
     parseJSON = Aeson.withText "SystemToolCapability" $ \txt ->
         case txt of
             "date" -> return SystemToolDate
@@ -1029,7 +1040,10 @@ instance FromJSON SystemToolCapability where
             "fork-conversation" -> return SystemToolForkConversation
             "list-ongoing-sessions" -> return SystemToolListOngoingSessions
             "read-ongoing-session" -> return SystemToolReadOngoingSession
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, inject-message, pause-conversation, resume-conversation, fork-conversation, list-ongoing-sessions, read-ongoing-session."
+            -- Phase 3 & 4
+            "subscribe-events" -> return SystemToolSubscribeEvents
+            "wait-for-event" -> return SystemToolWaitForEvent
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, inject-message, pause-conversation, resume-conversation, fork-conversation, list-ongoing-sessions, read-ongoing-session, subscribe-events, wait-for-event."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
