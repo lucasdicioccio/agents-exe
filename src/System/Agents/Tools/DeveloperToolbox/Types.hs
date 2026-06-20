@@ -24,6 +24,7 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     PatchResult (..),
     PatchError (..),
     Hunk (..),
+    HunkSegment (..),
     RangeSpec (..),
     AgentOverrides (..),
     ToolConfig (..),
@@ -580,6 +581,20 @@ data PatchError
       PatchInvalidLineNumber !Int
     deriving (Show, Eq)
 
+{- | A single piece of a hunk body, in the order it appears in the diff.
+A hunk is an ordered sequence of these segments, which lets a hunk contain
+more than one change separated by context (e.g. @ctx, change, ctx, change, ctx@).
+-}
+data HunkSegment
+    = -- | Unchanged lines that must match the original file exactly (no diff prefix)
+      HunkContext [Text]
+    | -- | A contiguous block of removed lines (- prefix) followed by added lines (+ prefix)
+      HunkChange
+        { hunkChangeRemoved :: [Text]
+        , hunkChangeAdded :: [Text]
+        }
+    deriving (Show, Eq)
+
 {- | A hunk represents a single change section in a unified diff.
 The context lines must match exactly for the hunk to be applied.
 -}
@@ -587,19 +602,13 @@ data Hunk = Hunk
     { hunkOldStart :: Int
     -- ^ Starting line number in the original file (1-based)
     , hunkOldCount :: Int
-    -- ^ Number of lines the hunk applies to in the original file
+    -- ^ Number of lines the hunk header claims to span in the original file
     , hunkNewStart :: Int
     -- ^ Starting line number in the new file (1-based)
     , hunkNewCount :: Int
-    -- ^ Number of lines the hunk produces in the new file
-    , hunkContextBefore :: [Text]
-    -- ^ Context lines before the changed lines (no prefix)
-    , hunkRemovedLines :: [Text]
-    -- ^ Lines to remove (from original file, - prefix in diff)
-    , hunkAddedLines :: [Text]
-    -- ^ Lines to add (to new file, + prefix in diff)
-    , hunkContextAfter :: [Text]
-    -- ^ Context lines after the changed lines (no prefix)
+    -- ^ Number of lines the hunk header claims to produce in the new file
+    , hunkSegments :: [HunkSegment]
+    -- ^ Ordered context/change segments making up the hunk body
     }
     deriving (Show, Eq)
 
