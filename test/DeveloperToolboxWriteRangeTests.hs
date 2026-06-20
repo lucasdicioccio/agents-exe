@@ -1609,8 +1609,7 @@ testAfterSnapshotRefReturned = withTempDir $ \tmpDir ->
         case result of
             Left err -> assertFailure $ show err
             Right writeResult -> do
-                -- beforeSnapshotRef and afterSnapshotRef should both be Nothing
-                -- since snapshot capability is not enabled in test toolbox
-                writeFileBeforeSnapshotRef writeResult @?= Nothing
-                writeFileAfterSnapshotRef writeResult @?= Nothing
+                -- Snapshots are now always taken, regardless of capability config.
+                assertBool "beforeSnapshotRef should be present" $ writeFileBeforeSnapshotRef writeResult /= Nothing
+                assertBool "afterSnapshotRef should be present" $ writeFileAfterSnapshotRef writeResult /= Nothing
 

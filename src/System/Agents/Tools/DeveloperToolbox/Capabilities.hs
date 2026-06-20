@@ -103,11 +103,11 @@ getCapabilityInfo DevToolHelp =
     )
 getCapabilityInfo DevToolSnapshot =
     ( "snapshot"
-    , "Enables snapshot functionality for write-file-range and patch-file. When enabled, file content is stored in RAM before edits, allowing rollback via restore-file using the returned snapshot reference (MD5 hash)."
+    , "Deprecated, no-op: snapshotting is now always on for write-file-range and patch-file (file content is stored in RAM before/after every edit, enabling rollback via restore-file). Listing this capability is no longer required and has no effect."
     )
 getCapabilityInfo DevToolRestoreFile =
     ( "restore-file"
-    , "Restores a file to a previous version using a snapshot reference (MD5 hash). Requires the 'snapshot' capability to be enabled to have stored snapshots available."
+    , "Restores a file to a previous version using a snapshot reference (MD5 hash) returned by write-file-range or patch-file."
     )
 getCapabilityInfo DevToolListDirectory =
     ( "list-directory"

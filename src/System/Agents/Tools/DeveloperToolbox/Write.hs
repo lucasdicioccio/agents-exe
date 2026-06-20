@@ -573,13 +573,14 @@ applyRangeEdit origLineCount (currentLines, offset, results) (range, content) =
                              in (before ++ newLines ++ after, offsetDelta, result)
      in (newCurrentLines, newOffset, results ++ [editResult])
 
-{- | Take a snapshot of the file before editing, if snapshot capability is enabled.
-Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+{- | Take a snapshot of the file before editing. Snapshots are always taken
+(the snapshot store is always present on the toolbox); returns Nothing only
+if the file doesn't exist yet.
 -}
 takeSnapshotBeforeEdit :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotBeforeEdit tracer toolbox filePath =
-    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
-        (Just store, True) -> do
+    case toolboxSnapshotStore toolbox of
+        Just store -> do
             -- Check if file exists
             fileExists <- doesFileExist filePath
             if fileExists
@@ -593,15 +594,13 @@ takeSnapshotBeforeEdit tracer toolbox filePath =
                     runTracer tracer (SnapshotTakenTrace filePath ref)
                     pure $ Just ref
                 else pure Nothing
-        _ -> pure Nothing
+        Nothing -> pure Nothing
 
-{- | Take a snapshot of the file after editing, if snapshot capability is enabled.
-Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
--}
+-- | Take a snapshot of the file after editing. Snapshots are always taken.
 takeSnapshotAfterEdit :: Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotAfterEdit toolbox filePath =
-    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
-        (Just store, True) -> do
+    case toolboxSnapshotStore toolbox of
+        Just store -> do
             -- Read file content and create snapshot
             content <- BS.readFile filePath
             let snapshot = makeSnapshot content
@@ -609,7 +608,7 @@ takeSnapshotAfterEdit toolbox filePath =
             -- Store snapshot in the store
             atomically $ modifyTVar' store (Map.insert ref snapshot)
             pure $ Just ref
-        _ -> pure Nothing
+        Nothing -> pure Nothing
 
 -------------------------------------------------------------------------------
 -- Multi-turn Edit Sessions

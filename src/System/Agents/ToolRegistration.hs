@@ -1177,7 +1177,7 @@ Developer tools expose functions based on configured capabilities:
 * write-file-range: Replace line ranges in a file with new content
 * patch-file: Apply a unified diff patch to a file
 * help: Get detailed help for all activated capabilities
-* snapshot: Enable snapshot functionality for file edits
+* snapshot: Deprecated, no-op (snapshots are now always taken for write-file-range/patch-file)
 * restore-file: Restore a file from a snapshot
 
 The tool accepts a 'capability' parameter to select which operation to perform.
@@ -2289,9 +2289,9 @@ formatCapabilityHelp DevToolWriteFileRange =
         , ""
         , "  4. Number of contentBlocks MUST match number of ranges."
         , ""
-        , "  5. OPTIMISTIC LOCKING: Pass expected_snapshot_ref from previous operation"
-        , "     to prevent editing stale content. Get snapshot refs by enabling the"
-        , "     'snapshot' capability."
+        , "  5. OPTIMISTIC LOCKING: Pass expected_snapshot_ref from a previous operation's"
+        , "     beforeSnapshotRef/afterSnapshotRef to prevent editing stale content."
+        , "     Snapshot refs are always returned, no separate capability needed."
         , ""
         , "Usage Examples:"
         , ""
@@ -2372,8 +2372,9 @@ formatCapabilityHelp DevToolWriteFileRange =
         , "  session started."
         , ""
         , "Returns: Result with lines written, final line count, beforeSnapshotRef,"
-        , "         and afterSnapshotRef (if snapshot enabled, or always at session commit)."
-        , "         Session calls also return sessionId, sessionNetDelta, sessionCommitted."
+        , "         and afterSnapshotRef (always returned, for use with restore-file or"
+        , "         as expected_snapshot_ref on a later call). Session calls also return"
+        , "         sessionId, sessionNetDelta, sessionCommitted."
         ]
 formatCapabilityHelp DevToolPatchFile =
     Text.unlines
@@ -2412,22 +2413,20 @@ formatCapabilityHelp DevToolPatchFile =
         , "  - Bottom-to-top: Applied in reverse order to avoid line shifts"
         , ""
         , "Returns: Result with hunks applied/rejected counts, beforeSnapshotRef,"
-        , "         and afterSnapshotRef (if snapshot enabled)."
+        , "         and afterSnapshotRef (always returned)."
         ]
 formatCapabilityHelp DevToolSnapshot =
     Text.unlines
         [ "--------------------------------------------------------------------------------"
-        , "CAPABILITY: snapshot"
+        , "CAPABILITY: snapshot (deprecated, no-op)"
         , "--------------------------------------------------------------------------------"
         , ""
-        , "Description: Enables snapshot functionality for write-file-range and patch-file."
-        , "             When enabled, file content is stored in RAM before edits,"
-        , "             allowing rollback via restore-file using the returned"
-        , "             snapshot reference (MD5 hash)."
-        , ""
-        , "Note: This is an enabling capability. It doesn't have its own operation,"
-        , "      but automatically enables snapshot behavior in write-file-range and"
-        , "      patch-file operations."
+        , "Description: Snapshotting is now always on for write-file-range and patch-file;"
+        , "             listing this capability is no longer required and has no effect."
+        , "             It's kept only so existing configurations that still list it"
+        , "             continue to load. File content is always stored in RAM before"
+        , "             and after every edit, allowing rollback via restore-file using"
+        , "             the returned snapshot reference (MD5 hash)."
         , ""
         , "Snapshot references are returned in:"
         , "  - write-file-range: beforeSnapshotRef and afterSnapshotRef fields"
@@ -2443,8 +2442,7 @@ formatCapabilityHelp DevToolRestoreFile =
         , "--------------------------------------------------------------------------------"
         , ""
         , "Description: Restores a file to a previous version using a snapshot"
-        , "             reference (MD5 hash). Requires the 'snapshot' capability to"
-        , "             be enabled to have stored snapshots available."
+        , "             reference (MD5 hash) returned by write-file-range or patch-file."
         , ""
         , "Parameters:"
         , "  - path        (string, required): Path to the file to restore"
@@ -2460,7 +2458,7 @@ formatCapabilityHelp DevToolRestoreFile =
         , "Returns: Success confirmation with the snapshot reference used."
         , ""
         , "Note: The snapshot reference is obtained from a previous write-file-range"
-        , "      or patch-file operation that had the snapshot capability enabled."
+        , "      or patch-file operation's beforeSnapshotRef/afterSnapshotRef field."
         ]
 formatCapabilityHelp DevToolListDirectory =
     Text.unlines
