@@ -54,6 +54,7 @@ module System.Agents.Tools.DeveloperToolbox (
     PatchResult (..),
     PatchError (..),
     Hunk (..),
+    HunkSegment (..),
     DirectoryListingResult (..),
     RangeSpec (..),
     AgentOverrides (..),

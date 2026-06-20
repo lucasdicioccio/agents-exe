@@ -47,6 +47,7 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolCapability (..),
     DeveloperToolError (..),
     Hunk (..),
+    HunkSegment (..),
     PatchError (..),
     PatchResult (..),
     Snapshot (..),
@@ -238,7 +239,11 @@ proceedWithPatchApplication tracer toolbox filePath patchText = do
                                         , patchAfterSnapshotRef = mAfterSnapshotRef
                                         }
   where
-    hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
+    hunkChangeCount hunk =
+        sum
+            [ length removedLines + length addedLines
+            | HunkChange removedLines addedLines <- hunkSegments hunk
+            ]
 
 {- | Take a snapshot of the file before patching. Snapshots are always taken
 (the snapshot store is always present on the toolbox); returns Nothing only
@@ -298,7 +303,11 @@ findOverlappingHunks (h : hs) =
             Nothing -> findOverlappingHunks hs
 
 {- | Validate a single hunk against the file content.
-Checks that context lines match exactly.
+
+Walks the hunk's segments in order starting at 'hunkOldStart', checking that
+each context segment and each removed-lines segment matches the
+corresponding lines in the file exactly. This correctly handles hunks that
+contain more than one change separated by context lines.
 -}
 validateHunk :: [Text] -> Hunk -> Either PatchError Hunk
 validateHunk fileLines hunk = do
@@ -309,37 +318,23 @@ validateHunk fileLines hunk = do
         Left $
             PatchInvalidLineNumber (hunkOldStart hunk)
 
-    -- Check context before matches
-    let contextBeforeStart = hunkOldStart hunk - length (hunkContextBefore hunk)
-    let expectedContextBefore =
-            if contextBeforeStart < 1
-                then drop (1 - contextBeforeStart) (hunkContextBefore hunk)
-                else hunkContextBefore hunk
-    let actualContextBefore =
-            take (length expectedContextBefore) $
-                drop (max 0 (contextBeforeStart - 1)) fileLines
-
-    when (expectedContextBefore /= actualContextBefore) $
-        Left $
-            PatchContextMismatch (hunkOldStart hunk) "Context before hunk doesn't match"
-
-    -- Check removed lines match
-    let removedStart = hunkOldStart hunk - 1
-    let actualRemoved = take (hunkOldCount hunk) $ drop removedStart fileLines
-    when (hunkRemovedLines hunk /= actualRemoved) $
-        Left $
-            PatchContextMismatch (hunkOldStart hunk) "Removed lines don't match"
-
-    -- Check context after matches
-    let contextAfterStart = hunkOldStart hunk + hunkOldCount hunk
-    let expectedContextAfter = hunkContextAfter hunk
-    let actualContextAfter = take (length expectedContextAfter) $ drop (contextAfterStart - 1) fileLines
-
-    when (expectedContextAfter /= actualContextAfter) $
-        Left $
-            PatchContextMismatch contextAfterStart "Context after hunk doesn't match"
-
+    walkSegments (hunkOldStart hunk - 1) (hunkSegments hunk)
     Right hunk
+  where
+    walkSegments :: Int -> [HunkSegment] -> Either PatchError ()
+    walkSegments _ [] = Right ()
+    walkSegments idx (seg : rest) =
+        case seg of
+            HunkContext ctx ->
+                let actual = take (length ctx) $ drop idx fileLines
+                 in if actual == ctx
+                        then walkSegments (idx + length ctx) rest
+                        else Left $ PatchContextMismatch (idx + 1) "Context doesn't match"
+            HunkChange removedLines _addedLines ->
+                let actual = take (length removedLines) $ drop idx fileLines
+                 in if actual == removedLines
+                        then walkSegments (idx + length removedLines) rest
+                        else Left $ PatchContextMismatch (idx + 1) "Removed lines don't match"
 
 {- | Apply a hunk to the file lines.
 Assumes the hunk has been validated and lines are 1-based.
@@ -347,15 +342,19 @@ Assumes the hunk has been validated and lines are 1-based.
 applyHunk :: Hunk -> [Text] -> [Text]
 applyHunk hunk lines' =
     let startIdx = hunkOldStart hunk - 1
-        -- Everything before the hunk (including context before)
-        before = take (startIdx - length (hunkContextBefore hunk)) lines'
-        -- Context before + new lines + context after
-        newContent =
-            hunkContextBefore hunk ++ hunkAddedLines hunk ++ hunkContextAfter hunk
-        -- Everything after the hunk (skipping old removed lines)
-        afterStart = startIdx + hunkOldCount hunk + length (hunkContextAfter hunk)
-        after = drop afterStart lines'
-     in before ++ newContent ++ after
+        before = take startIdx lines'
+        (newMiddle, consumedOld) = buildMiddle (hunkSegments hunk)
+        after = drop (startIdx + consumedOld) lines'
+     in before ++ newMiddle ++ after
+  where
+    buildMiddle :: [HunkSegment] -> ([Text], Int)
+    buildMiddle [] = ([], 0)
+    buildMiddle (seg : rest) =
+        let (restContent, restConsumed) = buildMiddle rest
+         in case seg of
+                HunkContext ctx -> (ctx ++ restContent, length ctx + restConsumed)
+                HunkChange removedLines addedLines ->
+                    (addedLines ++ restContent, length removedLines + restConsumed)
 
 -------------------------------------------------------------------------------
 -- Patch Parsing
@@ -403,7 +402,16 @@ parseHunk (line : rest)
         -- Parse hunk header: @@ -start,count +start,count @@
         (oldStart, oldCount, newStart, newCount) <- parseHunkHeader line
         -- Parse the hunk body
-        parseHunkBody oldStart oldCount newStart newCount [] [] [] [] rest
+        (segments, remaining) <- parseHunkBody rest
+        let hunk =
+                Hunk
+                    { hunkOldStart = oldStart
+                    , hunkOldCount = oldCount
+                    , hunkNewStart = newStart
+                    , hunkNewCount = newCount
+                    , hunkSegments = segments
+                    }
+        Right (hunk, remaining)
     | otherwise =
         -- Skip non-hunk lines (could be file names, etc.)
         parseHunk rest
@@ -411,6 +419,8 @@ parseHunk (line : rest)
 {- | Parse hunk header line.
 Format: @@ -oldStart,oldCount +newStart,newCount @@
 Or: @@ -oldStart +newStart @@ (when count is 1)
+The closing @@ may be followed by optional trailing context (e.g. a
+function name, as produced by @git diff@), which is ignored.
 -}
 parseHunkHeader :: Text -> Either PatchError (Int, Int, Int, Int)
 parseHunkHeader line =
@@ -418,9 +428,10 @@ parseHunkHeader line =
      in case Text.stripPrefix "@@ " stripped of
             Nothing -> Left $ PatchParseError $ "Invalid hunk header: " <> line
             Just afterAt ->
-                case Text.stripSuffix " @@" afterAt of
-                    Nothing -> Left $ PatchParseError $ "Invalid hunk header (missing @@ suffix): " <> line
-                    Just content -> parseHeaderContent content
+                case Text.breakOn " @@" afterAt of
+                    (content, rest)
+                        | Text.null rest -> Left $ PatchParseError $ "Invalid hunk header (missing @@ suffix): " <> line
+                        | otherwise -> parseHeaderContent content
   where
     parseHeaderContent content =
         let parts = Text.words content
@@ -451,107 +462,65 @@ parseHunkHeader line =
                 then Just (read str :: Int)
                 else Nothing
 
-{- | Parse the body of a hunk.
-Accumulates context lines and changed lines, switching between states.
+{- | Parse the body of a hunk into an ordered list of segments.
+
+A hunk body is a sequence of context lines and change blocks (a run of
+removed lines followed by a run of added lines). Unlike a flat
+before\/removed\/added\/after model, this preserves every context/change
+boundary in order, so a hunk with several changes separated by context
+(as produced by real diff tools) is represented faithfully instead of
+collapsing everything after the first change into "context after" and
+losing the rest.
+
+Each emitted line has its single-character diff prefix (@-@, @+@, or the
+leading space marking a context line) stripped before being stored, so the
+stored text matches the file's actual content exactly.
 -}
-parseHunkBody ::
-    Int ->
-    Int ->
-    Int ->
-    Int ->
-    [Text] ->
-    [Text] ->
-    [Text] ->
-    [Text] ->
-    [Text] ->
-    Either PatchError (Hunk, [Text])
-parseHunkBody oldStart oldCount newStart _newCount ctxBefore removed added ctxAfter lines' =
-    case lines' of
-        [] ->
-            -- End of patch, create the hunk
-            let hunk =
-                    Hunk
-                        { hunkOldStart = oldStart
-                        , hunkOldCount = oldCount
-                        , hunkNewStart = newStart
-                        , hunkNewCount = newStart + length added - oldStart
-                        , hunkContextBefore = reverse ctxBefore
-                        , hunkRemovedLines = removed
-                        , hunkAddedLines = added
-                        , hunkContextAfter = reverse ctxAfter
-                        }
-             in Right (hunk, [])
-        (line : rest) ->
-            if Text.isPrefixOf "@@" line
-                then
-                    -- Next hunk starts, finalize current hunk
-                    let hunk =
-                            Hunk
-                                { hunkOldStart = oldStart
-                                , hunkOldCount = oldCount
-                                , hunkNewStart = newStart
-                                , hunkNewCount = newStart + length added - oldStart
-                                , hunkContextBefore = reverse ctxBefore
-                                , hunkRemovedLines = removed
-                                , hunkAddedLines = added
-                                , hunkContextAfter = reverse ctxAfter
-                                }
-                     in Right (hunk, lines')
-                else
-                    if Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
-                        then
-                            -- Removed line
-                            let content = Text.drop 1 line
-                             in parseHunkBody
-                                    oldStart
-                                    oldCount
-                                    newStart
-                                    newStart
-                                    ctxBefore
-                                    (removed ++ [content])
-                                    added
-                                    []
-                                    rest
-                        else
-                            if Text.isPrefixOf "+" line && not (Text.isPrefixOf "+++" line)
-                                then
-                                    -- Added line
-                                    let content = Text.drop 1 line
-                                     in parseHunkBody
-                                            oldStart
-                                            oldCount
-                                            newStart
-                                            newStart
-                                            ctxBefore
-                                            removed
-                                            (added ++ [content])
-                                            []
-                                            rest
-                                else
-                                    -- Context line (unchanged)
-                                    let stripped = line
-                                     in if null removed && null added
-                                            then
-                                                -- Still in context before section
-                                                parseHunkBody
-                                                    oldStart
-                                                    oldCount
-                                                    newStart
-                                                    newStart
-                                                    (stripped : ctxBefore)
-                                                    removed
-                                                    added
-                                                    ctxAfter
-                                                    rest
-                                            else
-                                                -- In context after section
-                                                parseHunkBody
-                                                    oldStart
-                                                    oldCount
-                                                    newStart
-                                                    newStart
-                                                    ctxBefore
-                                                    removed
-                                                    added
-                                                    (stripped : ctxAfter)
-                                                    rest
+parseHunkBody :: [Text] -> Either PatchError ([HunkSegment], [Text])
+parseHunkBody = go [] [] [] []
+  where
+    -- segsAcc: completed segments, most recent first
+    -- ctxAcc: pending context lines, most recent first
+    -- removedAcc/addedAcc: pending change block, most recent first
+    -- Invariant: at most one of ctxAcc and (removedAcc/addedAcc) is non-empty.
+    go :: [HunkSegment] -> [Text] -> [Text] -> [Text] -> [Text] -> Either PatchError ([HunkSegment], [Text])
+    go segsAcc ctxAcc removedAcc addedAcc lines' =
+        case lines' of
+            [] -> Right (finalize segsAcc ctxAcc removedAcc addedAcc, [])
+            (line : rest)
+                | Text.isPrefixOf "@@" line ->
+                    Right (finalize segsAcc ctxAcc removedAcc addedAcc, lines')
+                | isRemovedLine line ->
+                    let content = Text.drop 1 line
+                        segsAcc1 = flushContext segsAcc ctxAcc
+                     in if not (null addedAcc)
+                            -- A new change block starts right after a previous one with no context between.
+                            then go (flushChange segsAcc1 removedAcc addedAcc) [] [content] [] rest
+                            else go segsAcc1 [] (content : removedAcc) addedAcc rest
+                | isAddedLine line ->
+                    let content = Text.drop 1 line
+                        segsAcc1 = flushContext segsAcc ctxAcc
+                     in go segsAcc1 [] removedAcc (content : addedAcc) rest
+                | otherwise ->
+                    let content = contextContent line
+                        segsAcc1 = flushChange segsAcc removedAcc addedAcc
+                     in go segsAcc1 (content : ctxAcc) [] [] rest
+
+    isRemovedLine line = Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
+    isAddedLine line = Text.isPrefixOf "+" line && not (Text.isPrefixOf "+++" line)
+
+    -- Context lines are prefixed with a single space in standard unified
+    -- diff output; strip it so the stored text matches file content.
+    contextContent line
+        | Text.null line = ""
+        | Text.isPrefixOf " " line = Text.drop 1 line
+        | otherwise = line
+
+    flushContext segsAcc [] = segsAcc
+    flushContext segsAcc ctxAcc = HunkContext (reverse ctxAcc) : segsAcc
+
+    flushChange segsAcc [] [] = segsAcc
+    flushChange segsAcc removedAcc addedAcc = HunkChange (reverse removedAcc) (reverse addedAcc) : segsAcc
+
+    finalize segsAcc ctxAcc removedAcc addedAcc =
+        reverse (flushChange (flushContext segsAcc ctxAcc) removedAcc addedAcc)
