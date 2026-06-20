@@ -19,6 +19,7 @@ import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.DeveloperToolbox.Types (
     Toolbox (..),
     Trace (..),
+    emptyEditSessionStore,
     emptySnapshotStore,
  )
 
@@ -61,10 +62,19 @@ initializeToolbox _tracer desc = do
                         pure $ Just sandbox
                     else pure Nothing
 
-            -- Create snapshot store if snapshot capability is enabled
-            mSnapshotStore <-
-                if DevToolSnapshot `elem` desc.developerToolboxCapabilities
-                    then Just <$> emptySnapshotStore
+            {- Snapshots are always available: write-file-range and patch-file
+            automatically record before/after snapshots of every edit, and
+            restore-file can roll back to any of them. This used to require
+            explicitly enabling the (now-deprecated, no-op) 'snapshot'
+            capability.
+            -}
+            mSnapshotStore <- Just <$> emptySnapshotStore
+
+            -- Create edit session store if write-file-range is enabled, to support
+            -- multi-turn editing sessions pinned to an original snapshot.
+            mEditSessionStore <-
+                if DevToolWriteFileRange `elem` desc.developerToolboxCapabilities
+                    then Just <$> emptyEditSessionStore
                     else pure Nothing
 
             let toolbox =
@@ -75,5 +85,6 @@ initializeToolbox _tracer desc = do
                         , toolboxConfig = desc
                         , toolboxFileSandbox = mFileSandbox
                         , toolboxSnapshotStore = mSnapshotStore
+                        , toolboxEditSessionStore = mEditSessionStore
                         }
             pure $ Right toolbox

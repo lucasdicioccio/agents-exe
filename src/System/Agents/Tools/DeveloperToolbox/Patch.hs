@@ -240,13 +240,14 @@ proceedWithPatchApplication tracer toolbox filePath patchText = do
   where
     hunkChangeCount hunk = length (hunkAddedLines hunk) + length (hunkRemovedLines hunk)
 
-{- | Take a snapshot of the file before patching, if snapshot capability is enabled.
-Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
+{- | Take a snapshot of the file before patching. Snapshots are always taken
+(the snapshot store is always present on the toolbox); returns Nothing only
+if the file doesn't exist yet.
 -}
 takeSnapshotBeforePatch :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotBeforePatch tracer toolbox filePath =
-    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
-        (Just store, True) -> do
+    case toolboxSnapshotStore toolbox of
+        Just store -> do
             -- Check if file exists
             fileExists <- doesFileExist filePath
             if fileExists
@@ -260,15 +261,13 @@ takeSnapshotBeforePatch tracer toolbox filePath =
                     runTracer tracer (SnapshotTakenTrace filePath ref)
                     pure $ Just ref
                 else pure Nothing
-        _ -> pure Nothing
+        Nothing -> pure Nothing
 
-{- | Take a snapshot of the file after patching, if snapshot capability is enabled.
-Returns the snapshot reference if a snapshot was taken, Nothing otherwise.
--}
+-- | Take a snapshot of the file after patching. Snapshots are always taken.
 takeSnapshotAfterPatch :: Tracer IO Trace -> Toolbox -> FilePath -> IO (Maybe SnapshotRef)
 takeSnapshotAfterPatch _tracer toolbox filePath =
-    case (toolboxSnapshotStore toolbox, DevToolSnapshot `elem` toolboxCapabilities toolbox) of
-        (Just store, True) -> do
+    case toolboxSnapshotStore toolbox of
+        Just store -> do
             -- Read file content and create snapshot
             content <- BS.readFile filePath
             let snapshot = makeSnapshot content
@@ -276,7 +275,7 @@ takeSnapshotAfterPatch _tracer toolbox filePath =
             -- Store snapshot in the store
             atomically $ modifyTVar' store (Map.insert ref snapshot)
             pure $ Just ref
-        _ -> pure Nothing
+        Nothing -> pure Nothing
 
 -- | Validate all hunks, returning the first error or the list of valid hunks.
 validateAllHunks :: [Text] -> [Hunk] -> Either PatchError [Hunk]
