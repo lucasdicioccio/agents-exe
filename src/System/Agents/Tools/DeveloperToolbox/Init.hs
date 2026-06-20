@@ -19,6 +19,7 @@ import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.DeveloperToolbox.Types (
     Toolbox (..),
     Trace (..),
+    emptyEditSessionStore,
     emptySnapshotStore,
  )
 
@@ -67,6 +68,13 @@ initializeToolbox _tracer desc = do
                     then Just <$> emptySnapshotStore
                     else pure Nothing
 
+            -- Create edit session store if write-file-range is enabled, to support
+            -- multi-turn editing sessions pinned to an original snapshot.
+            mEditSessionStore <-
+                if DevToolWriteFileRange `elem` desc.developerToolboxCapabilities
+                    then Just <$> emptyEditSessionStore
+                    else pure Nothing
+
             let toolbox =
                     Toolbox
                         { toolboxName = desc.developerToolboxName
@@ -75,5 +83,6 @@ initializeToolbox _tracer desc = do
                         , toolboxConfig = desc
                         , toolboxFileSandbox = mFileSandbox
                         , toolboxSnapshotStore = mSnapshotStore
+                        , toolboxEditSessionStore = mEditSessionStore
                         }
             pure $ Right toolbox

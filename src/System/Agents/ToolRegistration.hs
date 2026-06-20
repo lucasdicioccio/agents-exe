@@ -1322,6 +1322,28 @@ buildDeveloperToolParams box =
                 , propertyDescription = "For write-file-range, patch-file: Optional MD5 hash for optimistic locking. Operation fails if current file content doesn't match this hash. Use value from previous operation's beforeSnapshotRef or afterSnapshotRef."
                 , propertyRequired = False
                 }
+            , ParamProperty
+                { propertyKey = "session_id"
+                , propertyType = StringParamType
+                , propertyDescription =
+                    "For write-file-range: Continue a multi-turn edit session (from a previous call's sessionId). "
+                        <> "While a session is active, 'ranges' always refers to line numbers in the ORIGINAL file "
+                        <> "(the snapshot the session started from), even after earlier edits in the session have "
+                        <> "shifted line numbers around. This avoids line-number drift when making several edits to "
+                        <> "the same file across separate tool calls. Omit to start a new session (requires "
+                        <> "expected_snapshot_ref) or to make a normal one-shot edit (omit 'commit' too)."
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "commit"
+                , propertyType = BoolParamType
+                , propertyDescription =
+                    "For write-file-range: Set to true to write a session's accumulated edits to disk and end the "
+                        <> "session (returns a new afterSnapshotRef). Set to false (or omit session_id) while making "
+                        <> "intermediate edits within a session; nothing is written to disk until commit=true. "
+                        <> "Omit both 'commit' and 'session_id' for the original immediate single-edit behavior."
+                , propertyRequired = False
+                }
             ]
 
         -- Add patch-file params if enabled
@@ -1896,25 +1918,37 @@ executeDeveloperCapability tracer box cap params = case cap of
                     Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     "write-file-range" -> do
-        case KeyMap.lookup (AesonKey.fromText "path") params of
-            Just (Aeson.String filePath) -> do
-                case KeyMap.lookup (AesonKey.fromText "ranges") params of
-                    Just (Aeson.String ranges) -> do
-                        -- Parse contentBlocks directly as an array of text values
-                        let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
-                                Just (Aeson.Array arr) ->
-                                    Maybe.mapMaybe parseTextValue (toList arr)
-                                _ -> []
-                        -- Parse optional expected_snapshot_ref for optimistic locking
-                        let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
-                                Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
-                                _ -> Nothing
-                        result <- DeveloperTools.executeWriteFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef
-                        case result of
-                            Left err -> pure $ DeveloperToolError () err
-                            Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
-                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
-            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+        let mFilePath = case KeyMap.lookup (AesonKey.fromText "path") params of
+                Just (Aeson.String fp) -> Just fp
+                _ -> Nothing
+        let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") params of
+                Just (Aeson.String sid) -> Just sid
+                _ -> Nothing
+        case (mFilePath, mSessionId) of
+            -- 'path' is only required to start a session (or for legacy, session-less calls).
+            -- Continuing/committing an existing session uses the path it was started with.
+            (Nothing, Nothing) -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+            _ -> do
+                let filePath = Maybe.fromMaybe "" mFilePath
+                let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
+                        Just (Aeson.String r) -> r
+                        _ -> ""
+                -- Parse contentBlocks directly as an array of text values
+                let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
+                        Just (Aeson.Array arr) ->
+                            Maybe.mapMaybe parseTextValue (toList arr)
+                        _ -> []
+                -- Parse optional expected_snapshot_ref for optimistic locking
+                let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
+                        Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
+                        _ -> Nothing
+                let mCommit = case KeyMap.lookup (AesonKey.fromText "commit") params of
+                        Just (Aeson.Bool c) -> Just c
+                        _ -> Nothing
+                result <- DeveloperTools.executeWriteFileRangeWith (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef mSessionId mCommit
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
     "patch-file" -> do
         case KeyMap.lookup (AesonKey.fromText "path") params of
             Just (Aeson.String filePath) -> do
@@ -2294,8 +2328,52 @@ formatCapabilityHelp DevToolWriteFileRange =
         , "      \"expected_snapshot_ref\": \"a1b2c3d4e5f6...\""
         , "    }"
         , ""
+        , "  MULTI-TURN EDIT SESSIONS: When you need to make several edits to the same"
+        , "  file across separate tool calls, use session_id/commit instead of plain"
+        , "  expected_snapshot_ref calls. Within a session, 'ranges' ALWAYS refers to"
+        , "  line numbers in the ORIGINAL file (the snapshot the session started from),"
+        , "  even after earlier edits in the session have shifted lines around. This"
+        , "  avoids line-number drift, which is a common source of file corruption when"
+        , "  making multiple write-file-range calls without session_id."
+        , ""
+        , "    Turn 1 (start a session, don't write to disk yet):"
+        , "      {"
+        , "        \"capability\": \"write-file-range\","
+        , "        \"path\": \"./file.txt\","
+        , "        \"ranges\": \"45-50\","
+        , "        \"contentBlocks\": [\"new code...\"],"
+        , "        \"expected_snapshot_ref\": \"a1b2c3d4e5f6...\","
+        , "        \"commit\": false"
+        , "      }"
+        , "      -> returns sessionId, e.g. \"sess-abc\""
+        , ""
+        , "    Turn 2 (continue, still using ORIGINAL line numbers, e.g. 100-110):"
+        , "      {"
+        , "        \"capability\": \"write-file-range\","
+        , "        \"session_id\": \"sess-abc\","
+        , "        \"ranges\": \"100-110\","
+        , "        \"contentBlocks\": [\"more code...\"],"
+        , "        \"commit\": false"
+        , "      }"
+        , ""
+        , "    Turn N (commit: write everything to disk and end the session):"
+        , "      {"
+        , "        \"capability\": \"write-file-range\","
+        , "        \"session_id\": \"sess-abc\","
+        , "        \"ranges\": \"190-200\","
+        , "        \"contentBlocks\": [\"final code...\"],"
+        , "        \"commit\": true"
+        , "      }"
+        , "      -> writes to disk, returns a new afterSnapshotRef"
+        , ""
+        , "  Edits within a session must not overlap each other (in original coordinates)"
+        , "  and 'whole' is not supported while a session is open. Sessions expire after"
+        , "  1 hour of inactivity, and commit fails if the file changed on disk since the"
+        , "  session started."
+        , ""
         , "Returns: Result with lines written, final line count, beforeSnapshotRef,"
-        , "         and afterSnapshotRef (if snapshot enabled)."
+        , "         and afterSnapshotRef (if snapshot enabled, or always at session commit)."
+        , "         Session calls also return sessionId, sessionNetDelta, sessionCommitted."
         ]
 formatCapabilityHelp DevToolPatchFile =
     Text.unlines

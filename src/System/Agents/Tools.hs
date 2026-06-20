@@ -362,25 +362,37 @@ executeDeveloperCapability tracer box cap params = case cap of
                     Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     "write-file-range" -> do
-        case KeyMap.lookup (AesonKey.fromText "path") params of
-            Just (Aeson.String filePath) -> do
-                case KeyMap.lookup (AesonKey.fromText "ranges") params of
-                    Just (Aeson.String ranges) -> do
-                        -- Parse contentBlocks from array
-                        let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
-                                Just (Aeson.Array arr) ->
-                                    mapMaybe parseTextValue (toList arr)
-                                _ -> []
-                        -- Parse optional expected_snapshot_ref for optimistic locking
-                        let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
-                                Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
-                                _ -> Nothing
-                        result <- DeveloperTools.executeWriteFileRange (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef
-                        case result of
-                            Left err -> pure $ DeveloperToolError () err
-                            Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
-                    _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'ranges' parameter")
-            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+        let mFilePath = case KeyMap.lookup (AesonKey.fromText "path") params of
+                Just (Aeson.String fp) -> Just fp
+                _ -> Nothing
+        let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") params of
+                Just (Aeson.String sid) -> Just sid
+                _ -> Nothing
+        case (mFilePath, mSessionId) of
+            -- 'path' is only required to start a session (or for legacy, session-less calls).
+            -- Continuing/committing an existing session uses the path it was started with.
+            (Nothing, Nothing) -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+            _ -> do
+                let filePath = fromMaybe "" mFilePath
+                let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
+                        Just (Aeson.String r) -> r
+                        _ -> ""
+                -- Parse contentBlocks from array
+                let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
+                        Just (Aeson.Array arr) ->
+                            mapMaybe parseTextValue (toList arr)
+                        _ -> []
+                -- Parse optional expected_snapshot_ref for optimistic locking
+                let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
+                        Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
+                        _ -> Nothing
+                let mCommit = case KeyMap.lookup (AesonKey.fromText "commit") params of
+                        Just (Aeson.Bool c) -> Just c
+                        _ -> Nothing
+                result <- DeveloperTools.executeWriteFileRangeWith (contramap (\t -> ToolsTrace (DeveloperToolsTraceInner t)) tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef mSessionId mCommit
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
     "patch-file" -> do
         case KeyMap.lookup (AesonKey.fromText "path") params of
             Just (Aeson.String filePath) -> do

@@ -33,9 +33,16 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     SnapshotStore,
     RestoreResult (..),
     DirectoryListingResult (..),
+    SessionId (..),
+    SessionEditRecord (..),
+    EditSessionState (..),
+    EditSession (..),
+    EditSessionStore,
     defaultAgentOverrides,
     makeSnapshot,
     emptySnapshotStore,
+    emptyEditSessionStore,
+    sessionExpirySeconds,
 
     -- * Re-exported capability types
     DeveloperToolCapability (..),
@@ -52,6 +59,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Time (NominalDiffTime, UTCTime)
 import System.Agents.Base (
     BashToolboxDescription,
     BuiltinToolboxDescription (..),
@@ -109,6 +117,71 @@ type SnapshotStore = TVar (Map SnapshotRef Snapshot)
 -- | Create an empty snapshot store.
 emptySnapshotStore :: IO SnapshotStore
 emptySnapshotStore = newTVarIO Map.empty
+
+-------------------------------------------------------------------------------
+-- Edit Session Types
+-------------------------------------------------------------------------------
+
+{- | Opaque handle identifying an in-progress, multi-turn write-file-range
+edit session. All ranges supplied while continuing a session are interpreted
+in the ORIGINAL coordinate space of the snapshot the session started from.
+-}
+newtype SessionId = SessionId {unSessionId :: Text}
+    deriving (Show, Eq, Ord)
+
+instance ToJSON SessionId where
+    toJSON (SessionId s) = Aeson.toJSON s
+
+{- | A single edit applied within a session, recorded in the session's
+ORIGINAL coordinates so later edits (still expressed in original coordinates)
+can be mapped onto the current, already-edited content.
+-}
+data SessionEditRecord = SessionEditRecord
+    { sessionEditOriginalStart :: Int
+    -- ^ Start line, in original coordinates, that this edit touched
+    , sessionEditOriginalEnd :: Int
+    -- ^ End line, in original coordinates, that this edit touched
+    , sessionEditDelta :: Int
+    -- ^ Net line-count change introduced by this edit
+    }
+    deriving (Show)
+
+-- | Mutable state accumulated within an edit session.
+data EditSessionState = EditSessionState
+    { sessCurrentLines :: [Text]
+    -- ^ Accumulated in-memory content (not yet written to disk)
+    , sessEditLog :: [SessionEditRecord]
+    -- ^ All edits applied so far, in original coordinates (for replay/audit)
+    , sessLastTouched :: UTCTime
+    -- ^ Used to expire idle sessions
+    }
+
+{- | An in-progress, snapshot-pinned multi-turn edit session for a single file.
+
+The session is created from a verified on-disk snapshot and accumulates edits
+in memory across multiple write-file-range calls. Nothing is written to disk
+until the session is committed.
+-}
+data EditSession = EditSession
+    { editSessionFilePath :: FilePath
+    , editSessionBaseSnapshotRef :: SnapshotRef
+    -- ^ Snapshot the session started from; re-checked against disk at commit
+    , editSessionBaseLineCount :: Int
+    -- ^ Line count of the original snapshot, used to compute net deltas
+    , editSessionHasTrailingNewline :: Bool
+    , editSessionState :: TVar EditSessionState
+    }
+
+-- | In-memory store for active edit sessions, keyed by session id.
+type EditSessionStore = TVar (Map SessionId EditSession)
+
+-- | Create an empty edit session store.
+emptyEditSessionStore :: IO EditSessionStore
+emptyEditSessionStore = newTVarIO Map.empty
+
+-- | Sessions idle for longer than this are treated as expired.
+sessionExpirySeconds :: NominalDiffTime
+sessionExpirySeconds = 3600
 
 -------------------------------------------------------------------------------
 -- Trace Events
@@ -180,6 +253,12 @@ data Trace
       SnapshotNotFoundTrace !SnapshotRef
     | -- | Snapshot mismatch detected (optimistic locking)
       SnapshotMismatchTrace !FilePath !SnapshotRef !SnapshotRef
+    | -- | Edit session started
+      EditSessionStartedTrace !FilePath !SessionId
+    | -- | Edit session continued with a new edit
+      EditSessionContinuedTrace !SessionId !Int
+    | -- | Edit session committed to disk
+      EditSessionCommittedTrace !SessionId !FilePath
     | -- | Error during operation
       DeveloperToolErrorTrace !Text !Text
     deriving (Show)
@@ -225,6 +304,8 @@ data Toolbox = Toolbox
     -- ^ Optional file sandbox for read-file-range, write-file-range, patch-file
     , toolboxSnapshotStore :: Maybe SnapshotStore
     -- ^ Optional snapshot store for snapshot-enabled file operations
+    , toolboxEditSessionStore :: Maybe EditSessionStore
+    -- ^ Optional store of in-progress multi-turn write-file-range sessions
     }
 
 -------------------------------------------------------------------------------
@@ -409,6 +490,12 @@ data WriteFileRangeResult = WriteFileRangeResult
     -- ^ Reference to snapshot of file content before edit (if snapshot enabled)
     , writeFileAfterSnapshotRef :: Maybe SnapshotRef
     -- ^ Reference to snapshot of file content after edit (if snapshot enabled)
+    , writeFileSessionId :: Maybe Text
+    -- ^ Session id to use for the next call to continue this edit session
+    , writeFileSessionNetDelta :: Maybe Int
+    -- ^ Net line-count change accumulated so far in this session
+    , writeFileSessionCommitted :: Bool
+    -- ^ Whether this call wrote the session's accumulated edits to disk
     }
     deriving (Show)
 
@@ -423,6 +510,9 @@ instance ToJSON WriteFileRangeResult where
             , "rangeResults" .= writeFileRangeResults result
             , "beforeSnapshotRef" .= writeFileBeforeSnapshotRef result
             , "afterSnapshotRef" .= writeFileAfterSnapshotRef result
+            , "sessionId" .= writeFileSessionId result
+            , "sessionNetDelta" .= writeFileSessionNetDelta result
+            , "sessionCommitted" .= writeFileSessionCommitted result
             ]
 
 {- | Result of a patch file operation.
@@ -660,4 +750,10 @@ data DeveloperToolError
         , snapshotMismatchActual :: !SnapshotRef
         -- ^ Actual snapshot of current file content
         }
+    | -- | No edit session exists for the given session id
+      SessionNotFoundError !Text
+    | -- | The edit session existed but was idle for too long and was discarded
+      SessionExpiredError !Text
+    | -- | A requested edit overlaps a range already edited earlier in the session
+      RangeOverlapError !Text
     deriving (Show, Eq)

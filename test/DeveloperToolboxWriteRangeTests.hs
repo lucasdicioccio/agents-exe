@@ -13,6 +13,7 @@
 module DeveloperToolboxWriteRangeTests where
 
 import Control.Exception (bracket)
+import qualified Data.ByteString as BS
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -28,7 +29,11 @@ import Prod.Tracer (silent)
 import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..))
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
-import System.Agents.Tools.DeveloperToolbox.Types (SnapshotRef(..))
+import System.Agents.Tools.DeveloperToolbox.Types (SnapshotRef(..), Snapshot(..), makeSnapshot)
+
+-- | Compute the snapshot ref of a file's current on-disk content.
+currentSnapshotRef :: FilePath -> IO SnapshotRef
+currentSnapshotRef filePath = snapshotRef . makeSnapshot <$> BS.readFile filePath
 
 -- | Test data: a simple multi-line file for testing
 testFileContent :: Text
@@ -106,7 +111,218 @@ tests =
         , enhancedOutputTests
         , insertAfterTests
         , optimisticLockingTests
+        , editSessionTests
         ]
+
+-------------------------------------------------------------------------------
+-- Multi-turn Edit Sessions
+-------------------------------------------------------------------------------
+
+editSessionTests :: TestTree
+editSessionTests =
+    testGroup
+        "Multi-turn Edit Sessions"
+        [ testCase "edits across turns use original coordinates, avoiding drift" testSessionAvoidsLineDrift
+        , testCase "starting a session requires expected_snapshot_ref" testSessionRequiresSnapshotRef
+        , testCase "continuing an unknown session id fails" testSessionUnknownId
+        , testCase "overlapping edits in original coordinates are rejected" testSessionOverlapRejected
+        , testCase "nothing is written to disk until commit" testSessionNothingWrittenUntilCommit
+        , testCase "commit re-checks disk against the session's base snapshot" testSessionCommitDetectsConcurrentWrite
+        ]
+
+-- | The exact scenario from the corruption write-up: turn 1 edits an early
+-- range, turn 2 (still using ORIGINAL line numbers) edits a later range that
+-- would have landed on the wrong lines under the old immediate-write
+-- behavior, since turn 1 already shifted the line count.
+testSessionAvoidsLineDrift :: Assertion
+testSessionAvoidsLineDrift = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        baseRef <- currentSnapshotRef filePath
+
+        -- Turn 1: replace line 2 with two lines (file grows by one line).
+        result1 <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "2"
+                ["Replaced 2a\nReplaced 2b\n"]
+                (Just baseRef)
+                Nothing
+                (Just False)
+        sid <- case result1 of
+            Left err -> assertFailure ("Turn 1 failed: " ++ show err) >> error "unreachable"
+            Right writeResult -> do
+                writeFileSessionCommitted writeResult @?= False
+                maybe (assertFailure "Expected a session id" >> error "unreachable") pure (writeFileSessionId writeResult)
+
+        -- Turn 2: still using the ORIGINAL line number 9 ("Line 9: Ninth line"),
+        -- even though turn 1 already shifted everything after line 2 down by one.
+        result2 <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "9"
+                ["Replaced 9\n"]
+                Nothing
+                (Just sid)
+                (Just True)
+        case result2 of
+            Left err -> assertFailure $ "Turn 2 failed: " ++ show err
+            Right writeResult -> do
+                writeFileSessionCommitted writeResult @?= True
+                finalContent <- Text.readFile filePath
+                let finalLines = Text.lines finalContent
+                -- Original line 9 content is gone, replaced with the new content,
+                -- landing on current line 10 (shifted by turn 1's +1 delta).
+                assertBool "Original line 9 content should be gone" $
+                    not ("Line 9: Ninth line" `elem` finalLines)
+                assertBool "Replacement should be present" $
+                    "Replaced 9" `elem` finalLines
+                -- Everything not touched by either edit must be untouched.
+                assertBool "Line 1 preserved" $ "Line 1: First line" `elem` finalLines
+                assertBool "Line 10 preserved" $ "Line 10: Tenth line" `elem` finalLines
+
+-- | Starting a session without expected_snapshot_ref must fail, since there
+-- would be nothing to pin the original coordinate space to.
+testSessionRequiresSnapshotRef :: Assertion
+testSessionRequiresSnapshotRef = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        result <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "2"
+                ["x\n"]
+                Nothing
+                Nothing
+                (Just False)
+        case result of
+            Left (ValidationError _) -> pure ()
+            Left err -> assertFailure $ "Expected ValidationError, got: " ++ show err
+            Right _ -> assertFailure "Expected an error when starting a session without expected_snapshot_ref"
+
+-- | Continuing with an id that was never created must fail with SessionNotFoundError.
+testSessionUnknownId :: Assertion
+testSessionUnknownId = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        result <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "2"
+                ["x\n"]
+                Nothing
+                (Just "does-not-exist")
+                (Just False)
+        case result of
+            Left (SessionNotFoundError _) -> pure ()
+            Left err -> assertFailure $ "Expected SessionNotFoundError, got: " ++ show err
+            Right _ -> assertFailure "Expected an error for an unknown session id"
+
+-- | A second edit whose original range overlaps a range already edited
+-- earlier in the session must be rejected, since the original line numbers
+-- inside that region no longer mean anything coherent.
+testSessionOverlapRejected :: Assertion
+testSessionOverlapRejected = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        baseRef <- currentSnapshotRef filePath
+        result1 <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "3-5"
+                ["a\nb\n"]
+                (Just baseRef)
+                Nothing
+                (Just False)
+        sid <- case result1 of
+            Left err -> assertFailure ("Turn 1 failed: " ++ show err) >> error "unreachable"
+            Right writeResult -> maybe (assertFailure "Expected a session id" >> error "unreachable") pure (writeFileSessionId writeResult)
+        result2 <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "4"
+                ["c\n"]
+                Nothing
+                (Just sid)
+                (Just False)
+        case result2 of
+            Left (RangeOverlapError _) -> pure ()
+            Left err -> assertFailure $ "Expected RangeOverlapError, got: " ++ show err
+            Right _ -> assertFailure "Expected an error for an overlapping edit"
+
+-- | Staging edits (commit=False) must never touch disk.
+testSessionNothingWrittenUntilCommit :: Assertion
+testSessionNothingWrittenUntilCommit = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        baseRef <- currentSnapshotRef filePath
+        beforeContent <- Text.readFile filePath
+        result <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "2"
+                ["staged only\n"]
+                (Just baseRef)
+                Nothing
+                (Just False)
+        case result of
+            Left err -> assertFailure $ show err
+            Right writeResult -> writeFileSessionCommitted writeResult @?= False
+        afterContent <- Text.readFile filePath
+        afterContent @?= beforeContent
+
+-- | If the file on disk changes after a session starts but before it's
+-- committed, commit must fail rather than silently clobbering the change.
+testSessionCommitDetectsConcurrentWrite :: Assertion
+testSessionCommitDetectsConcurrentWrite = withTempDir $ \tmpDir ->
+    withStandardTestFile tmpDir $ \filePath -> do
+        toolbox <- testToolbox
+        baseRef <- currentSnapshotRef filePath
+        result1 <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                "2"
+                ["staged\n"]
+                (Just baseRef)
+                Nothing
+                (Just False)
+        sid <- case result1 of
+            Left err -> assertFailure ("Turn 1 failed: " ++ show err) >> error "unreachable"
+            Right writeResult -> maybe (assertFailure "Expected a session id" >> error "unreachable") pure (writeFileSessionId writeResult)
+
+        -- Someone else writes to the file directly, outside the session.
+        Text.writeFile filePath "concurrent external write\n"
+
+        result2 <-
+            DeveloperToolbox.executeWriteFileRangeWith
+                silent
+                toolbox
+                filePath
+                ""
+                []
+                Nothing
+                (Just sid)
+                (Just True)
+        case result2 of
+            Left (SnapshotMismatchError _ _) -> pure ()
+            Left err -> assertFailure $ "Expected SnapshotMismatchError, got: " ++ show err
+            Right _ -> assertFailure "Expected commit to fail after a concurrent external write"
 
 -------------------------------------------------------------------------------
 -- Bug 1: File Corruption with "head" Range - Validation Tests

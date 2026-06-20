@@ -80,6 +80,7 @@ module System.Agents.Tools.DeveloperToolbox (
     executeCreateTool,
     executeReadFileRange,
     executeWriteFileRange,
+    executeWriteFileRangeWith,
     executePatchFile,
     executeRestoreFile,
     executeHelp,
