@@ -103,6 +103,16 @@ module System.Agents.Tools.SystemToolbox (
     extractToolCallName,
     isSessionFileLocked,
 
+    -- * Wait-for-event (re-exported from Wait)
+    WaitForEventParams (..),
+    EventTypeSelector (..),
+    Named (..),
+    EventCombinator (..),
+    EventCondition (..),
+    ConditionCombinator (..),
+    WaitForEventResult (..),
+    waitForEvent,
+
     -- * Result formatting (re-exported from Formatting)
     formatResults,
 ) where
@@ -115,3 +125,4 @@ import System.Agents.Tools.SystemToolbox.Formatting
 import System.Agents.Tools.SystemToolbox.Media
 import System.Agents.Tools.SystemToolbox.Session
 import System.Agents.Tools.SystemToolbox.Types
+import System.Agents.Tools.SystemToolbox.Wait

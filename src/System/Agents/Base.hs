@@ -79,6 +79,14 @@ newStepId =
     StepId <$> UUID.nextRandom
 
 -------------------------------------------------------------------------------
+newtype ToolCallId = ToolCallId UUID
+    deriving (Show, Ord, Eq, FromJSON, ToJSON)
+
+newToolCallId :: IO ToolCallId
+newToolCallId =
+    ToolCallId <$> UUID.nextRandom
+
+-------------------------------------------------------------------------------
 -- Note: SessionId and TurnId are defined in System.Agents.Session.Types
 -- to avoid circular dependencies between Session.Base and Tools.Context.
 -- They are re-exported from Session.Base for convenience.
@@ -124,6 +132,89 @@ instance ToJSON ExtraAgentRef where
 
 instance FromJSON ExtraAgentRef where
     parseJSON = Aeson.genericParseJSON extraAgentRefOptions
+
+-------------------------------------------------------------------------------
+-- Inbox Messages (Phase 1: OS-Managed Inbox)
+-------------------------------------------------------------------------------
+
+{- | Messages that can be sent to an ongoing conversation's inbox.
+
+These messages enable external agents to interact with in-memory,
+ongoing sessions (not just persisted ones from SessionStore).
+
+The inbox is implemented as a TQueue for thread-safe STM operations.
+-}
+data InboxMessage
+    = -- | Inject a user message into the conversation
+      InjectUserMessage
+        { imUserText :: Text
+        -- ^ Text to inject as user input
+        , imSourceAgent :: Maybe AgentId
+        -- ^ Which agent sent this (for audit trail)
+        }
+    | -- | Add a system instruction to the context
+      InjectSystemInstruction
+        { imInstruction :: Text
+        -- ^ Add to system prompt context (temporary)
+        }
+    | -- | Pause the conversation
+      PauseConversation
+        { imReason :: Text
+        -- ^ Why pausing (for display/logging)
+        }
+    | -- | Resume a paused conversation
+      ResumeConversation
+    | -- | Cancel specific pending tool calls
+      CancelPendingToolCalls
+        { imToolCallIds :: [ToolCallId]
+        -- ^ Specific tool calls to cancel
+        }
+    | -- | Fork the conversation (create a child session)
+      ForkConversation
+        { imForkReason :: Text
+        -- ^ Reason for forking (becomes child session metadata)
+        }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON InboxMessage
+instance FromJSON InboxMessage
+
+-------------------------------------------------------------------------------
+-- Session Control Scope (Phase 1: Access Control)
+-------------------------------------------------------------------------------
+
+{- | Scope of session control permissions.
+
+Controls which sessions an agent can control when using ongoing session
+interaction capabilities like 'inject-message', 'pause-conversation', etc.
+-}
+data SessionControlScope
+    = -- | Agent can only control its own sessions
+      ControlOwnSessions
+    | -- | Can control sessions forked from own sessions
+      ControlChildSessions
+    | -- | Own + children
+      ControlSubtree
+    | -- | Requires explicit admin permission
+      ControlAllSessions
+    deriving (Show, Ord, Eq, Generic)
+
+-- | Serialize SessionControlScope as kebab-case strings.
+instance ToJSON SessionControlScope where
+    toJSON ControlOwnSessions = Aeson.String "own-sessions"
+    toJSON ControlChildSessions = Aeson.String "child-sessions"
+    toJSON ControlSubtree = Aeson.String "subtree"
+    toJSON ControlAllSessions = Aeson.String "all-sessions"
+
+-- | Parse SessionControlScope from kebab-case strings.
+instance FromJSON SessionControlScope where
+    parseJSON = Aeson.withText "SessionControlScope" $ \txt ->
+        case txt of
+            "own-sessions" -> return ControlOwnSessions
+            "child-sessions" -> return ControlChildSessions
+            "subtree" -> return ControlSubtree
+            "all-sessions" -> return ControlAllSessions
+            other -> fail $ "Invalid SessionControlScope: " ++ Text.unpack other ++ ". Expected one of: own-sessions, child-sessions, subtree, all-sessions."
 
 -------------------------------------------------------------------------------
 -- Bash Toolbox Configuration
@@ -642,18 +733,18 @@ data SqliteSharing
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON SqliteSharing where
-    toJSON SharingGlobal       = Aeson.String "global"
+    toJSON SharingGlobal = Aeson.String "global"
     toJSON SharingConversation = Aeson.String "conversation"
-    toJSON SharingTurn         = Aeson.String "turn"
-    toJSON SharingToolCall     = Aeson.String "tool-call"
+    toJSON SharingTurn = Aeson.String "turn"
+    toJSON SharingToolCall = Aeson.String "tool-call"
 
 instance FromJSON SqliteSharing where
     parseJSON = Aeson.withText "SqliteSharing" $ \txt ->
         case txt of
-            "global"       -> return SharingGlobal
+            "global" -> return SharingGlobal
             "conversation" -> return SharingConversation
-            "turn"         -> return SharingTurn
-            "tool-call"    -> return SharingToolCall
+            "turn" -> return SharingTurn
+            "tool-call" -> return SharingToolCall
             other -> fail $ "Invalid SqliteSharing: " ++ Text.unpack other ++ ". Expected 'global', 'conversation', 'turn', or 'tool-call'."
 
 {- | Version handle for restoration (serializable to JSON).
@@ -679,21 +770,22 @@ data SqliteVersionHandle = SqliteVersionHandle
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON SqliteVersionHandle where
-    toJSON h = Aeson.object
-        [ "session_id"       .= vhSessionId h
-        , "turn_id"          .= vhTurnId h
-        , "tool_call_index"  .= vhToolCallIndex h
-        , "toolbox_name"     .= vhToolboxName h
-        , "timestamp"        .= vhTimestamp h
-        ]
+    toJSON h =
+        Aeson.object
+            [ "session_id" .= vhSessionId h
+            , "turn_id" .= vhTurnId h
+            , "tool_call_index" .= vhToolCallIndex h
+            , "toolbox_name" .= vhToolboxName h
+            , "timestamp" .= vhTimestamp h
+            ]
 
 instance FromJSON SqliteVersionHandle where
     parseJSON = Aeson.withObject "SqliteVersionHandle" $ \v ->
         SqliteVersionHandle
-            <$> v .:  "session_id"
-            <*> v .:  "turn_id"
-            <*> v .:  "tool_call_index"
-            <*> v .:  "toolbox_name"
+            <$> v .: "session_id"
+            <*> v .: "turn_id"
+            <*> v .: "tool_call_index"
+            <*> v .: "toolbox_name"
             <*> (v .:? "timestamp" Aeson..!= "")
 
 {- | Enhanced SQLite versioning configuration.
@@ -734,10 +826,10 @@ instance FromJSON SqliteVersioningConfig where
     parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
         tag <- v .: "tag"
         case (tag :: Text) of
-            "SqliteReadOnly"     -> SqliteReadOnly  <$> v .: "path"
-            "SqliteReadWrite"    -> SqliteReadWrite <$> v .: "path"
+            "SqliteReadOnly" -> SqliteReadOnly <$> v .: "path"
+            "SqliteReadWrite" -> SqliteReadWrite <$> v .: "path"
             "SqliteNoVersioning" -> SqliteReadWrite <$> v .: "path"
-            "SqliteVersioned"    ->
+            "SqliteVersioned" ->
                 SqliteVersioned
                     <$> v .: "shared"
                     <*> v .:? "storageRoot"
@@ -832,6 +924,14 @@ instance FromJSON SqliteToolboxDescription where
 
 Each capability represents a category of system information that
 can be exposed to agents through the system toolbox.
+
+Phase 1 & 2 additions for ongoing session interaction:
+* SystemToolInjectMessage - Inject message to ongoing session
+* SystemToolPauseConversation - Pause an ongoing session
+* SystemToolResumeConversation - Resume a paused session
+* SystemToolForkConversation - Fork an ongoing session
+* SystemToolListOngoingSessions - List in-memory sessions
+* SystemToolReadOngoingSession - Read in-memory session state + events
 -}
 data SystemToolCapability
     = -- | Current date/time information
@@ -852,16 +952,38 @@ data SystemToolCapability
       SystemToolUptime
     | -- | Attach a file to the conversation
       SystemToolAttachFile
-    | -- | List accessible sessions
+    | -- | List accessible sessions (persisted)
       SystemToolListSessions
-    | -- | Full-text search across sessions
+    | -- | Full-text search across sessions (persisted)
       SystemToolSearchSessions
-    | -- | Read session content
+    | -- | Read session content (persisted)
       SystemToolReadSession
-    | -- | Get session statistics
+    | -- | Get session statistics (persisted)
       SystemToolGetSessionStats
     | -- | List directory contents with metadata
       SystemToolListDirectory
+    | -- Phase 1: Ongoing Session Control
+
+      -- | Inject message to ongoing session
+      SystemToolInjectMessage
+    | -- | Pause an ongoing session
+      SystemToolPauseConversation
+    | -- | Resume a paused session
+      SystemToolResumeConversation
+    | -- | Fork an ongoing session
+      SystemToolForkConversation
+    | -- Phase 2: Ongoing Session Observation
+
+      -- | List in-memory ongoing sessions
+      SystemToolListOngoingSessions
+        -- | Read in-memory session state + events
+        SystemToolReadOngoingSession
+    | -- Phase 3 & 4: Event Subscriptions and Wait-For
+
+      -- | Subscribe to session events
+      SystemToolSubscribeEvents
+    | -- | Wait for specific event in a session
+      SystemToolWaitForEvent
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -880,9 +1002,21 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolReadSession = Aeson.String "read-session"
     toJSON SystemToolGetSessionStats = Aeson.String "get-session-stats"
     toJSON SystemToolListDirectory = Aeson.String "list-directory"
-
--- | Parse SystemToolCapability from kebab-case strings.
-instance FromJSON SystemToolCapability where
+    -- Phase 1 & 2
+    toJSON SystemToolInjectMessage = Aeson.String "inject-message"
+    toJSON SystemToolPauseConversation = Aeson.String "pause-conversation"
+    toJSON SystemToolResumeConversation = Aeson.String "resume-conversation"
+    toJSON SystemToolForkConversation = Aeson.String "fork-conversation"
+    -- Phase 1 & 2
+    toJSON SystemToolInjectMessage = Aeson.String "inject-message"
+    toJSON SystemToolPauseConversation = Aeson.String "pause-conversation"
+    toJSON SystemToolResumeConversation = Aeson.String "resume-conversation"
+    toJSON SystemToolForkConversation = Aeson.String "fork-conversation"
+    toJSON SystemToolListOngoingSessions = Aeson.String "list-ongoing-sessions"
+    toJSON SystemToolReadOngoingSession = Aeson.String "read-ongoing-session"
+    -- Phase 3 & 4
+    toJSON SystemToolSubscribeEvents = Aeson.String "subscribe-events"
+    toJSON SystemToolWaitForEvent = Aeson.String "wait-for-event"
     parseJSON = Aeson.withText "SystemToolCapability" $ \txt ->
         case txt of
             "date" -> return SystemToolDate
@@ -899,7 +1033,17 @@ instance FromJSON SystemToolCapability where
             "read-session" -> return SystemToolReadSession
             "get-session-stats" -> return SystemToolGetSessionStats
             "list-directory" -> return SystemToolListDirectory
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory."
+            -- Phase 1 & 2
+            "inject-message" -> return SystemToolInjectMessage
+            "pause-conversation" -> return SystemToolPauseConversation
+            "resume-conversation" -> return SystemToolResumeConversation
+            "fork-conversation" -> return SystemToolForkConversation
+            "list-ongoing-sessions" -> return SystemToolListOngoingSessions
+            "read-ongoing-session" -> return SystemToolReadOngoingSession
+            -- Phase 3 & 4
+            "subscribe-events" -> return SystemToolSubscribeEvents
+            "wait-for-event" -> return SystemToolWaitForEvent
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, inject-message, pause-conversation, resume-conversation, fork-conversation, list-ongoing-sessions, read-ongoing-session, subscribe-events, wait-for-event."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
@@ -967,6 +1111,10 @@ The optional session introspection fields control access to session history:
 - 'sessionIntrospectionScope': Which sessions are accessible (default: ScopeSubtree)
 - 'sessionIntrospectionMaxResults': Max sessions to return (default: 50)
 - 'sessionIntrospectionIncludeToolOutputs': Include tool outputs in read operations (default: True)
+
+Ongoing session configuration (Phase 1 & 2):
+- 'sessionControlScope': Control permissions for ongoing sessions (default: ControlSubtree)
+- 'eventHistorySize': Bounded queue size for session events (default: 1000)
 -}
 data SystemToolboxDescription
     = SystemToolboxDescription
@@ -988,6 +1136,10 @@ data SystemToolboxDescription
     -- ^ Whether to include tool outputs in read operations (default: True)
     , systemToolboxFileSandbox :: Maybe FileSandboxConfig
     -- ^ File sandbox for attach-file capability (default: deny all)
+    , systemToolboxSessionControlScope :: Maybe SessionControlScope
+    -- ^ NEW (Phase 1): Control permissions for ongoing sessions (default: ControlSubtree)
+    , systemToolboxEventHistorySize :: Maybe Int
+    -- ^ NEW (Phase 2): Bounded queue size for session events (default: 1000)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1238,6 +1390,7 @@ instance FromJSON DeveloperToolCapability where
             "list-directory" -> return DevToolListDirectory
             "traverse-directory" -> return DevToolTraverseDirectory
             other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
+
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.
@@ -1580,4 +1733,3 @@ instance FromJSON AgentDescription where
             "OpenAIAgentDescription" ->
                 AgentDescription <$> v .: "contents"
             _ -> fail "expecting OpenAIAgentDescription 'tag'"
-

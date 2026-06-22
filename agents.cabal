@@ -79,9 +79,9 @@ library agents-lib
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
                     , System.Agents.OS.Events
+                    , System.Agents.OS.Events.Subscription
+                    , System.Agents.OS.Events.Router
                     , System.Agents.OS.Interfaces
-                    , System.Agents.OS.Interfaces.TUI
-                    , System.Agents.OS.Interfaces.OneShot
                     , System.Agents.OS.Persistence
                     , System.Agents.OS.Persistence.File
                     , System.Agents.OS.Persistence.Schema
@@ -134,10 +134,9 @@ library agents-lib
                     , System.Agents.Tools.OpenAPI.Types
                     , System.Agents.Tools.OpenAPI.Resolver
                     , System.Agents.Tools.OpenAPI.Converter
-                    , System.Agents.Tools.OpenAPIToolbox
+                    , System.Agents.Tools.PostgRESToolbox
                     , System.Agents.Tools.PostgREST.Types
                     , System.Agents.Tools.PostgREST.Converter
-                    , System.Agents.Tools.PostgRESToolbox
                     , System.Agents.Tools.ScriptTypes
                     , System.Agents.Tools.Secrets
                     , System.Agents.Tools.Skills.Types
@@ -145,6 +144,7 @@ library agents-lib
                     , System.Agents.Tools.Skills.Source
                     , System.Agents.Tools.Skills.Toolbox
                     , System.Agents.Tools.SqliteToolbox
+                    , System.Agents.Tools.OpenAPIToolbox
                     , System.Agents.Tools.SystemToolbox
                     , System.Agents.Tools.SystemToolbox.Attachment
                     , System.Agents.Tools.SystemToolbox.Core
@@ -154,24 +154,26 @@ library agents-lib
                     , System.Agents.Tools.SystemToolbox.Session
                     , System.Agents.Tools.SystemToolbox.SystemInfo
                     , System.Agents.Tools.SystemToolbox.Types
+                    , System.Agents.Tools.SystemToolbox.Wait
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace
+                    , System.Agents.Session.Events
                     , System.Agents.Session.Types
                     , System.Agents.Session.Base
                     , System.Agents.Session.Async
-                    , System.Agents.Session.Edit
                     , System.Agents.Session.Compat
-                    , System.Agents.Session.OpenAI
+                    , System.Agents.Session.Edit
                     , System.Agents.Session.Loop
-                    , System.Agents.Session.Step
-                    , System.Agents.Session.Signals
+                    , System.Agents.Session.OpenAI
                     , System.Agents.Session.Search.Index
                     , System.Agents.Session.Search.Query
                     , System.Agents.Session.Search.Types
+                    , System.Agents.Session.Signals
+                    , System.Agents.Session.Step
                     , System.Agents.SessionStore
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
@@ -222,21 +224,6 @@ library agents-lib
                       containers,
                       contravariant,
                       crypto-api,
-                      data-clist,
-                      data-default,
-                      deepseq,
-                      direct-sqlite,
-                      directory,
-                      extra,
-                      file-embed,
-                      filepath,
-                      formatting,
-                      free,
-                      Glob,
-                      hashable,
-                      hslua,
-                      hslua-marshalling,
-                      http-client,
                       http-client-tls,
                       http-types,
                       indexed-traversable,

@@ -34,23 +34,26 @@ executeListDirectory ::
     IO (Either DeveloperToolError DirectoryListingResult)
 executeListDirectory _toolbox path doRecurse doHidden namePatterns = do
     let scope = scopeFromList []
-        op = ListDirectoryOp
-            { targetPath = path
-            , filters = map NameFilter namePatterns
-            , recursive = doRecurse
-            , includeHidden = doHidden
-            }
+        op =
+            ListDirectoryOp
+                { targetPath = path
+                , filters = map NameFilter namePatterns
+                , recursive = doRecurse
+                , includeHidden = doHidden
+                }
     result <- scopedListDirectory scope op
     case result of
         Left err ->
             pure $ Left $ DirectoryScopeError $ Text.pack $ show err
         Right entries ->
-            pure $ Right $ DirectoryListingResult
-                { listingPath = path
-                , listingEntries = map Aeson.toJSON entries
-                , listingEntryCount = length entries
-                , listingRecursive = doRecurse
-                }
+            pure $
+                Right $
+                    DirectoryListingResult
+                        { listingPath = path
+                        , listingEntries = map Aeson.toJSON entries
+                        , listingEntryCount = length entries
+                        , listingRecursive = doRecurse
+                        }
 
 -- | Recursively traverse a directory tree within scope.
 executeTraverseDirectory ::
@@ -64,9 +67,11 @@ executeTraverseDirectory _toolbox path = do
         Left err ->
             pure $ Left $ DirectoryScopeError $ Text.pack $ show err
         Right entries ->
-            pure $ Right $ DirectoryListingResult
-                { listingPath = path
-                , listingEntries = map Aeson.toJSON entries
-                , listingEntryCount = length entries
-                , listingRecursive = True
-                }
+            pure $
+                Right $
+                    DirectoryListingResult
+                        { listingPath = path
+                        , listingEntries = map Aeson.toJSON entries
+                        , listingEntryCount = length entries
+                        , listingRecursive = True
+                        }
