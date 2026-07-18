@@ -409,6 +409,9 @@ Includes metadata fields to help distinguish between:
 - Empty files (totalLineCount = 0, totalFileSize = 0)
 - Out-of-bounds ranges (linesRead = 0, but totalLineCount > 0)
 - Successfully read ranges (linesRead > 0)
+
+Also includes a snapshotRef when a snapshot store is available, enabling
+optimistic locking for subsequent write operations.
 -}
 data ReadFileRangeResult = ReadFileRangeResult
     { readFilePath :: FilePath
@@ -423,6 +426,8 @@ data ReadFileRangeResult = ReadFileRangeResult
     -- ^ Total number of lines in the file
     , readFileRangesParsed :: [Text]
     -- ^ Normalized range specifications that were applied
+    , readFileSnapshotRef :: Maybe SnapshotRef
+    -- ^ Reference to snapshot of file content (if snapshot store available)
     }
     deriving (Show)
 
@@ -436,6 +441,7 @@ instance ToJSON ReadFileRangeResult where
             , "totalFileSize" .= readFileTotalSize result
             , "totalLineCount" .= readFileTotalLines result
             , "rangesParsed" .= readFileRangesParsed result
+            , "snapshotRef" .= readFileSnapshotRef result
             ]
 
 -- | Per-range edit result providing detailed feedback for each edit operation.
@@ -766,3 +772,4 @@ data DeveloperToolError
     | -- | A requested edit overlaps a range already edited earlier in the session
       RangeOverlapError !Text
     deriving (Show, Eq)
+
