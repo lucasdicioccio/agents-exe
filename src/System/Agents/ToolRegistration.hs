@@ -1079,9 +1079,18 @@ buildSystemToolParams box =
                 , propertyDescription = "For read-session: Include tool call responses (default: false)"
                 , propertyRequired = False
                 }
+        -- command parameter for execute-command capability
+        commandParam =
+            ParamProperty
+                { propertyKey = "command"
+                , propertyType = StringParamType
+                , propertyDescription = "For execute-command: The shell command to execute"
+                , propertyRequired = False
+                }
 
         hasCapability cap = cap `elem` box.toolboxCapabilities
 
+        -- list-directory parameters
         -- list-directory parameters
         listDirParams =
             if hasCapability SystemToolListDirectory
@@ -1130,6 +1139,7 @@ buildSystemToolParams box =
                    )
                 ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
                 ++ listDirParams
+                ++ (if hasCapability SystemToolExecuteCommand then [commandParam] else [])
      in
         baseParams ++ optionalParams
 
@@ -1149,6 +1159,7 @@ capabilityToText SystemToolSearchSessions = "search-sessions"
 capabilityToText SystemToolReadSession = "read-session"
 capabilityToText SystemToolGetSessionStats = "get-session-stats"
 capabilityToText SystemToolListDirectory = "list-directory"
+capabilityToText SystemToolExecuteCommand = "execute-command"
 
 {- | Register all tools from a System toolbox.
 
@@ -1737,25 +1748,27 @@ systemTool box =
                     then handleAttachFile tracer v
                     else if cap == "list-directory"
                         then handleListDirectory tracer v
-                        else do
-                            -- Extract optional parameters for session introspection capabilities
-                            let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
-                                    Just (Aeson.String sid) -> Just sid
-                                    _ -> Nothing
-                            let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
-                                    Just (Aeson.String q) -> Just q
-                                    _ -> Nothing
+                        else if cap == "execute-command"
+                            then handleExecuteCommand tracer v
+                            else do
+                                -- Extract optional parameters for session introspection capabilities
+                                let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
+                                        Just (Aeson.String sid) -> Just sid
+                                        _ -> Nothing
+                                let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
+                                        Just (Aeson.String q) -> Just q
+                                        _ -> Nothing
 
-                            -- Extract read-session parameters
-                            let mReadParams =
-                                    if cap == "read-session"
-                                        then Just $ extractReadSessionParams v
-                                        else Nothing
+                                -- Extract read-session parameters
+                                let mReadParams =
+                                        if cap == "read-session"
+                                            then Just $ extractReadSessionParams v
+                                            else Nothing
 
-                            result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
-                            case result of
-                                Left err -> pure $ SystemToolError call err
-                                Right rsp -> pure $ SystemToolResult call rsp
+                                result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
+                                case result of
+                                    Left err -> pure $ SystemToolError call err
+                                    Right rsp -> pure $ SystemToolResult call rsp
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
@@ -1802,6 +1815,29 @@ systemTool box =
                     Left err -> pure $ SystemToolError call err
                     Right listResult -> pure $ SystemToolResult call (SystemTools.QueryResult "list-directory" listResult 0)
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'path' parameter for list-directory capability")
+
+    -- Handle the execute-command capability
+    handleExecuteCommand :: Tracer IO Trace -> Aeson.Object -> IO (CallResult ())
+    handleExecuteCommand _tracer params = do
+        case KeyMap.lookup (AesonKey.fromText "command") params of
+            Just (Aeson.String command) -> do
+                result <- SystemTools.executeToolboxCommand box command
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right output -> do
+                        let response =
+                                Text.unlines
+                                    [ "Command: " <> command
+                                    , "Exit code: " <> Text.pack (show (SystemTools.commandOutputExitCode output))
+                                    , ""
+                                    , "--- stdout ---"
+                                    , SystemTools.commandOutputStdout output
+                                    , ""
+                                    , "--- stderr ---"
+                                    , SystemTools.commandOutputStderr output
+                                    ]
+                        pure $ BlobToolSuccess call (Text.encodeUtf8 response) Nothing
+            _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'command' parameter for execute-command capability")
 
     -- Extract read-session parameters from the tool call arguments
     extractReadSessionParams :: Aeson.Object -> SystemTools.ReadSessionParams

@@ -277,6 +277,10 @@ data QueryError
       SessionAccessDeniedError !Text !SessionIntrospectionScope
     | -- | Missing required parameter
       MissingParameterError !Text
+    | -- | Command refused by the configured filter
+      CommandRefusedError !Text
+    | -- | The configured filter produced invalid output
+      InvalidFilterOutputError !Text
     deriving (Show, Eq)
 
 -------------------------------------------------------------------------------

@@ -149,6 +149,7 @@ library agents-lib
                     , System.Agents.Tools.SystemToolbox.Attachment
                     , System.Agents.Tools.SystemToolbox.Core
                     , System.Agents.Tools.SystemToolbox.Directory
+                    , System.Agents.Tools.SystemToolbox.Execute
                     , System.Agents.Tools.SystemToolbox.Formatting
                     , System.Agents.Tools.SystemToolbox.Media
                     , System.Agents.Tools.SystemToolbox.Session

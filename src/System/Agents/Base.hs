@@ -862,6 +862,9 @@ data SystemToolCapability
       SystemToolGetSessionStats
     | -- | List directory contents with metadata
       SystemToolListDirectory
+    | -- | Execute an arbitrary shell command (optionally filtered by a
+      -- configured approval command)
+      SystemToolExecuteCommand
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -880,6 +883,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolReadSession = Aeson.String "read-session"
     toJSON SystemToolGetSessionStats = Aeson.String "get-session-stats"
     toJSON SystemToolListDirectory = Aeson.String "list-directory"
+    toJSON SystemToolExecuteCommand = Aeson.String "execute-command"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -899,7 +903,8 @@ instance FromJSON SystemToolCapability where
             "read-session" -> return SystemToolReadSession
             "get-session-stats" -> return SystemToolGetSessionStats
             "list-directory" -> return SystemToolListDirectory
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory."
+            "execute-command" -> return SystemToolExecuteCommand
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
@@ -965,8 +970,18 @@ The 'activation' field controls progressive disclosure (default: 'AlwaysActivate
 Session introspection configuration:
 The optional session introspection fields control access to session history:
 - 'sessionIntrospectionScope': Which sessions are accessible (default: ScopeSubtree)
+- 'sessionIntrospectionScope': Which sessions are accessible (default: ScopeSubtree)
 - 'sessionIntrospectionMaxResults': Max sessions to return (default: 50)
 - 'sessionIntrospectionIncludeToolOutputs': Include tool outputs in read operations (default: True)
+
+Command execution configuration:
+The optional 'commandFilter' field configures an approval command for the
+'execute-command' capability. When set, every requested command is passed on
+stdin to this filter command. The filter must print a JSON object on stdout:
+  {"acceptance":"allowed", "note":"optional explanation"}
+  {"acceptance":"refused", "note":"reason for refusal"}
+Any other output (malformed JSON, missing fields, unknown acceptance value, or
+non-zero exit code) rejects the tool call with an invalid filter output error.
 -}
 data SystemToolboxDescription
     = SystemToolboxDescription
@@ -988,6 +1003,9 @@ data SystemToolboxDescription
     -- ^ Whether to include tool outputs in read operations (default: True)
     , systemToolboxFileSandbox :: Maybe FileSandboxConfig
     -- ^ File sandbox for attach-file capability (default: deny all)
+    , systemToolboxCommandFilter :: Maybe Text
+    -- ^ Optional hardcoded filter command. When set, the command is run with
+    -- the requested command on stdin and must print a JSON acceptance object.
     }
     deriving (Show, Ord, Eq, Generic)
 

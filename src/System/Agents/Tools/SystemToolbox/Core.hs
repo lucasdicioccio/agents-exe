@@ -16,6 +16,9 @@ module System.Agents.Tools.SystemToolbox.Core (
     executeQuery,
     executeQueryWithParams,
 
+    -- * Command execution
+    executeToolboxCommand,
+
     -- * Capability utilities
     capabilityFromName,
     capabilityToName,
@@ -54,6 +57,10 @@ import System.Agents.Tools.SystemToolbox.SystemInfo (
     getUptimeInfo,
     getWorkingDirectoryInfo,
  )
+import System.Agents.Tools.SystemToolbox.Execute (
+    CommandOutput (..),
+    executeCommand,
+ )
 import System.Agents.Tools.SystemToolbox.Types (
     QueryError (..),
     QueryResult (..),
@@ -63,7 +70,6 @@ import System.Agents.Tools.SystemToolbox.Types (
     Trace (..),
     defaultReadSessionParams,
  )
-
 -------------------------------------------------------------------------------
 -- Initialization
 -------------------------------------------------------------------------------
@@ -218,6 +224,24 @@ executeQueryWithParams tracer toolbox capabilityName mSessionId mQuery mReadPara
                                         }
 
 -------------------------------------------------------------------------------
+-- Command Execution
+-------------------------------------------------------------------------------
+
+{- | Execute an arbitrary shell command through the toolbox.
+
+This is used by the @execute-command@ capability. If the toolbox description
+configures a 'systemToolboxCommandFilter', the filter is run first with the
+command on stdin. The filter must return a JSON object indicating whether the
+command is @allowed@ or @refused@.
+-}
+executeToolboxCommand ::
+    Toolbox ->
+    Text ->
+    IO (Either QueryError CommandOutput)
+executeToolboxCommand toolbox requestedCommand =
+    executeCommand (systemToolboxCommandFilter $ toolboxConfig toolbox) requestedCommand
+
+-------------------------------------------------------------------------------
 -- Capability Utilities
 -------------------------------------------------------------------------------
 
@@ -238,6 +262,7 @@ capabilityFromName name = case name of
     "read-session" -> Just SystemToolReadSession
     "get-session-stats" -> Just SystemToolGetSessionStats
     "list-directory" -> Just SystemToolListDirectory
+    "execute-command" -> Just SystemToolExecuteCommand
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -256,6 +281,7 @@ capabilityToName SystemToolSearchSessions = "search-sessions"
 capabilityToName SystemToolReadSession = "read-session"
 capabilityToName SystemToolGetSessionStats = "get-session-stats"
 capabilityToName SystemToolListDirectory = "list-directory"
+capabilityToName SystemToolExecuteCommand = "execute-command"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -313,6 +339,7 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolReadSession -> getReadSessionInfo (toolboxSessionIntrospection toolbox) mSessionId (fromMaybe defaultReadSessionParams mReadParams)
             SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
             SystemToolListDirectory -> pure ("list-directory", Aeson.String "list-directory capability not yet implemented for system toolbox")
+            SystemToolExecuteCommand -> error "Use executeToolboxCommand for execute-command capability"
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e

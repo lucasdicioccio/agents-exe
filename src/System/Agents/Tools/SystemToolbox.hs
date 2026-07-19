@@ -11,6 +11,7 @@ This module implements the system toolbox functionality, including:
 * File attachment capability for multi-modal LLM interactions
 * Session introspection capabilities (list-sessions, search-sessions, read-session, get-session-stats)
 * Directory listing with metadata, filtering, and scope enforcement
+* Arbitrary command execution with optional configured filter/approval
 * Capability-based access control
 * Result formatting for LLM consumption
 * Tracing for debugging and monitoring
@@ -63,10 +64,9 @@ module System.Agents.Tools.SystemToolbox (
     executeQuery,
     executeQueryWithParams,
 
-    -- * Capability utilities (re-exported from Core)
-    capabilityFromName,
-    capabilityToName,
-    defaultTimeoutSeconds,
+    -- * Command execution (re-exported from Execute)
+    executeToolboxCommand,
+    CommandOutput (..),
 
     -- * File attachment (re-exported from Attachment)
     executeAttachFile,
@@ -108,9 +108,11 @@ module System.Agents.Tools.SystemToolbox (
 ) where
 
 -- Re-export all functionality from submodules
+-- Re-export all functionality from submodules
 import System.Agents.Tools.SystemToolbox.Attachment
 import System.Agents.Tools.SystemToolbox.Core
 import System.Agents.Tools.SystemToolbox.Directory
+import System.Agents.Tools.SystemToolbox.Execute
 import System.Agents.Tools.SystemToolbox.Formatting
 import System.Agents.Tools.SystemToolbox.Media
 import System.Agents.Tools.SystemToolbox.Session
