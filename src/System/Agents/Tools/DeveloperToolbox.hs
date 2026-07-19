@@ -80,6 +80,7 @@ module System.Agents.Tools.DeveloperToolbox (
     executeCreateAgent,
     executeCreateTool,
     executeReadFileRange,
+    executeReadFileRangeWith,
     executeWriteFileRange,
     executeWriteFileRangeWith,
     executePatchFile,
@@ -160,3 +161,4 @@ import System.Agents.Tools.DeveloperToolbox.Range
 
 -- Re-export templates
 import System.Agents.Tools.DeveloperToolbox.Templates
+

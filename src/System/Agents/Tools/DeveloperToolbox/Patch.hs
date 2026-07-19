@@ -308,6 +308,9 @@ Walks the hunk's segments in order starting at 'hunkOldStart', checking that
 each context segment and each removed-lines segment matches the
 corresponding lines in the file exactly. This correctly handles hunks that
 contain more than one change separated by context lines.
+
+When validation fails, the error includes both the expected and actual lines
+so the caller can diagnose the mismatch without extra round trips.
 -}
 validateHunk :: [Text] -> Hunk -> Either PatchError Hunk
 validateHunk fileLines hunk = do
@@ -326,15 +329,31 @@ validateHunk fileLines hunk = do
     walkSegments idx (seg : rest) =
         case seg of
             HunkContext ctx ->
-                let actual = take (length ctx) $ drop idx fileLines
-                 in if actual == ctx
+                let expected = ctx
+                    actual = take (length ctx) $ drop idx fileLines
+                 in if actual == expected
                         then walkSegments (idx + length ctx) rest
-                        else Left $ PatchContextMismatch (idx + 1) "Context doesn't match"
+                        else
+                            Left $
+                                PatchContextMismatch
+                                    { patchMismatchLine = idx + 1
+                                    , patchMismatchMessage = "Context doesn't match"
+                                    , patchMismatchExpected = expected
+                                    , patchMismatchActual = actual
+                                    }
             HunkChange removedLines _addedLines ->
-                let actual = take (length removedLines) $ drop idx fileLines
-                 in if actual == removedLines
+                let expected = removedLines
+                    actual = take (length removedLines) $ drop idx fileLines
+                 in if actual == expected
                         then walkSegments (idx + length removedLines) rest
-                        else Left $ PatchContextMismatch (idx + 1) "Removed lines don't match"
+                        else
+                            Left $
+                                PatchContextMismatch
+                                    { patchMismatchLine = idx + 1
+                                    , patchMismatchMessage = "Removed lines don't match"
+                                    , patchMismatchExpected = expected
+                                    , patchMismatchActual = actual
+                                    }
 
 {- | Apply a hunk to the file lines.
 Assumes the hunk has been validated and lines are 1-based.
@@ -524,3 +543,4 @@ parseHunkBody = go [] [] [] []
 
     finalize segsAcc ctxAcc removedAcc addedAcc =
         reverse (flushChange (flushContext segsAcc ctxAcc) removedAcc addedAcc)
+

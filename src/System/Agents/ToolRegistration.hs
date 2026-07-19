@@ -108,7 +108,7 @@ import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import System.Agents.Tools.IO (IOScript (..), IOScriptDescription (..))
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.LuaToolbox as LuaTools
-import System.Agents.Tools.McpToolbox (callTool, mcpActivation)
+import System.Agents.Tools.McpToolbox (mcpActivation)
 import qualified System.Agents.Tools.McpToolbox as McpTools
 import System.Agents.Tools.OpenAPI.Converter (normalizeForLLM)
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
@@ -759,7 +759,7 @@ buildPostgRESTParamProperties params =
 {- | Register all tools from a PostgREST toolbox.
 
 This function iterates through all tools in the toolbox and attempts to
-register each one.
+register each one with normalized names for LLM compatibility.
 
 If any registration fails, the entire operation fails fast with the first
 error encountered.
@@ -1317,6 +1317,22 @@ buildDeveloperToolParams box =
                         <> "For write-file-range: Use contentBlocks array with one block per range."
                 , propertyRequired = False
                 }
+            , ParamProperty
+                { propertyKey = "session_id"
+                , propertyType = StringParamType
+                , propertyDescription =
+                    "For read-file-range: Read from an in-progress write-file-range session's staged buffer instead of disk. "
+                        <> "When provided, 'path' is still required for sandbox validation but the content is served from the session."
+                , propertyRequired = False
+                }
+            , ParamProperty
+                { propertyKey = "metadata_only"
+                , propertyType = BoolParamType
+                , propertyDescription =
+                    "For read-file-range: If true, return only metadata (path, totalLineCount, totalFileSize, snapshotRef, rangesParsed) "
+                        <> "without the file content. Useful for a cheap status/snapshot check."
+                , propertyRequired = False
+                }
             ]
 
         -- Add write-file-range params if enabled
@@ -1634,7 +1650,7 @@ mcpTool toolbox desc =
   where
     call = ()
     run _tracer _ctx (Aeson.Object v) = do
-        ret <- callTool toolbox desc (Just v)
+        ret <- McpTools.callTool toolbox desc (Just v)
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
             err -> pure $ McpToolError call (mconcat ["calling error: ", show err])
@@ -1948,7 +1964,13 @@ executeDeveloperCapability tracer box cap params = case cap of
                 let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
                         Just (Aeson.String r) -> r
                         _ -> ""
-                result <- DeveloperTools.executeReadFileRange (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges
+                let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") params of
+                        Just (Aeson.String sid) -> Just sid
+                        _ -> Nothing
+                let metadataOnly = case KeyMap.lookup (AesonKey.fromText "metadata_only") params of
+                        Just (Aeson.Bool b) -> b
+                        _ -> False
+                result <- DeveloperTools.executeReadFileRangeWith (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges mSessionId metadataOnly
                 case result of
                     Left err -> pure $ DeveloperToolError () err
                     Right readResult -> pure $ DeveloperToolReadFileRangeResult () readResult
@@ -2254,17 +2276,24 @@ formatCapabilityHelp DevToolReadFileRange =
         , ""
         , "Description: Reads specific line ranges from a file. Returns content with"
         , "             line numbers prepended. Useful for examining code without"
-        , "             loading entire large files."
+        , "             loading entire large files. Can also return only metadata"
+        , "             or inspect a write-file-range session's staged buffer."
         , ""
         , "Parameters:"
-        , "  - path   (string, required): Path to the file to read"
-        , "  - ranges (string, optional): Line ranges to read. Formats:"
-        , "              - 'N'       - Single line (e.g., '5')"
-        , "              - 'N-M'     - Line range (e.g., '1-10')"
-        , "              - 'N,M,P'   - Multiple lines (e.g., '2,5,8')"
-        , "              - 'head'    - From beginning (no-op for read)"
-        , "              - 'tail'    - To end (no-op for read)"
-        , "              - Omit      - Read entire file"
+        , "  - path          (string, required): Path to the file to read"
+        , "  - ranges        (string, optional): Line ranges to read. Formats:"
+        , "                    - 'N'       - Single line (e.g., '5')"
+        , "                    - 'N-M'     - Line range (e.g., '1-10')"
+        , "                    - 'N,M,P'   - Multiple lines (e.g., '2,5,8')"
+        , "                    - 'head'    - From beginning (no-op for read)"
+        , "                    - 'tail'    - To end (no-op for read)"
+        , "                    - Omit      - Read entire file"
+        , "  - session_id    (string, optional): Read from an in-progress write-file-range"
+        , "                    session's staged buffer instead of disk. The path is still"
+        , "                    required for sandbox validation."
+        , "  - metadata_only (boolean, optional): If true, return only metadata (path,"
+        , "                    totalLineCount, totalFileSize, snapshotRef, rangesParsed)"
+        , "                    without the file content."
         , ""
         , "Usage Examples:"
         , "  Read lines 1-10:"
@@ -2287,7 +2316,22 @@ formatCapabilityHelp DevToolReadFileRange =
         , "      \"path\": \"./src/File.hs\""
         , "    }"
         , ""
-        , "Returns: File content with line numbers in format 'N\\t<content>'."
+        , "  Cheap status/snapshot check:"
+        , "    {"
+        , "      \"capability\": \"read-file-range\","
+        , "      \"path\": \"./src/File.hs\","
+        , "      \"metadata_only\": true"
+        , "    }"
+        , ""
+        , "  Inspect a staged session without committing:"
+        , "    {"
+        , "      \"capability\": \"read-file-range\","
+        , "      \"path\": \"./src/File.hs\","
+        , "      \"session_id\": \"sess-abc\""
+        , "    }"
+        , ""
+        , "Returns: File content with line numbers in format 'N\\t<content>', or"
+        , "         metadata only when metadata_only is true."
         ]
 formatCapabilityHelp DevToolWriteFileRange =
     Text.unlines
@@ -2381,7 +2425,7 @@ formatCapabilityHelp DevToolWriteFileRange =
         , "        \"expected_snapshot_ref\": \"a1b2c3d4e5f6...\","
         , "        \"commit\": false"
         , "      }"
-        , "      -> returns sessionId, e.g. \"sess-abc\""
+        , "      -> returns sessionId, e.g. \"sess-abc\"; sessionStatus is \"staged\""
         , ""
         , "    Turn 2 (continue, still using ORIGINAL line numbers, e.g. 100-110):"
         , "      {"
@@ -2391,6 +2435,7 @@ formatCapabilityHelp DevToolWriteFileRange =
         , "        \"contentBlocks\": [\"more code...\"],"
         , "        \"commit\": false"
         , "      }"
+        , "      -> sessionStatus is still \"staged\" (not on disk yet)"
         , ""
         , "    Turn N (commit: write everything to disk and end the session):"
         , "      {"
@@ -2400,17 +2445,19 @@ formatCapabilityHelp DevToolWriteFileRange =
         , "        \"contentBlocks\": [\"final code...\"],"
         , "        \"commit\": true"
         , "      }"
-        , "      -> writes to disk, returns a new afterSnapshotRef"
+        , "      -> writes to disk, sessionStatus is \"committed\", returns a new afterSnapshotRef"
         , ""
         , "  Edits within a session must not overlap each other (in original coordinates)"
         , "  and 'whole' is not supported while a session is open. Sessions expire after"
         , "  1 hour of inactivity, and commit fails if the file changed on disk since the"
-        , "  session started."
+        , "  session started. Reusing a session_id after commit returns an"
+        , "  'already committed' error."
         , ""
         , "Returns: Result with lines written, final line count, beforeSnapshotRef,"
         , "         and afterSnapshotRef (always returned, for use with restore-file or"
         , "         as expected_snapshot_ref on a later call). Session calls also return"
-        , "         sessionId, sessionNetDelta, sessionCommitted."
+        , "         sessionId, sessionNetDelta, sessionCommitted, and sessionStatus"
+        , "         (\"staged\" means buffered in memory only; \"committed\" means on disk)."
         ]
 formatCapabilityHelp DevToolPatchFile =
     Text.unlines
@@ -2447,6 +2494,7 @@ formatCapabilityHelp DevToolPatchFile =
         , "  - Context validation: Each hunk's context must match exactly"
         , "  - Overlap detection: Rejects overlapping hunks"
         , "  - Bottom-to-top: Applied in reverse order to avoid line shifts"
+        , "  - Rich errors: Context-mismatch errors include expected/actual lines"
         , ""
         , "Returns: Result with hunks applied/rejected counts, beforeSnapshotRef,"
         , "         and afterSnapshotRef (always returned)."

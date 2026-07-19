@@ -38,7 +38,7 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     SessionEditRecord (..),
     EditSessionState (..),
     EditSession (..),
-    EditSessionStore,
+    EditSessionStore (..),
     defaultAgentOverrides,
     makeSnapshot,
     emptySnapshotStore,
@@ -173,12 +173,25 @@ data EditSession = EditSession
     , editSessionState :: TVar EditSessionState
     }
 
--- | In-memory store for active edit sessions, keyed by session id.
-type EditSessionStore = TVar (Map SessionId EditSession)
+{- | In-memory store for active edit sessions and committed-session tombstones.
+
+We keep a small tombstone set of committed sessions so that reusing a
+session_id after commit produces a clear 'already committed' error instead of
+a confusing 'not found'.
+-}
+data EditSessionStore = EditSessionStore
+    { editSessionStoreActive :: TVar (Map SessionId EditSession)
+    -- ^ Currently open sessions
+    , editSessionStoreCommitted :: TVar (Map SessionId UTCTime)
+    -- ^ Tombstones for sessions that have already been committed
+    }
 
 -- | Create an empty edit session store.
 emptyEditSessionStore :: IO EditSessionStore
-emptyEditSessionStore = newTVarIO Map.empty
+emptyEditSessionStore = do
+    active <- newTVarIO Map.empty
+    committed <- newTVarIO Map.empty
+    pure EditSessionStore{editSessionStoreActive = active, editSessionStoreCommitted = committed}
 
 -- | Sessions idle for longer than this are treated as expired.
 sessionExpirySeconds :: NominalDiffTime
@@ -428,6 +441,10 @@ data ReadFileRangeResult = ReadFileRangeResult
     -- ^ Normalized range specifications that were applied
     , readFileSnapshotRef :: Maybe SnapshotRef
     -- ^ Reference to snapshot of file content (if snapshot store available)
+    , readFileSessionId :: Maybe Text
+    -- ^ Session id if the read was served from a session's staged buffer
+    , readFileMetadataOnly :: Bool
+    -- ^ True when the caller requested only metadata (no content)
     }
     deriving (Show)
 
@@ -442,6 +459,8 @@ instance ToJSON ReadFileRangeResult where
             , "totalLineCount" .= readFileTotalLines result
             , "rangesParsed" .= readFileRangesParsed result
             , "snapshotRef" .= readFileSnapshotRef result
+            , "sessionId" .= readFileSessionId result
+            , "metadataOnly" .= readFileMetadataOnly result
             ]
 
 -- | Per-range edit result providing detailed feedback for each edit operation.
@@ -503,6 +522,8 @@ data WriteFileRangeResult = WriteFileRangeResult
     -- ^ Net line-count change accumulated so far in this session
     , writeFileSessionCommitted :: Bool
     -- ^ Whether this call wrote the session's accumulated edits to disk
+    , writeFileSessionStatus :: Text
+    -- ^ "committed" if on disk, "staged" if buffered in session only
     }
     deriving (Show)
 
@@ -520,6 +541,7 @@ instance ToJSON WriteFileRangeResult where
             , "sessionId" .= writeFileSessionId result
             , "sessionNetDelta" .= writeFileSessionNetDelta result
             , "sessionCommitted" .= writeFileSessionCommitted result
+            , "sessionStatus" .= writeFileSessionStatus result
             ]
 
 {- | Result of a patch file operation.
@@ -577,8 +599,13 @@ instance ToJSON RestoreResult where
 data PatchError
     = -- | Invalid diff format
       PatchParseError !Text
-    | -- | Line N context doesn't match
-      PatchContextMismatch !Int !Text
+    | -- | Line N context doesn't match, carrying expected/actual lines
+      PatchContextMismatch
+        { patchMismatchLine :: !Int
+        , patchMismatchMessage :: !Text
+        , patchMismatchExpected :: ![Text]
+        , patchMismatchActual :: ![Text]
+        }
     | -- | Hunks at lines X and Y overlap
       PatchHunkOverlap !Int !Int
     | -- | File to patch not found
@@ -769,6 +796,8 @@ data DeveloperToolError
       SessionNotFoundError !Text
     | -- | The edit session existed but was idle for too long and was discarded
       SessionExpiredError !Text
+    | -- | The edit session was already committed and can no longer be modified
+      SessionAlreadyCommittedError !Text
     | -- | A requested edit overlaps a range already edited earlier in the session
       RangeOverlapError !Text
     deriving (Show, Eq)

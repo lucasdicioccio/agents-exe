@@ -46,7 +46,7 @@ import System.Agents.Tools.DeveloperToolbox.Types (
     DeveloperToolError (..),
     EditSession (..),
     EditSessionState (..),
-    EditSessionStore,
+    EditSessionStore (..),
     RangeEditResult (..),
     RangeSpec (..),
     SessionEditRecord (..),
@@ -373,6 +373,7 @@ proceedWithEdits tracer toolbox filePath ranges contentBlocks = do
                                 , writeFileSessionId = Nothing
                                 , writeFileSessionNetDelta = Nothing
                                 , writeFileSessionCommitted = True
+                                , writeFileSessionStatus = "committed"
                                 }
         _ -> do
             -- Read existing file or start empty
@@ -439,6 +440,7 @@ proceedWithEdits tracer toolbox filePath ranges contentBlocks = do
                                 , writeFileSessionId = Nothing
                                 , writeFileSessionNetDelta = Nothing
                                 , writeFileSessionCommitted = True
+                                , writeFileSessionStatus = "committed"
                                 }
 
 {- | Get sort key for range (for top-to-bottom ordering).
@@ -689,24 +691,29 @@ startSession tracer store toolbox filePath rangesTxt contentBlocks mExpectedSnap
                                         , editSessionHasTrailingNewline = hasTrailingNewline
                                         , editSessionState = stateVar
                                         }
-                            atomically $ modifyTVar' store (Map.insert sid session)
+                            atomically $ modifyTVar' (editSessionStoreActive store) (Map.insert sid session)
                             runTracer tracer (EditSessionStartedTrace filePath sid)
                             applyAndMaybeCommit tracer store toolbox sid session rangesTxt contentBlocks doCommit
 
 -- | Look up a session by id, expiring and removing it if it has been idle too long.
+-- Also checks committed tombstones so a reused session_id gets a clear error.
 lookupLiveSession :: EditSessionStore -> SessionId -> IO (Either DeveloperToolError EditSession)
 lookupLiveSession store sid = do
-    sessions <- readTVarIO store
-    case Map.lookup sid sessions of
-        Nothing -> pure $ Left $ SessionNotFoundError (unSessionId sid)
+    active <- readTVarIO (editSessionStoreActive store)
+    case Map.lookup sid active of
         Just session -> do
             now <- getCurrentTime
             st <- readTVarIO (editSessionState session)
             if diffUTCTime now (sessLastTouched st) > sessionExpirySeconds
                 then do
-                    atomically $ modifyTVar' store (Map.delete sid)
+                    atomically $ modifyTVar' (editSessionStoreActive store) (Map.delete sid)
                     pure $ Left $ SessionExpiredError (unSessionId sid)
                 else pure $ Right session
+        Nothing -> do
+            committed <- readTVarIO (editSessionStoreCommitted store)
+            if Map.member sid committed
+                then pure $ Left $ SessionAlreadyCommittedError (unSessionId sid)
+                else pure $ Left $ SessionNotFoundError (unSessionId sid)
 
 {- | Apply any edits supplied in this call to a session's in-memory state, and
 either stage them (commit=False) or write them to disk and destroy the
@@ -803,6 +810,7 @@ applyThenStage tracer sid session pairs = do
                         , writeFileSessionId = Just (unSessionId sid)
                         , writeFileSessionNetDelta = Just netDelta
                         , writeFileSessionCommitted = False
+                        , writeFileSessionStatus = "staged"
                         }
 
 -- | Apply edits and write the resulting content to disk, destroying the session.
@@ -837,7 +845,10 @@ applyThenWrite tracer store toolbox sid session pairs =
                         case toolboxSnapshotStore toolbox of
                             Just snapStore -> atomically $ modifyTVar' snapStore (Map.insert newRef newSnapshot)
                             Nothing -> pure ()
-                        atomically $ modifyTVar' store (Map.delete sid)
+                        now <- getCurrentTime
+                        atomically $ do
+                            modifyTVar' (editSessionStoreActive store) (Map.delete sid)
+                            modifyTVar' (editSessionStoreCommitted store) (Map.insert sid now)
                         runTracer tracer (EditSessionCommittedTrace sid filePath)
                         let netDelta = length finalLines - editSessionBaseLineCount session
                         pure $
@@ -853,6 +864,7 @@ applyThenWrite tracer store toolbox sid session pairs =
                                     , writeFileSessionId = Just (unSessionId sid)
                                     , writeFileSessionNetDelta = Just netDelta
                                     , writeFileSessionCommitted = True
+                                    , writeFileSessionStatus = "committed"
                                     }
 
 {- | Fold a sequence of (range, content) edits over a session's accumulated
@@ -970,3 +982,4 @@ applySessionRangeEdit baseLineCount (currentLines, log_, results) (range, conten
                                             }
                                     newLog = log_ ++ [SessionEditRecord origStart origEnd delta]
                                  in Right (before ++ newLines ++ after, newLog, results ++ [result])
+
