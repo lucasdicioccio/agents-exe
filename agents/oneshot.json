@@ -42,7 +42,8 @@
           "Capabilities": [
             "read-file-range",
             "write-file-range",
-            "patch-file"
+            "patch-file",
+            "restore-file"
           ],
           "FileSandbox": {
             "fsbName": "code-access",
@@ -59,6 +60,10 @@
                 {
                   "tag": "DirectoryRecursive",
                   "contents": "./test"
+                },
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./todos"
                 },
                 {
                   "tag": "FileExactly",
