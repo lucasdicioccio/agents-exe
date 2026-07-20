@@ -38,8 +38,8 @@ The framework supports multiple tool types:
 | **OpenAPI Tools** | REST APIs | API integrations |
 | **PostgREST Tools** | Database endpoints | Database queries |
 | **SQLite Tools** | SQLite databases | Local SQL queries |
-| **System Tools** | System information | Runtime context and session introspection |
-| **Developer Tools** | Development utilities | Agent/tool scaffolding, file editing |
+| **System Tools** | System information | Runtime context, session introspection, command execution |
+| **Developer Tools** | Development utilities | Agent/tool scaffolding, file editing with multi-turn sessions |
 | **IO Tools** | Haskell functions | In-process operations |
 | **Lua Tools** | Lua scripts | Embedded scripting |
 | **Skills** | Progressive disclosure | Procedural knowledge |
@@ -644,6 +644,8 @@ The System Toolbox provides agents with contextual information about the running
 | `process-info` | Process ID, parent PID, process name |
 | `uptime` | System uptime |
 | `attach-file` | Attach a file to the conversation |
+| `list-directory` | List directory contents with metadata |
+| `execute-command` | Execute shell commands with optional filter approval |
 | `list-sessions` | List accessible sessions (requires session introspection config) |
 | `search-sessions` | Full-text search across sessions (requires session introspection config) |
 | `read-session` | Read session content (requires session introspection config) |
@@ -659,13 +661,14 @@ The System Toolbox provides agents with contextual information about the running
       "contents": {
         "name": "system",
         "description": "System context and information",
-        "capabilities": ["date", "operating-system", "running-user", "hostname", "attach-file"],
+        "capabilities": ["date", "operating-system", "running-user", "hostname", "attach-file", "list-directory", "execute-command"],
         "envVarFilter": null,
         "fileSandbox": {
           "predicate": {"tag": "DirectoryRecursive", "contents": "./project"},
           "maxFileSize": 52428800,
           "name": "system-sandbox"
-        }
+        },
+        "commandFilter": "/path/to/approval-script.sh"
       }
     }
   ]
@@ -699,6 +702,64 @@ The `attach-file` capability allows the agent to attach files to the conversatio
 
 **Sandbox Behavior:**
 When `attach-file` is enabled, a file sandbox must be configured to specify which files can be attached. If no sandbox is configured, the capability will deny all file access.
+
+### List-Directory Capability
+
+The `list-directory` capability lists directory contents with metadata:
+
+```json
+// Input:
+{
+  "capability": "list-directory",
+  "path": "./src",
+  "recursive": false,
+  "include_hidden": false
+}
+
+// Output:
+{
+  "path": "./src",
+  "entries": [
+    {"name": "Main.hs", "type": "file", "size": 1234, "modified": "2024-01-15T10:30:00Z"},
+    {"name": "Utils", "type": "directory", "size": 0, "modified": "2024-01-14T08:00:00Z"}
+  ],
+  "total": 2
+}
+```
+
+### Execute-Command Capability
+
+The `execute-command` capability allows the agent to execute arbitrary shell commands with an optional approval filter:
+
+```json
+// Input:
+{
+  "capability": "execute-command",
+  "command": "ls -la"
+}
+
+// Output:
+{
+  "command": "ls -la",
+  "exitCode": 0,
+  "stdout": "...",
+  "stderr": "",
+  "duration": 0.123
+}
+```
+
+**Command Filter:**
+When `commandFilter` is configured, every command is first passed to the filter on stdin. The filter must output a JSON acceptance object:
+
+```json
+// Allowed:
+{"acceptance": "allowed", "note": "Safe command"}
+
+// Refused:
+{"acceptance": "refused", "note": "Command contains dangerous operations"}
+```
+
+Any non-JSON output, missing fields, or non-zero exit code rejects the command.
 
 ### Session Introspection Capabilities
 
@@ -868,7 +929,8 @@ Returns aggregate statistics about accessible sessions.
 | `sessionIntrospectionScope` | string? | Scope of accessible sessions (default: "subtree") |
 | `sessionIntrospectionMaxResults` | number? | Max sessions to return (default: 50) |
 | `sessionIntrospectionIncludeToolOutputs` | boolean? | Include tool outputs in read operations (default: true) |
-| `fileSandbox` | object? | File sandbox for attach-file capability (default: deny all) |
+| `fileSandbox` | object? | File sandbox for attach-file/list-directory capabilities (default: deny all) |
+| `commandFilter` | string? | Optional command approval filter for execute-command |
 
 ### Security Considerations
 
@@ -877,6 +939,7 @@ Returns aggregate statistics about accessible sessions.
 - **ScopeAll requires explicit opt-in**: Must be explicitly configured, never default
 - **Env var filtering**: Use `envVarFilter` to limit variable exposure
 - **Read-only**: System tools gather information but cannot modify the system
+- **Command filtering**: Use `commandFilter` to control command execution
 - **Linux-focused**: Initial implementation targets Linux systems
 
 ### LLM Tool Interface
@@ -910,7 +973,7 @@ Example response:
 
 ## Developer Toolbox
 
-The Developer Toolbox provides utilities for writing, validating, and scaffolding agents and tools.
+The Developer Toolbox provides utilities for writing, validating, and scaffolding agents and tools, with advanced file editing capabilities including multi-turn edit sessions.
 
 ### Capabilities
 
@@ -920,9 +983,9 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
 | `scaffold-agent` | Generates agent scaffolding from template |
 | `scaffold-tool` | Generates tool scaffolding in multiple languages |
 | `show-spec` | Displays specification documentation |
-| `read-file-range` | Reads specific line ranges from a file |
-| `write-file-range` | Replaces line ranges in a file with new content |
-| `patch-file` | Applies a unified diff patch to a file |
+| `read-file-range` | Reads specific line ranges from a file (supports session reads and metadata-only) |
+| `write-file-range` | Replaces line ranges with multi-turn session support |
+| `patch-file` | Applies a unified diff patch to a file with rich error context |
 
 ### Configuration
 
@@ -1057,14 +1120,16 @@ The developer toolbox exposes a single tool named `developer_{name}_developer_to
 
 #### read-file-range
 
-Reads specific line ranges from a file and returns them with line numbers.
+Reads specific line ranges from a file and returns them with line numbers. Supports reading from staged sessions and metadata-only queries.
 
 **Parameters:**
 ```json
 {
   "capability": "read-file-range",
   "path": "/path/to/file",
-  "ranges": "1-10,20-30"
+  "ranges": "1-10,20-30",
+  "session_id": "sess-abc",
+  "metadata_only": false
 }
 ```
 
@@ -1072,6 +1137,8 @@ Reads specific line ranges from a file and returns them with line numbers.
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to read |
 | `ranges` | string | No | Line ranges (e.g., `"1-10"`, `"5"`, `"head"`, `"tail"`, `"1-5,20-30"`). Omit to read entire file. |
+| `session_id` | string | No | Read from an in-progress write-file-range session's staged buffer |
+| `metadata_only` | boolean | No | Return only metadata (path, line counts, snapshot ref) without content |
 
 **Range Formats:**
 - Single line: `"5"` - Reads line 5
@@ -1080,34 +1147,49 @@ Reads specific line ranges from a file and returns them with line numbers.
 - Head: `"head"` - Reads from beginning (no-op for read)
 - Tail: `"tail"` - Reads to end (no-op for read)
 
-**Returns:**
+**Returns (full content):**
 ```json
 {
   "path": "/path/to/file",
   "content": "1\tdef hello():\n2\t    print('Hello, World!')\n3\t    return True\n",
-  "linesRead": 3
+  "linesRead": 3,
+  "totalLineCount": 50,
+  "totalFileSize": 1234,
+  "rangesParsed": ["1-3"],
+  "snapshotRef": "a1b2c3d4..."
+}
+```
+
+**Returns (metadata_only: true):**
+```json
+{
+  "path": "/path/to/file",
+  "content": "",
+  "linesRead": 0,
+  "totalLineCount": 50,
+  "totalFileSize": 1234,
+  "rangesParsed": [],
+  "snapshotRef": "a1b2c3d4...",
+  "metadataOnly": true
 }
 ```
 
 The content includes line numbers prepended with a tab separator in the format `{line_num}\t{line_content}`.
 
-**Example Output:**
-```
-1	def hello():
-2	    print("Hello, World!")
-3	    return True
-```
+**Reading from Staged Sessions:**
+When `session_id` is provided, the read is served from the session's in-memory buffer rather than disk. This allows inspecting pending edits before committing:
 
-**Error Responses:**
 ```json
 {
-  "error": "File not found: /path/to/file"
+  "capability": "read-file-range",
+  "path": "./src/File.hs",
+  "session_id": "sess-abc"
 }
 ```
 
 #### write-file-range
 
-Replaces specific lines in a file with new content. Supports multiple ranges processed sequentially with position tracking.
+Replaces specific lines in a file with new content. Supports **multi-turn edit sessions** for complex multi-step edits.
 
 **Parameters:**
 ```json
@@ -1115,15 +1197,21 @@ Replaces specific lines in a file with new content. Supports multiple ranges pro
   "capability": "write-file-range",
   "path": "/path/to/file",
   "ranges": "1-2,5-6",
-  "contentBlocks": ["new content for lines 1-2", "new content for lines 5-6"]
+  "contentBlocks": ["new content for lines 1-2", "new content for lines 5-6"],
+  "session_id": "sess-abc",
+  "expected_snapshot_ref": "a1b2c3d4...",
+  "commit": true
 }
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to modify |
-| `ranges` | string | Yes | Comma-separated line numbers or ranges (e.g., `"2,5,8"` or `"1-3,7-9"`) |
+| `ranges` | string | Yes | Comma-separated line numbers or ranges |
 | `contentBlocks` | array[string] | Yes | Array of content blocks, one per range. Use empty strings to delete lines. |
+| `session_id` | string | No | Continue an existing edit session |
+| `expected_snapshot_ref` | string | No | Optimistic locking: only proceed if file matches this snapshot |
+| `commit` | boolean | No | If true, write to disk and close session. If false, stage changes. |
 
 **Range Formats:**
 - Single line: `"5"` - Replaces line 5
@@ -1132,87 +1220,93 @@ Replaces specific lines in a file with new content. Supports multiple ranges pro
 - Head: `"head"` - Prepends content before line 1
 - Tail: `"tail"` - Appends content after last line
 
-**Processing:**
-- Ranges are processed in **ascending order** (top-to-bottom)
-- Each edit's line numbers are adjusted by the running offset from previous edits
-- Position tracking ensures correct line targeting when adding/removing lines
-- File is written atomically (temp file + rename)
+**Multi-Turn Edit Sessions:**
 
-**Examples:**
+For complex edits, use sessions to stage changes across multiple turns before committing:
+
+```
+Turn 1 (start session):
+  {
+    "capability": "write-file-range",
+    "path": "./src/File.hs",
+    "ranges": "10-20",
+    "contentBlocks": ["new code..."],
+    "commit": false
+  }
+  -> returns sessionId: "sess-abc", sessionStatus: "staged"
+
+Turn 2 (continue, still using ORIGINAL line numbers):
+  {
+    "capability": "write-file-range",
+    "path": "./src/File.hs",
+    "session_id": "sess-abc",
+    "ranges": "100-110",
+    "contentBlocks": ["more code..."],
+    "commit": false
+  }
+  -> sessionStatus: "staged"
+
+Turn N (commit to disk):
+  {
+    "capability": "write-file-range",
+    "path": "./src/File.hs",
+    "session_id": "sess-abc",
+    "ranges": "200-210",
+    "contentBlocks": ["final code..."],
+    "commit": true
+  }
+  -> writes to disk, sessionStatus: "committed"
+```
+
+**Session Rules:**
+- Sessions expire after 1 hour of inactivity
+- Edits within a session must not overlap (in original coordinates)
+- `whole` range not supported while session is open
+- Commit fails if file changed on disk since session started
+- Reusing a `session_id` after commit returns an "already committed" error
+
+**Optimistic Locking:**
+Use `expected_snapshot_ref` to prevent conflicts:
 
 ```json
-// Replace single line
 {
   "capability": "write-file-range",
-  "path": "File.hs",
-  "ranges": "5",
-  "contentBlocks": ["new content for line 5"]
-}
-
-// Replace multiple individual lines
-{
-  "capability": "write-file-range",
-  "path": "File.hs",
-  "ranges": "2,5,8",
-  "contentBlocks": [
-    "replace line 2",
-    "replace line 5",
-    "replace line 8"
-  ]
-}
-
-// Delete lines (empty content blocks)
-{
-  "capability": "write-file-range",
-  "path": "File.hs",
-  "ranges": "3,7",
-  "contentBlocks": ["", ""]
-}
-
-// Replace ranges with multi-line content
-{
-  "capability": "write-file-range",
-  "path": "File.hs",
-  "ranges": "1-2,5-6",
-  "contentBlocks": [
-    "new line 1\nnew line 2",
-    "new line 5\nnew line 6"
-  ]
+  "path": "./src/File.hs",
+  "ranges": "1-10",
+  "contentBlocks": ["new content"],
+  "expected_snapshot_ref": "a1b2c3d4...",
+  "commit": true
 }
 ```
+
+The operation fails if the file's current snapshot doesn't match, allowing retry with fresh content.
 
 **Returns:**
 ```json
 {
   "path": "/path/to/file",
   "rangesModified": 2,
-  "linesWritten": 6
-}
-```
-
-**Behavior:**
-- **Preserves trailing newline:** If the original file ends with a newline, the output will too
-- **Creates file for head/tail:** If file doesn't exist and using `head` or `tail`, creates the file
-- **Error for missing file:** Returns error if file doesn't exist for non-head/tail operations
-- **Sequential processing:** Multiple ranges are processed top-to-bottom with automatic position adjustment
-
-**Error Responses:**
-```json
-{
-  "error": "Number of content blocks (1) must match total lines in ranges (2)"
+  "linesWritten": 6,
+  "beforeSnapshotRef": "a1b2c3d4...",
+  "afterSnapshotRef": "e5f6g7h8...",
+  "sessionId": "sess-abc",
+  "sessionNetDelta": 2,
+  "sessionCommitted": true,
+  "sessionStatus": "committed"
 }
 ```
 
 #### patch-file
 
-Applies a unified diff patch to a file atomically with context validation.
+Applies a unified diff patch to a file atomically with context validation and rich error reporting.
 
 **Parameters:**
 ```json
 {
   "capability": "patch-file",
   "path": "/path/to/file",
-  "patch": "--- a/src/File.hs\n+++ b/src/File.hs\n@@ -10,5 +10,6 @@ import Foo\n+import Data.Text (Text)\n@@ -100,5 +101,5 @@ func1 x =\n-  oldBody\n+  newBody"
+  "patch": "--- a/src/File.hs\n+++ b/src/File.hs\n@@ -10,5 +10,6 @@ import Foo\n+import Data.Text (Text)\n@@ -100,5 +101,5 @@ func1 x =\n-  oldBody\n+  newBody",
+  "expected_snapshot_ref": "a1b2c3d4..."
 }
 ```
 
@@ -1220,6 +1314,7 @@ Applies a unified diff patch to a file atomically with context validation.
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to patch |
 | `patch` | string | Yes | Unified diff patch content |
+| `expected_snapshot_ref` | string | No | Optimistic locking: only proceed if file matches |
 
 **Patch Format:**
 Follows standard unified diff format:
@@ -1234,6 +1329,19 @@ Follows standard unified diff format:
 - **Context validation:** Each hunk's context lines must match exactly
 - **Overlap detection:** Hunks that would overlap are rejected
 - **Bottom-to-top application:** Hunks are applied in descending line order to avoid line number shifts
+- **Rich errors:** Context-mismatch errors include expected/actual lines for debugging
+
+**Rich Error Context:**
+When a context mismatch occurs, the error includes both expected and actual lines:
+
+```json
+{
+  "error": "Context mismatch at line 100",
+  "expected": ["import Foo", "import Bar"],
+  "actual": ["import Foo", "import Baz"],
+  "message": "Context doesn't match"
+}
+```
 
 **Returns:**
 ```json
@@ -1241,14 +1349,18 @@ Follows standard unified diff format:
   "path": "/path/to/file",
   "hunksApplied": 2,
   "hunksRejected": 0,
-  "linesChanged": 3
+  "linesChanged": 3,
+  "beforeSnapshotRef": "a1b2c3d4...",
+  "afterSnapshotRef": "e5f6g7h8..."
 }
 ```
 
 **Error Responses:**
 ```json
 {
-  "error": "Context mismatch at line 100: Context before hunk doesn't match"
+  "error": "Context mismatch at line 100: Context doesn't match",
+  "expected": ["context line 1", "context line 2"],
+  "actual": ["different line 1", "different line 2"]
 }
 ```
 
@@ -1267,6 +1379,12 @@ data ReadFileRangeResult = ReadFileRangeResult
     { readFilePath :: FilePath
     , readFileContent :: Text
     , readFileLinesRead :: Int
+    , readFileTotalLines :: Int
+    , readFileTotalSize :: Int
+    , readFileRangesParsed :: [Text]
+    , readFileSnapshotRef :: Maybe SnapshotRef
+    , readFileSessionId :: Maybe Text
+    , readFileMetadataOnly :: Bool
     }
 
 -- | Result of a write file range operation.
@@ -1274,6 +1392,12 @@ data WriteFileRangeResult = WriteFileRangeResult
     { writeFilePath :: FilePath
     , writeFileRangesModified :: Int
     , writeFileLinesWritten :: Int
+    , writeFileBeforeSnapshotRef :: Maybe SnapshotRef
+    , writeFileAfterSnapshotRef :: Maybe SnapshotRef
+    , writeFileSessionId :: Maybe Text
+    , writeFileSessionNetDelta :: Maybe Int
+    , writeFileSessionCommitted :: Bool
+    , writeFileSessionStatus :: Text  -- "staged" or "committed"
     }
 
 -- | Result of a patch file operation.
@@ -1282,8 +1406,47 @@ data PatchResult = PatchResult
     , patchHunksApplied :: Int
     , patchHunksRejected :: Int
     , patchLinesChanged :: Int
+    , patchBeforeSnapshotRef :: Maybe SnapshotRef
+    , patchAfterSnapshotRef :: Maybe SnapshotRef
     }
+
+-- | Patch error with rich context.
+data PatchError
+    = PatchParseError Text
+    | PatchContextMismatch
+        { patchMismatchLine :: Int
+        , patchMismatchMessage :: Text
+        , patchMismatchExpected :: [Text]
+        , patchMismatchActual :: [Text]
+        }
+    | PatchHunkOverlap Int Int
+    | PatchFileNotFound FilePath
+    | PatchInvalidLineNumber Int
 ```
+
+### Snapshot System
+
+The Developer Toolbox uses a snapshot system for optimistic locking and file restoration:
+
+```haskell
+-- | Snapshot reference (MD5 hash of content).
+newtype SnapshotRef = SnapshotRef { unSnapshotRef :: Text }
+    deriving (Show, Eq, Ord)
+
+-- | Snapshot with metadata.
+data Snapshot = Snapshot
+    { snapshotContent :: ByteString
+    , snapshotCreatedAt :: UTCTime
+    }
+
+-- | Create snapshot from content.
+makeSnapshot :: ByteString -> Snapshot
+
+-- | Get reference for a snapshot.
+snapshotRef :: Snapshot -> SnapshotRef
+```
+
+Snapshots are automatically taken during read operations and returned in results. Use `expected_snapshot_ref` for optimistic locking in write operations.
 
 ### Generated Templates
 
@@ -2219,6 +2382,8 @@ data QueryError
     | InvalidSessionIdError Text
     | SessionAccessDeniedError Text SessionIntrospectionScope
     | MissingParameterError Text
+    | CommandRefusedError Text
+    | InvalidFilterOutputError Text
 ```
 
 ### Developer Toolbox Errors
@@ -2234,6 +2399,10 @@ data DeveloperToolError
     | RangeOutOfBoundsError Text
     | PermissionError Text
     | PatchValidationError PatchError
+    | SessionNotFoundError Text
+    | SessionExpiredError Text
+    | SessionAlreadyCommittedError Text
+    | RangeOverlapError Text
 ```
 
 ### Patch Errors
@@ -2241,7 +2410,12 @@ data DeveloperToolError
 ```haskell
 data PatchError
     = PatchParseError Text
-    | PatchContextMismatch Int Text
+    | PatchContextMismatch
+        { patchMismatchLine :: Int
+        , patchMismatchMessage :: Text
+        , patchMismatchExpected :: [Text]
+        , patchMismatchActual :: [Text]
+        }
     | PatchHunkOverlap Int Int
     | PatchFileNotFound FilePath
     | PatchInvalidLineNumber Int
@@ -2291,6 +2465,10 @@ data PortalError
 21. **File sandbox configuration**: Always configure `fileSandbox` for SystemToolbox (attach-file), DeveloperToolbox (read/write/patch), and LuaToolbox (fs module)
 22. **Secure by default**: The default file sandbox denies all access (`AlwaysDeny`). Explicitly configure allowed paths.
 23. **Path canonicalization**: The file sandbox canonicalizes all paths, so predicates apply to resolved paths (not symlink paths)
+24. **Multi-turn edit sessions**: Use `commit: false` for staging multiple edits, then `commit: true` to finalize
+25. **Optimistic locking**: Use `expected_snapshot_ref` to prevent conflicts when multiple agents edit the same file
+26. **Rich patch errors**: Patch context mismatches now include expected/actual lines for easier debugging
+27. **Command filtering**: Use `commandFilter` in SystemToolbox to control arbitrary command execution
 
 ## Example: Complete Tool Configuration
 
@@ -2351,7 +2529,7 @@ data PortalError
       "contents": {
         "name": "system",
         "description": "System context and session memory",
-        "capabilities": ["date", "hostname", "working-directory", "attach-file", "list-sessions", "search-sessions"],
+        "capabilities": ["date", "hostname", "working-directory", "attach-file", "list-directory", "execute-command", "list-sessions", "search-sessions"],
         "envVarFilter": null,
         "sessionIntrospectionScope": "subtree",
         "sessionIntrospectionMaxResults": 50,
@@ -2360,7 +2538,8 @@ data PortalError
           "predicate": {"tag": "DirectoryRecursive", "contents": "./project"},
           "maxFileSize": 52428800,
           "name": "system-sandbox"
-        }
+        },
+        "commandFilter": "/path/to/approval-script.sh"
       }
     },
     {
@@ -2422,8 +2601,13 @@ data PortalError
 | `System.Agents.Tools.McpToolbox` | MCP server integration |
 | `System.Agents.Tools.OpenAPIToolbox` | OpenAPI conversion |
 | `System.Agents.Tools.SqliteToolbox` | SQLite tools |
-| `System.Agents.Tools.SystemToolbox` | System information and session introspection |
-| `System.Agents.Tools.DeveloperToolbox` | Development utilities |
+| `System.Agents.Tools.SystemToolbox` | System information, session introspection, command execution |
+| `System.Agents.Tools.SystemToolbox.Directory` | Directory listing |
+| `System.Agents.Tools.SystemToolbox.Execute` | Command execution |
+| `System.Agents.Tools.DeveloperToolbox` | Development utilities, file editing |
+| `System.Agents.Tools.DeveloperToolbox.Read` | File reading with sessions |
+| `System.Agents.Tools.DeveloperToolbox.Write` | File writing with sessions |
+| `System.Agents.Tools.DeveloperToolbox.Patch` | Patch application |
 | `System.Agents.Tools.LuaToolbox` | Lua scripting |
 | `System.Agents.Tools.Skills.Toolbox` | Skills system |
 | `System.Agents.Tools.Skills.Types` | Skill types |
