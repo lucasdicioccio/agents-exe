@@ -331,6 +331,7 @@ test-suite agents-tests
                     , EndpointPredicateTests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests
+                    , FileSandboxPredicateTests
                     , LuaToolboxJsonValueTests
                     , LuaToolboxHttpTests
                     , McpImplementationTests

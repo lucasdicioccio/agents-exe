@@ -55,7 +55,7 @@ import Control.Exception (IOException, try)
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
 import System.Directory (canonicalizePath, doesDirectoryExist, getCurrentDirectory, getFileSize)
-import System.FilePath (isAbsolute, isRelative, normalise, splitDirectories, takeExtension, takeFileName, (</>))
+import System.FilePath (isAbsolute, isRelative, normalise, takeDirectory, takeExtension, takeFileName, (</>))
 
 -- | Path validation error types.
 data PathError
@@ -304,12 +304,7 @@ isPathWithin child parent =
 
 -- | Get the parent directory of a path.
 takeParent :: FilePath -> FilePath
-takeParent path =
-    let norm = normalise path
-        dirs = splitDirectories norm
-     in if null dirs || length dirs == 1
-            then "/"
-            else normalise $ concat $ init dirs
+takeParent = normalise . takeDirectory
 
 {- | Simple glob pattern matching.
 Supports: * (matches any sequence of chars), ? (matches single char)

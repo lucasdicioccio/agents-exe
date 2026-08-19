@@ -37,6 +37,8 @@ import qualified SessionPrintTests
 -- Import EndpointPredicate tests
 import qualified EndpointPredicateTests
 -- Import Skills tests
+-- Import FileSandbox predicate tests
+import qualified FileSandboxPredicateTests
 import qualified SkillsTests
 -- Import MCP Implementation tests
 import qualified McpImplementationTests
@@ -97,6 +99,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite
+        , FileSandboxPredicateTests.tests
         , ActivationSessionTests.activationSessionTestSuite
         , McpImplementationTests.mcpImplementationTestSuite
         , ToolPortalTests.toolPortalTestSuite
