@@ -71,7 +71,10 @@ import qualified ActivationSessionTests
 -- Import DeveloperToolbox tests
 import qualified DeveloperToolboxTests
 -- Import DeveloperToolbox write-range specific tests
+-- Import DeveloperToolbox write-range specific tests
 import qualified DeveloperToolboxWriteRangeTests
+-- Import DeveloperToolbox patch-file specific tests
+import qualified DeveloperToolboxPatchTests
 
 main :: IO ()
 main = defaultMain tests
@@ -109,6 +112,7 @@ tests =
         , LuaToolboxHttpTests.luaToolboxHttpTests
         , DeveloperToolboxTests.tests
         , DeveloperToolboxWriteRangeTests.tests
+        , DeveloperToolboxPatchTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

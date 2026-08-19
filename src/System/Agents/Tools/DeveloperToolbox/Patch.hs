@@ -525,8 +525,13 @@ parseHunkBody = go [] [] [] []
                         segsAcc1 = flushChange segsAcc removedAcc addedAcc
                      in go segsAcc1 (content : ctxAcc) [] [] rest
 
-    isRemovedLine line = Text.isPrefixOf "-" line && not (Text.isPrefixOf "---" line)
-    isAddedLine line = Text.isPrefixOf "+" line && not (Text.isPrefixOf "+++" line)
+    -- Inside a hunk body every line that starts with '-' or '+' is a removed
+    -- or added line.  We deliberately do NOT exclude '---' / '+++' here:
+    -- those prefixes can occur when the original line itself starts with
+    -- '--' or '++' (common in Haskell comments and C++ operators).  File
+    -- headers are stripped earlier, before the first hunk header is parsed.
+    isRemovedLine line = Text.isPrefixOf "-" line
+    isAddedLine line = Text.isPrefixOf "+" line
 
     -- Context lines are prefixed with a single space in standard unified
     -- diff output; strip it so the stored text matches file content.

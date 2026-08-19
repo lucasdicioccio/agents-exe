@@ -327,6 +327,7 @@ test-suite agents-tests
     main-is:          Main.hs
     other-modules:    ActivationSessionTests
                     , DeveloperToolboxTests
+                    , DeveloperToolboxPatchTests
                     , DeveloperToolboxWriteRangeTests
                     , EndpointPredicateTests
                     , LuaToolboxSecurityTests
