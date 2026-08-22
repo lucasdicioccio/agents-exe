@@ -44,6 +44,7 @@ library agents-lib
                     , System.Agents.CLI.InitProject
                     , System.Agents.CLI.McpServer
                     , System.Agents.CLI.New
+                    , System.Agents.CLI.New.ModelCatalog
                     , System.Agents.CLI.OneShot
                     , System.Agents.CLI.Paths
                     , System.Agents.CLI.PromptScript
@@ -336,6 +337,7 @@ test-suite agents-tests
                     , LuaToolboxJsonValueTests
                     , LuaToolboxHttpTests
                     , McpImplementationTests
+                    , ModelCatalogTests
                     , OpenAPIToolboxTests
                     , OS.ConcurrentTests
                     , OS.ConversationTests

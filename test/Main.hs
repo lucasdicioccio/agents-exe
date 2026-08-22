@@ -46,6 +46,8 @@ import qualified McpImplementationTests
 import qualified ToolPortalTests
 -- Import LuaToolbox security tests
 import qualified LuaToolboxSecurityTests
+-- Import ModelCatalog tests
+import qualified ModelCatalogTests
 -- Import LuaToolbox comprehensive tests
 import qualified LuaToolboxTests
 -- Import luaToJsonValue specific tests
@@ -104,6 +106,7 @@ tests =
         , SkillsTests.skillsTestSuite
         , FileSandboxPredicateTests.tests
         , ActivationSessionTests.activationSessionTestSuite
+        , ModelCatalogTests.tests
         , McpImplementationTests.mcpImplementationTestSuite
         , ToolPortalTests.toolPortalTestSuite
         , LuaToolboxSecurityTests.tests

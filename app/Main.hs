@@ -93,6 +93,10 @@ defaultApiKeysContent =
                         [ "id" .= ("ollama-key" :: Text)
                         , "value" .= ("ollama" :: Text)
                         ]
+                   , Aeson.object
+                        [ "id" .= ("kimi-key" :: Text)
+                        , "value" .= ("<insert-your-moonshot-api-key-here>" :: Text)
+                        ]
                    ]
             ]
 
@@ -1170,18 +1174,11 @@ parseSpecOptions =
             )
 
 -- | Parse the new command
-parseNewCommand :: Parser Command
-parseNewCommand = New <$> parseNewOptions
+parseNewCommand :: ArgParserArgs -> Parser Command
+parseNewCommand argArgs = New <$> parseNewOptions argArgs
 
--- | Help footer for the new command listing available presets
-newCommandFooter :: String
-newCommandFooter =
-    "Available presets for 'new agent': "
-        ++ NewCmd.formatPresetListHelp
-        ++ ". The preset configures the provider URL, default model, and API key reference."
-
-parseNewOptions :: Parser NewCmd.NewOptions
-parseNewOptions =
+parseNewOptions :: ArgParserArgs -> Parser NewCmd.NewOptions
+parseNewOptions argArgs =
     NewCmd.NewOptions
         <$> subparser
             ( command
@@ -1190,11 +1187,55 @@ parseNewOptions =
                 <> command
                     "tool"
                     (info parseNewToolCommand (progDesc "Create a new tool script"))
+                <> command
+                    "models"
+                    (info (parseNewModelsCommand argArgs) (progDesc "Manage the model catalog"))
             )
         <*> switch
             ( long "force"
                 <> short 'f'
                 <> help "Overwrite existing files"
+            )
+
+parseNewModelsCommand :: ArgParserArgs -> Parser NewCmd.NewCommand
+parseNewModelsCommand argArgs =
+    NewCmd.NewModels <$> parseNewModelsOptions argArgs
+
+parseNewModelsOptions :: ArgParserArgs -> Parser NewCmd.NewModelsOptions
+parseNewModelsOptions argArgs =
+    NewCmd.NewModelsOptions
+        <$> pure argArgs.configdir
+        <*> subparser
+            ( command
+                "list"
+                ( info
+                    (pure NewCmd.ListModels)
+                    (progDesc "List known model patterns and their preset")
+                )
+                <> command
+                    "init"
+                    ( info
+                        (pure NewCmd.InitModels)
+                        (progDesc "Initialize a local model catalog from built-in defaults")
+                    )
+                <> command
+                    "update"
+                    ( info
+                        parseUpdateModelsOptions
+                        (progDesc "Download model catalog from a remote source")
+                    )
+            )
+
+parseUpdateModelsOptions :: Parser NewCmd.NewModelsSubcommand
+parseUpdateModelsOptions =
+    NewCmd.UpdateModels
+        <$> optional
+            ( strOption
+                ( long "url"
+                    <> short 'u'
+                    <> metavar "URL"
+                    <> help "URL to download the model catalog from"
+                )
             )
 
 parseNewAgentCommand :: Parser NewCmd.NewCommand
@@ -1215,16 +1256,8 @@ parseNewAgentOptions =
         <*> optional
             ( strArgument
                 ( metavar "MODEL"
-                    <> help "Model name (e.g., gpt-4o, mistral-large)"
+                    <> help "Model name (e.g., gpt-4o, mistral-large, kimi-k2.5). The provider preset is inferred from the model catalog."
                 )
-            )
-        <*> strOption
-            ( long "preset"
-                <> short 'p'
-                <> metavar "PRESET"
-                <> help ("Provider preset (" ++ NewCmd.formatPresetListHelp ++ ")")
-                <> value "openai"
-                <> showDefault
             )
 
 parseNewToolCommand :: Parser NewCmd.NewCommand
@@ -1369,10 +1402,8 @@ parseProgOptions argparserargs =
                 <> command
                     "new"
                     ( info
-                        parseNewCommand
-                        ( progDesc "Create new agent or tool scaffolding"
-                            <> footer newCommandFooter
-                        )
+                        (parseNewCommand argparserargs)
+                        (progDesc "Create new agent or tool scaffolding")
                     )
                 <> command
                     "tool-call"
@@ -1507,7 +1538,7 @@ runCommand pargs baseTracer sessionStore files =
         Spec opts ->
             SpecCmd.handleSpec opts
         New opts ->
-            NewCmd.handleNew opts
+            NewCmd.handleNew pargs.configDir opts
         ToolCall opts ->
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
 
@@ -1528,3 +1559,4 @@ maybeToEither (Just v) = Right v
 -- | Parse a date string in YYYY-MM-DD format
 parseDate :: String -> Maybe UTCTime
 parseDate = parseTimeM True defaultTimeLocale "%Y-%m-%d"
+

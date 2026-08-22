@@ -723,34 +723,26 @@ agents-exe new agent SLUG [FILE] [MODEL] [OPTIONS]
 |----------|-------------|
 | `SLUG` | Unique identifier for the agent |
 | `FILE` | Output file path (default: `./{slug}.json`) |
-| `MODEL` | Model name (e.g., gpt-4o, mistral-large) |
+| `MODEL` | Model name (e.g., gpt-4o, mistral-large). The provider preset is inferred from the model catalog. |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-p, --preset PRESET` | Provider preset: `openai`, `mistral`, `ollama` (default: `openai`) |
 | `-f, --force` | Overwrite existing file |
 
-**Presets:**
-
-| Preset | Model URL | Default Model | API Key ID |
-|--------|-----------|---------------|------------|
-| `openai` | https://api.openai.com/v1 | gpt-4-turbo-preview | main-key |
-| `mistral` | https://api.mistral.ai/v1 | mistral-large-latest | mistral-key |
-| `ollama` | http://localhost:11434/v1 | llama3.2 | ollama-key |
+Provider presets (URL, default model, API key ID) are selected automatically
+based on the model name. Use `agents-exe new models list` to see the built-in
+model patterns and `agents-exe new models init` to customize them locally.
 
 **Examples:**
 
 ```bash
-# Create agent with OpenAI preset (default)
+# Create agent with the default OpenAI preset
 agents-exe new agent my-assistant
 
-# Create agent with specific preset
-agents-exe new agent my-assistant --preset mistral
-
-# Create agent with custom model
-agents-exe new agent coder --preset openai --model gpt-4o
+# Create agent with custom model (preset inferred from the catalog)
+agents-exe new agent coder --model gpt-4o
 
 # Create agent with custom output path
 agents-exe new agent my-assistant ./agents/assistant.json

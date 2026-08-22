@@ -47,15 +47,20 @@
           ],
           "FileSandbox": {
             "fsbName": "code-access",
-            "--fsbPredicate": {
-              "tag": "AlwaysAllow"
-            },
             "fsbPredicate": {
               "tag": "Any",
               "contents": [
                 {
                   "tag": "DirectoryRecursive",
+                  "contents": "./app"
+                },
+                {
+                  "tag": "DirectoryRecursive",
                   "contents": "./src"
+                },
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./docs"
                 },
                 {
                   "tag": "DirectoryRecursive",
@@ -64,6 +69,10 @@
                 {
                   "tag": "DirectoryRecursive",
                   "contents": "./todos"
+                },
+                {
+                  "tag": "FileExactly",
+                  "contents": "./README.md"
                 },
                 {
                   "tag": "FileExactly",

@@ -4,6 +4,10 @@
 {- | Module for the 'new' command handler.
 
 The new command provides scaffolding for creating new agents and tools.
+Model selection is guided by a model catalog: when a model name is given,
+the provider preset is inferred automatically (e.g. @kimi-k2.5@ selects
+the Moonshot preset). When no model is given, the default OpenAI preset
+is used.
 -}
 module System.Agents.CLI.New (
     handleNew,
@@ -11,12 +15,13 @@ module System.Agents.CLI.New (
     NewCommand (..),
     NewAgentOptions (..),
     NewToolOptions (..),
+    NewModelsOptions (..),
+    NewModelsSubcommand (..),
     ModelPreset (..),
     ToolLanguage (..),
     -- Exported for testing
     buildAgentConfig,
     defaultPresets,
-    formatPresetListHelp,
     defaultSystemPrompt,
     toolLanguageToExtension,
     makeToolTemplate,
@@ -44,6 +49,17 @@ import System.Agents.Base (
     BuiltinToolboxDescription (..),
     DeveloperToolCapability (..),
     DeveloperToolboxDescription (..),
+ )
+import System.Agents.CLI.New.ModelCatalog (
+    ModelCatalog (..),
+    catalogEntriesText,
+    defaultModelCatalog,
+    defaultModelCatalogUrl,
+    loadModelCatalog,
+    lookupPresetForModel,
+    modelCatalogPath,
+    saveModelCatalog,
+    updateModelCatalogFromUrl,
  )
 
 -- | Default developer toolbox configuration for new agents.
@@ -80,9 +96,8 @@ data NewAgentOptions = NewAgentOptions
     { newAgentSlug :: Text
     , newAgentFilePath :: FilePath
     , newAgentModel :: Maybe Text
-    -- ^ Optional model name override
-    , newAgentPreset :: Text
-    -- ^ Preset name (openai, mistral, ollama)
+    -- ^ Optional model name override. When given, the provider preset is
+    -- inferred from the model catalog.
     }
     deriving (Show, Eq)
 
@@ -120,12 +135,30 @@ data NewToolOptions = NewToolOptions
     }
     deriving (Show, Eq)
 
+-- | Subcommands for managing the model catalog.
+data NewModelsSubcommand
+    = ListModels
+    | UpdateModels (Maybe Text)
+    -- ^ Download the catalog from an optional URL override.
+    | InitModels
+    -- ^ Write the built-in catalog to the local config file.
+    deriving (Show, Eq)
+
+-- | Options for the @new models@ subcommand.
+data NewModelsOptions = NewModelsOptions
+    { newModelsConfigDir :: FilePath
+    , newModelsSubcommand :: NewModelsSubcommand
+    }
+    deriving (Show, Eq)
+
 -- | Subcommands for the 'new' command
 data NewCommand
     = -- | Create a new agent with given options
       NewAgent NewAgentOptions
     | -- | Create a new tool with given options
       NewTool NewToolOptions
+    | -- | Manage the model catalog
+      NewModels NewModelsOptions
     deriving (Show, Eq)
 
 -- | Options for the new command
@@ -168,7 +201,7 @@ defaultPresets =
                 }
             )
         ,
-            ( "kimi-k2.5"
+            ( "kimi"
             , ModelPreset
                 { presetFlavor = "KimiV1"
                 , presetModelUrl = "https://api.moonshot.ai/v1"
@@ -178,12 +211,6 @@ defaultPresets =
             )
         ]
 
-{- | Get a formatted list of available presets for help text
-Returns: "openai, mistral, ollama"
--}
-formatPresetListHelp :: String
-formatPresetListHelp = Text.unpack $ Text.intercalate ", " (Map.keys defaultPresets)
-
 -- | Default system prompt based on agent slug
 defaultSystemPrompt :: Text -> [Text]
 defaultSystemPrompt agentSlug =
@@ -192,49 +219,89 @@ defaultSystemPrompt agentSlug =
     , "When using tools, you explain your actions to the user."
     ]
 
--- | Build agent configuration from options
-buildAgentConfig :: NewAgentOptions -> Either String Agent
-buildAgentConfig opts = do
-    preset <- case Map.lookup opts.newAgentPreset defaultPresets of
-        Nothing -> Left $ "Unknown preset: " ++ Text.unpack opts.newAgentPreset
+-- | Resolve the preset name to use, inferring from the model catalog when
+-- a model name is supplied and defaulting to OpenAI otherwise.
+resolvePresetName :: ModelCatalog -> NewAgentOptions -> Either String Text
+resolvePresetName catalog opts =
+    case opts.newAgentModel of
+        Nothing -> Right "openai"
+        Just model ->
+            case lookupPresetForModel catalog model of
+                Just (preset, _entry) -> Right preset
+                Nothing ->
+                    Left $
+                        "Cannot infer provider preset for model '"
+                            ++ Text.unpack model
+                            ++ "'. Add a matching entry to the model catalog."
+
+-- | Build agent configuration from options.
+--
+-- Returns the resolved preset name alongside the agent so that callers can
+-- report which preset was actually used (especially useful when it was
+-- inferred from the model catalog).
+buildAgentConfig :: ModelCatalog -> NewAgentOptions -> Either String (Text, Agent)
+buildAgentConfig catalog opts = do
+    presetName <- resolvePresetName catalog opts
+    preset <- case Map.lookup presetName defaultPresets of
+        Nothing -> Left $ "Unknown preset: " ++ Text.unpack presetName
         Just p -> Right p
 
     let selectedModelName = fromMaybe preset.presetModelName opts.newAgentModel
 
-    pure $
-        Agent
-            { slug = opts.newAgentSlug
-            , apiKeyId = preset.presetApiKeyId
-            , flavor = preset.presetFlavor
-            , modelUrl = preset.presetModelUrl
-            , modelName = selectedModelName
-            , announce = "a helpful assistant powered by " <> selectedModelName
-            , systemPrompt = defaultSystemPrompt opts.newAgentSlug
-            , toolDirectory = Just "tools"
-            , bashToolboxes = Nothing
-            , mcpServers = Just []
-            , openApiToolboxes = Nothing
-            , postgrestToolboxes = Nothing
-            , builtinToolboxes = Just [defaultDeveloperToolbox]
-            , extraAgents = Nothing
-            , skillSources = Nothing
-            , autoEnableSkills = Nothing
-            }
+    let agent =
+            Agent
+                { slug = opts.newAgentSlug
+                , apiKeyId = preset.presetApiKeyId
+                , flavor = preset.presetFlavor
+                , modelUrl = preset.presetModelUrl
+                , modelName = selectedModelName
+                , announce = "a helpful assistant powered by " <> selectedModelName
+                , systemPrompt = defaultSystemPrompt opts.newAgentSlug
+                , toolDirectory = Just "tools"
+                , bashToolboxes = Nothing
+                , mcpServers = Just []
+                , openApiToolboxes = Nothing
+                , postgrestToolboxes = Nothing
+                , builtinToolboxes = Just [defaultDeveloperToolbox]
+                , extraAgents = Nothing
+                , skillSources = Nothing
+                , autoEnableSkills = Nothing
+                }
 
--- | Handle the new command: create agent or tool scaffolding
+    pure (presetName, agent)
+
+-- | Load the model catalog, falling back to built-in defaults and warning
+-- on parse errors.
+loadCatalogOrDefault :: FilePath -> IO ModelCatalog
+loadCatalogOrDefault configDir = do
+    result <- loadModelCatalog (modelCatalogPath configDir)
+    case result of
+        Left err -> do
+            Text.hPutStrLn stderr $
+                "Warning: " <> Text.pack err <> ". Using built-in model catalog."
+            pure defaultModelCatalog
+        Right catalog -> pure catalog
+
+-- | Handle the new command: create agent or tool scaffolding, or manage
+-- the model catalog.
 handleNew ::
+    -- | Config directory (used for the model catalog)
+    FilePath ->
     -- | Options for new command
     NewOptions ->
     IO ()
-handleNew opts = case opts.newCommand of
-    NewAgent agentOpts ->
-        handleNewAgent opts.newForce agentOpts
+handleNew configDir opts = case opts.newCommand of
+    NewAgent agentOpts -> do
+        catalog <- loadCatalogOrDefault configDir
+        handleNewAgent opts.newForce catalog agentOpts
     NewTool toolOpts ->
         handleNewTool opts.newForce toolOpts
+    NewModels modelsOpts ->
+        handleNewModels opts.newForce modelsOpts
 
 -- | Handle the new agent command
-handleNewAgent :: Bool -> NewAgentOptions -> IO ()
-handleNewAgent force opts = do
+handleNewAgent :: Bool -> ModelCatalog -> NewAgentOptions -> IO ()
+handleNewAgent force catalog opts = do
     -- Check if file already exists
     unless force $ do
         exists <- doesFileExist opts.newAgentFilePath
@@ -245,11 +312,11 @@ handleNewAgent force opts = do
             exitFailure
 
     -- Build agent config
-    case buildAgentConfig opts of
+    case buildAgentConfig catalog opts of
         Left err -> do
             Text.hPutStrLn stderr $ "Error: " <> Text.pack err
             exitFailure
-        Right agent -> do
+        Right (presetName, agent) -> do
             -- Create directory structure
             createDirectoryIfMissing True (takeDirectory opts.newAgentFilePath)
             -- Create tool directory if toolDirectory is specified
@@ -267,7 +334,8 @@ handleNewAgent force opts = do
                 Aeson.encodePretty (AgentDescription agent)
 
             Text.putStrLn $ "Model: " <> agent.modelName
-            Text.putStrLn $ "Provider: " <> opts.newAgentPreset
+            Text.putStrLn $ "Preset: " <> presetName
+            Text.putStrLn $ "Provider: " <> Text.pack (show agent.flavor)
 
 -- | Handle the new tool command
 handleNewTool :: Bool -> NewToolOptions -> IO ()
@@ -303,6 +371,49 @@ handleNewTool force opts = do
     Text.putStrLn "  1. Edit the 'args' array in the describe function"
     Text.putStrLn "  2. Implement the run function"
     Text.putStrLn $ "  3. Test with: agents-exe describe-tool " <> Text.pack finalPath
+
+-- | Handle the @new models@ subcommand.
+handleNewModels :: Bool -> NewModelsOptions -> IO ()
+handleNewModels force opts = case opts.newModelsSubcommand of
+    ListModels -> do
+        catalog <- loadCatalogOrDefault opts.newModelsConfigDir
+        let path = modelCatalogPath opts.newModelsConfigDir
+        localExists <- doesFileExist path
+        Text.putStrLn $ catalogEntriesText catalog
+        unless localExists $
+            Text.putStrLn $
+                "Using built-in defaults. Run 'agents-exe new models init' to persist a local catalog."
+    UpdateModels mUrl -> do
+        let url = fromMaybe defaultModelCatalogUrl mUrl
+        result <- updateModelCatalogFromUrl url
+        case result of
+            Left err -> do
+                Text.hPutStrLn stderr $ "Error: " <> Text.pack err
+                exitFailure
+            Right catalog -> do
+                let path = modelCatalogPath opts.newModelsConfigDir
+                unless force $ do
+                    exists <- doesFileExist path
+                    when exists $ do
+                        Text.hPutStrLn stderr $
+                            "Error: Model catalog already exists: " <> Text.pack path
+                        Text.hPutStrLn stderr "Use --force to overwrite"
+                        exitFailure
+                saveModelCatalog path catalog
+                Text.putStrLn $ "Updated model catalog: " <> Text.pack path
+                Text.putStrLn $ "Entries: " <> Text.pack (show (length catalog.catalogEntries))
+    InitModels -> do
+        let path = modelCatalogPath opts.newModelsConfigDir
+        unless force $ do
+            exists <- doesFileExist path
+            when exists $ do
+                Text.hPutStrLn stderr $
+                    "Error: Model catalog already exists: " <> Text.pack path
+                Text.hPutStrLn stderr "Use --force to overwrite"
+                exitFailure
+        saveModelCatalog path defaultModelCatalog
+        Text.putStrLn $ "Initialized model catalog: " <> Text.pack path
+        Text.putStrLn "Edit this file to add custom model patterns."
 
 -- | Create a tool template for a given language
 makeToolTemplate :: ToolLanguage -> Text -> Text
@@ -520,3 +631,4 @@ makeNodeToolTemplate toolSlug =
         , ""
         , "main();"
         ]
+
