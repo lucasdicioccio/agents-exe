@@ -27,7 +27,7 @@ if [[ "$1" == "run" ]]; then
     fi
     echo "---"
     pattern="$2"
-    git grep -n -I "${pattern}" -- . ":!tasks-sessions/*"
+    git grep -n -I "${pattern}" -- . ":!manual-sessions/*" ":!tasks-sessions/*"
     exit 0
 fi
 
