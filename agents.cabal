@@ -373,6 +373,7 @@ test-suite agents-tests
                       tasty-hunit,
                       temporary,
                       time,
+                      unix,
                       unordered-containers,
                       uuid,
                       vector

@@ -28,10 +28,13 @@ import Test.Tasty.HUnit
 
 import Prod.Tracer (Tracer (..), silent)
 
-import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..))
+import System.Agents.Base (Agent (..), AgentDescription (..), DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..))
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import System.Agents.Tools.DeveloperToolbox.Types (RangeSpec(..))
+
+import qualified Data.Aeson as Aeson
+import System.Posix.Files (fileMode, getFileStatus, intersectFileModes, ownerExecuteMode)
 
 -- | Test data: a simple multi-line file for testing
 testFileContent :: Text
@@ -67,6 +70,9 @@ testToolbox = do
                 , developerToolboxCapabilities =
                     [ DevToolReadFileRange
                     , DevToolWriteFileRange
+                    , DevToolScaffoldTool
+                    , DevToolScaffoldAgent
+                    , DevToolValidateAgent
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxFileSandbox = Just FileSandboxConfig
@@ -116,6 +122,7 @@ tests =
         , multiRangeTests
         , indentationTests
         , lineNumberTests
+        , scaffoldTests
         ]
 
 -------------------------------------------------------------------------------
@@ -1066,4 +1073,80 @@ testSequentialLineReplacement = withTempDir $ \tmpDir -> do
             -- Verify originals are gone
             assertBool "Original B should be removed" $ not ("B" `elem` lines')
             assertBool "Original D should be removed" $ not ("D" `elem` lines')
+
+-------------------------------------------------------------------------------
+-- Scaffold Tests
+-------------------------------------------------------------------------------
+
+scaffoldTests :: TestTree
+scaffoldTests =
+    testGroup
+        "Scaffolding"
+        [ testCase "scaffold-tool makes bash script executable" testScaffoldBashExecutable
+        , testCase "scaffold-tool does not make python script executable" testScaffoldPythonNotExecutable
+        , testCase "scaffold-tool does not make haskell script executable" testScaffoldHaskellNotExecutable
+        , testCase "scaffold-agent produces valid agent JSON" testScaffoldAgentJsonFormat
+        ]
+
+-- | Test that scaffold-tool makes generated bash scripts executable.
+testScaffoldBashExecutable :: Assertion
+testScaffoldBashExecutable = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "my-tool.sh"
+    result <- DeveloperToolbox.executeScaffoldTool toolbox "bash" "my-tool" filePath False
+    case result of
+        Left err -> assertFailure $ show err
+        Right scaffoldResult -> do
+            scaffoldSuccess scaffoldResult @? "Scaffolding should succeed"
+            status <- getFileStatus filePath
+            let mode = fileMode status
+            assertBool "Bash tool should be executable by owner" $
+                mode `intersectFileModes` ownerExecuteMode == ownerExecuteMode
+
+-- | Test that scaffold-tool does not make python scripts executable.
+testScaffoldPythonNotExecutable :: Assertion
+testScaffoldPythonNotExecutable = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "my-tool.py"
+    result <- DeveloperToolbox.executeScaffoldTool toolbox "python" "my-tool" filePath False
+    case result of
+        Left err -> assertFailure $ show err
+        Right scaffoldResult -> do
+            scaffoldSuccess scaffoldResult @? "Scaffolding should succeed"
+            status <- getFileStatus filePath
+            let mode = fileMode status
+            assertBool "Python tool should not be executable by owner" $
+                mode `intersectFileModes` ownerExecuteMode /= ownerExecuteMode
+
+-- | Test that scaffold-tool does not make haskell scripts executable.
+testScaffoldHaskellNotExecutable :: Assertion
+testScaffoldHaskellNotExecutable = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "my-tool.hs"
+    result <- DeveloperToolbox.executeScaffoldTool toolbox "haskell" "my-tool" filePath False
+    case result of
+        Left err -> assertFailure $ show err
+        Right scaffoldResult -> do
+            scaffoldSuccess scaffoldResult @? "Scaffolding should succeed"
+            status <- getFileStatus filePath
+            let mode = fileMode status
+            assertBool "Haskell tool should not be executable by owner" $
+                mode `intersectFileModes` ownerExecuteMode /= ownerExecuteMode
+
+-- | Test that scaffold-agent produces JSON in the expected AgentDescription format.
+testScaffoldAgentJsonFormat :: Assertion
+testScaffoldAgentJsonFormat = withTempDir $ \tmpDir -> do
+    toolbox <- testToolbox
+    let filePath = tmpDir </> "my-agent.json"
+    result <- DeveloperToolbox.executeScaffoldAgent toolbox "openai" "my-agent" filePath False
+    case result of
+        Left err -> assertFailure $ show err
+        Right scaffoldResult -> do
+            scaffoldSuccess scaffoldResult @? "Scaffolding should succeed"
+            decodeResult <- Aeson.eitherDecodeFileStrict' filePath
+            case decodeResult of
+                Left err -> assertFailure $ "Failed to decode scaffolded agent: " ++ err
+                Right (AgentDescription agent) -> do
+                    slug agent @?= "my-agent"
+                    apiKeyId agent @?= "main-key"
 

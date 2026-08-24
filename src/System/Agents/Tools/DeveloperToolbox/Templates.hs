@@ -142,6 +142,8 @@ makeBashToolTemplate toolSlug =
     Text.unlines
         [ "#!/bin/bash"
         , ""
+        , "# NOTE: This script must be executable (chmod +x) to be loaded as a tool."
+        , ""
         , "# " <> toolSlug <> " - Tool description here"
         , ""
         , descLine
@@ -338,6 +340,8 @@ makeBashToolTemplateFromConfig :: ToolConfig -> Text
 makeBashToolTemplateFromConfig config =
     Text.unlines $
         [ "#!/bin/bash"
+        , ""
+        , "# NOTE: This script must be executable (chmod +x) to be loaded as a tool."
         , ""
         , "# " <> toolConfigSlug config <> " - " <> toolConfigDescription config
         , ""
@@ -552,3 +556,4 @@ defaultDeveloperToolboxDescription =
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             , developerToolboxFileSandbox = Nothing -- Uses default: deny all
             }
+

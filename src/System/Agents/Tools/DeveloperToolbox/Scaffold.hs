@@ -25,6 +25,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath (takeDirectory)
+import qualified System.Posix.Files as Posix
 
 import System.Agents.Base (AgentDescription (..), DeveloperToolCapability (..))
 import System.Agents.Tools.DeveloperToolbox.Templates (
@@ -97,7 +98,10 @@ executeScaffoldAgent toolbox templateName agentSlug filePath force = do
 
 {- | Execute tool scaffolding.
 
-This function generates tool scaffolding in a given language.
+This function generates tool scaffolding in a given language. When the
+requested language is @bash@ (the default), the generated file is made
+executable so that it can be loaded and validated by the bash tool system
+without a separate @chmod +x@ step.
 
 Returns:
 * 'Right ScaffoldResult' on success or failure with error
@@ -126,6 +130,8 @@ executeScaffoldTool toolbox language toolSlug filePath force = do
                 let content = makeToolTemplate language toolSlug
                 createDirectoryIfMissing True (takeDirectory filePath)
                 Text.writeFile filePath content
+                when (isBashLanguage language) $ do
+                    makeExecutable filePath
             case result of
                 Left (e :: SomeException) ->
                     pure $
@@ -143,3 +149,24 @@ executeScaffoldTool toolbox language toolSlug filePath force = do
                                 , scaffoldPath = filePath
                                 , scaffoldError = Nothing
                                 }
+
+-- | Determine whether the requested language is bash (the default).
+--
+-- The default language is "bash" and is selected when the language parameter
+-- is empty, "bash", or any unrecognized value (since 'makeToolTemplate'
+-- defaults to bash for unknown languages).
+isBashLanguage :: Text -> Bool
+isBashLanguage lang =
+    Text.null lang || Text.toLower lang == "bash"
+
+-- | Make a file executable for the owner, preserving existing permissions.
+--
+-- This is required for bash tools because the tool loader only considers
+-- files that are both regular (or symlinks) and owner-executable.
+makeExecutable :: FilePath -> IO ()
+makeExecutable path = do
+    status <- Posix.getFileStatus path
+    let currentMode = Posix.fileMode status
+    let newMode = currentMode `Posix.unionFileModes` Posix.ownerExecuteMode
+    Posix.setFileMode path newMode
+
