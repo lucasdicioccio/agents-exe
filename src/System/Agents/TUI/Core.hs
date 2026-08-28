@@ -124,7 +124,7 @@ import Brick hiding (Down)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (STM, TQueue, atomically, newTQueueIO, newTVarIO, readTQueue, readTVarIO)
+import Control.Concurrent.STM (STM, TQueue, atomically, newTQueueIO, newTVarIO, readTQueue)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
 import Data.Proxy (Proxy (..))
@@ -133,13 +133,13 @@ import Prod.Tracer (Tracer)
 import System.Agents.AgentTree (
     LoadAgentResult (..),
     LoadedApiKeys,
-    OSAgentNode (..),
     OSAgentTree (..),
     Props,
     loadAgentTree,
  )
-import qualified System.Agents.AgentTree as AgentTree
-import System.Agents.Base (AgentId (..))
+import System.Agents.Base (AgentId)
+import qualified System.Agents.OS.AgentHandle as AgentHandle
+import System.Agents.OS.AgentHandle (createAgentHandle)
 import System.Agents.OS.Conversation (
     ConversationConfig,
     ConversationState,
@@ -351,21 +351,17 @@ a TuiAgent that provides direct access to OS-native structures.
 -}
 createTuiAgent :: OSAgentTree -> TuiAgent
 createTuiAgent tree =
-    let rootNode = osTreeRoot tree
-     in TuiAgent
-            { tuiAgentId = rootNode.osNodeAgentId
-            , tuiTree = tree
-            , tuiNode = rootNode
-            , tuiSlug = rootNode.osNodeConfig.slug
-            }
+    TuiAgent
+        { tuaHandle = createAgentHandle tree
+        , tuaWorld = Nothing
+        }
 
 {- | Refresh tools for a TuiAgent.
 
 This function reads the current tools from the OS-native TVar.
 -}
 refreshAgentTools :: TuiAgent -> IO [ToolRegistration]
-refreshAgentTools agent =
-    readTVarIO (osNodeTools agent.tuiNode)
+refreshAgentTools = AgentHandle.getAgentTools . tuaHandle
 
 -- | Get tools for a TuiAgent from the OS-native TVar.
 getAgentTools :: TuiAgent -> IO [ToolRegistration]
@@ -428,3 +424,4 @@ initWorld = do
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
     pure world3
+

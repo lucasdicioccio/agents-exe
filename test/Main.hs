@@ -62,8 +62,6 @@ import qualified OS.ConversationTests
 import qualified OS.ResourcesTests
 -- Import OS Concurrent tests
 import qualified OS.ConcurrentTests
--- Import OS Interface tests
-import qualified OS.InterfaceTests
 -- Import OS Integration tests
 import qualified OS.IntegrationTests
 -- Import OS Persistence tests
@@ -95,7 +93,6 @@ tests =
         , OS.ConversationTests.conversationTests
         , OS.ResourcesTests.resourcesTests
         , OS.ConcurrentTests.concurrentTests
-        , OS.InterfaceTests.tests
         , OS.IntegrationTests.integrationTests
         , OS.PersistenceTests.persistenceTests
         , OpenAPIToolboxTests.tests

@@ -1,15 +1,11 @@
-{-# LANGUAGE OverloadedRecordDot #-}
-
-{- |
-OS (Operating System) module for the Agents framework.
+{- | OS (Operating System) module for the Agents framework.
 
 This module provides the Entity-Component-System (ECS) based architecture
 for managing agents, toolboxes, and resources.
 
-Note: This module selectively re-exports to avoid name conflicts:
-- 'ResourceScope' is exported from System.Agents.OS.Core (not Resources)
-- 'ConversationStatus' and 'AgentStatus' are exported from System.Agents.OS.Core (not Interfaces)
-- 'createAgent' is exported from System.Agents.OS.Agents via AgentTree (not Interfaces)
+Note: This module selectively re-exports 'ResourceScope' from
+'System.Agents.OS.Core' rather than 'System.Agents.OS.Resources' to avoid
+a name conflict, since both modules define the same type name.
 -}
 module System.Agents.OS (
     -- * Core ECS
@@ -30,52 +26,19 @@ module System.Agents.OS (
     -- * Persistence
     module System.Agents.OS.Persistence,
 
-    -- * Conversation Tracking (excluding conflicting types)
+    -- * Conversation Tracking
     module System.Agents.OS.Conversation,
 
-    -- * Interfaces (with selective export to avoid conflicts)
-    InterfaceHandle (..),
-    InterfaceConfig (..),
-    OSInterface (..),
-    AgentHandle (..),
-    ConversationHandle (..),
-    OSEvent (..),
-    subscribeToEvents,
-    unsubscribeFromEvents,
-    defaultInterfaceConfig,
-    InterfaceMode (..),
-    sendMessage,
-    receiveMessage,
-    startConversation,
-    endConversation,
-    getConversationStatus,
-    destroyAgent,
-    OS (..),
+    -- * Events
+    module System.Agents.OS.Events,
 ) where
 
 import System.Agents.OS.AgentTree
 import System.Agents.OS.Agents
 import System.Agents.OS.Concurrent
-import System.Agents.OS.Conversation hiding (ConversationStatus)
+import System.Agents.OS.Conversation
 import System.Agents.OS.Core
-import System.Agents.OS.Interfaces (
-    AgentHandle (..),
-    ConversationHandle (..),
-    InterfaceConfig (..),
-    InterfaceHandle (..),
-    InterfaceMode (..),
-    OS (..),
-    OSEvent (..),
-    OSInterface (..),
-    defaultInterfaceConfig,
-    destroyAgent,
-    endConversation,
-    getConversationStatus,
-    receiveMessage,
-    sendMessage,
-    startConversation,
-    subscribeToEvents,
-    unsubscribeFromEvents,
- )
+import System.Agents.OS.Events
 import System.Agents.OS.Persistence
 import System.Agents.OS.Resources hiding (ResourceScope)
+

@@ -121,11 +121,9 @@ import System.Agents.TUI.Types (
     selectedAttachmentIndex,
     sessionConfig,
     sessionList,
-    tuiAgentId,
     tuiCore,
     tuiNode,
     tuiSlug,
-    tuiTree,
     tuiUI,
     uiBufferedMessages,
     uiFocusRing,
@@ -249,7 +247,6 @@ runConversation tracer baseTuiAgent session = do
                         Nothing -> notifyNeedInput >> readBChan inChan
                         Just buftxt -> pure (Just $ UserQuery buftxt [])
                 }
-    let tuiAgent = TuiAgent (tuiAgentId baseTuiAgent) (tuiTree baseTuiAgent) (tuiNode baseTuiAgent) (tuiSlug baseTuiAgent)
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
         void $ Loop.run convId a session
@@ -257,7 +254,7 @@ runConversation tracer baseTuiAgent session = do
     let conv =
             Conversation
                 { conversationId = convId
-                , conversationAgent = tuiAgent
+                , conversationAgent = baseTuiAgent
                 , conversationThreadId = Just threadId
                 , conversationSession = Nothing
                 , conversationName = "@" <> tuiSlug baseTuiAgent
@@ -561,3 +558,4 @@ appendConversation conv c = c{_coreConversations = conv : (c ^. coreConversation
 -- | Extract short identifier from ConversationId for debugging.
 shortConvId :: ConversationId -> Text.Text
 shortConvId (ConversationId uuid) = Text.take 8 $ Text.pack $ UUID.toString uuid
+

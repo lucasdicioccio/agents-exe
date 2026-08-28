@@ -110,7 +110,7 @@
       "- Test code examples mentally"
     ],
     "extraAgents": [],
-    "builtinToolboxes": [
+    "--builtinToolboxes": [
       {
         "tag": "SqliteToolbox",
         "contents": {

@@ -119,7 +119,7 @@
         "contents": {
           "Name": "knowledge_store",
           "Description": "A knowledge base about the code base and how it works.",
-          "Versioning": {"tag": "SqliteReadOnly", "path":  "./resources/documenter-knowledge.db"}
+          "Versioning": {"tag": "SqliteReadWrite", "path":  "./resources/documenter-knowledge.db"}
         }
       },
       {
@@ -136,7 +136,8 @@
           "Name": "dev",
           "Description": "Development utilities",
           "Capabilities": [
-            "read-file-range"
+            "read-file-range",
+            "write-file-range"
           ]
         }
       }

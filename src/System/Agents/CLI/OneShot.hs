@@ -25,7 +25,6 @@ module System.Agents.CLI.OneShot (
     listOneShotAgentTools,
 ) where
 
-import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_, unless)
 import Data.Map (Map)
 import Data.Text (Text)
@@ -39,11 +38,11 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.SessionStore as SessionStore
 
-import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
-import System.Agents.Base (AgentId)
+import System.Agents.AgentTree (OSAgentTree (..))
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.PromptScript (MediaReference (..), PromptScript, interpretPromptScript, resolveMediaType)
 import System.Agents.Media.Types (MediaAttachment (..))
+import System.Agents.OS.AgentHandle (AgentHandle, createAgentHandle, getAgentId, getAgentTools)
 import System.Agents.ToolRegistration (ToolRegistration)
 import System.Exit (exitFailure)
 import System.IO (stderr)
@@ -69,24 +68,16 @@ data OneShotOptions = OneShotOptions
 
 {- | OneShot agent using OS-native structures.
 
-This structure wraps an OSAgentNode for one-shot execution.
-Tools are accessed directly from the node's tools TVar.
+This structure wraps an 'AgentHandle' for one-shot execution.
 -}
 data OneShotAgent = OneShotAgent
-    { oneShotAgentId :: AgentId
-    -- ^ Unique identifier for this agent
-    , oneShotTree :: OSAgentTree
-    -- ^ The agent's tree structure
-    , oneShotNode :: OSAgentNode
-    -- ^ The specific node for this agent
+    { osaHandle :: AgentHandle
     }
 
 -- | Manual Show instance for OneShotAgent.
 instance Show OneShotAgent where
     show agent =
-        "OneShotAgent {oneShotAgentId = "
-            ++ show agent.oneShotAgentId
-            ++ ", oneShotTree = <OSAgentTree>, oneShotNode = <OSAgentNode>}"
+        "OneShotAgent {oneShotAgentId = " ++ show (getAgentId agent.osaHandle) ++ "}"
 
 {- | Create a OneShotAgent from an OSAgentTree.
 
@@ -94,20 +85,16 @@ This function extracts the root agent from the tree for one-shot execution.
 -}
 createOneShotAgent :: OSAgentTree -> OneShotAgent
 createOneShotAgent tree =
-    let rootNode = osTreeRoot tree
-     in OneShotAgent
-            { oneShotAgentId = rootNode.osNodeAgentId
-            , oneShotTree = tree
-            , oneShotNode = rootNode
-            }
+    OneShotAgent
+        { osaHandle = createAgentHandle tree
+        }
 
 {- | List tools for a OneShotAgent.
 
-Reads tools directly from the OS-native TVar.
+Reads tools directly from the OS-native TVar via the shared 'AgentHandle'.
 -}
 listOneShotAgentTools :: OneShotAgent -> IO [ToolRegistration]
-listOneShotAgentTools agent =
-    readTVarIO (osNodeTools agent.oneShotNode)
+listOneShotAgentTools = getAgentTools . osaHandle
 
 {- | Load media files from references and create MediaAttachments.
 Returns Left with error message if any file cannot be loaded.
@@ -180,3 +167,4 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                         , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
                         , AgentTree.sessionStore = sessionStore
                         }
+

@@ -35,7 +35,10 @@ module System.Agents.TUI.Types.Core (
 
     -- * Agent Types
     TuiAgent (..),
-    agentTree,
+    tuiAgentId,
+    tuiTree,
+    tuiNode,
+    tuiSlug,
 
     -- * Layout and Configuration
     LayoutMode (..),
@@ -59,7 +62,9 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 
 import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode, OSAgentTree)
-import System.Agents.Base (AgentId, ConversationId (..))
+import System.Agents.Base (AgentId (..), ConversationId (..))
+import System.Agents.OS.AgentHandle (AgentHandle (..), getAgentId, getAgentSlug)
+import System.Agents.OS.Core.World (World)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session, SessionId)
 import System.Agents.SessionStore (SessionStore)
@@ -198,32 +203,41 @@ data AppEvent
 
 {- | TUI Agent using OS-native structures.
 
-This structure wraps an OSAgentNode for use in the TUI.
-Tools are accessed directly from the node's tools TVar.
+This structure wraps an 'AgentHandle' for use in the TUI. The handle
+provides direct access to OS-native structures and is shared with the
+OneShot interface.
 -}
 data TuiAgent = TuiAgent
-    { tuiAgentId :: AgentId
-    -- ^ Unique identifier for this agent
-    , tuiTree :: OSAgentTree
-    -- ^ The agent's tree structure
-    , tuiNode :: OSAgentNode
-    -- ^ The specific node for this agent
-    , tuiSlug :: Text
-    -- ^ The agent's slug
+    { tuaHandle :: AgentHandle
+    -- ^ Shared OS-native agent handle
+    , tuaWorld :: Maybe World
+    -- ^ Optional OS World for ECS operations (TUI-specific)
     }
+
+-- | Get the agent ID from a TUI agent.
+tuiAgentId :: TuiAgent -> AgentId
+tuiAgentId = getAgentId . tuaHandle
+
+-- | Get the agent tree from a TUI agent.
+tuiTree :: TuiAgent -> OSAgentTree
+tuiTree = ahTree . tuaHandle
+
+-- | Get the agent node from a TUI agent.
+tuiNode :: TuiAgent -> OSAgentNode
+tuiNode = ahNode . tuaHandle
+
+-- | Get the agent slug from a TUI agent.
+tuiSlug :: TuiAgent -> Text
+tuiSlug = getAgentSlug . tuaHandle
 
 -- | Manual Show instance for TuiAgent.
 instance Show TuiAgent where
     show agent =
         "TuiAgent {tuiAgentId = "
-            ++ show agent.tuiAgentId
+            ++ show (tuiAgentId agent)
             ++ ", tuiSlug = "
-            ++ show agent.tuiSlug
-            ++ ", tuiTree = <OSAgentTree>, tuiNode = <OSAgentNode>}"
-
--- | Legacy accessor for backward compatibility.
-agentTree :: TuiAgent -> OSAgentTree
-agentTree = tuiTree
+            ++ show (tuiSlug agent)
+            ++ ", tuaHandle = <AgentHandle>, tuaWorld = <World>}"
 
 -------------------------------------------------------------------------------
 -- Layout Configuration
@@ -301,3 +315,4 @@ mkSessionConfig store apiKeys keymap inputConfig =
         , sessionKeyMapping = keymap
         , sessionInputConfig = inputConfig
         }
+
