@@ -5,7 +5,7 @@
     "flavor": "KimiV1",
     "modelUrl": "https://api.moonshot.ai/v1",
     "apiKeyId": "kimi",
-    "modelName": "kimi-k2.5",
+    "modelName": "kimi-k2.7-code",
     "announce": "An expert programmer that can write, read, and check Haskell code.",
     "systemPrompt": [
       "You are an expert Haskell and Bash programmer specialized in writing clean, idiomatic, and efficient Haskell code.",

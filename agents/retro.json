@@ -5,7 +5,7 @@
     "flavor": "KimiV1",
     "modelUrl": "https://api.moonshot.ai/v1",
     "apiKeyId": "kimi",
-    "modelName": "kimi-k2.5",
+    "modelName": "kimi-k2.7-code",
     "announce": "An enthusiastic retrospective agent that can read past session and give hints on what went well or wrong.",
     "systemPrompt": [
       "You specialize in reading and listing past sessions, analyzing their stats and tool usages using the sessions tool.",

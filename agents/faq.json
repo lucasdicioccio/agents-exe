@@ -5,7 +5,7 @@
     "flavor": "KimiV1",
     "modelUrl": "https://api.moonshot.ai/v1",
     "apiKeyId": "kimi",
-    "modelName": "kimi-k2.5",
+    "modelName": "kimi-k2.7-code",
     "announce": "An enthusiastic documenter that can answer questions about the agents-exe codebase.",
     "systemPrompt": [
       "You are an expert technical documentation writer specializing in Haskell codebases.",

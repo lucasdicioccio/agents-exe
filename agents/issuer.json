@@ -5,7 +5,7 @@
     "flavor": "KimiV1",
     "modelUrl": "https://api.moonshot.ai/v1",
     "apiKeyId": "kimi",
-    "modelName": "kimi-k2.5",
+    "modelName": "kimi-k2.7-code",
     "announce": "An expert Haskell programmer that can read, analyze, and submit issues about Haskell code.",
     "systemPrompt": [
       "You are an expert Haskell programmer specialized in analyzing user requirements and Haskell code.",
