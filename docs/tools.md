@@ -1695,7 +1695,7 @@ local exists = fs.exists("./README.md")          -- Must be in sandbox
 ### Example Lua Script
 
 ```lua
--- Modules are pre-loaded as globals - no require() needed
+-- Modules are pre-loaded as globals and available via require()
 
 -- Read a file (validated against fileSandbox)
 local content = fs.read("./repro-cases/input.json")

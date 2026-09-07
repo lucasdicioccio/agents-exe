@@ -335,6 +335,9 @@ moduleTests =
         , testCase "Time module is available" testTimeAvailable
         , testCase "Tools module is available" testToolsAvailable
         , testCase "FS module blocks unauthorized access" testFsBlocksUnauthorized
+        , testCase "require('json') returns json module" testJsonRequire
+        , testCase "require('tools') returns tools module" testToolsRequire
+        , testCase "require('tools').list returns allowed tools" testToolsRequireList
         ]
 
 testJsonAvailable :: Assertion
@@ -377,7 +380,54 @@ testToolsAvailable = withTestToolbox $ \box -> do
         Right execResult ->
             execResult.resultValues @?= [Aeson.Bool True]
 
-testFsBlocksUnauthorized :: Assertion
+testJsonRequire :: Assertion
+testJsonRequire = withTestToolbox $ \box -> do
+    -- Test that require('json') returns the same table as the json global
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return require('json') == json" ctx dummyPortal
+    case result of
+        Left err -> assertFailure $ show err
+        Right execResult ->
+            execResult.resultValues @?= [Aeson.Bool True]
+
+testToolsRequire :: Assertion
+testToolsRequire = withTestToolbox $ \box -> do
+    -- Test that require('tools') returns the same table as the tools global
+    let ctx = mkTestContext dummyPortal
+    result <- LuaToolbox.executeScriptWithPortal Prod.tracePrint box "return require('tools') == tools" ctx dummyPortal
+    case result of
+        Left err -> assertFailure $ show err
+        Right execResult ->
+            execResult.resultValues @?= [Aeson.Bool True]
+
+testToolsRequireList :: Assertion
+testToolsRequireList = do
+    -- Test that require('tools').list() returns the allowed whitelist
+    let mockPortal :: ToolPortal
+        mockPortal _mParentCtx _ =
+            pure $
+                ToolResult
+                    { resultData = Aeson.object [("result", Aeson.String "success")]
+                    , resultDuration = 0
+                    , resultTraceId = "test-trace"
+                    }
+    let desc = testLuaToolbox{luaToolboxAllowedTools = ["allowed_tool"]}
+    initResult <- LuaToolbox.initializeToolbox silent desc
+    case initResult of
+        Left err -> assertFailure $ "Failed to initialize toolbox: " ++ err
+        Right box -> do
+            let ctx = mkTestContext mockPortal
+            result <-
+                LuaToolbox.executeScriptWithPortal
+                    silent
+                    box
+                    "local t = require('tools'); return t.list()"
+                    ctx
+                    mockPortal
+            case result of
+                Left err -> assertFailure $ show err
+                Right execResult ->
+                    execResult.resultValues @?= [Aeson.Array (Vector.fromList [Aeson.String "allowed_tool"])]
 testFsBlocksUnauthorized = withTestToolbox $ \box -> do
     -- With empty allowedPaths (default testLuaToolbox), any fs access should be blocked
     let ctx = mkTestContext dummyPortal

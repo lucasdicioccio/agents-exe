@@ -38,8 +38,13 @@ The toolbox is designed to be safe for LLM-generated code by:
 
 Standard library modules available to Lua scripts:
 
-All modules are pre-registered as global variables - no @require()@ needed.
-Just use the global directly (e.g., @json.encode@, @text.split@).
+All modules are pre-registered as global variables and are also loadable
+through the standard Lua @require@ function. Both access styles work:
+
+* Direct global access: @json.encode@, @text.split@, @tools.list()@
+* Idiomatic @require@: @local tools = require('tools')@
+
+The available modules are:
 
 * @json@: JSON encoding/decoding with @json.encode@ and @json.decode@
 * @text@: UTF-8 string utilities (@text.split@, @text.find@, @text.trim@, etc.)
@@ -50,7 +55,7 @@ Just use the global directly (e.g., @json.encode@, @text.split@).
 
 Example Lua script using modules:
 
-> -- No require() needed - modules are pre-loaded as globals
+> -- Modules are available as globals and via require()
 >
 > -- Read and parse a JSON file
 > local data = json.decode(fs.read("/allowed/path/config.json"))
@@ -80,7 +85,8 @@ Scripts that relied on persistence across calls must use SQLite:
 -- Call 2: return users[1]  -- Returns "alice"
 
 -- AFTER (explicit persistence):
--- No require() needed - json and tools are pre-loaded globals
+-- AFTER (explicit persistence):
+-- json and tools are pre-loaded globals (require() also works)
 
 -- Save
 tools.call("sqlite_memory_query", {
@@ -434,13 +440,56 @@ registerStandardModules moduleTracer lstate desc parentCtx portal = do
         parentCtx
         portal
 
--------------------------------------------------------------------------------
+    -- Make built-in modules available through require() as well as globals.
+    -- This allows LLM-generated scripts to use the idiomatic Lua pattern:
+    --   local tools = require('tools')
+    -- while still supporting direct global access:
+    --   tools.list()
+    registerModulesAsRequireable
+        lstate
+        ["json", "text", "time", "fs", "http", "tools"]
 -- Sandbox Configuration
 -------------------------------------------------------------------------------
 
 -- | Convert StackIndex to Int
 stackIndexToInt :: Lua.StackIndex -> Int
 stackIndexToInt (Lua.StackIndex n) = fromIntegral n
+{- | Seed @package.loaded@ for the built-in modules so that @require@ works.
+
+Each module is already registered as a global table (e.g. @tools@, @json@).
+This function additionally sets @package.loaded[name] = _G[name]@, which makes
+Lua's @require@ return the module table instead of failing with
+"module not found".
+
+This supports both styles of module access:
+
+* Direct global access (no @require@):
+  > return tools.list()
+* Idiomatic Lua @require@:
+  > local tools = require('tools')
+  > return tools.list()
+
+External modules remain blocked because @package.path@ and @package.cpath@
+are empty and @package.preload@ is cleared by 'configurePackagePath'.
+-}
+registerModulesAsRequireable :: Lua.State -> [Text.Text] -> IO ()
+registerModulesAsRequireable lstate moduleNames =
+    Lua.runWith lstate $ mapM_ registerRequireable moduleNames
+  where
+    registerRequireable :: Text.Text -> Lua.Lua ()
+    registerRequireable name = do
+        -- _G.package.loaded[name] = _G[name]
+        _ <- Lua.getglobal (Lua.Name "package")
+        Lua.pushName "loaded"
+        _ <- Lua.gettable (Lua.nthTop 2)
+        Lua.pushstring (Text.encodeUtf8 name)
+        _ <- Lua.getglobal (toName name)
+        Lua.settable (Lua.nthTop 3)
+        Lua.pop 2
+
+-------------------------------------------------------------------------------
+-- Sandbox Configuration
+-------------------------------------------------------------------------------
 
 {- | Configure the Lua sandbox by removing dangerous functions.
 
@@ -495,7 +544,7 @@ configureSandbox lstate = Lua.runWith lstate $ do
             ]
 
     -- Configure package.path to prevent loading external Lua files
-    -- Our modules are pre-registered as globals
+    -- Our built-in modules are registered as globals and in package.loaded
     configurePackagePath
   where
     removeGlobals :: [Text.Text] -> Lua.Lua ()
@@ -529,14 +578,14 @@ configureSandbox lstate = Lua.runWith lstate $ do
 
 {- | Configure package.path to prevent loading external Lua files.
 
-We keep the 'require' function for our pre-registered modules,
+We keep the 'require' function for our built-in modules,
 but set package.path and package.cpath to empty strings to
 prevent loading external files.
 
-The preload table is also cleared to prevent loading of C modules.
-
-Note: Our modules (json, text, time, fs, http, tools) are registered
-as global variables, so no require() is needed to access them.
+The preload table is cleared to prevent loading of external C modules.
+Our built-in modules are later registered in package.loaded by
+'registerModulesAsRequireable', so @require('tools')@, @require('json')@,
+etc. still return the module tables.
 -}
 configurePackagePath :: Lua.Lua ()
 configurePackagePath = do
@@ -624,7 +673,7 @@ This function provides maximum isolation:
 * No shared locks (safe for recursive agent calls)
 
 Note: Modules (json, text, time, fs, http, tools) are available as
-global variables - no require() call is needed.
+global variables and through @require@ (e.g., @require('tools')@).
 -}
 executeScriptWithPortal ::
     Tracer IO Trace ->
