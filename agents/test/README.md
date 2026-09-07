@@ -26,6 +26,7 @@ agents-exe tui --agent file-system-tester
 | `openapi-tester` | OpenAPI → tool mapping | `OpenAPIToolbox` against a local spec + mock server |
 | `postgrest-tester` | PostgREST → tool mapping | `PostgRESToolbox` against a local spec + mock server |
 | `lua-tester` | Lua toolbox & tool exposition | `LuaToolbox` calling `tools.list()` and other tools |
+| `lua-rlm-recursion-tester` | Symbolic recursive tool calls in Lua | `LuaToolbox` calling itself, `SqliteToolbox` as external memory |
 | `introspection-tester` | Session introspection | `SystemToolbox` session capabilities |
 
 ## Common model configuration

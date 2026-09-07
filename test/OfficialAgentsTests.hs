@@ -20,6 +20,7 @@ officialAgents =
     , ("agents/test/openapi-tester.json", "openapi-tester")
     , ("agents/test/postgrest-tester.json", "postgrest-tester")
     , ("agents/test/lua-tester.json", "lua-tester")
+    , ("agents/test/lua-rlm-recursion-tester.json", "lua-rlm-recursion-tester")
     , ("agents/test/introspection-tester.json", "introspection-tester")
     ]
 
