@@ -81,10 +81,15 @@ the allowed paths.
 
 Parameters:
 - path: Path to the file to modify
-- ranges: Comma-separated line numbers (e.g., "2,5,8" for lines 2, 5, and 8)
-          Each number represents a single line to replace, or use ranges like "1-3".
-          Special values: "head" (prepend), "tail" (append), "whole" (overwrite entire file)
-          Insert-after: "N+" (insert after line N), "N-M+" (insert after line M)
+- ranges: Line range specifications, comma-separated. Each spec is one of:
+            - "N"       -> REPLACE line N (e.g., "5" replaces line 5)
+            - "N-M"     -> REPLACE lines N through M (e.g., "1-10")
+            - "N+"      -> INSERT AFTER line N (e.g., "54+" inserts after line 54)
+            - "head"    -> PREPEND before line 1 (use this to CREATE new files)
+            - "tail"    -> APPEND after the last line
+            - "whole"   -> REPLACE the entire file
+          WARNING: "N" and "N+" are not interchangeable. Use "54+" to insert after
+          line 54; using "54" will replace line 54.
 - contentBlocks: List of content blocks, where each block corresponds to one range.
                  Use empty blocks to delete lines. Each block is treated as the
                  replacement content for its corresponding range.

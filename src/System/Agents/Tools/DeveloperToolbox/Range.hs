@@ -6,9 +6,17 @@ Range parsing utilities for the DeveloperToolbox.
 This module provides functionality to parse range specifications used by
 the read-file-range and write-file-range capabilities.
 
+Calling semantics for write-file-range (the common source of confusion):
+- "N"       -> REPLACE line N
+- "N-M"     -> REPLACE lines N through M
+- "N+"      -> INSERT AFTER line N
+- "head"    -> PREPEND before line 1 (use to CREATE new files)
+- "tail"    -> APPEND after the last line
+- "whole"   -> REPLACE the entire file
+
 Supported formats:
-- Single number: "5" -> Lines (5, 5)
-- Range: "1-10" -> Lines (1, 10)
+- Single number: "5" -> Lines (5, 5)  (replaces line 5)
+- Range: "1-10" -> Lines (1, 10)      (replaces lines 1-10)
 - Insert after single: "5+" -> After 5 (insert after line 5)
 - Insert after range: "1-5+" -> After 5 (insert after line 5, end of range)
 - Special: "head" -> Head, "tail" -> Tail, "whole" -> Whole
@@ -18,6 +26,9 @@ Default behavior:
 - Empty string or "whole" -> Reads/writes entire file
 - For read-file-range, omitting ranges defaults to reading the whole file
 - For write-file-range, "head" creates new files, "tail" appends, "whole" overwrites
+
+WARNING: "N" and "N+" are not interchangeable. Use "54+" to insert after
+line 54; using "54" will replace line 54.
 -}
 module System.Agents.Tools.DeveloperToolbox.Range (
     -- * Range parsing
@@ -37,7 +48,15 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 
 {- | Parse a ranges string into a list of RangeSpec.
 
-Supports formats:
+Calling semantics (write-file-range):
+- "N"       -> REPLACE line N
+- "N-M"     -> REPLACE lines N through M
+- "N+"      -> INSERT AFTER line N
+- "head"    -> PREPEND before line 1
+- "tail"    -> APPEND after the last line
+- "whole"   -> REPLACE the entire file
+
+Supported formats:
 - Empty string "" -> [Whole] (default to entire file)
 - "whole" -> Whole (entire file)
 - Single number: "5" -> Lines (5, 5)
@@ -51,6 +70,9 @@ Returns Left with error message if parsing fails.
 Note: An empty string now defaults to [Whole] for better UX when ranges
 parameter is omitted in read-file-range. This provides intuitive behavior
 where omitting ranges reads the entire file.
+
+WARNING: "N" replaces line N; "N+" inserts after line N. Use "54+" to
+insert after line 54; using "54" will replace line 54.
 -}
 parseRanges :: Text -> Either DeveloperToolError [RangeSpec]
 parseRanges txt
@@ -118,3 +140,4 @@ parsePositiveInt txt errPrefix =
                         then Right n
                         else Left $ InvalidRangeError $ errPrefix <> " (must be positive): " <> txt
             else Left $ InvalidRangeError $ errPrefix <> ": " <> txt
+

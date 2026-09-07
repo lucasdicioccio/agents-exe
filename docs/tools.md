@@ -1207,18 +1207,21 @@ Replaces specific lines in a file with new content. Supports **multi-turn edit s
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to modify |
-| `ranges` | string | Yes | Comma-separated line numbers or ranges |
+| `ranges` | string | Yes | Range specs: `N` replace line N, `N-M` replace lines N-M, `N+` insert after line N, `head` prepend, `tail` append, `whole` overwrite file |
 | `contentBlocks` | array[string] | Yes | Array of content blocks, one per range. Use empty strings to delete lines. |
 | `session_id` | string | No | Continue an existing edit session |
 | `expected_snapshot_ref` | string | No | Optimistic locking: only proceed if file matches this snapshot |
 | `commit` | boolean | No | If true, write to disk and close session. If false, stage changes. |
 
 **Range Formats:**
-- Single line: `"5"` - Replaces line 5
-- Line range: `"1-10"` - Replaces lines 1 through 10
-- Multiple ranges: `"1-5,20-30"` - Replaces multiple separate ranges
-- Head: `"head"` - Prepends content before line 1
-- Tail: `"tail"` - Appends content after last line
+- `N` - **Replace** line N (e.g., `5` replaces line 5)
+- `N-M` - **Replace** lines N through M (e.g., `1-10` replaces lines 1-10)
+- `N+` - **Insert after** line N (e.g., `54+` inserts after line 54)
+- `head` - Prepend content before line 1 (use this to create new files)
+- `tail` - Append content after the last line
+- `whole` - Replace the entire file
+
+> **Warning:** `N` and `N+` are not interchangeable. Use `54+` to insert after line 54; using `54` will replace line 54.
 
 **Multi-Turn Edit Sessions:**
 

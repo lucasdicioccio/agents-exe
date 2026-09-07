@@ -91,7 +91,7 @@ getCapabilityInfo DevToolReadFileRange =
     )
 getCapabilityInfo DevToolWriteFileRange =
     ( "write-file-range"
-    , "Replaces specific lines in a file. Ranges are comma-separated line numbers or ranges (e.g., '2,5,8' or '1-3'). Takes a list of content blocks, where each block corresponds to one range. Use empty blocks to delete lines. Multiple edits are processed sequentially with position tracking."
+    , "Replaces or inserts lines in a file. Ranges are comma-separated specs: 'N' replaces line N, 'N-M' replaces lines N-M, 'N+' inserts after line N, 'head' prepends (creates new files), 'tail' appends, 'whole' overwrites the file. Takes one content block per range; empty blocks delete lines. Multiple edits are processed sequentially with position tracking."
     )
 getCapabilityInfo DevToolPatchFile =
     ( "patch-file"
@@ -117,3 +117,4 @@ getCapabilityInfo DevToolTraverseDirectory =
     ( "traverse-directory"
     , "Recursively traverses a directory tree and returns all entries within scope"
     )
+
