@@ -1,0 +1,130 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "lua-tester",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.7-code",
+    "announce": "An empirical test agent for the Lua toolbox and tool exposition.",
+    "systemPrompt": [
+      "You are an empirical test agent for agents-exe. Your job is to exercise the Lua toolbox, in particular the tools.list() exposition and the tools.call() portal, and report what happened.",
+      "",
+      "Available tools the Lua scripts are allowed to call:",
+      "- bash_read-file",
+      "- bash_list-files",
+      "- system_testsys_system_info",
+      "- sqlite_testdb_query",
+      "",
+      "When the user asks you to run a test, perform the following smoke test in order by calling lua_testlua_execute with the scripts below:",
+      "",
+      "Step 1 - tool exposition:",
+      "Run a Lua script that does:\n",
+      "  local tools = require('tools')\n",
+      "  return tools.list()\n",
+      "Report the array of tool names returned. Confirm it contains exactly the four allowed tools listed above.",
+      "",
+      "Step 2 - call a bash tool from Lua:",
+      "Run a Lua script that does:\n",
+      "  local tools = require('tools')\n",
+      "  local json = require('json')\n",
+      "  local res = tools.call('bash_read-file', {filepath = './agents/test/README.md'})\n",
+      "  return json.decode(res.result_txt)\n",
+      "Report the 'data' field (the file content) or any error.",
+      "",
+      "Step 3 - call a SQLite tool from Lua:",
+      "Run a Lua script that does:\n",
+      "  local tools = require('tools')\n",
+      "  local json = require('json')\n",
+      "  tools.call('sqlite_testdb_query', {sql = 'CREATE TABLE IF NOT EXISTS lua_smoke (id INTEGER PRIMARY KEY, msg TEXT)'})\n",
+      "  tools.call('sqlite_testdb_query', {sql = \"INSERT INTO lua_smoke (msg) VALUES ('from-lua')\"})\n",
+      "  local res = tools.call('sqlite_testdb_query', {sql = 'SELECT * FROM lua_smoke ORDER BY id DESC LIMIT 1'})\n",
+      "  return json.decode(res.result_txt)\n",
+      "Report the row returned.",
+      "",
+      "Step 4 - call a system tool from Lua:",
+      "Run a Lua script that does:\n",
+      "  local tools = require('tools')\n",
+      "  local json = require('json')\n",
+      "  local res = tools.call('system_testsys_system_info', {capability = 'date'})\n",
+      "  return json.decode(res.result_txt)\n",
+      "Report the system date or any error.",
+      "",
+      "For every step report:",
+      "- the Lua script you sent,",
+      "- the exact tool names invoked from inside Lua,",
+      "- the returned values or error messages.",
+      "",
+      "If a tools.call returns status 'not-allowed' or 'not-found', report it verbatim and stop.",
+      "The first line of your final response must be a one-line summary of whether the Lua toolbox correctly exposes and calls other tools."
+    ],
+    "extraAgents": [],
+    "builtinToolboxes": [
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "testsys",
+          "Description": "System context for Lua smoke tests",
+          "Capabilities": [
+            "date",
+            "working-directory"
+          ]
+        }
+      },
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "Name": "testdb",
+          "Description": "SQLite database for Lua smoke tests",
+          "Versioning": {
+            "tag": "SqliteReadWrite",
+            "path": "./resources/test-lua.db"
+          }
+        }
+      },
+      {
+        "tag": "LuaToolbox",
+        "contents": {
+          "Name": "testlua",
+          "Description": "Sandboxed Lua interpreter for smoke tests",
+          "MaxMemoryMB": 128,
+          "MaxExecutionTimeSeconds": 60,
+          "AllowedTools": [
+            "bash_read-file",
+            "bash_list-files",
+            "system_testsys_system_info",
+            "sqlite_testdb_query"
+          ],
+          "AllowedHosts": [],
+          "FileSandbox": {
+            "fsbName": "lua-test-sandbox",
+            "fsbPredicate": {
+              "tag": "Any",
+              "contents": [
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./agents/test"
+                },
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./resources"
+                }
+              ]
+            },
+            "fsbMaxFileSize": 10485760
+          }
+        }
+      }
+    ],
+    "bashToolboxes": [
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/read",
+          "BasenameFilter": ".sh"
+        }
+      }
+    ]
+  }
+}
+

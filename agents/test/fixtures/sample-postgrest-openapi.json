@@ -1,0 +1,171 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "agents-exe PostgREST test API",
+    "version": "1.0.0",
+    "description": "A PostgREST-style OpenAPI spec used to empirically test the PostgREST toolbox mapping."
+  },
+  "basePath": "/",
+  "paths": {
+    "/tasks": {
+      "get": {
+        "summary": "List tasks",
+        "description": "Read rows from the tasks table",
+        "parameters": [
+          {"$ref": "#/parameters/rowFilter.tasks.id"},
+          {"$ref": "#/parameters/rowFilter.tasks.title"},
+          {"$ref": "#/parameters/rowFilter.tasks.done"},
+          {"$ref": "#/parameters/rowFilter.tasks.limit"},
+          {"$ref": "#/parameters/rowFilter.tasks.offset"},
+          {"$ref": "#/parameters/rowFilter.tasks.order"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/tasks"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create task",
+        "description": "Insert a new row into the tasks table",
+        "parameters": [
+          {"$ref": "#/parameters/body.tasks"}
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/tasks"
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{id}": {
+      "get": {
+        "summary": "Get task",
+        "description": "Read a single task by id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/tasks"
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update task",
+        "description": "Update a task by id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          },
+          {"$ref": "#/parameters/body.tasks"}
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete task",
+        "description": "Delete a task by id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    }
+  },
+  "parameters": {
+    "rowFilter.tasks.id": {
+      "name": "id",
+      "in": "query",
+      "description": "Filter on id",
+      "type": "integer"
+    },
+    "rowFilter.tasks.title": {
+      "name": "title",
+      "in": "query",
+      "description": "Filter on title",
+      "type": "string"
+    },
+    "rowFilter.tasks.done": {
+      "name": "done",
+      "in": "query",
+      "description": "Filter on done",
+      "type": "boolean"
+    },
+    "rowFilter.tasks.limit": {
+      "name": "limit",
+      "in": "query",
+      "description": "Limit the number of rows returned",
+      "type": "integer"
+    },
+    "rowFilter.tasks.offset": {
+      "name": "offset",
+      "in": "query",
+      "description": "Skip a number of rows",
+      "type": "integer"
+    },
+    "rowFilter.tasks.order": {
+      "name": "order",
+      "in": "query",
+      "description": "Order results",
+      "type": "string"
+    },
+    "body.tasks": {
+      "name": "tasks",
+      "in": "body",
+      "description": "tasks row",
+      "schema": {
+        "$ref": "#/definitions/tasks"
+      }
+    }
+  },
+  "definitions": {
+    "tasks": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "done": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,5 @@
+# Temporary files created by the empirical test agents
+.tmp-*.txt
+*.db
+*.db-journal
+

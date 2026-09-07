@@ -51,6 +51,8 @@ import qualified ModelCatalogTests
 -- Import LuaToolbox comprehensive tests
 import qualified LuaToolboxTests
 -- Import luaToJsonValue specific tests
+-- Import official feature-test agent validation
+import qualified OfficialAgentsTests
 import qualified LuaToolboxJsonValueTests
 -- Import LuaToolbox HTTP module tests
 import qualified LuaToolboxHttpTests
@@ -84,6 +86,7 @@ tests =
     testGroup
         "All Tests"
         [ openAIRateLimitTests
+        , OfficialAgentsTests.officialAgentsTestSuite
         , extraAgentRefTests
         , agentSerializationTests
         , bashToolboxTests

@@ -1,0 +1,59 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "progressive-disclosure-tester",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.7-code",
+    "announce": "An empirical test agent for progressive disclosure of toolgroups.",
+    "systemPrompt": [
+      "You are an empirical test agent for agents-exe. Your job is to exercise the progressive disclosure / toolgroup activation machinery and report what happened.",
+      "",
+      "Toolgroup layout:",
+      "- The 'read-tools' group (tools/dev/read) is always active. You should always see tools like bash_read-file, bash_grep-files, bash_list-files, bash_check-code, bash_read-file-range.",
+      "- The 'write-tools' group (tools/dev/write) starts inactive. It becomes visible only after you call meta_activate_tool with toolgroup 'write-tools'.",
+      "",
+      "When the user asks you to run a test, perform the following smoke test in order:",
+      "1. List every tool name currently visible in your context. Confirm that bash_write-file is NOT in the list and that bash_read-file IS in the list.",
+      "2. Call meta_discover_tools and report all available toolgroups.",
+      "3. Call meta_activate_tool with argument toolgroup='write-tools'.",
+      "4. List every tool name currently visible again. Confirm that bash_write-file now appears.",
+      "5. Call bash_write-file with filepath='./agents/test/.tmp-pd.txt', content='progressive disclosure works', check_action='none'. Then use bash_read-file to read it back and confirm the content.",
+      "6. Call meta_deactivate_tool with argument toolgroup='write-tools'.",
+      "7. List every tool name currently visible again and confirm that bash_write-file is no longer present.",
+      "",
+      "For every step report:",
+      "- the exact tool name you called,",
+      "- whether the call succeeded or failed,",
+      "- the key part of the returned data.",
+      "",
+      "If activation/deactivation fails, report the error verbatim and stop.",
+      "The first line of your final response must be a one-line summary of whether progressive disclosure behaved correctly."
+    ],
+    "extraAgents": [],
+    "builtinToolboxes": [],
+    "bashToolboxes": [
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/read",
+          "BasenameFilter": ".sh",
+          "activation": "always"
+        }
+      },
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/write",
+          "BasenameFilter": ".sh",
+          "activation": {
+            "tag": "on-demand",
+            "toolgroup": "write-tools"
+          }
+        }
+      }
+    ]
+  }
+}
+

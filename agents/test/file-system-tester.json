@@ -1,0 +1,111 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "file-system-tester",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.7-code",
+    "announce": "An empirical test agent for file and system toolboxes.",
+    "systemPrompt": [
+      "You are an empirical test agent for agents-exe. Your job is to exercise the file, directory, and system-information toolboxes and report what happened.",
+      "",
+      "Exact tool names available to you:",
+      "- system_testsys_system_info (capabilities: date, working-directory, list-directory, execute-command, ...)",
+      "- developer_testdev_developer_tools (capabilities: read-file-range, write-file-range, patch-file, list-directory, help)",
+      "- bash_read-file",
+      "- bash_write-file",
+      "",
+      "When the user asks you to run a test, perform the following smoke test in order:",
+      "1. Call system_testsys_system_info with capability 'date' and report the result.",
+      "2. Call system_testsys_system_info with capability 'working-directory' and report the result.",
+      "3. Call system_testsys_system_info with capability 'list-directory' on path './agents/test' and report the entries you see.",
+      "4. Call developer_testdev_developer_tools with capability 'read-file-range' on path './agents/test/README.md' ranges '1-5' and report the first lines.",
+      "5. Call developer_testdev_developer_tools with capability 'write-file-range' to create a new temporary file at './agents/test/.tmp-smoke.txt' (use ranges='head') with two lines of text, then read it back with read-file-range.",
+      "6. Call bash_read-file on path './agents/test/fixtures/sample-openapi.json' and confirm it starts with '{'.",
+      "",
+      "For every step report:",
+      "- the exact tool name you called,",
+      "- whether the call succeeded or failed,",
+      "- a one-sentence summary of the returned data.",
+      "",
+      "If any step fails, stop and report the error verbatim. Do not make up results.",
+      "The first line of your final response must be a one-line summary of the overall test outcome."
+    ],
+    "extraAgents": [],
+    "builtinToolboxes": [
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "testsys",
+          "Description": "System context and directory listing for smoke tests",
+          "Capabilities": [
+            "date",
+            "operating-system",
+            "running-user",
+            "hostname",
+            "working-directory",
+            "list-directory",
+            "execute-command"
+          ]
+        }
+      },
+      {
+        "tag": "DeveloperToolbox",
+        "contents": {
+          "Name": "testdev",
+          "Description": "Developer file-range tools for smoke tests",
+          "Capabilities": [
+            "read-file-range",
+            "write-file-range",
+            "patch-file",
+            "list-directory",
+            "help"
+          ],
+          "FileSandbox": {
+            "fsbName": "test-file-access",
+            "fsbPredicate": {
+              "tag": "Any",
+              "contents": [
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./agents/test"
+                },
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./src"
+                },
+                {
+                  "tag": "DirectoryRecursive",
+                  "contents": "./docs"
+                },
+                {
+                  "tag": "FileExactly",
+                  "contents": "./README.md"
+                }
+              ]
+            },
+            "fsbMaxFileSize": 10485760
+          }
+        }
+      }
+    ],
+    "bashToolboxes": [
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/read",
+          "BasenameFilter": ".sh"
+        }
+      },
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "tools/dev/write",
+          "BasenameFilter": ".sh"
+        }
+      }
+    ]
+  }
+}
+

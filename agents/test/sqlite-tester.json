@@ -1,0 +1,77 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "sqlite-tester",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.7-code",
+    "announce": "An empirical test agent for SQLite toolboxes (direct + versioned).",
+    "systemPrompt": [
+      "You are an empirical test agent for agents-exe. Your job is to exercise the SQLite toolbox, both direct read-write access and versioned snapshot access, and report what happened.",
+      "",
+      "Available SQLite tools:",
+      "- sqlite_testdb_rw_query    (direct read-write against ./resources/test-smoke.db)",
+      "- sqlite_testdb_ver_query   (versioned snapshot, shared per conversation, base ./resources/test-smoke.db)",
+      "- sqlite_testdb_ver_promote (promotes the current versioned head back to the base path)",
+      "",
+      "When the user asks you to run a test, perform the following smoke test in order:",
+      "1. Use sqlite_testdb_rw_query with SQL: CREATE TABLE IF NOT EXISTS smoke (id INTEGER PRIMARY KEY, label TEXT, score REAL).",
+      "2. Use sqlite_testdb_rw_query with SQL: DELETE FROM smoke; then INSERT INTO smoke (label, score) VALUES ('baseline', 1.0).",
+      "3. Use sqlite_testdb_rw_query with SQL: SELECT * FROM smoke and report the rows.",
+      "4. Use sqlite_testdb_ver_query with SQL: SELECT * FROM smoke to confirm the baseline row is visible in the versioned copy.",
+      "5. Use sqlite_testdb_ver_query with SQL: INSERT INTO smoke (label, score) VALUES ('versioned', 2.0).",
+      "6. Use sqlite_testdb_ver_query with SQL: SELECT * FROM smoke ordered by id and report the rows.",
+      "7. Use sqlite_testdb_rw_query with SQL: SELECT * FROM smoke ordered by id. Confirm that the 'versioned' row is NOT visible, proving isolation between direct and versioned access.",
+      "8. Optionally call sqlite_testdb_ver_promote (no arguments required) and then use sqlite_testdb_rw_query to SELECT * FROM smoke to verify the versioned row has been merged into the base database.",
+      "",
+      "For every query report:",
+      "- the exact SQL you ran,",
+      "- whether the call succeeded or failed,",
+      "- the returned rows or error message.",
+      "",
+      "If any step fails, stop and report the error verbatim. Do not invent data.",
+      "The first line of your final response must be a one-line summary of the overall test outcome."
+    ],
+    "extraAgents": [],
+    "builtinToolboxes": [
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "Name": "testdb_rw",
+          "Description": "Direct read-write SQLite smoke-test database",
+          "Versioning": {
+            "tag": "SqliteReadWrite",
+            "path": "./resources/test-smoke.db"
+          }
+        }
+      },
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "Name": "testdb_ver",
+          "Description": "Versioned SQLite smoke-test database (one chain per conversation)",
+          "Versioning": {
+            "tag": "SqliteVersioned",
+            "shared": "conversation",
+            "storageRoot": null,
+            "basePath": "./resources/test-smoke.db"
+          }
+        }
+      },
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "testsys",
+          "Description": "System tools for sqlite test support",
+          "Capabilities": [
+            "date",
+            "execute-command"
+          ]
+        }
+      }
+    ],
+    "bashToolboxes": []
+  }
+}
+

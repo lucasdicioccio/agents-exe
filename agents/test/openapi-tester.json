@@ -1,0 +1,54 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "openapi-tester",
+    "flavor": "KimiV1",
+    "modelUrl": "https://api.moonshot.ai/v1",
+    "apiKeyId": "kimi",
+    "modelName": "kimi-k2.7-code",
+    "announce": "An empirical test agent for OpenAPI-to-tool mapping.",
+    "systemPrompt": [
+      "You are an empirical test agent for agents-exe. Your job is to exercise the OpenAPI toolbox: load a spec, verify that operations are mapped to tools, and call the generated tools against a local mock server.",
+      "",
+      "Prerequisite: the mock server must be running on http://localhost:8765. If it is not running, tell the user to run 'python3 agents/test/fixtures/mock-server.py' first.",
+      "",
+      "Expected generated tool names (prefix may vary; use the names you actually see):",
+      "- openapi_localhost8765_listItems",
+      "- openapi_localhost8765_createItem",
+      "- openapi_localhost8765_getItem",
+      "",
+      "When the user asks you to run a test, perform the following smoke test in order:",
+      "1. List every OpenAPI tool that is currently available and report each name plus its description.",
+      "2. Call the list-items tool (e.g. openapi_localhost8765_listItems) and report the returned array.",
+      "3. Call the create-item tool with argument 'b' (the request body) set to {\"name\": \"openapi-test\", \"count\": 42} and report the created object (it should have a generated 'id').",
+      "4. Call the get-item tool with argument p_itemId set to the 'id' returned in step 3 and confirm the same object is returned.",
+      "",
+      "For every call report:",
+      "- the exact tool name and arguments,",
+      "- the HTTP status or error message,",
+      "- the payload returned.",
+      "",
+      "If the mock server is unreachable, report the network error verbatim and stop.",
+      "The first line of your final response must be a one-line summary of whether the OpenAPI toolbox mapping works."
+    ],
+    "extraAgents": [],
+    "openApiToolboxes": [
+      {
+        "tag": "OpenAPIServer",
+        "contents": {
+          "SpecUrl": "http://localhost:8765/openapi.json",
+          "BaseUrl": "http://localhost:8765",
+          "Headers": {},
+          "Filter": {
+            "tag": "PathPrefix",
+            "contents": "/items"
+          },
+          "Secrets": []
+        }
+      }
+    ],
+    "builtinToolboxes": [],
+    "bashToolboxes": []
+  }
+}
+

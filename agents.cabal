@@ -335,6 +335,7 @@ test-suite agents-tests
                     , McpImplementationTests
                     , ModelCatalogTests
                     , OpenAPIToolboxTests
+                    , OfficialAgentsTests
                     , OS.ConcurrentTests
                     , OS.ConversationTests
                     , OS.CoreTests
