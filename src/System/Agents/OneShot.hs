@@ -161,8 +161,9 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
         Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
 
     config.onSessionProgress convId (SessionStarted session0)
-    (llmTurn, _) <- run convId agent session0
-    config.onSessionProgress convId (SessionCompleted session0)
+    -- The agent returns the final session as part of its stop result.
+    (llmTurn, finalSession) <- run convId agent session0
+    config.onSessionProgress convId (SessionCompleted finalSession)
     pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
 
 mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
