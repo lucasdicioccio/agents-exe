@@ -29,6 +29,9 @@ module System.Agents.Session.Durable (
     yieldingExecutor,
     cachingExecutor,
     isolatedExecutor,
+    cachedInProcessExecutor,
+    composeExecutors,
+    mkDurableExecutor,
 
     -- * Isolated execution
     DeploymentRunner (..),
@@ -51,8 +54,8 @@ module System.Agents.Session.Durable (
     functionRunner,
 ) where
 
+import Data.Maybe (listToMaybe)
 import Data.Time (getCurrentTime)
-
 
 import System.Agents.Session.Async (AsyncToolResponse (..), newContinuationToken)
 import System.Agents.Session.Isolation (
@@ -144,6 +147,60 @@ inProcessExecutor runSync =
         , execAsync = \ctx call -> ToolComplete <$> runSync ctx call
         }
 
+{- | In-process executor with caching.
+
+Convenience wrapper equivalent to @cachingExecutor cache (inProcessExecutor runSync)@.
+Useful when an agent wants to add a cache to its native 'toolCall' without
+manually constructing the inner executor.
+-}
+cachedInProcessExecutor ::
+    ToolCache ->
+    (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) ->
+    ToolExecutor
+cachedInProcessExecutor cache runSync =
+    cachingExecutor cache (inProcessExecutor runSync)
+
+{- | Compose a list of conditional executors over a fallback executor.
+
+The provided policy is evaluated to obtain the flattened disposition for
+each call. The first predicate that matches the base disposition wins;
+otherwise execution falls through to the provided fallback executor. This
+makes it easy to assemble complex executors (e.g., "bash calls go to Docker,
+everything else runs in-process") without writing a custom 'ToolExecutor' by
+hand.
+
+Example:
+
+@
+let isIsolated base = case base of RunIsolated _ -> True; _ -> False
+composeExecutors policy
+    [ (isIsolated, isolatedExecutor policy runner (inProcessExecutor runSync))
+    ]
+    (inProcessExecutor runSync)
+@
+-}
+composeExecutors ::
+    ToolCallPolicy ->
+    [(ToolCallDisposition -> Bool, ToolExecutor)] ->
+    ToolExecutor ->
+    ToolExecutor
+composeExecutors policy branches fallback =
+    ToolExecutor
+        { execSync = \ctx call -> do
+            let (_decorators, base) = flattenDisposition (policy ctx call)
+            case lookupBranch base of
+                Just executor -> executor.execSync ctx call
+                Nothing -> fallback.execSync ctx call
+        , execAsync = \ctx call -> do
+            let (_decorators, base) = flattenDisposition (policy ctx call)
+            case lookupBranch base of
+                Just executor -> executor.execAsync ctx call
+                Nothing -> fallback.execAsync ctx call
+        }
+  where
+    lookupBranch base =
+        listToMaybe [executor | (pred', executor) <- branches, pred' base]
+
 {- | Yielding executor.
 
 Always returns 'ToolYield' with a fresh continuation token. Useful for
@@ -229,3 +286,32 @@ isolatedExecutor policy runner inner =
         let envelope = mkIsolationEnvelope token call (contextSnapshot ctx) disp Nothing
         result <- drExecute runner envelope
         pure $ either (TextResponse . ("isolation error: " <>) . (\(IsolationError e) -> e)) id result
+
+-------------------------------------------------------------------------------
+-- Durable executor construction
+-------------------------------------------------------------------------------
+
+{- | Build a durable executor from the agent's native tool-call function.
+
+The resulting executor:
+
+* Looks up results in the optional cache first.
+* Delegates 'RunIsolated' calls to the optional deployment runner.
+* Falls back to the native 'toolCall' for everything else.
+
+This is the executor used by 'withDurableExecutor' and mirrors the default
+logic in 'System.Agents.Session.Step.executeCall', but packaged as a reusable
+'ToolExecutor'.
+-}
+mkDurableExecutor ::
+    ToolCallPolicy ->
+    Maybe ToolCache ->
+    Maybe DeploymentRunner ->
+    (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) ->
+    ToolExecutor
+mkDurableExecutor policy mCache mRunner runSync =
+    let base = inProcessExecutor runSync
+        cached = maybe base (\cache -> cachingExecutor cache base) mCache
+        isolated = maybe cached (\runner -> isolatedExecutor policy runner cached) mRunner
+     in isolated
+

@@ -6,10 +6,11 @@ This module provides combinators for wrapping agents with session persistence
 and progress tracking capabilities. The primary functions are:
 
 * 'agentStoreSession' - wraps an agent to persist sessions to a 'SessionStore'
+* 'agentStoreSessionWithCallback' - same but also invokes a progress callback
 * 'agentWithSessionProgress' - wraps an agent to emit progress events after each step
 
-When the agent has a 'ctxSessionBackend' configured, 'agentStoreSession' uses that
-backend as the primary store and falls back to the provided file-based
+When the agent has a 'ctxSessionBackend' configured, the storage combinators use
+that backend as the primary store and fall back to the provided file-based
 'SessionStore' when no backend is configured. The optional explicit 'FilePath'
 always receives an additional copy.
 
@@ -27,16 +28,21 @@ progressAgent <- agentWithSessionProgress myProgressCallback baseAgent
 -- Use a durable backend (e.g., SQLite)
 durableAgent <- pure $ withSessionBackend backend baseAgent
 storedAgent' <- agentStoreSession store Nothing convId durableAgent
+
+-- Storage + external progress callback
+storedAndObserved <- agentStoreSessionWithCallback store Nothing convId myCallback durableAgent
 @
 -}
 module System.Agents.Combinators.StoreSessionProgress (
     -- * Session Storage Combinators
     agentStoreSession,
+    agentStoreSessionWithCallback,
     agentWithSessionProgress,
 
     -- * Callback Utilities
     sessionStoreCallback,
     backendStoreCallback,
+    backendWithCallbackStoreCallback,
     filepathStoreCallback,
 ) where
 
@@ -80,6 +86,18 @@ backendStoreCallback backend progress =
     storeSessionWithBackend sess =
         sbStore backend sess.sessionId sess
 
+{- | Creates a callback that stores session progress using a 'SessionBackend'
+and then forwards the progress event to an additional callback.
+
+Useful when the caller wants to both persist to a durable backend and
+observe / react to every progress event (for example, to emit metrics,
+update a UI, or log lifecycle transitions).
+-}
+backendWithCallbackStoreCallback :: SessionBackend -> OnSessionProgress -> OnSessionProgress
+backendWithCallbackStoreCallback backend callback progress = do
+    backendStoreCallback backend progress
+    callback progress
+
 {- | Creates a callback that stores session progress using an extra optional session-path.
 This is useful in OneShot command where the command-line drives the filename.
 -}
@@ -118,6 +136,32 @@ agentStoreSession store mPath convId agent =
             Just backend -> backendStoreCallback backend x
             Nothing -> sessionStoreCallback store convId x
         filepathStoreCallback mPath x
+
+{- | Wrap an agent to store sessions and also emit progress events to a callback.
+
+This is a variant of 'agentStoreSession' that invokes a user-supplied progress
+callback in addition to durable storage. It is useful when the caller wants to
+observe every session update while still benefiting from backend/file persistence.
+
+Storage is performed first, then the user callback is invoked.
+-}
+agentStoreSessionWithCallback ::
+    forall r.
+    SessionStore ->
+    Maybe FilePath ->
+    ConversationId ->
+    OnSessionProgress ->
+    Agent r ->
+    Agent r
+agentStoreSessionWithCallback store mPath convId userCallback agent =
+    agentWithSessionProgress handleProgress agent
+  where
+    handleProgress x = do
+        case ctxSessionBackend agent of
+            Just backend -> backendStoreCallback backend x
+            Nothing -> sessionStoreCallback store convId x
+        filepathStoreCallback mPath x
+        userCallback x
 
 -- | Wrap an agent to emit session progress events after each step.
 agentWithSessionProgress :: forall r. OnSessionProgress -> Agent r -> Agent r

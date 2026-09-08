@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | Tests for Phases 2, 3, and 5 of the durable-workflows plan.
+{- | Tests for Phases 2, 3, 5, and 6 of the durable-workflows plan.
 
 Phase 2 covers:
 
@@ -25,6 +25,16 @@ Phase 5 covers:
 * 'dockerRunner' envelope construction (execution skipped when Docker
   is unavailable).
 * Integration of 'ctxDeploymentRunner' with the async scheduler.
+
+Phase 6 covers:
+
+* Integration of policy + continuation store + session backend + cache in a
+  single end-to-end session that yields, persists, wakes, and resumes.
+* New durable executor helpers ('mkDurableExecutor', 'cachedInProcessExecutor',
+  'composeExecutors').
+* New agent combinators ('withDurableWorkflows', 'withAsyncConfig',
+  'withDurableExecutor').
+* 'agentStoreSessionWithCallback' storage + progress callback integration.
 -}
 module DurableWorkflowTests where
 
@@ -32,6 +42,7 @@ import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Maybe (catMaybes, fromJust, isJust)
 import Data.Text (Text, unpack)
 import Data.Time (UTCTime)
@@ -43,7 +54,12 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Combinators.StoreSessionProgress (agentStoreSession, agentWithSessionProgress)
+import System.Agents.Combinators.StoreSessionProgress (
+    agentStoreSession,
+    agentStoreSessionWithCallback,
+    agentWithSessionProgress,
+    backendStoreCallback,
+ )
 import System.Agents.Session.Async (
     ContinuationStore,
     ToolContinuationSnapshot (..),
@@ -52,6 +68,11 @@ import System.Agents.Session.Async (
     mkSqliteContinuationStore,
  )
 import System.Agents.Session.Base
+import System.Agents.Session.Durable (
+    cachedInProcessExecutor,
+    composeExecutors,
+    mkDurableExecutor,
+ )
 import System.Agents.Session.Isolation (
     IsolationEnvelope (..),
     IsolationError (..),
@@ -86,6 +107,7 @@ import System.Agents.Tools.Context (
     ToolExecutionContextSnapshot (..),
     ToolPortal,
     ToolResult (..),
+    mkMinimalContext,
  )
 import qualified System.Agents.Tools.Context as Ctx
 
@@ -119,6 +141,16 @@ tests =
             , dockerRunnerEnvelopeTest
             , isolatedToolNamePolicyTest
             ]
+        , testGroup
+            "Phase 6"
+            [ durableWorkflowIntegrationTest
+            , withDurableWorkflowsTest
+            , withAsyncConfigTest
+            , mkDurableExecutorTest
+            , cachedInProcessExecutorTest
+            , composeExecutorsTest
+            , agentStoreSessionWithCallbackTest
+            ]
         ]
 
 -------------------------------------------------------------------------------
@@ -132,6 +164,10 @@ testConvId = ConversationId nil
 -- | A stable session id used throughout the tests.
 testSessionId :: SessionId
 testSessionId = SessionId nil
+
+-- | A valid (but minimal) execution context for tests that need one.
+testCtx :: Ctx.ToolExecutionContext
+testCtx = mkMinimalContext testSessionId testConvId (TurnId nil) dummyPortal
 
 -- | Build a minimal LLM-issued tool call with a function name.
 mkCall :: Text -> LlmToolCall
@@ -668,3 +704,213 @@ isolatedToolNamePolicyTest =
         insert x (y : ys)
             | x <= y = x : y : ys
             | otherwise = y : insert x ys
+
+-------------------------------------------------------------------------------
+-- Phase 6 tests
+-------------------------------------------------------------------------------
+
+-- | Full end-to-end integration of policy + cache + continuation store + backend.
+durableWorkflowIntegrationTest :: TestTree
+durableWorkflowIntegrationTest =
+    testCase "full durable workflow integrates policy + cache + store + backend" $
+        withSystemTempDirectory "durable-integration" $ \dir -> do
+            conn <- open ":memory:"
+            backend <- mkSqliteSessionStore conn
+            store <- mkSqliteContinuationStore conn
+            cachePath <- emptySystemTempFile "durable-integration-cache.db"
+            cache <- mkSqliteToolCache cachePath
+
+            let calls = [mkCall "sync_tool", mkCall "defer_a", mkCall "defer_b"]
+            let policy _ctx call
+                    | callName call == "sync_tool" = RunSync
+                    | otherwise = Defer (Reason "approval required")
+            let agent0 = mkAsyncAgent policy (Just cache) (Just store) (Just backend) Nothing
+
+            -- Run the async step. It should execute one call and defer two.
+            (_agent, result) <- runStepMAsync testConvId agent0 (mkSessionWithCalls calls)
+            partialSession <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session"
+
+            -- Persist the partial session via the backend manually (mirroring what
+            -- a progress callback or external orchestrator would do after a yield).
+            sbStore backend partialSession.sessionId partialSession
+
+            -- The session backend should have stored the partial session.
+            mStored <- sbLoad backend partialSession.sessionId
+            mStored @?= Just partialSession
+
+            -- The continuation store should have the two deferred snapshots.
+            pending <- csListPending store testSessionId
+            length pending @?= 2
+
+            -- Wake the session with results for the deferred calls.
+            partial <- case getPartialTurn partialSession of
+                Just p -> pure p
+                Nothing -> assertFailure "expected a partial turn"
+            let deferred = [tc | tc <- partial.pTrackedToolCalls, tc.tcState == Deferred]
+            let responses =
+                    [ (fromJust (tc.tcContinuation), TextResponse ("woken:" <> callName (tc.tcCall)))
+                    | tc <- deferred
+                    ]
+            woken <- wakeSessionWithCache (Just cache) partialSession responses
+
+            -- After waking, the partial turn should be a full user turn.
+            case getPartialTurn woken of
+                Just _ -> assertFailure "expected partial turn to be converted to a full user turn"
+                Nothing -> pure ()
+
+            -- The cache should contain the woken results.
+            forM_ deferred $ \tc -> do
+                mCached <- cache.cacheLookup (computeCacheKey (tc.tcCall))
+                case mCached of
+                    Just (CachedResult result _ _) ->
+                        result @?= TextResponse ("woken:" <> callName (tc.tcCall))
+                    Nothing -> assertFailure "expected deferred result to be cached"
+
+            -- Resume should complete (the LLM step returns no tool calls).
+            final <- resumeSession testConvId agent0 woken
+            case final of
+                Left (llmTurn, _session) -> do
+                    length llmTurn.llmToolCalls @?= 0
+                Right _ -> assertFailure "expected session to complete after resume"
+
+-- | Convenience combinator that wires backend + continuation store.
+withDurableWorkflowsTest :: TestTree
+withDurableWorkflowsTest =
+    testCase "withDurableWorkflows installs backend and continuation store" $ do
+        conn <- open ":memory:"
+        backend <- mkSqliteSessionStore conn
+        store <- mkSqliteContinuationStore conn
+        let agent = withDurableWorkflows backend store mkSimpleAgent
+        isJust (ctxSessionBackend agent) @?= True
+        isJust (ctxContinuationStore agent) @?= True
+
+-- | Convenience combinator that configures async mode + cache + policy.
+withAsyncConfigTest :: TestTree
+withAsyncConfigTest =
+    testCase "withAsyncConfig sets mode, cache and policy" $ do
+        cachePath <- emptySystemTempFile "async-config-cache.db"
+        cache <- mkSqliteToolCache cachePath
+        let policy _ctx _call = RunAsync
+        let agent = withAsyncConfig Asynchronous (Just cache) policy mkSimpleAgent
+        ctxExecutionMode agent @?= Asynchronous
+        isJust (ctxToolCache agent) @?= True
+        -- Apply the installed policy to verify it is the one we supplied.
+        ctxToolCallPolicy agent testCtx (mkCall "any") @?= RunAsync
+
+-- | 'mkDurableExecutor' builds an executor that caches and isolates.
+mkDurableExecutorTest :: TestTree
+mkDurableExecutorTest =
+    testCase "mkDurableExecutor caches sync calls and isolates bash" $
+        withSystemTempDirectory "durable-executor" $ \dir -> do
+            cachePath <- emptySystemTempFile "durable-executor-cache.db"
+            cache <- mkSqliteToolCache cachePath
+
+            let workerPath = dir ++ "/worker.sh"
+            writeFile workerPath workerScript
+            setPermissions workerPath emptyPermissions{readable = True, executable = True}
+            let runner = localProcessRunner workerPath
+
+            let policy _ctx call
+                    | callName call == "bash_command" = RunIsolated (LocalProcess workerPath)
+                    | otherwise = RunSync
+            let exec = mkDurableExecutor policy (Just cache) (Just runner) runSync
+
+            -- First sync call executes and is cached.
+            let syncCall = mkCall "sync_tool"
+            r1 <- exec.execSync testCtx syncCall
+            r1 @?= TextResponse "done:sync_tool"
+            mCached <- cache.cacheLookup (computeCacheKey syncCall)
+            isJust mCached @?= True
+
+            -- Isolated call runs the worker.
+            let bashCall = mkCall "bash_command"
+            r2 <- exec.execSync testCtx bashCall
+            r2 @?= TextResponse "hello from worker"
+  where
+    runSync _ctx call = pure $ TextResponse ("done:" <> callName call)
+
+    workerScript =
+        unlines
+            [ "#!/usr/bin/env bash"
+            , "set -e"
+            , "TOKEN=$(sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p' | head -1)"
+            , "echo \"{\\\"token\\\":\\\"$TOKEN\\\",\\\"status\\\":\\\"success\\\",\\\"result\\\":{\\\"type\\\":\\\"text\\\",\\\"content\\\":\\\"hello from worker\\\"}}\""
+            ]
+
+-- | 'cachedInProcessExecutor' caches in-process calls.
+cachedInProcessExecutorTest :: TestTree
+cachedInProcessExecutorTest =
+    testCase "cachedInProcessExecutor caches sync calls" $ do
+        cachePath <- emptySystemTempFile "cached-executor-cache.db"
+        cache <- mkSqliteToolCache cachePath
+        ref <- newIORef (0 :: Int)
+        let runSync _ctx _call = do
+                modifyIORef' ref (+ 1)
+                pure $ TextResponse "computed"
+        let exec = cachedInProcessExecutor cache runSync
+        let call = mkCall "sync_tool"
+
+        r1 <- exec.execSync testCtx call
+        r1 @?= TextResponse "computed"
+        count1 <- readIORef ref
+        count1 @?= 1
+
+        -- Second call should hit the cache and not invoke runSync again.
+        r2 <- exec.execSync testCtx call
+        r2 @?= TextResponse "computed"
+        count2 <- readIORef ref
+        count2 @?= 1
+
+-- | 'composeExecutors' routes calls based on disposition predicates.
+composeExecutorsTest :: TestTree
+composeExecutorsTest =
+    testCase "composeExecutors dispatches by disposition" $ do
+        refSync <- newIORef (0 :: Int)
+        refIso <- newIORef (0 :: Int)
+        let policy _ctx call
+                | callName call == "bash_command" = RunIsolated (LocalProcess "/dummy")
+                | otherwise = RunSync
+        let syncExec = inProcessExecutor $ \_ctx _call -> do
+                modifyIORef' refSync (+ 1)
+                pure $ TextResponse "sync"
+        let isoExec = inProcessExecutor $ \_ctx _call -> do
+                modifyIORef' refIso (+ 1)
+                pure $ TextResponse "isolated"
+        let isIsolated base = case base of RunIsolated _ -> True; _ -> False
+        let exec = composeExecutors policy [(isIsolated, isoExec)] syncExec
+
+        _ <- exec.execSync testCtx (mkCall "sync_tool")
+        _ <- exec.execSync testCtx (mkCall "bash_command")
+
+        syncCount <- readIORef refSync
+        isoCount <- readIORef refIso
+        syncCount @?= 1
+        isoCount @?= 1
+
+-- | 'agentStoreSessionWithCallback' stores via backend and invokes user callback.
+agentStoreSessionWithCallbackTest :: TestTree
+agentStoreSessionWithCallbackTest =
+    testCase "agentStoreSessionWithCallback stores and emits progress" $
+        withSystemTempDirectory "session-callback" $ \dir -> do
+            backend <- mkFileSessionStore dir
+            ref <- newIORef ([] :: [SessionProgress])
+            let agent = withSessionBackend backend mkSimpleAgent
+            let userCallback progress = modifyIORef' ref (progress :)
+            let wrapped = agentStoreSessionWithCallback (error "should not use file store") Nothing testConvId userCallback agent
+
+            let session0 = mkSessionWithCalls []
+            _ <- wrapped.step session0
+
+            -- Backend should have stored the session.
+            mLoaded <- sbLoad backend session0.sessionId
+            mLoaded @?= Just session0
+
+            -- User callback should have been invoked at least once.
+            events <- readIORef ref
+            length events @?= 1
+            case events of
+                (SessionUpdated sess : _) -> sess @?= session0
+                _ -> assertFailure "expected SessionUpdated event"
+

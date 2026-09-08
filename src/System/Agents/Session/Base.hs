@@ -62,6 +62,9 @@ module System.Agents.Session.Base (
     yieldingExecutor,
     cachingExecutor,
     isolatedExecutor,
+    cachedInProcessExecutor,
+    composeExecutors,
+    mkDurableExecutor,
     flattenDisposition,
     mkIsolationEnvelope,
     mkIsolationSuccessEnvelope,
@@ -91,6 +94,9 @@ module System.Agents.Session.Base (
     withContinuationStore,
     withDeploymentRunner,
     withSessionBackend,
+    withDurableWorkflows,
+    withAsyncConfig,
+    withDurableExecutor,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -108,6 +114,8 @@ import System.Agents.Session.Durable (
     ToolCallPolicy,
     ToolExecutor (..),
     cachingExecutor,
+    cachedInProcessExecutor,
+    composeExecutors,
     defaultToolCallPolicy,
     dockerRunner,
     flattenDisposition,
@@ -115,6 +123,7 @@ import System.Agents.Session.Durable (
     inProcessExecutor,
     isolatedExecutor,
     localProcessRunner,
+    mkDurableExecutor,
     mkIsolationEnvelope,
     mkIsolationErrorEnvelope,
     mkIsolationSuccessEnvelope,
@@ -352,3 +361,78 @@ durableAgent = withSessionBackend backend agent
 -}
 withSessionBackend :: SessionBackend -> Agent r -> Agent r
 withSessionBackend backend agent = agent{ctxSessionBackend = Just backend}
+
+{- | Set a durable session backend and continuation store in one call.
+
+Convenience combinator for the common durable-workflow setup where both
+session state and yielded continuations should be persisted.
+
+Example:
+
+@
+backend  <- mkSqliteSessionStore conn
+store    <- mkSqliteContinuationStore conn
+durableAgent = withDurableWorkflows backend store agent
+@
+-}
+withDurableWorkflows :: SessionBackend -> ContinuationStore -> Agent r -> Agent r
+withDurableWorkflows backend store agent =
+    agent
+        { ctxSessionBackend = Just backend
+        , ctxContinuationStore = Just store
+        }
+
+{- | Configure the asynchronous execution settings for an agent in one call.
+
+Sets the execution mode, optional tool cache, and tool-call policy. This is
+useful when switching an agent from the default synchronous mode to a
+durable, policy-driven async mode.
+
+Example:
+
+@
+asyncAgent = withAsyncConfig Asynchronous (Just cache) myPolicy agent
+@
+-}
+withAsyncConfig :: ExecutionMode -> Maybe ToolCache -> ToolCallPolicy -> Agent r -> Agent r
+withAsyncConfig mode mCache policy agent =
+    agent
+        { ctxExecutionMode = mode
+        , ctxToolCache = mCache
+        , ctxToolCallPolicy = policy
+        }
+
+{- | Configure a durable executor for an agent in one call.
+
+This combines an optional tool cache and an optional deployment runner into
+a 'ToolExecutor' and installs it on the agent. The resulting executor:
+
+* Looks up results in the cache when a cache is provided.
+* Delegates 'RunIsolated' calls to the deployment runner when a runner is
+  provided.
+* Falls back to the agent's native 'toolCall' function for everything else.
+
+Example:
+
+@
+cache  <- mkSqliteToolCache ".cache.db"
+runner <- dockerRunner "agents-exe/runner"
+agent' = withDurableExecutor cache runner agent
+@
+-}
+withDurableExecutor ::
+    Maybe ToolCache ->
+    Maybe DeploymentRunner ->
+    Agent r ->
+    Agent r
+withDurableExecutor mCache mRunner agent =
+    agent
+        { ctxToolExecutor =
+            Just $
+                mkDurableExecutor
+                    agent.ctxToolCallPolicy
+                    mCache
+                    mRunner
+                    agent.toolCall
+        }
+

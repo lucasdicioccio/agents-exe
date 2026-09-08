@@ -235,10 +235,66 @@ Phase 4's core functions were already implemented during Phase 2. CLI exposure (
 - Library builds with `-Wall -Werror`.
 - Test suite `agents-tests` passes, including all Phase 2, Phase 3, Phase 4, and Phase 5 durable-workflow tests.
 
-## Next: Phase 6 — Integration & agent combinators
+## Phase 6 — Integration & agent combinators ✅ COMPLETE
+
+### 6.1 `Agent` record defaults
+
+- Verified that `System.Agents.Session.Base.Agent` exposes all durable-workflow fields:
+  - `ctxToolCallPolicy :: ToolCallPolicy` (defaults to `defaultToolCallPolicy`)
+  - `ctxToolExecutor :: Maybe ToolExecutor` (defaults to `Nothing`)
+  - `ctxContinuationStore :: Maybe ContinuationStore` (defaults to `Nothing`)
+  - `ctxDeploymentRunner :: Maybe DeploymentRunner` (defaults to `Nothing`)
+  - `ctxSessionBackend :: Maybe SessionBackend` (defaults to `Nothing`)
+- Confirmed all existing agent construction sites (`OneShot`, `MCP.Server`, `AgentTree.OneShotTool`) still compile unchanged and initialise every field.
+
+### 6.2 Agent combinators
+
+- Added/verified all requested combinators in `System.Agents.Session.Base`:
+  - `withToolCallPolicy`
+  - `withToolExecutor`
+  - `withContinuationStore`
+  - `withDeploymentRunner`
+  - `withSessionBackend`
+  - Convenience `withDurableWorkflows :: SessionBackend -> ContinuationStore -> Agent r -> Agent r`
+  - Convenience `withAsyncConfig :: ExecutionMode -> Maybe ToolCache -> ToolCallPolicy -> Agent r -> Agent r`
+  - Convenience `withDurableExecutor :: Maybe ToolCache -> Maybe DeploymentRunner -> Agent r -> Agent r`
+
+### 6.3 Progress / storage helpers
+
+- Added `backendWithCallbackStoreCallback :: SessionBackend -> OnSessionProgress -> OnSessionProgress` to `System.Agents.Combinators.StoreSessionProgress`.
+  - Stores each progress event via the configured backend and then forwards the event to an additional user-supplied callback.
+- Verified `agentStoreSession` still correctly wires `ctxSessionBackend`, file fallback, and optional extra file copy.
+
+### 6.4 Durable executor helpers
+
+- Verified `System.Agents.Session.Durable` provides:
+  - `mkDurableExecutor` — cache + runner + native tool call
+  - `cachedInProcessExecutor` — in-process execution with caching
+  - `composeExecutors` — conditional dispatch by disposition
+
+### 6.5 Integration tests
+
+- Fixed and extended `test/DurableWorkflowTests.hs` Phase 6 group:
+  - `durableWorkflowIntegrationTest` — end-to-end session with a policy that defers calls, a continuation store, a SQLite session backend, and a cache; verifies yield, persistence, wake, cache population, and resume.
+  - `withDurableWorkflowsTest`
+  - `withAsyncConfigTest`
+  - `mkDurableExecutorTest`
+  - `cachedInProcessExecutorTest`
+  - `composeExecutorsTest`
+  - `agentStoreSessionWithCallbackTest`
+
+### Verification
+
+- Library builds with `-Wall -Werror`.
+- Test suite `agents-tests` passes, including all Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 durable-workflow tests.
+
+## Next: Phase 7 — CLI / operator API
 
 Remaining work from the plan:
 
-- Add any remaining combinators for wiring durable-workflow pieces together.
-- Ensure `Agent` defaults keep existing agents compiling unchanged.
-- Consider additional integration tests across phases.
+- `agents session pause <session-id>` — yield after current step
+- `agents session resume <session-id>` — continue execution
+- `agents session pending <session-id>` — list deferred calls / continuation tokens
+- `agents session complete <token> <result-file>` — inject an external result
+- `agents session run-isolated <session-id>` — poll and execute `RunIsolated` calls
+
