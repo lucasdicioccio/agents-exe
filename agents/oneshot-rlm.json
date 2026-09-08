@@ -36,9 +36,6 @@
           "Name": "dev",
           "Description": "Development utilities",
           "Capabilities": [
-            "validate-tool",
-            "scaffold-agent",
-            "scaffold-tool",
             "show-spec"
           ]
         }
@@ -62,3 +59,4 @@
     ]
   }
 }
+

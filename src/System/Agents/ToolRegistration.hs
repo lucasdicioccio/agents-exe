@@ -1180,9 +1180,6 @@ registerSystemTools box =
 {- | Register a DeveloperToolbox tool with the LLM system.
 
 Developer tools expose functions based on configured capabilities:
-* validate-tool: Validate a tool script
-* scaffold-agent: Generate agent scaffolding
-* scaffold-tool: Generate tool scaffolding
 * show-spec: Display specification documentation
 * read-file-range: Read specific line ranges from a file
 * write-file-range: Replace line ranges in a file with new content
@@ -1247,42 +1244,6 @@ buildDeveloperToolParams box =
                 , propertyType = StringParamType
                 , propertyDescription = "Capability to execute: " <> Text.intercalate ", " (map devCapabilityToText box.toolboxCapabilities)
                 , propertyRequired = True
-                }
-            , ParamProperty
-                { propertyKey = "tool_path"
-                , propertyType = StringParamType
-                , propertyDescription = "For validate-tool: Path to tool script"
-                , propertyRequired = False
-                }
-            , ParamProperty
-                { propertyKey = "template"
-                , propertyType = StringParamType
-                , propertyDescription = "For scaffold-agent: Template (openai, mistral, ollama)"
-                , propertyRequired = False
-                }
-            , ParamProperty
-                { propertyKey = "language"
-                , propertyType = StringParamType
-                , propertyDescription = "For scaffold-tool: Language (bash, python, haskell)"
-                , propertyRequired = False
-                }
-            , ParamProperty
-                { propertyKey = "slug"
-                , propertyType = StringParamType
-                , propertyDescription = "For scaffold operations: Slug/name for the generated file"
-                , propertyRequired = False
-                }
-            , ParamProperty
-                { propertyKey = "file_path"
-                , propertyType = StringParamType
-                , propertyDescription = "For scaffold operations, restore-file: Output file path or path to restore"
-                , propertyRequired = False
-                }
-            , ParamProperty
-                { propertyKey = "force"
-                , propertyType = BoolParamType
-                , propertyDescription = "For scaffold operations: Overwrite existing files"
-                , propertyRequired = False
                 }
             , ParamProperty
                 { propertyKey = "spec_name"
@@ -1394,9 +1355,6 @@ buildDeveloperToolParams box =
 
 -- Helper to convert developer capability to text
 devCapabilityToText :: DeveloperToolCapability -> Text
-devCapabilityToText DevToolValidateTool = "validate-tool"
-devCapabilityToText DevToolScaffoldAgent = "scaffold-agent"
-devCapabilityToText DevToolScaffoldTool = "scaffold-tool"
 devCapabilityToText DevToolShowSpec = "show-spec"
 devCapabilityToText DevToolValidateAgent = "validate-agent"
 devCapabilityToText DevToolCreateAgent = "create-agent"
@@ -1909,48 +1867,6 @@ developerTool box =
 -- | Execute a developer tool capability
 executeDeveloperCapability :: Tracer IO Trace -> DeveloperTools.Toolbox -> Text -> Aeson.Object -> IO (CallResult ())
 executeDeveloperCapability tracer box cap params = case cap of
-    "validate-tool" -> do
-        case KeyMap.lookup (AesonKey.fromText "tool_path") params of
-            Just (Aeson.String tPath) -> do
-                result <- DeveloperTools.executeValidateTool (Prod.contramap BashToolsLoadTrace tracer) box (Text.unpack tPath)
-                case result of
-                    Left err -> pure $ DeveloperToolError () err
-                    Right valResult -> pure $ DeveloperToolResult () valResult
-            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'tool_path' parameter")
-    "scaffold-agent" -> do
-        let mTemplate = case KeyMap.lookup (AesonKey.fromText "template") params of
-                Just (Aeson.String t) -> t
-                _ -> "openai"
-        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
-                Just (Aeson.String s) -> s
-                _ -> "new-agent"
-        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
-                Just (Aeson.String fp) -> Text.unpack fp
-                _ -> "new-agent.json"
-        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
-                Just (Aeson.Bool f) -> f
-                _ -> False
-        result <- DeveloperTools.executeScaffoldAgent box mTemplate mSlug mFilePath mForce
-        case result of
-            Left err -> pure $ DeveloperToolError () err
-            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
-    "scaffold-tool" -> do
-        let mLang = case KeyMap.lookup (AesonKey.fromText "language") params of
-                Just (Aeson.String l) -> l
-                _ -> "bash"
-        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
-                Just (Aeson.String s) -> s
-                _ -> "new-tool"
-        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
-                Just (Aeson.String fp) -> Text.unpack fp
-                _ -> "new-tool.sh"
-        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
-                Just (Aeson.Bool f) -> f
-                _ -> False
-        result <- DeveloperTools.executeScaffoldTool box mLang mSlug mFilePath mForce
-        case result of
-            Left err -> pure $ DeveloperToolError () err
-            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
     "show-spec" -> do
         case KeyMap.lookup (AesonKey.fromText "spec_name") params of
             Just (Aeson.String specName) -> do
@@ -2069,7 +1985,7 @@ generateDeveloperToolboxHelp box =
                 , "================================================================================"
                 , ""
                 , "This developer toolbox provides utilities for writing, validating, and"
-                , "scaffolding agents and tools. Each capability is described below with"
+                , "writing and validating agents and tools. Each capability is described below with"
                 , "its parameters and usage examples."
                 , ""
                 , "IMPORTANT TIPS:"
@@ -2112,83 +2028,6 @@ formatCapabilityHelp DevToolHelp =
         , ""
         , "Returns: This comprehensive help text with all capability documentation."
         ]
-formatCapabilityHelp DevToolValidateTool =
-    Text.unlines
-        [ "--------------------------------------------------------------------------------"
-        , "CAPABILITY: validate-tool"
-        , "--------------------------------------------------------------------------------"
-        , ""
-        , "Description: Validates a bash tool script by loading and parsing its"
-        , "             description. Checks that the script follows the proper"
-        , "             describe/run protocol."
-        , ""
-        , "IMPORTANT: The script must be executable (owner execute bit set). If you get 'Permission Denied', run: chmod +x <tool-path>"
-        , ""
-        , "Parameters:"
-        , "  - tool_path (string, required): Path to the tool script to validate"
-        , ""
-        , "Usage:"
-        , "  {"
-        , "    \"capability\": \"validate-tool\","
-        , "    \"tool_path\": \"./tools/my-tool.sh\""
-        , "  }"
-        , ""
-        , "Returns: Validation result with script slug, description, and any errors."
-        ]
-formatCapabilityHelp DevToolScaffoldAgent =
-    Text.unlines
-        [ "--------------------------------------------------------------------------------"
-        , "CAPABILITY: scaffold-agent"
-        , "--------------------------------------------------------------------------------"
-        , ""
-        , "Description: Generates a new agent configuration file from a template."
-        , "             Supports OpenAI, Mistral, and Ollama agent formats. The output is JSON in the standard agent configuration format (with an 'OpenAIAgentDescription' tag wrapper), which is the same format validate-agent expects."
-        , ""
-        , "Parameters:"
-        , "  - template  (string, optional): Template to use - 'openai' (default),"
-        , "                                  'mistral', or 'ollama'"
-        , "  - slug      (string, optional): Name/slug for the agent (default: 'new-agent')"
-        , "  - file_path (string, optional): Output file path (default: 'new-agent.json')"
-        , "  - force     (boolean, optional): Overwrite existing file (default: false)"
-        , ""
-        , "Usage:"
-        , "  {"
-        , "    \"capability\": \"scaffold-agent\","
-        , "    \"template\": \"openai\","
-        , "    \"slug\": \"my-agent\","
-        , "    \"file_path\": \"./agents/my-agent.json\","
-        , "    \"force\": false"
-        , "  }"
-        , ""
-        , "Returns: Success message with created file path or error if file exists."
-        ]
-formatCapabilityHelp DevToolScaffoldTool =
-    Text.unlines
-        [ "--------------------------------------------------------------------------------"
-        , "CAPABILITY: scaffold-tool"
-        , "--------------------------------------------------------------------------------"
-        , ""
-        , "Description: Generates a new tool script from a template. Supports bash,"
-        , "             Python, and Haskell tool scaffolding with proper protocol structure. Generated bash scripts are automatically made executable."
-        , ""
-        , "Parameters:"
-        , "  - language  (string, optional): Language - 'bash' (default), 'python',"
-        , "                                  or 'haskell'"
-        , "  - slug      (string, optional): Name/slug for the tool (default: 'new-tool')"
-        , "  - file_path (string, optional): Output file path (default: 'new-tool.sh')"
-        , "  - force     (boolean, optional): Overwrite existing file (default: false)"
-        , ""
-        , "Usage:"
-        , "  {"
-        , "    \"capability\": \"scaffold-tool\","
-        , "    \"language\": \"bash\","
-        , "    \"slug\": \"my-tool\","
-        , "    \"file_path\": \"./tools/my-tool.sh\","
-        , "    \"force\": false"
-        , "  }"
-        , ""
-        , "Returns: Success message with created file path or error if file exists."
-        ]
 formatCapabilityHelp DevToolShowSpec =
     Text.unlines
         [ "--------------------------------------------------------------------------------"
@@ -2216,7 +2055,8 @@ formatCapabilityHelp DevToolValidateAgent =
         , "--------------------------------------------------------------------------------"
         , ""
         , "Description: Validates an agent JSON configuration file. Checks that the"
-        , "             file is valid JSON and conforms to the agent schema. The file must use the standard agent configuration format (with an 'OpenAIAgentDescription' tag wrapper), which is the same format scaffold-agent produces."
+        , "Description: Validates an agent JSON configuration file. Checks that the"
+        , "             file is valid JSON and conforms to the agent schema. The file must use the standard agent configuration format (with an 'OpenAIAgentDescription' tag wrapper)."
         , ""
         , "Parameters:"
         , "  - file_path (string, required): Path to the agent JSON file"

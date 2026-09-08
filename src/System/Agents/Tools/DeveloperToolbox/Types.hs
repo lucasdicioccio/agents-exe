@@ -15,7 +15,6 @@ module System.Agents.Tools.DeveloperToolbox.Types (
     ToolDescription (..),
     DeveloperToolError (..),
     ValidationResult (..),
-    ScaffoldResult (..),
     AgentValidationResult (..),
     CreateResult (..),
     ReadFileRangeResult (..),
@@ -345,22 +344,6 @@ instance ToJSON ValidationResult where
             , "error" .= validationError result
             ]
 
--- | Result of a scaffolding operation.
-data ScaffoldResult = ScaffoldResult
-    { scaffoldSuccess :: Bool
-    , scaffoldPath :: FilePath
-    , scaffoldError :: Maybe Text
-    }
-    deriving (Show)
-
--- | JSON serialization for ScaffoldResult.
-instance ToJSON ScaffoldResult where
-    toJSON result =
-        Aeson.object
-            [ "success" .= scaffoldSuccess result
-            , "path" .= scaffoldPath result
-            , "error" .= scaffoldError result
-            ]
 
 -- | Result of an agent validation.
 data AgentValidationResult = AgentValidationResult
@@ -753,8 +736,6 @@ data DeveloperToolError
       CapabilityNotEnabledError !Text
     | -- | Error during tool validation
       ValidationError !Text
-    | -- | Error during scaffolding
-      ScaffoldError !Text
     | -- | File already exists
       FileExistsError !FilePath
     | -- | Invalid template or language

@@ -1187,13 +1187,7 @@ Each capability represents a tool that can help developers write
 and validate agents and tools.
 -}
 data DeveloperToolCapability
-    = -- | Validate a tool script
-      DevToolValidateTool
-    | -- | Generate agent scaffolding
-      DevToolScaffoldAgent
-    | -- | Generate tool scaffolding
-      DevToolScaffoldTool
-    | -- | Show bash-tools specification
+    = -- | Show bash-tools specification
       DevToolShowSpec
     | -- | Validate an agent JSON file
       DevToolValidateAgent
@@ -1221,9 +1215,6 @@ data DeveloperToolCapability
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
 instance ToJSON DeveloperToolCapability where
-    toJSON DevToolValidateTool = Aeson.String "validate-tool"
-    toJSON DevToolScaffoldAgent = Aeson.String "scaffold-agent"
-    toJSON DevToolScaffoldTool = Aeson.String "scaffold-tool"
     toJSON DevToolShowSpec = Aeson.String "show-spec"
     toJSON DevToolValidateAgent = Aeson.String "validate-agent"
     toJSON DevToolCreateAgent = Aeson.String "create-agent"
@@ -1241,9 +1232,6 @@ instance ToJSON DeveloperToolCapability where
 instance FromJSON DeveloperToolCapability where
     parseJSON = Aeson.withText "DeveloperToolCapability" $ \txt ->
         case txt of
-            "validate-tool" -> return DevToolValidateTool
-            "scaffold-agent" -> return DevToolScaffoldAgent
-            "scaffold-tool" -> return DevToolScaffoldTool
             "show-spec" -> return DevToolShowSpec
             "validate-agent" -> return DevToolValidateAgent
             "create-agent" -> return DevToolCreateAgent
@@ -1256,7 +1244,7 @@ instance FromJSON DeveloperToolCapability where
             "restore-file" -> return DevToolRestoreFile
             "list-directory" -> return DevToolListDirectory
             "traverse-directory" -> return DevToolTraverseDirectory
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: validate-tool, scaffold-agent, scaffold-tool, show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.
@@ -1270,7 +1258,7 @@ Example configuration:
   "contents": {
     "name": "developer",
     "description": "Tools for developing agents and tools",
-    "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"],
+    "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"],
     "lifetime": "conversation",
     "activation": "always"
   }
@@ -1338,7 +1326,7 @@ Example configuration:
     {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
     {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
     {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
-    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["validate-tool", "scaffold-agent", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"]}},
+    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"]}},
     {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "fileSandbox": {"predicate": {"tag": "AlwaysAllow"}, "maxFileSize": 10485760, "name": "lua-sandbox"}}}
   ]
 }

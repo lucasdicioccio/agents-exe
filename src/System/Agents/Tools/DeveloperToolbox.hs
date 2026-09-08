@@ -9,9 +9,6 @@
 This module implements the developer toolbox functionality, providing tools
 for:
 
-* Validating tool scripts
-* Generating agent scaffolding
-* Generating tool scaffolding
 * Accessing specification documentation
 * Validating agent configurations
 * Creating agent configurations
@@ -30,10 +27,8 @@ The patch-file capability provides atomic, context-aware file modifications
 using unified diff format, addressing the fragility issues of write-file-range
 when making multiple edits.
 
-The snapshot capability enables rollback by storing file content in memory
-before edits. When snapshot is enabled, write-file-range and patch-file
-operations automatically save the original file content keyed by MD5 hash.
-The restore-file capability can then restore the file to any saved snapshot.
+Snapshot references are automatically recorded by write-file-range and
+patch-file, enabling rollback via restore-file using the returned MD5 hash.
 
 The help capability returns comprehensive documentation for all enabled
 capabilities, providing detailed parameter descriptions and usage examples.
@@ -45,7 +40,6 @@ module System.Agents.Tools.DeveloperToolbox (
     ToolDescription (..),
     DeveloperToolError (..),
     ValidationResult (..),
-    ScaffoldResult (..),
     AgentValidationResult (..),
     CreateResult (..),
     ReadFileRangeResult (..),
@@ -72,9 +66,6 @@ module System.Agents.Tools.DeveloperToolbox (
     initializeToolbox,
 
     -- * Tool execution
-    executeValidateTool,
-    executeScaffoldAgent,
-    executeScaffoldTool,
     executeShowSpec,
     executeValidateAgent,
     executeCreateAgent,
@@ -105,12 +96,7 @@ module System.Agents.Tools.DeveloperToolbox (
     validateAllHunks,
     applyHunk,
 
-    -- * Template functions (exposed for testing)
-    makeAgentTemplate,
-    makeToolTemplate,
-    makeBashToolTemplate,
-    makePythonToolTemplate,
-    makeHaskellToolTemplate,
+    -- * Config-based template functions (exposed for testing)
     makeToolTemplateFromConfig,
     makeBashToolTemplateFromConfig,
     makePythonToolTemplateFromConfig,
@@ -148,7 +134,6 @@ import System.Agents.Tools.DeveloperToolbox.Help
 import System.Agents.Tools.DeveloperToolbox.Patch
 import System.Agents.Tools.DeveloperToolbox.Read
 import System.Agents.Tools.DeveloperToolbox.Restore
-import System.Agents.Tools.DeveloperToolbox.Scaffold
 import System.Agents.Tools.DeveloperToolbox.Spec
 import System.Agents.Tools.DeveloperToolbox.Validate
 import System.Agents.Tools.DeveloperToolbox.Write

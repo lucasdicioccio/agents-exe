@@ -19,9 +19,6 @@ import System.Agents.Base (DeveloperToolCapability (..))
 
 -- | Get the name for a capability.
 capabilityToName :: DeveloperToolCapability -> Text
-capabilityToName DevToolValidateTool = "validate-tool"
-capabilityToName DevToolScaffoldAgent = "scaffold-agent"
-capabilityToName DevToolScaffoldTool = "scaffold-tool"
 capabilityToName DevToolShowSpec = "show-spec"
 capabilityToName DevToolValidateAgent = "validate-agent"
 capabilityToName DevToolCreateAgent = "create-agent"
@@ -38,9 +35,6 @@ capabilityToName DevToolTraverseDirectory = "traverse-directory"
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
 capabilityFromName name = case name of
-    "validate-tool" -> Just DevToolValidateTool
-    "scaffold-agent" -> Just DevToolScaffoldAgent
-    "scaffold-tool" -> Just DevToolScaffoldTool
     "show-spec" -> Just DevToolShowSpec
     "validate-agent" -> Just DevToolValidateAgent
     "create-agent" -> Just DevToolCreateAgent
@@ -57,18 +51,6 @@ capabilityFromName name = case name of
 
 -- | Get information about a capability (name and description).
 getCapabilityInfo :: DeveloperToolCapability -> (Text, Text)
-getCapabilityInfo DevToolValidateTool =
-    ( "validate-tool"
-    , "Validates a bash tool script by loading its description"
-    )
-getCapabilityInfo DevToolScaffoldAgent =
-    ( "scaffold-agent"
-    , "Generates agent scaffolding from a template (openai, mistral, ollama)"
-    )
-getCapabilityInfo DevToolScaffoldTool =
-    ( "scaffold-tool"
-    , "Generates tool scaffolding in a language (bash, python, haskell)"
-    )
 getCapabilityInfo DevToolShowSpec =
     ( "show-spec"
     , "Shows specification documentation (bash-tools)"

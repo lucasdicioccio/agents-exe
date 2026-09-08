@@ -1423,7 +1423,7 @@ echo '{"input": "test"}' | agents-exe tool-call my-validator
 # Create agent with dev tools
 agents-exe new agent dev-assistant
 # (add DeveloperToolbox to builtinToolboxes)
-# Now the agent can validate tools and scaffold new ones!
+# Now the agent can use developer file-editing tools and show specs!
 
 # Create a tool that outputs media
 agents-exe new tool chart-generator bash ./tools/chart-gen

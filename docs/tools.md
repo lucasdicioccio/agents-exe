@@ -39,7 +39,7 @@ The framework supports multiple tool types:
 | **PostgREST Tools** | Database endpoints | Database queries |
 | **SQLite Tools** | SQLite databases | Local SQL queries |
 | **System Tools** | System information | Runtime context, session introspection, command execution |
-| **Developer Tools** | Development utilities | Agent/tool scaffolding, file editing with multi-turn sessions |
+| **Developer Tools** | Development utilities | File editing with multi-turn sessions, agent validation/creation |
 | **IO Tools** | Haskell functions | In-process operations |
 | **Lua Tools** | Lua scripts | Embedded scripting |
 | **Skills** | Progressive disclosure | Procedural knowledge |
@@ -973,15 +973,16 @@ Example response:
 
 ## Developer Toolbox
 
-The Developer Toolbox provides utilities for writing, validating, and scaffolding agents and tools, with advanced file editing capabilities including multi-turn edit sessions.
+The Developer Toolbox provides utilities for writing and validating agents and tools, with advanced file editing capabilities including multi-turn edit sessions.
 
 ### Capabilities
 
 | Capability | Description |
 |------------|-------------|
-| `validate-tool` | Validates a bash tool script |
-| `scaffold-agent` | Generates agent scaffolding from template |
-| `scaffold-tool` | Generates tool scaffolding in multiple languages |
+| `show-spec` | Displays specification documentation |
+| `validate-agent` | Validates an agent JSON configuration file |
+| `create-agent` | Creates a new agent configuration |
+| `create-tool` | Creates a new tool script |
 | `show-spec` | Displays specification documentation |
 | `read-file-range` | Reads specific line ranges from a file (supports session reads and metadata-only) |
 | `write-file-range` | Replaces line ranges with multi-turn session support |
@@ -997,7 +998,7 @@ The Developer Toolbox provides utilities for writing, validating, and scaffoldin
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"],
+        "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
         "fileSandbox": {
           "predicate": {"tag": "DirectoryRecursive", "contents": "./src"},
           "maxFileSize": null,
@@ -1040,70 +1041,6 @@ The developer toolbox exposes a single tool named `developer_{name}_developer_to
 - **Parameter**: `capability` (string) - Which operation to perform
 - **Additional parameters** vary by capability
 
-#### validate-tool
-
-```json
-{
-  "capability": "validate-tool",
-  "tool_path": "./tools/my-tool.sh"
-}
-```
-
-**Response:**
-```json
-{
-  "path": "./tools/my-tool.sh",
-  "valid": true,
-  "slug": "my-tool",
-  "error": null
-}
-```
-
-#### scaffold-agent
-
-```json
-{
-  "capability": "scaffold-agent",
-  "template": "openai",
-  "slug": "my-new-agent",
-  "file_path": "./my-new-agent.json",
-  "force": false
-}
-```
-
-**Templates:** `openai`, `mistral`, `ollama`
-
-**Response:**
-```json
-{
-  "success": true,
-  "path": "./my-new-agent.json",
-  "error": null
-}
-```
-
-#### scaffold-tool
-
-```json
-{
-  "capability": "scaffold-tool",
-  "language": "bash",
-  "slug": "my-new-tool",
-  "file_path": "./tools/my-new-tool.sh",
-  "force": false
-}
-```
-
-**Languages:** `bash`, `python`, `haskell`, `node`
-
-**Response:**
-```json
-{
-  "success": true,
-  "path": "./tools/my-new-tool.sh",
-  "error": null
-}
-```
 
 #### show-spec
 
@@ -2226,7 +2163,6 @@ data CallResult call
     | SqliteToolResult call SqliteQueryResult
     | SystemToolResult call SystemQueryResult
     | DeveloperToolResult call ValidationResult
-    | DeveloperToolScaffoldResult call ScaffoldResult
     | DeveloperToolSpecResult call Text
     | DeveloperToolAgentValidationResult call AgentValidationResult
     | DeveloperToolCreateResult call CreateResult
@@ -2395,7 +2331,6 @@ data QueryError
 data DeveloperToolError
     = CapabilityNotEnabledError Text
     | ValidationError Text
-    | ScaffoldError Text
     | FileExistsError FilePath
     | InvalidTemplateError Text
     | InvalidRangeError Text
@@ -2550,7 +2485,7 @@ data PortalError
       "contents": {
         "name": "dev",
         "description": "Development utilities",
-        "capabilities": ["validate-tool", "scaffold-agent", "scaffold-tool", "read-file-range", "write-file-range", "patch-file"],
+        "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
         "fileSandbox": {
           "predicate": {
             "tag": "Any",

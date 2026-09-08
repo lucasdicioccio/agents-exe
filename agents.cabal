@@ -111,7 +111,6 @@ library agents-lib
                     , System.Agents.Tools.DeveloperToolbox.Range
                     , System.Agents.Tools.DeveloperToolbox.Read
                     , System.Agents.Tools.DeveloperToolbox.Restore
-                    , System.Agents.Tools.DeveloperToolbox.Scaffold
                     , System.Agents.Tools.DeveloperToolbox.Spec
                     , System.Agents.Tools.DeveloperToolbox.Templates
                     , System.Agents.Tools.DeveloperToolbox.Types

@@ -70,10 +70,7 @@ defaultDeveloperToolbox =
             { developerToolboxName = "developer"
             , developerToolboxDescription = "Tools for developing agents and tools"
             , developerToolboxCapabilities =
-                [ DevToolValidateTool
-                , DevToolScaffoldAgent
-                , DevToolScaffoldTool
-                , DevToolShowSpec
+                [ DevToolShowSpec
                 , DevToolValidateAgent
                 , DevToolCreateAgent
                 , DevToolCreateTool

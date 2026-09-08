@@ -268,9 +268,6 @@ systemTool box =
 This creates a tool that provides developer utilities for writing and validating
 agents and tools. The tool accepts parameters based on the capability:
 
-* validate-tool: { "tool_path": "/path/to/tool.sh" }
-* scaffold-agent: { "template": "openai", "slug": "my-agent", "file_path": "my-agent.json", "force": false }
-* scaffold-tool: { "language": "bash", "slug": "my-tool", "file_path": "my-tool.sh", "force": false }
 * show-spec: { "spec_name": "bash-tools" }
 * read-file-range: { "path": "/path/to/file", "ranges": "1-10,20-30" }
 * write-file-range: { "path": "/path/to/file", "ranges": "head,5-10,tail", "contentBlocks": ["new content"] }
@@ -300,48 +297,6 @@ developerTool tracer box =
 -- | Execute a developer tool capability
 executeDeveloperCapability :: Tracer IO ToolsTrace -> DeveloperTools.Toolbox -> Text.Text -> Aeson.Object -> IO (CallResult ())
 executeDeveloperCapability tracer box cap params = case cap of
-    "validate-tool" -> do
-        case KeyMap.lookup (AesonKey.fromText "tool_path") params of
-            Just (Aeson.String toolPath) -> do
-                result <- DeveloperTools.executeValidateTool (contramap (\t -> ToolsTrace (BashToolsLoadTraceInner t)) tracer) box (Text.unpack toolPath)
-                case result of
-                    Left err -> pure $ DeveloperToolError () err
-                    Right valResult -> pure $ DeveloperToolResult () valResult
-            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'tool_path' parameter")
-    "scaffold-agent" -> do
-        let mTemplate = case KeyMap.lookup (AesonKey.fromText "template") params of
-                Just (Aeson.String t) -> t
-                _ -> "openai"
-        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
-                Just (Aeson.String s) -> s
-                _ -> "new-agent"
-        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
-                Just (Aeson.String fp) -> Text.unpack fp
-                _ -> "new-agent.json"
-        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
-                Just (Aeson.Bool f) -> f
-                _ -> False
-        result <- DeveloperTools.executeScaffoldAgent box mTemplate mSlug mFilePath mForce
-        case result of
-            Left err -> pure $ DeveloperToolError () err
-            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
-    "scaffold-tool" -> do
-        let mLang = case KeyMap.lookup (AesonKey.fromText "language") params of
-                Just (Aeson.String l) -> l
-                _ -> "bash"
-        let mSlug = case KeyMap.lookup (AesonKey.fromText "slug") params of
-                Just (Aeson.String s) -> s
-                _ -> "new-tool"
-        let mFilePath = case KeyMap.lookup (AesonKey.fromText "file_path") params of
-                Just (Aeson.String fp) -> Text.unpack fp
-                _ -> "new-tool.sh"
-        let mForce = case KeyMap.lookup (AesonKey.fromText "force") params of
-                Just (Aeson.Bool f) -> f
-                _ -> False
-        result <- DeveloperTools.executeScaffoldTool box mLang mSlug mFilePath mForce
-        case result of
-            Left err -> pure $ DeveloperToolError () err
-            Right scaffoldResult -> pure $ DeveloperToolScaffoldResult () scaffoldResult
     "show-spec" -> do
         case KeyMap.lookup (AesonKey.fromText "spec_name") params of
             Just (Aeson.String specName) -> do

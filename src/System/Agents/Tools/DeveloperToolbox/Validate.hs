@@ -1,28 +1,21 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Validation capabilities for the DeveloperToolbox.
 
-This module provides functionality for validating:
-- Bash tool scripts
-- Agent JSON configuration files
+This module provides functionality for validating agent JSON configuration
+files.
 -}
 module System.Agents.Tools.DeveloperToolbox.Validate (
     -- * Validation execution
-    executeValidateTool,
     executeValidateAgent,
 
     -- * Validation helpers (exposed for testing)
     validateAgentStructure,
 ) where
-
-import Control.Exception (SomeException, try)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import System.Directory (doesFileExist)
-
-import Prod.Tracer (Tracer (..))
 
 import System.Agents.Base (
     Agent (..),
@@ -30,72 +23,11 @@ import System.Agents.Base (
     DeveloperToolCapability (..),
  )
 import qualified System.Agents.FileLoader as FileLoader
-import System.Agents.Tools.Bash (LoadTrace)
-import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.DeveloperToolbox.Types (
     AgentValidationResult (..),
     DeveloperToolError (..),
     Toolbox (..),
-    ValidationResult (..),
  )
-
--------------------------------------------------------------------------------
--- Tool Validation
--------------------------------------------------------------------------------
-
-{- | Execute tool validation.
-
-This function validates a bash tool script by attempting to load its
-description using the standard 'describe' command.
-
-Returns:
-* 'Right ValidationResult' on successful validation (valid or invalid)
-* 'Left DeveloperToolError' if capability not enabled
--}
-executeValidateTool ::
-    Tracer IO LoadTrace ->
-    Toolbox ->
-    FilePath ->
-    IO (Either DeveloperToolError ValidationResult)
-executeValidateTool tracer toolbox toolPath = do
-    if DevToolValidateTool `notElem` toolboxCapabilities toolbox
-        then pure $ Left $ CapabilityNotEnabledError "validate-tool"
-        else do
-            result <- try $ Bash.loadScript tracer toolPath
-            case result of
-                Left (e :: SomeException) -> do
-                    let errMsg = Text.pack $ show e
-                    pure $
-                        Right $
-                            ValidationResult
-                                { validationPath = toolPath
-                                , validationValid = False
-                                , validationSlug = Nothing
-                                , validationError = Just errMsg
-                                }
-                Right (Left _err) -> do
-                    let errMsg = "Failed to load script"
-                    pure $
-                        Right $
-                            ValidationResult
-                                { validationPath = toolPath
-                                , validationValid = False
-                                , validationSlug = Nothing
-                                , validationError = Just errMsg
-                                }
-                Right (Right scriptDesc) -> do
-                    pure $
-                        Right $
-                            ValidationResult
-                                { validationPath = toolPath
-                                , validationValid = True
-                                , validationSlug = Just scriptDesc.scriptInfo.scriptSlug
-                                , validationError = Nothing
-                                }
-
--------------------------------------------------------------------------------
--- Agent Validation
--------------------------------------------------------------------------------
 
 {- | Execute agent validation.
 
@@ -216,3 +148,4 @@ validateAgentStructure agent =
          in if hasAnySource
                 then []
                 else ["No tool sources configured (toolDirectory, bashToolboxes, mcpServers, openApiToolboxes, postgrestToolboxes, builtinToolboxes, or extraAgents)"]
+

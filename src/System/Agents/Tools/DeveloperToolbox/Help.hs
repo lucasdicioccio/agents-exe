@@ -47,7 +47,7 @@ buildHelpTextForCapabilities enabledCapabilities =
                 [ "Developer Toolbox Help"
                 , "======================"
                 , ""
-                , "This toolbox provides utilities for writing, validating, and scaffolding"
+                , "This toolbox provides utilities for writing and validating"
                 , "agents and tools. Below are detailed descriptions of all available capabilities."
                 , ""
                 , "Enabled capabilities in this toolbox:"
@@ -94,26 +94,15 @@ buildHelpTextForCapabilities enabledCapabilities =
                 , "   - Use write-file-range for simple line replacements (faster)"
                 , "   - patch-file uses unified diff format"
                 , ""
-                , "5. Validation First"
-                , "   - Use validate-tool before deploying new tools"
+                , "5. Validation"
                 , "   - Use validate-agent to check agent configurations"
                 , ""
-                , "6. Scaffolding"
-                , "   - scaffold-agent creates agent JSON from templates (openai, mistral, ollama)"
-                , "   - scaffold-agent writes the standard agent JSON format with the"
-                , "     OpenAIAgentDescription wrapper (the same format validate-agent expects)"
-                , "   - scaffold-tool creates tool scripts (bash, python, haskell)"
-                , "   - scaffold-tool automatically makes generated bash scripts executable"
-                , "   - Use these as starting points, then customize"
-                , ""
-                , "7. Bash Tool Permissions"
+                , "6. Bash Tool Permissions"
                 , "   - Bash tools MUST be executable (owner execute bit) to be loaded"
                 , "   - The tool loader ignores non-executable files in tool directories"
-                , "   - scaffold-tool sets executable permissions for bash scripts automatically"
                 , "   - If you copy or move a bash tool manually, run: chmod +x <tool-path>"
-                , "   - validate-tool will fail with 'Permission Denied' if the script is not executable"
                 , ""
-                , "8. Optimistic Locking with Snapshots"
+                , "7. Optimistic Locking with Snapshots"
                 , "   - Enable 'snapshot' capability to get snapshot references"
                 , "   - Use expectedSnapshotRef parameter to prevent concurrent edit conflicts"
                 , "   - If SnapshotMismatchError occurs, re-read and retry your edit"
@@ -125,80 +114,6 @@ buildHelpTextForCapabilities enabledCapabilities =
 -- | Build comprehensive help text for a single capability.
 buildCapabilityHelp :: DeveloperToolCapability -> Text
 buildCapabilityHelp cap = case cap of
-    DevToolValidateTool ->
-        Text.unlines
-            [ "validate-tool"
-            , "---------------"
-            , "Validates a bash tool script by loading its description."
-            , ""
-            , "IMPORTANT: The script must be executable (owner execute bit set) for"
-            , "validation to succeed. If you get 'Permission Denied', run:"
-            , "  chmod +x <tool-path>"
-            , ""
-            , "Parameters:"
-            , "  - tool_path (string, required): Path to the tool script to validate"
-            , ""
-            , "Returns: ValidationResult with:"
-            , "  - path: The file path validated"
-            , "  - valid: Boolean indicating if validation passed"
-            , "  - slug: The tool's slug (if valid)"
-            , "  - error: Error message (if invalid)"
-            , ""
-            , "Example:"
-            , "  {\"capability\": \"validate-tool\", \"tool_path\": \"./tools/my-tool.sh\"}"
-            , ""
-            ]
-    DevToolScaffoldAgent ->
-        Text.unlines
-            [ "scaffold-agent"
-            , "--------------"
-            , "Generates agent scaffolding from a template."
-            , ""
-            , "The output is a JSON file in the standard agent configuration format"
-            , "(with an 'OpenAIAgentDescription' tag wrapper). This is the same format"
-            , "that validate-agent expects and the same format used by agent config"
-            , "files loaded by the runtime."
-            , ""
-            , "Parameters:"
-            , "  - template (string, optional): Template to use - 'openai' (default), 'mistral', or 'ollama'"
-            , "  - slug (string, optional): Name/slug for the agent (default: 'new-agent')"
-            , "  - file_path (string, optional): Output file path (default: 'new-agent.json')"
-            , "  - force (boolean, optional): Overwrite existing file (default: false)"
-            , ""
-            , "Returns: ScaffoldResult with:"
-            , "  - success: Boolean indicating if scaffolding succeeded"
-            , "  - path: Path where the agent file was created"
-            , "  - error: Error message (if failed)"
-            , ""
-            , "Example:"
-            , "  {\"capability\": \"scaffold-agent\", \"template\": \"openai\", \"slug\": \"my-agent\", \"file_path\": \"./my-agent.json\"}"
-            , ""
-            ]
-    DevToolScaffoldTool ->
-        Text.unlines
-            [ "scaffold-tool"
-            , "-------------"
-            , "Generates tool scaffolding in the specified language."
-            , ""
-            , "For bash tools, the generated file is automatically made executable"
-            , "(owner execute bit set). If you later copy or move the file manually,"
-            , "remember to run 'chmod +x <tool-path>' so the tool loader can find it."
-            , ""
-            , "Parameters:"
-            , "  - language (string, optional): Language - 'bash' (default), 'python', or 'haskell'"
-            , "  - slug (string, optional): Name/slug for the tool (default: 'new-tool')"
-            , "  - file_path (string, optional): Output file path (default: 'new-tool.sh')"
-            , "  - force (boolean, optional): Overwrite existing file (default: false)"
-            , ""
-            , "Returns: ScaffoldResult with:"
-            , "  - success: Boolean indicating if scaffolding succeeded"
-            , "  - path: Path where the tool file was created"
-            , "  - error: Error message (if failed)"
-            , ""
-            , "Example:"
-            , "  {\"capability\": \"scaffold-tool\", \"language\": \"bash\", \"slug\": \"my-tool\", \"file_path\": \"./tools/my-tool.sh\"}"
-            , ""
-            ]
     DevToolShowSpec ->
         Text.unlines
             [ "show-spec"
@@ -221,8 +136,7 @@ buildCapabilityHelp cap = case cap of
             , "Validates an agent JSON configuration file."
             , ""
             , "The file must be valid JSON in the standard agent configuration format"
-            , "(with an 'OpenAIAgentDescription' tag wrapper). Files produced by"
-            , "scaffold-agent are already in this format."
+            , "(with an 'OpenAIAgentDescription' tag wrapper)."
             , ""
             , "Parameters:"
             , "  - agent_path (string, required): Path to the agent JSON file to validate"
@@ -538,9 +452,6 @@ buildCapabilityHelp cap = case cap of
 
 -- | Get short name for a capability.
 capabilityToShortName :: DeveloperToolCapability -> Text
-capabilityToShortName DevToolValidateTool = "validate-tool"
-capabilityToShortName DevToolScaffoldAgent = "scaffold-agent"
-capabilityToShortName DevToolScaffoldTool = "scaffold-tool"
 capabilityToShortName DevToolShowSpec = "show-spec"
 capabilityToShortName DevToolValidateAgent = "validate-agent"
 capabilityToShortName DevToolCreateAgent = "create-agent"
@@ -562,10 +473,7 @@ useful for reference documentation or when all capabilities are enabled.
 buildHelpText :: Text
 buildHelpText =
     let allCapabilities =
-            [ DevToolValidateTool
-            , DevToolScaffoldAgent
-            , DevToolScaffoldTool
-            , DevToolShowSpec
+            [ DevToolShowSpec
             , DevToolValidateAgent
             , DevToolCreateAgent
             , DevToolCreateTool

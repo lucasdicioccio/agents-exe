@@ -160,7 +160,6 @@ callResultToUserToolResponse _ result =
         SystemToolError _ err ->
             JsonResponse $ Aeson.object ["error" .= ("System tool error: " <> show err)]
         DeveloperToolResult _ valResult -> JsonResponse $ Aeson.toJSON valResult
-        DeveloperToolScaffoldResult _ scaffoldResult -> JsonResponse $ Aeson.toJSON scaffoldResult
         DeveloperToolSpecResult _ content -> TextResponse content
         DeveloperToolAgentValidationResult _ validationResult -> JsonResponse $ Aeson.toJSON validationResult
         DeveloperToolCreateResult _ createResult -> JsonResponse $ Aeson.toJSON createResult

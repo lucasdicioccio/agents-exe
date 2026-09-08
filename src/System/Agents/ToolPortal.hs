@@ -400,12 +400,6 @@ callResultToJson (DeveloperToolResult _ result) =
         , "data" .= result
         , "toolType" .= ("devtool" :: Text)
         ]
-callResultToJson (DeveloperToolScaffoldResult _ result) =
-    Aeson.object
-        [ "type" .= ("success" :: Text)
-        , "data" .= result
-        , "toolType" .= ("devtool-scaffold" :: Text)
-        ]
 callResultToJson (DeveloperToolSpecResult _ result) =
     Aeson.object
         [ "type" .= ("success" :: Text)
