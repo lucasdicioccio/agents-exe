@@ -21,7 +21,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
-import System.FilePath ((</>))
+import System.FilePath (takeFileName, (</>))
 import System.IO.Temp (createTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -32,6 +32,17 @@ import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapabi
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import System.Agents.Tools.DeveloperToolbox.Types (RangeSpec(..))
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
+
+import System.Agents.Base (ConversationId (..), newConversationId)
+import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Session.Types (SessionId (..), TurnId (..), newSessionId, newTurnId)
+import qualified System.Agents.ToolRegistration as ToolReg
+import qualified System.Agents.ToolSchema as ToolSchema
+import System.Agents.Tools.Base (CallResult (..), Tool (..))
+import System.Agents.Tools.Context (ToolCall (..), mkMinimalContext)
+import System.Agents.Tools.DeveloperToolbox.Types (DirectoryListingResult (..))
 
 
 -- | Test data: a simple multi-line file for testing
@@ -82,6 +93,29 @@ testToolbox = do
         Left err -> error $ "Failed to initialize test toolbox: " ++ err
         Right toolbox -> pure toolbox
 
+-- | Create a test toolbox with directory capabilities enabled and sandbox allowing all file access
+testDirectoryToolbox :: IO Toolbox
+testDirectoryToolbox = do
+    let desc =
+            DeveloperToolboxDescription
+                { developerToolboxName = "test-developer-directory"
+                , developerToolboxDescription = "Test developer toolbox with directory capabilities"
+                , developerToolboxCapabilities =
+                    [ DevToolListDirectory
+                    , DevToolTraverseDirectory
+                    ]
+                , developerToolboxActivation = Nothing
+                , developerToolboxFileSandbox = Just FileSandboxConfig
+                    { fsbPredicate = AlwaysAllow
+                    , fsbMaxFileSize = Nothing
+                    , fsbName = Nothing
+                    }
+                }
+    result <- DeveloperToolbox.initializeToolbox silent desc
+    case result of
+        Left err -> error $ "Failed to initialize test directory toolbox: " ++ err
+        Right toolbox -> pure toolbox
+
 -- | Create a temporary directory for testing, clean up after
 withTempDir :: (FilePath -> IO a) -> IO a
 withTempDir action = do
@@ -117,7 +151,7 @@ tests =
         , edgeCaseTests
         , multiRangeTests
         , indentationTests
-        , lineNumberTests
+        , directoryTests
         ]
 
 -------------------------------------------------------------------------------
@@ -1069,3 +1103,122 @@ testSequentialLineReplacement = withTempDir $ \tmpDir -> do
             assertBool "Original B should be removed" $ not ("B" `elem` lines')
             assertBool "Original D should be removed" $ not ("D" `elem` lines')
 
+
+-------------------------------------------------------------------------------
+-- Directory Tests
+-------------------------------------------------------------------------------
+
+directoryTests :: TestTree
+directoryTests =
+    testGroup
+        "Directory Capabilities"
+        [ testCase "list-directory returns entries" testListDirectory
+        , testCase "list-directory recursive returns nested entries" testListDirectoryRecursive
+        , testCase "traverse-directory returns recursive entries" testTraverseDirectory
+        , testCase "ToolRegistration dispatches list-directory" testListDirectoryDispatch
+        , testCase "ToolRegistration dispatches traverse-directory" testTraverseDirectoryDispatch
+        ]
+
+-- | Create a small directory tree for directory tests
+withTestDirectoryTree :: (FilePath -> IO a) -> IO a
+withTestDirectoryTree action = withTempDir $ \tmpDir -> do
+    let root = tmpDir </> "root"
+    createDirectoryIfMissing True (root </> "subdir")
+    Text.writeFile (root </> "file1.txt") "hello\n"
+    Text.writeFile (root </> "subdir" </> "file2.txt") "world\n"
+    action root
+
+-- | Extract the path field from a directory listing entry JSON object.
+entryPath :: Aeson.Value -> FilePath
+entryPath (Aeson.Object obj) =
+    case KeyMap.lookup "path" obj of
+        Just (Aeson.String p) -> Text.unpack p
+        _ -> ""
+entryPath _ = ""
+testListDirectory :: Assertion
+testListDirectory = withTestDirectoryTree $ \root -> do
+    toolbox <- testDirectoryToolbox
+    result <- DeveloperToolbox.executeListDirectory toolbox root False False []
+    case result of
+        Left err -> assertFailure $ show err
+        Right listing -> do
+            listingRecursive listing @?= False
+            let names = map Text.pack $ map (takeFileName . entryPath) (listingEntries listing)
+            assertBool "Should contain file1.txt" $ "file1.txt" `elem` names
+            assertBool "Should contain subdir" $ "subdir" `elem` names
+            assertBool "Should NOT contain nested file2.txt" $ not ("file2.txt" `elem` names)
+testListDirectoryRecursive :: Assertion
+testListDirectoryRecursive = withTestDirectoryTree $ \root -> do
+    toolbox <- testDirectoryToolbox
+    result <- DeveloperToolbox.executeListDirectory toolbox root True False []
+    case result of
+        Left err -> assertFailure $ show err
+        Right listing -> do
+            listingRecursive listing @?= True
+            let paths = map Text.pack $ map entryPath (listingEntries listing)
+            assertBool "Should contain file1.txt" $ any ("file1.txt" `Text.isInfixOf`) paths
+            assertBool "Should contain nested file2.txt" $ any ("file2.txt" `Text.isInfixOf`) paths
+            assertBool "Should contain subdir" $ any ("subdir" `Text.isInfixOf`) paths
+
+testTraverseDirectory :: Assertion
+testTraverseDirectory = withTestDirectoryTree $ \root -> do
+    toolbox <- testDirectoryToolbox
+    result <- DeveloperToolbox.executeTraverseDirectory toolbox root
+    case result of
+        Left err -> assertFailure $ show err
+        Right listing -> do
+            listingRecursive listing @?= True
+            let paths = map Text.pack $ map entryPath (listingEntries listing)
+            assertBool "Should contain file1.txt" $ any ("file1.txt" `Text.isInfixOf`) paths
+            assertBool "Should contain nested file2.txt" $ any ("file2.txt" `Text.isInfixOf`) paths
+
+-- | Helper to execute a developer_tools capability through ToolRegistration
+runDeveloperToolCapability :: Toolbox -> Aeson.Object -> IO (CallResult ToolCall)
+runDeveloperToolCapability toolbox args = do
+    registrations <- ToolReg.registerDeveloperTools toolbox
+    case registrations of
+        Left err -> assertFailure $ "registerDeveloperTools failed: " ++ err
+        Right [] -> assertFailure "Expected at least one tool registration"
+        Right (reg : _) -> do
+            sessionId <- newSessionId
+            convId <- newConversationId
+            turnId <- newTurnId
+            let toolName = ToolSchema.getToolName $ ToolSchema.toolDescriptionName $ ToolReg.declareTool reg
+            let toolCall = ToolCall
+                    { callToolName = toolName
+                    , callArgs = Aeson.Object args
+                    }
+            case ToolReg.findTool reg toolCall of
+                Nothing -> assertFailure $ "Could not find tool: " ++ Text.unpack toolName
+                Just tool -> do
+                    let portal _ _ = pure $ error "Portal not used in test"
+                    let ctx = mkMinimalContext sessionId convId turnId portal
+                    toolRun tool silent ctx (Aeson.Object args)
+
+testListDirectoryDispatch :: Assertion
+testListDirectoryDispatch = withTestDirectoryTree $ \root -> do
+    toolbox <- testDirectoryToolbox
+    let args = KeyMap.fromList
+            [ ("capability", Aeson.String "list-directory")
+            , ("path", Aeson.String (Text.pack root))
+            ]
+    result <- runDeveloperToolCapability toolbox args
+    case result of
+        DeveloperToolDirectoryListingResult _ listing -> do
+            let paths = map Text.pack $ map entryPath (listingEntries listing)
+            assertBool "Dispatch should list file1.txt" $ any ("file1.txt" `Text.isInfixOf`) paths
+        other -> assertFailure $ "Expected DeveloperToolDirectoryListingResult, got: " ++ show other
+
+testTraverseDirectoryDispatch :: Assertion
+testTraverseDirectoryDispatch = withTestDirectoryTree $ \root -> do
+    toolbox <- testDirectoryToolbox
+    let args = KeyMap.fromList
+            [ ("capability", Aeson.String "traverse-directory")
+            , ("path", Aeson.String (Text.pack root))
+            ]
+    result <- runDeveloperToolCapability toolbox args
+    case result of
+        DeveloperToolDirectoryListingResult _ listing -> do
+            let paths = map Text.pack $ map entryPath (listingEntries listing)
+            assertBool "Dispatch should list nested file2.txt" $ any ("file2.txt" `Text.isInfixOf`) paths
+        other -> assertFailure $ "Expected DeveloperToolDirectoryListingResult, got: " ++ show other

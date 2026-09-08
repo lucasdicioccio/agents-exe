@@ -1236,6 +1236,7 @@ registerDeveloperTool box =
                 }
 
 -- | Build parameter properties for developer tools based on enabled capabilities.
+-- | Build parameter properties for developer tools based on enabled capabilities.
 buildDeveloperToolParams :: DeveloperTools.Toolbox -> [ParamProperty]
 buildDeveloperToolParams box =
     let baseParams =
@@ -1259,15 +1260,28 @@ buildDeveloperToolParams box =
                 }
             ]
 
-        -- Add read-file-range params if enabled
-        readFileRangeParams =
+        hasCapability cap = cap `elem` box.toolboxCapabilities
+        needsPath =
+            hasCapability DevToolReadFileRange
+                || hasCapability DevToolWriteFileRange
+                || hasCapability DevToolPatchFile
+                || hasCapability DevToolRestoreFile
+                || hasCapability DevToolListDirectory
+                || hasCapability DevToolTraverseDirectory
+
+        sharedPathParam =
             [ ParamProperty
                 { propertyKey = "path"
                 , propertyType = StringParamType
-                , propertyDescription = "For read-file-range, write-file-range, patch-file, restore-file: Path to the file"
+                , propertyDescription = "For read-file-range, write-file-range, patch-file, restore-file, list-directory, traverse-directory: Path to the file or directory"
                 , propertyRequired = False
                 }
-            , ParamProperty
+            | needsPath
+            ]
+
+        -- Add read-file-range params if enabled
+        readFileRangeParams =
+            [ ParamProperty
                 { propertyKey = "ranges"
                 , propertyType = StringParamType
                 , propertyDescription =
@@ -1345,13 +1359,36 @@ buildDeveloperToolParams box =
                 }
             ]
 
-        hasCapability cap = cap `elem` box.toolboxCapabilities
-
         fileRangeParams =
             if hasCapability DevToolReadFileRange || hasCapability DevToolWriteFileRange || hasCapability DevToolPatchFile || hasCapability DevToolRestoreFile
                 then readFileRangeParams ++ writeFileRangeParams ++ patchFileParams
                 else []
-     in baseParams ++ fileRangeParams
+
+        -- Add directory params if enabled
+        directoryParams =
+            if hasCapability DevToolListDirectory || hasCapability DevToolTraverseDirectory
+                then
+                    [ ParamProperty
+                        { propertyKey = "recursive"
+                        , propertyType = BoolParamType
+                        , propertyDescription = "For list-directory: Include subdirectories recursively (default: false)"
+                        , propertyRequired = False
+                        }
+                    , ParamProperty
+                        { propertyKey = "include_hidden"
+                        , propertyType = BoolParamType
+                        , propertyDescription = "For list-directory: Include hidden files/dotfiles (default: false)"
+                        , propertyRequired = False
+                        }
+                    , ParamProperty
+                        { propertyKey = "name_patterns"
+                        , propertyType = OpaqueParamType "array"
+                        , propertyDescription = "For list-directory: Glob patterns to filter entries by name"
+                        , propertyRequired = False
+                        }
+                    ]
+                else []
+     in baseParams ++ sharedPathParam ++ fileRangeParams ++ directoryParams
 
 -- Helper to convert developer capability to text
 devCapabilityToText :: DeveloperToolCapability -> Text
@@ -1965,12 +2002,41 @@ executeDeveloperCapability tracer box cap params = case cap of
         -- Generate and return the help message based on activated capabilities
         let helpText = generateDeveloperToolboxHelp box
         pure $ DeveloperToolSpecResult () helpText
+    "list-directory" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String dirPath) -> do
+                let recursive = Maybe.fromMaybe False (KeyMap.lookup (AesonKey.fromText "recursive") params >>= parseBoolValue)
+                let includeHidden = Maybe.fromMaybe False (KeyMap.lookup (AesonKey.fromText "include_hidden") params >>= parseBoolValue)
+                let namePatterns = Maybe.fromMaybe [] (KeyMap.lookup (AesonKey.fromText "name_patterns") params >>= parseTextArray)
+                result <- DeveloperTools.executeListDirectory box (Text.unpack dirPath) recursive includeHidden namePatterns
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right listingResult -> pure $ DeveloperToolDirectoryListingResult () listingResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "traverse-directory" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String dirPath) -> do
+                result <- DeveloperTools.executeTraverseDirectory box (Text.unpack dirPath)
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right listingResult -> pure $ DeveloperToolDirectoryListingResult () listingResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
   where
     -- Parse a JSON value as Text, returning Nothing for non-string values
     parseTextValue :: Aeson.Value -> Maybe Text
     parseTextValue (Aeson.String t) = Just t
     parseTextValue _ = Nothing
+
+    -- Parse a JSON value as Bool, returning Nothing for non-boolean values
+    parseBoolValue :: Aeson.Value -> Maybe Bool
+    parseBoolValue (Aeson.Bool b) = Just b
+    parseBoolValue _ = Nothing
+
+    -- Parse a JSON array value as a list of Text, returning Nothing for non-array values
+    parseTextArray :: Aeson.Value -> Maybe [Text]
+    parseTextArray (Aeson.Array arr) = Just $ Maybe.mapMaybe parseTextValue (toList arr)
+    parseTextArray _ = Nothing
 
 -- | Generate a comprehensive help message for the Developer Toolbox based on activated capabilities.
 generateDeveloperToolboxHelp :: DeveloperTools.Toolbox -> Text

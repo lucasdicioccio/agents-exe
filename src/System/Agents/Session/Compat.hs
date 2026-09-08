@@ -166,6 +166,7 @@ callResultToUserToolResponse _ result =
         DeveloperToolReadFileRangeResult _ readResult -> JsonResponse $ Aeson.toJSON readResult
         DeveloperToolWriteFileRangeResult _ writeResult -> JsonResponse $ Aeson.toJSON writeResult
         DeveloperToolPatchResult _ patchResult -> JsonResponse $ Aeson.toJSON patchResult
+        DeveloperToolDirectoryListingResult _ listingResult -> JsonResponse $ Aeson.toJSON listingResult
         DeveloperToolError _ err ->
             JsonResponse $ Aeson.object ["error" .= ("Developer tool error: " <> show err)]
         LuaToolResult _ toolResult -> JsonResponse toolResult

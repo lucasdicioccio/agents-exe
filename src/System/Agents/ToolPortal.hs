@@ -436,6 +436,12 @@ callResultToJson (DeveloperToolPatchResult _ result) =
         , "data" .= result
         , "toolType" .= ("devtool-patch" :: Text)
         ]
+callResultToJson (DeveloperToolDirectoryListingResult _ result) =
+    Aeson.object
+        [ "type" .= ("success" :: Text)
+        , "data" .= result
+        , "toolType" .= ("devtool-directory-listing" :: Text)
+        ]
 callResultToJson (DeveloperToolError _ err) =
     Aeson.object
         [ "type" .= ("error" :: Text)

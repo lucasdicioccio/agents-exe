@@ -71,7 +71,8 @@ module System.Agents.Tools.DirectoryListing (
     -- * Core Functions
     scopedListDirectory,
     scopedTraverseDirectory,
-
+    listDirectory,
+    traverseDirectory,
     -- * Filtering Functions
     applyFilters,
     matchesNameFilter,
@@ -92,16 +93,8 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
-import System.Directory (
-    Permissions (..),
-    doesDirectoryExist,
-    doesFileExist,
-    getModificationTime,
-    getPermissions,
-    getSymbolicLinkTarget,
-    listDirectory,
-    pathIsSymbolicLink,
- )
+import qualified System.Directory as Directory
+import System.Directory hiding (isSymbolicLink, listDirectory)
 import System.FilePath (takeFileName, (</>))
 import System.FilePath.Glob (compile, match)
 import System.Posix.Files (
@@ -293,27 +286,15 @@ Example:
 >>>     Left err -> putStrLn $ "Error: " ++ show err
 -}
 scopedListDirectory :: FileScope -> ListDirectoryOp -> IO (Either ScopeError [FileEntry])
-scopedListDirectory scope op = do
-    -- Validate the target path is within scope
-    validationResult <- validatePath scope (targetPath op)
-    case validationResult of
-        Left err -> pure $ Left err
-        Right canonicalPath -> do
-            -- Check if it's actually a directory
-            isDir <- doesDirectoryExist canonicalPath
-            if not isDir
-                then pure $ Left $ PathDoesNotExist canonicalPath
-                else do
-                    -- Perform the listing
-                    entries <- listDirectoryRecursive scope op canonicalPath canonicalPath
-                    pure $ Right entries
+scopedListDirectory scope op =
+    listDirectoryInternal (Just scope) op
 
 {- | Traverse a directory tree starting from a given path.
 
 Simplified interface when you just want all entries (with scope check).
 
 * No filtering beyond scope validation
-* Non-recursive (direct children only)
+* Recursive (all descendants)
 * Hidden files excluded
 * Full metadata collected
 
@@ -335,22 +316,65 @@ scopedTraverseDirectory scope path =
             , includeHidden = False
             }
 
+{- | List directory contents without scope validation.
+
+The caller is responsible for enforcing any security boundary before
+invoking this function. This is used by toolboxes that perform their own
+access control (e.g. via a file sandbox) and then need a raw listing.
+-}
+listDirectory :: ListDirectoryOp -> IO (Either ScopeError [FileEntry])
+listDirectory op =
+    listDirectoryInternal Nothing op
+
+{- | Traverse a directory tree without scope validation.
+
+The caller is responsible for enforcing any security boundary.
+-}
+traverseDirectory :: FilePath -> IO (Either ScopeError [FileEntry])
+traverseDirectory path =
+    listDirectory $
+        ListDirectoryOp
+            { targetPath = path
+            , filters = []
+            , recursive = True
+            , includeHidden = False
+            }
+
+-- | Internal implementation shared by scoped and unscoped listings.
+listDirectoryInternal ::
+    Maybe FileScope ->
+    ListDirectoryOp ->
+    IO (Either ScopeError [FileEntry])
+listDirectoryInternal mScope op = do
+    validationResult <- case mScope of
+        Nothing -> pure $ Right (targetPath op)
+        Just scope -> validatePath scope (targetPath op)
+    case validationResult of
+        Left err -> pure $ Left err
+        Right canonicalPath -> do
+            isDir <- doesDirectoryExist canonicalPath
+            if not isDir
+                then pure $ Left $ PathDoesNotExist canonicalPath
+                else do
+                    entries <- listDirectoryRecursive mScope op canonicalPath canonicalPath
+                    pure $ Right entries
+
 -------------------------------------------------------------------------------
 -- Internal Implementation
 -------------------------------------------------------------------------------
 
 -- | Recursively list directory contents with full metadata collection.
 listDirectoryRecursive ::
-    FileScope ->
+    Maybe FileScope ->
     ListDirectoryOp ->
     -- | Root path (for calculating relative paths in results)
     FilePath ->
     -- | Current directory being listed
     FilePath ->
     IO [FileEntry]
-listDirectoryRecursive scope op rootPath currentPath = do
+listDirectoryRecursive mScope op rootPath currentPath = do
     -- Get raw directory contents
-    contents <- listDirectory currentPath
+    contents <- Directory.listDirectory currentPath
     let fullPaths = map (currentPath </>) contents
 
     -- Filter hidden files if needed
@@ -360,39 +384,41 @@ listDirectoryRecursive scope op rootPath currentPath = do
                 else filter (not . isHiddenFile) fullPaths
 
     -- Process each entry
-    entries <- concat <$> mapM (processEntry scope op rootPath) visiblePaths
+    entries <- concat <$> mapM (processEntry mScope op rootPath) visiblePaths
 
     pure entries
 
 -- | Process a single filesystem entry (file, directory, or symlink).
 processEntry ::
-    FileScope ->
+    Maybe FileScope ->
     ListDirectoryOp ->
     -- | Root path
     FilePath ->
     -- | Entry path
     FilePath ->
     IO [FileEntry]
-processEntry scope op rootPath entryPath = do
-    -- Check if path is within scope
-    inScope <- isPathInScopeIO scope entryPath
+processEntry mScope op rootPath entryPath = do
+    -- Check if path is within scope (when a scope is provided)
+    inScope <- case mScope of
+        Nothing -> pure True
+        Just scope -> isPathInScopeIO scope entryPath
     if not inScope
         then pure [] -- Silently skip out-of-scope entries
         else do
             -- Determine if it's a symlink
             isSymlink <- pathIsSymbolicLink entryPath
             if isSymlink
-                then processSymlink scope op rootPath entryPath
-                else processRegularEntry scope op rootPath entryPath
+                then processSymlink mScope op rootPath entryPath
+                else processRegularEntry mScope op rootPath entryPath
 
 -- | Process a symbolic link safely.
 processSymlink ::
-    FileScope ->
+    Maybe FileScope ->
     ListDirectoryOp ->
     FilePath ->
     FilePath ->
     IO [FileEntry]
-processSymlink scope op rootPath linkPath = do
+processSymlink mScope op rootPath linkPath = do
     -- Get the link target
     targetResult <- try $ getSymbolicLinkTarget linkPath
     case targetResult of
@@ -408,8 +434,10 @@ processSymlink scope op rootPath linkPath = do
                         then target
                         else takeFileName linkPath </> target
 
-            -- Check if target is within scope
-            targetInScope <- isPathInScopeIO scope absoluteTarget
+            -- Check if target is within scope (when a scope is provided)
+            targetInScope <- case mScope of
+                Nothing -> pure True
+                Just scope -> isPathInScopeIO scope absoluteTarget
             if not targetInScope
                 then do
                     -- Target outside scope - include link but don't follow
@@ -418,7 +446,7 @@ processSymlink scope op rootPath linkPath = do
                     pure $ maybeToList filtered
                 else do
                     -- Target is within scope, follow it
-                    processRegularEntry scope op rootPath absoluteTarget
+                    processRegularEntry mScope op rootPath absoluteTarget
   where
     isAbsolutePath p = case p of
         ('/' : _) -> True
@@ -428,12 +456,12 @@ processSymlink scope op rootPath linkPath = do
 
 -- | Process a regular file or directory.
 processRegularEntry ::
-    FileScope ->
+    Maybe FileScope ->
     ListDirectoryOp ->
     FilePath ->
     FilePath ->
     IO [FileEntry]
-processRegularEntry scope op rootPath entryPath = do
+processRegularEntry mScope op rootPath entryPath = do
     isDir <- doesDirectoryExist entryPath
     if isDir
         then do
@@ -445,7 +473,7 @@ processRegularEntry scope op rootPath entryPath = do
             -- Recurse if needed
             children <-
                 if recursive op
-                    then listDirectoryRecursive scope op rootPath entryPath
+                    then listDirectoryRecursive mScope op rootPath entryPath
                     else pure []
 
             pure (dirEntry ++ children)

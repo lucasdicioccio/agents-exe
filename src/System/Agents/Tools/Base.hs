@@ -114,6 +114,8 @@ data CallResult call
       DeveloperToolWriteFileRangeResult call DeveloperTools.WriteFileRangeResult
     | -- | Developer tool patch file result
       DeveloperToolPatchResult call DeveloperTools.PatchResult
+    | -- | Developer tool directory listing result
+      DeveloperToolDirectoryListingResult call DeveloperTools.DirectoryListingResult
     | -- | Developer tool execution failed
       DeveloperToolError call DeveloperTools.DeveloperToolError
     | -- | Lua tool executed successfully with result
@@ -149,6 +151,7 @@ mapCallResult f c =
         (DeveloperToolReadFileRangeResult v r) -> DeveloperToolReadFileRangeResult (f v) r
         (DeveloperToolWriteFileRangeResult v r) -> DeveloperToolWriteFileRangeResult (f v) r
         (DeveloperToolPatchResult v r) -> DeveloperToolPatchResult (f v) r
+        (DeveloperToolDirectoryListingResult v r) -> DeveloperToolDirectoryListingResult (f v) r
         (DeveloperToolError v e) -> DeveloperToolError (f v) e
         (LuaToolResult v r) -> LuaToolResult (f v) r
         (LuaToolError v e) -> LuaToolError (f v) e
@@ -184,6 +187,7 @@ extractCall (DeveloperToolAgentValidationResult c _) = c
 extractCall (DeveloperToolCreateResult c _) = c
 extractCall (DeveloperToolReadFileRangeResult c _) = c
 extractCall (DeveloperToolWriteFileRangeResult c _) = c
+extractCall (DeveloperToolDirectoryListingResult c _) = c
 extractCall (DeveloperToolPatchResult c _) = c
 extractCall (DeveloperToolError c _) = c
 extractCall (LuaToolResult c _) = c
@@ -245,6 +249,8 @@ callResultByteSize (DeveloperToolCreateResult _ result) =
 callResultByteSize (DeveloperToolReadFileRangeResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (DeveloperToolWriteFileRangeResult _ result) =
+    fromIntegral (LByteString.length (Aeson.encode result))
+callResultByteSize (DeveloperToolDirectoryListingResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))
 callResultByteSize (DeveloperToolPatchResult _ result) =
     fromIntegral (LByteString.length (Aeson.encode result))

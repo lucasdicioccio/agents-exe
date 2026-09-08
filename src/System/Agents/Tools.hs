@@ -363,12 +363,41 @@ executeDeveloperCapability tracer box cap params = case cap of
                             Right patchResult -> pure $ DeveloperToolPatchResult () patchResult
                     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'patch' parameter")
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "list-directory" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String dirPath) -> do
+                let recursive = fromMaybe False (KeyMap.lookup (AesonKey.fromText "recursive") params >>= parseBoolValue)
+                let includeHidden = fromMaybe False (KeyMap.lookup (AesonKey.fromText "include_hidden") params >>= parseBoolValue)
+                let namePatterns = fromMaybe [] (KeyMap.lookup (AesonKey.fromText "name_patterns") params >>= parseTextArray)
+                result <- DeveloperTools.executeListDirectory box (Text.unpack dirPath) recursive includeHidden namePatterns
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right listingResult -> pure $ DeveloperToolDirectoryListingResult () listingResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "traverse-directory" -> do
+        case KeyMap.lookup (AesonKey.fromText "path") params of
+            Just (Aeson.String dirPath) -> do
+                result <- DeveloperTools.executeTraverseDirectory box (Text.unpack dirPath)
+                case result of
+                    Left err -> pure $ DeveloperToolError () err
+                    Right listingResult -> pure $ DeveloperToolDirectoryListingResult () listingResult
+            _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
   where
     -- Parse a JSON value as Text, returning Nothing for non-string values
     parseTextValue :: Aeson.Value -> Maybe Text.Text
     parseTextValue (Aeson.String t) = Just t
     parseTextValue _ = Nothing
+
+    -- Parse a JSON value as Bool, returning Nothing for non-boolean values
+    parseBoolValue :: Aeson.Value -> Maybe Bool
+    parseBoolValue (Aeson.Bool b) = Just b
+    parseBoolValue _ = Nothing
+
+    -- Parse a JSON array value as a list of Text, returning Nothing for non-array values
+    parseTextArray :: Aeson.Value -> Maybe [Text.Text]
+    parseTextArray (Aeson.Array arr) = Just $ mapMaybe parseTextValue (toList arr)
+    parseTextArray _ = Nothing
 
 -------------------------------------------------------------------------------
 
