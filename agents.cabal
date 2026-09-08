@@ -248,6 +248,7 @@ library agents-lib
                       network-uri,
                       monad-logger,
                       mtl,
+                      optparse-applicative,
                       process,
                       process-extras,
                       prodapi,

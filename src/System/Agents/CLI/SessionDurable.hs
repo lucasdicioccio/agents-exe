@@ -29,12 +29,16 @@ module System.Agents.CLI.SessionDurable (
     parseResultFile,
     extractDeferredCalls,
     extractIsolatedCalls,
+    buildToolCallPolicy,
+    applyAgentDurableConfig,
 ) where
 
 import Control.Monad (forM_)
+import Data.Map (Map)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
+import Data.List (find)
 import Data.Maybe (catMaybes, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -47,6 +51,9 @@ import System.IO (stderr)
 
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.Base as Base
+import System.Agents.CLI.Aliases (AliasDefinition)
+import System.Agents.CLI.OneShot (PromptScriptOptions (..), loadPromptScriptOptions)
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.OneShot (nodeToAgent)
 import System.Agents.Session.Base
@@ -63,16 +70,18 @@ import qualified System.Agents.Tools.Context as Ctx
 data SessionDurableOptions = SessionDurableOptions
     { sdCommand :: SessionDurableCommand
     }
-    deriving (Show, Eq)
+    deriving (Show)
 
 -- | Subcommands for durable session operations.
 data SessionDurableCommand
-    = SessionPause SessionId
+    = SessionStart PromptScriptOptions Bool
+    | SessionStep SessionId
+    | SessionPause SessionId
     | SessionResume SessionId
     | SessionPending SessionId
     | SessionComplete ContinuationToken FilePath
     | SessionRunIsolated SessionId
-    deriving (Show, Eq)
+    deriving (Show)
 
 -------------------------------------------------------------------------------
 -- Pure helpers
@@ -194,17 +203,41 @@ The agent is configured for the session's conversation id so that resumed
 execution carries the same lineage. The caller can further customise the
 agent (e.g. set asynchronous mode) before running steps.
 -}
-withAgentForSession ::
+-- | Load the JSON agent configuration from a file.
+loadJsonAgentFile :: FilePath -> IO Base.Agent
+loadJsonAgentFile path = do
+    result <- Aeson.eitherDecodeFileStrict' path
+    case result of
+        Left err -> do
+            Text.hPutStrLn stderr $ "Error parsing agent file " <> Text.pack path <> ": " <> Text.pack err
+            exitFailure
+        Right (Base.AgentDescription agent) -> pure agent
+
+-- | Build a runtime 'ToolCallPolicy' from a declarative policy config.
+buildToolCallPolicy :: Base.ToolCallPolicyConfig -> ToolCallPolicy
+buildToolCallPolicy cfg _ctx call =
+    maybe (Base.tpcDefaultDisposition cfg) Base.tprDisposition $
+        find (\rule -> Base.tprToolName rule == callName call) (Base.tpcRules cfg)
+
+-- | Apply durable settings from the JSON agent config to a runtime agent.
+applyAgentDurableConfig :: Base.Agent -> Agent r -> Agent r
+applyAgentDurableConfig jsonAgent agent =
+    let agent' = maybe agent (\mode -> withExecutionMode mode agent) (Base.executionMode jsonAgent)
+     in maybe agent' (\cfg -> withToolCallPolicy (buildToolCallPolicy cfg) agent') (Base.toolCallPolicyConfig jsonAgent)
+-- | Build an execution agent from the first supplied agent file for a given
+-- conversation id. Durable settings from the JSON agent config are applied.
+buildAgentForFile ::
     SessionStore.SessionStore ->
     FilePath ->
     [FilePath] ->
-    Session ->
+    Base.ConversationId ->
     (Agent (LlmTurnContent, Session) -> IO a) ->
     IO a
-withAgentForSession _ _ [] _ _ = do
+buildAgentForFile _ _ [] _ _ = do
     Text.hPutStrLn stderr "Error: session commands that advance execution require an agent file (use --agent-file)"
     exitFailure
-withAgentForSession store apiKeysFile (agentFile : _) sess action = do
+buildAgentForFile store apiKeysFile (agentFile : _) convId action = do
+    jsonAgent <- loadJsonAgentFile agentFile
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let props =
             AgentTree.Props
@@ -220,9 +253,25 @@ withAgentForSession store apiKeysFile (agentFile : _) sess action = do
             Text.hPutStrLn stderr $ "Error loading agent tree: " <> Text.pack (show errs)
             exitFailure
         AgentTree.Initialized tree -> do
-            let convId = SessionStore.sessionIdToConversationId (sessionId sess)
-            agent <- nodeToAgent store Nothing convId silent apiKeys (AgentTree.osTreeRoot tree)
+            agent0 <- nodeToAgent store Nothing convId silent apiKeys (AgentTree.osTreeRoot tree)
+            let agent = applyAgentDurableConfig jsonAgent agent0
             action agent
+
+-- | Build an execution agent from the first supplied agent file.
+--
+-- The agent is configured for the session's conversation id so that resumed
+-- execution carries the same lineage. The caller can further customise the
+-- agent (e.g. set asynchronous mode) before running steps.
+withAgentForSession ::
+    SessionStore.SessionStore ->
+    FilePath ->
+    [FilePath] ->
+    Session ->
+    (Agent (LlmTurnContent, Session) -> IO a) ->
+    IO a
+withAgentForSession store apiKeysFile agentFiles sess action = do
+    let convId = SessionStore.sessionIdToConversationId (sessionId sess)
+    buildAgentForFile store apiKeysFile agentFiles convId action
 
 -------------------------------------------------------------------------------
 -- Command handlers
@@ -233,15 +282,82 @@ handleSessionDurable ::
     SessionStore.SessionStore ->
     FilePath ->
     [FilePath] ->
+    Map Text AliasDefinition ->
     SessionDurableOptions ->
     IO ()
-handleSessionDurable store apiKeysFile agentFiles opts =
+handleSessionDurable store apiKeysFile agentFiles aliases opts =
     case opts.sdCommand of
+        SessionStart promptOpts runStep -> handleStart store apiKeysFile agentFiles aliases promptOpts runStep
+        SessionStep sid -> handleStep store apiKeysFile agentFiles sid
         SessionPause sid -> handlePause store apiKeysFile agentFiles sid
         SessionResume sid -> handleResume store apiKeysFile agentFiles sid
         SessionPending sid -> handlePending store sid
         SessionComplete token path -> handleComplete store token path
         SessionRunIsolated sid -> handleRunIsolated store apiKeysFile agentFiles sid
+
+-- | Start a new durable session from a prompt.
+handleStart ::
+    SessionStore.SessionStore ->
+    FilePath ->
+    [FilePath] ->
+    Map Text AliasDefinition ->
+    PromptScriptOptions ->
+    Bool ->
+    IO ()
+handleStart _ _ [] _ _ _ = do
+    Text.hPutStrLn stderr "Error: session start requires an agent file (use --agent-file)"
+    exitFailure
+handleStart store apiKeysFile agentFiles aliases opts runStep = do
+    (promptText, mediaAttachments) <- loadPromptScriptOptions aliases Nothing opts
+    convId <- Base.newConversationId
+    sid <- newSessionId
+    tid <- newTurnId
+    buildAgentForFile store apiKeysFile agentFiles convId $ \agent0 -> do
+        let agent = agent0{ctxExecutionMode = Asynchronous}
+        sPrompt <- sysPrompt agent
+        sTools <- sysTools agent
+        let uQuery = Just (UserQuery promptText mediaAttachments)
+        let initialTurn = UserTurn (UserTurnContent sPrompt sTools uQuery []) Nothing
+        let sess = Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous)
+        if runStep
+            then do
+                (_agent, result) <- runStepM convId agent sess
+                case result of
+                    Left (llmTurn, finalSess) -> do
+                        storeSessionById store sid finalSess
+                        Text.putStrLn $ "session-id: " <> formatSessionId sid
+                        Text.putStrLn "Session completed."
+                        forM_ llmTurn.llmResponse.responseText Text.putStrLn
+                    Right finalSess -> do
+                        storeSessionById store sid finalSess
+                        Text.putStrLn $ "session-id: " <> formatSessionId sid
+                        printSessionState finalSess
+            else do
+                storeSessionById store sid sess
+                Text.putStrLn $ "session-id: " <> formatSessionId sid
+                printSessionState sess
+
+-- | Run exactly one scheduling step on an existing session.
+handleStep ::
+    SessionStore.SessionStore ->
+    FilePath ->
+    [FilePath] ->
+    SessionId ->
+    IO ()
+handleStep store apiKeysFile agentFiles sid = do
+    sess <- requireSession store sid "step"
+    withAgentForSession store apiKeysFile agentFiles sess $ \agent0 -> do
+        let agent = agent0{ctxExecutionMode = Asynchronous}
+        let convId = SessionStore.sessionIdToConversationId sid
+        (_agent, result) <- runStepM convId agent sess
+        case result of
+            Left (llmTurn, finalSess) -> do
+                storeSessionById store sid finalSess
+                Text.putStrLn "Session completed."
+                forM_ llmTurn.llmResponse.responseText Text.putStrLn
+            Right finalSess -> do
+                storeSessionById store sid finalSess
+                printSessionState finalSess
 
 -- | Pause after one async step of the agent.
 handlePause ::
@@ -386,6 +502,24 @@ printYieldedState sess =
             forM_ deferred $ \tc ->
                 forM_ tc.tcContinuation $ \token ->
                     Text.putStrLn $ "  token: " <> formatContinuationToken token <> " (" <> callName tc.tcCall <> ")"
+
+-- | Print a human-readable summary of the current session state.
+printSessionState :: Session -> IO ()
+printSessionState sess =
+    case sess.turns of
+        [] -> Text.putStrLn "State: empty session"
+        (turn : _) -> case turn of
+            UserTurn _ _ -> Text.putStrLn "State: UserTurn (ready for LLM)"
+            LlmTurn llmTurn _ ->
+                if null llmTurn.llmToolCalls
+                    then do
+                        Text.putStrLn "State: LlmTurn (completed)"
+                        forM_ llmTurn.llmResponse.responseText Text.putStrLn
+                    else do
+                        Text.putStrLn "State: LlmTurn"
+                        forM_ llmTurn.llmToolCalls $ \call ->
+                            Text.putStrLn $ "  tool call: " <> callName call
+            PartialUserTurn _ _ -> printYieldedState sess
 
 formatToolCallId :: ToolCallId -> Text
 formatToolCallId (ToolCallId uuid) = UUID.toText uuid

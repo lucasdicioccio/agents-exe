@@ -76,6 +76,8 @@ makeAgentTemplate templateName agentSlug = case templateName of
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing
+            , executionMode = Nothing
+            , toolCallPolicyConfig = Nothing
             }
     "ollama" ->
         Agent
@@ -99,6 +101,8 @@ makeAgentTemplate templateName agentSlug = case templateName of
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing
+            , executionMode = Nothing
+            , toolCallPolicyConfig = Nothing
             }
     _ ->
         -- Default to OpenAI template
@@ -123,6 +127,8 @@ makeAgentTemplate templateName agentSlug = case templateName of
             , extraAgents = Nothing
             , skillSources = Nothing
             , autoEnableSkills = Nothing
+            , executionMode = Nothing
+            , toolCallPolicyConfig = Nothing
             }
 
 -------------------------------------------------------------------------------

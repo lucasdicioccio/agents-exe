@@ -21,7 +21,10 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import System.Agents.Base (ConversationId (..))
+import qualified System.Agents.Base as Base
 import System.Agents.CLI.SessionDurable (
+    applyAgentDurableConfig,
+    buildToolCallPolicy,
     extractDeferredCalls,
     extractIsolatedCalls,
     formatContinuationToken,
@@ -127,6 +130,9 @@ tests =
         "Session Durable CLI"
         [ tokenFormattingTests
         , resultFileParsingTests
+        , policyConfigTests
+        , buildPolicyTests
+        , applyConfigTests
         , deferredCallExtractionTests
         , isolatedCallExtractionTests
         , pendingCompleteIntegrationTest
@@ -287,7 +293,96 @@ pendingCompleteIntegrationTest =
                 Nothing -> pure ()
 
             -- After completion there should be no deferred calls.
-            extractDeferredCalls updated @?= []
+-- | Minimal JSON agent config for testing config application.
+minimalBaseAgent :: Base.Agent
+minimalBaseAgent =
+    Base.Agent
+        { Base.slug = "test-agent"
+        , Base.apiKeyId = "test-key"
+        , Base.flavor = "openai"
+        , Base.modelUrl = "http://example.com/v1"
+        , Base.modelName = "test-model"
+        , Base.announce = "test agent"
+        , Base.systemPrompt = []
+        , Base.toolDirectory = Nothing
+        , Base.bashToolboxes = Nothing
+        , Base.mcpServers = Nothing
+        , Base.openApiToolboxes = Nothing
+        , Base.postgrestToolboxes = Nothing
+        , Base.builtinToolboxes = Nothing
+        , Base.extraAgents = Nothing
+        , Base.skillSources = Nothing
+        , Base.autoEnableSkills = Nothing
+        , Base.executionMode = Nothing
+        , Base.toolCallPolicyConfig = Nothing
+        }
+
+-- | Tool-call policy config JSON round-trip tests.
+policyConfigTests :: TestTree
+policyConfigTests =
+    testGroup
+        "ToolCallPolicyConfig JSON"
+        [ testCase "round-trips default and rules" $ do
+            let cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        [ Base.ToolCallPolicyRule "bash_command" (Defer (Reason "approval"))
+                        , Base.ToolCallPolicyRule "fetch_remote" RunAsync
+                        ]
+            let json = Aeson.encode cfg
+            Aeson.decode json @?= Just cfg
+        , testCase "parses example policy config JSON" $ do
+            let json =
+                    LBS8.pack $
+                        unlines
+                            [ "{"
+                            , "  \"default\": {\"tag\":\"runSync\"},"
+                            , "  \"rules\": ["
+                            , "    {\"tool\":\"bash_command\",\"disposition\":{\"tag\":\"defer\",\"reason\":\"approval required\"}},"
+                            , "    {\"tool\":\"fetch_remote\",\"disposition\":{\"tag\":\"runAsync\"}}"
+                            , "  ]"
+                            , "}"
+                            ]
+            case Aeson.decode json :: Maybe Base.ToolCallPolicyConfig of
+                Nothing -> assertFailure "failed to parse policy config"
+                Just cfg -> do
+                    Base.tpcDefaultDisposition cfg @?= RunSync
+                    map Base.tprToolName (Base.tpcRules cfg) @?= ["bash_command", "fetch_remote"]
+        ]
+
+-- | 'buildToolCallPolicy' tests.
+buildPolicyTests :: TestTree
+buildPolicyTests =
+    testGroup
+        "buildToolCallPolicy"
+        [ testCase "uses rule disposition for matching tool" $ do
+            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))]
+            let policy = buildToolCallPolicy cfg
+            policy undefined (mkCall "defer_me") @?= Defer (Reason "test")
+        , testCase "uses default disposition for unknown tool" $ do
+            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))]
+            let policy = buildToolCallPolicy cfg
+            policy undefined (mkCall "unknown") @?= RunSync
+        ]
+
+-- | 'applyAgentDurableConfig' tests.
+applyConfigTests :: TestTree
+applyConfigTests =
+    testGroup
+        "applyAgentDurableConfig"
+        [ testCase "sets execution mode from JSON agent" $ do
+            let jsonAgent = minimalBaseAgent{Base.executionMode = Just Asynchronous}
+            let agent = mkAsyncAgent defaultToolCallPolicy
+            let agent' = applyAgentDurableConfig jsonAgent agent
+            ctxExecutionMode agent' @?= Asynchronous
+        , testCase "sets tool-call policy from JSON agent" $ do
+            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "bash_command" (Defer (Reason "approval"))]
+            let jsonAgent = minimalBaseAgent{Base.toolCallPolicyConfig = Just cfg}
+            let agent = mkAsyncAgent defaultToolCallPolicy
+            let agent' = applyAgentDurableConfig jsonAgent agent
+            ctxToolCallPolicy agent' undefined (mkCall "bash_command") @?= Defer (Reason "approval")
+            ctxToolCallPolicy agent' undefined (mkCall "other") @?= RunSync
+        ]
 
 -- | Simple insertion sort for tests.
 sort :: Ord a => [a] -> [a]

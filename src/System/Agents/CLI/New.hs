@@ -266,6 +266,8 @@ buildAgentConfig catalog opts = do
                 , extraAgents = Nothing
                 , skillSources = Nothing
                 , autoEnableSkills = Nothing
+                , executionMode = Nothing
+                , toolCallPolicyConfig = Nothing
                 }
 
     pure (presetName, agent)

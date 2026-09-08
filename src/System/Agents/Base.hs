@@ -20,6 +20,7 @@ import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
+import System.Agents.Session.Types (ExecutionMode, ToolCallDisposition)
 
 -- Import FileSandbox types for unified sandboxing
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
@@ -1492,6 +1493,60 @@ instance FromJSON McpServerDescription where
             "McpSimpleBinary" ->
                 McpSimpleBinary <$> v .: "contents"
             _ -> fail "expecting McpSimpleBinary 'tag'"
+-------------------------------------------------------------------------------
+-- Tool-Call Policy Configuration
+-------------------------------------------------------------------------------
+
+{- | Per-agent configuration for tool-call disposition policy.
+
+This optional configuration lets an agent declare a default disposition
+for all tool calls and a list of per-tool rules. When present it is used
+by the runtime to decide how each tool call should be executed.
+-}
+data ToolCallPolicyConfig = ToolCallPolicyConfig
+    { tpcDefaultDisposition :: ToolCallDisposition
+    -- ^ Default disposition when no rule matches
+    , tpcRules :: [ToolCallPolicyRule]
+    -- ^ Per-tool disposition rules
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolCallPolicyConfig where
+    toJSON cfg =
+        Aeson.object
+            [ "default" .= tpcDefaultDisposition cfg
+            , "rules" .= tpcRules cfg
+            ]
+
+instance FromJSON ToolCallPolicyConfig where
+    parseJSON = Aeson.withObject "ToolCallPolicyConfig" $ \v ->
+        ToolCallPolicyConfig
+            <$> v .: "default"
+            <*> v .: "rules"
+
+{- | A single rule mapping a tool name to a disposition.
+-}
+data ToolCallPolicyRule = ToolCallPolicyRule
+    { tprToolName :: Text
+    -- ^ Name of the tool this rule applies to
+    , tprDisposition :: ToolCallDisposition
+    -- ^ Disposition to use for this tool
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolCallPolicyRule where
+    toJSON rule =
+        Aeson.object
+            [ "tool" .= tprToolName rule
+            , "disposition" .= tprDisposition rule
+            ]
+
+instance FromJSON ToolCallPolicyRule where
+    parseJSON = Aeson.withObject "ToolCallPolicyRule" $ \v ->
+        ToolCallPolicyRule
+            <$> v .: "tool"
+            <*> v .: "disposition"
+
 
 -------------------------------------------------------------------------------
 -- Agent Definition
@@ -1559,6 +1614,10 @@ data Agent
     -- ^ Sources to load skills from (directories, git repos)
     , autoEnableSkills :: Maybe [SkillName]
     -- ^ Skills to enable automatically at session start
+    , executionMode :: Maybe ExecutionMode
+    -- ^ Optional execution mode override for this agent
+    , toolCallPolicyConfig :: Maybe ToolCallPolicyConfig
+    -- ^ Optional tool-call policy configuration for this agent
     }
     deriving (Show, Eq, Generic)
 

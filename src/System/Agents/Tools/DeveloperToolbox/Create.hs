@@ -174,6 +174,8 @@ agentFromOverrides overrides =
         , extraAgents = fromMaybe Nothing (overrideExtraAgents overrides)
         , skillSources = fromMaybe Nothing (overrideSkillSources overrides)
         , autoEnableSkills = fromMaybe Nothing (overrideAutoEnableSkills overrides)
+        , executionMode = Nothing
+        , toolCallPolicyConfig = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -196,6 +198,8 @@ mergeAgentWithOverrides ref overrides =
         , extraAgents = fromMaybe (extraAgents ref) (overrideExtraAgents overrides)
         , skillSources = fromMaybe (skillSources ref) (overrideSkillSources overrides)
         , autoEnableSkills = fromMaybe (autoEnableSkills ref) (overrideAutoEnableSkills overrides)
+        , executionMode = Nothing
+        , toolCallPolicyConfig = Nothing
         }
 
 -------------------------------------------------------------------------------

@@ -193,8 +193,21 @@ data ExecutionMode
     | Asynchronous
     deriving (Show, Eq, Ord, Generic)
 
-instance ToJSON ExecutionMode
-instance FromJSON ExecutionMode
+instance ToJSON ExecutionMode where
+    toJSON Synchronous = Aeson.String "synchronous"
+    toJSON Asynchronous = Aeson.String "asynchronous"
+
+instance FromJSON ExecutionMode where
+    parseJSON = Aeson.withText "ExecutionMode" $ \txt ->
+        case txt of
+            "synchronous" -> pure Synchronous
+            "asynchronous" -> pure Asynchronous
+            -- Legacy constructor-name values, kept for backward compatibility.
+            "Synchronous" -> pure Synchronous
+            "Asynchronous" -> pure Asynchronous
+            other ->
+                fail $
+                    "Invalid ExecutionMode: " ++ Text.unpack other ++ ". Expected 'synchronous' or 'asynchronous'."
 
 -------------------------------------------------------------------------------
 -- Durable Workflow Primitives

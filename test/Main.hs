@@ -260,6 +260,8 @@ agentSerializationTests =
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -282,6 +284,8 @@ agentSerializationTests =
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -306,6 +310,8 @@ agentSerializationTests =
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -336,6 +342,8 @@ agentSerializationTests =
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -371,6 +379,8 @@ agentSerializationTests =
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -403,6 +413,8 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -514,6 +526,8 @@ bashToolboxTests =
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -537,6 +551,8 @@ bashToolboxTests =
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
+                    , Base.executionMode = Nothing
+                    , Base.toolCallPolicyConfig = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

@@ -50,7 +50,6 @@ import qualified System.Agents.CLI.McpServer as McpServerCmd
 import qualified System.Agents.CLI.New as NewCmd
 import qualified System.Agents.CLI.OneShot as OneShotCmd
 import qualified System.Agents.CLI.Paths as PathsCmd
-import System.Agents.CLI.PromptScript (MediaReference (..), PromptScript, PromptScriptDirective (..), parseMediaReference)
 import qualified System.Agents.CLI.ReplayToolCall as ReplayToolCallCmd
 import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
@@ -63,13 +62,11 @@ import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
-import qualified System.Agents.OneShot as OneShot
 import System.Agents.Session.Search.Types (DateFilter (..), IndexOperation (..))
 import System.Agents.Session.Base (ContinuationToken (..), SessionId (..))
 import qualified Data.UUID as UUID
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
-import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.CLI (Trace (..), toJsonTrace)
@@ -127,6 +124,8 @@ defaultOpenAIAgent =
         , extraAgents = Nothing
         , skillSources = Nothing
         , autoEnableSkills = Nothing
+        , executionMode = Nothing
+        , toolCallPolicyConfig = Nothing
         }
 
 -- | Mistral AI agent configuration
@@ -153,6 +152,8 @@ mistralAgent =
         , extraAgents = Nothing
         , skillSources = Nothing
         , autoEnableSkills = Nothing
+        , executionMode = Nothing
+        , toolCallPolicyConfig = Nothing
         }
 
 -- | Ollama local LLM agent configuration
@@ -179,6 +180,8 @@ ollamaAgent =
         , extraAgents = Nothing
         , skillSources = Nothing
         , autoEnableSkills = Nothing
+        , executionMode = Nothing
+        , toolCallPolicyConfig = Nothing
         }
 
 -- | Orchestrator agent that can delegate to other agents
@@ -214,6 +217,8 @@ orchestratorAgent =
                 ]
         , skillSources = Nothing
         , autoEnableSkills = Nothing
+        , executionMode = Nothing
+        , toolCallPolicyConfig = Nothing
         }
 
 -- | Ensure the config directory structure exists with default files
@@ -744,43 +749,6 @@ parseTuiOptions argArgs =
                 )
             )
 
--- | Parse the --thinking option with choices: none, stdout, stderr
-parseThinkingOption :: Parser OneShot.ThinkingOutput
-parseThinkingOption =
-    option
-        (maybeReader parseThinking)
-        ( long "thinking"
-            <> metavar "TARGET"
-            <> help "Where to output thinking content: none, stdout, or stderr (default: none)"
-            <> value OneShot.ThinkingNone
-            <> showDefaultWith showThinking
-        )
-  where
-    parseThinking :: String -> Maybe OneShot.ThinkingOutput
-    parseThinking "none" = Just OneShot.ThinkingNone
-    parseThinking "stdout" = Just OneShot.ThinkingStdout
-    parseThinking "stderr" = Just OneShot.ThinkingStderr
-    parseThinking _ = Nothing
-
-    showThinking :: OneShot.ThinkingOutput -> String
-    showThinking OneShot.ThinkingNone = "none"
-    showThinking OneShot.ThinkingStdout = "stdout"
-    showThinking OneShot.ThinkingStderr = "stderr"
-
-{- | Parse a media reference option.
-Supports formats:
-- image/png;/path/to/image.png (explicit MIME type)
-- /path/to/image.png (inferred from extension)
--}
-parseMediaOption :: Parser MediaReference
-parseMediaOption =
-    option
-        (eitherReader parseMediaReference)
-        ( long "media"
-            <> short 'm'
-            <> metavar "MEDIA"
-            <> help "Attach a media file. Format: [mime/type;]/path/to/file (can be specified multiple times)"
-        )
 
 parseOneShotOptions :: Parser OneShotCmd.OneShotOptions
 parseOneShotOptions =
@@ -792,9 +760,7 @@ parseOneShotOptions =
                     <> help "extra session-file to resume/store"
                 )
             )
-        <*> parseThinkingOption
-        <*> parsePromptScriptInput
-        <*> many parseMediaOption
+        <*> OneShotCmd.parsePromptScriptOptions
 
 parseEchoPromptOptions :: Parser EchoPromptCmd.EchoPromptOptions
 parseEchoPromptOptions =
@@ -806,136 +772,8 @@ parseEchoPromptOptions =
                     <> help "extra session-file for alias input mode"
                 )
             )
-        <*> parsePromptScriptInput
+        <*> OneShotCmd.parsePromptScriptInput
 
--- | Parse prompt script input
-parsePromptScriptInput :: Parser PromptScript
-parsePromptScriptInput =
-    let pair = (,) <$> optional parseAliasPrompt <*> many parseRegularDirectives
-     in fmap (\(md0, ds) -> maybe ds (: ds) md0) pair
-  where
-    parseRegularDirectives :: Parser PromptScriptDirective
-    parseRegularDirectives =
-        asum
-            [ promptOption
-            , fileOption
-            , shellOption
-            , smallSeparatorFlag
-            , largeSeparatorFlag
-            , sessionXSOption
-            , sessionSOption
-            , sessionMOption
-            , sessionLOption
-            , sessionXLOption
-            ]
-
-parseAliasPrompt :: Parser PromptScriptDirective
-parseAliasPrompt =
-    AliasPrompt
-        <$> strOption
-            ( long "alias"
-                <> metavar "NAME"
-                <> help "Use a predefined prompt alias (e.g., translate, summarize, code-review, explain)"
-            )
-
-promptOption :: Parser PromptScriptDirective
-promptOption =
-    Str
-        <$> strOption
-            ( long "prompt"
-                <> short 'p'
-                <> metavar "PROMPT"
-                <> help "prompt text paragraph"
-            )
-
-fileOption :: Parser PromptScriptDirective
-fileOption =
-    FileContents
-        <$> strOption
-            ( long "file"
-                <> short 'f'
-                <> metavar "FILE"
-                <> help "prompt text file"
-            )
-
-shellOption :: Parser PromptScriptDirective
-shellOption =
-    ShellOutput
-        <$> strOption
-            ( long "shell"
-                <> metavar "SHELL"
-                <> help "prompt the stdout of a shell command"
-            )
-
-smallSeparatorFlag :: Parser PromptScriptDirective
-smallSeparatorFlag =
-    Separator 4
-        <$> strOption
-            ( long "sep4"
-                <> short 's'
-                <> metavar "SEPARATOR"
-                <> help "a short separator"
-            )
-
-largeSeparatorFlag :: Parser PromptScriptDirective
-largeSeparatorFlag =
-    Separator 40
-        <$> strOption
-            ( long "sep40"
-                <> short 'S'
-                <> metavar "SEPARATOR"
-                <> help "a long separator"
-            )
-
-sessionXSOption :: Parser PromptScriptDirective
-sessionXSOption =
-    SessionContents
-        <$> strOption
-            ( long "session-xs"
-                <> metavar "SESSIONFILE"
-                <> help "inject session file content at minimal verbosity (queries/responses only, skips tool-only turns)"
-            )
-        <*> pure SessionInject.SessionXS
-
-sessionSOption :: Parser PromptScriptDirective
-sessionSOption =
-    SessionContents
-        <$> strOption
-            ( long "session-s"
-                <> metavar "SESSIONFILE"
-                <> help "inject session file content at low verbosity (+thinking, +tool names)"
-            )
-        <*> pure SessionInject.SessionS
-
-sessionMOption :: Parser PromptScriptDirective
-sessionMOption =
-    SessionContents
-        <$> strOption
-            ( long "session-m"
-                <> metavar "SESSIONFILE"
-                <> help "inject session file content at medium verbosity (+statistics)"
-            )
-        <*> pure SessionInject.SessionM
-
-sessionLOption :: Parser PromptScriptDirective
-sessionLOption =
-    SessionContents
-        <$> strOption
-            ( long "session-l"
-                <> metavar "SESSIONFILE"
-                <> help "inject session file content at high verbosity (+tool call results)"
-            )
-        <*> pure SessionInject.SessionL
-
-sessionXLOption :: Parser PromptScriptDirective
-sessionXLOption =
-    SessionContents
-        <$> strOption
-            ( long "session-xl"
-                <> metavar "SESSIONFILE"
-                <> help "inject session file content at maximum verbosity (complete)"
-            )
-        <*> pure SessionInject.SessionXL
 
 parseMcpServer :: Parser Command
 parseMcpServer = pure McpServer
@@ -1322,12 +1160,27 @@ parseSessionDurableOptions :: Parser SessionDurableCmd.SessionDurableOptions
 parseSessionDurableOptions =
     SessionDurableCmd.SessionDurableOptions
         <$> subparser
-            ( command "pause" (info parseSessionPauseCommand (progDesc "Run one async step and yield"))
+            ( command "start" (info parseSessionStartCommand (progDesc "Create a new durable session from a prompt"))
+                <> command "step" (info parseSessionStepCommand (progDesc "Run exactly one scheduling step on a session"))
+                <> command "pause" (info parseSessionPauseCommand (progDesc "Run one async step and yield"))
                 <> command "resume" (info parseSessionResumeCommand (progDesc "Continue execution until completion or next yield"))
                 <> command "pending" (info parseSessionPendingCommand (progDesc "List deferred calls and continuation tokens"))
                 <> command "complete" (info parseSessionCompleteCommand (progDesc "Inject an external result for a continuation token"))
                 <> command "run-isolated" (info parseSessionRunIsolatedCommand (progDesc "Execute deferred RunIsolated calls"))
             )
+
+parseSessionStartCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionStartCommand =
+    SessionDurableCmd.SessionStart
+        <$> OneShotCmd.parsePromptScriptOptions
+        <*> switch
+            ( long "step"
+                <> help "Run one scheduling step immediately after creating the session"
+            )
+
+parseSessionStepCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionStepCommand =
+    SessionDurableCmd.SessionStep <$> parseSessionIdArgument
 
 parseSessionPauseCommand :: Parser SessionDurableCmd.SessionDurableCommand
 parseSessionPauseCommand =
@@ -1474,7 +1327,7 @@ parseProgOptions argparserargs =
                     "session"
                     ( info
                         parseSessionDurableCommand
-                        (progDesc "Operate durable sessions: pause, resume, pending, complete, run-isolated")
+                        (progDesc "Operate durable sessions: start, step, pause, resume, pending, complete, run-isolated")
                     )
                 <> command
                     "tool-call"
@@ -1613,7 +1466,7 @@ runCommand pargs baseTracer sessionStore files =
         ToolCall opts ->
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
         SessionDurable opts ->
-            SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files opts
+            SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

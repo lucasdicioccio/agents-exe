@@ -50,6 +50,8 @@ handleInitialize apiKeysFile agentFiles = do
                 , extraAgents = Nothing
                 , skillSources = Nothing
                 , autoEnableSkills = Nothing
+                , executionMode = Nothing
+                , toolCallPolicyConfig = Nothing
                 }
 
     forM_ (take 1 agentFiles) $ \agentFile -> do
