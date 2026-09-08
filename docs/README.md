@@ -10,6 +10,7 @@ The Agents framework provides a complete infrastructure for:
 - **Multi-Agent Orchestration**: Hierarchical agent trees with parent-child relationships and cross-agent references
 - **Tool System**: Extensible tool registration with support for bash scripts, MCP servers, and OpenAPI integrations
 - **Session Management**: Persistent conversation sessions with turn-based interactions
+- **Durable Workflows**: Asynchronous, resumable execution with deferred tool calls and isolated deployments
 - **Multiple Interfaces**: CLI, TUI (Terminal UI), and MCP server modes
 
 ## Quick Start
@@ -19,6 +20,9 @@ The Agents framework provides a complete infrastructure for:
 ```bash
 # Build the project
 cabal build
+
+# Run the durable-workflow demonstrator (no API key needed)
+cabal run durable-workflow-demo
 
 # Run tests
 cabal test
@@ -94,6 +98,9 @@ Create `agents-exe.cfg.json` in your project root:
 agents/
 ├── app/                      # Application entry point
 │   └── Main.hs              # CLI argument parsing and command routing
+├── examples/                # Runnable example programs
+│   └── durable-workflow-demo/
+│       └── Main.hs          # Self-contained durable workflow demonstrator
 ├── src/
 │   └── System/Agents/
 │       ├── Base.hs          # Core types (Agent, AgentId, ConversationId)
@@ -137,12 +144,35 @@ agents-exe run --agent-file agent.json --session-file session.json
 agents-exe session-print session.json
 ```
 
+### Durable Workflows
+
+Turns can pause mid-execution, persist, and resume when external results
+arrive:
+
+```bash
+# Pause after one async step
+agents session pause <session-id> --agent-file agent.json
+
+# List deferred calls
+agents session pending <session-id>
+
+# Inject an external result
+agents session complete <token> result.json
+
+# Resume until completion or next yield
+agents session resume <session-id> --agent-file agent.json
+```
+
+See [Durable Workflows How-To](durable-workflows-howto.md) for a full walkthrough,
+including a runnable mock-LLM demonstrator.
+
 ## Documentation
 
 - [Architecture](architecture.md) - Runtime and core architecture
 - [Tool System](tools.md) - Tool registration and execution
 - [MCP Protocol](mcp.md) - Model Context Protocol integration
 - [Session Management](sessions.md) - Session lifecycle and persistence
+- [Durable Workflows How-To](durable-workflows-howto.md) - Resumable async execution
 - [Terminal UI](tui.md) - TUI interface
 - [CLI Reference](cli-commands.md) - Command reference
 - [Export/Import](export-import.md) - Tool sharing and distribution

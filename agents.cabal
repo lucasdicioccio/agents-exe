@@ -8,6 +8,7 @@ maintainer:         lucas@dicioccio.fr
 category:           System
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
+                    docs/durable-workflows-howto.md
 extra-source-files: docs/binary-tool.md
 
 copyright:          2024 Lucas DiCioccio
@@ -50,10 +51,10 @@ library agents-lib
                     , System.Agents.CLI.PromptScript
                     , System.Agents.CLI.ReplayToolCall
                     , System.Agents.CLI.SelfDescribe
+                    , System.Agents.CLI.SessionDurable
                     , System.Agents.CLI.SessionEdit
                     , System.Agents.CLI.SessionIndex
                     , System.Agents.CLI.SessionSearch
-                    , System.Agents.CLI.SessionDurable
                     , System.Agents.CLI.Spec
                     , System.Agents.CLI.TUI
                     , System.Agents.CLI.ToolCall
@@ -99,7 +100,6 @@ library agents-lib
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.Cache
                     , System.Agents.Tools.Context
-                    , System.Agents.Tools.DirectoryListing
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.DeveloperToolbox.Capabilities
                     , System.Agents.Tools.DeveloperToolbox.Create
@@ -117,6 +117,7 @@ library agents-lib
                     , System.Agents.Tools.DeveloperToolbox.Types
                     , System.Agents.Tools.DeveloperToolbox.Validate
                     , System.Agents.Tools.DeveloperToolbox.Write
+                    , System.Agents.Tools.DirectoryListing
                     , System.Agents.Tools.EndpointPredicate
                     , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.IO
@@ -189,6 +190,7 @@ library agents-lib
                     , System.Agents.TUI.Types.Conversation
                     , System.Agents.TUI.Types.State
                     , System.Agents.TUI.Buffer
+                    , System.Agents.TUI.Clipboard
                     , System.Agents.TUI.Render
                     , System.Agents.TUI.Render.Attributes
                     , System.Agents.TUI.Render.Conversation
@@ -198,11 +200,10 @@ library agents-lib
                     , System.Agents.TUI.Render.Widgets
                     , System.Agents.TUI.Event
                     , System.Agents.TUI.Event.Dialog
-                    , System.Agents.TUI.Event.Navigation
                     , System.Agents.TUI.Event.Conversation
                     , System.Agents.TUI.Event.Queue
                     , System.Agents.TUI.Event.Attachment
-                    , System.Agents.TUI.Clipboard
+                    , System.Agents.TUI.Event.Navigation
                     , System.Agents.TUI.KeyMapping
                     , System.Agents.TUI.MessageComposer
                     , System.Agents.ToolPortal
@@ -322,6 +323,20 @@ executable agq
     hs-source-dirs:   agq
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
+
+executable durable-workflow-demo
+    import:           warnings
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      text,
+                      uuid
+    hs-source-dirs:   examples/durable-workflow-demo
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+
 test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test

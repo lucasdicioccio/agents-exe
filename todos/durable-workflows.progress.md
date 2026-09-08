@@ -193,7 +193,7 @@ Phase 4's core functions were already implemented during Phase 2. CLI exposure (
   - Returns `IsolationError` for non-zero exit codes, unparseable output, or token mismatches.
 - `dockerRunner :: Text -> DeploymentRunner`
   - Runs `docker run --rm -i <image>` with the envelope on stdin.
-  - Reads stdout and parses the result envelope.
+  Reads stdout and parses the result envelope.
   - Returns `IsolationError` if Docker is unavailable or the container fails.
 - `functionRunner :: DeploymentRunner`
   - Documented placeholder for future serverless/FaaS execution.
@@ -399,7 +399,6 @@ a no-op.
 * `completeLastDeferredTest`: completing the single remaining deferred call
 converts a `PartialUserTurn` into a full `UserTurn`.
 * `compositeBackendDeduplicationTest`: a composite backend's `sbList` returns
-* `compositeBackendDeduplicationTest`: a composite backend's `sbList` returns
 only one entry when the same session is stored in multiple backends.
 
 Implemented the deduplication behavior in `src/System/Agents/SessionStore.hs`:
@@ -419,3 +418,80 @@ Haskell98 and failed to compile under the current GHC/cabal setup.
 * Library builds with `-Wall -Werror`.
 * Test suite `agents-tests` passes, including all Phase 2–7 durable-workflow
 tests and the new Phase 8 determinism/edge-case tests.
+
+---
+
+## Addendum — User-facing how-to and demonstrator ✅ COMPLETE
+
+After completing the implementation phases, a runnable demonstrator and a
+user-facing how-to were added so the durable-workflow mode can be exercised
+without writing custom code first.
+
+### Additions
+
+* `examples/durable-workflow-demo/Main.hs` — self-contained executable that:
+  * simulates an LLM turn with three tool calls (`fetch_local`,
+    `fetch_remote_a`, `fetch_remote_b`);
+  * uses a `ToolCallPolicy` that runs the local call synchronously and defers
+    the two remote calls;
+  * prints the yielded partial turn with continuation tokens;
+  * wakes the session with external results for the deferred calls;
+  * resumes the session and prints the final LLM response.
+  * Uses a mock LLM, so it needs no API keys and runs deterministically.
+
+* `docs/durable-workflows-howto.md` — guide covering:
+  * how to run the demonstrator;
+  * core durable-workflow concepts (execution mode, policy, executor,
+    persistence, wake/resume);
+  * the `agents session pause|resume|pending|complete|run-isolated` CLI
+    commands;
+  * how to build a custom durable agent in Haskell;
+  * how to add durable storage, caching, and isolated execution.
+
+* `docs/README.md` — updated the documentation index to link to the new how-to
+  and mention durable workflows in the overview and quick-start sections.
+
+* `agents.cabal` — registered the new `durable-workflow-demo` executable and
+  fixed the pre-existing missing `System.Agents.TUI.Clipboard` entry in the
+  library's `exposed-modules`.
+
+### Verification
+
+* The `durable-workflow-demo` executable builds with `-Wall -Werror`.
+* The full test suite `agents-tests` passes.
+* Library, `agents-exe`, and `agq` executables all build with `-Wall -Werror`.
+
+---
+
+## Summary — What we gained
+
+Implementing all eight phases of the durable-workflows plan turned agents-exe from a purely synchronous, in-process runner into a **durable, resumable, and isolatable workflow engine**.
+
+### Capabilities delivered
+
+* **Per-call execution policy**: `ToolCallPolicy` lets an agent decide, for every tool call, whether to run it synchronously, defer it, yield it for external completion, or run it in isolation (Docker/subprocess).
+* **Tracked tool-call lifecycle**: `TrackedToolCall` gives every call a stable ID and explicit state (`Ready` / `Running` / `Deferred` / `Completed` / `Failed`), enabling external systems to match results to calls.
+* **Yield and wake**: a session can pause mid-turn, persist, and later resume when external results arrive via `wakeSession` / `resumeSession`.
+* **Pluggable executors**: `ToolExecutor`, `DeploymentRunner`, and concrete runners (`localProcessRunner`, `dockerRunner`) make *how* a call runs independent of the session loop.
+* **Durable session storage**: `SessionBackend` abstracts file, SQLite, and composite backends so sessions can survive process restarts and be shared across machines.
+* **Operator CLI**: `agents session pause|resume|pending|complete|run-isolated` gives operators direct control over durable executions.
+* **Runnable demonstrator and how-to**: users can exercise the canonical flow immediately with `cabal run durable-workflow-demo` and follow `docs/durable-workflows-howto.md` to build their own durable agents.
+
+### Architectural gains
+
+* **Separation of concerns**: policy, execution, persistence, and isolation are now distinct, composable layers.
+* **Backward compatibility**: existing synchronous agents continue to work unchanged; durable features are opt-in via combinators.
+* **Testability**: 848 tests cover policy classification, serialization, wake/resume, caching, isolation envelopes, backend round-trips, CLI helpers, and determinism.
+
+### New modules and examples
+
+* `System.Agents.Session.Durable` — policy/executor primitives
+* `System.Agents.Session.Isolation` — isolated execution envelopes and runners
+* `System.Agents.Session.Wake` — wake/resume API
+* `System.Agents.CLI.SessionDurable` — operator CLI
+* `test/DurableWorkflowTests.hs`, `test/SessionDurableTests.hs`, `test/DurableWorkflowDeterminismTests.hs`
+* `examples/durable-workflow-demo/Main.hs` — runnable mock-LLM demonstrator
+* `docs/durable-workflows-howto.md` — user-facing how-to guide
+
+The codebase now supports the requested example flow end-to-end: an agent issues three tool calls, executes one and defers two, yields, persists, wakes with the two results, and resumes to completion.
+
