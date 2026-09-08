@@ -13,6 +13,10 @@ import Data.Void (Void)
 
 import System.Agents.Base (ConversationId)
 import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
+import System.Agents.Session.Async (
+    mkToolContinuationSnapshot,
+    storeContinuation,
+ )
 import System.Agents.Session.Base
 import System.Agents.Session.Types (StepByteUsage, calculateStepByteUsage)
 import System.Agents.ToolSchema (ParamProperty)
@@ -80,12 +84,16 @@ runStepMSync convId agent sess =
 
 In async mode:
 1. Tool calls are tracked individually through their lifecycle state.
-2. Each call checks the cache first.
-3. After each call, the session can be persisted.
-4. If all calls complete, the turn is finalized.
-5. If yielding is needed, a PartialUserTurn is created.
+2. The configured 'ToolCallPolicy' classifies each call as sync, async,
+   isolated, or deferred.
+3. All 'RunSync' calls are executed in one batch.
+4. 'RunAsync' and 'Defer' calls are moved to the 'Deferred' state and a
+   continuation token is generated.
+5. If all calls complete, the turn is finalized; otherwise a
+   'PartialUserTurn' is yielded.
 
-This enables sessions to be paused and resumed, potentially on different machines.
+This enables sessions to be paused and resumed, potentially on different
+machines.
 -}
 runStepMAsync :: forall r. ConversationId -> Agent r -> Session -> IO (Agent r, Either r Session)
 runStepMAsync convId agent sess =
@@ -132,8 +140,9 @@ getPartialTurn session =
 
 {- | Start a new async user turn.
 
-Wraps all pending tool calls as 'Ready' tracked calls, then executes
-one call and either finalizes the turn or creates a partial turn.
+Wraps all pending tool calls as 'Ready' tracked calls, classifies them
+according to the agent's policy, executes the synchronous batch, and
+yields any deferred calls.
 -}
 startNewAsyncTurn ::
     forall r.
@@ -152,7 +161,9 @@ startNewAsyncTurn convId agent sess sPrompt sTools uQuery calls = do
 
 {- | Continue execution of a partial turn.
 
-Takes the existing tracked calls and executes the next ready call.
+Takes the existing tracked calls and re-runs the scheduler.  Calls that
+are already 'Completed' or 'Deferred' are left untouched; any remaining
+'Ready' calls are classified and processed.
 -}
 continuePartialTurn ::
     forall r.
@@ -165,10 +176,15 @@ continuePartialTurn convId agent sess partial = do
     let ctx = buildContext agent sess convId
     executeTrackedCalls ctx agent sess partial.pUserPrompt partial.pUserTools partial.pUserQuery partial.pTrackedToolCalls
 
-{- | Execute the next ready tool call in the tracked list.
+{- | Execute the scheduler over a list of tracked calls.
 
-Checks cache first, then executes if needed. Updates the session with
-either a new partial turn or a complete user turn.
+* 'Ready' calls classified as 'RunSync' (or 'RunIsolated') are executed,
+  with an optional cache lookup first.
+* 'Ready' calls classified as 'RunAsync' or 'Defer' are moved to
+  'Deferred' and a continuation snapshot is stored if a store is configured.
+* If every call ends up 'Completed', a full 'UserTurn' is emitted.
+* Otherwise a 'PartialUserTurn' is emitted, allowing the session to be
+  resumed later.
 -}
 executeTrackedCalls ::
     forall r.
@@ -180,68 +196,71 @@ executeTrackedCalls ::
     Maybe UserQuery ->
     [TrackedToolCall] ->
     IO (Agent r, Either r Session)
-executeTrackedCalls ctx agent sess sPrompt sTools uQuery tracked =
-    case findReady tracked of
-        Nothing -> do
-            -- No ready calls remain - finalize the turn if all completed
-            let completed = partialCompletedResponses $ PartialUserTurnContent sPrompt sTools uQuery tracked
+executeTrackedCalls ctx agent sess sPrompt sTools uQuery tracked = do
+    processed <- mapM (processTrackedCall ctx agent) tracked
+    if all (\tc -> tc.tcState == Completed) processed
+        then do
+            let content = PartialUserTurnContent sPrompt sTools uQuery processed
+            let completed = partialCompletedResponses content
             let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd completed)
             sess' <- addTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery completed) (Just byteUsage))
             pure (agent, Right sess')
-        Just (idx, tc) -> do
-            -- Execute next ready call with cache check
-            result <- executeTrackedCallWithCache agent ctx tc
-            let updatedTc = tc{tcState = Completed, tcResult = Just result}
-            let newTracked = updateAt idx updatedTc tracked
-            if hasReady newTracked
-                then do
-                    -- More calls remain ready - create partial turn
-                    let partial = PartialUserTurnContent sPrompt sTools uQuery newTracked
-                    let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery newTracked
-                    sess' <- addTurn sess (PartialUserTurn partial (Just byteUsage))
-                    pure (agent, Right sess')
-                else do
-                    -- No more ready calls - check if we can finalize
-                    if allCompleted newTracked
-                        then do
-                            let completed = partialCompletedResponses partial
-                                partial = PartialUserTurnContent sPrompt sTools uQuery newTracked
-                            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd completed)
-                            sess' <- addTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery completed) (Just byteUsage))
-                            pure (agent, Right sess')
-                        else do
-                            -- Some calls are deferred - create partial turn
-                            let partial = PartialUserTurnContent sPrompt sTools uQuery newTracked
-                            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery newTracked
-                            sess' <- addTurn sess (PartialUserTurn partial (Just byteUsage))
-                            pure (agent, Right sess')
+        else do
+            let content = PartialUserTurnContent sPrompt sTools uQuery processed
+            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery processed
+            sess' <- addTurn sess (PartialUserTurn content (Just byteUsage))
+            pure (agent, Right sess')
   where
     addTurn s t = do
         tId <- newTurnId
         pure $ s{turns = t : s.turns, turnId = tId}
 
-    findReady :: [TrackedToolCall] -> Maybe (Int, TrackedToolCall)
-    findReady tcs =
-        let indexed = zip [0 ..] tcs
-         in case filter (\(_, tc) -> tc.tcState == Ready) indexed of
-                [] -> Nothing
-                ((i, tc) : _) -> Just (i, tc)
+{- | Process a single tracked call according to the agent's policy.
 
-    hasReady :: [TrackedToolCall] -> Bool
-    hasReady tcs = any (\tc -> tc.tcState == Ready) tcs
+Non-'Ready' calls are returned unchanged.  'Ready' calls are classified
+and either executed immediately or deferred.
+-}
+processTrackedCall ::
+    forall r.
+    ToolExecutionContext ->
+    Agent r ->
+    TrackedToolCall ->
+    IO TrackedToolCall
+processTrackedCall _ctx _agent tc
+    | tc.tcState /= Ready = pure tc
+processTrackedCall ctx agent tc = do
+    let disp = agent.ctxToolCallPolicy ctx tc.tcCall
+    case snd (flattenDisposition disp) of
+        RunSync -> executeAndComplete disp
+        RunIsolated _spec -> executeAndComplete disp
+        RunAsync -> deferCall disp
+        Defer _reason -> deferCall disp
+        -- 'flattenDisposition' should never return 'Decorate', but the
+        -- compiler cannot see that. Treat an unexpected decorator tree as
+        -- synchronous to keep the scheduler total.
+        Decorate _ _ -> executeAndComplete disp
+  where
+    executeAndComplete disp = do
+        result <- executeTrackedCallWithCache agent ctx tc
+        pure $ tc{tcState = Completed, tcResult = Just result, tcPolicy = AppliedPolicy disp Nothing}
 
-    allCompleted :: [TrackedToolCall] -> Bool
-    allCompleted tcs = all (\tc -> tc.tcState == Completed) tcs
+    deferCall disp = do
+        token <- newContinuationToken
+        now <- getCurrentTime
+        let snapshot = mkToolContinuationSnapshot token now tc disp ctx
+        case agent.ctxContinuationStore of
+            Just store -> storeContinuation store snapshot
+            Nothing -> pure ()
+        pure $ tc{tcState = Deferred, tcContinuation = Just token, tcPolicy = AppliedPolicy disp Nothing}
 
-    updateAt :: Int -> TrackedToolCall -> [TrackedToolCall] -> [TrackedToolCall]
-    updateAt _ _ [] = []
-    updateAt 0 tc (_ : rest) = tc : rest
-    updateAt n tc (x : rest) = x : updateAt (n - 1) tc rest
+-- | Import needed for getCurrentTime.
+getCurrentTime :: IO Data.Time.UTCTime
+getCurrentTime = Data.Time.getCurrentTime
 
 {- | Create a fresh 'TrackedToolCall' in the 'Ready' state.
 
-In Phase 1 the policy is recorded for observability but every call
-starts as 'Ready' and is executed sequentially.
+The policy is recorded for observability but the call starts as 'Ready'
+and is only classified when the scheduler processes it.
 -}
 mkReadyTrackedCall ::
     ToolExecutionContext ->
@@ -287,10 +306,6 @@ executeCall agent ctx call =
     case agent.ctxToolExecutor of
         Just executor -> executor.execSync ctx call
         Nothing -> agent.toolCall ctx call
-
--- Import needed for getCurrentTime
-getCurrentTime :: IO Data.Time.UTCTime
-getCurrentTime = Data.Time.getCurrentTime
 
 {- | Build a ToolExecutionContext based on the agent's configuration.
 
@@ -422,6 +437,15 @@ contentPartBytes :: ContentPart -> Int
 contentPartBytes (TextPart txt) = Text.length txt * 4
 contentPartBytes (MediaPart media) = Text.length media.mediaBase64Data
 
+-- | Check whether any tracked call is in the 'Ready' state.
+hasReady :: [TrackedToolCall] -> Bool
+hasReady tcs = any (\tc -> tc.tcState == Ready) tcs
+
+-- | Check whether any tracked call is in the 'Deferred' state.
+hasDeferred :: [TrackedToolCall] -> Bool
+hasDeferred tcs = any (\tc -> tc.tcState == Deferred) tcs
+
+
 -------------------------------------------------------------------------------
 -- Naive Step Functions
 -------------------------------------------------------------------------------
@@ -447,14 +471,18 @@ naiveStep sess0 = do
                         let uQuery0 = userTurn.userQuery
                         let tAnswers0 = userTurn.userToolResponses
                         pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
-                    (PartialUserTurn partial _mUsage) -> do
-                        -- Partial turn: continue with remaining ready calls
-                        let sPrompt0 = partial.pUserPrompt
-                        let sTools0 = partial.pUserTools
-                        let uQuery0 = partial.pUserQuery
-                        let tAnswers0 = partialCompletedResponses partial
-                        -- Create completion with completed responses so far
-                        pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
+                    (PartialUserTurn partial _mUsage) ->
+                        -- Partial turn: continue with remaining ready calls.
+                        -- If only deferred calls remain, ask for a user prompt with
+                        -- an empty missing-tool list so the async scheduler yields.
+                        if hasReady partial.pTrackedToolCalls || hasDeferred partial.pTrackedToolCalls
+                            then pure $ AskUserPrompt (MissingUserPrompt False (partialPendingCalls partial))
+                            else do
+                                let sPrompt0 = partial.pUserPrompt
+                                let sTools0 = partial.pUserTools
+                                let uQuery0 = partial.pUserQuery
+                                let tAnswers0 = partialCompletedResponses partial
+                                pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
 
 -- | Step function that stops when the LLM returns no tool calls.
 naiveTilNoToolCallStep :: Session -> IO (Action (LlmTurnContent, Session))
@@ -483,17 +511,15 @@ naiveTilNoToolCallStep sess = do
                             pure $ AskUserPrompt $ MissingUserPrompt False llmTurn.llmToolCalls
                 PartialUserTurn partial _mUsage ->
                     -- Last turn was partial - need to continue execution
-                    if hasReady partial.pTrackedToolCalls
+                    if hasReady partial.pTrackedToolCalls || hasDeferred partial.pTrackedToolCalls
                         then
-                            -- Still have ready calls: continue execution
+                            -- Still have ready or deferred calls: continue execution
                             pure $ AskUserPrompt $ MissingUserPrompt False (partialPendingCalls partial)
                         else
-                            -- No ready calls: treat like user turn completion
+                            -- No ready or deferred calls: treat like user turn completion
                             let sPrompt0 = partial.pUserPrompt
                                 sTools0 = partial.pUserTools
                                 uQuery0 = partial.pUserQuery
                                 tAnswers0 = partialCompletedResponses partial
                              in pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
-  where
-    hasReady tracked = any (\tc -> tcState tc == Ready) tracked
 

@@ -21,6 +21,9 @@ module System.Agents.Tools.Context (
     ToolExecutionContext (..),
     CallStackEntry (..),
     RecursionError (..),
+    ToolExecutionContextSnapshot (..),
+    contextSnapshot,
+    hydrateContextSnapshot,
 
     -- * Tool Portal types
     TraceId,
@@ -375,6 +378,66 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> v .: "parentConversation"
 
+
+{- | Serializable subset of 'ToolExecutionContext' suitable for durable
+continuation snapshots.
+
+Omits the non-serializable runtime fields ('ctxToolPortal', 'ctxWorld',
+'ctxEventQueue') so that a paused call can be persisted and later
+re-hydrated in a different process.
+-}
+data ToolExecutionContextSnapshot = ToolExecutionContextSnapshot
+    { tecsSessionId :: SessionId
+    , tecsConversationId :: ConversationId
+    , tecsTurnId :: TurnId
+    , tecsCallStack :: [CallStackEntry]
+    , tecsAllowedTools :: [Text]
+    , tecsParentConversation :: Maybe ConversationId
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolExecutionContextSnapshot
+instance FromJSON ToolExecutionContextSnapshot
+
+-- | Extract the serializable snapshot from a full execution context.
+contextSnapshot :: ToolExecutionContext -> ToolExecutionContextSnapshot
+contextSnapshot ctx =
+    ToolExecutionContextSnapshot
+        { tecsSessionId = ctxSessionId ctx
+        , tecsConversationId = ctxConversationId ctx
+        , tecsTurnId = ctxTurnId ctx
+        , tecsCallStack = ctxCallStack ctx
+        , tecsAllowedTools = ctxAllowedTools ctx
+        , tecsParentConversation = ctxParentConversation ctx
+        }
+
+{- | Re-hydrate a full execution context from a snapshot.
+
+The runtime fields ('ctxToolPortal', 'ctxWorld', 'ctxEventQueue') are
+supplied by the caller; the remaining fields are restored from the
+snapshot.
+-}
+hydrateContextSnapshot ::
+    ToolPortal ->
+    Maybe World ->
+    Maybe (TQueue OSEvent) ->
+    ToolExecutionContextSnapshot ->
+    ToolExecutionContext
+hydrateContextSnapshot portal mWorld mEventQueue snap =
+    ToolExecutionContext
+        { ctxSessionId = tecsSessionId snap
+        , ctxConversationId = tecsConversationId snap
+        , ctxTurnId = tecsTurnId snap
+        , ctxAgentId = Nothing
+        , ctxFullSession = Nothing
+        , ctxCallStack = tecsCallStack snap
+        , ctxMaxDepth = Nothing
+        , ctxToolPortal = portal
+        , ctxAllowedTools = tecsAllowedTools snap
+        , ctxWorld = mWorld
+        , ctxEventQueue = mEventQueue
+        , ctxParentConversation = tecsParentConversation snap
+        }
 -------------------------------------------------------------------------------
 -- Construction Helpers
 -------------------------------------------------------------------------------

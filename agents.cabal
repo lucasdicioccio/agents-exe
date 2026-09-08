@@ -167,6 +167,7 @@ library agents-lib
                     , System.Agents.Session.OpenAI
                     , System.Agents.Session.Loop
                     , System.Agents.Session.Step
+                    , System.Agents.Session.Wake
                     , System.Agents.Session.Signals
                     , System.Agents.Session.Search.Index
                     , System.Agents.Session.Search.Query
@@ -327,6 +328,7 @@ test-suite agents-tests
                     , DeveloperToolboxTests
                     , DeveloperToolboxPatchTests
                     , DeveloperToolboxWriteRangeTests
+                    , DurableWorkflowTests
                     , EndpointPredicateTests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests
@@ -365,6 +367,7 @@ test-suite agents-tests
                       prodapi,
                       stm,
                       text,
+                      sqlite-simple,
                       tasty,
                       tasty-hunit,
                       temporary,
