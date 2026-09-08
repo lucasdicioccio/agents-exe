@@ -53,6 +53,7 @@ library agents-lib
                     , System.Agents.CLI.SessionEdit
                     , System.Agents.CLI.SessionIndex
                     , System.Agents.CLI.SessionSearch
+                    , System.Agents.CLI.SessionDurable
                     , System.Agents.CLI.Spec
                     , System.Agents.CLI.TUI
                     , System.Agents.CLI.ToolCall
@@ -288,8 +289,9 @@ executable agents-exe
                       prodapi,
                       optparse-applicative,
                       time,
+                      time,
+                      uuid,
                       temporary,
-                      unix
     hs-source-dirs:   app
     default-language: Haskell2010
 
@@ -348,6 +350,7 @@ test-suite agents-tests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
                     , SessionEditTests
+                    , SessionDurableTests
                     , SessionPrintTests
                     , SkillsTests
                     , ToolPortalTests

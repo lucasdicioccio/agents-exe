@@ -32,6 +32,8 @@ import qualified OpenAPIToolboxTests
 import qualified PostgRESTParseTest
 -- Import Session Edit tests
 import qualified SessionEditTests
+-- Import Session Durable CLI tests
+import qualified SessionDurableTests
 -- Import SessionPrint tests
 import qualified SessionPrintTests
 -- Import EndpointPredicate tests
@@ -103,6 +105,8 @@ tests =
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests
+        , SessionEditTests.tests
+        , SessionDurableTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite

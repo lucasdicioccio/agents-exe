@@ -56,6 +56,7 @@ import qualified System.Agents.CLI.SelfDescribe as SelfDescribeCmd
 import qualified System.Agents.CLI.SessionEdit as SessionEditCmd
 import qualified System.Agents.CLI.SessionIndex as SessionIndexCmd
 import qualified System.Agents.CLI.SessionSearch as SessionSearchCmd
+import qualified System.Agents.CLI.SessionDurable as SessionDurableCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.CLI.ToolCall as ToolCallCmd
@@ -64,6 +65,8 @@ import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import qualified System.Agents.OneShot as OneShot
 import System.Agents.Session.Search.Types (DateFilter (..), IndexOperation (..))
+import System.Agents.Session.Base (ContinuationToken (..), SessionId (..))
+import qualified Data.UUID as UUID
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionPrint.Inject as SessionInject
@@ -508,6 +511,7 @@ data Command
     | Spec SpecCmd.SpecOptions
     | New NewCmd.NewOptions
     | ToolCall ToolCallCmd.ToolCallOptions
+    | SessionDurable SessionDurableCmd.SessionDurableOptions
 
 instance Show Command where
     show (Check _) = "Check"
@@ -531,6 +535,7 @@ instance Show Command where
     show (Spec _) = "Spec"
     show (New _) = "New"
     show (ToolCall _) = "ToolCall"
+    show (SessionDurable _) = "SessionDurable"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -1309,6 +1314,66 @@ parseToolCallOptions =
                     <> help "Optional log file for tracing tool execution"
                 )
             )
+-- | Parse the session durable-workflow command and its subcommands.
+parseSessionDurableCommand :: Parser Command
+parseSessionDurableCommand = SessionDurable <$> parseSessionDurableOptions
+
+parseSessionDurableOptions :: Parser SessionDurableCmd.SessionDurableOptions
+parseSessionDurableOptions =
+    SessionDurableCmd.SessionDurableOptions
+        <$> subparser
+            ( command "pause" (info parseSessionPauseCommand (progDesc "Run one async step and yield"))
+                <> command "resume" (info parseSessionResumeCommand (progDesc "Continue execution until completion or next yield"))
+                <> command "pending" (info parseSessionPendingCommand (progDesc "List deferred calls and continuation tokens"))
+                <> command "complete" (info parseSessionCompleteCommand (progDesc "Inject an external result for a continuation token"))
+                <> command "run-isolated" (info parseSessionRunIsolatedCommand (progDesc "Execute deferred RunIsolated calls"))
+            )
+
+parseSessionPauseCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionPauseCommand =
+    SessionDurableCmd.SessionPause <$> parseSessionIdArgument
+
+parseSessionResumeCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionResumeCommand =
+    SessionDurableCmd.SessionResume <$> parseSessionIdArgument
+
+parseSessionPendingCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionPendingCommand =
+    SessionDurableCmd.SessionPending <$> parseSessionIdArgument
+
+parseSessionCompleteCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionCompleteCommand =
+    SessionDurableCmd.SessionComplete
+        <$> parseContinuationTokenArgument
+        <*> strArgument (metavar "RESULTFILE" <> help "Path to a JSON or plain-text result file")
+
+parseSessionRunIsolatedCommand :: Parser SessionDurableCmd.SessionDurableCommand
+parseSessionRunIsolatedCommand =
+    SessionDurableCmd.SessionRunIsolated <$> parseSessionIdArgument
+
+-- | Parse a session id argument (UUID).
+parseSessionIdArgument :: Parser SessionId
+parseSessionIdArgument =
+    argument
+        (maybeReader parseSessionId)
+        ( metavar "SESSION-ID"
+            <> help "Session UUID"
+        )
+  where
+    parseSessionId :: String -> Maybe SessionId
+    parseSessionId = fmap SessionId . UUID.fromString
+
+-- | Parse a continuation token argument (UUID).
+parseContinuationTokenArgument :: Parser ContinuationToken
+parseContinuationTokenArgument =
+    argument
+        (maybeReader parseToken)
+        ( metavar "TOKEN"
+            <> help "Continuation token UUID"
+        )
+  where
+    parseToken :: String -> Maybe ContinuationToken
+    parseToken = fmap ContinuationToken . UUID.fromString
 
 parseProgOptions :: ArgParserArgs -> Parser Prog
 parseProgOptions argparserargs =
@@ -1404,6 +1469,12 @@ parseProgOptions argparserargs =
                     ( info
                         (parseNewCommand argparserargs)
                         (progDesc "Create new agent or tool scaffolding")
+                    )
+                <> command
+                    "session"
+                    ( info
+                        parseSessionDurableCommand
+                        (progDesc "Operate durable sessions: pause, resume, pending, complete, run-isolated")
                     )
                 <> command
                     "tool-call"
@@ -1541,6 +1612,8 @@ runCommand pargs baseTracer sessionStore files =
             NewCmd.handleNew pargs.configDir opts
         ToolCall opts ->
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
+        SessionDurable opts ->
+            SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files opts
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

@@ -135,15 +135,6 @@ Progress tracker for `todos/durable-workflows.md`.
 - Library builds with `-Wall -Werror`.
 - Test suite `agents-tests` passes, including all Phase 2 and Phase 3 durable-workflow tests.
 
-## Next: Phase 4 — Wake / resume API
-
-Remaining work from the plan:
-
-- `wakeSession` and `resumeSession` exist but could be exposed via CLI commands (Phase 7).
-- Finish `ContinuationStore` load/list implementations are already complete in Phase 2.
-- Add CLI/operator API for pause/resume/complete/pending operations (Phase 7).
-
-
 ## Phase 4 — Wake / resume API ✅ COMPLETE
 
 ### 4.1 Inject external results
@@ -288,13 +279,82 @@ Phase 4's core functions were already implemented during Phase 2. CLI exposure (
 - Library builds with `-Wall -Werror`.
 - Test suite `agents-tests` passes, including all Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 durable-workflow tests.
 
-## Next: Phase 7 — CLI / operator API
+## Phase 7 — CLI / operator API ✅ COMPLETE
+
+### 7.1 New `session` subcommand group
+
+- Added `System.Agents.CLI.SessionDurable` module with:
+  - `SessionDurableOptions` and `SessionDurableCommand` types.
+  - `handleSessionDurable` dispatcher.
+- Integrated the new command group into `app/Main.hs` under `agents session <subcommand>`.
+- Added `uuid` to the `agents-exe` executable build-depends for parsing session/token UUID arguments.
+
+### 7.2 `agents session pause <session-id>`
+
+- Loads the session from the configured file-based `SessionStore`.
+- Loads the first supplied agent file (same mechanism as one-shot) and sets execution mode to `Asynchronous`.
+- Runs one step via `runStepM`.
+- Persists the resulting session (completed or yielded) back to the `SessionStore`.
+- Prints the yielded state and any deferred continuation tokens.
+
+### 7.3 `agents session resume <session-id>`
+
+- Loads the session and agent as above.
+- Calls `resumeSession` from `System.Agents.Session.Wake`.
+- Runs until completion or until the session yields again, persisting after each yield.
+- Prints the final LLM response or the yielded partial-turn summary.
+
+### 7.4 `agents session pending <session-id>`
+
+- Loads the session from the `SessionStore`.
+- Finds the latest `PartialUserTurn`.
+- Lists all deferred `TrackedToolCall`s with their `ToolCallId`, `ContinuationToken`, tool name, and policy/disposition.
+
+### 7.5 `agents session complete <token> <result-file>`
+
+- Reads the result file. If it parses as a `UserToolResponse` JSON value, that value is used; otherwise the raw file contents are treated as a plain-text response.
+- Scans all sessions in the `SessionStore` to locate the session containing the matching continuation token.
+- Calls `wakeSession` with the token/result pair.
+- Persists the updated session.
+- Prints whether the turn is now complete or still partial.
+
+### 7.6 `agents session run-isolated <session-id>` (optional)
+
+- Loads the session and agent.
+- Finds deferred calls whose disposition is `RunIsolated`.
+- If the agent has a configured `ctxDeploymentRunner`, executes those calls through the runner and injects the results via `wakeSession`.
+- Persists the updated session and prints per-call results/errors.
+- If no runner is configured, reports the number of deferred isolated calls found.
+
+### 7.7 Pure helpers and tests
+
+- Exported pure helpers from `System.Agents.CLI.SessionDurable` for testing:
+  - `formatContinuationToken` / `parseContinuationToken`
+  - `parseResultFile`
+  - `extractDeferredCalls`
+  - `extractIsolatedCalls`
+- Added `test/SessionDurableTests.hs` with unit tests for:
+  - Continuation token formatting/parsing round-trip.
+  - Result-file parsing for JSON and plain-text responses.
+  - Deferred-call extraction from partial turns.
+  - Isolated-call extraction from manually constructed partial turns.
+  - Pending/complete integration test via a temporary file session store.
+- Registered the new test module in `test/Main.hs` and `agents.cabal`.
+
+### Verification
+
+- Library builds with `-Wall -Werror`.
+- Executable `agents-exe` builds with `-Wall -Werror`.
+- Test suite `agents-tests` passes, including all Phase 2–6 durable-workflow tests and the new Phase 7 `SessionDurableTests`.
+
+## Next: Phase 8 — Testing strategy
 
 Remaining work from the plan:
 
-- `agents session pause <session-id>` — yield after current step
-- `agents session resume <session-id>` — continue execution
-- `agents session pending <session-id>` — list deferred calls / continuation tokens
-- `agents session complete <token> <result-file>` — inject an external result
-- `agents session run-isolated <session-id>` — poll and execute `RunIsolated` calls
+- Policy classification tests (already covered in Phase 2 `DurableWorkflowTests`).
+- Partial turn serialization through SQLite/file backends (already covered in Phase 3).
+- Wake/resume tests (already covered in Phase 2/4).
+- Cache integration tests (already covered in Phase 2).
+- Isolation contract tests (already covered in Phase 5).
+- Determinism/resume-twice tests (can be added as part of Phase 8).
 
