@@ -358,3 +358,64 @@ Remaining work from the plan:
 - Isolation contract tests (already covered in Phase 5).
 - Determinism/resume-twice tests (can be added as part of Phase 8).
 
+
+## Phase 8 — Testing strategy ✅ COMPLETE
+
+### 8.1 Review of existing Phase 2–7 tests
+
+Verified that the durable-workflow tests already covered the first five Phase 8
+categories:
+
+* Policy classification (Phase 2 `policyClassificationTest`).
+* Partial turn serialization through SQLite/file backends (Phase 3
+  `fileBackendRoundTripTest`, `sqliteBackendRoundTripTest`).
+* Wake/resume (Phase 2 `wakeAndResumeTest`).
+* Cache integration (Phase 2 `cacheIntegrationTest`).
+* Isolation contract (Phase 5 `localProcessRunnerTest`,
+  `isolatedToolNamePolicyTest`).
+
+Updated the Haddock header of `test/DurableWorkflowTests.hs` to explicitly map
+each existing test group to the Phase 8 category it covers, and to reference the
+new Phase 8 determinism/edge-case tests in
+`test/DurableWorkflowDeterminismTests.hs`.
+
+### 8.2 Determinism / resume-twice tests
+
+Added `test/DurableWorkflowDeterminismTests.hs` with:
+
+* `determinismTest`: constructs a yielded session with one sync and two deferred
+calls, wakes both deferred calls, then resumes the identical woken session
+twice.  Asserts that both resumes produce the same semantic outcome by comparing
+LLM turn content and turn history while ignoring generated `turnId` values.
+* `wakeIdempotenceTest`: wakes a session once, then wakes the resulting session
+again with the same token/result pair, asserting the session state is unchanged.
+
+### 8.3 Edge-case tests
+
+Added focused edge-case tests in `DurableWorkflowDeterminismTests`:
+
+* `wakeNoPartialTurnTest`: `wakeSession` on a session without a partial turn is
+a no-op.
+* `completeLastDeferredTest`: completing the single remaining deferred call
+converts a `PartialUserTurn` into a full `UserTurn`.
+* `compositeBackendDeduplicationTest`: a composite backend's `sbList` returns
+* `compositeBackendDeduplicationTest`: a composite backend's `sbList` returns
+only one entry when the same session is stored in multiple backends.
+
+Implemented the deduplication behavior in `src/System/Agents/SessionStore.hs`:
+`mkCompositeSessionStore` now applies `dedupeBy fst` to the concatenated backend
+lists so the primary backend's entry wins.  Updated the composite backend
+Haddock to document this.
+
+* Registered `DurableWorkflowDeterminismTests` in `test/Main.hs`.
+* Added `DurableWorkflowDeterminismTests` to the `other-modules` of the
+`agents-tests` test suite in `agents.cabal`.
+
+### Verification
+* Also added the missing `default-language: Haskell2010` field to the `agq`
+executable stanza in `agents.cabal`; without it the executable defaulted to
+Haskell98 and failed to compile under the current GHC/cabal setup.
+
+* Library builds with `-Wall -Werror`.
+* Test suite `agents-tests` passes, including all Phase 2–7 durable-workflow
+tests and the new Phase 8 determinism/edge-case tests.

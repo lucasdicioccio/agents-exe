@@ -26,6 +26,8 @@ import qualified Data.Text.Encoding as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
+-- Import Phase 8 durable-workflow determinism tests
+import qualified DurableWorkflowDeterminismTests
 -- Import the comprehensive OpenAPI Toolbox tests
 import qualified OpenAPIToolboxTests
 -- Import PostgREST parsing tests
@@ -68,6 +70,7 @@ import qualified OS.ResourcesTests
 import qualified OS.ConcurrentTests
 -- Import OS Integration tests
 import qualified OS.IntegrationTests
+-- Import OS Persistence tests
 -- Import OS Persistence tests
 import qualified OS.PersistenceTests
 -- Import Activation Session tests
@@ -122,6 +125,7 @@ tests =
         , DeveloperToolboxTests.tests
         , DeveloperToolboxWriteRangeTests.tests
         , DeveloperToolboxPatchTests.tests
+        , DurableWorkflowDeterminismTests.tests
         , DurableWorkflowTests.tests
         ]
 

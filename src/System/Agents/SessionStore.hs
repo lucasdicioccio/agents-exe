@@ -262,6 +262,9 @@ sqliteDeleteSession conn sid = do
 
 Reads fall back across all provided backends in order. Writes (store/delete) go
 to the first backend only, which acts as the primary target.
+
+Listing aggregates entries from all backends and deduplicates by 'SessionId',
+keeping the first occurrence (highest-priority backend).
 -}
 newtype CompositeSessionStore = CompositeSessionStore [SessionBackend]
 
@@ -273,7 +276,7 @@ mkCompositeSessionStore backends =
             (primary : _) -> sbStore primary sid sess
             [] -> pure ()
         , sbLoad = fallbackLoad backends
-        , sbList = concat <$> mapM sbList backends
+        , sbList = dedupeBy fst . concat <$> mapM sbList backends
         , sbDelete = \sid -> case backends of
             (primary : _) -> sbDelete primary sid
             [] -> pure ()

@@ -322,7 +322,6 @@ executable agq
     hs-source-dirs:   agq
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
-
 test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
@@ -332,6 +331,7 @@ test-suite agents-tests
                     , DeveloperToolboxPatchTests
                     , DeveloperToolboxWriteRangeTests
                     , DurableWorkflowTests
+                    , DurableWorkflowDeterminismTests
                     , EndpointPredicateTests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests

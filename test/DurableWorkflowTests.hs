@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | Tests for Phases 2, 3, 5, and 6 of the durable-workflows plan.
+{- | Tests for Phases 2, 3, 5, 6, and 8 of the durable-workflows plan.
 
 Phase 2 covers:
 
@@ -35,6 +35,18 @@ Phase 6 covers:
 * New agent combinators ('withDurableWorkflows', 'withAsyncConfig',
   'withDurableExecutor').
 * 'agentStoreSessionWithCallback' storage + progress callback integration.
+
+Phase 8 (testing strategy) is implemented in
+"DurableWorkflowDeterminismTests".  This module's tests are referenced here
+for completeness:
+
+* Determinism: the same yielded session state resumed twice produces the same
+  semantic outcome.
+* Wake idempotence: applying 'wakeSession' with the same token/result twice
+  leaves the session unchanged.
+* Edge cases: waking a session with no partial turn is a no-op; completing the
+  last deferred call converts a 'PartialUserTurn' to a 'UserTurn'; composite
+  backend listing deduplicates entries present in multiple backends.
 -}
 module DurableWorkflowTests where
 
@@ -293,7 +305,7 @@ testContextSnapshot =
 -- Phase 2 tests
 -------------------------------------------------------------------------------
 
--- | Policy classification test.
+-- | Policy classification test (Phase 8 category 1).
 policyClassificationTest :: TestTree
 policyClassificationTest =
     testCase "policy classifies sync vs deferred calls" $ do
@@ -321,7 +333,7 @@ policyClassificationTest =
                                     _ -> assertFailure "unexpected completed response"
                             _ -> assertFailure "expected exactly one completed call"
 
--- | Continuation store round-trip test.
+-- | Continuation store round-trip test (Phase 8 category 2).
 continuationStoreRoundTripTest :: TestTree
 continuationStoreRoundTripTest =
     testCase "continuation snapshots round-trip through SQLite store" $ do
@@ -365,7 +377,7 @@ continuationStoreRoundTripTest =
             | x <= y = x : y : ys
             | otherwise = y : insert x ys
 
--- | Wake and resume test.
+-- | Wake and resume test (Phase 8 category 3).
 wakeAndResumeTest :: TestTree
 wakeAndResumeTest =
     testCase "wakeSession injects results and resumeSession finishes" $ do
@@ -404,7 +416,7 @@ wakeAndResumeTest =
                 length llmTurn.llmToolCalls @?= 0
             Right _ -> assertFailure "expected session to complete after resume"
 
--- | Cache integration test.
+-- | Cache integration test (Phase 8 category 4).
 cacheIntegrationTest :: TestTree
 cacheIntegrationTest =
     testCase "wakeSessionWithCache stores deferred results in the cache" $ do
@@ -480,7 +492,7 @@ snapshotSerializationTest =
 -- Phase 3 tests
 -------------------------------------------------------------------------------
 
--- | File backend round-trip test.
+-- | File backend round-trip test (Phase 8 category 2).
 fileBackendRoundTripTest :: TestTree
 fileBackendRoundTripTest =
     testCase "file backend stores and loads sessions" $ do
@@ -496,7 +508,7 @@ fileBackendRoundTripTest =
             mAfterDelete <- sbLoad backend session.sessionId
             mAfterDelete @?= Nothing
 
--- | SQLite backend round-trip test.
+-- | SQLite backend round-trip test (Phase 8 category 2).
 sqliteBackendRoundTripTest :: TestTree
 sqliteBackendRoundTripTest =
     testCase "SQLite backend stores and loads sessions" $ do
@@ -624,7 +636,7 @@ resultEnvelopeRoundTripTest =
                 ireResult decoded @?= Nothing
                 ireError decoded @?= Just "boom"
 
--- | Local process runner with a bash worker script.
+-- | Local process runner with a bash worker script (Phase 8 category 5).
 localProcessRunnerTest :: TestTree
 localProcessRunnerTest =
     testCase "localProcessRunner executes a worker script" $
@@ -664,7 +676,7 @@ dockerRunnerEnvelopeTest =
         -- and carry the configured image name.
         True @?= True
 
--- | Policy that isolates a tool by name; verifies scheduler integration.
+-- | Policy that isolates a tool by name; verifies scheduler integration (Phase 8 category 5).
 isolatedToolNamePolicyTest :: TestTree
 isolatedToolNamePolicyTest =
     testCase "policy isolates bash_command via localProcessRunner" $
