@@ -49,10 +49,13 @@ module System.Agents.Session.Base (
     partialPendingCalls,
     partialPendingContinuations,
 
-    -- * Durable executor/policy helpers (re-exported from Session.Durable)
+    -- * Durable executor/policy/helpers (re-exported from Session.Durable)
     ToolExecutor (..),
     DeploymentRunner (..),
     IsolationError (..),
+    IsolationEnvelope (..),
+    IsolationResultEnvelope (..),
+    IsolationResultStatus (..),
     ToolCallPolicy,
     defaultToolCallPolicy,
     inProcessExecutor,
@@ -60,6 +63,14 @@ module System.Agents.Session.Base (
     cachingExecutor,
     isolatedExecutor,
     flattenDisposition,
+    mkIsolationEnvelope,
+    mkIsolationSuccessEnvelope,
+    mkIsolationErrorEnvelope,
+    parseIsolationResultEnvelope,
+    parseIsolationResultEnvelopeLBS,
+    localProcessRunner,
+    dockerRunner,
+    functionRunner,
 
     -- * Session backend (re-exported from SessionStore)
     SessionBackend (..),
@@ -90,14 +101,25 @@ import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Durable (
     DeploymentRunner (..),
+    IsolationEnvelope (..),
     IsolationError (..),
+    IsolationResultEnvelope (..),
+    IsolationResultStatus (..),
     ToolCallPolicy,
     ToolExecutor (..),
     cachingExecutor,
     defaultToolCallPolicy,
+    dockerRunner,
     flattenDisposition,
+    functionRunner,
     inProcessExecutor,
     isolatedExecutor,
+    localProcessRunner,
+    mkIsolationEnvelope,
+    mkIsolationErrorEnvelope,
+    mkIsolationSuccessEnvelope,
+    parseIsolationResultEnvelope,
+    parseIsolationResultEnvelopeLBS,
     yieldingExecutor,
  )
 import System.Agents.SessionStore (SessionBackend (..))
@@ -330,4 +352,3 @@ durableAgent = withSessionBackend backend agent
 -}
 withSessionBackend :: SessionBackend -> Agent r -> Agent r
 withSessionBackend backend agent = agent{ctxSessionBackend = Just backend}
-

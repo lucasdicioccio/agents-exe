@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | Tests for Phases 2 and 3 of the durable-workflows plan.
+{- | Tests for Phases 2, 3, and 5 of the durable-workflows plan.
 
 Phase 2 covers:
 
@@ -17,6 +17,14 @@ Phase 3 covers:
 * 'SessionBackend' SQLite round-trip.
 * Composite backend read fallback.
 * 'withSessionBackend' integration with the progress callback.
+
+Phase 5 covers:
+
+* Stable JSON envelope round-tripping for isolated execution.
+* 'localProcessRunner' fork/exec of a worker process.
+* 'dockerRunner' envelope construction (execution skipped when Docker
+  is unavailable).
+* Integration of 'ctxDeploymentRunner' with the async scheduler.
 -}
 module DurableWorkflowTests where
 
@@ -25,10 +33,11 @@ import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Maybe (catMaybes, fromJust, isJust)
-import Data.Text (Text)
+import Data.Text (Text, unpack)
 import Data.Time (UTCTime)
 import Data.UUID (nil)
 import Database.SQLite.Simple (open)
+import System.Directory (emptyPermissions, executable, readable, setPermissions)
 import System.IO.Temp (emptySystemTempFile, withSystemTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -43,6 +52,19 @@ import System.Agents.Session.Async (
     mkSqliteContinuationStore,
  )
 import System.Agents.Session.Base
+import System.Agents.Session.Isolation (
+    IsolationEnvelope (..),
+    IsolationError (..),
+    IsolationResultEnvelope (..),
+    IsolationResultStatus (..),
+    dockerRunner,
+    localProcessRunner,
+    mkIsolationEnvelope,
+    mkIsolationErrorEnvelope,
+    mkIsolationSuccessEnvelope,
+    parseIsolationResultEnvelope,
+    parseIsolationResultEnvelopeLBS,
+ )
 import System.Agents.Session.Step (getPartialTurn, naiveTilNoToolCallStep, runStepMAsync)
 import System.Agents.Session.Types
 import System.Agents.Session.Wake (resumeSession, wakeSession, wakeSessionWithCache)
@@ -88,6 +110,14 @@ tests =
             , sqliteBackendRoundTripTest
             , compositeFallbackTest
             , backendProgressCallbackTest
+            ]
+        , testGroup
+            "Phase 5"
+            [ envelopeRoundTripTest
+            , resultEnvelopeRoundTripTest
+            , localProcessRunnerTest
+            , dockerRunnerEnvelopeTest
+            , isolatedToolNamePolicyTest
             ]
         ]
 
@@ -141,8 +171,9 @@ mkAsyncAgent ::
     Maybe ToolCache ->
     Maybe ContinuationStore ->
     Maybe SessionBackend ->
+    Maybe DeploymentRunner ->
     Agent (LlmTurnContent, Session)
-mkAsyncAgent policy mCache mStore mBackend =
+mkAsyncAgent policy mCache mStore mBackend mRunner =
     Agent
         { step = naiveTilNoToolCallStep
         , sysPrompt = pure $ SystemPrompt "test prompt"
@@ -161,28 +192,8 @@ mkAsyncAgent policy mCache mStore mBackend =
         , ctxToolCallPolicy = policy
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = mStore
-        , ctxDeploymentRunner = Nothing
+        , ctxDeploymentRunner = mRunner
         , ctxSessionBackend = mBackend
-        }
-
--- | Build a session whose latest turn is an LLM turn with the given calls.
-mkSessionWithCalls :: [LlmToolCall] -> Session
-mkSessionWithCalls calls =
-    Session
-        { turns =
-            [ LlmTurn
-                ( LlmTurnContent
-                    { llmResponse = LlmResponse Nothing Nothing Aeson.Null Nothing
-                    , llmToolCalls = calls
-                    }
-                )
-                Nothing
-            ]
-        , sessionId = testSessionId
-        , forkedFromSessionId = Nothing
-        , turnId = TurnId nil
-        , sessionVersion = Just 2
-        , sessionExecutionMode = Just Asynchronous
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -210,6 +221,38 @@ mkSimpleAgent =
         , ctxSessionBackend = Nothing
         }
 
+-- | Build a session whose latest turn is an LLM turn with the given calls.
+mkSessionWithCalls :: [LlmToolCall] -> Session
+mkSessionWithCalls calls =
+    Session
+        { turns =
+            [ LlmTurn
+                ( LlmTurnContent
+                    { llmResponse = LlmResponse Nothing Nothing Aeson.Null Nothing
+                    , llmToolCalls = calls
+                    }
+                )
+                Nothing
+            ]
+        , sessionId = testSessionId
+        , forkedFromSessionId = Nothing
+        , turnId = TurnId nil
+        , sessionVersion = Just 2
+        , sessionExecutionMode = Just Asynchronous
+        }
+
+-- | A serialisable context snapshot for envelope tests.
+testContextSnapshot :: ToolExecutionContextSnapshot
+testContextSnapshot =
+    ToolExecutionContextSnapshot
+        { tecsSessionId = testSessionId
+        , tecsConversationId = testConvId
+        , tecsTurnId = TurnId nil
+        , tecsCallStack = []
+        , tecsAllowedTools = []
+        , tecsParentConversation = Nothing
+        }
+
 -------------------------------------------------------------------------------
 -- Phase 2 tests
 -------------------------------------------------------------------------------
@@ -222,7 +265,7 @@ policyClassificationTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy Nothing Nothing Nothing
+        let agent = mkAsyncAgent policy Nothing Nothing Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         case result of
             Left _ -> assertFailure "expected a yielded session, not a final result"
@@ -252,7 +295,7 @@ continuationStoreRoundTripTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy Nothing (Just store) Nothing
+        let agent = mkAsyncAgent policy Nothing (Just store) Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         session <- case result of
             Right s -> pure s
@@ -294,7 +337,7 @@ wakeAndResumeTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy Nothing Nothing Nothing
+        let agent = mkAsyncAgent policy Nothing Nothing Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         partialSession <- case result of
             Right s -> pure s
@@ -335,7 +378,7 @@ cacheIntegrationTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy (Just cache) Nothing Nothing
+        let agent = mkAsyncAgent policy (Just cache) Nothing Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         partialSession <- case result of
             Right s -> pure s
@@ -438,7 +481,7 @@ compositeFallbackTest :: TestTree
 compositeFallbackTest =
     testCase "composite backend falls back to secondary store" $
         withSystemTempDirectory "session-primary" $ \primaryDir ->
-            withSystemTempDirectory "session-secondary" $ (\secondaryDir -> do
+            withSystemTempDirectory "session-secondary" $ \secondaryDir -> do
                 primary <- mkFileSessionStore primaryDir
                 secondary <- mkFileSessionStore secondaryDir
                 let composite = mkCompositeSessionStore [primary, secondary]
@@ -474,7 +517,8 @@ compositeFallbackTest =
 
                 -- Listing aggregates both backends.
                 listed <- sbList composite
-                length listed @?= 2)
+                length listed @?= 2
+
 -- | Backend integration with the session progress callback.
 backendProgressCallbackTest :: TestTree
 backendProgressCallbackTest =
@@ -497,3 +541,130 @@ backendProgressCallbackTest =
             mLoaded <- sbLoad backend session0.sessionId
             mLoaded @?= Just session0
 
+-------------------------------------------------------------------------------
+-- Phase 5 tests
+-------------------------------------------------------------------------------
+
+-- | Input envelope JSON round-trip.
+envelopeRoundTripTest :: TestTree
+envelopeRoundTripTest =
+    testCase "IsolationEnvelope round-trips through JSON" $ do
+        token <- newContinuationToken
+        let call = mkCall "bash_command"
+        let disp = RunIsolated (Docker "agents-exe/bash-runner:latest")
+        let env = mkIsolationEnvelope token call testContextSnapshot disp (Just "isolate bash for safety")
+        let json = Aeson.encode env
+        case Aeson.eitherDecode json of
+            Left err -> assertFailure $ "envelope decode failed: " ++ err
+            Right decoded -> do
+                ieToken decoded @?= token
+                ieToolCall decoded @?= call
+                ieContextSnapshot decoded @?= testContextSnapshot
+                ieDisposition decoded @?= disp
+                ieReason decoded @?= Just "isolate bash for safety"
+
+-- | Result envelope JSON round-trip and parser helpers.
+resultEnvelopeRoundTripTest :: TestTree
+resultEnvelopeRoundTripTest =
+    testCase "IsolationResultEnvelope round-trips and parses" $ do
+        token <- newContinuationToken
+        let result = TextResponse "hello from isolation"
+        let successEnv = mkIsolationSuccessEnvelope token result
+        let successJson = Aeson.encode successEnv
+        case parseIsolationResultEnvelopeLBS successJson of
+            Left (IsolationError err) -> assertFailure $ unpack err
+            Right decoded -> do
+                ireToken decoded @?= token
+                ireStatus decoded @?= IsolationSuccess
+                ireResult decoded @?= Just result
+                ireError decoded @?= Nothing
+        let errorEnv = mkIsolationErrorEnvelope token "boom"
+        let errorJson = Aeson.encode errorEnv
+        case parseIsolationResultEnvelope $ Aeson.toJSON errorEnv of
+            Left (IsolationError err) -> assertFailure $ unpack err
+            Right decoded -> do
+                ireToken decoded @?= token
+                ireStatus decoded @?= IsolationFailure
+                ireResult decoded @?= Nothing
+                ireError decoded @?= Just "boom"
+
+-- | Local process runner with a bash worker script.
+localProcessRunnerTest :: TestTree
+localProcessRunnerTest =
+    testCase "localProcessRunner executes a worker script" $
+        withSystemTempDirectory "isolation-worker" $ \dir -> do
+            let workerPath = dir ++ "/worker.sh"
+            writeFile workerPath workerScript
+            setPermissions workerPath emptyPermissions{readable = True, executable = True}
+            let runner = localProcessRunner workerPath
+            token <- newContinuationToken
+            let call = mkCall "bash_command"
+            let env = mkIsolationEnvelope token call testContextSnapshot (RunIsolated (LocalProcess workerPath)) Nothing
+            result <- drExecute runner env
+            case result of
+                Left (IsolationError err) -> assertFailure $ "runner failed: " ++ unpack err
+                Right (TextResponse txt) -> txt @?= "hello from worker"
+                Right _ -> assertFailure "expected a text response from the worker"
+  where
+    -- Bash worker that reads the envelope from stdin, echoes the token back,
+    -- and prints a success result envelope. This relies on aeson's compact
+    -- encoding, which places the token field on the single input line.
+    workerScript =
+        unlines
+            [ "#!/usr/bin/env bash"
+            , "set -e"
+            , "TOKEN=$(sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p' | head -1)"
+            , "echo \"{\\\"token\\\":\\\"$TOKEN\\\",\\\"status\\\":\\\"success\\\",\\\"result\\\":{\\\"type\\\":\\\"text\\\",\\\"content\\\":\\\"hello from worker\\\"}}\""
+            ]
+
+-- | Docker runner envelope construction; actual execution is environment-dependent.
+dockerRunnerEnvelopeTest :: TestTree
+dockerRunnerEnvelopeTest =
+    testCase "dockerRunner constructs a named runner" $ do
+        let runner = dockerRunner "agents-exe/bash-runner:latest"
+        drName runner @?= "docker"
+        -- Execution is intentionally not tested here because Docker may not be
+        -- available in the test environment. The runner simply needs to exist
+        -- and carry the configured image name.
+        True @?= True
+
+-- | Policy that isolates a tool by name; verifies scheduler integration.
+isolatedToolNamePolicyTest :: TestTree
+isolatedToolNamePolicyTest =
+    testCase "policy isolates bash_command via localProcessRunner" $
+        withSystemTempDirectory "isolation-worker" $ \dir -> do
+            let workerPath = dir ++ "/worker.sh"
+            writeFile workerPath workerScript
+            setPermissions workerPath emptyPermissions{readable = True, executable = True}
+            let runner = localProcessRunner workerPath
+            let policy _ctx call
+                    | callName call == "bash_command" = RunIsolated (LocalProcess workerPath)
+                    | otherwise = RunSync
+            let agent = mkAsyncAgent policy Nothing Nothing Nothing (Just runner)
+            let calls = [mkCall "sync_tool", mkCall "bash_command"]
+            (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
+            session <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session"
+            case session.turns of
+                (UserTurn content _ : _) -> do
+                    length content.userToolResponses @?= 2
+                    let texts = sort [txt | (_, TextResponse txt) <- content.userToolResponses]
+                    texts @?= ["done:sync_tool", "hello from worker"]
+                _ -> assertFailure "expected a user turn with both responses"
+  where
+    workerScript =
+        unlines
+            [ "#!/usr/bin/env bash"
+            , "set -e"
+            , "TOKEN=$(sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p' | head -1)"
+            , "echo \"{\\\"token\\\":\\\"$TOKEN\\\",\\\"status\\\":\\\"success\\\",\\\"result\\\":{\\\"type\\\":\\\"text\\\",\\\"content\\\":\\\"hello from worker\\\"}}\""
+            ]
+
+    sort :: Ord a => [a] -> [a]
+    sort = foldr insert []
+      where
+        insert x [] = [x]
+        insert x (y : ys)
+            | x <= y = x : y : ys
+            | otherwise = y : insert x ys

@@ -301,11 +301,19 @@ executeTrackedCallWithCache agent ctx tc = do
         Nothing -> executeCall agent ctx tc.tcCall
 
 -- | Execute a single tool call using the agent's configured executor or toolCall.
+-- When a 'DeploymentRunner' is configured but no explicit 'ToolExecutor' is set,
+-- isolated calls are dispatched through the runner and non-isolated calls fall
+-- back to the agent's 'toolCall'.
 executeCall :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
 executeCall agent ctx call =
     case agent.ctxToolExecutor of
         Just executor -> executor.execSync ctx call
-        Nothing -> agent.toolCall ctx call
+        Nothing ->
+            case agent.ctxDeploymentRunner of
+                Just runner ->
+                    let executor = isolatedExecutor agent.ctxToolCallPolicy runner (inProcessExecutor agent.toolCall)
+                     in executor.execSync ctx call
+                Nothing -> agent.toolCall ctx call
 
 {- | Build a ToolExecutionContext based on the agent's configuration.
 
@@ -522,4 +530,3 @@ naiveTilNoToolCallStep sess = do
                                 uQuery0 = partial.pUserQuery
                                 tAnswers0 = partialCompletedResponses partial
                              in pure $ AskLlmCompletion (LlmCompletion sPrompt0 sTools0 uQuery0 tAnswers0 hist [] (Just sess.sessionId))
-

@@ -34,12 +34,42 @@ module System.Agents.Session.Durable (
     DeploymentRunner (..),
     IsolationError (..),
     IsolationSpec (..),
+
+    -- * Envelope types and helpers (re-exported from Isolation)
+    IsolationEnvelope (..),
+    IsolationResultEnvelope (..),
+    IsolationResultStatus (..),
+    mkIsolationEnvelope,
+    mkIsolationSuccessEnvelope,
+    mkIsolationErrorEnvelope,
+    parseIsolationResultEnvelope,
+    parseIsolationResultEnvelopeLBS,
+
+    -- * Concrete runners (re-exported from Isolation)
+    localProcessRunner,
+    dockerRunner,
+    functionRunner,
 ) where
 
-import Data.Text (Text)
 import Data.Time (getCurrentTime)
 
+
 import System.Agents.Session.Async (AsyncToolResponse (..), newContinuationToken)
+import System.Agents.Session.Isolation (
+    DeploymentRunner (..),
+    IsolationEnvelope (..),
+    IsolationError (..),
+    IsolationResultEnvelope (..),
+    IsolationResultStatus (..),
+    dockerRunner,
+    functionRunner,
+    localProcessRunner,
+    mkIsolationEnvelope,
+    mkIsolationErrorEnvelope,
+    mkIsolationSuccessEnvelope,
+    parseIsolationResultEnvelope,
+    parseIsolationResultEnvelopeLBS,
+ )
 import System.Agents.Session.Types (
     Decorator (..),
     IsolationSpec (..),
@@ -49,7 +79,7 @@ import System.Agents.Session.Types (
  )
 import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..))
 import qualified System.Agents.Tools.Cache as Cache
-import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext, contextSnapshot)
 
 -------------------------------------------------------------------------------
 -- Policy
@@ -168,28 +198,12 @@ cachingExecutor cache inner =
 -- Isolated execution
 -------------------------------------------------------------------------------
 
-{- | Error produced by an isolated execution runner.
--}
-newtype IsolationError = IsolationError Text
-    deriving (Show, Eq)
-
-{- | Runner for tool calls outside the current process.
-
-Abstracts over Docker, subprocess workers, and future serverless targets.
-The runner receives the isolation specification and the original tool call
-and must return either an error or a 'UserToolResponse'.
--}
-data DeploymentRunner = DeploymentRunner
-    { drName :: Text
-    -- ^ Human-readable runner name (e.g., "docker", "local-process")
-    , drExecute :: IsolationSpec -> LlmToolCall -> IO (Either IsolationError UserToolResponse)
-    }
-
 {- | Executor that delegates isolated calls to a 'DeploymentRunner'.
 
 The provided policy is re-evaluated for each call to recover the
-'IsolationSpec'. This keeps the 'ToolExecutor' interface unchanged while
-still allowing per-call isolation decisions.
+isolation specification. A fresh continuation token and an
+'IsolationEnvelope' are built for every isolated call so that external
+workers receive a stable, language-agnostic input document.
 -}
 isolatedExecutor :: ToolCallPolicy -> DeploymentRunner -> ToolExecutor -> ToolExecutor
 isolatedExecutor policy runner inner =
@@ -199,18 +213,19 @@ isolatedExecutor policy runner inner =
         }
   where
     dispatch ctx call fallback = do
-        let (decorators, base) = flattenDisposition $ policy ctx call
+        let (_decorators, base) = flattenDisposition $ policy ctx call
         case base of
-            RunIsolated spec -> runIsolated decorators spec ctx call
+            RunIsolated _spec -> runIsolated base ctx call
             _ -> fallback ctx call
 
     dispatchAsync ctx call = do
-        let (decorators, base) = flattenDisposition $ policy ctx call
+        let (_decorators, base) = flattenDisposition $ policy ctx call
         case base of
-            RunIsolated spec -> ToolComplete <$> runIsolated decorators spec ctx call
+            RunIsolated _spec -> ToolComplete <$> runIsolated base ctx call
             _ -> inner.execAsync ctx call
 
-    runIsolated _decorators spec _ctx call = do
-        result <- drExecute runner spec call
+    runIsolated disp ctx call = do
+        token <- newContinuationToken
+        let envelope = mkIsolationEnvelope token call (contextSnapshot ctx) disp Nothing
+        result <- drExecute runner envelope
         pure $ either (TextResponse . ("isolation error: " <>) . (\(IsolationError e) -> e)) id result
-

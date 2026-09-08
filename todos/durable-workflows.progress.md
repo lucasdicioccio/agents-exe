@@ -143,3 +143,102 @@ Remaining work from the plan:
 - Finish `ContinuationStore` load/list implementations are already complete in Phase 2.
 - Add CLI/operator API for pause/resume/complete/pending operations (Phase 7).
 
+
+## Phase 4 — Wake / resume API ✅ COMPLETE
+
+### 4.1 Inject external results
+
+- `wakeSession` and `wakeSessionWithCache` are implemented in `System.Agents.Session.Wake` (introduced in Phase 2).
+- They find the latest `PartialUserTurn`, match deferred calls by token, move them to `Completed`, update the cache, and convert the turn to a full `UserTurn` when all calls are complete.
+
+### 4.2 Resume execution
+
+- `resumeSession` is implemented in `System.Agents.Session.Wake` (introduced in Phase 2).
+- It resumes a session from a partial or completed user turn, running the scheduler until completion or until deferred calls remain.
+
+### 4.3 Complete continuations from external workers
+
+- `resumeAsyncToolCall` uses the SQLite `ContinuationStore` with proper JSON round-tripping of `ToolContinuationSnapshot`.
+- `csLoad` / `csListPending` implementations are complete (Phase 2).
+
+### Note
+
+Phase 4's core functions were already implemented during Phase 2. CLI exposure (Phase 7) is out of scope for this phase.
+
+### Verification
+
+- Library builds with `-Wall -Werror`.
+- Test suite `agents-tests` passes, including Phase 2 wake/resume tests.
+
+## Phase 5 — Isolated deployment primitives ✅ COMPLETE
+
+### 5.1 `DeploymentRunner` abstraction
+
+- Moved `DeploymentRunner` and `IsolationError` to a new module `System.Agents.Session.Isolation`.
+- Changed `DeploymentRunner` to accept a stable `IsolationEnvelope` instead of raw `IsolationSpec` + `LlmToolCall`, so external workers receive a language-agnostic document.
+- `System.Agents.Session.Durable` re-exports the runner/error types and the new envelope helpers for backward compatibility.
+
+### 5.2 Serialization contract for isolated calls
+
+- Added stable envelope types in `System.Agents.Session.Isolation`:
+  - `IsolationEnvelope` — input envelope with `token`, `toolCall`, `contextSnapshot`, `policy`, and optional `reason`.
+  - `IsolationResultEnvelope` — result envelope with `token`, `status` (`success`/`error`), `result`, and `error`.
+  - `IsolationResultStatus` — `IsolationSuccess` / `IsolationFailure`.
+- Added helpers:
+  - `mkIsolationEnvelope`
+  - `mkIsolationSuccessEnvelope`
+  - `mkIsolationErrorEnvelope`
+  - `parseIsolationResultEnvelope`
+  - `parseIsolationResultEnvelopeLBS`
+- Documented the JSON shapes in Haddock comments.
+
+### 5.3 Concrete runners
+
+- `localProcessRunner :: FilePath -> DeploymentRunner`
+  - Serialises the envelope to compact JSON.
+  - Forks the worker process and writes the envelope to its stdin.
+  - Reads stdout and parses the result envelope.
+  - Validates that the result token matches the input token.
+  - Returns `IsolationError` for non-zero exit codes, unparseable output, or token mismatches.
+- `dockerRunner :: Text -> DeploymentRunner`
+  - Runs `docker run --rm -i <image>` with the envelope on stdin.
+  - Reads stdout and parses the result envelope.
+  - Returns `IsolationError` if Docker is unavailable or the container fails.
+- `functionRunner :: DeploymentRunner`
+  - Documented placeholder for future serverless/FaaS execution.
+  - Always returns `IsolationError "functionRunner is a future placeholder ..."`.
+
+### 5.4 Integration with the policy-driven scheduler
+
+- Updated `isolatedExecutor` in `System.Agents.Session.Durable` to build an `IsolationEnvelope` for each isolated call (fresh continuation token + serialisable context snapshot).
+- Updated `executeCall` in `System.Agents.Session.Step` so that when an agent has `ctxDeploymentRunner` configured but no explicit `ctxToolExecutor`, isolated calls are dispatched through the runner and non-isolated calls fall back to the agent's `toolCall`.
+- This makes `RunIsolated` policy decisions transparent to the session loop.
+
+### 5.5 Example isolation-by-tool-name policy
+
+- Added `isolatedToolNamePolicyTest` showing:
+  - `bash_command` isolated via `localProcessRunner`.
+  - Other tools executed synchronously in-process.
+  - The scheduler produces a full `UserTurn` containing both responses.
+
+### 5.6 Tests
+
+- Extended `DurableWorkflowTests` with a Phase 5 group covering:
+  - `IsolationEnvelope` JSON round-trip.
+  - `IsolationResultEnvelope` JSON round-trip and parser helpers.
+  - `localProcessRunner` with a simple bash worker script.
+  - `dockerRunner` envelope construction (execution skipped when Docker is unavailable).
+  - Integration test for isolation-by-tool-name policy.
+
+### Verification
+
+- Library builds with `-Wall -Werror`.
+- Test suite `agents-tests` passes, including all Phase 2, Phase 3, Phase 4, and Phase 5 durable-workflow tests.
+
+## Next: Phase 6 — Integration & agent combinators
+
+Remaining work from the plan:
+
+- Add any remaining combinators for wiring durable-workflow pieces together.
+- Ensure `Agent` defaults keep existing agents compiling unchanged.
+- Consider additional integration tests across phases.
