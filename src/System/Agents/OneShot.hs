@@ -331,6 +331,7 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                 , ctxToolExecutor = Nothing
                 , ctxContinuationStore = Nothing
                 , ctxDeploymentRunner = Nothing
+                , ctxSessionBackend = Nothing
                 }
 
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool

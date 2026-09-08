@@ -61,6 +61,9 @@ module System.Agents.Session.Base (
     isolatedExecutor,
     flattenDisposition,
 
+    -- * Session backend (re-exported from SessionStore)
+    SessionBackend (..),
+
     -- * Defined in this module
     MissingUserPrompt (..),
     LlmCompletion (..),
@@ -76,6 +79,7 @@ module System.Agents.Session.Base (
     withToolExecutor,
     withContinuationStore,
     withDeploymentRunner,
+    withSessionBackend,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -96,6 +100,7 @@ import System.Agents.Session.Durable (
     isolatedExecutor,
     yieldingExecutor,
  )
+import System.Agents.SessionStore (SessionBackend (..))
 import System.Agents.Tools.Cache (ToolCache (..))
 import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
 -- Re-export all session types from Session.Types for backward compatibility
@@ -171,6 +176,7 @@ Version 2 additions for async/resumable execution:
 * 'ctxToolExecutor' - Optional pluggable tool executor
 * 'ctxContinuationStore' - Optional durable continuation store
 * 'ctxDeploymentRunner' - Optional isolated-deployment runner
+* 'ctxSessionBackend' - Optional durable session storage backend
 -}
 data Agent r = Agent
     { step :: Session -> IO (Action r)
@@ -231,6 +237,11 @@ data Agent r = Agent
     , ctxDeploymentRunner :: Maybe DeploymentRunner
     {- ^ Optional runner for isolated tool execution (Docker, subprocess,
     serverless). Used when the policy returns 'RunIsolated'.
+    -}
+    , ctxSessionBackend :: Maybe SessionBackend
+    {- ^ Optional durable session storage backend. When present, progress
+    callbacks and session persistence combinators store sessions via
+    this backend, falling back to file storage when absent.
     -}
     }
     deriving (Functor)
@@ -307,4 +318,16 @@ isoAgent = withDeploymentRunner runner agent
 -}
 withDeploymentRunner :: DeploymentRunner -> Agent r -> Agent r
 withDeploymentRunner runner agent = agent{ctxDeploymentRunner = Just runner}
+
+{- | Set a durable session storage backend on an agent.
+
+Example:
+
+@
+backend <- mkSqliteSessionStore conn
+durableAgent = withSessionBackend backend agent
+@
+-}
+withSessionBackend :: SessionBackend -> Agent r -> Agent r
+withSessionBackend backend agent = agent{ctxSessionBackend = Just backend}
 

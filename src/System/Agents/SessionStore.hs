@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -15,9 +16,32 @@ Multi-location support allows:
 - Reading sessions from multiple directories (e.g., project-local, global)
 - Writing all new sessions to a single unified location
 - Deduplication by ConversationId with priority based on location order
+
+In addition to the legacy file-based 'SessionStore', this module defines a
+pluggable 'SessionBackend' interface with SQLite and composite fallback
+implementations for durable workflow support.
 -}
 module System.Agents.SessionStore (
-    -- * Session Store
+    -- * Session Backend Interface
+    SessionBackend (..),
+    sessionIdToConversationId,
+    conversationIdToSessionId,
+
+    -- * File Backend
+    FileSessionStore (..),
+    mkFileSessionStore,
+    fileSessionBackend,
+
+    -- * SQLite Backend
+    SqliteSessionStore (..),
+    mkSqliteSessionStore,
+    initializeSessionSchema,
+
+    -- * Composite Backend
+    CompositeSessionStore (..),
+    mkCompositeSessionStore,
+
+    -- * Legacy Session Store
     SessionStore (..),
     defaultSessionStore,
     mkSessionStore,
@@ -45,24 +69,227 @@ module System.Agents.SessionStore (
     isSessionFile,
 ) where
 
-import Control.Exception (IOException, try)
-import Control.Monad (filterM)
+import Control.Exception (IOException, catch, try)
+import Control.Monad (filterM, forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.List (foldl', isInfixOf, isPrefixOf, sortOn)
+import Data.Maybe (mapMaybe)
 import Data.Ord (Down (..))
+import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time (UTCTime)
-import System.Directory (doesFileExist, getHomeDirectory, getModificationTime, listDirectory)
+import qualified Data.Text.Encoding as TextEnc
+import Data.Time (UTCTime, getCurrentTime)
+import qualified Data.UUID as UUID
+import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query, query_)
+import Database.SQLite.Simple.QQ (sql)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, getModificationTime, listDirectory, removeFile)
 import System.FilePath (takeFileName, (</>))
 import System.IO.Error (ioeGetErrorString)
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Session.Base (Session (..))
+import System.Agents.Session.Types (Session (..), SessionId (..))
 
 -------------------------------------------------------------------------------
--- Session Store Configuration
+-- Session Backend Interface
+-------------------------------------------------------------------------------
+
+{- | Abstract backend interface for durable session storage.
+
+A 'SessionBackend' hides the details of where and how sessions are persisted,
+allowing agents to store sessions in files, SQLite, or a composite of multiple
+backends without changing the caller.
+-}
+data SessionBackend = SessionBackend
+    { sbStore :: SessionId -> Session -> IO ()
+    -- ^ Persist a session under the given session id.
+    , sbLoad :: SessionId -> IO (Maybe Session)
+    -- ^ Load a session by id. Returns 'Nothing' if not found or unreadable.
+    , sbList :: IO [(SessionId, UTCTime)]
+    -- ^ List all stored sessions with their last update time.
+    , sbDelete :: SessionId -> IO ()
+    -- ^ Delete a session by id.
+    }
+
+-- | Convert a 'SessionId' to a 'ConversationId'.
+sessionIdToConversationId :: SessionId -> ConversationId
+sessionIdToConversationId (SessionId uuid) = ConversationId uuid
+
+-- | Convert a 'ConversationId' to a 'SessionId'.
+conversationIdToSessionId :: ConversationId -> SessionId
+conversationIdToSessionId (ConversationId uuid) = SessionId uuid
+
+-------------------------------------------------------------------------------
+-- File Backend
+-------------------------------------------------------------------------------
+
+{- | File-backed session backend.
+
+Stores sessions as JSON files in a single directory using the same
+@conv.<uuid>.json@ naming scheme as the legacy 'SessionStore'.
+-}
+newtype FileSessionStore = FileSessionStore FilePath
+{- | Create a file-backed session backend, ensuring the directory exists.
+
+Example:
+
+> backend <- mkFileSessionStore "./sessions/"
+-}
+mkFileSessionStore :: FilePath -> IO SessionBackend
+mkFileSessionStore path = do
+    createDirectoryIfMissing True path
+    pure $ fileSessionBackend (FileSessionStore path)
+
+-- | Build a 'SessionBackend' from an existing 'FileSessionStore'.
+fileSessionBackend :: FileSessionStore -> SessionBackend
+fileSessionBackend (FileSessionStore path) =
+    let simpleStore = mkSimpleSessionStore path
+     in SessionBackend
+            { sbStore = \sid sess -> storeSession simpleStore (sessionIdToConversationId sid) sess
+            , sbLoad = \sid -> readSession simpleStore (sessionIdToConversationId sid)
+            , sbList = do
+                files <- findSessionFiles simpleStore
+                pure $ map (\info -> (conversationIdToSessionId info.sessionInfoConversationId, info.sessionInfoModTime)) files
+            , sbDelete = \sid -> do
+                let convId = sessionIdToConversationId sid
+                let path' = sessionWritePath simpleStore convId
+                removeFile path' `catch` \(_ :: IOException) -> pure ()
+            }
+
+-------------------------------------------------------------------------------
+-- SQLite Backend
+-------------------------------------------------------------------------------
+
+{- | SQLite-backed session backend.
+
+Stores sessions as JSON rows in a @sessions@ table with
+@session_id@, @created_at@, @updated_at@, and @json@ columns.
+-}
+newtype SqliteSessionStore = SqliteSessionStore Connection
+
+-- | Schema statements for the sessions table.
+sessionSchemaStatements :: [Query]
+sessionSchemaStatements =
+    [ [sql| CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            json TEXT NOT NULL
+        ) |]
+    , [sql| CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at) |]
+    ]
+
+-- | Initialize the SQLite session schema.
+initializeSessionSchema :: Connection -> IO ()
+initializeSessionSchema conn =
+    forM_ sessionSchemaStatements (execute_ conn)
+
+{- | Create a SQLite-backed session backend and initialize its schema.
+
+Example:
+
+> conn <- open ":memory:"
+> backend <- mkSqliteSessionStore conn
+-}
+mkSqliteSessionStore :: Connection -> IO SessionBackend
+mkSqliteSessionStore conn = do
+    initializeSessionSchema conn
+    pure $ sqliteSessionBackend conn
+
+-- | Build a 'SessionBackend' from an existing SQLite connection.
+sqliteSessionBackend :: Connection -> SessionBackend
+sqliteSessionBackend conn =
+    SessionBackend
+        { sbStore = sqliteStoreSession conn
+        , sbLoad = sqliteLoadSession conn
+        , sbList = sqliteListSessions conn
+        , sbDelete = sqliteDeleteSession conn
+        }
+
+sqliteStoreSession :: Connection -> SessionId -> Session -> IO ()
+sqliteStoreSession conn sid sess = do
+    now <- getCurrentTime
+    let SessionId uuid = sid
+    let json = TextEnc.decodeUtf8 $ LByteString.toStrict $ Aeson.encode sess
+    execute
+        conn
+        [sql| INSERT INTO sessions (session_id, created_at, updated_at, json)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(session_id) DO UPDATE SET
+                updated_at = excluded.updated_at,
+                json = excluded.json |]
+        (UUID.toText uuid, now, now, json)
+
+sqliteLoadSession :: Connection -> SessionId -> IO (Maybe Session)
+sqliteLoadSession conn sid = do
+    let SessionId uuid = sid
+    rows <-
+        query
+            conn
+            [sql| SELECT json FROM sessions WHERE session_id = ? |]
+            (Only $ UUID.toText uuid) ::
+            IO [Only Text]
+    case rows of
+        [Only json] -> pure $ Aeson.decode $ LByteString.fromStrict $ TextEnc.encodeUtf8 json
+        _ -> pure Nothing
+
+sqliteListSessions :: Connection -> IO [(SessionId, UTCTime)]
+sqliteListSessions conn = do
+    rows <-
+        query_
+            conn
+            [sql| SELECT session_id, updated_at FROM sessions ORDER BY updated_at DESC |] ::
+            IO [(Text, UTCTime)]
+    pure $
+        mapMaybe
+            ( \(sidText, mtime) -> case UUID.fromText sidText of
+                Just uuid -> Just (SessionId uuid, mtime)
+                Nothing -> Nothing
+            )
+            rows
+
+sqliteDeleteSession :: Connection -> SessionId -> IO ()
+sqliteDeleteSession conn sid = do
+    let SessionId uuid = sid
+    execute conn [sql| DELETE FROM sessions WHERE session_id = ? |] (Only $ UUID.toText uuid)
+
+-------------------------------------------------------------------------------
+-- Composite Backend
+-------------------------------------------------------------------------------
+
+{- | Composite session backend.
+
+Reads fall back across all provided backends in order. Writes (store/delete) go
+to the first backend only, which acts as the primary target.
+-}
+newtype CompositeSessionStore = CompositeSessionStore [SessionBackend]
+
+-- | Build a composite backend from a non-empty list of backends.
+mkCompositeSessionStore :: [SessionBackend] -> SessionBackend
+mkCompositeSessionStore backends =
+    SessionBackend
+        { sbStore = \sid sess -> case backends of
+            (primary : _) -> sbStore primary sid sess
+            [] -> pure ()
+        , sbLoad = fallbackLoad backends
+        , sbList = concat <$> mapM sbList backends
+        , sbDelete = \sid -> case backends of
+            (primary : _) -> sbDelete primary sid
+            [] -> pure ()
+        }
+
+-- | Try loading from each backend in order until one succeeds.
+fallbackLoad :: [SessionBackend] -> SessionId -> IO (Maybe Session)
+fallbackLoad [] _ = pure Nothing
+fallbackLoad (b : bs) sid = do
+    mSess <- sbLoad b sid
+    case mSess of
+        Just sess -> pure $ Just sess
+        Nothing -> fallbackLoad bs sid
+
+-------------------------------------------------------------------------------
+-- Legacy Session Store Configuration
 -------------------------------------------------------------------------------
 
 {- | The default session file pattern prefix.
@@ -415,3 +642,4 @@ listSessions store = do
     sessionFiles <- findSessionFiles store
     -- Load each session file (locked/inaccessible files will return Nothing)
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sessionFiles
+

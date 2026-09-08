@@ -1,15 +1,22 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | Tests for Phase 2 of the durable-workflows plan.
+{- | Tests for Phases 2 and 3 of the durable-workflows plan.
 
-Covers:
+Phase 2 covers:
 
 * Tool-call policy classification in the async scheduler.
 * Continuation snapshot serialisation and SQLite round-tripping.
 * 'wakeSession' injecting external results and converting partial turns.
 * Cache updates during wake.
 * 'resumeSession' continuing from a partial or completed user turn.
+
+Phase 3 covers:
+
+* 'SessionBackend' file round-trip.
+* 'SessionBackend' SQLite round-trip.
+* Composite backend read fallback.
+* 'withSessionBackend' integration with the progress callback.
 -}
 module DurableWorkflowTests where
 
@@ -22,11 +29,12 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import Data.UUID (nil)
 import Database.SQLite.Simple (open)
-import System.IO.Temp (emptySystemTempFile)
+import System.IO.Temp (emptySystemTempFile, withSystemTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
 
 import System.Agents.Base (ConversationId (..))
+import System.Agents.Combinators.StoreSessionProgress (agentStoreSession, agentWithSessionProgress)
 import System.Agents.Session.Async (
     ContinuationStore,
     ToolContinuationSnapshot (..),
@@ -36,9 +44,14 @@ import System.Agents.Session.Async (
  )
 import System.Agents.Session.Base
 import System.Agents.Session.Step (getPartialTurn, naiveTilNoToolCallStep, runStepMAsync)
-import System.Agents.Session.Step (getPartialTurn, naiveTilNoToolCallStep, runStepMAsync)
 import System.Agents.Session.Types
 import System.Agents.Session.Wake (resumeSession, wakeSession, wakeSessionWithCache)
+import System.Agents.SessionStore (
+    SessionBackend (..),
+    mkCompositeSessionStore,
+    mkFileSessionStore,
+    mkSqliteSessionStore,
+ )
 import System.Agents.Tools.Cache (
     CachedResult (..),
     ToolCache (..),
@@ -53,18 +66,29 @@ import System.Agents.Tools.Context (
     ToolResult (..),
  )
 import qualified System.Agents.Tools.Context as Ctx
+
 -- Test suite
 -------------------------------------------------------------------------------
 
 tests :: TestTree
 tests =
     testGroup
-        "Durable Workflows (Phase 2)"
-        [ policyClassificationTest
-        , continuationStoreRoundTripTest
-        , wakeAndResumeTest
-        , cacheIntegrationTest
-        , snapshotSerializationTest
+        "Durable Workflows"
+        [ testGroup
+            "Phase 2"
+            [ policyClassificationTest
+            , continuationStoreRoundTripTest
+            , wakeAndResumeTest
+            , cacheIntegrationTest
+            , snapshotSerializationTest
+            ]
+        , testGroup
+            "Phase 3"
+            [ fileBackendRoundTripTest
+            , sqliteBackendRoundTripTest
+            , compositeFallbackTest
+            , backendProgressCallbackTest
+            ]
         ]
 
 -------------------------------------------------------------------------------
@@ -111,13 +135,14 @@ dummyPortal _ _ =
             , resultTraceId = "dummy"
             }
 
--- | Build an async agent with a given policy and optional cache/store.
+-- | Build an async agent with a given policy and optional cache/store/backend.
 mkAsyncAgent ::
     ToolCallPolicy ->
     Maybe ToolCache ->
     Maybe ContinuationStore ->
+    Maybe SessionBackend ->
     Agent (LlmTurnContent, Session)
-mkAsyncAgent policy mCache mStore =
+mkAsyncAgent policy mCache mStore mBackend =
     Agent
         { step = naiveTilNoToolCallStep
         , sysPrompt = pure $ SystemPrompt "test prompt"
@@ -137,6 +162,7 @@ mkAsyncAgent policy mCache mStore =
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = mStore
         , ctxDeploymentRunner = Nothing
+        , ctxSessionBackend = mBackend
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -159,10 +185,36 @@ mkSessionWithCalls calls =
         , sessionExecutionMode = Just Asynchronous
         }
 
+-- | Build a minimal synchronous agent for progress-callback tests.
+mkSimpleAgent :: Agent (LlmTurnContent, Session)
+mkSimpleAgent =
+    Agent
+        { step = naiveTilNoToolCallStep
+        , sysPrompt = pure $ SystemPrompt "test prompt"
+        , sysTools = pure []
+        , usrQuery = pure Nothing
+        , toolCall = \_ call -> pure $ TextResponse ("done:" <> callName call)
+        , toolPortal = dummyPortal
+        , complete = \_ -> pure (LlmResponse (Just "hello") Nothing Aeson.Null Nothing, [])
+        , contextConfig = defaultContextConfig
+        , ctxWorld = Nothing
+        , ctxEventQueue = Nothing
+        , ctxCallStack = []
+        , ctxParentConversation = Nothing
+        , ctxExecutionMode = Synchronous
+        , ctxToolCache = Nothing
+        , ctxToolCallPolicy = defaultToolCallPolicy
+        , ctxToolExecutor = Nothing
+        , ctxContinuationStore = Nothing
+        , ctxDeploymentRunner = Nothing
+        , ctxSessionBackend = Nothing
+        }
+
 -------------------------------------------------------------------------------
--- Policy classification test
+-- Phase 2 tests
 -------------------------------------------------------------------------------
 
+-- | Policy classification test.
 policyClassificationTest :: TestTree
 policyClassificationTest =
     testCase "policy classifies sync vs deferred calls" $ do
@@ -170,7 +222,7 @@ policyClassificationTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy Nothing Nothing
+        let agent = mkAsyncAgent policy Nothing Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         case result of
             Left _ -> assertFailure "expected a yielded session, not a final result"
@@ -190,10 +242,7 @@ policyClassificationTest =
                                     _ -> assertFailure "unexpected completed response"
                             _ -> assertFailure "expected exactly one completed call"
 
--------------------------------------------------------------------------------
--- Continuation store round-trip test
--------------------------------------------------------------------------------
-
+-- | Continuation store round-trip test.
 continuationStoreRoundTripTest :: TestTree
 continuationStoreRoundTripTest =
     testCase "continuation snapshots round-trip through SQLite store" $ do
@@ -203,7 +252,7 @@ continuationStoreRoundTripTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy Nothing (Just store)
+        let agent = mkAsyncAgent policy Nothing (Just store) Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         session <- case result of
             Right s -> pure s
@@ -237,10 +286,7 @@ continuationStoreRoundTripTest =
             | x <= y = x : y : ys
             | otherwise = y : insert x ys
 
--------------------------------------------------------------------------------
--- Wake and resume test
--------------------------------------------------------------------------------
-
+-- | Wake and resume test.
 wakeAndResumeTest :: TestTree
 wakeAndResumeTest =
     testCase "wakeSession injects results and resumeSession finishes" $ do
@@ -248,7 +294,7 @@ wakeAndResumeTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy Nothing Nothing
+        let agent = mkAsyncAgent policy Nothing Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         partialSession <- case result of
             Right s -> pure s
@@ -279,10 +325,7 @@ wakeAndResumeTest =
                 length llmTurn.llmToolCalls @?= 0
             Right _ -> assertFailure "expected session to complete after resume"
 
--------------------------------------------------------------------------------
--- Cache integration test
--------------------------------------------------------------------------------
-
+-- | Cache integration test.
 cacheIntegrationTest :: TestTree
 cacheIntegrationTest =
     testCase "wakeSessionWithCache stores deferred results in the cache" $ do
@@ -292,7 +335,7 @@ cacheIntegrationTest =
         let policy _ctx call
                 | callName call == "sync_tool" = RunSync
                 | otherwise = Defer (Reason "test deferral")
-        let agent = mkAsyncAgent policy (Just cache) Nothing
+        let agent = mkAsyncAgent policy (Just cache) Nothing Nothing
         (_agent, result) <- runStepMAsync testConvId agent (mkSessionWithCalls calls)
         partialSession <- case result of
             Right s -> pure s
@@ -311,10 +354,7 @@ cacheIntegrationTest =
                     Nothing -> assertFailure "expected result to be in cache"
             _ -> assertFailure "expected exactly one deferred call"
 
--------------------------------------------------------------------------------
--- Snapshot serialization test
--------------------------------------------------------------------------------
-
+-- | Snapshot serialization test.
 snapshotSerializationTest :: TestTree
 snapshotSerializationTest =
     testCase "ToolContinuationSnapshot serialises without runtime fields" $ do
@@ -356,4 +396,104 @@ snapshotSerializationTest =
                 Ctx.ctxSessionId hydrated @?= testSessionId
                 Ctx.ctxConversationId hydrated @?= testConvId
                 Ctx.ctxTurnId hydrated @?= TurnId nil
+
+-------------------------------------------------------------------------------
+-- Phase 3 tests
+-------------------------------------------------------------------------------
+
+-- | File backend round-trip test.
+fileBackendRoundTripTest :: TestTree
+fileBackendRoundTripTest =
+    testCase "file backend stores and loads sessions" $ do
+        withSystemTempDirectory "session-file-backend" $ \dir -> do
+            backend <- mkFileSessionStore dir
+            let session = mkSessionWithCalls [mkCall "test_tool"]
+            sbStore backend session.sessionId session
+            mLoaded <- sbLoad backend session.sessionId
+            mLoaded @?= Just session
+            listed <- sbList backend
+            map fst listed @?= [session.sessionId]
+            sbDelete backend session.sessionId
+            mAfterDelete <- sbLoad backend session.sessionId
+            mAfterDelete @?= Nothing
+
+-- | SQLite backend round-trip test.
+sqliteBackendRoundTripTest :: TestTree
+sqliteBackendRoundTripTest =
+    testCase "SQLite backend stores and loads sessions" $ do
+        conn <- open ":memory:"
+        backend <- mkSqliteSessionStore conn
+        let session = mkSessionWithCalls [mkCall "test_tool"]
+        sbStore backend session.sessionId session
+        mLoaded <- sbLoad backend session.sessionId
+        mLoaded @?= Just session
+        listed <- sbList backend
+        map fst listed @?= [session.sessionId]
+        sbDelete backend session.sessionId
+        mAfterDelete <- sbLoad backend session.sessionId
+        mAfterDelete @?= Nothing
+
+-- | Composite backend read fallback test.
+compositeFallbackTest :: TestTree
+compositeFallbackTest =
+    testCase "composite backend falls back to secondary store" $
+        withSystemTempDirectory "session-primary" $ \primaryDir ->
+            withSystemTempDirectory "session-secondary" $ (\secondaryDir -> do
+                primary <- mkFileSessionStore primaryDir
+                secondary <- mkFileSessionStore secondaryDir
+                let composite = mkCompositeSessionStore [primary, secondary]
+
+                sidA <- newSessionId
+                sidB <- newSessionId
+                sidC <- newSessionId
+                let sessionA = (mkSessionWithCalls [mkCall "in_primary"]){sessionId = sidA}
+                let sessionB = (mkSessionWithCalls [mkCall "in_secondary"]){sessionId = sidB}
+                let sessionC = (mkSessionWithCalls [mkCall "via_composite"]){sessionId = sidC}
+
+                -- Store A only in primary, B only in secondary.
+                sbStore primary sessionA.sessionId sessionA
+                sbStore secondary sessionB.sessionId sessionB
+
+                -- Composite should find both.
+                mA <- sbLoad composite sessionA.sessionId
+                mB <- sbLoad composite sessionB.sessionId
+                mA @?= Just sessionA
+                mB @?= Just sessionB
+
+                -- Composite writes only to primary.
+                sbStore composite sessionC.sessionId sessionC
+                mPrimary <- sbLoad primary sessionC.sessionId
+                mSecondary <- sbLoad secondary sessionC.sessionId
+                mPrimary @?= Just sessionC
+                mSecondary @?= Nothing
+
+                -- Composite delete only removes from primary.
+                sbDelete composite sessionA.sessionId
+                mDeleted <- sbLoad composite sessionA.sessionId
+                mDeleted @?= Nothing
+
+                -- Listing aggregates both backends.
+                listed <- sbList composite
+                length listed @?= 2)
+-- | Backend integration with the session progress callback.
+backendProgressCallbackTest :: TestTree
+backendProgressCallbackTest =
+    testCase "agentStoreSession uses ctxSessionBackend when present" $
+        withSystemTempDirectory "session-backend" $ \dir -> do
+            backend <- mkFileSessionStore dir
+            let agent = withSessionBackend backend mkSimpleAgent
+            -- The file-based store passed here should be ignored because the
+            -- agent has a backend configured.
+            let wrapped = agentStoreSession (error "should not use file store") Nothing testConvId agent
+
+            -- Simulate a progress event by invoking the decorated step on a
+            -- fresh session. The callback stores the session before the step.
+            let session0 = mkSessionWithCalls []
+            _ <- wrapped.step session0
+
+            -- The backend should have stored the session.
+            listed <- sbList backend
+            length listed @?= 1
+            mLoaded <- sbLoad backend session0.sessionId
+            mLoaded @?= Just session0
 

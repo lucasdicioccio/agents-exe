@@ -527,6 +527,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , ctxToolExecutor = Nothing
                 , ctxContinuationStore = Nothing
                 , ctxDeploymentRunner = Nothing
+                , ctxSessionBackend = Nothing
                 }
 
 -------------------------------------------------------------------------------

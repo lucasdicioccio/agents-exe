@@ -343,6 +343,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , ctxToolExecutor = Nothing
                 , ctxContinuationStore = Nothing
                 , ctxDeploymentRunner = Nothing
+                , ctxSessionBackend = Nothing
                 }
 
     -- Create initial session with media support (version 1)

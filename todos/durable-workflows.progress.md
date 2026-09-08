@@ -50,16 +50,6 @@ Progress tracker for `todos/durable-workflows.md`.
 - Library builds with `-Wall -Werror`.
 - Test suite `agents-tests` passes.
 
-## Next: Phase 2 — Async scheduler in the session loop
-
-Remaining work from the plan:
-
-- Update `runStepMAsync` to classify calls via `ToolCallPolicy`, batch `RunSync` calls, and yield `RunAsync`/`Defer` calls with continuation tokens.
-- Generate serializable `ToolContinuationSnapshot`s for deferred calls (without non-serializable context fields).
-- Implement `wakeSession` and `resumeSession`.
-- Finish `ContinuationStore` load/list implementations.
-
-
 ## Phase 2 — Async scheduler in the session loop ✅ COMPLETE
 
 ### 2.1 Policy-driven async scheduler
@@ -96,3 +86,60 @@ Remaining work from the plan:
 
 - Library builds with `-Wall -Werror`.
 - Test suite `agents-tests` passes, including new `DurableWorkflowTests` covering policy classification, continuation-store round-tripping, wake/resume, cache integration, and snapshot serialisation.
+
+## Phase 3 — Durable session storage ✅ COMPLETE
+
+### 3.1 Generalized `SessionBackend` interface
+
+- Added `SessionBackend` record to `System.Agents.SessionStore`:
+  - `sbStore :: SessionId -> Session -> IO ()`
+  - `sbLoad :: SessionId -> IO (Maybe Session)`
+  - `sbList :: IO [(SessionId, UTCTime)]`
+  - `sbDelete :: SessionId -> IO ()`
+- Added `sessionIdToConversationId` / `conversationIdToSessionId` conversion helpers.
+
+### 3.2 Concrete backends
+
+- `FileSessionStore FilePath`:
+  - Newtype wrapper and `mkFileSessionStore` constructor.
+  - Implements `SessionBackend` by reusing the existing file-based `SessionStore` logic (`mkSimpleSessionStore`, `storeSession`, `readSession`, `findSessionFiles`).
+- `SqliteSessionStore Connection`:
+  - Newtype wrapper and `mkSqliteSessionStore` constructor.
+  - Stores sessions as JSON in a `sessions` table with `session_id`, `created_at`, `updated_at`, and `json` columns.
+  - `initializeSessionSchema` creates the table and an index on `updated_at`.
+- `CompositeSessionStore [SessionBackend]`:
+  - Newtype wrapper and `mkCompositeSessionStore` constructor.
+  - Reads fall back across all backends in order.
+  - Writes (store/delete) go to the first backend only (primary target).
+
+### 3.3 `Agent` integration
+
+- Added `ctxSessionBackend :: Maybe SessionBackend` to `Agent` in `System.Agents.Session.Base`.
+- Added `withSessionBackend :: SessionBackend -> Agent r -> Agent r` combinator.
+- Updated `System.Agents.Combinators.StoreSessionProgress`:
+  - Added `backendStoreCallback` for storing progress via a `SessionBackend`.
+  - `agentStoreSession` now uses `ctxSessionBackend` when present, falling back to the provided file `SessionStore` when absent.
+  - The optional explicit `FilePath` still receives an additional copy in both cases.
+- Updated all `Agent` construction sites (`OneShot`, `MCP.Server`, `AgentTree.OneShotTool`) and the test helper to initialize `ctxSessionBackend = Nothing`.
+
+### 3.4 Tests
+
+- Extended `DurableWorkflowTests` with a Phase 3 group covering:
+  - File backend store/load/delete/list round-trip.
+  - SQLite backend store/load/delete/list round-trip.
+  - Composite backend read fallback, primary-only write, primary-only delete, and aggregated listing.
+  - `withSessionBackend` + `agentStoreSession` integration ensuring the backend is used and the file store is bypassed.
+
+### Verification
+
+- Library builds with `-Wall -Werror`.
+- Test suite `agents-tests` passes, including all Phase 2 and Phase 3 durable-workflow tests.
+
+## Next: Phase 4 — Wake / resume API
+
+Remaining work from the plan:
+
+- `wakeSession` and `resumeSession` exist but could be exposed via CLI commands (Phase 7).
+- Finish `ContinuationStore` load/list implementations are already complete in Phase 2.
+- Add CLI/operator API for pause/resume/complete/pending operations (Phase 7).
+
