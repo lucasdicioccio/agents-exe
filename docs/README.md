@@ -173,6 +173,7 @@ including a runnable mock-LLM demonstrator.
 - [MCP Protocol](mcp.md) - Model Context Protocol integration
 - [Session Management](sessions.md) - Session lifecycle and persistence
 - [Durable Workflows How-To](durable-workflows-howto.md) - Resumable async execution
+- [Asynchronous Tool Calls](async-tool-calls.md) - Background tool calls, progress and cancellation
 - [Terminal UI](tui.md) - TUI interface
 - [CLI Reference](cli-commands.md) - Command reference
 - [Export/Import](export-import.md) - Tool sharing and distribution

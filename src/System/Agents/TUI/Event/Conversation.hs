@@ -33,6 +33,7 @@ module System.Agents.TUI.Event.Conversation (
 
     -- * Conversation Updates
     handleConversationUpdated,
+    handleToolCallActivity,
     handleConversationNeedsInput,
     updateConversationStatus,
 
@@ -87,6 +88,8 @@ import System.Agents.Session.Base (
     newTurnId,
  )
 import qualified System.Agents.Session.Loop as Loop
+import System.Agents.OS.Events (ToolCallActivity)
+import System.Agents.TUI.ToolCallActivity (applyToolCallActivity, pruneToolCallViews)
 import System.Agents.TUI.Types (
     AppEvent (..),
     Conversation (..),
@@ -124,6 +127,7 @@ import System.Agents.TUI.Types (
     tuiCore,
     tuiNode,
     tuiSlug,
+    toolCallViews,
     tuiUI,
     uiBufferedMessages,
     uiFocusRing,
@@ -239,6 +243,11 @@ runConversation tracer baseTuiAgent session = do
                     ret <- agentWithOS.step sess
                     case ret of
                         Stop _r -> pure $ AskUserPrompt (MissingUserPrompt True [])
+                        -- The LLM is done but background tool calls still run:
+                        -- let the user talk meanwhile. The stepper races the
+                        -- input against the calls and delivers their results
+                        -- as soon as they finish.
+                        AskUserPrompt (MissingUserPrompt False []) -> pure $ AskUserPrompt (MissingUserPrompt True [])
                         _ -> pure ret
                 , usrQuery = do
                     core <- readTVarIO coreRef
@@ -249,7 +258,19 @@ runConversation tracer baseTuiAgent session = do
                 }
     threadId <- liftIO $ forkIO $ do
         notifyProgress (SessionStarted session)
-        void $ Loop.run convId a session
+        -- 'runUntilBlocked' rather than 'run': a turn waiting only on deferred
+        -- calls cannot progress here, and looping on it would spin.
+        outcome <- Loop.runUntilBlocked convId a session
+        case outcome of
+            Left _ -> pure ()
+            Right blocked -> do
+                notifyProgress (SessionUpdated blocked)
+                writeBChan
+                    outChan
+                    ( AppEvent_ShowStatus
+                        StatusWarning
+                        "Conversation stopped: waiting for deferred tool calls. Complete them with the 'session' commands."
+                    )
         notifyProgress (SessionCompleted session)
     let conv =
             Conversation
@@ -463,9 +484,15 @@ updateConversationStatus convId newStatus = do
                     (c ^. coreConversations)
             }
 
+-- | Record a background tool call event for rendering.
+handleToolCallActivity :: ToolCallActivity -> EventM N TuiState ()
+handleToolCallActivity activity =
+    tuiUI . toolCallViews %= applyToolCallActivity activity
+
 -- | Handle conversation update event.
 handleConversationUpdated :: ConversationId -> Session -> EventM N TuiState ()
 handleConversationUpdated convId sess = do
+    tuiUI . toolCallViews %= pruneToolCallViews sess
     coreRef <- use tuiCore
     liftIO $ atomically $ modifyTVar coreRef $ \c ->
         c{_coreConversations = updateConversationSession convId sess (c ^. coreConversations)}

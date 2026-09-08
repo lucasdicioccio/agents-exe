@@ -52,6 +52,9 @@ handleInitialize apiKeysFile agentFiles = do
                 , autoEnableSkills = Nothing
                 , executionMode = Nothing
                 , toolCallPolicyConfig = Nothing
+                , asyncYieldStrategy = Nothing
+                , maxConcurrency = Nothing
+                , asyncCallTimeoutSeconds = Nothing
                 }
 
     forM_ (take 1 agentFiles) $ \agentFile -> do

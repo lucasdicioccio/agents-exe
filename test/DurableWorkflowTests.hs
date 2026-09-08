@@ -236,12 +236,16 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
+        , ctxAsyncYieldStrategy = YieldWhenAllDone
+        , ctxMaxConcurrency = Nothing
+        , ctxAsyncCallTimeout = Nothing
         , ctxToolCache = mCache
         , ctxToolCallPolicy = policy
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = mStore
         , ctxDeploymentRunner = mRunner
         , ctxSessionBackend = mBackend
+        , ctxAsyncEngine = Nothing
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -261,12 +265,16 @@ mkSimpleAgent =
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Synchronous
+        , ctxAsyncYieldStrategy = YieldWhenAllDone
+        , ctxMaxConcurrency = Nothing
+        , ctxAsyncCallTimeout = Nothing
         , ctxToolCache = Nothing
         , ctxToolCallPolicy = defaultToolCallPolicy
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = Nothing
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
+        , ctxAsyncEngine = Nothing
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

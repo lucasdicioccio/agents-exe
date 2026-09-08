@@ -77,9 +77,9 @@ wakeSessionWithCache mCache session responses =
 
     makeTurn :: PartialUserTurnContent -> [TrackedToolCall] -> Turn
     makeTurn partial tracked
-        | all (\tc -> tc.tcState == Completed) tracked =
+        | all (isFinalToolCallState . tcState) tracked =
             let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
-                completed = partialCompletedResponses content
+                completed = partialToolMessages content
                 byteUsage =
                     calculateUserTurnByteUsage
                         (pUserPrompt partial)

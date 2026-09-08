@@ -17,18 +17,12 @@ import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.LLMs.OpenAI (TokenUsage (..))
+import System.Agents.OS.Events (ToolCallActivity (..))
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Signals (calculateTrajectorySignals)
-import System.Agents.Session.Types (
-    ExecutionSignals (..),
-    InteractionSignals (..),
-    StepByteUsage (..),
-    TrajectorySignals (..),
-    sessionTotalBytes,
- )
 import System.Agents.TUI.Render.Attributes
 import System.Agents.TUI.Render.Utils (borderWithFocus)
+import System.Agents.TUI.ToolCallActivity (ToolCallView (..), describeToolCallView, runningToolCallViews, sessionToolCallViews)
 import System.Agents.TUI.Types
 
 -- | Tree structure for nested conversations.
@@ -228,10 +222,23 @@ render_session st w (Just session) mNavState =
             borderWithFocus st w "Session" $
                 viewport w Both $
                     vBox $
-                        [render_session_usage session]
-                            ++ map render_turn (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
+                        [render_session_usage session, render_background_calls views]
+                            ++ map (render_turn views) (Prelude.reverse (zip [(0 :: Int) ..] $ Prelude.reverse session.turns))
         Just navState ->
             render_turn_navigation session navState
+  where
+    views = sessionToolCallViews session.sessionId (st ^. tuiUI . toolCallViews)
+
+-- | One line listing background tool calls that are still running.
+render_background_calls :: Map.Map ToolCallId ToolCallView -> Widget N
+render_background_calls views =
+    case runningToolCallViews views of
+        [] -> emptyWidget
+        running ->
+            withAttr byteUsageAttr $
+                txt $
+                    "Background tool calls running: "
+                        <> Text.intercalate ", " [v.tcvLatest.tcaToolName | v <- running]
 
 -- | Render session in turn navigation mode.
 render_turn_navigation :: Session -> TurnNavigationState -> Widget N
@@ -254,7 +261,7 @@ render_navigable_turn :: Int -> (Int, Turn) -> Widget N
 render_navigable_turn selectedIdx (idx, turn) =
     let isSelected = idx == selectedIdx
         selectionMarker = if isSelected then "▶ " else "  "
-        turnWidget = render_turn (idx, turn)
+        turnWidget = render_turn Map.empty (idx, turn)
      in if isSelected
             then withAttr selectedTurnAttr $ hBox [txt selectionMarker, turnWidget]
             else hBox [txt selectionMarker, turnWidget]
@@ -399,8 +406,8 @@ formatBytes n
     | otherwise = Text.pack (show n) <> " B"
 
 -- | Render a single turn with usage info (tokens or bytes fallback).
-render_turn :: (Int, Turn) -> Widget N
-render_turn (_k, turn) =
+render_turn :: Map.Map ToolCallId ToolCallView -> (Int, Turn) -> Widget N
+render_turn views (_k, turn) =
     case turn of
         UserTurn userTurn mUsage ->
             withAttr userMessageAttr $
@@ -432,9 +439,26 @@ render_turn (_k, turn) =
                         "[Partial] > " <> case partial.pUserQuery of
                             Just (UserQuery q _) -> q
                             Nothing -> "(no query)"
+                    , vBox (map (render_tracked_call views) partial.pTrackedToolCalls)
                     , render_usage mUsage
                     , txt " "
                     ]
+
+-- | One line per tracked call of a partial turn, with live status when known.
+render_tracked_call :: Map.Map ToolCallId ToolCallView -> TrackedToolCall -> Widget N
+render_tracked_call views tc =
+    txt $ "  " <> marker <> " " <> llmToolCallName tc.tcCall <> callId <> ": " <> status
+  where
+    callId = maybe "" (\pid -> " (" <> pid <> ")") (providerToolCallId tc.tcCall)
+    live = Map.lookup tc.tcId views
+    (marker, status) = case tc.tcState of
+        Ready -> ("·", "pending")
+        Deferred -> ("⏸", "deferred")
+        Running -> ("⏳", maybe "running" describeToolCallView live)
+        Completed
+            | tc.tcDeliveredLate -> ("✓", "completed (delivered later)")
+            | otherwise -> ("✓", "completed")
+        Failed -> ("✗", "failed")
 
 -- | Render usage information for a turn (tokens or bytes).
 render_usage :: Maybe StepByteUsage -> Widget N
@@ -452,3 +476,4 @@ render_usage (Just usage) =
                         txt $
                             "  [" <> formatBytes usage.stepTotalBytes <> "]"
                 else emptyWidget
+

@@ -263,6 +263,9 @@ capabilityFromName name = case name of
     "get-session-stats" -> Just SystemToolGetSessionStats
     "list-directory" -> Just SystemToolListDirectory
     "execute-command" -> Just SystemToolExecuteCommand
+    "get-tool-call-status" -> Just SystemToolGetToolCallStatus
+    "list-running-tool-calls" -> Just SystemToolListRunningToolCalls
+    "cancel-tool-call" -> Just SystemToolCancelToolCall
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -282,6 +285,9 @@ capabilityToName SystemToolReadSession = "read-session"
 capabilityToName SystemToolGetSessionStats = "get-session-stats"
 capabilityToName SystemToolListDirectory = "list-directory"
 capabilityToName SystemToolExecuteCommand = "execute-command"
+capabilityToName SystemToolGetToolCallStatus = "get-tool-call-status"
+capabilityToName SystemToolListRunningToolCalls = "list-running-tool-calls"
+capabilityToName SystemToolCancelToolCall = "cancel-tool-call"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -340,6 +346,9 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolGetSessionStats -> getSessionStatsInfo (toolboxSessionIntrospection toolbox)
             SystemToolListDirectory -> pure ("list-directory", Aeson.String "list-directory capability not yet implemented for system toolbox")
             SystemToolExecuteCommand -> error "Use executeToolboxCommand for execute-command capability"
+            SystemToolGetToolCallStatus -> error "Use getToolCallStatus"
+            SystemToolListRunningToolCalls -> error "Use listRunningToolCalls"
+            SystemToolCancelToolCall -> error "Use cancelToolCallById"
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e

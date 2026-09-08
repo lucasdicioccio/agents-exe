@@ -70,10 +70,12 @@ import Brick.Focus (focusGetCurrent, focusSetCurrent)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
+import Control.Concurrent (killThread)
+import System.Timeout (timeout)
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (readTVarIO)
 import Control.Lens (to, use, (%=), (.=), (^.))
-import Control.Monad (filterM, unless, when)
+import Control.Monad (filterM, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -202,13 +204,29 @@ handleQuit :: EventM N TuiState ()
 handleQuit = do
     pending <- use (tuiUI . quitConfirmationPending)
     if pending
-        then halt
+        then stopConversations >> halt
         else do
             tuiUI . quitConfirmationPending .= True
             showStatus StatusWarning "Are you sure? Press Ctrl+Q again to quit"
 
+{- | Stop the conversation threads before quitting.
+
+Each thread cancels its background tool calls (and their subprocesses) while
+unwinding, so nothing is left behind. Bounded in time so that a thread stuck
+in a foreign call cannot keep the TUI from quitting.
+-}
+stopConversations :: EventM N TuiState ()
+stopConversations = do
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+    let threads = [tid | conv <- core ^. coreConversations, Just tid <- [conversationThreadId conv]]
+    liftIO $ void $ timeout conversationShutdownMicros $ mapM_ killThread threads
+
+-- | How long to wait for conversation threads to stop when quitting.
+conversationShutdownMicros :: Int
+conversationShutdownMicros = 2000000
+
 -- | Reset quit confirmation state.
-resetQuitConfirmation :: EventM N TuiState ()
 resetQuitConfirmation = do
     tuiUI . quitConfirmationPending .= False
 
@@ -248,6 +266,8 @@ handleTurnNavigationEventWithSubcalls tracer navState ev = do
             handleSubcallCompleted subcallId result
         AppEvent (AppEvent_SubcallFailed subcallId err) ->
             handleSubcallFailed subcallId err
+        AppEvent (AppEvent_ToolCallActivity activity) ->
+            handleToolCallActivity activity
         VtyEvent vtyEv
             | matchesEvent keymap EventExitTurnNavigation vtyEv -> do
                 tuiUI . turnNavigation .= Nothing
@@ -291,6 +311,8 @@ handleNormalEvent tracer ev = do
             handleSubcallCompleted subcallId result
         AppEvent (AppEvent_SubcallFailed subcallId err) ->
             handleSubcallFailed subcallId err
+        AppEvent (AppEvent_ToolCallActivity activity) ->
+            handleToolCallActivity activity
         VtyEvent vtyEv
             | matchesEvent keymap EventQuit vtyEv -> handleQuit
         VtyEvent vtyEv

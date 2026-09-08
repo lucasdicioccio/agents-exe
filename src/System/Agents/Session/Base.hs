@@ -15,27 +15,20 @@ module System.Agents.Session.Base (
     UserTurnContent (..),
     LlmTurnContent (..),
     PartialUserTurnContent (..),
-    SystemPrompt (..),
-    LlmResponse (..),
-    LlmToolCall (..),
-    UserQuery (..),
-    UserToolResponse (..),
-    SystemTool (..),
-    SystemToolDefinition (..),
-    SystemToolDefinitionV1 (..),
-    SessionProgress (..),
-    OnSessionProgress,
-    ignoreSessionProgress,
-    ExecutionMode (..),
-    ContinuationToken (..),
-    newContinuationToken,
-    ContinuationStore (..),
-    CacheKey (..),
-    migrateSessionV1ToV2,
+
+    -- * Partial turn helpers
+    partialCompletedResponses,
+    partialToolMessages,
+    partialPendingCalls,
+    partialPendingContinuations,
+    cacheKeyForTrackedCall,
 
     -- * Durable workflow primitives (re-exported from Session.Types)
     ToolCallId (..),
     newToolCallId,
+    providerToolCallId,
+    llmToolCallName,
+    isFinalToolCallState,
     ToolCallState (..),
     ToolCallDisposition (..),
     IsolationSpec (..),
@@ -44,10 +37,57 @@ module System.Agents.Session.Base (
     AppliedPolicy (..),
     TrackedToolCall (..),
 
-    -- * Partial turn helpers (re-exported from Session.Types)
-    partialCompletedResponses,
-    partialPendingCalls,
-    partialPendingContinuations,
+    -- * Execution mode / continuation types
+    ExecutionMode (..),
+    ContinuationToken (..),
+    newContinuationToken,
+    CacheKey (..),
+    AsyncYieldStrategy (..),
+
+    -- * Byte usage tracking
+    StepByteUsage (..),
+    calculateStepByteUsage,
+    sessionTotalBytes,
+
+    -- * Content types
+    SystemPrompt (..),
+    LlmResponse (..),
+    LlmToolCall (..),
+    UserQuery (..),
+    UserToolResponse (..),
+
+    -- * Tool definitions
+    SystemTool (..),
+    SystemToolDefinition (..),
+    SystemToolDefinitionV1 (..),
+
+    -- * Signal types (trajectory analysis)
+    InteractionSignals (..),
+    ExecutionSignals (..),
+    EnvironmentSignals (..),
+    TrajectorySignals (..),
+    StepSignals (..),
+    defaultInteractionSignals,
+    defaultExecutionSignals,
+    defaultEnvironmentSignals,
+    defaultTrajectorySignals,
+
+    -- * Session progress tracking
+    SessionProgress (..),
+    OnSessionProgress,
+    ignoreSessionProgress,
+
+    -- * Migration helpers
+    migrateSessionV1ToV2,
+
+    -- * Re-exports for convenience
+    TokenUsage (..),
+
+    -- * Async engine
+    AsyncEngine (..),
+
+    -- * Session backend (re-exported from SessionStore)
+    SessionBackend (..),
 
     -- * Durable executor/policy/helpers (re-exported from Session.Durable)
     ToolExecutor (..),
@@ -61,11 +101,11 @@ module System.Agents.Session.Base (
     inProcessExecutor,
     yieldingExecutor,
     cachingExecutor,
-    isolatedExecutor,
     cachedInProcessExecutor,
     composeExecutors,
     mkDurableExecutor,
     flattenDisposition,
+    isolatedExecutor,
     mkIsolationEnvelope,
     mkIsolationSuccessEnvelope,
     mkIsolationErrorEnvelope,
@@ -74,9 +114,6 @@ module System.Agents.Session.Base (
     localProcessRunner,
     dockerRunner,
     functionRunner,
-
-    -- * Session backend (re-exported from SessionStore)
-    SessionBackend (..),
 
     -- * Defined in this module
     MissingUserPrompt (..),
@@ -97,14 +134,18 @@ module System.Agents.Session.Base (
     withDurableWorkflows,
     withAsyncConfig,
     withDurableExecutor,
+    withAsyncEngine,
+    withAsyncYieldStrategy,
 ) where
 
 import Control.Concurrent.STM (TQueue)
 
 import System.Agents.Base (ConversationId)
+import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Async (ContinuationStore (..))
+import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Durable (
     DeploymentRunner (..),
     IsolationEnvelope (..),
@@ -167,7 +208,7 @@ data Action r
     | AskUserPrompt MissingUserPrompt
     | AskLlmCompletion LlmCompletion
     | -- comfort/note fully-motivated below, is to evolve the agent so that th runner logic has a primitive to do so
-      -- \* one advantage is it allows "pure" agents (i.e., dropping the need for a IO in usrQuery et al.)
+      -- \* one advantage is it allows "pure" agents (i.e., dropping the need a IO in usrQuery et al.)
       -- \* could consider forking but that would require a joining function (r -> r -> r) to combine results, which prevents the functorial aspects
       -- \* could consider extensiblility so that agents come with their set of decisions, but the runloop then has to account for these
       Evolve (Agent r)
@@ -208,6 +249,7 @@ Version 2 additions for async/resumable execution:
 * 'ctxContinuationStore' - Optional durable continuation store
 * 'ctxDeploymentRunner' - Optional isolated-deployment runner
 * 'ctxSessionBackend' - Optional durable session storage backend
+* 'ctxAsyncEngine' - Optional concurrent async execution engine
 -}
 data Agent r = Agent
     { step :: Session -> IO (Action r)
@@ -246,6 +288,18 @@ data Agent r = Agent
     {- ^ Execution mode: Synchronous (default) or Asynchronous.
     Async mode enables partial execution and session resumption.
     -}
+    , ctxAsyncYieldStrategy :: AsyncYieldStrategy
+    {- ^ Yield strategy for asynchronous tool execution.
+    Defaults to 'YieldWhenAllDone' for backward compatibility.
+    -}
+    , ctxMaxConcurrency :: Maybe Int
+    {- ^ Maximum number of concurrent async tool calls for the engine
+    created on demand by asynchronous steps. 'Nothing' uses the default.
+    -}
+    , ctxAsyncCallTimeout :: Maybe Int
+    {- ^ Seconds after which a background tool call is given up on and
+    reported as failed. 'Nothing' lets calls run indefinitely.
+    -}
     , ctxToolCache :: Maybe ToolCache
     {- ^ Optional tool cache for storing and retrieving tool results.
     Used in async mode to avoid re-executing cached tool calls.
@@ -274,12 +328,28 @@ data Agent r = Agent
     callbacks and session persistence combinators store sessions via
     this backend, falling back to file storage when absent.
     -}
+    , ctxAsyncEngine :: Maybe AsyncEngine
+    {- ^ Optional concurrent async execution engine. When present,
+    'RunAsync' calls are executed concurrently in background threads
+    and their OS entity lifecycle is kept in sync.
+    -}
     }
     deriving (Functor)
 
 -------------------------------------------------------------------------------
 -- Agent Combinators
 -------------------------------------------------------------------------------
+
+{- | Set the async yield strategy for an agent.
+
+Example:
+
+@
+yieldingAgent = withAsyncYieldStrategy YieldOnAnyProgress baseAgent
+@
+-}
+withAsyncYieldStrategy :: AsyncYieldStrategy -> Agent r -> Agent r
+withAsyncYieldStrategy strategy agent = agent{ctxAsyncYieldStrategy = strategy}
 
 {- | Set the execution mode for an agent.
 
@@ -398,6 +468,7 @@ withAsyncConfig :: ExecutionMode -> Maybe ToolCache -> ToolCallPolicy -> Agent r
 withAsyncConfig mode mCache policy agent =
     agent
         { ctxExecutionMode = mode
+        , ctxAsyncYieldStrategy = YieldWhenAllDone
         , ctxToolCache = mCache
         , ctxToolCallPolicy = policy
         }
@@ -435,4 +506,38 @@ withDurableExecutor mCache mRunner agent =
                     mRunner
                     agent.toolCall
         }
+
+{- | Install (or replace) a concurrent async engine on the agent.
+
+The engine is created from the agent's OS 'World' and native tool-call
+function. If the agent does not have a 'World', this combinator has no
+effect.
+
+Asynchronous steps install an engine on demand, but the loops only keep it
+for the duration of one call. Install it up front when a session is paused
+and resumed with the same agent, so resumed steps can still cancel calls
+started earlier and share the concurrency limit.
+
+Example:
+
+@
+asyncAgent <- withAsyncEngine 4 baseAgent
+@
+-}
+withAsyncEngine :: Int -> Agent r -> IO (Agent r)
+withAsyncEngine maxConcurrency agent =
+    case agent.ctxWorld of
+        Nothing -> pure agent
+        Just world0 -> do
+            -- Register the tool-call stores first so the engine and the
+            -- agent share the same world value.
+            world <- TCT.ensureToolCallComponentsIO world0
+            engine <- mkAsyncEngine world (executeCall agent) maxConcurrency agent.ctxAsyncCallTimeout
+            pure agent{ctxWorld = Just world, ctxAsyncEngine = Just engine}
+  where
+    executeCall :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+    executeCall a ctx call =
+        case a.ctxToolExecutor of
+            Just executor -> executor.execSync ctx call
+            Nothing -> a.toolCall ctx call
 

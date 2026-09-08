@@ -109,11 +109,11 @@ data ExtraAgentRef = ExtraAgentRef
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "my-agent",
-    "api-key-id": "my-key",
+    "apiKeyId": "my-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4",
+    "toolDirectory": "tools",
     "extraAgents": [
       {
         "slug": "helper-agent",
@@ -125,7 +125,7 @@ data ExtraAgentRef = ExtraAgentRef
       }
     ],
     "announce": "A recursive agent that can call itself.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are a helpful assistant.",
       "You can call yourself recursively for complex tasks."
     ]
@@ -234,11 +234,11 @@ refine-agent/
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "refine-code",
-    "api-key-id": "openai-key",
+    "apiKeyId": "openai-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4o",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4o",
+    "toolDirectory": "tools",
     "extraAgents": [
       {
         "slug": "refine-code",
@@ -246,7 +246,7 @@ refine-agent/
       }
     ],
     "announce": "Code refinement agent with self-recursion.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are a code refinement specialist.",
       "Analyze the provided code and suggest improvements.",
       "If the task is complex, break it into steps and call",
@@ -289,11 +289,11 @@ plan-exec/
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "task-planner",
-    "api-key-id": "openai-key",
+    "apiKeyId": "openai-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4o",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4o",
+    "toolDirectory": "tools",
     "extraAgents": [
       {
         "slug": "task-executor",
@@ -301,7 +301,7 @@ plan-exec/
       }
     ],
     "announce": "Task planner that delegates to executor.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are a strategic planner.",
       "Break down complex tasks into executable steps.",
       "Use the 'task-executor' tool to execute each step.",
@@ -318,11 +318,11 @@ plan-exec/
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "task-executor",
-    "api-key-id": "openai-key",
+    "apiKeyId": "openai-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4o",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4o",
+    "toolDirectory": "tools",
     "extraAgents": [
       {
         "slug": "task-planner",
@@ -330,7 +330,7 @@ plan-exec/
       }
     ],
     "announce": "Task executor that can request replanning.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are an execution specialist.",
       "Implement the planned steps precisely.",
       "If execution fails or needs adjustment,",
@@ -376,11 +376,11 @@ hierarchy/
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "boss",
-    "api-key-id": "openai-key",
+    "apiKeyId": "openai-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4o",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4o",
+    "toolDirectory": "tools",
     "extraAgents": [
       {
         "slug": "senior-dev",
@@ -388,7 +388,7 @@ hierarchy/
       }
     ],
     "announce": "Project manager coordinating development.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are a technical project manager.",
       "Delegate architecture decisions to senior-dev.",
       "Track overall progress and ensure quality."
@@ -404,11 +404,11 @@ hierarchy/
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "senior-dev",
-    "api-key-id": "openai-key",
+    "apiKeyId": "openai-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4o-mini",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4o-mini",
+    "toolDirectory": "tools",
     "extraAgents": [
       {
         "slug": "junior-dev",
@@ -420,7 +420,7 @@ hierarchy/
       }
     ],
     "announce": "Senior developer for architecture and review.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are a senior software developer.",
       "Design architecture and review implementations.",
       "Delegate implementation tasks to junior-dev.",
@@ -437,14 +437,14 @@ hierarchy/
   "tag": "OpenAIAgentDescription",
   "contents": {
     "slug": "junior-dev",
-    "api-key-id": "openai-key",
+    "apiKeyId": "openai-key",
     "flavor": "OpenAI",
-    "model-url": "https://api.openai.com",
-    "model-name": "gpt-4o-mini",
-    "tool-directory": "tools",
+    "modelUrl": "https://api.openai.com",
+    "modelName": "gpt-4o-mini",
+    "toolDirectory": "tools",
     "extraAgents": [],
     "announce": "Junior developer for implementation.",
-    "system-prompt": [
+    "systemPrompt": [
       "You are a junior software developer.",
       "Implement features following senior-dev specifications.",
       "Write tests and documentation for all code."
@@ -475,7 +475,7 @@ Add clear documentation in system prompts:
 
 ```json
 {
-  "system-prompt": [
+  "systemPrompt": [
     "You can call yourself recursively using the 'my-agent' tool.",
     "IMPORTANT: Stop after 3 levels of recursion.",
     "Track recursion depth in your reasoning."

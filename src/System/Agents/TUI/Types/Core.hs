@@ -65,6 +65,7 @@ import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode, OSAgentTree)
 import System.Agents.Base (AgentId (..), ConversationId (..))
 import System.Agents.OS.AgentHandle (AgentHandle (..), getAgentId, getAgentSlug)
 import System.Agents.OS.Core.World (World)
+import System.Agents.OS.Events (ToolCallActivity)
 import System.Agents.Runtime.Trace (Trace)
 import System.Agents.Session.Base (Session, SessionId)
 import System.Agents.SessionStore (SessionStore)
@@ -195,6 +196,8 @@ data AppEvent
       AppEvent_SubcallCompleted ConversationId Text
     | -- | A subcall has failed
       AppEvent_SubcallFailed ConversationId Text
+    | -- | A background tool call started, progressed, or finished
+      AppEvent_ToolCallActivity ToolCallActivity
     deriving (Show)
 
 -------------------------------------------------------------------------------

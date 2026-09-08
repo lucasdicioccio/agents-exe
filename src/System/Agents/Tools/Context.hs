@@ -67,7 +67,7 @@ import GHC.Generics (Generic)
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
-import System.Agents.Session.Types (Session, SessionId, TurnId)
+import System.Agents.Session.Types (Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
 
 -------------------------------------------------------------------------------
 -- Call Stack Entry
@@ -230,6 +230,10 @@ The context is designed to be:
   subcalls can emit events to notify the TUI of their lifecycle.
 * 'ctxParentConversation' - Optional parent conversation ID for subcalls.
   When present, indicates this context is for a nested agent invocation.
+* 'ctxProgressCallback' - Optional callback a tool can use to emit
+  structured progress updates while it is running. The callback accepts
+  a JSON value and writes it into the OS entity for this tool call.
+  When absent, tools should not attempt to stream partial results.
 -}
 data ToolExecutionContext = ToolExecutionContext
     { ctxSessionId :: SessionId
@@ -290,6 +294,22 @@ data ToolExecutionContext = ToolExecutionContext
     indicates this context is for a nested agent invocation, enabling
     proper lineage tracking in the OS.
     -}
+    , ctxProgressCallback :: Maybe (Aeson.Value -> IO ())
+    {- ^ Optional progress callback for streaming tool-call updates.
+    When present, a running tool can emit structured JSON progress
+    payloads; the async engine persists them on the OS entity.
+    -}
+    , ctxCancelToolCall :: Maybe (ToolCallId -> IO Bool)
+    {- ^ Optional hook to cancel a call running in the async engine. It
+    interrupts the background thread and returns 'False' when the engine
+    does not own a running call with that id.
+    -}
+    , ctxSessionToolCalls :: [TrackedToolCall]
+    {- ^ Tracked calls of the session's unfinished turns. Lets the
+    tool-call capabilities answer about calls that have no OS entity —
+    typically calls started by a process that is gone — without carrying
+    the whole session in 'ctxFullSession'.
+    -}
     }
     deriving (Generic)
 
@@ -306,6 +326,8 @@ instance Eq ToolExecutionContext where
             && ctxAllowedTools a == ctxAllowedTools b
             && ctxParentConversation a == ctxParentConversation b
 
+-- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and ctxProgressCallback are not compared
+-- (functions, TVars, and TQueue can't be compared)
 -- Note: ctxToolPortal, ctxWorld, and ctxEventQueue are not compared
 -- (functions, TVars, and TQueue can't be compared)
 
@@ -337,11 +359,19 @@ instance Show ToolExecutionContext where
             ++ eventQueueStr
             ++ ", ctxParentConversation = "
             ++ show (ctxParentConversation ctx)
+            ++ ", ctxProgressCallback = "
+            ++ progressCallbackStr
+            ++ ", ctxCancelToolCall = "
+            ++ cancelHookStr
+            ++ ", ctxSessionToolCalls = "
+            ++ show (length (ctxSessionToolCalls ctx))
             ++ " }"
       where
         portalStr = "<portal>"
         worldStr = "<world>"
         eventQueueStr = "<eventQueue>"
+        progressCallbackStr = "<progressCallback>"
+        cancelHookStr = "<cancelToolCall>"
 
 {- | JSON serialization support for 'ToolExecutionContext'.
 Note: The tool portal function, world, and event queue are not serialized.
@@ -358,8 +388,8 @@ instance ToJSON ToolExecutionContext where
             , "maxDepth" .= ctxMaxDepth ctx
             , "allowedTools" .= ctxAllowedTools ctx
             , "parentConversation" .= ctxParentConversation ctx
-            -- Note: ctxToolPortal, ctxWorld, and ctxEventQueue are intentionally omitted
-            -- (not serializable)
+            -- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and
+            -- ctxProgressCallback are intentionally omitted (not serializable)
             ]
 
 instance FromJSON ToolExecutionContext where
@@ -377,6 +407,9 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> v .: "parentConversation"
+            <*> pure Nothing
+            <*> pure Nothing
+            <*> pure []
 
 
 {- | Serializable subset of 'ToolExecutionContext' suitable for durable
@@ -437,6 +470,9 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxWorld = mWorld
         , ctxEventQueue = mEventQueue
         , ctxParentConversation = tecsParentConversation snap
+        , ctxProgressCallback = Nothing
+        , ctxCancelToolCall = Nothing
+        , ctxSessionToolCalls = []
         }
 -------------------------------------------------------------------------------
 -- Construction Helpers
@@ -466,6 +502,9 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
         , ctxParentConversation = Nothing
+        , ctxProgressCallback = Nothing
+        , ctxCancelToolCall = Nothing
+        , ctxSessionToolCalls = []
         }
 
 {- | Create a minimal 'ToolExecutionContext' with only required identifiers.
@@ -503,6 +542,9 @@ mkMinimalContext sessId convId tId portal =
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
         , ctxParentConversation = Nothing
+        , ctxProgressCallback = Nothing
+        , ctxCancelToolCall = Nothing
+        , ctxSessionToolCalls = []
         }
 
 {- | Create a root-level context for the start of agent execution (depth 0).
@@ -548,6 +590,9 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
         , ctxParentConversation = Nothing
+        , ctxProgressCallback = Nothing
+        , ctxCancelToolCall = Nothing
+        , ctxSessionToolCalls = []
         }
 
 {- | Create a context with tool portal support.
@@ -595,6 +640,9 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
         , ctxParentConversation = Nothing
+        , ctxProgressCallback = Nothing
+        , ctxCancelToolCall = Nothing
+        , ctxSessionToolCalls = []
         }
 
 {- | Create a nested context for subcall execution with OS integration.
@@ -633,6 +681,11 @@ mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
         { ctxWorld = mWorld
         , ctxEventQueue = mEventQueue
         , ctxParentConversation = Just parentConvId
+        , -- The parent's hooks target the parent's tool call and engine; the
+          -- sub-agent's own steps install hooks for its calls.
+          ctxProgressCallback = Nothing
+        , ctxCancelToolCall = Nothing
+        , ctxSessionToolCalls = []
         }
 
 {- | Create a nested context when calling a sub-agent.

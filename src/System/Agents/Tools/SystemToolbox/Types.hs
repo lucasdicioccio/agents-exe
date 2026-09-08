@@ -1,4 +1,6 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {- | Core types for the SystemToolbox module.
@@ -25,16 +27,28 @@ module System.Agents.Tools.SystemToolbox.Types (
     -- * Query results
     QueryResult (..),
     AttachFileResult (..),
+
+    -- * Async tool-call status
+    GetToolCallStatusParams (..),
+    ToolCallStatusResult (..),
+    ListRunningToolCallsResult (..),
+    RunningToolCallInfo (..),
+    CancelToolCallParams (..),
+    CancelToolCallResult (..),
+
+    -- * Query errors
     QueryError (..),
 
     -- * Utilities
     formatExecutionTime,
 ) where
 
-import Data.Aeson (ToJSON (..), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, (.=), (.:), (.:?))
 import qualified Data.Aeson as Aeson
+import Data.Aeson.Types ((.!=))
 import Data.Text (Text)
-import Data.Time (NominalDiffTime)
+import Data.Time (NominalDiffTime, UTCTime)
+import GHC.Generics (Generic)
 
 import System.Agents.Base (
     SessionIntrospectionScope (..),
@@ -43,8 +57,10 @@ import System.Agents.Base (
  )
 import System.Agents.FileSandbox (FileSandbox)
 import System.Agents.Media.Types (MediaType (..))
+import System.Agents.OS.Conversation.Types (ToolCallProgress)
 import System.Agents.Session.Types (SessionId (..))
 import qualified System.Agents.SessionStore as SessionStore
+
 
 -------------------------------------------------------------------------------
 -- Trace Events
@@ -249,6 +265,168 @@ instance ToJSON AttachFileResult where
             , "size" .= attachFileSize result
             ]
 
+
+-------------------------------------------------------------------------------
+-- Async Tool-Call Status
+-------------------------------------------------------------------------------
+
+{- | Parameters for the @get-tool-call-status@ capability.
+
+All fields except 'toolCallId' are optional and use the documented defaults
+when omitted.
+-}
+data GetToolCallStatusParams = GetToolCallStatusParams
+    { toolCallId :: Text
+    -- ^ The tool-call id to query
+    , includeProgress :: Bool
+    -- ^ Whether to include progress entries in the result (default: True)
+    , waitForCompletion :: Bool
+    -- ^ Whether to block until the call reaches a final state (default: False)
+    , timeoutSeconds :: Int
+    -- ^ Maximum seconds to wait when 'waitForCompletion' is True (default: 5)
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON GetToolCallStatusParams where
+    parseJSON = Aeson.withObject "GetToolCallStatusParams" $ \v ->
+        GetToolCallStatusParams
+            <$> v .: "tool_call_id"
+            <*> v .:? "include_progress" .!= True
+            <*> v .:? "wait_for_completion" .!= False
+            <*> v .:? "timeout_seconds" .!= 5
+
+instance ToJSON GetToolCallStatusParams where
+    toJSON p =
+        Aeson.object
+            [ "tool_call_id" .= toolCallId p
+            , "include_progress" .= includeProgress p
+            , "wait_for_completion" .= waitForCompletion p
+            , "timeout_seconds" .= timeoutSeconds p
+            ]
+
+{- | Result of a @get-tool-call-status@ query.
+
+Provides a stable view of the tool-call entity, including its current
+status, timing, final result (if any), and progress history.
+-}
+data ToolCallStatusResult = ToolCallStatusResult
+    { tcsrToolCallId :: Text
+    -- ^ The queried tool-call id
+    , tcsrStatus :: Text
+    -- ^ Human-readable status: pending, running, completed, failed, cancelled, orphaned
+    , tcsrToolName :: Maybe Text
+    -- ^ Name of the tool being called, when known
+    , tcsrStartedAt :: Maybe UTCTime
+    -- ^ When the call started executing
+    , tcsrCompletedAt :: Maybe UTCTime
+    -- ^ When the call reached a final state
+    , tcsrResult :: Maybe Value
+    -- ^ Final JSON result, when completed successfully
+    , tcsrProgress :: [ToolCallProgress]
+    -- ^ Progress updates, newest first
+    , tcsrIsFinal :: Bool
+    -- ^ Whether the call has reached a terminal state
+    }
+    deriving (Show, Eq, Generic)
+
+toolCallStatusResultOptions :: Aeson.Options
+toolCallStatusResultOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 4
+        }
+
+instance ToJSON ToolCallStatusResult where
+    toJSON = Aeson.genericToJSON toolCallStatusResultOptions
+
+instance FromJSON ToolCallStatusResult where
+    parseJSON = Aeson.genericParseJSON toolCallStatusResultOptions
+
+{- | Result of a @list-running-tool-calls@ query.
+-}
+newtype ListRunningToolCallsResult = ListRunningToolCallsResult
+    { ltcRunning :: [RunningToolCallInfo]
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ListRunningToolCallsResult where
+    toJSON result =
+        Aeson.object ["running" .= ltcRunning result]
+
+instance FromJSON ListRunningToolCallsResult where
+    parseJSON = Aeson.withObject "ListRunningToolCallsResult" $ \v ->
+        ListRunningToolCallsResult <$> v .: "running"
+
+{- | Description of a single running tool call.
+-}
+data RunningToolCallInfo = RunningToolCallInfo
+    { rtciToolCallId :: Text
+    -- ^ Tool-call id
+    , rtciToolName :: Text
+    -- ^ Name of the tool being called
+    , rtciStatus :: Text
+    -- ^ Current status: pending or running
+    , rtciStartedAt :: Maybe UTCTime
+    -- ^ When the call started executing
+    }
+    deriving (Show, Eq, Generic)
+
+runningToolCallInfoOptions :: Aeson.Options
+runningToolCallInfoOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 4
+        }
+
+instance ToJSON RunningToolCallInfo where
+    toJSON = Aeson.genericToJSON runningToolCallInfoOptions
+
+instance FromJSON RunningToolCallInfo where
+    parseJSON = Aeson.genericParseJSON runningToolCallInfoOptions
+
+{- | Parameters for the @cancel-tool-call@ capability.
+-}
+data CancelToolCallParams = CancelToolCallParams
+    { ctpToolCallId :: Text
+    -- ^ The tool-call id to cancel
+    , ctpReason :: Maybe Text
+    -- ^ Optional human-readable reason for cancellation
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON CancelToolCallParams where
+    parseJSON = Aeson.withObject "CancelToolCallParams" $ \v ->
+        CancelToolCallParams
+            <$> v .: "tool_call_id"
+            <*> v .:? "reason"
+
+instance ToJSON CancelToolCallParams where
+    toJSON p =
+        Aeson.object $
+            ["tool_call_id" .= ctpToolCallId p]
+                ++ ["reason" .= r | Just r <- [ctpReason p]]
+
+{- | Result of a @cancel-tool-call@ query.
+-}
+data CancelToolCallResult = CancelToolCallResult
+    { ccrToolCallId :: Text
+    -- ^ The cancelled tool-call id
+    , ccrCancelled :: Bool
+    -- ^ Whether the call was actually cancelled
+    , ccrPreviousStatus :: Text
+    -- ^ Status before the cancellation attempt
+    }
+    deriving (Show, Eq, Generic)
+
+cancelToolCallResultOptions :: Aeson.Options
+cancelToolCallResultOptions =
+    Aeson.defaultOptions
+        { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 3
+        }
+
+instance ToJSON CancelToolCallResult where
+    toJSON = Aeson.genericToJSON cancelToolCallResultOptions
+
+instance FromJSON CancelToolCallResult where
+    parseJSON = Aeson.genericParseJSON cancelToolCallResultOptions
 -------------------------------------------------------------------------------
 -- Query Errors
 -------------------------------------------------------------------------------

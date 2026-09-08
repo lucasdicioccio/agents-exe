@@ -495,3 +495,32 @@ Implementing all eight phases of the durable-workflows plan turned agents-exe fr
 
 The codebase now supports the requested example flow end-to-end: an agent issues three tool calls, executes one and defers two, yields, persists, wakes with the two results, and resumes to completion.
 
+
+## Follow-up — Phase 2 scheduler compilation fix
+
+A subsequent review found that `src/System/Agents/Session/Step.hs` had drifted
+into a non-compiling state despite the Phase 2 completion note. The following
+fixes were applied to make the async scheduler build and the test suite pass
+again:
+
+* Added missing imports:
+  * `System.Agents.Session.Base` (agent/session/action types)
+  * `System.Agents.Session.Async` (`mkToolContinuationSnapshot`, `storeContinuation`)
+  * `System.Agents.Session.Compat` (`parseToolCallFromLlmToolCall`)
+  * `System.Agents.Session.Types` (`StepByteUsage`, `calculateStepByteUsage`)
+  * `System.Agents.Media.Types` (`ContentPart`, `MediaAttachment`)
+  * `System.Agents.OS.Core.World` (`getComponent`)
+  * `Control.Concurrent.STM` (`atomically`)
+* Qualified the `System.Agents.OS.Conversation` import as `OSConv` and updated
+  `pollRunningCall` to use `OSConv.ToolCallState`, `OSConv.tcStatus`, and the
+  `OSConv.TcCompleted` / `OSConv.TcFailed` / `OSConv.TcCancelled` constructors,
+  resolving name clashes with the session-layer `ToolCallState` / `tcResult`.
+* Removed the dead import of `System.Agents.Session.Async.Engine`.
+* Enabled `TypeApplications` so `getComponent @OSConv.ToolCallState` is valid.
+
+### Verification
+
+* Library builds with `-Wall -Werror`.
+* Executable `agents-exe` builds with `-Wall -Werror`.
+* Executable `durable-workflow-demo` builds with `-Wall -Werror`.
+* Test suite `agents-tests` passes, including all durable-workflow tests.

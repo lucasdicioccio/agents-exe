@@ -32,6 +32,8 @@ case result of
 module System.Agents.Session.Loop (
     -- * Synchronous execution
     run,
+    runUntilBlocked,
+    isBlockedOnDeferredCalls,
 
     -- * Asynchronous execution with pause/resume
     runAsync,
@@ -46,7 +48,11 @@ module System.Agents.Session.Loop (
     module System.Agents.Session.Step,
 ) where
 
+import Control.Exception (onException)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+
 import System.Agents.Base (ConversationId)
+import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
 import System.Agents.Session.Base
 import System.Agents.Session.Step
 
@@ -61,14 +67,65 @@ immediately and the session runs to completion without pausing.
 -}
 run :: forall r. ConversationId -> Agent r -> Session -> IO r
 run convId agent sess =
-    go agent sess
+    withEngineShutdown agent $ \latest ->
+        go latest agent sess
   where
-    go :: Agent r -> Session -> IO r
-    go agent0 sess0 = do
+    go :: IORef (Agent r) -> Agent r -> Session -> IO r
+    go latest agent0 sess0 = do
         (agent1, res) <- runStepM convId agent0 sess0
+        writeIORef latest agent1
         case res of
             Left r -> pure r
-            Right sess1 -> go agent1 sess1
+            Right sess1 -> go latest agent1 sess1
+
+{- | Run an action that tracks the evolving agent, then cancel whatever the
+agent's async engine is still running.
+
+Steps install the engine on the agent they return, so the last agent seen is
+the one holding the engine. Background calls are only useful while the agent
+runs, so they (and their subprocesses) are cancelled when it is done or fails.
+-}
+withEngineShutdown :: Agent r -> (IORef (Agent r) -> IO a) -> IO a
+withEngineShutdown agent0 action = do
+    latest <- newIORef agent0
+    let shutdown = do
+            agent <- readIORef latest
+            mapM_ shutdownAsyncEngine agent.ctxAsyncEngine
+    result <- action latest `onException` shutdown
+    shutdown
+    pure result
+
+{- | Like 'run', but returns the session instead of looping when nothing can
+progress in this process: the head partial turn only waits on deferred calls
+(see 'isBlockedOnDeferredCalls'), which an external worker must complete.
+
+Background calls running in this process are waited for, since they cannot
+outlive it.
+-}
+runUntilBlocked :: forall r. ConversationId -> Agent r -> Session -> IO (Either r Session)
+runUntilBlocked convId agent sess =
+    withEngineShutdown agent $ \latest -> go latest agent sess
+  where
+    go :: IORef (Agent r) -> Agent r -> Session -> IO (Either r Session)
+    go latest agent0 sess0
+        | isBlockedOnDeferredCalls sess0 = pure (Right sess0)
+        | otherwise = do
+            (agent1, res) <- runStepM convId agent0 sess0
+            writeIORef latest agent1
+            case res of
+                Left r -> pure (Left r)
+                Right sess1 -> go latest agent1 sess1
+
+{- | Whether the head partial turn has deferred calls and nothing else to
+run or wait for (no ready or running calls).
+-}
+isBlockedOnDeferredCalls :: Session -> Bool
+isBlockedOnDeferredCalls session =
+    case getPartialTurn session of
+        Nothing -> False
+        Just partial ->
+            let states = map (.tcState) partial.pTrackedToolCalls
+             in Deferred `elem` states && Ready `notElem` states && Running `notElem` states
 
 -------------------------------------------------------------------------------
 -- Asynchronous Execution with Progress Callbacks
@@ -89,18 +146,19 @@ runWithProgress ::
     IO r
 runWithProgress convId agent sess onProgress = do
     onProgress $ SessionStarted sess
-    go agent sess
+    withEngineShutdown agent $ \latest -> go latest agent sess
   where
-    go :: Agent r -> Session -> IO r
-    go agent0 sess0 = do
+    go :: IORef (Agent r) -> Agent r -> Session -> IO r
+    go latest agent0 sess0 = do
         (agent1, res) <- runStepM convId agent0 sess0
+        writeIORef latest agent1
         case res of
             Left r -> do
                 onProgress $ SessionCompleted sess0
                 pure r
             Right sess1 -> do
                 onProgress $ SessionUpdated sess1
-                go agent1 sess1
+                go latest agent1 sess1
 
 {- | Run an agent in async mode with progress callbacks.
 
@@ -121,11 +179,16 @@ runAsyncWithProgress ::
     IO (Either r Session)
 runAsyncWithProgress convId agent sess onProgress = do
     onProgress $ SessionStarted sess
-    go agent sess
+    -- Only cancel on failure: pausing with calls still running is the point of
+    -- this loop, and they are picked up again on resume.
+    latest <- newIORef agent
+    let shutdown = readIORef latest >>= \a -> mapM_ shutdownAsyncEngine a.ctxAsyncEngine
+    go latest agent sess `onException` shutdown
   where
-    go :: Agent r -> Session -> IO (Either r Session)
-    go agent0 sess0 = do
+    go :: IORef (Agent r) -> Agent r -> Session -> IO (Either r Session)
+    go latest agent0 sess0 = do
         (agent1, res) <- runStepM convId agent0 sess0
+        writeIORef latest agent1
         case res of
             Left r -> do
                 onProgress $ SessionCompleted sess0
@@ -138,8 +201,8 @@ runAsyncWithProgress convId agent sess onProgress = do
                         -- Check if there's a partial turn (indicating pause)
                         case getPartialTurn sess1 of
                             Just _ -> pure $ Right sess1
-                            Nothing -> go agent1 sess1
-                    Synchronous -> go agent1 sess1
+                            Nothing -> go latest agent1 sess1
+                    Synchronous -> go latest agent1 sess1
 
 -------------------------------------------------------------------------------
 -- Asynchronous Execution
@@ -153,6 +216,11 @@ Executes the agent step by step. Returns either:
 
 This allows sessions to be saved and resumed later, potentially on
 different machines.
+
+The async engine created during the run is not returned. When resuming in
+the same process, install one with 'withAsyncEngine' beforehand so calls
+started before the pause can still be cancelled. Calls whose process is
+gone are resolved as orphaned on resume.
 
 Example:
 
@@ -208,13 +276,15 @@ getSessionStatus session =
         Nothing ->
             "Complete - " ++ show (length session.turns) ++ " turns"
         Just partial ->
-            let completed = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == Completed]
-                pending = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == Ready]
-                deferred = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == Deferred]
+            let count st = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == st]
              in "Partial - "
-                    ++ show completed
+                    ++ show (count Completed)
                     ++ " completed, "
-                    ++ show pending
+                    ++ show (count Failed)
+                    ++ " failed, "
+                    ++ show (count Running)
+                    ++ " running, "
+                    ++ show (count Ready)
                     ++ " pending, "
-                    ++ show deferred
+                    ++ show (count Deferred)
                     ++ " deferred"

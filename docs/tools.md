@@ -312,10 +312,10 @@ OpenAPI tools convert REST API specifications into LLM-callable tools.
     {
       "tag": "OpenAPIServer",
       "contents": {
-        "specUrl": "https://api.example.com/openapi.json",
-        "baseUrl": "https://api.example.com",
-        "headers": {"X-API-Version": "v1"},
-        "token": "${API_TOKEN}"
+        "SpecUrl": "https://api.example.com/openapi.json",
+        "BaseUrl": "https://api.example.com",
+        "Headers": {"X-API-Version": "v1"},
+        "Token": "${API_TOKEN}"
       }
     }
   ]
@@ -387,9 +387,8 @@ PostgREST tools generate database query tools from PostgREST APIs.
     {
       "tag": "PostgRESTServer",
       "contents": {
-        "specUrl": "http://localhost:3000/",
-        "name": "mydb",
-        "description": "Main database"
+        "SpecUrl": "http://localhost:3000/",
+        "BaseUrl": "http://localhost:3000"
       }
     }
   ]
@@ -444,9 +443,9 @@ SQLite tools provide SQL query capabilities against SQLite databases.
     {
       "tag": "SqliteToolbox",
       "contents": {
-        "name": "analytics",
-        "description": "Analytics database",
-        "path": "./analytics.db"
+        "Name": "analytics",
+        "Description": "Analytics database",
+        "Versioning": {"tag": "SqliteReadOnly", "path": "./analytics.db"}
       }
     }
   ]
@@ -503,7 +502,7 @@ The file sandbox system provides secure, configurable file access control for to
 
 ### FileSandboxConfig
 
-Each sandboxed toolbox accepts an optional `fileSandbox` configuration:
+Each sandboxed toolbox accepts an optional `FileSandbox` configuration:
 
 ```haskell
 data FileSandboxConfig = FileSandboxConfig
@@ -553,7 +552,7 @@ data PathPredicate
 
 ```json
 {
-  "predicate": {
+  "fsbPredicate": {
     "tag": "Any",
     "contents": [
       {"tag": "DirectoryRecursive", "contents": "./src"},
@@ -568,7 +567,7 @@ data PathPredicate
 
 ```json
 {
-  "predicate": {
+  "fsbPredicate": {
     "tag": "And",
     "contents": [
       {"tag": "DirectoryRecursive", "contents": "./src"},
@@ -583,7 +582,7 @@ data PathPredicate
 
 ```json
 {
-  "predicate": {
+  "fsbPredicate": {
     "tag": "And",
     "contents": [
       {"tag": "DirectoryRecursive", "contents": "./my-project"},
@@ -597,7 +596,7 @@ data PathPredicate
 
 ```json
 {
-  "predicate": {
+  "fsbPredicate": {
     "tag": "Any",
     "contents": [
       {"tag": "FilePattern", "contents": "*.md"},
@@ -631,6 +630,10 @@ All paths are canonicalized before validation:
 
 The System Toolbox provides agents with contextual information about the running system through a configurable set of capabilities.
 
+The `get-tool-call-status`, `list-running-tool-calls` and `cancel-tool-call`
+capabilities only do something for agents that run tool calls in the
+background; see [async-tool-calls.md](async-tool-calls.md).
+
 ### Capabilities
 
 | Capability | Description |
@@ -646,6 +649,9 @@ The System Toolbox provides agents with contextual information about the running
 | `attach-file` | Attach a file to the conversation |
 | `list-directory` | List directory contents with metadata |
 | `execute-command` | Execute shell commands with optional filter approval |
+| `get-tool-call-status` | Status, progress and result of one of the agent's own tool calls |
+| `list-running-tool-calls` | Tool calls still running in the background |
+| `cancel-tool-call` | Stop a running background tool call |
 | `list-sessions` | List accessible sessions (requires session introspection config) |
 | `search-sessions` | Full-text search across sessions (requires session introspection config) |
 | `read-session` | Read session content (requires session introspection config) |
@@ -659,16 +665,16 @@ The System Toolbox provides agents with contextual information about the running
     {
       "tag": "SystemToolbox",
       "contents": {
-        "name": "system",
-        "description": "System context and information",
-        "capabilities": ["date", "operating-system", "running-user", "hostname", "attach-file", "list-directory", "execute-command"],
-        "envVarFilter": null,
-        "fileSandbox": {
-          "predicate": {"tag": "DirectoryRecursive", "contents": "./project"},
-          "maxFileSize": 52428800,
-          "name": "system-sandbox"
+        "Name": "system",
+        "Description": "System context and information",
+        "Capabilities": ["date", "operating-system", "running-user", "hostname", "attach-file", "list-directory", "execute-command"],
+        "EnvVarFilter": null,
+        "FileSandbox": {
+          "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./project"},
+          "fsbMaxFileSize": 52428800,
+          "fsbName": "system-sandbox"
         },
-        "commandFilter": "/path/to/approval-script.sh"
+        "CommandFilter": "/path/to/approval-script.sh"
       }
     }
   ]
@@ -749,7 +755,7 @@ The `execute-command` capability allows the agent to execute arbitrary shell com
 ```
 
 **Command Filter:**
-When `commandFilter` is configured, every command is first passed to the filter on stdin. The filter must output a JSON acceptance object:
+When `CommandFilter` is configured, every command is first passed to the filter on stdin. The filter must output a JSON acceptance object:
 
 ```json
 // Allowed:
@@ -782,9 +788,9 @@ Access control is managed through `SessionIntrospectionScope`:
 {
   "tag": "SystemToolbox",
   "contents": {
-    "name": "system",
-    "description": "System information and session memory",
-    "capabilities": [
+    "Name": "system",
+    "Description": "System information and session memory",
+    "Capabilities": [
       "date",
       "hostname",
       "list-sessions",
@@ -792,9 +798,9 @@ Access control is managed through `SessionIntrospectionScope`:
       "read-session",
       "get-session-stats"
     ],
-    "sessionIntrospectionScope": "subtree",
-    "sessionIntrospectionMaxResults": 50,
-    "sessionIntrospectionIncludeToolOutputs": false
+    "SessionIntrospectionScope": "subtree",
+    "SessionIntrospectionMaxResults": 50,
+    "SessionIntrospectionIncludeToolOutputs": false
   }
 }
 ```
@@ -922,24 +928,24 @@ Returns aggregate statistics about accessible sessions.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Unique name for this toolbox instance |
-| `description` | string | Human-readable description |
-| `capabilities` | [string] | List of enabled capabilities |
-| `envVarFilter` | string? | Optional substring filter for env vars |
-| `sessionIntrospectionScope` | string? | Scope of accessible sessions (default: "subtree") |
-| `sessionIntrospectionMaxResults` | number? | Max sessions to return (default: 50) |
-| `sessionIntrospectionIncludeToolOutputs` | boolean? | Include tool outputs in read operations (default: true) |
-| `fileSandbox` | object? | File sandbox for attach-file/list-directory capabilities (default: deny all) |
-| `commandFilter` | string? | Optional command approval filter for execute-command |
+| `Name` | string | Unique name for this toolbox instance |
+| `Description` | string | Human-readable description |
+| `Capabilities` | [string] | List of enabled capabilities |
+| `EnvVarFilter` | string? | Optional substring filter for env vars |
+| `SessionIntrospectionScope` | string? | Scope of accessible sessions (default: "subtree") |
+| `SessionIntrospectionMaxResults` | number? | Max sessions to return (default: 50) |
+| `SessionIntrospectionIncludeToolOutputs` | boolean? | Include tool outputs in read operations (default: true) |
+| `FileSandbox` | object? | File sandbox for attach-file/list-directory capabilities (default: deny all) |
+| `CommandFilter` | string? | Optional command approval filter for execute-command |
 
 ### Security Considerations
 
 - **Capability-based access**: Only enabled capabilities are exposed
 - **Session scope enforcement**: Strict access control via `SessionIntrospectionScope`
 - **ScopeAll requires explicit opt-in**: Must be explicitly configured, never default
-- **Env var filtering**: Use `envVarFilter` to limit variable exposure
+- **Env var filtering**: Use `EnvVarFilter` to limit variable exposure
 - **Read-only**: System tools gather information but cannot modify the system
-- **Command filtering**: Use `commandFilter` to control command execution
+- **Command filtering**: Use `CommandFilter` to control command execution
 - **Linux-focused**: Initial implementation targets Linux systems
 
 ### LLM Tool Interface
@@ -996,13 +1002,13 @@ The Developer Toolbox provides utilities for writing and validating agents and t
     {
       "tag": "DeveloperToolbox",
       "contents": {
-        "name": "dev",
-        "description": "Development utilities",
-        "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
-        "fileSandbox": {
-          "predicate": {"tag": "DirectoryRecursive", "contents": "./src"},
-          "maxFileSize": null,
-          "name": "developer-sandbox"
+        "Name": "dev",
+        "Description": "Development utilities",
+        "Capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
+        "FileSandbox": {
+          "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./src"},
+          "fsbMaxFileSize": null,
+          "fsbName": "developer-sandbox"
         }
       }
     }
@@ -1018,8 +1024,8 @@ The `read-file-range`, `write-file-range`, and `patch-file` capabilities require
 
 ```json
 {
-  "fileSandbox": {
-    "predicate": {
+  "FileSandbox": {
+    "fsbPredicate": {
       "tag": "Any",
       "contents": [
         {"tag": "DirectoryRecursive", "contents": "./src"},
@@ -1027,7 +1033,7 @@ The `read-file-range`, `write-file-range`, and `patch-file` capabilities require
         {"tag": "FileExactly", "contents": "./package.yaml"}
       ]
     },
-    "maxFileSize": 10485760
+    "fsbMaxFileSize": 10485760
   }
 }
 ```
@@ -1498,44 +1504,45 @@ The Lua toolbox enables a powerful pattern called **Recursive Language Models (L
     "bashToolboxes": [
       {
         "tag": "SingleTool",
-        "contents": "./tools/askuser/ask-user.bash"
+        "contents": {"Path": "./tools/askuser/ask-user.bash"}
       }
     ],
     "builtinToolboxes": [
       {
         "tag": "LuaToolbox",
         "contents": {
-          "name": "lua",
-          "description": "Sandboxed Lua interpreter",
-          "maxMemoryMB": 256,
-          "maxExecutionTimeSeconds": 300,
-          "allowedTools": [
+          "Name": "lua",
+          "Description": "Sandboxed Lua interpreter",
+          "MaxMemoryMB": 256,
+          "MaxExecutionTimeSeconds": 300,
+          "AllowedTools": [
             "bash_ask_user",
             "io_prompt_agent_local_lrmlua",
             "sqlite_shared_working_memory_query"
           ],
-          "allowedPaths": [
-            "./repro-cases",
-            "./README.md"
-          ],
-          "allowedHosts": [
+          "AllowedHosts": [
             "localhost",
             "127.0.0.1"
           ],
-          "fileSandbox": {
-            "predicate": {"tag": "DirectoryRecursive", "contents": "./repro-cases"},
-            "maxFileSize": 10485760,
-            "name": "lua-fs-sandbox"
+          "FileSandbox": {
+            "fsbPredicate": {
+              "tag": "Any",
+              "contents": [
+                {"tag": "DirectoryRecursive", "contents": "./repro-cases"},
+                {"tag": "FileExactly", "contents": "./README.md"}
+              ]
+            },
+            "fsbMaxFileSize": 10485760,
+            "fsbName": "lua-fs-sandbox"
           }
         }
       },
       {
         "tag": "SqliteToolbox",
         "contents": {
-          "name": "shared_working_memory",
-          "description": "A base to help you coordinate large works.",
-          "path": "./dev-memory.db",
-          "access": "read-write"
+          "Name": "shared_working_memory",
+          "Description": "A base to help you coordinate large works.",
+          "Versioning": {"tag": "SqliteReadWrite", "path": "./dev-memory.db"}
         }
       }
     ]
@@ -1547,33 +1554,33 @@ The Lua toolbox enables a powerful pattern called **Recursive Language Models (L
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Unique name for this toolbox instance (used as tool prefix) |
-| `description` | string | Human-readable description |
-| `maxMemoryMB` | integer | Maximum Lua heap memory in megabytes |
-| `maxExecutionTimeSeconds` | integer | Maximum script execution time in seconds |
-| `allowedTools` | [string] | Whitelist of tool names Lua scripts can call via the portal |
-| `allowedPaths` | [string] | **Deprecated**, use `fileSandbox` instead |
-| `allowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module |
-| `fileSandbox` | object? | File sandbox configuration for Lua `fs` module |
+| `Name` | string | Unique name for this toolbox instance (used as tool prefix) |
+| `Description` | string | Human-readable description |
+| `MaxMemoryMB` | integer | Maximum Lua heap memory in megabytes |
+| `MaxExecutionTimeSeconds` | integer | Maximum script execution time in seconds |
+| `AllowedTools` | [string] | Whitelist of tool names Lua scripts can call via the portal |
+| `AllowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module |
+| `FileSandbox` | object? | File sandbox configuration for Lua `fs` module |
 
 ### File Sandbox for Lua
 
-The Lua `fs` module uses the unified file sandbox system. When `fileSandbox` is configured, all filesystem operations (`fs.read`, `fs.write`, `fs.list`, etc.) are validated against the sandbox.
+The Lua `fs` module uses the unified file sandbox system. When `FileSandbox` is configured, all filesystem operations (`fs.read`, `fs.write`, `fs.list`, etc.) are validated against the sandbox.
 
 **Migration from `allowedPaths`:**
 
-The legacy `allowedPaths` field is deprecated. Migrate to `fileSandbox`:
+The legacy `allowedPaths` field no longer exists and is ignored if present.
+Use `FileSandbox` instead:
 
 ```json
-// Old (deprecated)
+// Old (removed, ignored)
 {
   "allowedPaths": ["./data", "./scripts"]
 }
 
-// New (recommended)
+// New
 {
-  "fileSandbox": {
-    "predicate": {
+  "FileSandbox": {
+    "fsbPredicate": {
       "tag": "Any",
       "contents": [
         {"tag": "DirectoryRecursive", "contents": "./data"},
@@ -1589,8 +1596,8 @@ The legacy `allowedPaths` field is deprecated. Migrate to `fileSandbox`:
 The Lua toolbox provides a sandboxed execution environment:
 
 - **Memory limits**: Lua state memory is constrained via allocator hooks
-- **Timeout enforcement**: Scripts that exceed `maxExecutionTimeSeconds` are terminated
-- **Path sandboxing**: Filesystem access restricted to `fileSandbox` configuration
+- **Timeout enforcement**: Scripts that exceed `MaxExecutionTimeSeconds` are terminated
+- **Path sandboxing**: Filesystem access restricted to `FileSandbox` configuration
 - **Host whitelisting**: HTTP requests limited to `allowedHosts`
 - **Tool whitelist**: Only tools in `allowedTools` can be called through the portal
 - **Dangerous functions removed**: `os.execute`, `io.popen`, `loadfile`, `dofile`, etc. are removed
@@ -2400,13 +2407,13 @@ data PortalError
 18. **Atomic file edits**: For complex multi-range edits, use `write-file-range` with contentBlocks array
 19. **Patch for context validation**: Use `patch-file` when context validation is needed before applying changes
 20. **Session introspection**: Enable session introspection capabilities in SystemToolbox for cross-session analysis
-21. **File sandbox configuration**: Always configure `fileSandbox` for SystemToolbox (attach-file), DeveloperToolbox (read/write/patch), and LuaToolbox (fs module)
+21. **File sandbox configuration**: Always configure `FileSandbox` for SystemToolbox (attach-file), DeveloperToolbox (read/write/patch), and LuaToolbox (fs module)
 22. **Secure by default**: The default file sandbox denies all access (`AlwaysDeny`). Explicitly configure allowed paths.
 23. **Path canonicalization**: The file sandbox canonicalizes all paths, so predicates apply to resolved paths (not symlink paths)
 24. **Multi-turn edit sessions**: Use `commit: false` for staging multiple edits, then `commit: true` to finalize
 25. **Optimistic locking**: Use `expected_snapshot_ref` to prevent conflicts when multiple agents edit the same file
 26. **Rich patch errors**: Patch context mismatches now include expected/actual lines for easier debugging
-27. **Command filtering**: Use `commandFilter` in SystemToolbox to control arbitrary command execution
+27. **Command filtering**: Use `CommandFilter` in SystemToolbox to control arbitrary command execution
 
 ## Example: Complete Tool Configuration
 
@@ -2421,7 +2428,7 @@ data PortalError
   "systemPrompt": ["You help users manage and analyze files."],
   "toolDirectory": "tools",
   "bashToolboxes": [
-    { "path": "./extra-tools", "name": "extras" }
+    {"tag": "FileSystemDirectory", "contents": {"Path": "./extra-tools"}}
   ],
   "mcpServers": [
     {
@@ -2437,9 +2444,9 @@ data PortalError
     {
       "tag": "OpenAPIServer",
       "contents": {
-        "specUrl": "https://api.github.com/openapi.json",
-        "baseUrl": "https://api.github.com",
-        "token": "${GITHUB_TOKEN}"
+        "SpecUrl": "https://api.github.com/openapi.json",
+        "BaseUrl": "https://api.github.com",
+        "Token": "${GITHUB_TOKEN}"
       }
     }
   ],
@@ -2447,9 +2454,8 @@ data PortalError
     {
       "tag": "PostgRESTServer",
       "contents": {
-        "specUrl": "http://localhost:3000/",
-        "name": "maindb",
-        "description": "Main application database"
+        "SpecUrl": "http://localhost:3000/",
+        "BaseUrl": "http://localhost:3000"
       }
     }
   ],
@@ -2457,37 +2463,37 @@ data PortalError
     {
       "tag": "SqliteToolbox",
       "contents": {
-        "name": "analytics",
-        "description": "Analytics database",
-        "path": "./analytics.db"
+        "Name": "analytics",
+        "Description": "Analytics database",
+        "Versioning": {"tag": "SqliteReadOnly", "path": "./analytics.db"}
       }
     },
     {
       "tag": "SystemToolbox",
       "contents": {
-        "name": "system",
-        "description": "System context and session memory",
-        "capabilities": ["date", "hostname", "working-directory", "attach-file", "list-directory", "execute-command", "list-sessions", "search-sessions"],
-        "envVarFilter": null,
-        "sessionIntrospectionScope": "subtree",
-        "sessionIntrospectionMaxResults": 50,
-        "sessionIntrospectionIncludeToolOutputs": false,
-        "fileSandbox": {
-          "predicate": {"tag": "DirectoryRecursive", "contents": "./project"},
-          "maxFileSize": 52428800,
-          "name": "system-sandbox"
+        "Name": "system",
+        "Description": "System context and session memory",
+        "Capabilities": ["date", "hostname", "working-directory", "attach-file", "list-directory", "execute-command", "list-sessions", "search-sessions"],
+        "EnvVarFilter": null,
+        "SessionIntrospectionScope": "subtree",
+        "SessionIntrospectionMaxResults": 50,
+        "SessionIntrospectionIncludeToolOutputs": false,
+        "FileSandbox": {
+          "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./project"},
+          "fsbMaxFileSize": 52428800,
+          "fsbName": "system-sandbox"
         },
-        "commandFilter": "/path/to/approval-script.sh"
+        "CommandFilter": "/path/to/approval-script.sh"
       }
     },
     {
       "tag": "DeveloperToolbox",
       "contents": {
-        "name": "dev",
-        "description": "Development utilities",
-        "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
-        "fileSandbox": {
-          "predicate": {
+        "Name": "dev",
+        "Description": "Development utilities",
+        "Capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
+        "FileSandbox": {
+          "fsbPredicate": {
             "tag": "Any",
             "contents": [
               {"tag": "DirectoryRecursive", "contents": "./src"},
@@ -2495,24 +2501,24 @@ data PortalError
               {"tag": "FileExactly", "contents": "./package.yaml"}
             ]
           },
-          "maxFileSize": 10485760,
-          "name": "developer-sandbox"
+          "fsbMaxFileSize": 10485760,
+          "fsbName": "developer-sandbox"
         }
       }
     },
     {
       "tag": "LuaToolbox",
       "contents": {
-        "name": "lua",
-        "description": "Lua scripting tools",
-        "maxMemoryMB": 256,
-        "maxExecutionTimeSeconds": 300,
-        "allowedTools": ["bash_read_file", "sqlite_analytics_query", "system_system_attach_file"],
-        "allowedHosts": ["localhost"],
-        "fileSandbox": {
-          "predicate": {"tag": "DirectoryRecursive", "contents": "./scripts"},
-          "maxFileSize": 10485760,
-          "name": "lua-sandbox"
+        "Name": "lua",
+        "Description": "Lua scripting tools",
+        "MaxMemoryMB": 256,
+        "MaxExecutionTimeSeconds": 300,
+        "AllowedTools": ["bash_read_file", "sqlite_analytics_query", "system_system_attach_file"],
+        "AllowedHosts": ["localhost"],
+        "FileSandbox": {
+          "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./scripts"},
+          "fsbMaxFileSize": 10485760,
+          "fsbName": "lua-sandbox"
         }
       }
     }

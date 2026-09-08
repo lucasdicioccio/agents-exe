@@ -97,12 +97,16 @@ mkAsyncAgent policy =
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
+        , ctxAsyncYieldStrategy = YieldWhenAllDone
+        , ctxMaxConcurrency = Nothing
+        , ctxAsyncCallTimeout = Nothing
         , ctxToolCache = Nothing
         , ctxToolCallPolicy = policy
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = Nothing
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
+        , ctxAsyncEngine = Nothing
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

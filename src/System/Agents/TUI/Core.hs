@@ -120,6 +120,13 @@ module System.Agents.TUI.Core (
     getAgentTools,
 ) where
 
+import System.Agents.OS.Conversation (
+    ConversationConfig,
+    ConversationState,
+    Lineage (..),
+    registerToolCallComponents,
+ )
+
 import Brick hiding (Down)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
@@ -140,11 +147,6 @@ import System.Agents.AgentTree (
 import System.Agents.Base (AgentId)
 import qualified System.Agents.OS.AgentHandle as AgentHandle
 import System.Agents.OS.AgentHandle (createAgentHandle)
-import System.Agents.OS.Conversation (
-    ConversationConfig,
-    ConversationState,
-    Lineage (..),
- )
 import System.Agents.OS.Core.World (World, newWorld, registerComponentStore)
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.Session.Base (Session (..))
@@ -393,6 +395,8 @@ convertOSEvent (OSEvent_SubcallCompleted convId result) =
     Just $ AppEvent_SubcallCompleted convId result
 convertOSEvent (OSEvent_SubcallFailed convId err) =
     Just $ AppEvent_SubcallFailed convId err
+convertOSEvent (OSEvent_ToolCallActivity activity) =
+    Just $ AppEvent_ToolCallActivity activity
 convertOSEvent _ = Nothing
 
 {- | Start a background thread that bridges OSEvents to AppEvents.
@@ -423,5 +427,7 @@ initWorld = do
     world1 <- registerComponentStore world (Proxy @ConversationConfig)
     world2 <- registerComponentStore world1 (Proxy @ConversationState)
     world3 <- registerComponentStore world2 (Proxy @Lineage)
-    pure world3
+    -- Register component stores for tool-call entities
+    world4 <- registerToolCallComponents world3
+    pure world4
 

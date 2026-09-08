@@ -20,7 +20,7 @@ import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
-import System.Agents.Session.Types (ExecutionMode, ToolCallDisposition)
+import System.Agents.Session.Types (AsyncYieldStrategy, ExecutionMode, ToolCallDisposition)
 
 -- Import FileSandbox types for unified sandboxing
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
@@ -250,9 +250,9 @@ Example configuration:
 @
 {
   "bashToolboxes": [
-    {"tag": "FileSystemDirectory", "contents": {"path": "./tools", "basenameFilter": null}},
-    {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools", "basenameFilter": ".sh"}},
-    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
+    {"tag": "FileSystemDirectory", "contents": {"Path": "./tools", "BasenameFilter": null}},
+    {"tag": "FileSystemDirectory", "contents": {"Path": "./extra-tools", "BasenameFilter": ".sh"}},
+    {"tag": "SingleTool", "contents": {"Path": "/path/to/special-tool.sh"}}
   ]
 }
 @
@@ -866,6 +866,12 @@ data SystemToolCapability
     | -- | Execute an arbitrary shell command (optionally filtered by a
       -- configured approval command)
       SystemToolExecuteCommand
+    | -- | Query the status of a running or completed async tool call
+      SystemToolGetToolCallStatus
+    | -- | List async tool calls that are still running
+      SystemToolListRunningToolCalls
+    | -- | Cancel a running async tool call
+      SystemToolCancelToolCall
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -885,6 +891,9 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolGetSessionStats = Aeson.String "get-session-stats"
     toJSON SystemToolListDirectory = Aeson.String "list-directory"
     toJSON SystemToolExecuteCommand = Aeson.String "execute-command"
+    toJSON SystemToolGetToolCallStatus = Aeson.String "get-tool-call-status"
+    toJSON SystemToolListRunningToolCalls = Aeson.String "list-running-tool-calls"
+    toJSON SystemToolCancelToolCall = Aeson.String "cancel-tool-call"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -905,7 +914,10 @@ instance FromJSON SystemToolCapability where
             "get-session-stats" -> return SystemToolGetSessionStats
             "list-directory" -> return SystemToolListDirectory
             "execute-command" -> return SystemToolExecuteCommand
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command."
+            "get-tool-call-status" -> return SystemToolGetToolCallStatus
+            "list-running-tool-calls" -> return SystemToolListRunningToolCalls
+            "cancel-tool-call" -> return SystemToolCancelToolCall
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
@@ -1568,8 +1580,8 @@ Example configuration:
   "systemPrompt": ["You are a helpful assistant."],
   "tools": "tools",
   "bashToolboxes": [
-    {"tag": "FileSystemDirectory", "contents": {"path": "./extra-tools"}},
-    {"tag": "SingleTool", "contents": {"path": "/path/to/special-tool.sh"}}
+    {"tag": "FileSystemDirectory", "contents": {"Path": "./extra-tools"}},
+    {"tag": "SingleTool", "contents": {"Path": "/path/to/special-tool.sh"}}
   ],
   "mcpServers": [...],
   "openApiToolboxes": [...],
@@ -1606,6 +1618,13 @@ data Agent
     -- ^ Optional execution mode override for this agent
     , toolCallPolicyConfig :: Maybe ToolCallPolicyConfig
     -- ^ Optional tool-call policy configuration for this agent
+    , asyncYieldStrategy :: Maybe AsyncYieldStrategy
+    -- ^ When to hand control back to the LLM while async tool calls run
+    -- (only used when @executionMode@ is asynchronous)
+    , maxConcurrency :: Maybe Int
+    -- ^ Maximum number of async tool calls running at once for this agent
+    , asyncCallTimeoutSeconds :: Maybe Int
+    -- ^ Give up on an async tool call that has run for this long
     }
     deriving (Show, Eq, Generic)
 

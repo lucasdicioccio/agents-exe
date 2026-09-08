@@ -128,6 +128,7 @@ import System.Agents.Tools.PostgREST.Converter (
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
+import qualified System.Agents.Tools.SystemToolbox.ToolCallStatus as ToolCallStatus
 
 type Tool call = ToolBase.Tool Trace call
 
@@ -1088,6 +1089,49 @@ buildSystemToolParams box =
                 , propertyRequired = False
                 }
 
+        -- tool_call_id parameter for async tool-call introspection capabilities
+        toolCallIdParam =
+            ParamProperty
+                { propertyKey = "tool_call_id"
+                , propertyType = StringParamType
+                , propertyDescription = "For get-tool-call-status and cancel-tool-call: The id of the tool call to inspect or cancel (the tool_call_id of one of your earlier calls, as shown in running placeholders or list-running-tool-calls)"
+                , propertyRequired = False
+                }
+
+        -- get-tool-call-status tuning parameters
+        includeProgressParam =
+            ParamProperty
+                { propertyKey = "include_progress"
+                , propertyType = BoolParamType
+                , propertyDescription = "For get-tool-call-status: Include progress entries in the result (default: true)"
+                , propertyRequired = False
+                }
+
+        waitForCompletionParam =
+            ParamProperty
+                { propertyKey = "wait_for_completion"
+                , propertyType = BoolParamType
+                , propertyDescription = "For get-tool-call-status: Block until the call reaches a final state (default: false)"
+                , propertyRequired = False
+                }
+
+        timeoutSecondsParam =
+            ParamProperty
+                { propertyKey = "timeout_seconds"
+                , propertyType = NumberParamType
+                , propertyDescription = "For get-tool-call-status: Maximum seconds to wait when wait_for_completion is true (default: 5)"
+                , propertyRequired = False
+                }
+
+        -- cancel-tool-call optional reason
+        cancelReasonParam =
+            ParamProperty
+                { propertyKey = "reason"
+                , propertyType = StringParamType
+                , propertyDescription = "For cancel-tool-call: Optional reason for cancellation"
+                , propertyRequired = False
+                }
+
         hasCapability cap = cap `elem` box.toolboxCapabilities
 
         -- list-directory parameters
@@ -1123,6 +1167,7 @@ buildSystemToolParams box =
                 else []
 
         -- Add optional parameters only if their respective capabilities are enabled
+        -- Add optional parameters only if their respective capabilities are enabled
         optionalParams =
             (if hasCapability SystemToolAttachFile then [filepathParam] else [])
                 ++ ( if hasCapability SystemToolReadSession
@@ -1140,6 +1185,20 @@ buildSystemToolParams box =
                 ++ (if hasCapability SystemToolSearchSessions then [queryParam] else [])
                 ++ listDirParams
                 ++ (if hasCapability SystemToolExecuteCommand then [commandParam] else [])
+                ++ ( if hasCapability SystemToolGetToolCallStatus
+                        || hasCapability SystemToolCancelToolCall
+                        then [toolCallIdParam]
+                        else []
+                   )
+                ++ ( if hasCapability SystemToolGetToolCallStatus
+                        then
+                            [ includeProgressParam
+                            , waitForCompletionParam
+                            , timeoutSecondsParam
+                            ]
+                        else []
+                   )
+                ++ (if hasCapability SystemToolCancelToolCall then [cancelReasonParam] else [])
      in
         baseParams ++ optionalParams
 
@@ -1160,6 +1219,9 @@ capabilityToText SystemToolReadSession = "read-session"
 capabilityToText SystemToolGetSessionStats = "get-session-stats"
 capabilityToText SystemToolListDirectory = "list-directory"
 capabilityToText SystemToolExecuteCommand = "execute-command"
+capabilityToText SystemToolGetToolCallStatus = "get-tool-call-status"
+capabilityToText SystemToolListRunningToolCalls = "list-running-tool-calls"
+capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
 
 {- | Register all tools from a System toolbox.
 
@@ -1752,7 +1814,7 @@ systemTool box =
             , SystemTools.toolDescriptionToolboxName = box.toolboxName
             }
     run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
-    run tracer _ctx (Aeson.Object v) = do
+    run tracer ctx (Aeson.Object v) = do
         case KeyMap.lookup (AesonKey.fromText "capability") v of
             Just (Aeson.String cap) -> do
                 -- Route based on capability
@@ -1762,28 +1824,70 @@ systemTool box =
                         then handleListDirectory tracer v
                         else if cap == "execute-command"
                             then handleExecuteCommand tracer v
-                            else do
-                                -- Extract optional parameters for session introspection capabilities
-                                let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
-                                        Just (Aeson.String sid) -> Just sid
-                                        _ -> Nothing
-                                let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
-                                        Just (Aeson.String q) -> Just q
-                                        _ -> Nothing
+                            else if cap == "get-tool-call-status"
+                                then handleGetToolCallStatus ctx v
+                                else if cap == "list-running-tool-calls"
+                                    then handleListRunning ctx
+                                    else if cap == "cancel-tool-call"
+                                        then handleCancel ctx v
+                                        else do
+                                            -- Extract optional parameters for session introspection capabilities
+                                            let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
+                                                    Just (Aeson.String sid) -> Just sid
+                                                    _ -> Nothing
+                                            let mQuery = case KeyMap.lookup (AesonKey.fromText "query") v of
+                                                    Just (Aeson.String q) -> Just q
+                                                    _ -> Nothing
 
-                                -- Extract read-session parameters
-                                let mReadParams =
-                                        if cap == "read-session"
-                                            then Just $ extractReadSessionParams v
-                                            else Nothing
+                                            -- Extract read-session parameters
+                                            let mReadParams =
+                                                    if cap == "read-session"
+                                                        then Just $ extractReadSessionParams v
+                                                        else Nothing
 
-                                result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
-                                case result of
-                                    Left err -> pure $ SystemToolError call err
-                                    Right rsp -> pure $ SystemToolResult call rsp
+                                            result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box cap mSessionId mQuery mReadParams
+                                            case result of
+                                                Left err -> pure $ SystemToolError call err
+                                                Right rsp -> pure $ SystemToolResult call rsp
             _ -> pure $ SystemToolError call (SystemTools.SystemInfoError "Missing 'capability' parameter or invalid type")
     run _tracer _ctx _ = do
         pure $ SystemToolError call (SystemTools.SystemInfoError "Arguments must be a JSON object")
+
+    -- Handle the get-tool-call-status capability
+    handleGetToolCallStatus :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleGetToolCallStatus ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.GetToolCallStatusParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success statusParams -> do
+                result <- ToolCallStatus.getToolCallStatus ctx statusParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right statusResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "get-tool-call-status" (Aeson.toJSON statusResult) 0
+
+    -- Handle the list-running-tool-calls capability
+    handleListRunning :: ToolExecutionContext -> IO (CallResult ())
+    handleListRunning ctx = do
+        result <- ToolCallStatus.listRunningToolCalls ctx
+        case result of
+            Left err -> pure $ SystemToolError call err
+            Right listResult ->
+                pure $ SystemToolResult call $ SystemTools.QueryResult "list-running-tool-calls" (Aeson.toJSON listResult) 0
+
+    -- Handle the cancel-tool-call capability
+    handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleCancel ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.CancelToolCallParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success cancelParams -> do
+                result <- ToolCallStatus.cancelToolCallById ctx cancelParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right cancelResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "cancel-tool-call" (Aeson.toJSON cancelResult) 0
+
 
     -- Handle the attach-file capability
     handleAttachFile :: Tracer IO Trace -> Aeson.Object -> IO (CallResult ())

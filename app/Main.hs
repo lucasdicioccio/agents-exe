@@ -126,6 +126,9 @@ defaultOpenAIAgent =
         , autoEnableSkills = Nothing
         , executionMode = Nothing
         , toolCallPolicyConfig = Nothing
+        , asyncYieldStrategy = Nothing
+        , maxConcurrency = Nothing
+        , asyncCallTimeoutSeconds = Nothing
         }
 
 -- | Mistral AI agent configuration
@@ -154,6 +157,9 @@ mistralAgent =
         , autoEnableSkills = Nothing
         , executionMode = Nothing
         , toolCallPolicyConfig = Nothing
+        , asyncYieldStrategy = Nothing
+        , maxConcurrency = Nothing
+        , asyncCallTimeoutSeconds = Nothing
         }
 
 -- | Ollama local LLM agent configuration
@@ -182,6 +188,9 @@ ollamaAgent =
         , autoEnableSkills = Nothing
         , executionMode = Nothing
         , toolCallPolicyConfig = Nothing
+        , asyncYieldStrategy = Nothing
+        , maxConcurrency = Nothing
+        , asyncCallTimeoutSeconds = Nothing
         }
 
 -- | Orchestrator agent that can delegate to other agents
@@ -219,6 +228,9 @@ orchestratorAgent =
         , autoEnableSkills = Nothing
         , executionMode = Nothing
         , toolCallPolicyConfig = Nothing
+        , asyncYieldStrategy = Nothing
+        , maxConcurrency = Nothing
+        , asyncCallTimeoutSeconds = Nothing
         }
 
 -- | Ensure the config directory structure exists with default files

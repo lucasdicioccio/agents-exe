@@ -192,7 +192,9 @@ mkOpenAICompletion config completion = do
             toolResponses = comp.completeToolResponses
             toolMsgs = concatMap toolResponseToMessages toolResponses
             histMsgs = historyToMessages comp.completeConversationHistory
-         in systemMsg : histMsgs ++ userMsg ++ toolMsgs
+         in -- Tool messages must directly follow the assistant message that
+            -- issued the calls, so they come before any user message.
+            systemMsg : histMsgs ++ toolMsgs ++ userMsg
 
     -- Convert conversation history turns to OpenAI messages
     historyToMessages :: [Turn] -> [Aeson.Value]
@@ -214,9 +216,10 @@ mkOpenAICompletion config completion = do
             toolResponses = turn.userToolResponses
             toolMsgs = concatMap toolResponseToMessages toolResponses
          in
-            userMsg ++ toolMsgs
+            toolMsgs ++ userMsg
     turnToMessages (PartialUserTurn turn _mUsage) =
-        -- Partial user turns: include completed responses but not pending calls
+        -- Partial user turns: one tool message per call, with a placeholder
+        -- for calls that were still running when the LLM saw this turn
         let
             mQuery = turn.pUserQuery
             -- Extract media from the query
@@ -224,10 +227,10 @@ mkOpenAICompletion config completion = do
                 Nothing -> []
                 Just (UserQuery _ media) -> media
             userMsg = userQueryToMessages mQuery mediaAttachments
-            toolResponses = partialCompletedResponses turn
+            toolResponses = partialToolMessages turn
             toolMsgs = concatMap toolResponseToMessages toolResponses
          in
-            userMsg ++ toolMsgs
+            toolMsgs ++ userMsg
 
     -- Convert a UserQuery and media attachments to OpenAI message format
     -- Supports multi-modal content with text and images

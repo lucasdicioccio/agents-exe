@@ -265,6 +265,9 @@ buildAgentConfig catalog opts = do
                 , autoEnableSkills = Nothing
                 , executionMode = Nothing
                 , toolCallPolicyConfig = Nothing
+                , asyncYieldStrategy = Nothing
+                , maxConcurrency = Nothing
+                , asyncCallTimeoutSeconds = Nothing
                 }
 
     pure (presetName, agent)

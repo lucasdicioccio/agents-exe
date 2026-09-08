@@ -56,6 +56,17 @@ module System.Agents.Tools.SystemToolbox (
     QueryResult (..),
     AttachFileResult (..),
 
+    -- * Async tool-call introspection (re-exported from ToolCallStatus)
+    GetToolCallStatusParams (..),
+    ToolCallStatusResult (..),
+    ListRunningToolCallsResult (..),
+    RunningToolCallInfo (..),
+    CancelToolCallParams (..),
+    CancelToolCallResult (..),
+    getToolCallStatus,
+    listRunningToolCalls,
+    cancelToolCallById,
+
     -- * Initialization (re-exported from Core)
     initializeToolbox,
     initializeToolboxWithSessionIntrospection,
@@ -116,4 +127,5 @@ import System.Agents.Tools.SystemToolbox.Execute
 import System.Agents.Tools.SystemToolbox.Formatting
 import System.Agents.Tools.SystemToolbox.Media
 import System.Agents.Tools.SystemToolbox.Session
+import System.Agents.Tools.SystemToolbox.ToolCallStatus
 import System.Agents.Tools.SystemToolbox.Types

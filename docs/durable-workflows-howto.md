@@ -1,0 +1,331 @@
+# Durable Workflows How-To
+
+This guide shows how to exercise and extend the durable-workflow features in
+`agents-exe`.  Durable workflows let an agent turn pause after some tool calls,
+persist its state, and resume later when external results arrive.
+
+The canonical example flow is:
+
+1. The user asks a question.
+2. The LLM replies with three tool calls.
+3. The runtime executes one call immediately and defers the other two.
+4. The process yields (and can even be restarted).
+5. External workers complete the deferred calls.
+6. The runtime wakes the session with the results.
+7. The LLM receives all three results and continues.
+
+This guide covers:
+
+* [A ready-to-run demonstrator](#running-the-demonstrator) that exercises the
+  flow without calling a real LLM.
+* [Core concepts](#core-concepts) behind durable execution.
+* [CLI commands](#cli-commands-for-operators) for operating durable sessions.
+* [Building your own durable agent](#building-your-own-durable-agent) in
+  Haskell.
+
+---
+
+## Running the demonstrator
+
+The repository contains a self-contained executable called
+`durable-workflow-demo`.  It uses a mock LLM so you can run it without API
+keys.
+
+Build and run:
+
+```bash
+cabal run durable-workflow-demo
+```
+
+You should see output similar to:
+
+```
+Durable workflow demonstrator
+=============================
+
+Step 1: run the async scheduler on the LLM turn.
+  [executing in-process] fetch_local
+Yielded partial turn:
+  completed: 1
+    - fetch_local: result from fetch_local
+  deferred: 2
+    - fetch_remote_a token: 550e8400-e29b-41d4-a716-446655440000
+    - fetch_remote_b token: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+
+Step 2: complete the deferred calls from the outside world.
+  providing result for token 550e8400-e29b-41d4-a716-446655440000
+  providing result for token 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+Turn is now complete.
+
+Step 3: resume the session until the LLM produces a final answer.
+
+=== Final LLM response ===
+All three calls are complete. Results:
+- fetch_local: result from fetch_local
+- fetch_remote_a: external result for fetch_remote_a
+- fetch_remote_b: external result for fetch_remote_b
+```
+
+The source is in `examples/durable-workflow-demo/Main.hs` and is heavily
+commented.  It is the best starting point for adapting the workflow to your
+own agents.
+
+---
+
+## Core concepts
+
+Durable workflows are built from four composable layers.
+
+### 1. Execution mode
+
+`Agent.ctxExecutionMode` is either `Synchronous` (default) or `Asynchronous`.
+Only asynchronous agents yield partial turns.
+
+```haskell
+asyncAgent = agent{ctxExecutionMode = Asynchronous}
+-- or
+asyncAgent = withExecutionMode Asynchronous agent
+```
+
+### 2. Tool-call policy
+
+A `ToolCallPolicy` is a pure function that decides, for every tool call,
+whether to run it synchronously, defer it, run it asynchronously, or isolate
+it:
+
+```haskell
+policy :: ToolExecutionContext -> LlmToolCall -> ToolCallDisposition
+policy _ctx call
+    | callName call == "fetch_local"  = RunSync
+    | callName call == "bash_command" = RunIsolated (Docker "agents-exe/bash-runner:latest")
+    | otherwise                       = Defer (Reason "waiting for external service")
+```
+
+Dispositions can be decorated with timeouts, retries, cache keys, or labels:
+
+```haskell
+Decorate [WithTimeout 30, WithRetries 2] RunSync
+```
+
+### 3. Pluggable executor
+
+`ToolExecutor` decouples *how* a call runs from the session loop.  The
+runtime provides `inProcessExecutor`, `yieldingExecutor`, `cachingExecutor`,
+`isolatedExecutor`, and `mkDurableExecutor` to compose them.
+
+For most use cases you only need to set `ctxToolCallPolicy`; the session loop
+falls back to the agent's native `toolCall` for synchronous calls.
+
+### 4. Persistence and wake/resume
+
+When a call is deferred, the runtime optionally stores a serialisable
+`ToolContinuationSnapshot` in a `ContinuationStore` and emits a
+`PartialUserTurn`.  Later:
+
+* `wakeSession` injects external results.
+* `resumeSession` continues execution until completion or the next yield.
+* `SessionBackend` (file, SQLite, or composite) stores session state across
+  process restarts.
+
+---
+
+## CLI commands for operators
+
+The `agents session` command group operates on stored sessions.  These
+commands load sessions through the configured file-based `SessionStore` and
+use the first supplied `--agent-file` when execution needs to advance.
+
+> **Note:** The CLI commands set the agent to asynchronous mode but keep the
+> default `defaultToolCallPolicy`, which runs every call synchronously.  To
+> actually defer calls from the CLI, the loaded agent must be configured with
+> a custom policy through the programmatic API shown in the next section.
+
+### Pause after one async step
+
+```bash
+agents session pause <session-id> --agent-file ./my-agent.json
+```
+
+Runs one asynchronous step and persists the resulting session.  If the turn
+yields, it prints the continuation tokens for deferred calls.
+
+### Resume until completion or next yield
+
+```bash
+agents session resume <session-id> --agent-file ./my-agent.json
+```
+
+Calls `resumeSession` and persists after each yield.
+
+### List pending deferred calls
+
+```bash
+agents session pending <session-id>
+```
+
+Shows each deferred call's tool name, call id, continuation token, and
+disposition.
+
+### Inject an external result
+
+Create a result file.  JSON is parsed as a `UserToolResponse`; anything else
+is treated as plain text.
+
+```bash
+# JSON result
+echo '{"type":"text","content":"42"}' > result.json
+agents session complete <token> result.json
+
+# Plain-text result
+echo "42" > result.txt
+agents session complete <token> result.txt
+```
+
+`complete` scans all sessions in the store to find the one containing the
+token.
+
+### Run deferred isolated calls
+
+```bash
+agents session run-isolated <session-id> --agent-file ./my-agent.json
+```
+
+If the agent has `ctxDeploymentRunner` configured, this executes deferred
+`RunIsolated` calls through the runner and injects their results back into the
+session.
+
+---
+
+## Building your own durable agent
+
+The demo is a minimal Haskell program.  The key pieces are reproduced below.
+
+### 1. Make the agent asynchronous and set a policy
+
+```haskell
+import System.Agents.Session.Base
+
+myPolicy :: ToolCallPolicy
+myPolicy _ctx call
+    | callName call == "fetch_local" = RunSync
+    | otherwise                      = Defer (Reason "external")
+
+agent' = agent
+    { ctxExecutionMode = Asynchronous
+    , ctxToolCallPolicy = myPolicy
+    }
+```
+
+### 2. Run the async scheduler
+
+```haskell
+import System.Agents.Session.Step (runStepM)
+
+(_agent, result) <- runStepM convId agent' session0
+case result of
+    Left final      -> putStrLn "Session completed immediately."
+    Right session1  -> putStrLn "Session yielded."
+```
+
+### 3. Wake with external results
+
+```haskell
+import System.Agents.Session.Wake (wakeSession)
+
+let responses =
+        [ (token, TextResponse "external answer")
+        | (token, _call) <- deferredCalls
+        ]
+session2 <- wakeSession session1 responses
+```
+
+### 4. Resume
+
+```haskell
+import System.Agents.Session.Wake (resumeSession)
+
+final <- resumeSession convId agent' session2
+case final of
+    Left (llmTurn, _session) -> print (llmTurn.llmResponse.responseText)
+    Right session3           -> putStrLn "Yielded again."
+```
+
+### 5. Add durable storage
+
+```haskell
+import System.Agents.Session.Async (mkSqliteContinuationStore)
+import System.Agents.SessionStore (mkSqliteSessionStore)
+import Database.SQLite.Simple (open)
+
+conn <- open ".agents-durable.db"
+backend <- mkSqliteSessionStore conn
+store   <- mkSqliteContinuationStore conn
+
+let durableAgent = withDurableWorkflows backend store agent'
+```
+
+`withDurableWorkflows` is a convenience combinator that installs both a
+session backend and a continuation store.
+
+### 6. Add a tool cache
+
+```haskell
+import System.Agents.Tools.Cache (mkSqliteToolCache)
+
+cache <- mkSqliteToolCache ".agents-cache.db"
+let cachedAgent = withToolCache agent' cache
+```
+
+Cached synchronous calls are skipped on resume if their result is already in
+the cache.
+
+---
+
+## Isolated execution
+
+To run a tool call outside the current process, provide a `DeploymentRunner`:
+
+```haskell
+import System.Agents.Session.Base (dockerRunner, localProcessRunner)
+
+runner = localProcessRunner "./worker.sh"
+-- or
+runner = dockerRunner "agents-exe/bash-runner:latest"
+
+isolatedAgent = withDeploymentRunner runner durableAgent
+```
+
+The worker receives a stable JSON envelope on stdin and must print a result
+envelope on stdout.  See `System.Agents.Session.Isolation` for the envelope
+schema, or look at the worker script in `test/DurableWorkflowTests.hs`.
+
+---
+
+## Testing
+
+The durable-workflow implementation is covered by:
+
+* `test/DurableWorkflowTests.hs` — policy, wake/resume, cache, backends,
+  isolation envelopes, and integration.
+* `test/DurableWorkflowDeterminismTests.hs` — resume-twice and edge-case
+  tests.
+* `test/SessionDurableTests.hs` — CLI helper tests.
+
+Run them with:
+
+```bash
+cabal test agents-tests
+```
+
+---
+
+## Further reading
+
+* `todos/durable-workflows.md` — design plan and architectural decisions.
+* `todos/durable-workflows.progress.md` — implementation progress.
+* `examples/durable-workflow-demo/Main.hs` — runnable mock-LLM demo.
+* `docs/cli-commands.md` — full CLI reference, including `agents session`.
+* `docs/sessions.md` — session storage and multi-location stores.
+* `docs/async-tool-calls.md` — background tool calls in the same process,
+  with progress, cancellation and partial answers.
+

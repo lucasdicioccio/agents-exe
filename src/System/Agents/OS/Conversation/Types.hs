@@ -48,6 +48,8 @@ module System.Agents.OS.Conversation.Types (
     ToolCallConfig (..),
     ToolCallState (..),
     ToolCallStatus (..),
+    ToolCallProgress (..),
+    ProgressKind (..),
 
     -- * Message Components
     Message (..),
@@ -68,6 +70,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
+import qualified System.Agents.Base as Base
 import System.Agents.OS.Core.Types (
     AgentId,
     Component (..),
@@ -76,6 +79,7 @@ import System.Agents.OS.Core.Types (
     ToolCallId,
     TurnId,
  )
+import System.Agents.Session.Types (SessionId)
 
 -------------------------------------------------------------------------------
 -- Conversation Components
@@ -267,6 +271,15 @@ data ToolCallConfig = ToolCallConfig
     -- ^ Input arguments for the tool (JSON)
     , tcParentCallId :: Maybe ToolCallId
     -- ^ Parent tool call for nested calls (Nothing for top-level)
+    , tcSessionId :: SessionId
+    -- ^ Session that owns this call (session-layer identifier)
+    , tcConversationId :: Base.ConversationId
+    -- ^ Conversation that owns this call (session-layer identifier)
+    , tcProviderCallId :: Maybe Text
+    {- ^ Tool-call id assigned by the LLM provider (e.g. @call_abc123@).
+    This is the id the model knows, so capabilities accept it in place of
+    the internal UUID.
+    -}
     }
     deriving (Show, Eq, Generic)
 
@@ -283,12 +296,14 @@ Tracks the execution lifecycle of a tool call.
 data ToolCallState = ToolCallState
     { tcStatus :: ToolCallStatus
     -- ^ Current status of the tool call
-    , tcStartedAt :: UTCTime
-    -- ^ When the tool call started
+    , tcStartedAt :: Maybe UTCTime
+    -- ^ When the tool call started (Nothing until it actually starts)
     , tcCompletedAt :: Maybe UTCTime
     -- ^ When the tool call completed (if it has)
     , tcResult :: Maybe Value
     -- ^ Result of the tool call (if completed)
+    , tcProgress :: [ToolCallProgress]
+    -- ^ Structured progress updates, newest at the head
     }
     deriving (Show, Eq, Generic)
 
@@ -314,6 +329,39 @@ data ToolCallStatus
 
 instance FromJSON ToolCallStatus
 instance ToJSON ToolCallStatus
+
+{- | A single structured progress update for a tool call.
+
+All payloads are valid JSON values. Progress entries are stored in
+'ToolCallState' with the newest entry at the head of the list.
+-}
+data ToolCallProgress = ToolCallProgress
+    { progressAt :: UTCTime
+    -- ^ Timestamp when the progress update was emitted
+    , progressKind :: ProgressKind
+    -- ^ What kind of progress update this is
+    , progressPayload :: Value
+    -- ^ Structured payload for this progress update
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON ToolCallProgress
+instance ToJSON ToolCallProgress
+
+-- | Classification of a progress update.
+data ProgressKind
+    = -- | Call has started executing
+      ProgressStarted
+    | -- | Free-form log line (payload is usually a JSON string)
+      ProgressLog Text
+    | -- | Structured partial result
+      ProgressPartial Value
+    | -- | Heartbeat indicating the call is still alive
+      ProgressHeartbeat
+    deriving (Show, Eq, Generic)
+
+instance FromJSON ProgressKind
+instance ToJSON ProgressKind
 
 -------------------------------------------------------------------------------
 -- Message Components
@@ -395,3 +443,4 @@ getToolCallResult tcs = case tcs.tcStatus of
 -- | Default maximum depth for nested tool calls.
 defaultMaxToolCallDepth :: Int
 defaultMaxToolCallDepth = 10
+

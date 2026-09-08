@@ -182,10 +182,10 @@ parseAgentJson = eitherDecodeStrict
       {
         "tag": "OpenAPIServer",
         "contents": {
-          "specUrl": "https://api.example.com/openapi.json",
-          "baseUrl": "https://api.example.com",
-          "headers": null,
-          "token": "${API_TOKEN}"
+          "SpecUrl": "https://api.example.com/openapi.json",
+          "BaseUrl": "https://api.example.com",
+          "Headers": null,
+          "Token": "${API_TOKEN}"
         }
       }
     ],

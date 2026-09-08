@@ -176,6 +176,9 @@ agentFromOverrides overrides =
         , autoEnableSkills = fromMaybe Nothing (overrideAutoEnableSkills overrides)
         , executionMode = Nothing
         , toolCallPolicyConfig = Nothing
+        , asyncYieldStrategy = Nothing
+        , maxConcurrency = Nothing
+        , asyncCallTimeoutSeconds = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -200,6 +203,9 @@ mergeAgentWithOverrides ref overrides =
         , autoEnableSkills = fromMaybe (autoEnableSkills ref) (overrideAutoEnableSkills overrides)
         , executionMode = Nothing
         , toolCallPolicyConfig = Nothing
+        , asyncYieldStrategy = Nothing
+        , maxConcurrency = Nothing
+        , asyncCallTimeoutSeconds = Nothing
         }
 
 -------------------------------------------------------------------------------

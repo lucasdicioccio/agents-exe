@@ -739,11 +739,55 @@ formatTurn opts firstDisplayStepNum (stepNum, turn) =
                     <> Text.pack (show (stepNum :: Int))
                     <> ": LLM Turn\n\n"
                     <> formatLlmTurn opts content
-            Session.PartialUserTurn _content _mUsage ->
+            Session.PartialUserTurn content _mUsage ->
                 "## ⏸️ Step "
                     <> Text.pack (show (stepNum :: Int))
                     <> ": Partial Turn (in progress)\n\n"
-                    <> "_(Turn execution paused - async mode)_\n"
+                    <> "_(Some tool calls had not finished when this turn was sent)_\n"
+                    <> formatPartialUserTurn opts content
+
+{- | Format a partial user turn: the query, each tracked call with its state,
+and the responses of calls that finished.
+-}
+formatPartialUserTurn :: SessionPrintOptions -> Session.PartialUserTurnContent -> Text.Text
+formatPartialUserTurn opts content =
+    let querySection = case content.pUserQuery of
+            Just (Session.UserQuery q _) -> "\n### 💬 User Query\n\n" <> q <> "\n"
+            Nothing -> ""
+        callsSection
+            | null content.pTrackedToolCalls = ""
+            | otherwise = "\n### ⏳ Tool Call Status\n\n" <> Text.intercalate "\n" (map formatTrackedCall content.pTrackedToolCalls) <> "\n"
+        finished =
+            [ (tc.tcCall, result)
+            | tc <- content.pTrackedToolCalls
+            , Session.isFinalToolCallState tc.tcState
+            , Just result <- [tc.tcResult]
+            ]
+        responsesSection = case opts.showToolCallResults of
+            Hidden -> ""
+            _ | null finished -> ""
+            _ -> "\n### 📥 Tool Responses\n\n" <> formatToolResponses opts.showToolCallResults finished
+     in querySection <> callsSection <> responsesSection
+  where
+    formatTrackedCall :: Session.TrackedToolCall -> Text.Text
+    formatTrackedCall tc =
+        "- `"
+            <> Session.llmToolCallName tc.tcCall
+            <> "`"
+            <> maybe "" (\pid -> " (`" <> pid <> "`)") (Session.providerToolCallId tc.tcCall)
+            <> ": "
+            <> trackedStatus tc
+    trackedStatus :: Session.TrackedToolCall -> Text.Text
+    trackedStatus tc = case tc.tcState of
+        Session.Ready -> "pending"
+        Session.Deferred -> "deferred"
+        Session.Running -> "running (placeholder sent)"
+        Session.Completed
+            | tc.tcDeliveredLate -> "completed, result delivered in a later message"
+            | otherwise -> "completed"
+        Session.Failed
+            | tc.tcDeliveredLate -> "failed, result delivered in a later message"
+            | otherwise -> "failed"
 
 {- | Format user turn content.
 The 'isFirstTurn' parameter ensures that system prompt and tools are shown

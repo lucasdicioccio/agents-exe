@@ -152,12 +152,16 @@ mkDemoAgent convId = do
             , ctxCallStack = [CallStackEntry "durable-demo" convId 0]
             , ctxParentConversation = Nothing
             , ctxExecutionMode = Asynchronous
+            , ctxAsyncYieldStrategy = YieldWhenAllDone
+            , ctxMaxConcurrency = Nothing
+            , ctxAsyncCallTimeout = Nothing
             , ctxToolCache = Nothing
             , ctxToolCallPolicy = policy
             , ctxToolExecutor = Nothing
             , ctxContinuationStore = Nothing
             , ctxDeploymentRunner = Nothing
             , ctxSessionBackend = Nothing
+            , ctxAsyncEngine = Nothing
             }
 
 -------------------------------------------------------------------------------

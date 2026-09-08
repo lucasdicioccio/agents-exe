@@ -83,6 +83,25 @@ agents-exe run [OPTIONS]
 | `--session-l FILE` | Inject session at high verbosity |
 | `--session-xl FILE` | Inject session at maximum verbosity |
 
+**Asynchronous tool calls:**
+
+If the agent file enables asynchronous execution (see
+[async-tool-calls.md](async-tool-calls.md)), tool calls run concurrently and
+the model can be answered while they run. `run` still waits for them, since
+they cannot outlive the process.
+
+It stops early only when a turn waits on *deferred* calls, which an external
+worker completes. It then prints a JSON report and stores the session:
+
+```json
+{"status": "paused",
+ "reason": "waiting for deferred tool calls",
+ "session_id": "…",
+ "deferred_calls": [{"tool": "approve_deploy", "tool_call_id": "call_9", "continuation_token": "…"}]}
+```
+
+Continue it with `session complete` and `session resume`.
+
 **Media Attachment Format:**
 
 The `-m, --media` option accepts file paths with optional MIME type:

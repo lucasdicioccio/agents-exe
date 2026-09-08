@@ -1,6 +1,8 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 {- | Provides a version of turnAgentRuntimeIntoIOTool based on OneShot.hs
@@ -20,7 +22,8 @@ module System.Agents.AgentTree.OneShotTool (
 ) where
 
 import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeTQueue)
-import Control.Exception (SomeException, catch, displayException)
+import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
+import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
@@ -58,15 +61,18 @@ import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
 import qualified System.Agents.OneShot as OneShot
+import System.Agents.Session.AgentConfig (applyAgentDurableConfig)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
     LlmTurnContent (..),
+    PartialUserTurnContent (..),
     Session (..),
     SystemPrompt (..),
     SystemTool (..),
     SystemToolDefinition (..),
     SystemToolDefinitionV1 (..),
+    Turn (..),
     UserQuery (..),
     defaultContextConfig,
     newSessionId,
@@ -334,6 +340,7 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
                 agentWithQuery
                 mWorld
                 mEventQueue
+                (Ctx.ctxProgressCallback ctx)
 
         -- Return the result
         pure $ Text.encodeUtf8 result
@@ -352,18 +359,22 @@ runSubAgentWithEventEmission ::
     Agent (LlmTurnContent, Session) ->
     Maybe World ->
     Maybe (TQueue OSEvent) ->
+    -- | Progress callback of the calling tool call, if it runs in the background
+    Maybe (Aeson.Value -> IO ()) ->
     IO Text
-runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
+runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue mReportProgress = do
     -- Create a progress emitter function that sends SubcallProgress events
-    let emitProgress sess = case mEventQueue of
-            Just eventQueue -> do
-                let event =
-                        OSEvent_SubcallProgress
-                            { subcallProgressConversationId = baseConvId
-                            , subcallProgressSession = sess
-                            }
-                atomically $ writeTQueue eventQueue event
-            Nothing -> pure ()
+    let emitProgress sess = do
+            forM_ mReportProgress ($ subAgentProgress sess)
+            case mEventQueue of
+                Just eventQueue -> do
+                    let event =
+                            OSEvent_SubcallProgress
+                                { subcallProgressConversationId = baseConvId
+                                , subcallProgressSession = sess
+                                }
+                    atomically $ writeTQueue eventQueue event
+                Nothing -> pure ()
 
     -- Wrap the agent's step function to emit progress after each step
     let agentWithProgress = wrapAgentWithProgress emitProgress agent
@@ -379,6 +390,11 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
                 pure $ Right resultText
             )
             ( \e -> do
+                -- Cancellation (e.g. cancel-tool-call) must stop the sub-agent,
+                -- not be reported as a failure.
+                case fromException e of
+                    Just (_ :: SomeAsyncException) -> throwIO e
+                    Nothing -> pure ()
                 let errMsg = Text.pack $ displayException (e :: SomeException)
                 pure $ Left errMsg
             )
@@ -422,6 +438,26 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue = do
     case result of
         Right resultText -> pure resultText
         Left errMsg -> error $ Text.unpack errMsg
+
+{- | Progress payload describing where a sub-agent is, reported to the
+calling tool call.
+-}
+subAgentProgress :: Session -> Aeson.Value
+subAgentProgress sess =
+    Aeson.object
+        [ "message" .= describe sess.turns
+        , "turns" .= length sess.turns
+        ]
+  where
+    describe :: [Turn] -> Text
+    describe = \case
+        [] -> "sub-agent starting"
+        (LlmTurn llm _ : _)
+            | null llm.llmToolCalls -> "sub-agent answered"
+            | otherwise -> "sub-agent calling " <> Text.intercalate ", " (map SessionBase.llmToolCallName llm.llmToolCalls)
+        (UserTurn _ _ : _) -> "sub-agent waiting for its LLM"
+        (PartialUserTurn partial _ : _) ->
+            "sub-agent has " <> Text.pack (show (length partial.pTrackedToolCalls)) <> " tool calls in progress"
 
 {- | Wrap an agent's step function to emit progress events after each step.
 
@@ -508,6 +544,7 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
 
     pure $
         agentStoreSession store Nothing convId $
+            applyAgentDurableConfig agentCfg $
             Agent
                 { step = naiveTilNoToolCallStep
                 , sysPrompt = pure sPrompt
@@ -522,12 +559,16 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
                 , ctxExecutionMode = SessionBase.Synchronous
+                , ctxAsyncYieldStrategy = SessionBase.YieldWhenAllDone
+                , ctxMaxConcurrency = Nothing
+                , ctxAsyncCallTimeout = Nothing
                 , ctxToolCache = Nothing
                 , ctxToolCallPolicy = SessionBase.defaultToolCallPolicy
                 , ctxToolExecutor = Nothing
                 , ctxContinuationStore = Nothing
                 , ctxDeploymentRunner = Nothing
                 , ctxSessionBackend = Nothing
+                , ctxAsyncEngine = Nothing
                 }
 
 -------------------------------------------------------------------------------

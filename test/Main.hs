@@ -36,6 +36,7 @@ import qualified PostgRESTParseTest
 import qualified SessionEditTests
 -- Import Session Durable CLI tests
 import qualified SessionDurableTests
+import qualified AsyncToolCallsTests
 -- Import SessionPrint tests
 import qualified SessionPrintTests
 -- Import EndpointPredicate tests
@@ -110,6 +111,7 @@ tests =
         , SessionEditTests.tests
         , SessionEditTests.tests
         , SessionDurableTests.tests
+        , AsyncToolCallsTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , SkillsTests.skillsTestSuite
@@ -262,6 +264,9 @@ agentSerializationTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -286,6 +291,9 @@ agentSerializationTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -312,6 +320,9 @@ agentSerializationTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -344,6 +355,9 @@ agentSerializationTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -381,6 +395,9 @@ agentSerializationTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -415,6 +432,9 @@ agentSerializationTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -528,6 +548,9 @@ bashToolboxTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -553,6 +576,9 @@ bashToolboxTests =
                     , Base.autoEnableSkills = Nothing
                     , Base.executionMode = Nothing
                     , Base.toolCallPolicyConfig = Nothing
+                    , Base.asyncYieldStrategy = Nothing
+                    , Base.maxConcurrency = Nothing
+                    , Base.asyncCallTimeoutSeconds = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

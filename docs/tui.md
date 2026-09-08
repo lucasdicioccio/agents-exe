@@ -136,6 +136,33 @@ data TUIState = TuiState
     }
 ```
 
+## Background Tool Calls
+
+Agents configured for asynchronous execution (see
+[async-tool-calls.md](async-tool-calls.md)) run tool calls in the background.
+The TUI shows what is running, with the latest progress each tool reports:
+
+```
+Background tool calls running: run_tests
+
+[Partial] > run the tests and the linter
+  ✓ lint (call_1): completed
+  ⏳ run_tests (call_2): running: 128 tests passed
+```
+
+Call states are `pending`, `deferred`, `running`, `completed`,
+`completed (delivered later)` and `failed`. "Delivered later" means the model
+had already been answered with a placeholder for that call, and got the result
+in a following message.
+
+While calls run in the background and the LLM has nothing to do, the
+conversation still accepts input: whichever comes first — your message or the
+results — is sent to the model.
+
+A conversation that waits on *deferred* calls (completed by an external
+worker) stops with a status message instead of waiting; use the `session`
+commands to complete those calls.
+
 ## Subcall Conversation Visibility
 
 When agents call other agents as tools (via `prompt_agent_<slug>`), the subcall conversations are now visible in the TUI with visual distinction and hierarchy tracking.

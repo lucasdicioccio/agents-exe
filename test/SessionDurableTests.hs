@@ -95,12 +95,16 @@ mkAsyncAgent policy =
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
+        , ctxAsyncYieldStrategy = YieldWhenAllDone
+        , ctxMaxConcurrency = Nothing
+        , ctxAsyncCallTimeout = Nothing
         , ctxToolCache = Nothing
         , ctxToolCallPolicy = policy
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = Nothing
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
+        , ctxAsyncEngine = Nothing
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -218,6 +222,8 @@ isolatedCallExtractionTests =
                         , tcResult = Nothing
                         , tcContinuation = Just token
                         , tcPolicy = AppliedPolicy disp Nothing
+                        , tcEntityId = Nothing
+                        , tcDeliveredLate = False
                         }
             let partial =
                     PartialUserTurnContent
@@ -250,6 +256,8 @@ isolatedCallExtractionTests =
                         , tcResult = Nothing
                         , tcContinuation = Just token
                         , tcPolicy = AppliedPolicy disp Nothing
+                        , tcEntityId = Nothing
+                        , tcDeliveredLate = False
                         }
             let partial =
                     PartialUserTurnContent
@@ -315,6 +323,9 @@ minimalBaseAgent =
         , Base.autoEnableSkills = Nothing
         , Base.executionMode = Nothing
         , Base.toolCallPolicyConfig = Nothing
+        , Base.asyncYieldStrategy = Nothing
+        , Base.maxConcurrency = Nothing
+        , Base.asyncCallTimeoutSeconds = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.
@@ -382,6 +393,32 @@ applyConfigTests =
             let agent' = applyAgentDurableConfig jsonAgent agent
             ctxToolCallPolicy agent' undefined (mkCall "bash_command") @?= Defer (Reason "approval")
             ctxToolCallPolicy agent' undefined (mkCall "other") @?= RunSync
+        , testCase "sets yield strategy and max concurrency from JSON agent" $ do
+            let jsonAgent =
+                    minimalBaseAgent
+                        { Base.asyncYieldStrategy = Just YieldOnAnyProgress
+                        , Base.maxConcurrency = Just 2
+                        , Base.asyncCallTimeoutSeconds = Just 30
+                        }
+            let agent' = applyAgentDurableConfig jsonAgent (mkAsyncAgent defaultToolCallPolicy)
+            ctxAsyncYieldStrategy agent' @?= YieldOnAnyProgress
+            ctxMaxConcurrency agent' @?= Just 2
+            ctxAsyncCallTimeout agent' @?= Just 30
+        , testCase "leaves unset fields untouched" $ do
+            let agent = (mkAsyncAgent defaultToolCallPolicy){ctxAsyncYieldStrategy = YieldOnTimeout 5}
+            let agent' = applyAgentDurableConfig minimalBaseAgent agent
+            ctxAsyncYieldStrategy agent' @?= YieldOnTimeout 5
+            ctxMaxConcurrency agent' @?= Nothing
+        , testCase "parses async fields from agent JSON" $ do
+            let json =
+                    "{\"slug\":\"a\",\"apiKeyId\":\"k\",\"flavor\":\"openai\",\"modelUrl\":\"u\",\"modelName\":\"m\",\"announce\":\"x\",\"systemPrompt\":[],\"executionMode\":\"asynchronous\",\"asyncYieldStrategy\":{\"tag\":\"yieldOnTimeout\",\"milliseconds\":500},\"maxConcurrency\":3,\"asyncCallTimeoutSeconds\":120}"
+            case Aeson.eitherDecode json of
+                Left err -> assertFailure err
+                Right parsed -> do
+                    Base.executionMode parsed @?= Just Asynchronous
+                    Base.asyncYieldStrategy parsed @?= Just (YieldOnTimeout 500)
+                    Base.maxConcurrency parsed @?= Just 3
+                    Base.asyncCallTimeoutSeconds parsed @?= Just 120
         ]
 
 -- | Simple insertion sort for tests.

@@ -36,6 +36,7 @@ import Control.Exception (Exception)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
 import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
@@ -60,6 +61,7 @@ import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveD
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Media.Types (MediaAttachment)
+import System.Agents.Session.AgentConfig (applyAgentDurableConfig)
 import System.Agents.Session.Base
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop
@@ -162,9 +164,44 @@ runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
 
     config.onSessionProgress convId (SessionStarted session0)
     -- The agent returns the final session as part of its stop result.
-    (llmTurn, finalSession) <- run convId agent session0
-    config.onSessionProgress convId (SessionCompleted finalSession)
-    pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
+    result <- runUntilBlocked convId agent session0
+    case result of
+        Left (llmTurn, finalSession) -> do
+            config.onSessionProgress convId (SessionCompleted finalSession)
+            pure $ OneShotResult $ extractResponseText llmTurn.llmResponse
+        Right pausedSession -> do
+            config.onSessionProgress convId (SessionUpdated pausedSession)
+            -- Also store under the session id, which the durable 'session'
+            -- commands use to find it.
+            SessionStore.storeSession store (SessionStore.sessionIdToConversationId pausedSession.sessionId) pausedSession
+            pure $ OneShotResult $ pausedReport pausedSession
+
+{- | JSON report printed when a one-shot run stops on deferred tool calls.
+
+Lists the session id and each deferred call with its continuation token, so
+the calls can be completed with @session complete@ and the run continued with
+@session resume@.
+-}
+pausedReport :: Session -> Text
+pausedReport sess =
+    Text.decodeUtf8 $
+        LByteString.toStrict $
+            Aeson.encode $
+                Aeson.object
+                    [ "status" .= ("paused" :: Text)
+                    , "reason" .= ("waiting for deferred tool calls" :: Text)
+                    , "session_id" .= sess.sessionId
+                    , "deferred_calls"
+                        .= [ Aeson.object
+                                    [ "tool" .= llmToolCallName tc.tcCall
+                                    , "tool_call_id" .= providerToolCallId tc.tcCall
+                                    , "continuation_token" .= tc.tcContinuation
+                                    ]
+                                 | PartialUserTurn partial _ <- take 1 sess.turns
+                                 , tc <- partial.pTrackedToolCalls
+                                 , tc.tcState == Deferred
+                                 ]
+                    ]
 
 mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
 mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolRegistrationTrace t) = ToolRegistrationTrace t
@@ -295,6 +332,7 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
 
     pure $
         agentStoreSession store mPath convId $
+            applyAgentDurableConfig agentCfg $
             Agent
                 { step = \sess -> do
                     action <- naiveTilNoToolCallStep sess
@@ -326,12 +364,16 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                 , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxParentConversation = Nothing
                 , ctxExecutionMode = Synchronous
+            , ctxAsyncYieldStrategy = YieldWhenAllDone
+            , ctxMaxConcurrency = Nothing
+            , ctxAsyncCallTimeout = Nothing
                 , ctxToolCache = Nothing
                 , ctxToolCallPolicy = defaultToolCallPolicy
                 , ctxToolExecutor = Nothing
                 , ctxContinuationStore = Nothing
                 , ctxDeploymentRunner = Nothing
                 , ctxSessionBackend = Nothing
+                , ctxAsyncEngine = Nothing
                 }
 
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool

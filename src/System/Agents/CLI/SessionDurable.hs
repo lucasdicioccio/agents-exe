@@ -36,9 +36,7 @@ module System.Agents.CLI.SessionDurable (
 import Control.Monad (forM_)
 import Data.Map (Map)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
-import Data.List (find)
 import Data.Maybe (catMaybes, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -56,6 +54,7 @@ import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.OneShot (PromptScriptOptions (..), loadPromptScriptOptions)
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.OneShot (nodeToAgent)
+import System.Agents.Session.AgentConfig (applyAgentDurableConfig, buildToolCallPolicy, llmToolCallName)
 import System.Agents.Session.Base
 import System.Agents.Session.Step (getPartialTurn, runStepM)
 import System.Agents.Session.Wake (resumeSession, wakeSession)
@@ -155,16 +154,7 @@ appliedDisposition policy = policy.apDisposition
 
 -- | Extract the function name from an LLM tool call.
 callName :: LlmToolCall -> Text
-callName (LlmToolCall val) =
-    case val of
-        Aeson.Object obj ->
-            case KeyMap.lookup "function" obj of
-                Just (Aeson.Object func) ->
-                    case KeyMap.lookup "name" func of
-                        Just (Aeson.String n) -> n
-                        _ -> "unknown"
-                _ -> "unknown"
-        _ -> "unknown"
+callName = llmToolCallName
 
 -------------------------------------------------------------------------------
 -- Session loading / storing
@@ -213,17 +203,6 @@ loadJsonAgentFile path = do
             exitFailure
         Right (Base.AgentDescription agent) -> pure agent
 
--- | Build a runtime 'ToolCallPolicy' from a declarative policy config.
-buildToolCallPolicy :: Base.ToolCallPolicyConfig -> ToolCallPolicy
-buildToolCallPolicy cfg _ctx call =
-    maybe (Base.tpcDefaultDisposition cfg) Base.tprDisposition $
-        find (\rule -> Base.tprToolName rule == callName call) (Base.tpcRules cfg)
-
--- | Apply durable settings from the JSON agent config to a runtime agent.
-applyAgentDurableConfig :: Base.Agent -> Agent r -> Agent r
-applyAgentDurableConfig jsonAgent agent =
-    let agent' = maybe agent (\mode -> withExecutionMode mode agent) (Base.executionMode jsonAgent)
-     in maybe agent' (\cfg -> withToolCallPolicy (buildToolCallPolicy cfg) agent') (Base.toolCallPolicyConfig jsonAgent)
 -- | Build an execution agent from the first supplied agent file for a given
 -- conversation id. Durable settings from the JSON agent config are applied.
 buildAgentForFile ::

@@ -48,6 +48,7 @@ module System.Agents.TUI.Types.State (
     uiAgentTools,
     buffers,
     bufferFocus,
+    toolCallViews,
     initUIState,
 
     -- * TUI State
@@ -81,6 +82,7 @@ import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Base (Session)
 import System.Agents.TUI.Buffer (Buffer)
 import System.Agents.TUI.KeyMapping (KeyMapping)
+import System.Agents.TUI.ToolCallActivity (ToolCallViews)
 import System.Agents.TUI.Types.Conversation (Conversation)
 import System.Agents.TUI.Types.Core (
     AppEvent,
@@ -197,6 +199,8 @@ data UIState = UIState
     -- ^ Global in-memory buffers (most recent first)
     , _bufferFocus :: Maybe Int
     -- ^ Index of selected buffer in the widget
+    , _toolCallViews :: ToolCallViews
+    -- ^ Live status of background tool calls, per session
     }
 
 makeLenses ''UIState
@@ -247,6 +251,7 @@ initUIState helpText agents sessions =
         , _uiAgentTools = []
         , _buffers = []
         , _bufferFocus = Nothing
+        , _toolCallViews = Map.empty
         }
 
 -------------------------------------------------------------------------------

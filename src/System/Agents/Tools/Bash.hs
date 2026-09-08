@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Defines tools as bash script (or programs) according to a simple convention.
 module System.Agents.Tools.Bash (
@@ -32,12 +33,21 @@ module System.Agents.Tools.Bash (
     turnIdToString,
     agentIdToString,
     buildToolEnvironment,
+    runProcessReportingOutput,
 
     -- * Re-exports
     ScriptDescription (..),
 ) where
 
-import Control.Concurrent.Async (mapConcurrently)
+import Control.Concurrent.Async (concurrently, mapConcurrently)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar (modifyMVar_, newMVar)
+import Control.Exception (IOException, handle, onException)
+import Control.Monad (unless)
+import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Char8 as ByteStringChar8
+import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
+import System.IO (Handle, hClose)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
@@ -55,7 +65,8 @@ import System.Environment (getEnvironment)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.Posix.Files as Posix
-import System.Process (CreateProcess (..), proc)
+import System.Posix.Signals (signalProcessGroup, sigKILL, sigTERM)
+import System.Process (CreateProcess (..), ProcessHandle, StdStream (..), getPid, proc, waitForProcess, withCreateProcess)
 import System.Process.ByteString (readCreateProcessWithExitCode, readProcessWithExitCode)
 
 import System.Agents.Base (AgentId (..), ConversationId (..))
@@ -74,6 +85,105 @@ import System.Agents.Tools.ScriptTypes (
  )
 
 -------------------------------------------------------------------------------
+
+{- | Run a process like 'readCreateProcessWithExitCode', reporting output as
+it arrives.
+
+Progress payloads look like
+@{"stream": "stdout", "line": "<latest complete line>", "lines": n, "bytes": n}@
+and are sent at most every 'outputReportInterval' per stream.
+
+The script runs in its own process group, so cancelling the calling thread
+(e.g. through @cancel-tool-call@) kills the script *and* the processes it
+started, not just the script itself.
+-}
+runProcessReportingOutput ::
+    (Aeson.Value -> IO ()) ->
+    CreateProcess ->
+    ByteString ->
+    IO (ExitCode, ByteString, ByteString)
+runProcessReportingOutput report process input =
+    withCreateProcess process{std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe, create_group = True} $ \mIn mOut mErr ph ->
+        case (mIn, mOut, mErr) of
+            (Just hIn, Just hOut, Just hErr) -> do
+                let feed = ignoreBrokenPipe (ByteString.hPut hIn input) >> ignoreBrokenPipe (hClose hIn)
+                let body = do
+                        ((out, err), ()) <-
+                            concurrently
+                                (concurrently (drain "stdout" hOut) (drain "stderr" hErr))
+                                feed
+                        code <- waitForProcess ph
+                        pure (code, out, err)
+                body `onException` killProcessGroup ph
+            _ -> error "runProcessReportingOutput: process pipes were not created"
+  where
+    ignoreBrokenPipe :: IO () -> IO ()
+    ignoreBrokenPipe = handle (\(_ :: IOException) -> pure ())
+
+    drain :: Text -> Handle -> IO ByteString
+    drain stream h = do
+        lastReport <- newMVar (Nothing :: Maybe UTCTime)
+        -- chunks: everything read so far (reversed); pending: text after the
+        -- last newline, not yet a complete line.
+        let loop chunks pending lineCount byteCount = do
+                chunk <- ByteString.hGetSome h 32768
+                if ByteString.null chunk
+                    then pure (ByteString.concat (List.reverse chunks))
+                    else do
+                        let buffered = pending <> chunk
+                            byteCount' = byteCount + ByteString.length chunk
+                        case ByteStringChar8.elemIndexEnd '\n' buffered of
+                            Nothing -> loop (chunk : chunks) buffered lineCount byteCount'
+                            Just ix -> do
+                                let (complete, rest) = ByteString.splitAt (ix + 1) buffered
+                                    completeLines = ByteStringChar8.lines complete
+                                    lineCount' = lineCount + List.length completeLines
+                                    nonEmpty = List.filter (not . ByteString.null) completeLines
+                                unless (List.null nonEmpty) $
+                                    reportLine lastReport stream (List.last nonEmpty) lineCount' byteCount'
+                                loop (chunk : chunks) rest lineCount' byteCount'
+        loop [] ByteString.empty (0 :: Int) (0 :: Int)
+
+    reportLine lastReport stream line lineCount byteCount = do
+        now <- getCurrentTime
+        modifyMVar_ lastReport $ \prev ->
+            if maybe True (\t -> diffUTCTime now t >= outputReportInterval) prev
+                then do
+                    report $
+                        Aeson.object
+                            [ "stream" Aeson..= stream
+                            , "line" Aeson..= Text.decodeUtf8With lenientDecode line
+                            , "lines" Aeson..= lineCount
+                            , "bytes" Aeson..= byteCount
+                            ]
+                    pure (Just now)
+                else pure prev
+
+{- | Signal the whole process group of a running process, so that children
+started by a script die with it. Best-effort: signalling failures (the
+process is already gone, or has no group) are ignored.
+-}
+killProcessGroup :: ProcessHandle -> IO ()
+killProcessGroup ph = do
+    mPid <- getPid ph
+    case mPid of
+        Nothing -> pure ()
+        Just pid -> do
+            ignoreSignalError $ signalProcessGroup sigTERM pid
+            threadDelay killGraceMicros
+            ignoreSignalError $ signalProcessGroup sigKILL pid
+  where
+    ignoreSignalError :: IO () -> IO ()
+    ignoreSignalError = handle (\(_ :: IOException) -> pure ())
+
+-- | Grace period between SIGTERM and SIGKILL for a cancelled script.
+killGraceMicros :: Int
+killGraceMicros = 100000
+
+-- | Minimum delay between two output reports for one stream.
+outputReportInterval :: NominalDiffTime
+outputReportInterval = 0.5
+
 data LoadTrace
     = LoadCommandStart !FilePath [String]
     | LoadCommandStopped !FilePath [String] !ExitCode !ByteString !ByteString
@@ -293,7 +403,9 @@ runValue tracer script mCtx val = do
             -- Create the process with the modified environment
             let process = (proc path args){env = Just toolEnv}
 
-            (code, out, err) <- readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
+            (code, out, err) <- case mCtx >>= ctxProgressCallback of
+                Nothing -> readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
+                Just report -> runProcessReportingOutput report process (Text.encodeUtf8 stdin)
             runTracer tracer (RunCommandStopped path args code out err)
             if code /= ExitSuccess
                 then pure $ Left $ ScriptExecutionError path code err

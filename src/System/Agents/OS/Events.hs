@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -13,13 +14,19 @@ between OS.Interfaces, Session.Base, and Tools.Context.
 module System.Agents.OS.Events (
     -- * OS Event Types
     OSEvent (..),
+
+    -- * Tool-call activity
+    ToolCallActivity (..),
+    ToolCallPhase (..),
+    isFinalToolCallPhase,
 ) where
 
 import Data.Aeson (Value)
 import Data.Text (Text)
+import Data.Time (UTCTime)
 
 import System.Agents.Base (AgentId, ConversationId)
-import System.Agents.Session.Types (Session, SessionProgress)
+import System.Agents.Session.Types (Session, SessionId, SessionProgress, ToolCallId)
 
 -- | Events that can be emitted by the OS.
 data OSEvent
@@ -67,4 +74,44 @@ data OSEvent
         , subcallFailedError :: Text
         -- ^ The error message
         }
+    | -- | Emitted when a background (async) tool call starts, reports
+      -- progress, or finishes
+      OSEvent_ToolCallActivity ToolCallActivity
     deriving (Show)
+
+-- | Lifecycle phase of a background tool call.
+data ToolCallPhase
+    = ToolCallStarted
+    | -- | A progress payload reported by the tool
+      ToolCallProgressed Value
+    | ToolCallCompleted
+    | -- | The call failed with the given error
+      ToolCallFailed Text
+    | ToolCallCancelled
+    deriving (Show, Eq)
+
+-- | Whether the phase is final (the call no longer runs).
+isFinalToolCallPhase :: ToolCallPhase -> Bool
+isFinalToolCallPhase = \case
+    ToolCallStarted -> False
+    ToolCallProgressed _ -> False
+    ToolCallCompleted -> True
+    ToolCallFailed _ -> True
+    ToolCallCancelled -> True
+
+-- | An update about a background tool call.
+data ToolCallActivity = ToolCallActivity
+    { tcaSessionId :: SessionId
+    -- ^ Session holding the call
+    , tcaConversationId :: ConversationId
+    -- ^ Conversation holding the call
+    , tcaToolCallId :: ToolCallId
+    -- ^ Session-level id of the call
+    , tcaProviderCallId :: Maybe Text
+    -- ^ Id the LLM provider gave the call, when known
+    , tcaToolName :: Text
+    -- ^ Name of the called tool
+    , tcaPhase :: ToolCallPhase
+    , tcaAt :: UTCTime
+    }
+    deriving (Show, Eq)

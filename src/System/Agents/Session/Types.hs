@@ -25,6 +25,7 @@ module System.Agents.Session.Types (
 
     -- * Partial turn helpers
     partialCompletedResponses,
+    partialToolMessages,
     partialPendingCalls,
     partialPendingContinuations,
     cacheKeyForTrackedCall,
@@ -32,6 +33,9 @@ module System.Agents.Session.Types (
     -- * Durable workflow primitives
     ToolCallId (..),
     newToolCallId,
+    providerToolCallId,
+    llmToolCallName,
+    isFinalToolCallState,
     ToolCallState (..),
     ToolCallDisposition (..),
     IsolationSpec (..),
@@ -45,6 +49,7 @@ module System.Agents.Session.Types (
     ContinuationToken (..),
     newContinuationToken,
     CacheKey (..),
+    AsyncYieldStrategy (..),
 
     -- * Byte usage tracking
     StepByteUsage (..),
@@ -102,8 +107,8 @@ import GHC.Generics (Generic)
 
 import System.Agents.LLMs.OpenAI (TokenUsage (..))
 import System.Agents.Media.Types (ContentPart, MediaAttachment (..))
+import System.Agents.OS.Core.Types (EntityId (..))
 import System.Agents.ToolSchema
-
 -------------------------------------------------------------------------------
 -- Identifiers
 -------------------------------------------------------------------------------
@@ -236,6 +241,24 @@ instance FromJSON ToolCallId where
 newToolCallId :: IO ToolCallId
 newToolCallId = ToolCallId <$> UUID.nextRandom
 
+{- | The tool-call id assigned by the LLM provider (the @id@ field of the
+raw call), which is the only id the model knows about.
+-}
+providerToolCallId :: LlmToolCall -> Maybe Text
+providerToolCallId (LlmToolCall (Aeson.Object obj)) =
+    case KeyMap.lookup "id" obj of
+        Just (Aeson.String tid) | not (Text.null tid) -> Just tid
+        _ -> Nothing
+providerToolCallId _ = Nothing
+
+-- | The function name of an OpenAI-style LLM tool call, or @unknown@.
+llmToolCallName :: LlmToolCall -> Text
+llmToolCallName (LlmToolCall (Aeson.Object obj))
+    | Just (Aeson.Object func) <- KeyMap.lookup "function" obj
+    , Just (Aeson.String n) <- KeyMap.lookup "name" func =
+        n
+llmToolCallName _ = "unknown"
+
 {- | Lifecycle state of a tracked tool call.
 
 State transitions:
@@ -254,6 +277,12 @@ data ToolCallState
 
 instance ToJSON ToolCallState
 instance FromJSON ToolCallState
+
+-- | Whether a tracked call reached a terminal state ('Completed' or 'Failed').
+isFinalToolCallState :: ToolCallState -> Bool
+isFinalToolCallState Completed = True
+isFinalToolCallState Failed = True
+isFinalToolCallState _ = False
 
 -- | Human-readable reason for deferring or isolating a call.
 newtype Reason = Reason Text
@@ -397,6 +426,42 @@ instance FromJSON ToolCallDisposition where
             "defer" -> Defer . Reason <$> v .: "reason"
             "decorate" -> Decorate <$> v .: "decorators" <*> v .: "inner"
             _ -> fail $ "Unknown ToolCallDisposition tag: " ++ Text.unpack tag
+{- | Strategy that controls when an asynchronous step yields a partial user turn.
+
+* 'YieldOnAnyProgress' - return as soon as at least one async call reaches a
+  final state.
+* 'YieldWhenAllDone' - block until every synchronous and asynchronous call in
+  the batch has finished (default, preserves the traditional synchronous
+  mental model).
+* 'YieldOnTimeout Int' - return after the given number of milliseconds even if
+  no call has finished.
+-}
+data AsyncYieldStrategy
+    = YieldOnAnyProgress
+    | YieldWhenAllDone
+    | YieldOnTimeout Int
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON AsyncYieldStrategy where
+    toJSON YieldOnAnyProgress = Aeson.String "yieldOnAnyProgress"
+    toJSON YieldWhenAllDone = Aeson.String "yieldWhenAllDone"
+    toJSON (YieldOnTimeout ms) =
+        Aeson.object ["tag" .= ("yieldOnTimeout" :: Text), "milliseconds" .= ms]
+
+instance FromJSON AsyncYieldStrategy where
+    parseJSON v = Aeson.withText "AsyncYieldStrategy" parseText v <|> Aeson.withObject "AsyncYieldStrategy" parseObj v
+      where
+        parseText "yieldOnAnyProgress" = pure YieldOnAnyProgress
+        parseText "yieldWhenAllDone" = pure YieldWhenAllDone
+        parseText other = fail $ "Invalid AsyncYieldStrategy: " ++ Text.unpack other
+        parseObj obj = do
+            tag <- obj .: "tag"
+            if tag == ("yieldOnTimeout" :: Text)
+                then YieldOnTimeout <$> obj .: "milliseconds"
+                else fail $ "Unknown AsyncYieldStrategy tag: " ++ Text.unpack tag
+
+
+
 
 {- | Record of the policy decision applied to a tracked call.
 
@@ -444,6 +509,14 @@ data TrackedToolCall = TrackedToolCall
     -- ^ Continuation token when deferred or async
     , tcPolicy :: AppliedPolicy
     -- ^ Record of why it ran this way
+    , tcEntityId :: Maybe EntityId
+    -- ^ Optional ECS entity id when the call is promoted to the OS world
+    , tcDeliveredLate :: Bool
+    {- ^ The LLM was shown a @running@ placeholder for this call and its
+    result was delivered later in a subsequent user turn. The turn holding
+    this call keeps rendering the placeholder so history matches what the
+    model saw.
+    -}
     }
     deriving (Show, Eq, Ord, Generic)
 
@@ -457,6 +530,8 @@ instance ToJSON TrackedToolCall where
             ]
                 ++ ["result" .= r | Just r <- [tc.tcResult]]
                 ++ ["continuation" .= c | Just c <- [tc.tcContinuation]]
+                ++ ["entityId" .= e | Just e <- [tc.tcEntityId]]
+                ++ ["deliveredLate" .= True | tc.tcDeliveredLate]
 
 instance FromJSON TrackedToolCall where
     parseJSON = Aeson.withObject "TrackedToolCall" $ \v ->
@@ -467,8 +542,11 @@ instance FromJSON TrackedToolCall where
             <*> v .:? "result"
             <*> v .:? "continuation"
             <*> v .: "policy"
+            <*> v .:? "entityId"
+            <*> v .:? "deliveredLate" .!= False
 -------------------------------------------------------------------------------
 -- Signal Types (Trajectory Analysis)
+-------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 
 {- | Interaction signals derived from user-assistant natural language discourse.
@@ -996,6 +1074,8 @@ migrateLegacyPartialTurn completed pending =
             , tcResult = Just result
             , tcContinuation = Nothing
             , tcPolicy = AppliedPolicy RunSync Nothing
+            , tcEntityId = Nothing
+            , tcDeliveredLate = False
             }
     mkPending idx call =
         TrackedToolCall
@@ -1005,6 +1085,8 @@ migrateLegacyPartialTurn completed pending =
             , tcResult = Nothing
             , tcContinuation = Nothing
             , tcPolicy = AppliedPolicy RunSync Nothing
+            , tcEntityId = Nothing
+            , tcDeliveredLate = False
             }
 
 -- | Completed tool calls with their responses (backward-compatible view).
@@ -1015,6 +1097,43 @@ partialCompletedResponses content =
     , tc.tcState == Completed
     , Just result <- [tc.tcResult]
     ]
+
+{- | One tool message per call, as sent to the LLM.
+
+Final calls ('Completed' or 'Failed') contribute their result. Calls that
+are still in flight, and calls whose result was delivered late, contribute a
+placeholder so that every tool call in the preceding LLM turn has exactly
+one response.
+-}
+partialToolMessages :: PartialUserTurnContent -> [(LlmToolCall, UserToolResponse)]
+partialToolMessages content =
+    map toMessage content.pTrackedToolCalls
+  where
+    toMessage :: TrackedToolCall -> (LlmToolCall, UserToolResponse)
+    toMessage tc =
+        case tc.tcResult of
+            Just result
+                | isFinalToolCallState tc.tcState && not tc.tcDeliveredLate ->
+                    (tc.tcCall, result)
+            _ -> (tc.tcCall, pendingPlaceholder tc)
+
+    pendingPlaceholder :: TrackedToolCall -> UserToolResponse
+    pendingPlaceholder tc =
+        let status :: Text
+            status = case tc.tcState of
+                Deferred -> "deferred"
+                Ready -> "pending"
+                _ -> "running"
+         in JsonResponse $
+                Aeson.object $
+                    [ "status" .= status
+                    , "message"
+                        .= ( "This tool call has not finished yet. Its result will be delivered in a later message. \
+                             \Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it." ::
+                                Text
+                           )
+                    ]
+                        ++ ["tool_call_id" .= tid | Just tid <- [providerToolCallId tc.tcCall]]
 
 -- | Tool calls that still need execution (backward-compatible view).
 partialPendingCalls :: PartialUserTurnContent -> [LlmToolCall]

@@ -101,7 +101,19 @@ module System.Agents.OS.Conversation (
     ToolCallConfig (..),
     ToolCallState (..),
     ToolCallStatus (..),
+    ToolCallProgress (..),
+    ProgressKind (..),
 
+    -- * Tool Call Helpers
+    registerToolCallComponents,
+    createToolCallEntity,
+    startToolCall,
+    completeToolCall,
+    failToolCall,
+    cancelToolCall,
+    addToolCallProgress,
+    findToolCallEntityBySessionId,
+    listToolCallsBySessionAndConversation,
     -- * Message Components
     Message (..),
     MessageRole (..),
@@ -149,6 +161,7 @@ module System.Agents.OS.Conversation (
 import Data.Proxy (Proxy (..))
 
 import System.Agents.OS.Conversation.Lineage
+import System.Agents.OS.Conversation.ToolCalls
 import System.Agents.OS.Conversation.Types
 import System.Agents.OS.Core.Types (Component (..), ComponentTypeId (..))
 
