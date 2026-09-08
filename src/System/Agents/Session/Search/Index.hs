@@ -52,7 +52,7 @@ import System.FilePath (takeDirectory)
 
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.Base (LlmTurnContent (..), PartialUserTurnContent (..), Session (..), Turn (..), UserTurnContent (..))
+import System.Agents.Session.Base (LlmTurnContent (..), PartialUserTurnContent (..), Session (..), Turn (..), UserTurnContent (..), partialCompletedResponses)
 import System.Agents.Session.Search.Types
 import System.Agents.Session.Types (
     LlmResponse (..),
@@ -427,7 +427,7 @@ extractTurnContent includeToolOutputs turn = case turn of
             [ Just $ extractSystemPrompt content.pUserPrompt
             , extractUserQuery <$> content.pUserQuery
             , if includeToolOutputs
-                then Just $ extractToolResponses content.pCompletedResponses
+                then Just $ extractToolResponses (partialCompletedResponses content)
                 else Nothing
             ]
 
@@ -501,7 +501,7 @@ countToolCalls session =
     extractToolsFromTurn turn = case turn of
         UserTurn content _ -> map (\(LlmToolCall val, _) -> extractToolName val) content.userToolResponses
         LlmTurn content _ -> map (\(LlmToolCall val) -> extractToolName val) content.llmToolCalls
-        PartialUserTurn content _ -> map (\(LlmToolCall val, _) -> extractToolName val) content.pCompletedResponses
+        PartialUserTurn content _ -> map (\(LlmToolCall val, _) -> extractToolName val) (partialCompletedResponses content)
 
     extractToolName :: Value -> Text
     extractToolName val = case val of
@@ -526,7 +526,7 @@ extractToolNames session =
     extractToolsFromTurn turn = case turn of
         UserTurn content _ -> map (\(LlmToolCall val, _) -> extractToolName val) content.userToolResponses
         LlmTurn content _ -> map (\(LlmToolCall val) -> extractToolName val) content.llmToolCalls
-        PartialUserTurn content _ -> map (\(LlmToolCall val, _) -> extractToolName val) content.pCompletedResponses
+        PartialUserTurn content _ -> map (\(LlmToolCall val, _) -> extractToolName val) (partialCompletedResponses content)
 
     extractToolName :: Value -> Text
     extractToolName val = case val of

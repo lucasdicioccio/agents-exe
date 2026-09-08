@@ -208,8 +208,13 @@ getSessionStatus session =
         Nothing ->
             "Complete - " ++ show (length session.turns) ++ " turns"
         Just partial ->
-            "Partial - "
-                ++ show (length partial.pCompletedResponses)
-                ++ " completed, "
-                ++ show (length partial.pPendingCalls)
-                ++ " pending"
+            let completed = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == Completed]
+                pending = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == Ready]
+                deferred = length [() | tc <- partial.pTrackedToolCalls, tc.tcState == Deferred]
+             in "Partial - "
+                    ++ show completed
+                    ++ " completed, "
+                    ++ show pending
+                    ++ " pending, "
+                    ++ show deferred
+                    ++ " deferred"

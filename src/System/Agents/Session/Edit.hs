@@ -18,7 +18,6 @@ Example usage:
 
 > $ cat session.json | agents-exe session-edit take 10
 > $ cat session.json | agents-exe session-edit take-tail 5
-> $ cat session.json | agents-exe session-edit censor thinking
 -}
 module System.Agents.Session.Edit (
     -- * Session transformation functions
@@ -112,14 +111,7 @@ sessionEditCensorToolCalls session =
     censorTurn (Session.UserTurn utc mUsage) =
         Session.UserTurn (utc{Session.userToolResponses = []}) mUsage
     censorTurn (Session.PartialUserTurn puc mUsage) =
-        Session.PartialUserTurn
-            ( puc
-                { Session.pCompletedResponses = []
-                , Session.pPendingCalls = []
-                , Session.pPendingContinuations = []
-                }
-            )
-            mUsage
+        Session.PartialUserTurn (puc{Session.pTrackedToolCalls = []}) mUsage
     censorTurn (Session.LlmTurn ltc mUsage) =
         Session.LlmTurn (ltc{Session.llmToolCalls = []}) mUsage
 
@@ -154,7 +146,8 @@ The edits are applied in the order they appear in the list:
 
 > applySessionEdits [sessionEditDrop 5, sessionEditTake 10] session
 > -- Equivalent to: sessionEditTake 10 . sessionEditDrop 5 $ session
-> -- Results in turns 6-15 from the original session
+> -- Results in turns 6-15 from the original
 -}
 applySessionEdits :: [Session.Session -> Session.Session] -> Session.Session -> Session.Session
 applySessionEdits edits session = foldl (\s f -> f s) session edits
+

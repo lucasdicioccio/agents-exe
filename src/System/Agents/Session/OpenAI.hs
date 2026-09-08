@@ -224,7 +224,7 @@ mkOpenAICompletion config completion = do
                 Nothing -> []
                 Just (UserQuery _ media) -> media
             userMsg = userQueryToMessages mQuery mediaAttachments
-            toolResponses = turn.pCompletedResponses
+            toolResponses = partialCompletedResponses turn
             toolMsgs = concatMap toolResponseToMessages toolResponses
          in
             userMsg ++ toolMsgs

@@ -23,10 +23,25 @@ module System.Agents.Session.Types (
     LlmTurnContent (..),
     PartialUserTurnContent (..),
 
-    -- * Execution mode
-    ExecutionMode (..),
+    -- * Partial turn helpers
+    partialCompletedResponses,
+    partialPendingCalls,
+    partialPendingContinuations,
+    cacheKeyForTrackedCall,
 
-    -- * Async/Continuation types
+    -- * Durable workflow primitives
+    ToolCallId (..),
+    newToolCallId,
+    ToolCallState (..),
+    ToolCallDisposition (..),
+    IsolationSpec (..),
+    Reason (..),
+    Decorator (..),
+    AppliedPolicy (..),
+    TrackedToolCall (..),
+
+    -- * Execution mode / continuation types
+    ExecutionMode (..),
     ContinuationToken (..),
     newContinuationToken,
     CacheKey (..),
@@ -72,6 +87,7 @@ module System.Agents.Session.Types (
 ) where
 
 import Control.Applicative ((<|>))
+import Control.Monad (unless)
 import Data.Aeson (FromJSON, ToJSON, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -180,6 +196,264 @@ data ExecutionMode
 instance ToJSON ExecutionMode
 instance FromJSON ExecutionMode
 
+-------------------------------------------------------------------------------
+-- Durable Workflow Primitives
+-------------------------------------------------------------------------------
+
+{- | Stable identifier for a single tool call within a user turn.
+
+Using UUIDs makes it safe to reference calls across processes and
+databases. This is essential for matching external results injected
+via 'wakeSession' or completed by isolated workers.
+-}
+newtype ToolCallId = ToolCallId UUID
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ToolCallId where
+    toJSON (ToolCallId uuid) = Aeson.toJSON $ UUID.toText uuid
+
+instance FromJSON ToolCallId where
+    parseJSON val = do
+        txt <- Aeson.parseJSON val
+        case UUID.fromText txt of
+            Just uuid -> pure $ ToolCallId uuid
+            Nothing -> fail "Invalid UUID for ToolCallId"
+
+-- | Generate a new unique tool-call identifier.
+newToolCallId :: IO ToolCallId
+newToolCallId = ToolCallId <$> UUID.nextRandom
+
+{- | Lifecycle state of a tracked tool call.
+
+State transitions:
+* 'Ready'    -> 'Running' | 'Deferred' | 'Completed'
+* 'Running'  -> 'Completed' | 'Failed'
+* 'Deferred' -> 'Ready' | 'Completed' (via external wake)
+* 'Completed' is terminal
+-}
+data ToolCallState
+    = Ready
+    | Running
+    | Deferred
+    | Completed
+    | Failed
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ToolCallState
+instance FromJSON ToolCallState
+
+-- | Human-readable reason for deferring or isolating a call.
+newtype Reason = Reason Text
+    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
+
+{- | Specification for running a tool call outside the current process.
+
+* 'Docker' image name / tag
+* 'LocalProcess' path to a worker executable
+* 'FunctionRunner' serverless/FaaS target (future)
+-}
+data IsolationSpec
+    = Docker Text
+    | LocalProcess FilePath
+    | FunctionRunner Text
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON IsolationSpec where
+    toJSON spec =
+        case spec of
+            Docker image ->
+                Aeson.object
+                    [ "tag" .= ("docker" :: Text)
+                    , "image" .= image
+                    ]
+            LocalProcess path ->
+                Aeson.object
+                    [ "tag" .= ("localProcess" :: Text)
+                    , "path" .= path
+                    ]
+            FunctionRunner target ->
+                Aeson.object
+                    [ "tag" .= ("functionRunner" :: Text)
+                    , "target" .= target
+                    ]
+
+instance FromJSON IsolationSpec where
+    parseJSON = Aeson.withObject "IsolationSpec" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "docker" -> Docker <$> v .: "image"
+            "localProcess" -> LocalProcess <$> v .: "path"
+            "functionRunner" -> FunctionRunner <$> v .: "target"
+            _ -> fail $ "Unknown IsolationSpec tag: " ++ Text.unpack tag
+
+{- | Decorators that can be attached to a tool-call disposition.
+
+These modify how a call is executed without changing the core
+decision (sync / async / deferred / isolated).
+-}
+data Decorator
+    = WithTimeout Int
+    -- ^ Maximum execution time in seconds
+    | WithRetries Int
+    -- ^ Number of retries on failure
+    | WithCache CacheKey
+    -- ^ Use a specific cache key (overrides default)
+    | WithLabel Text
+    -- ^ Human-readable label for observability
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Decorator where
+    toJSON dec =
+        case dec of
+            WithTimeout seconds ->
+                Aeson.object
+                    [ "tag" .= ("timeout" :: Text)
+                    , "seconds" .= seconds
+                    ]
+            WithRetries count ->
+                Aeson.object
+                    [ "tag" .= ("retries" :: Text)
+                    , "count" .= count
+                    ]
+            WithCache key ->
+                Aeson.object
+                    [ "tag" .= ("cache" :: Text)
+                    , "key" .= key
+                    ]
+            WithLabel label ->
+                Aeson.object
+                    [ "tag" .= ("label" :: Text)
+                    , "label" .= label
+                    ]
+
+instance FromJSON Decorator where
+    parseJSON = Aeson.withObject "Decorator" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "timeout" -> WithTimeout <$> v .: "seconds"
+            "retries" -> WithRetries <$> v .: "count"
+            "cache" -> WithCache <$> v .: "key"
+            "label" -> WithLabel <$> v .: "label"
+            _ -> fail $ "Unknown Decorator tag: " ++ Text.unpack tag
+
+{- | Decision made for a single tool call.
+
+* 'RunSync' - Execute immediately in the current process
+* 'RunAsync' - Yield a continuation token and complete externally
+* 'RunIsolated' - Execute outside the current process
+* 'Defer' - Intentionally pause (e.g., pending approval)
+* 'Decorate' - Attach modifiers to an underlying disposition
+-}
+data ToolCallDisposition
+    = RunSync
+    | RunAsync
+    | RunIsolated IsolationSpec
+    | Defer Reason
+    | Decorate [Decorator] ToolCallDisposition
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ToolCallDisposition where
+    toJSON disp =
+        case disp of
+            RunSync -> Aeson.object ["tag" .= ("runSync" :: Text)]
+            RunAsync -> Aeson.object ["tag" .= ("runAsync" :: Text)]
+            RunIsolated spec ->
+                Aeson.object
+                    [ "tag" .= ("runIsolated" :: Text)
+                    , "spec" .= spec
+                    ]
+            Defer (Reason reason) ->
+                Aeson.object
+                    [ "tag" .= ("defer" :: Text)
+                    , "reason" .= reason
+                    ]
+            Decorate decorators inner ->
+                Aeson.object
+                    [ "tag" .= ("decorate" :: Text)
+                    , "decorators" .= decorators
+                    , "inner" .= inner
+                    ]
+
+instance FromJSON ToolCallDisposition where
+    parseJSON = Aeson.withObject "ToolCallDisposition" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "runSync" -> pure RunSync
+            "runAsync" -> pure RunAsync
+            "runIsolated" -> RunIsolated <$> v .: "spec"
+            "defer" -> Defer . Reason <$> v .: "reason"
+            "decorate" -> Decorate <$> v .: "decorators" <*> v .: "inner"
+            _ -> fail $ "Unknown ToolCallDisposition tag: " ++ Text.unpack tag
+
+{- | Record of the policy decision applied to a tracked call.
+
+Stored so that resumes and audits can see why a call was executed
+the way it was.
+-}
+data AppliedPolicy = AppliedPolicy
+    { apDisposition :: ToolCallDisposition
+    -- ^ The final disposition applied
+    , apReason :: Maybe Text
+    -- ^ Optional human-readable reason
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON AppliedPolicy where
+    toJSON policy =
+        Aeson.object $
+            [ "disposition" .= policy.apDisposition
+            ]
+                ++ ["reason" .= r | Just r <- [policy.apReason]]
+
+instance FromJSON AppliedPolicy where
+    parseJSON = Aeson.withObject "AppliedPolicy" $ \v ->
+        AppliedPolicy
+            <$> v .: "disposition"
+            <*> v .:? "reason"
+
+{- | A tool call tracked through its execution lifecycle.
+
+Wraps an 'LlmToolCall' with durable-execution metadata:
+* Stable ID for matching external results
+* Current lifecycle state
+* Optional result, continuation token, and applied policy
+-}
+data TrackedToolCall = TrackedToolCall
+    { tcId :: ToolCallId
+    -- ^ Stable identifier for this call
+    , tcCall :: LlmToolCall
+    -- ^ The original LLM-issued tool call
+    , tcState :: ToolCallState
+    -- ^ Current lifecycle state
+    , tcResult :: Maybe UserToolResponse
+    -- ^ Result once the call completes
+    , tcContinuation :: Maybe ContinuationToken
+    -- ^ Continuation token when deferred or async
+    , tcPolicy :: AppliedPolicy
+    -- ^ Record of why it ran this way
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON TrackedToolCall where
+    toJSON tc =
+        Aeson.object $
+            [ "id" .= tc.tcId
+            , "call" .= tc.tcCall
+            , "state" .= tc.tcState
+            , "policy" .= tc.tcPolicy
+            ]
+                ++ ["result" .= r | Just r <- [tc.tcResult]]
+                ++ ["continuation" .= c | Just c <- [tc.tcContinuation]]
+
+instance FromJSON TrackedToolCall where
+    parseJSON = Aeson.withObject "TrackedToolCall" $ \v ->
+        TrackedToolCall
+            <$> v .: "id"
+            <*> v .: "call"
+            <*> v .: "state"
+            <*> v .:? "result"
+            <*> v .:? "continuation"
+            <*> v .: "policy"
 -------------------------------------------------------------------------------
 -- Signal Types (Trajectory Analysis)
 -------------------------------------------------------------------------------
@@ -642,11 +916,11 @@ data LlmTurnContent
 instance FromJSON LlmTurnContent
 instance ToJSON LlmTurnContent
 
-{- | Partial user-turn content for async execution.
+{- | Partial user-turn content for async / durable execution.
 
-Represents an incomplete user turn where some tool calls have completed
-and others are still pending (either not yet executed or yielded for
-external completion).
+Represents an incomplete user turn where tool calls are tracked
+individually through their lifecycle states (ready, running, deferred,
+completed, failed).
 -}
 data PartialUserTurnContent = PartialUserTurnContent
     { pUserPrompt :: SystemPrompt
@@ -655,14 +929,10 @@ data PartialUserTurnContent = PartialUserTurnContent
     -- ^ Tools available
     , pUserQuery :: Maybe UserQuery
     -- ^ User query if any
-    , pCompletedResponses :: [(LlmToolCall, UserToolResponse)]
-    -- ^ Completed tool calls with their responses
-    , pPendingCalls :: [LlmToolCall]
-    -- ^ Tool calls that still need execution
-    , pPendingContinuations :: [(ContinuationToken, CacheKey)]
-    -- ^ Continuation tokens for yielded tool calls (async mode)
+    , pTrackedToolCalls :: [TrackedToolCall]
+    -- ^ All tool calls in this turn with their lifecycle state
     }
-    deriving (Show, Ord, Eq, Generic)
+    deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON PartialUserTurnContent where
     toJSON content =
@@ -670,20 +940,92 @@ instance ToJSON PartialUserTurnContent where
             [ "userPrompt" .= content.pUserPrompt
             , "userTools" .= content.pUserTools
             , "userQuery" .= content.pUserQuery
-            , "completedResponses" .= content.pCompletedResponses
-            , "pendingCalls" .= content.pPendingCalls
-            , "pendingContinuations" .= content.pPendingContinuations
+            , "trackedToolCalls" .= content.pTrackedToolCalls
             ]
 
 instance FromJSON PartialUserTurnContent where
     parseJSON = Aeson.withObject "PartialUserTurnContent" $ \v ->
-        PartialUserTurnContent
-            <$> v .: "userPrompt"
-            <*> v .: "userTools"
-            <*> v .:? "userQuery"
-            <*> v .: "completedResponses"
-            <*> v .: "pendingCalls"
-            <*> v .:? "pendingContinuations" .!= []
+        parseTracked v <|> parseLegacy v
+      where
+        parseTracked trackedV =
+            PartialUserTurnContent
+                <$> trackedV .: "userPrompt"
+                <*> trackedV .: "userTools"
+                <*> trackedV .:? "userQuery"
+                <*> trackedV .: "trackedToolCalls"
+
+        parseLegacy legacyV = do
+            prompt <- legacyV .: "userPrompt"
+            tools <- legacyV .: "userTools"
+            query <- legacyV .:? "userQuery"
+            completed <- legacyV .: "completedResponses"
+            pending <- legacyV .: "pendingCalls"
+            continuations <- (legacyV .:? "pendingContinuations" .!= [] :: Aeson.Types.Parser [(ContinuationToken, CacheKey)])
+            unless (null continuations) $
+                fail "Legacy pending continuations cannot be migrated; use the new durable format"
+            tracked <- migrateLegacyPartialTurn completed pending
+            pure $ PartialUserTurnContent prompt tools query tracked
+
+-- | Convert a legacy partial turn (completed + pending calls) into tracked calls.
+migrateLegacyPartialTurn ::
+    [(LlmToolCall, UserToolResponse)] ->
+    [LlmToolCall] ->
+    Aeson.Types.Parser [TrackedToolCall]
+migrateLegacyPartialTurn completed pending =
+    pure $ zipWith mkCompleted [0 ..] completed ++ zipWith mkPending [offset ..] pending
+  where
+    offset = fromIntegral $ length completed
+    mkCompleted idx (call, result) =
+        TrackedToolCall
+            { tcId = ToolCallId $ UUID.fromWords 0 0 0 idx
+            , tcCall = call
+            , tcState = Completed
+            , tcResult = Just result
+            , tcContinuation = Nothing
+            , tcPolicy = AppliedPolicy RunSync Nothing
+            }
+    mkPending idx call =
+        TrackedToolCall
+            { tcId = ToolCallId $ UUID.fromWords 0 0 0 idx
+            , tcCall = call
+            , tcState = Ready
+            , tcResult = Nothing
+            , tcContinuation = Nothing
+            , tcPolicy = AppliedPolicy RunSync Nothing
+            }
+
+-- | Completed tool calls with their responses (backward-compatible view).
+partialCompletedResponses :: PartialUserTurnContent -> [(LlmToolCall, UserToolResponse)]
+partialCompletedResponses content =
+    [ (tc.tcCall, result)
+    | tc <- content.pTrackedToolCalls
+    , tc.tcState == Completed
+    , Just result <- [tc.tcResult]
+    ]
+
+-- | Tool calls that still need execution (backward-compatible view).
+partialPendingCalls :: PartialUserTurnContent -> [LlmToolCall]
+partialPendingCalls content =
+    [ tc.tcCall
+    | tc <- content.pTrackedToolCalls
+    , tc.tcState == Ready
+    ]
+
+-- | Continuation tokens for yielded tool calls (backward-compatible view).
+partialPendingContinuations :: PartialUserTurnContent -> [(ContinuationToken, CacheKey)]
+partialPendingContinuations content =
+    [ (token, cacheKeyForTrackedCall tc)
+    | tc <- content.pTrackedToolCalls
+    , tc.tcState == Deferred
+    , Just token <- [tc.tcContinuation]
+    ]
+
+-- | Compute a cache key for a tracked call from its content.
+cacheKeyForTrackedCall :: TrackedToolCall -> CacheKey
+cacheKeyForTrackedCall tc =
+    let LlmToolCall val = tc.tcCall
+        jsonStr = Text.pack $ show val
+     in CacheKey "tool" (Text.take 64 jsonStr)
 
 {- | Unification.
 

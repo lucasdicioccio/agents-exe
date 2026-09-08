@@ -339,7 +339,10 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
                 , ctxParentConversation = Nothing
                 , ctxExecutionMode = SessionTypes.Synchronous
                 , ctxToolCache = Nothing
-                , ctxAsyncToolCall = Nothing
+                , ctxToolCallPolicy = SessionBase.defaultToolCallPolicy
+                , ctxToolExecutor = Nothing
+                , ctxContinuationStore = Nothing
+                , ctxDeploymentRunner = Nothing
                 }
 
     -- Create initial session with media support (version 1)

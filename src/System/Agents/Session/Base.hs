@@ -29,8 +29,37 @@ module System.Agents.Session.Base (
     ExecutionMode (..),
     ContinuationToken (..),
     newContinuationToken,
+    ContinuationStore (..),
     CacheKey (..),
     migrateSessionV1ToV2,
+
+    -- * Durable workflow primitives (re-exported from Session.Types)
+    ToolCallId (..),
+    newToolCallId,
+    ToolCallState (..),
+    ToolCallDisposition (..),
+    IsolationSpec (..),
+    Reason (..),
+    Decorator (..),
+    AppliedPolicy (..),
+    TrackedToolCall (..),
+
+    -- * Partial turn helpers (re-exported from Session.Types)
+    partialCompletedResponses,
+    partialPendingCalls,
+    partialPendingContinuations,
+
+    -- * Durable executor/policy helpers (re-exported from Session.Durable)
+    ToolExecutor (..),
+    DeploymentRunner (..),
+    IsolationError (..),
+    ToolCallPolicy,
+    defaultToolCallPolicy,
+    inProcessExecutor,
+    yieldingExecutor,
+    cachingExecutor,
+    isolatedExecutor,
+    flattenDisposition,
 
     -- * Defined in this module
     MissingUserPrompt (..),
@@ -40,14 +69,13 @@ module System.Agents.Session.Base (
     defaultContextConfig,
     Agent (..),
 
-    -- * Async execution helpers
-    AsyncToolCallFn,
-    defaultAsyncExecutor,
-
     -- * Agent combinators
     withExecutionMode,
     withToolCache,
-    withAsyncToolCall,
+    withToolCallPolicy,
+    withToolExecutor,
+    withContinuationStore,
+    withDeploymentRunner,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -55,37 +83,24 @@ import Control.Concurrent.STM (TQueue)
 import System.Agents.Base (ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
-import System.Agents.Session.Async (AsyncToolResponse (..))
+import System.Agents.Session.Async (ContinuationStore (..))
+import System.Agents.Session.Durable (
+    DeploymentRunner (..),
+    IsolationError (..),
+    ToolCallPolicy,
+    ToolExecutor (..),
+    cachingExecutor,
+    defaultToolCallPolicy,
+    flattenDisposition,
+    inProcessExecutor,
+    isolatedExecutor,
+    yieldingExecutor,
+ )
 import System.Agents.Tools.Cache (ToolCache (..))
 import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
-
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Types
-
--------------------------------------------------------------------------------
--- Async Execution Types
--------------------------------------------------------------------------------
-
-{- | Type alias for async-aware tool execution function.
-
-In async mode, tool calls can either complete immediately or yield
-for external completion.
--}
-type AsyncToolCallFn =
-    ToolExecutionContext ->
-    LlmToolCall ->
-    IO AsyncToolResponse
-
-{- | Default async executor that simply calls the synchronous tool executor.
-
-This provides backward compatibility - when no special async handling
-is needed, tools execute synchronously as before.
--}
-defaultAsyncExecutor :: (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) -> AsyncToolCallFn
-defaultAsyncExecutor syncExec ctx call = do
-    result <- syncExec ctx call
-    pure $ ToolComplete result
 
 -------------------------------------------------------------------------------
 -- Action and Agent types
@@ -152,7 +167,10 @@ Functions in its body.
 Version 2 additions for async/resumable execution:
 * 'ctxExecutionMode' - Controls sync vs async execution
 * 'ctxToolCache' - Optional cache for tool results
-* 'ctxAsyncToolCall' - Async-aware tool executor
+* 'ctxToolCallPolicy' - Per-call execution policy
+* 'ctxToolExecutor' - Optional pluggable tool executor
+* 'ctxContinuationStore' - Optional durable continuation store
+* 'ctxDeploymentRunner' - Optional isolated-deployment runner
 -}
 data Agent r = Agent
     { step :: Session -> IO (Action r)
@@ -195,10 +213,24 @@ data Agent r = Agent
     {- ^ Optional tool cache for storing and retrieving tool results.
     Used in async mode to avoid re-executing cached tool calls.
     -}
-    , ctxAsyncToolCall :: Maybe AsyncToolCallFn
-    {- ^ Optional async-aware tool executor. When present and execution
-    mode is Asynchronous, this function is used instead of the
-    standard toolCall function.
+    , ctxToolCallPolicy :: ToolCallPolicy
+    {- ^ Per-call policy deciding sync / async / isolated / deferred.
+    Defaults to 'defaultToolCallPolicy' (always RunSync).
+    -}
+    , ctxToolExecutor :: Maybe ToolExecutor
+    {- ^ Optional pluggable tool executor. When present and execution
+    mode is Asynchronous, the executor is used instead of the standard
+    'toolCall' function. The loop selects sync vs async based on the
+    policy disposition.
+    -}
+    , ctxContinuationStore :: Maybe ContinuationStore
+    {- ^ Optional durable store for yielded continuations. When present,
+    deferred tool calls are persisted so external workers can complete
+    them.
+    -}
+    , ctxDeploymentRunner :: Maybe DeploymentRunner
+    {- ^ Optional runner for isolated tool execution (Docker, subprocess,
+    serverless). Used when the policy returns 'RunIsolated'.
     -}
     }
     deriving (Functor)
@@ -230,13 +262,49 @@ cachedAgent = withToolCache agent cache
 withToolCache :: Agent r -> ToolCache -> Agent r
 withToolCache agent cache = agent{ctxToolCache = Just cache}
 
-{- | Set a custom async tool call executor.
+{- | Set a custom tool-call policy.
 
 Example:
 
 @
-asyncAgent = withAsyncToolCall customAsyncExecutor agent
+policyAgent = withToolCallPolicy myPolicy agent
 @
 -}
-withAsyncToolCall :: Agent r -> AsyncToolCallFn -> Agent r
-withAsyncToolCall agent asyncFn = agent{ctxAsyncToolCall = Just asyncFn}
+withToolCallPolicy :: ToolCallPolicy -> Agent r -> Agent r
+withToolCallPolicy policy agent = agent{ctxToolCallPolicy = policy}
+
+{- | Set a custom tool executor.
+
+Example:
+
+@
+execAgent = withToolExecutor customExecutor agent
+@
+-}
+withToolExecutor :: ToolExecutor -> Agent r -> Agent r
+withToolExecutor executor agent = agent{ctxToolExecutor = Just executor}
+
+{- | Set a continuation store for durable async execution.
+
+Example:
+
+@
+store <- mkSqliteContinuationStore conn
+storedAgent = withContinuationStore store agent
+@
+-}
+withContinuationStore :: ContinuationStore -> Agent r -> Agent r
+withContinuationStore store agent = agent{ctxContinuationStore = Just store}
+
+{- | Set a deployment runner for isolated tool execution.
+
+Example:
+
+@
+runner <- dockerRunner "agents-exe/runner"
+isoAgent = withDeploymentRunner runner agent
+@
+-}
+withDeploymentRunner :: DeploymentRunner -> Agent r -> Agent r
+withDeploymentRunner runner agent = agent{ctxDeploymentRunner = Just runner}
+

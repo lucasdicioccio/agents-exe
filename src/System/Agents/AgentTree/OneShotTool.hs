@@ -523,7 +523,10 @@ nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
                 , ctxParentConversation = Nothing
                 , ctxExecutionMode = SessionBase.Synchronous
                 , ctxToolCache = Nothing
-                , ctxAsyncToolCall = Nothing
+                , ctxToolCallPolicy = SessionBase.defaultToolCallPolicy
+                , ctxToolExecutor = Nothing
+                , ctxContinuationStore = Nothing
+                , ctxDeploymentRunner = Nothing
                 }
 
 -------------------------------------------------------------------------------

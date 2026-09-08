@@ -327,7 +327,10 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                 , ctxParentConversation = Nothing
                 , ctxExecutionMode = Synchronous
                 , ctxToolCache = Nothing
-                , ctxAsyncToolCall = Nothing
+                , ctxToolCallPolicy = defaultToolCallPolicy
+                , ctxToolExecutor = Nothing
+                , ctxContinuationStore = Nothing
+                , ctxDeploymentRunner = Nothing
                 }
 
 toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
