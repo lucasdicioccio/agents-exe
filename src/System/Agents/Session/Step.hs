@@ -571,25 +571,6 @@ refreshHeadPartialTurn ctx sess =
                         pure sess{turns = turn : rest}
         _ -> pure sess
 
-{- | Whether the session has background calls whose placeholder was shown to
-the LLM and whose result has not been delivered yet.
-
-Such calls live in partial turns below the head. Step functions use this to
-keep the session going (instead of stopping) until their results arrive.
--}
-hasBackgroundCalls :: Session -> Bool
-hasBackgroundCalls sess =
-    not (null (backgroundCalls sess))
-
--- | Running, undelivered calls in partial turns below the head turn.
-backgroundCalls :: Session -> [TrackedToolCall]
-backgroundCalls sess =
-    [ tc
-    | PartialUserTurn partial _ <- drop 1 sess.turns
-    , tc <- partial.pTrackedToolCalls
-    , tcState tc == Running
-    , not (tcDeliveredLate tc)
-    ]
 
 {- | Collect the results of background calls that finished since the LLM saw
 their placeholder.

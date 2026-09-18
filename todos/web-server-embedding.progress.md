@@ -54,3 +54,47 @@ Progress tracker for `todos/web-server-embedding.md`.
 - `agents-tests`: 902 tests pass, including 8 new `AgentFactoryTests`.
 - Smoke test of `session start`, `session start --step`, and `session step`
   with an isolated `HOME`: exactly one `conv.<session-id>.json` per session.
+
+## Phase 3 — Metadata, versions, migrations, catalog ✅ COMPLETE
+
+- `Session.Types`: `SessionStatus` (idle / ready / running /
+  waiting_external / failed) with text and JSON forms, and `sessionStatusOf`.
+  `isBlockedOnDeferredCalls` (from `Session.Loop`) and `hasBackgroundCalls` /
+  `backgroundCalls` (from `Session.Step`) moved here; `Session.Loop` still
+  re-exports `isBlockedOnDeferredCalls`.
+- `SessionStore`:
+  - `SessionLabels`, `SessionMeta`, `SessionQuery`, `VersionConflict`.
+  - `SessionBackend` gains `sbStoreLabelled`, `sbLoadMeta`,
+    `sbCompareAndStore`, and `sbQuery`. Every write increments the version;
+    unconditional stores derive the status, except that a running status is
+    kept.
+  - SQLite: `runMigrations` with a component-scoped `schema_migrations`
+    table; migration 2 adds the metadata columns and indexes and derives the
+    status of existing rows. Compare-and-store is a single conditional
+    statement with `RETURNING`.
+  - File backend: `meta.<uuid>.json` sidecars.
+  - Composite: writes and queries on the primary, loads with fallback.
+  - `SessionCatalog` / `CatalogEntry`, `fileCatalog`, `backendCatalog`,
+    `isFileBusy`.
+- `StoreSessionProgress`: `sinkStoreCallback` and `agentPersistSession` take
+  `SessionLabels`; `backendStoreCallbackWith`.
+- `AgentFactory` labels sessions with the agent slug and, for sub-agents, the
+  parent session. `OneShotTool` gives a sub-agent's session the ID of its
+  conversation.
+- Session tools (`SystemToolbox/Session`) read through
+  `introspectionCatalog`; `getSessionModTime` removed. `AgentTree.Props`
+  takes `sessionCatalog`; the CLI and TUI pass `fileCatalog`.
+- `agents.cabal`: the library's `import: warnings` moved above `visibility`.
+  Cabal ignored it in its old position, so the library was built without
+  `-Wall -Werror` since the library was made public. A forced full rebuild
+  shows no warnings.
+
+### Not done here
+
+- The search index (`Session/Search`) stays on the file store (CLI-only).
+- `PRAGMA` settings are left to `withHost` (Phase 5).
+
+### Verification
+
+- Forced full rebuild of the library with `-Wall -Werror`: no warnings.
+- `agents-tests`: 923 tests pass, including 21 new `SessionMetadataTests`.

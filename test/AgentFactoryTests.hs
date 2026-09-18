@@ -2,7 +2,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Tests for 'System.Agents.AgentFactory', the single agent constructor.
-module AgentFactoryTests (tests) where
+module AgentFactoryTests (
+    tests,
+
+    -- * Fixtures
+    mockDeps,
+    mockCompletion,
+    testNode,
+    newConvId,
+) where
 
 import Control.Concurrent.STM (newTVarIO)
 import Data.IORef (modifyIORef', newIORef, readIORef)

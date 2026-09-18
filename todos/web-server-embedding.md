@@ -68,7 +68,8 @@ prints thinking to stdout/stderr. Progressive-disclosure tool filtering
 takes the file `SessionStore`, generates a fresh `ConversationId`, and records
 no link to the parent session.
 
-**G4. Session-reading tools and search read only the file store.** The
+**G4. Session-reading tools and search read only the file store** (tools
+fixed in Phase 3; the search index is CLI-only and stays on files). The
 `SystemToolbox` session tools (`Tools/SystemToolbox/Session.hs`, via
 `SessionIntrospectionConfig.introspectionStore`) and the search index
 (`Session/Search/Index.hs`, via `indexSessionStore`) call
@@ -201,8 +202,8 @@ All front-ends use it: one-shot `run` and the TUI (through
 `SubAgent parentConvId stack` and the same conversation ID it uses for the
 call stack and the OS World entity. That ID now also names the stored
 sub-session; it used to be an unrelated random ID. The parent link is kept at
-runtime (`ctxParentConversation`). Persisting it needs the `parent_session_id`
-column from Phase 3.
+runtime (`ctxParentConversation`), and backends store it as
+`parent_session_id` (Phase 3).
 
 #### 2.2 `System.Agents.Host` (Phase 5)
 
@@ -231,71 +232,80 @@ withHost :: HostConfig -> Tracer IO HostTrace -> (Host -> IO a) -> IO a
 
 ### 3. Storage
 
-#### 3.1 Extended `SessionBackend`
+#### 3.1 Extended `SessionBackend` (implemented, Phase 3)
+
+`SessionStatus`, `sessionStatusOf`, `isBlockedOnDeferredCalls`, and
+`hasBackgroundCalls` live in `Session.Types` (pure, re-exported by
+`Session.Base`); the metadata types live in `SessionStore`.
 
 ```haskell
-data SessionStatus
-    = StatusIdle             -- ^ Head turn is a final LlmTurn; waiting for a user message.
-    | StatusReady            -- ^ Can progress in-process (UserTurn head, ready calls).
-    | StatusRunning          -- ^ A live run owns it (set by the runner only).
-    | StatusWaitingExternal  -- ^ Blocked on deferred calls (isBlockedOnDeferredCalls).
-    | StatusFailed Text
+data SessionStatus = StatusIdle | StatusReady | StatusRunning | StatusWaitingExternal | StatusFailed
+
+data SessionLabels = SessionLabels   -- Nothing keeps the stored value
+    { slAgent :: Maybe Text, slParent :: Maybe SessionId, slOwner :: Maybe Text }
 
 data SessionMeta = SessionMeta
-    { smSessionId  :: SessionId
-    , smAgentSlug  :: Maybe AgentSlug
-    , smParent     :: Maybe SessionId
-    , smOwner      :: Maybe Text          -- ^ reserved, unused in milestone 1
-    , smStatus     :: SessionStatus
-    , smVersion    :: Int                 -- ^ incremented on every write
-    , smCreatedAt  :: UTCTime
-    , smUpdatedAt  :: UTCTime
+    { smSessionId    :: SessionId
+    , smAgent        :: Maybe Text
+    , smParent       :: Maybe SessionId
+    , smOwner        :: Maybe Text          -- reserved, unused for now
+    , smStatus       :: SessionStatus
+    , smStatusDetail :: Maybe Text          -- why it failed
+    , smVersion      :: Int                 -- incremented on every write; 0 = never stored
+    , smCreatedAt, smUpdatedAt :: UTCTime
     }
 
 data SessionQuery = SessionQuery
-    { sqAgent :: Maybe AgentSlug, sqStatus :: Maybe [SessionStatus]
-    , sqParent :: Maybe SessionId, sqLimit :: Int, sqBefore :: Maybe UTCTime }
+    { sqAgent :: Maybe Text, sqStatuses :: Maybe [SessionStatus], sqParent :: Maybe SessionId
+    , sqUpdatedBefore :: Maybe UTCTime, sqLimit :: Maybe Int }
 
-data VersionConflict = VersionConflict { expected :: Int, actual :: Int }
+data VersionConflict = VersionConflict { vcSessionId :: SessionId, vcExpected, vcActual :: Int }
 
 data SessionBackend = SessionBackend
-    { sbStore  :: SessionId -> Session -> IO ()                    -- unchanged, unconditional
-    , sbLoad   :: SessionId -> IO (Maybe Session)                  -- unchanged
-    , sbList   :: IO [(SessionId, UTCTime)]                        -- unchanged
-    , sbDelete :: SessionId -> IO ()                               -- unchanged
-    , sbLoadMeta :: SessionId -> IO (Maybe (Session, SessionMeta))
+    { sbStore  :: SessionId -> Session -> IO ()     -- unconditional
+    , sbLoad   :: SessionId -> IO (Maybe Session)
+    , sbList   :: IO [(SessionId, UTCTime)]
+    , sbDelete :: SessionId -> IO ()
+    , sbStoreLabelled   :: SessionLabels -> SessionId -> Session -> IO ()
+    , sbLoadMeta        :: SessionId -> IO (Maybe (Session, SessionMeta))
     , sbCompareAndStore :: SessionMeta -> Session -> IO (Either VersionConflict SessionMeta)
-    -- ^ Writes only if the stored version equals smVersion; returns the new meta.
-    -- A missing row counts as version 0.
-    , sbQuery :: SessionQuery -> IO [SessionMeta]
+    , sbQuery           :: SessionQuery -> IO [SessionMeta]
     }
 ```
 
-`sessionStatusOf :: Session -> SessionStatus` derives every status except
-`StatusRunning` and `StatusFailed` from the head turn. It goes in
-`Session.Loop` next to `isBlockedOnDeferredCalls` (`Loop.hs:122`), which it
-reuses.
+Unconditional stores (`sbStore`, `sbStoreLabelled`) increment the version,
+keep stored labels where the new ones are `Nothing`, and set the status from
+`sessionStatusOf`, unless the stored status is `StatusRunning`.
+`sbCompareAndStore` writes the given metadata exactly, only if the stored
+version equals `smVersion` (a missing session counts as 0).
 
 Backend implementations:
 
-* **SQLite**: real CAS, using
-  `UPDATE … SET version = version + 1 … WHERE session_id = ? AND version = ?`
-  and checking `changes()`.
-* **File**: stores meta in a sidecar `conv.<uuid>.meta.json`. CAS is
-  best-effort (read-compare-write, not atomic across processes); the
-  docstring says so.
-* **Composite**: delegates meta operations to the primary backend and falls
-  back on load.
+* **SQLite**: compare-and-store is one conditional statement
+  (`UPDATE … WHERE version = ? RETURNING …`, or an upsert with
+  `DO UPDATE … WHERE sessions.version = 0` for version 0), so it is atomic
+  without a lock. Rows from before the migration have version 0.
+* **File**: metadata in a sidecar `meta.<uuid>.json` (not `conv.*`, so session
+  listings ignore it). A session file without a sidecar reads as version 0.
+  Compare-and-store is read-compare-write, not atomic across processes.
+* **Composite**: writes and queries go to the primary backend; loads fall
+  back in order.
 
-#### 3.2 SQLite schema and migrations
+`AgentFactory` stores through `sbStoreLabelled` with the agent's slug and,
+for sub-agents, the parent session. A sub-agent's session ID is its
+conversation ID, so its own sub-agents name it correctly as their parent.
 
-One database file holds `sessions`, `tool_continuations`, the tool cache, and
-a new `schema_migrations(version INTEGER PRIMARY KEY, applied_at TIMESTAMP)`
-table. Migrations are an ordered list of SQL statement groups, applied in one
-transaction each at `withHost` startup:
+#### 3.2 SQLite schema and migrations (implemented, Phase 3)
+
+`SessionStore.runMigrations conn component migrations` applies each
+not-yet-applied `Migration` in a transaction and records it in
+`schema_migrations(component, version, applied_at)`, so the continuation
+store and tool cache can have their own migration lists later.
+`initializeSessionSchema` (called by `mkSqliteSessionStore`) runs the
+`sessions` migrations:
 
 ```sql
--- migration 1 (existing tables; CREATE IF NOT EXISTS, as today)
+-- migration 1: the original table and index (CREATE IF NOT EXISTS)
 -- migration 2
 ALTER TABLE sessions ADD COLUMN agent_slug TEXT;
 ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
@@ -305,35 +315,39 @@ ALTER TABLE sessions ADD COLUMN status_detail TEXT;
 ALTER TABLE sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
-CREATE INDEX IF NOT EXISTS idx_continuations_session ON tool_continuations(session_id, completed_at);
+-- then each existing row's status is derived from its JSON
 ```
 
-Connection settings at open: `PRAGMA journal_mode=WAL`,
-`PRAGMA busy_timeout=5000`, `PRAGMA foreign_keys=ON`. All writes go through
-one `Connection` guarded by an `MVar`: sqlite-simple connections are not safe
-to use concurrently, and one writer is enough at this scale.
+The `tool_continuations(session_id, completed_at)` index belongs to the
+continuation store's migrations (Phase 4). Connection settings
+(`journal_mode=WAL`, `busy_timeout`, `foreign_keys`) are set by `withHost`
+when it opens the database (Phase 5), not by the library backends, which
+work on connections their callers own.
 
-`sbStore` (unconditional) keeps its current behaviour for the CLI. It also
-refreshes `status` from `sessionStatusOf`, unless the row is `running`.
+#### 3.3 Reading sessions from tools (G4, implemented, Phase 3)
 
-#### 3.3 Reading sessions from tools and search (G4)
-
-Add a read-only interface both stores implement:
+A read-only interface both stores implement:
 
 ```haskell
+data CatalogEntry = CatalogEntry
+    { ceConversationId :: ConversationId, ceUpdatedAt :: Maybe UTCTime
+    , ceSession :: Maybe Session   -- Nothing when unreadable (locked file)
+    , ceBusy :: Bool }             -- locked file, or status running
 data SessionCatalog = SessionCatalog
-    { catList :: IO [(SessionId, UTCTime)]
-    , catRead :: SessionId -> IO (Maybe Session)
-    }
+    { catList :: IO [CatalogEntry], catRead :: ConversationId -> IO (Maybe Session) }
 fileCatalog    :: SessionStore -> SessionCatalog
 backendCatalog :: SessionBackend -> SessionCatalog
 ```
 
-`SessionIntrospectionConfig.introspectionStore`,
-`SearchIndexConfig.indexSessionStore`, and `AgentTree.Props.sessionStore` all
-change to `SessionCatalog`. `getSessionModTime` (`Session.hs:562`), which reads
-file modification times, switches to `catList`. The CLI passes
-`fileCatalog store`; the Host passes `backendCatalog hostBackend`.
+Entries are keyed by conversation ID, the vocabulary of the session tools
+(and the same UUID as the session ID in a backend).
+`SessionIntrospectionConfig.introspectionCatalog` and
+`AgentTree.Props.sessionCatalog` take a catalog; the CLI and TUI pass
+`fileCatalog store`, and the Host will pass `backendCatalog`.
+
+The search index (`Session/Search`) stays on the file `SessionStore`: only
+the `session-index` and `session-search` CLI commands use it, and it is built
+around file paths and modification times.
 
 #### 3.4 Continuations stay consistent (G7)
 
@@ -429,12 +443,12 @@ Every operation that changes a session:
 A run takes the lock for each step's store, not for the whole run. Inside the
 run loop each step: `runStepM`, then `sbCompareAndStore` under `lsLock`, then
 emit `session.updated`. A `VersionConflict` inside a run stops it with
-`StatusFailed "concurrent modification"`. That cannot happen with a single
+`StatusFailed` with detail "concurrent modification". That cannot happen with a single
 server process; it guards against a second process or the CLI writing to the
 same database.
 
 The runner sets `status = running` when a run starts and `sessionStatusOf s`
-when it ends. On an exception it sets `StatusFailed (displayException e)`.
+when it ends. On an exception it sets `StatusFailed` with `displayException e` as detail.
 Progress storage installed by `buildAgent` (§2.5) is **disabled** for
 runner-built agents (`SinkNone`),
 because the runner does the versioned stores itself.
@@ -643,18 +657,19 @@ tracker.
 * `newSessionFromPrompt` in the library.
 * Tests: the existing suite unchanged; new `AgentFactoryTests`.
 
-### Phase 3: metadata, versions, migrations, catalog (G4, G9)
+### Phase 3: metadata, versions, migrations, catalog (G4, G9) ✅
 
-* Extended `SessionBackend`, `SessionMeta`, `sessionStatusOf`, SQLite
-  migrations, and the file sidecar.
-* `SessionCatalog`; switch the introspection tools, search index, and `Props`
-  to it.
-* Sub-agents store `parent_session_id`, from `SubAgent`.
-* Tests: migrating a pre-existing database (copy of a v1 schema fixture);
-  CAS conflict returns `VersionConflict`; `sbQuery` filters; the
-  session-listing tool sees sessions from a SQLite catalog; a parent agent
-  calling a sub-agent tool (mock LLM) leaves a sub-session row with
-  `parent_session_id` set.
+* Extended `SessionBackend`, `SessionLabels`, `SessionMeta`,
+  `sessionStatusOf`, SQLite migrations, and the file sidecar.
+* `SessionCatalog`; the session tools and `Props` switched to it.
+* Sub-agents store their agent slug and `parent_session_id`.
+* Tests (`SessionMetadataTests`): status derivation; version increments;
+  labels kept; CAS success and conflicts (stale, and version 0 twice);
+  running status kept by unconditional stores; `sbQuery` filters and limit;
+  composite fallback; migrating a database from before metadata; migrations
+  run once; file sidecar and legacy files; file and backend catalogs;
+  list-sessions over a backend catalog; a parent agent calling a sub-agent
+  tool (mock LLM) leaves a sub-session row naming the parent.
 
 ### Phase 4: continuation consistency (G7)
 

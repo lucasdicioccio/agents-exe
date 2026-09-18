@@ -64,11 +64,11 @@ import System.Agents.Session.Base (
     Session (..),
     Turn (..),
     UserQuery (..),
-    newSessionId,
     newTurnId,
  )
 import qualified System.Agents.Session.Base as SessionBase
 import System.Agents.Session.Loop (run)
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (
     ToolRegistration,
     registerIOScriptInLLM,
@@ -225,8 +225,10 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId =
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
 
-        -- Create a fresh session with media support (version 1)
-        session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
+        -- Create a fresh session with media support (version 1), identified
+        -- like its conversation so that its own sub-agents can name it as parent
+        let subcallSessionId = SessionStore.conversationIdToSessionId subcallBaseConvId
+        session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing
 
         -- Get current time for timestamps
         now <- getCurrentTime

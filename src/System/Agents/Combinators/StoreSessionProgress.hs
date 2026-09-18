@@ -47,6 +47,7 @@ module System.Agents.Combinators.StoreSessionProgress (
     -- * Callback Utilities
     sessionStoreCallback,
     backendStoreCallback,
+    backendStoreCallbackWith,
     backendWithCallbackStoreCallback,
     filepathStoreCallback,
 ) where
@@ -60,7 +61,7 @@ import System.Agents.Session.Base (
     SessionBackend (..),
     SessionProgress (..),
  )
-import System.Agents.SessionStore (SessionStore)
+import System.Agents.SessionStore (SessionLabels (..), SessionStore, noLabels)
 import qualified System.Agents.SessionStore as SessionStore
 
 {- | Where an agent persists its sessions.
@@ -76,17 +77,20 @@ data SessionSink
     | -- | Do not store sessions.
       SinkNone
 
--- | Creates a callback that stores session progress into a 'SessionSink'.
-sinkStoreCallback :: SessionSink -> ConversationId -> OnSessionProgress
-sinkStoreCallback (SinkBackend backend) _ = backendStoreCallback backend
-sinkStoreCallback (SinkFiles store) convId = sessionStoreCallback store convId
-sinkStoreCallback SinkNone _ = const (pure ())
+{- | Creates a callback that stores session progress into a 'SessionSink'.
+
+Backends also record the labels; the file store has nowhere to put them.
+-}
+sinkStoreCallback :: SessionSink -> SessionLabels -> ConversationId -> OnSessionProgress
+sinkStoreCallback (SinkBackend backend) labels _ = backendStoreCallbackWith backend labels
+sinkStoreCallback (SinkFiles store) _ convId = sessionStoreCallback store convId
+sinkStoreCallback SinkNone _ _ = const (pure ())
 
 -- | Wrap an agent to store its session into the given sink before every step.
-agentPersistSession :: forall r. SessionSink -> ConversationId -> Agent r -> Agent r
-agentPersistSession SinkNone _ agent = agent
-agentPersistSession sink convId agent =
-    agentWithSessionProgress (sinkStoreCallback sink convId) agent
+agentPersistSession :: forall r. SessionSink -> SessionLabels -> ConversationId -> Agent r -> Agent r
+agentPersistSession SinkNone _ _ agent = agent
+agentPersistSession sink labels convId agent =
+    agentWithSessionProgress (sinkStoreCallback sink labels convId) agent
 
 -- | Creates a callback that stores session progress using a SessionStore.
 sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
@@ -106,7 +110,11 @@ The session id from the progress event is used as the backend key, so the
 backend is responsible for mapping 'SessionId's to its storage layout.
 -}
 backendStoreCallback :: SessionBackend -> OnSessionProgress
-backendStoreCallback backend progress =
+backendStoreCallback backend = backendStoreCallbackWith backend noLabels
+
+-- | Like 'backendStoreCallback', also recording labels next to the session.
+backendStoreCallbackWith :: SessionBackend -> SessionLabels -> OnSessionProgress
+backendStoreCallbackWith backend labels progress =
     case progress of
         SessionUpdated sess -> storeSessionWithBackend sess
         SessionCompleted sess -> storeSessionWithBackend sess
@@ -114,7 +122,7 @@ backendStoreCallback backend progress =
         SessionFailed sess _ -> storeSessionWithBackend sess
   where
     storeSessionWithBackend sess =
-        sbStore backend sess.sessionId sess
+        sbStoreLabelled backend labels sess.sessionId sess
 
 {- | Creates a callback that stores session progress using a 'SessionBackend'
 and then forwards the progress event to an additional callback.
@@ -163,7 +171,7 @@ agentStoreSession store mPath convId agent =
     agentWithSessionProgress handleProgress agent
   where
     handleProgress x = do
-        sinkStoreCallback (agentSink store agent) convId x
+        sinkStoreCallback (agentSink store agent) noLabels convId x
         filepathStoreCallback mPath x
 
 -- | The sink 'agentStoreSession' uses: the agent's backend, else the files.
@@ -190,7 +198,7 @@ agentStoreSessionWithCallback store mPath convId userCallback agent =
     agentWithSessionProgress handleProgress agent
   where
     handleProgress x = do
-        sinkStoreCallback (agentSink store agent) convId x
+        sinkStoreCallback (agentSink store agent) noLabels convId x
         filepathStoreCallback mPath x
         userCallback x
 

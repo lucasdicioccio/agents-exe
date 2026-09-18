@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -19,6 +20,15 @@ module System.Agents.Session.Types (
     -- * Core types
     Session (..),
     newSessionFromPrompt,
+
+    -- * Session status
+    SessionStatus (..),
+    sessionStatusOf,
+    sessionStatusText,
+    parseSessionStatus,
+    isBlockedOnDeferredCalls,
+    hasBackgroundCalls,
+    backgroundCalls,
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),
@@ -127,6 +137,85 @@ newtype TurnId = TurnId UUID
 newTurnId :: IO TurnId
 newTurnId =
     TurnId <$> UUID.nextRandom
+
+{- | Where a session stands, as recorded next to it in storage.
+
+'StatusRunning' and 'StatusFailed' are set by whoever runs the session;
+'sessionStatusOf' derives the others from the turns.
+-}
+data SessionStatus
+    = -- | The LLM gave a final answer; the session waits for a user message.
+      StatusIdle
+    | -- | The next step can run in-process.
+      StatusReady
+    | -- | A live run owns the session.
+      StatusRunning
+    | -- | Only deferred calls remain, which an external worker must complete.
+      StatusWaitingExternal
+    | -- | The last run failed.
+      StatusFailed
+    deriving (Show, Eq, Ord, Enum, Bounded, Generic)
+
+sessionStatusText :: SessionStatus -> Text
+sessionStatusText = \case
+    StatusIdle -> "idle"
+    StatusReady -> "ready"
+    StatusRunning -> "running"
+    StatusWaitingExternal -> "waiting_external"
+    StatusFailed -> "failed"
+
+parseSessionStatus :: Text -> Maybe SessionStatus
+parseSessionStatus txt = lookup txt [(sessionStatusText s, s) | s <- [minBound .. maxBound]]
+
+instance ToJSON SessionStatus where
+    toJSON = Aeson.String . sessionStatusText
+
+instance FromJSON SessionStatus where
+    parseJSON = Aeson.withText "SessionStatus" $ \txt ->
+        maybe (fail $ "unknown session status: " <> Text.unpack txt) pure (parseSessionStatus txt)
+
+-- | The status implied by the turns of a session.
+sessionStatusOf :: Session -> SessionStatus
+sessionStatusOf sess =
+    case sess.turns of
+        [] -> StatusReady
+        (UserTurn _ _ : _) -> StatusReady
+        (LlmTurn llm _ : _)
+            | null llm.llmToolCalls && not (hasBackgroundCalls sess) -> StatusIdle
+            | otherwise -> StatusReady
+        (PartialUserTurn _ _ : _)
+            | isBlockedOnDeferredCalls sess -> StatusWaitingExternal
+            | otherwise -> StatusReady
+
+{- | Whether the head partial turn has deferred calls and nothing else to
+run or wait for (no ready or running calls).
+-}
+isBlockedOnDeferredCalls :: Session -> Bool
+isBlockedOnDeferredCalls session =
+    case session.turns of
+        (PartialUserTurn partial _ : _) ->
+            let states = map (.tcState) partial.pTrackedToolCalls
+             in Deferred `elem` states && Ready `notElem` states && Running `notElem` states
+        _ -> False
+
+{- | Whether calls started in earlier turns still run in the background.
+
+Such calls live in partial turns below the head. Step functions use this to
+keep the session going (instead of stopping) until their results arrive.
+-}
+hasBackgroundCalls :: Session -> Bool
+hasBackgroundCalls sess =
+    not (null (backgroundCalls sess))
+
+-- | Running, undelivered calls in partial turns below the head turn.
+backgroundCalls :: Session -> [TrackedToolCall]
+backgroundCalls sess =
+    [ tc
+    | PartialUserTurn partial _ <- drop 1 sess.turns
+    , tc <- partial.pTrackedToolCalls
+    , tcState tc == Running
+    , not (tcDeliveredLate tc)
+    ]
 
 {- | A new asynchronous session whose only turn asks the LLM the given query.
 

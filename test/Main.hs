@@ -85,6 +85,7 @@ import qualified DeveloperToolboxWriteRangeTests
 import qualified DeveloperToolboxPatchTests
 -- Import durable workflow (Phase 2) tests
 import qualified AgentFactoryTests
+import qualified SessionMetadataTests
 import qualified DurableWorkflowTests
 
 main :: IO ()
@@ -131,6 +132,7 @@ tests =
         , DurableWorkflowDeterminismTests.tests
         , DurableWorkflowTests.tests
         , AgentFactoryTests.tests
+        , SessionMetadataTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

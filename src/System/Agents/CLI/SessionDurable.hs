@@ -211,7 +211,7 @@ buildAgentForFile store apiKeysFile (agentFile : _) convId action = do
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = silent
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool silent (AgentFactory.fileAgentDeps store apiKeys)
-                , AgentTree.sessionStore = store
+                , AgentTree.sessionCatalog = SessionStore.fileCatalog store
                 }
     AgentTree.withAgentTree props $ \case
         AgentTree.Errors errs -> do

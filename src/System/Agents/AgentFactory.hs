@@ -58,7 +58,7 @@ import System.Agents.Session.Base
 import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
 import System.Agents.Session.Step (naiveTilNoToolCallStep)
-import System.Agents.SessionStore (SessionStore)
+import System.Agents.SessionStore (SessionLabels (..), SessionStore, conversationIdToSessionId)
 import qualified System.Agents.ToolPortal as ToolPortal
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.Tools.Cache (ToolCache)
@@ -131,7 +131,9 @@ data AgentRole
 {- | Build a runnable agent for a conversation.
 
 The 'ConversationId' identifies the conversation for tool contexts and
-file-based storage. A 'SinkBackend' keys sessions by their own 'SessionId'.
+file-based storage. A 'SinkBackend' keys sessions by their own 'SessionId',
+and records the agent's slug and, for sub-agents, the parent session (the
+parent's conversation ID read as a session ID).
 -}
 buildAgent ::
     Tracer IO Trace ->
@@ -150,6 +152,12 @@ buildAgent tracer deps role convId node = do
     let (callStack, parent) = case role of
             RootAgent -> ([CallStackEntry "root" convId 0], Nothing)
             SubAgent parentConv stack -> (stack, Just parentConv)
+    let labels =
+            SessionLabels
+                { slAgent = Just (Base.slug agentCfg)
+                , slParent = conversationIdToSessionId <$> parent
+                , slOwner = Nothing
+                }
     let base =
             Agent
                 { step = naiveTilNoToolCallStep
@@ -185,7 +193,7 @@ buildAgent tracer deps role convId node = do
             (contramap mapProgressiveDisclosureTrace tracer)
             node.osNodeTools
             (applyAgentDurableConfig agentCfg base)
-    pure $ agentPersistSession deps.adSessionSink convId disclosed
+    pure $ agentPersistSession deps.adSessionSink labels convId disclosed
   where
     sinkBackend :: SessionSink -> Maybe SessionBackend
     sinkBackend (SinkBackend backend) = Just backend

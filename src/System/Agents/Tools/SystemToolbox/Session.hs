@@ -35,7 +35,6 @@ module System.Agents.Tools.SystemToolbox.Session (
     extractToolCallName,
     isSessionFileLocked,
     isResourceBusyError,
-    getSessionModTime,
     turnContentText,
     turnMatchesTerm,
     termMatchesSession,
@@ -74,7 +73,7 @@ import System.Agents.Session.Types (
     UserQuery (..),
     UserTurnContent (..),
  )
-import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.SessionStore (CatalogEntry (..), SessionCatalog (..))
 import System.Agents.Tools.SystemToolbox.Types (
     ReadSessionParams (..),
     SessionIntrospectionConfig (..),
@@ -93,8 +92,8 @@ being written to.
 getListSessionsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value)
 getListSessionsInfo Nothing = pure ("list-sessions", String "Session store not configured")
 getListSessionsInfo (Just config) = do
-    -- List all sessions from the store with error handling for locked files
-    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    -- List all sessions from the catalog with error handling for locked files
+    allSessionsResult <- try $ catList (introspectionCatalog config)
 
     case allSessionsResult of
         Left (e :: SomeException) -> do
@@ -107,23 +106,16 @@ getListSessionsInfo (Just config) = do
             -- Apply limit
             let limitedSessions = take (introspectionMaxResults config) accessibleSessions
 
-            -- Build session info list, handling locked files gracefully
-            sessionInfos <- forM limitedSessions $ \(path, mSession, convId) -> do
-                -- Try to get modification time, handling locked files
-                mtimeResult <- try $ getSessionModTime (introspectionStore config) convId
-                let mtime = case mtimeResult of
-                        Left (_ :: SomeException) -> Nothing
-                        Right mt -> mt
-
-                -- Check if session is locked (currently being edited)
-                isLocked <- isSessionFileLocked path
-
-                let turnCount = maybe 0 (length . (.turns)) mSession
-                let isParent = isParentSession config mSession
-                let isChild = isChildSession config mSession
-
-                pure $
-                    Aeson.object
+            -- Build session info list; locked files have no session
+            let sessionInfos = flip map limitedSessions $ \entry ->
+                    let convId = entry.ceConversationId
+                        mSession = entry.ceSession
+                        mtime = entry.ceUpdatedAt
+                        isLocked = entry.ceBusy
+                        turnCount = maybe 0 (length . (.turns)) mSession
+                        isParent = isParentSession config mSession
+                        isChild = isChildSession config mSession
+                     in Aeson.object
                         [ "sessionId" .= conversationIdToText convId
                         , "conversationId" .= conversationIdToText convId
                         , "modificationTime" .= maybe "" (Text.pack . show) mtime
@@ -176,8 +168,8 @@ getSearchSessionsInfo Nothing _ = pure ("search-sessions", String "Session store
 getSearchSessionsInfo (Just _config) Nothing =
     pure ("search-sessions", Aeson.object ["error" .= ("Missing 'query' parameter for search-sessions" :: Text)])
 getSearchSessionsInfo (Just config) (Just searchQuery) = do
-    -- List all sessions from the store
-    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    -- List all sessions from the catalog
+    allSessionsResult <- try $ catList (introspectionCatalog config)
 
     case allSessionsResult of
         Left (e :: SomeException) -> do
@@ -194,12 +186,12 @@ getSearchSessionsInfo (Just config) (Just searchQuery) = do
             let limitedResults = take (introspectionMaxResults config) matchingSessions
 
             -- Build result items
-            resultItems <- forM limitedResults $ \(_path, mSession, convId) -> do
-                let turnCount = maybe 0 (length . (.turns)) mSession
-                let preview = generateSessionPreview mSession searchTerms
-
-                pure $
-                    Aeson.object
+            let resultItems = flip map limitedResults $ \entry ->
+                    let convId = entry.ceConversationId
+                        mSession = entry.ceSession
+                        turnCount = maybe 0 (length . (.turns)) mSession
+                        preview = generateSessionPreview mSession searchTerms
+                     in Aeson.object
                         [ "sessionId" .= conversationIdToText convId
                         , "conversationId" .= conversationIdToText convId
                         , "turnCount" .= turnCount
@@ -218,9 +210,9 @@ getSearchSessionsInfo (Just config) (Just searchQuery) = do
                 )
 
 -- | Check if a session matches the search terms
-sessionMatchesSearch :: [Text] -> (FilePath, Maybe Session, ConversationId) -> Bool
-sessionMatchesSearch searchTerms (_, mSession, _) =
-    case mSession of
+sessionMatchesSearch :: [Text] -> CatalogEntry -> Bool
+sessionMatchesSearch searchTerms entry =
+    case entry.ceSession of
         Nothing -> False
         Just session -> any (termMatchesSession session) searchTerms
 
@@ -304,7 +296,7 @@ getReadSessionInfo (Just config) (Just sessionIdText) params = do
             let targetConvId = sessionIdToConversationId targetSessionId
 
             -- Try to read the session
-            mSession <- SessionStore.readSession (introspectionStore config) targetConvId
+            mSession <- catRead (introspectionCatalog config) targetConvId
 
             case mSession of
                 Nothing ->
@@ -466,7 +458,7 @@ getSessionStatsInfo :: Maybe SessionIntrospectionConfig -> IO (Text, Aeson.Value
 getSessionStatsInfo Nothing = pure ("get-session-stats", String "Session store not configured")
 getSessionStatsInfo (Just config) = do
     -- List all accessible sessions with error handling
-    allSessionsResult <- try $ SessionStore.listSessions (introspectionStore config)
+    allSessionsResult <- try $ catList (introspectionCatalog config)
 
     case allSessionsResult of
         Left (_ :: SomeException) -> do
@@ -483,7 +475,7 @@ getSessionStatsInfo (Just config) = do
             let accessibleSessions = filterSessionsByScope config allSessions
 
             -- Calculate aggregate stats, handling Nothing sessions (locked/unreadable)
-            let totalTurns = sum [maybe 0 (length . (.turns)) mSession | (_, mSession, _) <- accessibleSessions]
+            let totalTurns = sum [maybe 0 (length . (.turns)) entry.ceSession | entry <- accessibleSessions]
             let totalSessions = length accessibleSessions
 
             pure $
@@ -519,20 +511,21 @@ showScope ScopeSubtree = "subtree"
 showScope ScopeAll = "all"
 
 -- | Filter sessions based on the configured scope
-filterSessionsByScope :: SessionIntrospectionConfig -> [(FilePath, Maybe Session, ConversationId)] -> [(FilePath, Maybe Session, ConversationId)]
+filterSessionsByScope :: SessionIntrospectionConfig -> [CatalogEntry] -> [CatalogEntry]
 filterSessionsByScope config sessions =
     case introspectionScope config of
         ScopeAll -> sessions
         _ -> filter (sessionMatchesScope config) sessions
 
 -- | Check if a session matches the configured scope
-sessionMatchesScope :: SessionIntrospectionConfig -> (FilePath, Maybe Session, ConversationId) -> Bool
-sessionMatchesScope config (_, mSession, _convId) =
-    case introspectionScope config of
-        ScopeAll -> True
-        ScopeParentsOnly -> isParentSession config mSession
-        ScopeChildrenOnly -> isChildSession config mSession
-        ScopeSubtree -> isParentSession config mSession || isChildSession config mSession || isCurrentSession config mSession
+sessionMatchesScope :: SessionIntrospectionConfig -> CatalogEntry -> Bool
+sessionMatchesScope config entry =
+    let mSession = entry.ceSession
+     in case introspectionScope config of
+            ScopeAll -> True
+            ScopeParentsOnly -> isParentSession config mSession
+            ScopeChildrenOnly -> isChildSession config mSession
+            ScopeSubtree -> isParentSession config mSession || isChildSession config mSession || isCurrentSession config mSession
 
 -- | Check if a session is a parent (ancestor) of the current session
 isParentSession :: SessionIntrospectionConfig -> Maybe Session -> Bool
@@ -557,15 +550,6 @@ isCurrentSession config mSession =
         (Just currentId, Just sess) ->
             sess.sessionId == currentId
         _ -> False
-
--- | Helper to get session modification time
-getSessionModTime :: SessionStore.SessionStore -> ConversationId -> IO (Maybe Time.UTCTime)
-getSessionModTime store convId = do
-    let path = SessionStore.sessionFilePath store convId
-    result <- try $ getModificationTime path
-    case result of
-        Left (_ :: SomeException) -> pure Nothing
-        Right mtime -> pure $ Just mtime
 
 -- | Helper to convert ConversationId to Text
 conversationIdToText :: ConversationId -> Text
