@@ -31,22 +31,25 @@ module System.Agents.OneShot (
     parseModelFlavor,
 ) where
 
-import Control.Concurrent.STM (readTVarIO)
 import Control.Exception (Exception)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
-import Data.Maybe (listToMaybe)
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
-import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Text.IO as Text
-import Prod.Tracer (Tracer (..), contramap)
+import Prod.Tracer (Tracer (..))
 import System.IO (stderr)
 
+import System.Agents.AgentFactory (
+    AgentRole (..),
+    Trace (..),
+    buildAgent,
+    fileAgentDeps,
+    mapProgressiveDisclosureTrace,
+ )
 import System.Agents.AgentTree (
     LoadAgentResult (..),
     LoadedApiKeys,
@@ -56,38 +59,19 @@ import System.Agents.AgentTree (
     withAgentTree,
  )
 import System.Agents.Base (ConversationId, newConversationId)
-import qualified System.Agents.Base as Base
-import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveDisclosure
-import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.Session.AgentConfig (applyAgentDurableConfig)
 import System.Agents.Session.Base
-import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop
-import System.Agents.Session.OpenAI
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.ToolRegistration (ToolRegistration (..))
-import qualified System.Agents.ToolRegistration as ToolRegistration
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Context (CallStackEntry (..))
-import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 
 -- Re-export session storage combinators
 import System.Agents.Combinators.StoreSessionProgress (
     agentStoreSession,
     agentWithSessionProgress,
+    filepathStoreCallback,
  )
-
-import qualified Data.Aeson.Key as AesonKey
-import qualified System.Agents.ToolPortal as ToolPortal
-
-data Trace
-    = ToolRegistrationTrace !ToolRegistration.Trace
-    | ToolPortalTrace !ToolPortal.Trace
-    | OpenAITrace !OpenAI.Trace
-    deriving (Show)
 
 -- | Controls where thinking content should be output.
 data ThinkingOutput
@@ -145,12 +129,7 @@ runOneShotWithConfig ::
     Text ->
     IO OneShotResult
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
-    agent0 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
-
-    -- Apply dynamic tool filtering based on session activation state
-    -- Apply dynamic tool filtering based on session activation state
-    -- This allows tools to be enabled/disabled via meta_activate_tool/meta_deactivate_tool
-    agent1 <- ProgressiveDisclosure.agentEvaluateActiveTools (contramap mapProgressiveDisclosureTrace tracer) (osNodeTools node) agent0
+    agent1 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
 
     let agent =
             agentSetQuery (UserQuery query []) $
@@ -202,10 +181,6 @@ pausedReport sess =
                                  , tc.tcState == Deferred
                                  ]
                     ]
-
-mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
-mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolRegistrationTrace t) = ToolRegistrationTrace t
-mapProgressiveDisclosureTrace (ProgressiveDisclosure.ToolPortalTrace t) = ToolPortalTrace t
 
 {- | Run a one-shot agent with optional file-based session storage.
 
@@ -264,17 +239,10 @@ extractResponseText (LlmResponse txt _thinking _ _) = Maybe.fromMaybe "" txt
 parseModelFlavor :: Text -> OpenAI.ModelFlavor
 parseModelFlavor txt = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor txt
 
--- | Look up an API key by its ID from the loaded API keys.
-lookupApiKey :: Text -> LoadedApiKeys -> Maybe OpenAI.ApiKey
-lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) keys
-
 {- | Converts an OSAgentNode into an Agent that stops when no tool calls are present.
 
-The agent is configured with the node's agent ID and the provided conversation ID.
-These identifiers are used to construct the 'ToolExecutionContext' passed to tools
-during execution, allowing tools to access session metadata.
-
-This function uses OS-native types for agent execution.
+The agent is built by 'buildAgent' with file-based storage keyed by the given
+conversation ID; the optional path receives an extra copy of the session.
 -}
 nodeToAgent ::
     SessionStore ->
@@ -304,38 +272,12 @@ nodeToAgentWithThinking ::
     OSAgentNode ->
     IO (Agent (LlmTurnContent, Session))
 nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loadedApiKeys node = do
-    let agentCfg = osNodeConfig node
-    let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
-
-    -- Read tools from the OS-native TVar
-    allTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (osNodeTools node)
-
-    -- Get the API key for this agent and create HTTP runtime
-    let apiKeyId = Base.apiKeyId agentCfg
-    let mApiKey = lookupApiKey apiKeyId loadedApiKeys
-    httpRuntime <- case mApiKey of
-        Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
-        Nothing -> HttpClient.newRuntime HttpClient.NoToken
-
-    -- Create OpenAI completion config from node config
-    -- Use node's agent slug and id for tracing
-    let completionConfig =
-            OpenAICompletionConfig
-                { cfgTracer = contramap OpenAITrace tracer
-                , cfgRuntime = httpRuntime
-                , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
-                , cfgModelName = Base.modelName agentCfg
-                , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
-                }
-    let completeF = mkOpenAICompletion completionConfig
-    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (osNodeTools node)
-
+    agent <- buildAgent tracer (fileAgentDeps store loadedApiKeys) RootAgent convId node
     pure $
-        agentStoreSession store mPath convId $
-            applyAgentDurableConfig agentCfg $
-            Agent
+        agentWithSessionProgress (filepathStoreCallback mPath) $
+            agent
                 { step = \sess -> do
-                    action <- naiveTilNoToolCallStep sess
+                    action <- agent.step sess
                     -- Output thinking if present and configured
                     case action of
                         Stop (llmTurn, _) ->
@@ -345,93 +287,10 @@ nodeToAgentWithThinking store mPath thinkingOut mediaAttachs convId tracer loade
                                 _ -> pure ()
                         _ -> pure ()
                     pure action
-                , sysPrompt = pure sPrompt
-                , sysTools = pure allTools
-                , usrQuery = pure Nothing
-                , toolCall =
-                    executeLlmToolCall
-                        (contramap ToolRegistrationTrace tracer)
-                        (readTVarIO $ osNodeTools node)
-                        (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = tp
-                , complete = \completion -> do
+                , complete = \completion ->
                     -- Inject media attachments into the completion
-                    let completionWithMedia = completion{completeMedia = mediaAttachs}
-                    completeF completionWithMedia
-                , contextConfig = defaultContextConfig
-                , ctxWorld = Nothing
-                , ctxEventQueue = Nothing
-                , ctxCallStack = [CallStackEntry "root" convId 0]
-                , ctxParentConversation = Nothing
-                , ctxExecutionMode = Synchronous
-            , ctxAsyncYieldStrategy = YieldWhenAllDone
-            , ctxMaxConcurrency = Nothing
-            , ctxAsyncCallTimeout = Nothing
-                , ctxToolCache = Nothing
-                , ctxToolCallPolicy = defaultToolCallPolicy
-                , ctxToolExecutor = Nothing
-                , ctxContinuationStore = Nothing
-                , ctxDeploymentRunner = Nothing
-                , ctxSessionBackend = Nothing
-                , ctxAsyncEngine = Nothing
+                    agent.complete completion{completeMedia = mediaAttachs}
                 }
-
-toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
-toolRegistrationToSystemTool reg =
-    let llmTool = reg.declareTool
-        toolDefv1 =
-            SystemToolDefinitionV1
-                { name = llmTool.toolDescriptionName.getToolName
-                , llmName = llmTool.toolDescriptionName.getToolName
-                , description = llmTool.toolDescriptionText
-                , properties = llmTool.toolDescriptionParamProperties
-                , raw =
-                    Aeson.object
-                        [ "type" .= ("function" :: Text)
-                        , "function"
-                            .= Aeson.object
-                                [ "name" .= llmTool.toolDescriptionName.getToolName
-                                , "description" .= llmTool.toolDescriptionText
-                                , "parameters" .= toolParamsToJson llmTool.toolDescriptionParamProperties
-                                ]
-                        ]
-                }
-     in SystemTool $ V1 toolDefv1
-
-{- | Convert tool parameters to JSON schema.
-
-Only properties with 'propertyRequired = True' are included in the 'required' array.
--}
-toolParamsToJson :: [ParamProperty] -> Aeson.Value
-toolParamsToJson props =
-    Aeson.object
-        [ "type" .= ("object" :: Text)
-        , "properties" .= KeyMap.fromList (map paramPropertyToJson props)
-        , "required" .= map propertyKey (filter propertyRequired props)
-        , "additionalProperties" .= False
-        ]
-  where
-    paramPropertyToJson :: ParamProperty -> (Aeson.Key, Aeson.Value)
-    paramPropertyToJson p = (AesonKey.fromText p.propertyKey, paramTypeToJson p)
-    paramTypeToJson :: ParamProperty -> Aeson.Value
-    paramTypeToJson p =
-        Aeson.object $
-            [ "type" .= paramTypeToString p.propertyType
-            , "description" .= p.propertyDescription
-            ]
-                ++ case p.propertyType of
-                    EnumParamType values -> ["enum" .= values]
-                    _ -> []
-
-    paramTypeToString :: ParamType -> Text
-    paramTypeToString NullParamType = "null"
-    paramTypeToString StringParamType = "string"
-    paramTypeToString BoolParamType = "boolean"
-    paramTypeToString NumberParamType = "number"
-    paramTypeToString (EnumParamType _) = "string"
-    paramTypeToString (OpaqueParamType t) = t
-    paramTypeToString (MultipleParamType t) = t
-    paramTypeToString (ObjectParamType _) = "object"
 
 {- | Creates a callback that stores session progress to a file.
 This is useful for creating an 'OnSessionProgress' handler that persists to disk.

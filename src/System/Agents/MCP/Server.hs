@@ -43,38 +43,25 @@ import System.Agents.MCP.Base (
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Server.Runtime
 
--- OneShot integration imports
-import qualified System.Agents.HttpClient as HttpClient
+-- Agent execution imports
+import System.Agents.AgentFactory (AgentRole (..), buildAgent, defaultAgentDeps)
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.OneShot (parseModelFlavor)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
     LlmTurnContent (..),
     Session (..),
-    SystemPrompt (..),
     UserQuery (..),
-    defaultContextConfig,
  )
 import qualified System.Agents.Session.Base as SessionBase
-import qualified System.Agents.Session.Compat as SessionCompat
-import System.Agents.Session.Loop (run)
-import System.Agents.Session.OpenAI (
-    OpenAICompletionConfig (..),
-    mkOpenAICompletion,
- )
-import System.Agents.Session.Step (naiveTilNoToolCallStep)
+import System.Agents.Session.Loop (runUntilBlocked)
 import System.Agents.Session.Types (
     newSessionId,
     newTurnId,
  )
-import qualified System.Agents.Session.Types as SessionTypes
 import qualified System.Agents.ToolPortal as ToolPortal
-import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
-import qualified System.Agents.ToolSchema as ToolSchema
-import System.Agents.Tools.Context (CallStackEntry (..))
-import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.Trace as Tools
 
 -------------------------------------------------------------------------------
@@ -273,82 +260,18 @@ handleMsg tracer req (CallToolRequestMsg callTool) = do
                 (Mcp.CallToolResult [toolCallContent res] Nothing)
     Rpc.sendResponse rsp
 
-{- | Run an agent with a query using the LLM session-based approach.
+{- | Run the root agent of a tree on a query, without storing sessions.
 
-This implementation follows the same pattern as 'runOneShotWithConfig' from
-System.Agents.OneShot, adapted for use within the MCP server context.
-
-The function:
-1. Creates a minimal in-memory session store
-2. Converts the OSAgentNode to an Agent using the node's configuration
-3. Sets up the OpenAI completion function with proper API key resolution
-4. Executes the agent loop until completion
-5. Returns the response text or an error
+The agent is built with 'buildAgent', like in every other front-end. A turn
+that waits on deferred tool calls cannot progress here: nothing stores the
+session for an external worker to complete, so it is reported as an error.
 -}
 runAgentWithQuery :: Tracer IO Trace -> SessionBase.OnSessionProgress -> AgentTree.LoadedApiKeys -> AgentTree.OSAgentTree -> Text -> IO (Either String Text)
 runAgentWithQuery tracer onProgress apiKeys tree query = do
-    -- Generate unique identifiers for this conversation
     convId <- newConversationId
-    _stepId <- newStepId
-
     let node = AgentTree.osTreeRoot tree
-    let agentCfg = AgentTree.osNodeConfig node
-
-    -- Get the API key for this agent
-    let apiKeyIdentifier = apiKeyId agentCfg
-    let mApiKey = lookupApiKey apiKeyIdentifier apiKeys
-
-    -- Create HTTP runtime with the API key
-    httpRuntime <- case mApiKey of
-        Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
-        Nothing -> HttpClient.newRuntime HttpClient.NoToken
-
-    -- Create OpenAI completion config
-    let completionConfig =
-            OpenAICompletionConfig
-                { cfgTracer = contramap LlmCompletionTrace tracer
-                , cfgRuntime = httpRuntime
-                , cfgBaseUrl = OpenAI.ApiBaseUrl $ AgentTree.modelUrl agentCfg
-                , cfgModelName = AgentTree.modelName agentCfg
-                , cfgModelFlavor = parseModelFlavor $ AgentTree.flavor agentCfg
-                }
-    let completeF = mkOpenAICompletion completionConfig
-
-    -- Build the system prompt from the agent configuration
-    let sPrompt = SystemPrompt $ Text.unlines $ AgentTree.systemPrompt agentCfg
-
-    -- Read tools from the OS-native TVar
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO (AgentTree.osNodeTools node)
-
-    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (AgentTree.osNodeTools node)
-    -- Create the agent with the naive step function that stops when no tool calls remain
-    -- Initialize the call stack with a root entry for arbitrarily deep nesting support
-    let agent =
-            Agent
-                { step = naiveTilNoToolCallStep
-                , sysPrompt = pure sPrompt
-                , sysTools = pure sTools
-                , usrQuery = pure (Just $ UserQuery query [])
-                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (readTVarIO $ AgentTree.osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = tp
-                , complete = completeF
-                , contextConfig = defaultContextConfig
-                , ctxWorld = Nothing
-                , ctxEventQueue = Nothing
-                , ctxCallStack = [CallStackEntry "root" convId 0]
-                , ctxParentConversation = Nothing
-                , ctxExecutionMode = SessionTypes.Synchronous
-                , ctxAsyncYieldStrategy = SessionBase.YieldWhenAllDone
-                , ctxMaxConcurrency = Nothing
-                , ctxAsyncCallTimeout = Nothing
-                , ctxToolCache = Nothing
-                , ctxToolCallPolicy = SessionBase.defaultToolCallPolicy
-                , ctxToolExecutor = Nothing
-                , ctxContinuationStore = Nothing
-                , ctxDeploymentRunner = Nothing
-                , ctxSessionBackend = Nothing
-                , ctxAsyncEngine = Nothing
-                }
+    agent0 <- buildAgent (contramap agentFactoryTrace tracer) (defaultAgentDeps apiKeys) RootAgent convId node
+    let agent = agent0{usrQuery = pure (Just $ UserQuery query [])}
 
     -- Create initial session with media support (version 1)
     session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
@@ -358,14 +281,18 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
 
     -- Run the agent loop with exception handling
     result <-
-        (Right <$> run convId agent session0)
+        (Right <$> runUntilBlocked convId agent session0)
             `catch` (\e -> pure $ Left $ show (e :: SomeException))
 
     case result of
         Left err -> do
             onProgress (SessionBase.SessionFailed session0 $ Text.pack err)
             pure $ Left err
-        Right (llmTurn, _) -> do
+        Right (Right paused) -> do
+            let err = "the agent is waiting for deferred tool calls, which the MCP server cannot complete"
+            onProgress (SessionBase.SessionFailed paused $ Text.pack err)
+            pure $ Left err
+        Right (Left (llmTurn, _)) -> do
             onProgress (SessionBase.SessionCompleted session0)
             pure $ Right $ extractResponseText llmTurn.llmResponse
   where
@@ -373,68 +300,11 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
     extractResponseText :: LlmResponse -> Text
     extractResponseText (LlmResponse mtxt _thinking _ _) = Maybe.fromMaybe "" mtxt
 
-    -- Look up an API key by its ID from the loaded API keys
-    lookupApiKey :: Text -> AgentTree.LoadedApiKeys -> Maybe OpenAI.ApiKey
-    lookupApiKey keyId keys = fmap snd $ List.find ((== keyId) . fst) keys
-
-    -- Convert ToolRegistration to SystemTool for the Session agent
-    toolRegistrationToSystemTool :: ToolRegistration -> SessionTypes.SystemTool
-    toolRegistrationToSystemTool reg =
-        let llmTool = reg.declareTool
-            toolNameText = llmTool.toolDescriptionName.getToolName
-            toolDesc = llmTool.toolDescriptionText
-            toolProps = llmTool.toolDescriptionParamProperties
-            toolDefv1 =
-                SessionTypes.SystemToolDefinitionV1
-                    toolNameText
-                    toolNameText
-                    toolDesc
-                    toolProps
-                    ( Aeson.object
-                        [ "type" Aeson..= ("function" :: Text)
-                        , "function"
-                            Aeson..= Aeson.object
-                                [ "name" Aeson..= toolNameText
-                                , "description" Aeson..= toolDesc
-                                , "parameters" Aeson..= toolParamsToJson toolProps
-                                ]
-                        ]
-                    )
-         in SessionTypes.SystemTool $ SessionTypes.V1 toolDefv1
-
-    -- Convert tool parameters to JSON schema
-    toolParamsToJson :: [ToolSchema.ParamProperty] -> Aeson.Value
-    toolParamsToJson props =
-        Aeson.object
-            [ "type" Aeson..= ("object" :: Text)
-            , "properties"
-                Aeson..= Aeson.fromList (map paramPropertyToJson props)
-            , "required" Aeson..= map ToolSchema.propertyKey (filter ToolSchema.propertyRequired props)
-            , "additionalProperties" Aeson..= False
-            ]
-      where
-        paramPropertyToJson p =
-            ( AesonKey.fromText $ ToolSchema.propertyKey p
-            , paramTypeToJson p
-            )
-        paramTypeToJson p =
-            Aeson.object $
-                [ "type" Aeson..= paramTypeToString (ToolSchema.propertyType p)
-                , "description" Aeson..= ToolSchema.propertyDescription p
-                ]
-                    ++ case ToolSchema.propertyType p of
-                        ToolSchema.EnumParamType enumVals -> ["enum" Aeson..= enumVals]
-                        _ -> []
-
-        paramTypeToString :: ToolSchema.ParamType -> Text
-        paramTypeToString ToolSchema.NullParamType = "null"
-        paramTypeToString ToolSchema.StringParamType = "string"
-        paramTypeToString ToolSchema.BoolParamType = "boolean"
-        paramTypeToString ToolSchema.NumberParamType = "number"
-        paramTypeToString (ToolSchema.EnumParamType _) = "string"
-        paramTypeToString (ToolSchema.OpaqueParamType t) = t
-        paramTypeToString (ToolSchema.MultipleParamType t) = t
-        paramTypeToString (ToolSchema.ObjectParamType _) = "object"
+-- | Report agent-building traces with the server's own trace constructors.
+agentFactoryTrace :: AgentFactory.Trace -> Trace
+agentFactoryTrace (AgentFactory.ToolRegistrationTrace t) = ToolRegistrationTrace t
+agentFactoryTrace (AgentFactory.ToolPortalTrace t) = ToolPortalTrace t
+agentFactoryTrace (AgentFactory.OpenAITrace t) = LlmCompletionTrace t
 
 -------------------------------------------------------------------------------
 

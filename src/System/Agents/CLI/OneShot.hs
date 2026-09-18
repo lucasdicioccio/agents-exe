@@ -43,6 +43,7 @@ import Options.Applicative
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.SessionPrint.Inject as SessionInject
@@ -378,7 +379,7 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                 , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFilePath
                 , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
                 , AgentTree.sessionStore = sessionStore
                 }
 

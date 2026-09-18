@@ -5,14 +5,16 @@
 This module provides combinators for wrapping agents with session persistence
 and progress tracking capabilities. The primary functions are:
 
+* 'agentPersistSession' - wraps an agent to persist sessions to an explicit 'SessionSink'
 * 'agentStoreSession' - wraps an agent to persist sessions to a 'SessionStore'
 * 'agentStoreSessionWithCallback' - same but also invokes a progress callback
 * 'agentWithSessionProgress' - wraps an agent to emit progress events after each step
 
-When the agent has a 'ctxSessionBackend' configured, the storage combinators use
-that backend as the primary store and fall back to the provided file-based
-'SessionStore' when no backend is configured. The optional explicit 'FilePath'
-always receives an additional copy.
+'agentPersistSession' stores to the sink it is given, whatever the agent's
+fields say later. The older 'agentStoreSession' reads 'ctxSessionBackend' from
+the agent it wraps, at wrapping time: a backend installed on the result
+afterwards is not used by it. The optional explicit 'FilePath' always receives
+an additional copy.
 
 Example usage:
 
@@ -35,6 +37,9 @@ storedAndObserved <- agentStoreSessionWithCallback store Nothing convId myCallba
 -}
 module System.Agents.Combinators.StoreSessionProgress (
     -- * Session Storage Combinators
+    SessionSink (..),
+    agentPersistSession,
+    sinkStoreCallback,
     agentStoreSession,
     agentStoreSessionWithCallback,
     agentWithSessionProgress,
@@ -57,6 +62,31 @@ import System.Agents.Session.Base (
  )
 import System.Agents.SessionStore (SessionStore)
 import qualified System.Agents.SessionStore as SessionStore
+
+{- | Where an agent persists its sessions.
+
+The sink is chosen when the agent is built, so storage never depends on
+agent fields set afterwards.
+-}
+data SessionSink
+    = -- | Store under the session's own 'SessionId'.
+      SinkBackend SessionBackend
+    | -- | Store as a file keyed by the agent's 'ConversationId'.
+      SinkFiles SessionStore
+    | -- | Do not store sessions.
+      SinkNone
+
+-- | Creates a callback that stores session progress into a 'SessionSink'.
+sinkStoreCallback :: SessionSink -> ConversationId -> OnSessionProgress
+sinkStoreCallback (SinkBackend backend) _ = backendStoreCallback backend
+sinkStoreCallback (SinkFiles store) convId = sessionStoreCallback store convId
+sinkStoreCallback SinkNone _ = const (pure ())
+
+-- | Wrap an agent to store its session into the given sink before every step.
+agentPersistSession :: forall r. SessionSink -> ConversationId -> Agent r -> Agent r
+agentPersistSession SinkNone _ agent = agent
+agentPersistSession sink convId agent =
+    agentWithSessionProgress (sinkStoreCallback sink convId) agent
 
 -- | Creates a callback that stores session progress using a SessionStore.
 sessionStoreCallback :: SessionStore -> ConversationId -> OnSessionProgress
@@ -119,7 +149,8 @@ The session is stored using the conversation ID from the session.
 This combinator combines both 'sessionStoreCallback' and 'filepathStoreCallback'
 to provide comprehensive session persistence:
 
-1. If the agent has a 'ctxSessionBackend', sessions are stored via that backend.
+1. If the agent has a 'ctxSessionBackend' when it is wrapped, sessions are
+   stored via that backend. Prefer 'agentPersistSession' with an explicit sink.
 2. Otherwise, sessions are stored to the provided 'SessionStore' (file-based).
 3. If a file path is provided, sessions are also stored to that specific file.
 
@@ -132,10 +163,12 @@ agentStoreSession store mPath convId agent =
     agentWithSessionProgress handleProgress agent
   where
     handleProgress x = do
-        case ctxSessionBackend agent of
-            Just backend -> backendStoreCallback backend x
-            Nothing -> sessionStoreCallback store convId x
+        sinkStoreCallback (agentSink store agent) convId x
         filepathStoreCallback mPath x
+
+-- | The sink 'agentStoreSession' uses: the agent's backend, else the files.
+agentSink :: SessionStore -> Agent r -> SessionSink
+agentSink store agent = maybe (SinkFiles store) SinkBackend (ctxSessionBackend agent)
 
 {- | Wrap an agent to store sessions and also emit progress events to a callback.
 
@@ -157,9 +190,7 @@ agentStoreSessionWithCallback store mPath convId userCallback agent =
     agentWithSessionProgress handleProgress agent
   where
     handleProgress x = do
-        case ctxSessionBackend agent of
-            Just backend -> backendStoreCallback backend x
-            Nothing -> sessionStoreCallback store convId x
+        sinkStoreCallback (agentSink store agent) convId x
         filepathStoreCallback mPath x
         userCallback x
 

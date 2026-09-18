@@ -11,6 +11,7 @@ module System.Agents.Session.Base (
     newSessionId,
     newTurnId,
     Session (..),
+    newSessionFromPrompt,
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),

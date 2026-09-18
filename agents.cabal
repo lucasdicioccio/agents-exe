@@ -182,6 +182,7 @@ library agents-lib
                     , System.Agents.SessionStore
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
+                    , System.Agents.AgentFactory
                     , System.Agents.OneShot
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client
@@ -348,6 +349,7 @@ test-suite agents-tests
     hs-source-dirs:   test
     main-is:          Main.hs
     other-modules:    ActivationSessionTests
+                    , AgentFactoryTests
                     , AsyncToolCallsTests
                     , DeveloperToolboxTests
                     , DeveloperToolboxPatchTests

@@ -21,27 +21,24 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeTQueue)
+import Control.Concurrent.STM (TQueue, atomically, newTVarIO, writeTQueue)
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as AesonKey
-import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (getCurrentTime)
 import Prod.Tracer (Tracer (..), contramap)
 
-import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode (..))
+import System.Agents.AgentFactory (AgentDeps, AgentRole (..), buildAgent)
+import qualified System.Agents.AgentFactory as AgentFactory
+import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
-import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
-import qualified System.Agents.HttpClient as HttpClient
-import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.OS.Conversation (
     ConversationConfig (..),
     ConversationState (..),
@@ -59,55 +56,37 @@ import System.Agents.OS.Core.Types (
 import System.Agents.OS.Core.World (World, setComponent)
 import qualified System.Agents.OS.Core.World as OSWorld
 import System.Agents.OS.Events (OSEvent (..))
-import System.Agents.OneShot (agentStoreSession, mapProgressiveDisclosureTrace, parseModelFlavor)
-import qualified System.Agents.OneShot as OneShot
-import System.Agents.Session.AgentConfig (applyAgentDurableConfig)
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
     LlmTurnContent (..),
     PartialUserTurnContent (..),
     Session (..),
-    SystemPrompt (..),
-    SystemTool (..),
-    SystemToolDefinition (..),
-    SystemToolDefinitionV1 (..),
     Turn (..),
     UserQuery (..),
-    defaultContextConfig,
     newSessionId,
     newTurnId,
  )
 import qualified System.Agents.Session.Base as SessionBase
-import qualified System.Agents.Session.Compat as SessionCompat
 import System.Agents.Session.Loop (run)
-import System.Agents.Session.OpenAI (OpenAICompletionConfig (..), mkOpenAICompletion)
-import System.Agents.Session.Step (naiveTilNoToolCallStep)
-import System.Agents.SessionStore (SessionStore)
-import qualified System.Agents.ToolPortal as ToolPortal
 import System.Agents.ToolRegistration (
-    ToolRegistration (..),
+    ToolRegistration,
     registerIOScriptInLLM,
  )
-import qualified System.Agents.ToolRegistration as ToolRegistration
-import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
+import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 
 -- Import ToolExecutionContext with qualified access to avoid ambiguity with Agent fields.
 -- DuplicateRecordFields allows both Agent and ToolExecutionContext to have the same field names.
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext (..))
 import qualified System.Agents.Tools.Context as Ctx
-import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import qualified System.Agents.Tools.IO as IOTools
 
 -------------------------------------------------------------------------------
 -- Trace Types
 -------------------------------------------------------------------------------
 
-data Trace
-    = OneShotTrace !OneShot.Trace
-    | OpenAITrace !OpenAI.Trace
-    | ToolPortalTrace !ToolPortal.Trace
-    | ToolRegistrationTrace !ToolRegistration.Trace
+newtype Trace
+    = OneShotTrace AgentFactory.Trace
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -174,10 +153,8 @@ Type handling:
 -}
 turnAgentRuntimeIntoIOTool ::
     Tracer IO Trace ->
-    -- | Optional session store for persisting sessions
-    SessionStore ->
-    -- | API keys for creating HTTP runtime
-    LoadedApiKeys ->
+    -- | Dependencies shared with the calling agent (API keys, session storage)
+    AgentDeps ->
     -- | The OS agent node to convert into a tool
     OSAgentNode ->
     -- | The slug of the calling agent (for tracing)
@@ -186,7 +163,7 @@ turnAgentRuntimeIntoIOTool ::
     Base.AgentId ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
+turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId =
     registerIOScriptInLLM io props
   where
     agent = node.osNodeConfig
@@ -217,19 +194,6 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         -- ctx.ctxConversationId is Base.ConversationId
         let parentBaseConvId = ctx.ctxConversationId
 
-        -- Get the API key for this agent
-        let apiKeyId = Base.apiKeyId agent
-        let mApiKey = lookupApiKey apiKeyId apiKeys
-
-        -- Create HTTP runtime with the API key
-        httpRuntime <- case mApiKey of
-            Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
-            Nothing -> HttpClient.newRuntime HttpClient.NoToken
-
-        -- Create the agent from the OS node
-        -- nodeToAgent expects Base.AgentId and returns Agent using Base.ConversationId
-        sessionAgent0 <- nodeToAgent store httpRuntime node tracer callerSlug callerId
-
         -- Calculate new call stack from parent context for arbitrarily deep nesting
         -- Use qualified access to avoid ambiguity with Agent fields
         let parentCallStack = Ctx.ctxCallStack ctx
@@ -242,18 +206,21 @@ turnAgentRuntimeIntoIOTool tracer store apiKeys node callerSlug callerId =
         let mEventQueue = Ctx.ctxEventQueue ctx
         let mParentBaseConv = Ctx.ctxParentConversation ctx
 
-        -- Update the agent with the new call stack, parent reference, AND OS integration fields
-        -- The World and EventQueue are essential for nested subcalls to be visible in the TUI
-        let sessionAgent0WithStack =
+        -- Build the sub-agent with the caller's dependencies, then attach the
+        -- OS integration fields: the World and EventQueue are essential for
+        -- nested subcalls to be visible in the TUI
+        sessionAgent0 <-
+            buildAgent
+                (contramap OneShotTrace tracer)
+                deps
+                (SubAgent parentBaseConvId subcallCallStack)
+                subcallBaseConvId
+                node
+        let sessionAgent =
                 sessionAgent0
-                    { SessionBase.ctxCallStack = subcallCallStack
-                    , SessionBase.ctxParentConversation = Just parentBaseConvId
-                    , SessionBase.ctxWorld = mWorld
+                    { SessionBase.ctxWorld = mWorld
                     , SessionBase.ctxEventQueue = mEventQueue
                     }
-
-        -- Apply dynamic tool filtering based on session activation state
-        sessionAgent <- agentEvaluateActiveTools (contramap (OneShotTrace . mapProgressiveDisclosureTrace) tracer) (osNodeTools node) sessionAgent0WithStack
 
         -- Set the query on the agent
         let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
@@ -498,138 +465,6 @@ updateConversationStatus world osConvId newStatus = do
                             }
                 setComponent world entityId updatedState
         Nothing -> pure ()
-
--- | Look up an API key by its ID from the loaded API keys.
-lookupApiKey :: Text -> LoadedApiKeys -> Maybe OpenAI.ApiKey
-lookupApiKey keyId keys = fmap snd $ listToMaybe $ filter ((== keyId) . fst) keys
-
--------------------------------------------------------------------------------
-
-{- | Creates an Agent from an OSAgentNode configured for use as a tool.
-Uses Base types throughout since Session subsystem uses Base.ConversationId.
--}
-nodeToAgent ::
-    SessionStore ->
-    -- | HTTP runtime for making LLM requests
-    HttpClient.Runtime ->
-    OSAgentNode ->
-    Tracer IO Trace ->
-    Base.AgentSlug ->
-    Base.AgentId ->
-    IO (Agent (LlmTurnContent, Session))
-nodeToAgent store httpRuntime node tracer _callerSlug _callerId = do
-    let agentCfg = node.osNodeConfig
-    let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
-
-    -- Read tools from the OS-native TVar
-    toolRegs <- readTVarIO (osNodeTools node)
-    let sTools = map toolRegistrationToSystemTool toolRegs
-
-    -- Create completion config and function
-    let completionConfig =
-            OpenAICompletionConfig
-                { cfgTracer = contramap OpenAITrace tracer
-                , cfgRuntime = httpRuntime
-                , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
-                , cfgModelName = Base.modelName agentCfg
-                , cfgModelFlavor = parseModelFlavor $ Base.flavor agentCfg
-                }
-    let completeF = mkOpenAICompletion completionConfig
-
-    let tp = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) (osNodeTools node)
-
-    -- Generate a new Base.ConversationId for this agent instance
-    -- Session subsystem uses Base.ConversationId
-    convId <- newBaseConversationId
-
-    pure $
-        agentStoreSession store Nothing convId $
-            applyAgentDurableConfig agentCfg $
-            Agent
-                { step = naiveTilNoToolCallStep
-                , sysPrompt = pure sPrompt
-                , sysTools = pure sTools
-                , usrQuery = pure Nothing
-                , toolCall = executeLlmToolCall (contramap ToolRegistrationTrace tracer) (readTVarIO $ osNodeTools node) (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = tp
-                , complete = completeF
-                , contextConfig = defaultContextConfig
-                , ctxWorld = Nothing
-                , ctxEventQueue = Nothing
-                , ctxCallStack = [CallStackEntry "root" convId 0]
-                , ctxParentConversation = Nothing
-                , ctxExecutionMode = SessionBase.Synchronous
-                , ctxAsyncYieldStrategy = SessionBase.YieldWhenAllDone
-                , ctxMaxConcurrency = Nothing
-                , ctxAsyncCallTimeout = Nothing
-                , ctxToolCache = Nothing
-                , ctxToolCallPolicy = SessionBase.defaultToolCallPolicy
-                , ctxToolExecutor = Nothing
-                , ctxContinuationStore = Nothing
-                , ctxDeploymentRunner = Nothing
-                , ctxSessionBackend = Nothing
-                , ctxAsyncEngine = Nothing
-                }
-
--------------------------------------------------------------------------------
-
--- | Convert a ToolRegistration to a SystemTool for the Session agent.
-toolRegistrationToSystemTool :: ToolRegistration -> SystemTool
-toolRegistrationToSystemTool reg =
-    let llmTool = reg.declareTool
-        toolDefv1 =
-            SystemToolDefinitionV1
-                { name = llmTool.toolDescriptionName.getToolName
-                , llmName = llmTool.toolDescriptionName.getToolName
-                , description = llmTool.toolDescriptionText
-                , properties = llmTool.toolDescriptionParamProperties
-                , raw =
-                    Aeson.object
-                        [ "type" .= ("function" :: Text)
-                        , "function"
-                            .= Aeson.object
-                                [ "name" .= llmTool.toolDescriptionName.getToolName
-                                , "description" .= llmTool.toolDescriptionText
-                                , "parameters" .= toolParamsToJson llmTool.toolDescriptionParamProperties
-                                ]
-                        ]
-                }
-     in SystemTool $ V1 toolDefv1
-
--- | Convert tool parameters to JSON schema.
-toolParamsToJson :: [ParamProperty] -> Aeson.Value
-toolParamsToJson props =
-    Aeson.object
-        [ "type" .= ("object" :: Text)
-        , "properties" .= KeyMap.fromList (map paramPropertyToJson props)
-        , "required" .= map propertyKey (filter propertyRequired props)
-        , "additionalProperties" .= False
-        ]
-  where
-    paramPropertyToJson :: ParamProperty -> (Aeson.Key, Aeson.Value)
-    paramPropertyToJson p = (AesonKey.fromText p.propertyKey, paramTypeToJson p)
-
-    paramTypeToJson :: ParamProperty -> Aeson.Value
-    paramTypeToJson p =
-        Aeson.object $
-            [ "type" .= paramTypeToString p.propertyType
-            , "description" .= p.propertyDescription
-            ]
-                ++ case p.propertyType of
-                    EnumParamType values -> ["enum" .= values]
-                    _ -> []
-
-    paramTypeToString :: ParamType -> Text
-    paramTypeToString NullParamType = "null"
-    paramTypeToString StringParamType = "string"
-    paramTypeToString BoolParamType = "boolean"
-    paramTypeToString NumberParamType = "number"
-    paramTypeToString (EnumParamType _) = "string"
-    paramTypeToString (OpaqueParamType t) = t
-    paramTypeToString (MultipleParamType t) = t
-    paramTypeToString (ObjectParamType _) = "object"
-
--------------------------------------------------------------------------------
 
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r

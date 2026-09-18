@@ -18,6 +18,7 @@ module System.Agents.Session.Types (
 
     -- * Core types
     Session (..),
+    newSessionFromPrompt,
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),
@@ -126,6 +127,16 @@ newtype TurnId = TurnId UUID
 newTurnId :: IO TurnId
 newTurnId =
     TurnId <$> UUID.nextRandom
+
+{- | A new asynchronous session whose only turn asks the LLM the given query.
+
+Nothing is sent to the LLM yet: the first step of an agent does that.
+-}
+newSessionFromPrompt :: SessionId -> SystemPrompt -> [SystemTool] -> UserQuery -> IO Session
+newSessionFromPrompt sid sPrompt sTools query = do
+    tid <- newTurnId
+    let initialTurn = UserTurn (UserTurnContent sPrompt sTools (Just query) []) Nothing
+    pure $ Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous)
 
 -------------------------------------------------------------------------------
 -- Async/Continuation Types

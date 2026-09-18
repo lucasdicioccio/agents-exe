@@ -26,6 +26,7 @@ import qualified Data.Text.IO as Text
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -74,7 +75,7 @@ handleCheck tracer opts apiKeysFile agentFiles = do
                 , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) SessionStore.defaultSessionStore apiKeys
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps SessionStore.defaultSessionStore apiKeys)
                 , AgentTree.sessionStore = SessionStore.defaultSessionStore
                 }
             $ \result -> case result of

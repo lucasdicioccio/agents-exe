@@ -210,8 +210,7 @@ runConversation tracer baseTuiAgent session = do
     inChan <- liftIO $ newBChan 100
     let notifyProgress = buildOnProgress convId outChan
     let node = tuiNode baseTuiAgent
-    agent0 <- liftIO $ OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . OneShot.mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
+    agent1 <- liftIO $ OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
     coreRef <- use tuiCore
 
     -- Get the World and EventQueue from Core for subcall visibility

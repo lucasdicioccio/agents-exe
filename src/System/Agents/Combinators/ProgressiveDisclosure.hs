@@ -14,6 +14,9 @@ module System.Agents.Combinators.ProgressiveDisclosure (
 
     -- * Progressive Disclosure
     agentEvaluateActiveTools,
+
+    -- * Tool conversion
+    toolRegistrationToSystemTool,
 ) where
 
 import Control.Concurrent.STM (TVar, readTVarIO)
