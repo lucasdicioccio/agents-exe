@@ -44,16 +44,13 @@ module System.Agents.Tools.SystemToolbox.Session (
 ) where
 
 import Control.Exception (IOException, SomeException, bracket, try)
-import Control.Monad (forM)
 import Data.Aeson (Value (..), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Time as Time
 import qualified Data.UUID as UUID
-import System.Directory (getModificationTime)
 import System.IO (IOMode (..), hClose, openBinaryFile)
 import System.IO.Error (ioeGetErrorString)
 

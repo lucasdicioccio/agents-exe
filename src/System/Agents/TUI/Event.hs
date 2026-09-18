@@ -227,6 +227,7 @@ conversationShutdownMicros :: Int
 conversationShutdownMicros = 2000000
 
 -- | Reset quit confirmation state.
+resetQuitConfirmation :: EventM N TuiState ()
 resetQuitConfirmation = do
     tuiUI . quitConfirmationPending .= False
 

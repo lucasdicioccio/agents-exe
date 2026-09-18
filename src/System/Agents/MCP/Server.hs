@@ -7,20 +7,17 @@
 module System.Agents.MCP.Server where
 
 import Conduit (stdinC)
-import Control.Concurrent.STM (readTVarIO)
 import Control.Exception (SomeException, catch)
 import Control.Monad (void)
 import Control.Monad.Logger (LoggingT (..), defaultOutput, logDebugN)
 import Control.Monad.Reader (runReaderT)
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as Aeson
 import qualified Data.Conduit.Combinators (sinkHandleFlush)
 import Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
 import qualified Data.Text.Lazy as LText
 import Formatting ((%))
 import qualified Formatting as Format
@@ -31,9 +28,7 @@ import UnliftIO (async, liftIO, stderr, stdout)
 import qualified System.Agents.AgentTree as AgentTree
 import System.Agents.Base (
     announce,
-    apiKeyId,
     newConversationId,
-    newStepId,
     slug,
  )
 import System.Agents.MCP.Base (

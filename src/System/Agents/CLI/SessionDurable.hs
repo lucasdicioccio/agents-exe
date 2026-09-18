@@ -54,7 +54,7 @@ import qualified System.Agents.Base as Base
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.OneShot (PromptScriptOptions (..), loadPromptScriptOptions)
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.AgentConfig (applyAgentDurableConfig, buildToolCallPolicy, llmToolCallName)
+import System.Agents.Session.AgentConfig (applyAgentDurableConfig, buildToolCallPolicy)
 import System.Agents.Session.Base
 import System.Agents.Session.Step (getPartialTurn, runStepM)
 import System.Agents.Session.Wake (resumeSession, wakeSession)

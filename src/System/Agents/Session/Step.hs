@@ -647,9 +647,9 @@ lateResultsQuery calls =
   where
     describe tc =
         let callId = maybe "(unknown id)" id (providerToolCallId tc.tcCall)
-            name = maybe "unknown tool" (\(ToolCall n _) -> n) (parseToolCallFromLlmToolCall tc.tcCall)
+            toolName = maybe "unknown tool" (\(ToolCall n _) -> n) (parseToolCallFromLlmToolCall tc.tcCall)
             status = if tcState tc == Completed then "completed" else "failed"
-         in "tool_call_id " <> callId <> " (" <> name <> ") " <> status <> ":\n" <> maybe "" renderResult (tcResult tc)
+         in "tool_call_id " <> callId <> " (" <> toolName <> ") " <> status <> ":\n" <> maybe "" renderResult (tcResult tc)
 
     renderResult (TextResponse txt) = txt
     renderResult (JsonResponse val) = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))
