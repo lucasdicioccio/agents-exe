@@ -349,18 +349,36 @@ The search index (`Session/Search`) stays on the file `SessionStore`: only
 the `session-index` and `session-search` CLI commands use it, and it is built
 around file paths and modification times.
 
-#### 3.4 Continuations stay consistent (G7)
+#### 3.4 Continuations stay consistent (G7, implemented, Phase 4)
 
 The session JSON is the source of truth. `tool_continuations` is an index
 from token to session.
 
-* New `Session.Wake.wakeSessionWith :: Maybe ContinuationStore -> Maybe ToolCache -> Session -> [(ContinuationToken, UserToolResponse)] -> IO Session`.
-  After a successful wake it calls `csComplete` for every token it applied.
-  `wakeSession` and `wakeSessionWithCache` become wrappers.
-* New `findSessionForToken :: ContinuationStore -> SessionBackend -> ContinuationToken -> IO (Maybe SessionId)`
-  uses `csLoad` and the snapshot's session id. It falls back to scanning only
-  when the continuation store has no row, which covers sessions created before
-  the store was installed. The CLI `complete` command switches to this.
+* `ContinuationStore.csFindSession :: ContinuationToken -> IO (Maybe SessionId)`
+  answers for pending and completed tokens (`csLoad` only returns pending
+  ones, so it cannot tell a completed token from an unknown one).
+* `Session.Wake.wakeSessionWith :: Maybe ContinuationStore -> Maybe ToolCache -> Session -> [(ContinuationToken, UserToolResponse)] -> IO WakeOutcome`
+  reports, per token, whether it was applied, already completed, or unknown,
+  and calls `csComplete` for the applied ones. A token is already completed
+  when a call of the session still carries it but is no longer deferred, or
+  when the store knows it for this session (once a turn is complete, the
+  session no longer holds its tokens). `wakeSession` and
+  `wakeSessionWithCache` are wrappers returning the session.
+* `Session.Wake.findSessionForToken :: Maybe ContinuationStore -> SessionBackend -> ContinuationToken -> IO (Maybe SessionId)`
+  asks `csFindSession` first and scans the backend's sessions only for tokens
+  the store does not know.
+* `csComplete` uses `UPDATE … RETURNING` instead of `SELECT changes()`, which
+  another user of the same connection could change in between.
+* The continuation table's schema goes through `runMigrations` (component
+  `continuations`); migration 2 adds the `(session_id, completed_at)` index.
+
+The CLI `complete` command keeps its scan over the file store: CLI agents
+have no continuation store. The runner (§4.3) uses `findSessionForToken` and
+`wakeSessionWith`.
+
+Agents store their session before each step, so the session a run stops in
+is not stored by the agent: callers store it (the session commands and
+one-shot `run` do; the runner stores after every step, §4.2).
 
 ### 4. `System.Agents.Host.Runner`: session lifecycle
 
@@ -671,14 +689,16 @@ tracker.
   list-sessions over a backend catalog; a parent agent calling a sub-agent
   tool (mock LLM) leaves a sub-session row naming the parent.
 
-### Phase 4: continuation consistency (G7)
+### Phase 4: continuation consistency (G7) ✅
 
-* `wakeSessionWith`, `findSessionForToken` via `csLoad`; switch the CLI
-  `complete` command over.
-* Tests: after a wake the continuation row has `completed_at` set; completing
-  the same token twice is reported as already completed; a token lookup does
-  not load unrelated sessions (count `sbLoad` calls with an instrumented
-  backend).
+* `csFindSession`, `wakeSessionWith` / `WakeOutcome`, `findSessionForToken`,
+  continuation migrations, `RETURNING` in `csComplete`.
+* Tests (`ContinuationConsistencyTests`, on a real paused run: async agent,
+  defer policy, mock LLM, one SQLite database): a wake marks the continuation
+  completed; a second wake reports the token as already completed and leaves
+  the session unchanged; an unknown token is reported; the woken session
+  resumes to a final answer; a token lookup through the index loads no
+  session; without an index the sessions are searched; migrations run once.
 
 ### Phase 5: `SessionRunner` (G6, G8)
 

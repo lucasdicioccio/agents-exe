@@ -10,15 +10,22 @@ module System.Agents.Session.Wake (
     -- * Wake a session with external results
     wakeSession,
     wakeSessionWithCache,
+    wakeSessionWith,
+    WakeOutcome (..),
+
+    -- * Find the session waiting for a token
+    findSessionForToken,
+    sessionHasToken,
 
     -- * Resume execution
     resumeSession,
 ) where
 
-import Control.Monad (forM_)
+import Control.Monad (filterM, forM_)
 import qualified Data.Map.Strict as Map
 
 import System.Agents.Base (ConversationId)
+import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Step (
     calculatePartialTurnByteUsage,
@@ -53,14 +60,67 @@ wakeSessionWithCache ::
     [(ContinuationToken, UserToolResponse)] ->
     IO Session
 wakeSessionWithCache mCache session responses =
-    case getPartialTurn session of
+    (.woSession) <$> wakeSessionWith Nothing mCache session responses
+
+-- | What 'wakeSessionWith' did with each token it was given.
+data WakeOutcome = WakeOutcome
+    { woSession :: Session
+    -- ^ The session with the applied results.
+    , woApplied :: [ContinuationToken]
+    -- ^ Tokens of deferred calls that received their result.
+    , woAlreadyCompleted :: [ContinuationToken]
+    -- ^ Tokens of calls that already had a result; theirs is unchanged.
+    , woUnknown :: [ContinuationToken]
+    -- ^ Tokens this session never issued (as far as it can tell).
+    }
+    deriving (Show)
+
+{- | Wake a paused session, reporting what happened to each token.
+
+A token is applied when it belongs to a deferred call of the head partial
+turn. It is already completed when a call of the session carries it but is
+no longer deferred, or when the continuation store knows it for this session
+(once a turn is complete, the session itself no longer holds its tokens).
+
+Applied tokens are marked completed in the continuation store, and their
+results are stored in the tool cache, when those are given.
+-}
+wakeSessionWith ::
+    Maybe ContinuationStore ->
+    Maybe ToolCache ->
+    Session ->
+    [(ContinuationToken, UserToolResponse)] ->
+    IO WakeOutcome
+wakeSessionWith mStore mCache session responses = do
+    woken <- case getPartialTurn session of
         Nothing -> pure session
         Just partial -> do
             updated <- mapM (wakeTracked responses) (pTrackedToolCalls partial)
             let newTurn = makeTurn partial updated
-            let newTurns = newTurn : drop 1 session.turns
-            pure $ session{turns = newTurns}
+            pure $ session{turns = newTurn : drop 1 session.turns}
+    let pendingTokens = [token | Just partial <- [getPartialTurn session], tc <- partial.pTrackedToolCalls, tc.tcState == Deferred, Just token <- [tc.tcContinuation]]
+        applied = [token | (token, _) <- responses, token `elem` pendingTokens]
+        others = [token | (token, _) <- responses, token `notElem` pendingTokens]
+    known <- filterM isKnown others
+    forM_ mStore $ \store ->
+        forM_ responses $ \(token, result) ->
+            if token `elem` applied then () <$ csComplete store token result else pure ()
+    pure
+        WakeOutcome
+            { woSession = woken
+            , woApplied = applied
+            , woAlreadyCompleted = known
+            , woUnknown = filter (`notElem` known) others
+            }
   where
+    -- A token not pending in the head turn, but issued by this session.
+    isKnown :: ContinuationToken -> IO Bool
+    isKnown token
+        | sessionHasToken token session = pure True
+        | otherwise = case mStore of
+            Nothing -> pure False
+            Just store -> (== Just session.sessionId) <$> csFindSession store token
+
     wakeTracked :: [(ContinuationToken, UserToolResponse)] -> TrackedToolCall -> IO TrackedToolCall
     wakeTracked _ tc | tc.tcState /= Deferred = pure tc
     wakeTracked rs tc =
@@ -91,6 +151,35 @@ wakeSessionWithCache mCache session responses =
             let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
                 byteUsage = calculatePartialTurnByteUsage (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
              in PartialUserTurn content (Just byteUsage)
+
+-- | Whether a call in any partial turn of the session carries the token.
+sessionHasToken :: ContinuationToken -> Session -> Bool
+sessionHasToken token sess =
+    or
+        [ tc.tcContinuation == Just token
+        | PartialUserTurn partial _ <- sess.turns
+        , tc <- partial.pTrackedToolCalls
+        ]
+
+{- | The session that issued a continuation token.
+
+Asks the continuation store first, which answers without loading any session.
+Tokens it does not know (e.g. issued before a store was installed) are
+searched in the backend's sessions, loading each in turn.
+-}
+findSessionForToken :: Maybe ContinuationStore -> SessionBackend -> ContinuationToken -> IO (Maybe SessionId)
+findSessionForToken mStore backend token = do
+    indexed <- maybe (pure Nothing) (\store -> csFindSession store token) mStore
+    case indexed of
+        Just sid -> pure (Just sid)
+        Nothing -> sbList backend >>= scan . map fst
+  where
+    scan [] = pure Nothing
+    scan (sid : rest) = do
+        mSess <- sbLoad backend sid
+        if maybe False (sessionHasToken token) mSess
+            then pure (Just sid)
+            else scan rest
 
 {- | Resume execution of a session.
 

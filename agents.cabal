@@ -350,6 +350,7 @@ test-suite agents-tests
     main-is:          Main.hs
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
+                    , ContinuationConsistencyTests
                     , AsyncToolCallsTests
                     , DeveloperToolboxTests
                     , DeveloperToolboxPatchTests

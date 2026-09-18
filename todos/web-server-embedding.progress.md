@@ -50,7 +50,8 @@ Progress tracker for `todos/web-server-embedding.md`.
 
 ### Verification
 
-- `cabal build all --enable-tests`: no new warnings.
+- `cabal build all --enable-tests` succeeded. (It did not check warnings: the
+  library was not built with `-Wall` then, see the Phase 4 section.)
 - `agents-tests`: 902 tests pass, including 8 new `AgentFactoryTests`.
 - Smoke test of `session start`, `session start --step`, and `session step`
   with an isolated `HOME`: exactly one `conv.<session-id>.json` per session.
@@ -86,8 +87,7 @@ Progress tracker for `todos/web-server-embedding.md`.
   takes `sessionCatalog`; the CLI and TUI pass `fileCatalog`.
 - `agents.cabal`: the library's `import: warnings` moved above `visibility`.
   Cabal ignored it in its old position, so the library was built without
-  `-Wall -Werror` since the library was made public. A forced full rebuild
-  shows no warnings.
+  `-Wall -Werror` since the library was made public.
 
 ### Not done here
 
@@ -96,5 +96,48 @@ Progress tracker for `todos/web-server-embedding.md`.
 
 ### Verification
 
-- Forced full rebuild of the library with `-Wall -Werror`: no warnings.
 - `agents-tests`: 923 tests pass, including 21 new `SessionMetadataTests`.
+- The "forced full rebuild shows no warnings" claim made here (and in the
+  Phase 3 commit message) was wrong: that rebuild did not recompile with
+  `-Wall -Werror`. See the Phase 4 section for the real check and the fixes.
+
+## Warning fixes after re-enabling `-Wall -Werror`
+
+A rebuild of the library from an empty build directory under `-Wall -Werror`
+reported warnings, now fixed:
+
+- From Phases 2 and 3 (this branch): unused imports in
+  `Tools/SystemToolbox/Session.hs`, `TUI/Event/Conversation.hs`,
+  `CLI/SessionDurable.hs`, and `MCP/Server.hs`.
+- Already present before this branch: a `name` binding shadowing a record
+  field in `Session/Step.hs` (`lateResultsQuery`), and a missing signature on
+  `resetQuitConfirmation` in `TUI/Event.hs`.
+
+## Phase 4 — Continuation consistency ✅ COMPLETE
+
+- `Session.Async`:
+  - `ContinuationStore.csFindSession`: the session of a pending or completed
+    token.
+  - The continuation schema goes through `runMigrations` (component
+    `continuations`); migration 2 adds a `(session_id, completed_at)` index.
+  - `csComplete` detects the update with `RETURNING` instead of
+    `SELECT changes()`.
+- `Session.Wake`:
+  - `wakeSessionWith` returns a `WakeOutcome` (applied / already completed /
+    unknown tokens) and marks applied tokens completed in the store.
+    `wakeSession` and `wakeSessionWithCache` wrap it.
+  - `findSessionForToken` (index first, then a scan of the backend) and
+    `sessionHasToken`.
+
+### Not done here
+
+- The CLI `complete` command keeps scanning the file store: CLI agents have
+  no continuation store.
+
+### Verification
+
+- Library rebuilt from an empty build directory under `-Wall -Werror`:
+  clean.
+- `cabal build all --enable-tests` succeeded.
+- `agents-tests`: 930 tests pass, including 7 new
+  `ContinuationConsistencyTests`.
