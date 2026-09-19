@@ -355,6 +355,7 @@ library agents-server-internal
     exposed-modules:  AgentsServer.Api
                     , AgentsServer.Auth
                     , AgentsServer.Log
+                    , AgentsServer.Mcp
                     , AgentsServer.Server
     build-depends:    base >=4.18.3.0,
                       agents-lib,
@@ -372,6 +373,7 @@ library agents-server-internal
                       time,
                       unix,
                       uuid,
+                      vector,
                       wai,
                       warp
     default-language: Haskell2010

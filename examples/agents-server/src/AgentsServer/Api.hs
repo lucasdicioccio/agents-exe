@@ -43,6 +43,7 @@ import Network.Wai
 import Text.Read (readMaybe)
 
 import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
+import AgentsServer.Mcp (McpContext (..), handleMcp)
 import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host (Host (..))
@@ -133,6 +134,7 @@ route :: ServerEnv -> Request -> IO Response
 route env req = case (requestMethod req, path) of
     ("GET", ["healthz"]) -> healthz env
     _ -> do
+        checkOrigin env req
         caller <- authenticateRequest env req
         routeAuthenticated env req caller path
   where
@@ -151,6 +153,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
+    ("POST", ["mcp"]) -> mcpH env req caller
     _
         | knownPath path -> throwIO $ ApiError status405 "method_not_allowed" "method not allowed on this path"
         | otherwise -> throwIO $ ApiError status404 "not_found" "no such endpoint"
@@ -167,11 +170,37 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "sessions", _] -> True
         ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "pending", "events"]
         ["v1", "continuations", _] -> True
+        ["mcp"] -> True
         _ -> False
 
 -------------------------------------------------------------------------------
 -- Authentication
 -------------------------------------------------------------------------------
+
+{- | Without authentication, refuse requests that a browser sends from a
+page that is not on this machine. This blocks DNS-rebinding attacks, where a
+remote page reaches the server through a name that resolves to 127.0.0.1.
+Requests without an @Origin@ header (curl, servers, MCP clients) pass.
+-}
+checkOrigin :: ServerEnv -> Request -> IO ()
+checkOrigin env req = case (env.envAuth, lookup "Origin" (requestHeaders req)) of
+    (Nothing, Just origin)
+        | not (isLoopbackOrigin origin) ->
+            throwIO $ ApiError status403 "forbidden_origin" "cross-origin requests need authentication (--auth-tokens)"
+    _ -> pure ()
+
+-- | @http(s)://localhost@, @127.0.0.1@, or @[::1]@, with any port.
+isLoopbackOrigin :: ByteString.ByteString -> Bool
+isLoopbackOrigin origin = case Text.breakOn "://" (Text.decodeUtf8Lenient origin) of
+    (scheme, rest)
+        | scheme `elem` ["http", "https"]
+        , Just hostPort <- Text.stripPrefix "://" rest ->
+            hostOf hostPort `elem` ["localhost", "127.0.0.1", "[::1]"]
+    _ -> False
+  where
+    hostOf hp
+        | "[" `Text.isPrefixOf` hp = Text.takeWhile (/= ']') hp <> "]"
+        | otherwise = Text.takeWhile (/= ':') hp
 
 authenticateRequest :: ServerEnv -> Request -> IO Caller
 authenticateRequest env req = case env.envAuth of
@@ -323,6 +352,21 @@ continuationH env req caller tokenText = do
     meta <- orThrow $ completeCall env.envRunner token result autoResume
     runResponse <$> afterRun env w meta.smSessionId
 
+mcpH :: ServerEnv -> Request -> Caller -> IO Response
+mcpH env req (Caller owner) = do
+    raw <- readBody req
+    let ctx =
+            McpContext
+                { mcRunner = env.envRunner
+                , mcAgents = env.envHost.hostAgents
+                , mcOwner = owner
+                , mcWait = \sid -> waitForRun env sid 120
+                }
+    (status, answer) <- handleMcp ctx raw
+    pure $ case answer of
+        Just value -> json status value
+        Nothing -> responseLBS status [] ""
+
 -------------------------------------------------------------------------------
 -- Events
 -------------------------------------------------------------------------------
@@ -395,11 +439,15 @@ waitParams req = do
 -- | Wait for the run if asked (or until shutdown), then load the session.
 afterRun :: ServerEnv -> WaitParams -> SessionId -> IO Aeson.Value
 afterRun env w sid = do
-    when w.wpWait $
-        race_
-            (atomically (readTVar env.envShutdown >>= check))
-            (awaitRun env.envRunner sid w.wpTimeout)
+    when w.wpWait $ waitForRun env sid w.wpTimeout
     loadView env sid
+
+-- | Wait for a session's run to stop, the timeout, or shutdown.
+waitForRun :: ServerEnv -> SessionId -> NominalDiffTime -> IO ()
+waitForRun env sid limit =
+    race_
+        (atomically (readTVar env.envShutdown >>= check))
+        (awaitRun env.envRunner sid limit)
 
 -- | @202@ while a run is going, @200@ once it stopped (or none started).
 runResponse :: Aeson.Value -> Response

@@ -235,6 +235,7 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | Method and path | Body | Success | Errors |
 |---|---|---|---|
 | `GET /healthz` | | `200 {ok, live_sessions, active_runs}` | |
+| `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
 | `GET /v1/agents` | | `200 [{slug, description, tools}]` | |
 | `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request` |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
@@ -248,6 +249,7 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
 
 Other errors: `401 unauthorized` when authentication is on,
+`403 forbidden_origin` when it is off (see [Authentication](#authentication)),
 `404 not_found` for an unknown path, `405 method_not_allowed`,
 `413 payload_too_large` for bodies over 32 MiB, and `500 internal_error`.
 
@@ -304,6 +306,39 @@ Several tokens may share an owner. The file is read at startup.
   sees them once it is on.
 
 All owners share the agents and the API keys of the server.
+
+**Browser origins.** Without `--auth-tokens`, requests carrying an `Origin`
+header that is not `localhost`, `127.0.0.1`, or `[::1]` answer
+`403 forbidden_origin`. This stops a web page from reaching a local server
+through DNS rebinding. Clients that send no `Origin` (curl, servers, MCP
+clients) are not affected. With authentication on, origins are not checked.
+
+---
+
+## MCP over HTTP
+
+`POST /mcp` serves the agents to MCP clients over the
+[Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http).
+Point a client at `http://127.0.0.1:8080/mcp`; with `--auth-tokens`, it must
+send the same bearer token as REST clients.
+
+* Each root agent is one tool, `ask_<slug>`, with a single string argument
+  `prompt`.
+* A call creates a session, owned by the caller, and waits for its run (up to
+  120 seconds). The result is the agent's final answer. `_meta.session_id`
+  names the session, which is also visible through the REST API.
+* If the run stops on deferred tool calls, the result (not an error) says
+  so and lists the pending calls with their continuation tokens: complete
+  them through `POST /v1/continuations/:token`. If the run is still going when
+  the wait ends, the result gives the session id to follow.
+* A failed run returns a result with `isError: true`.
+* Every request gets a plain JSON response. Notifications answer `202`.
+  The server sends no requests or notifications of its own, so `GET /mcp`
+  answers `405`. MCP sessions (`Mcp-Session-Id`) are not used.
+* Supported protocol versions: `2025-06-18`, `2025-03-26`, `2024-11-05`.
+
+For the stdio MCP server that runs agents without storing sessions, see
+[mcp.md](mcp.md).
 
 ---
 
@@ -386,6 +421,5 @@ The HTTP layer itself is in `examples/agents-server/src/AgentsServer/Api.hs`.
   its own writes, and version checks detect the others, but runs are not
   coordinated between processes.
 * Streaming LLM tokens.
-* MCP over HTTP.
 
 See `todos/web-server-embedding.md` for the design and the planned work.

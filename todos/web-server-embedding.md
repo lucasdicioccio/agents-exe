@@ -852,21 +852,31 @@ and the riskier ones come after the ones they build on. Choices marked
   sub-agent tools, which the host builds once at load time today. They stay
   in [Remaining later work](#remaining-later-work).
 
-### Phase 8: MCP over HTTP
+### Phase 8: MCP over HTTP ✅
 
-* `POST /mcp` on `agents-server` speaks MCP's Streamable HTTP transport, reusing
-  the protocol types in `MCP/Base.hs`. Each request gets a plain JSON response
-  (the transport allows that instead of an SSE stream). Notifications and
-  responses from the client answer 202. `GET /mcp` answers 405: there are no
-  server-initiated messages.
-* Tools: one `ask_<slug>` per root agent, input `{prompt}` (as the stdio
-  server). A call creates a session through the runner and waits for it (up to
-  the `timeout` default). The result text is the final answer; a session
-  that stops on deferred calls, or is still running, returns the session id
-  and pending continuation tokens as text, with `isError` false for
-  `waiting_external`, so clients can finish through the REST API.
-* The same bearer tokens and owners apply. `Mcp-Session-Id` is not used
-  (*default*: every request stands alone; MCP sessions are optional).
+* `POST /mcp` on `agents-server` (`AgentsServer.Mcp`) speaks MCP's Streamable
+  HTTP transport. It handles JSON-RPC with aeson directly and reuses the
+  `MCP/Base.hs` types for tools, tool lists, and the initialize result;
+  tool results are written by hand, because `TextContentImpl` always
+  writes `"annotations": null`. Each request, or batch, gets a plain JSON
+  response. Messages that need no answer (notifications, client responses)
+  get 202. `GET /mcp` answers 405: there are no server-initiated messages.
+  Protocol versions 2025-06-18, 2025-03-26, and 2024-11-05: the client's is
+  echoed when supported, else the latest.
+* Methods: `initialize`, `ping`, `tools/list`, `tools/call`, and empty
+  `resources/list` and `prompts/list`. Anything else is -32601; a bad
+  or unknown tool is -32602; malformed JSON answers 400 with -32700.
+* Tools: one `ask_<slug>` per root agent, input `{prompt}`. A call creates a
+  session through the runner, owned by the caller, and waits up to 120 s.
+  The result carries `_meta.session_id`. An idle session gives the final
+  answer; `waiting_external` gives a sentence plus the pending calls as JSON
+  (not an error); a run still going gives the session id; `failed` gives
+  `isError: true`.
+* The same bearer tokens and owners apply. `Mcp-Session-Id` is not used.
+* The Streamable HTTP transport requires validating `Origin` against DNS
+  rebinding. Without authentication, every endpoint (not only `/mcp`) refuses
+  an `Origin` other than localhost, 127.0.0.1, or [::1] with 403
+  `forbidden_origin`. With authentication, origins are not checked.
 
 ### Phase 9: TUI out of the core library
 

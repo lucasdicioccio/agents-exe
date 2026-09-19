@@ -445,7 +445,8 @@ runLoop runner live mode agent0 = do
                     _ <- storeOrThrow runner live meta sess status
                     atomically $ writeTVar live.lsRun Nothing
                     when (status == StatusWaitingExternal) $
-                        emit runner $ CallsDeferred sid (pendingDeferredCalls sess)
+                        emit runner $
+                            CallsDeferred sid (pendingDeferredCalls sess)
                     emit runner $ RunStopped sid status
                     pure Nothing
                 else pure (Just sess)
@@ -623,22 +624,22 @@ cancelRun runner sid = do
             Just (_, meta) -> pure $ Right meta
 
     tearDown live = do
-                mAgent <- readTVarIO live.lsAgent
-                forM_ (mAgent >>= (.ctxAsyncEngine)) shutdownAsyncEngine
-                atomically $ writeTVar live.lsAgent (fmap (\a -> a{ctxAsyncEngine = Nothing}) mAgent)
-                loadLatest runner live >>= \case
-                    Nothing -> pure $ Left $ UnknownSession sid
-                    Just (sess0, meta0) -> do
-                        atomically $ writeTVar live.lsLatest (Just (sess0, meta0))
-                        (sess1, meta1) <- applyInbox runner live
-                        sess2 <- case mAgent of
-                            Just agent -> refreshHeadPartialTurn (buildContext agent sess1 (sessionIdToConversationId sid)) sess1
-                            Nothing -> pure sess1
-                        atomically $ writeTVar live.lsRun Nothing
-                        let status = sessionStatusOf sess2
-                        result <- store runner live meta1 sess2 status Nothing
-                        emit runner $ RunStopped sid status
-                        pure $ either (Left . Conflict) Right result
+        mAgent <- readTVarIO live.lsAgent
+        forM_ (mAgent >>= (.ctxAsyncEngine)) shutdownAsyncEngine
+        atomically $ writeTVar live.lsAgent (fmap (\a -> a{ctxAsyncEngine = Nothing}) mAgent)
+        loadLatest runner live >>= \case
+            Nothing -> pure $ Left $ UnknownSession sid
+            Just (sess0, meta0) -> do
+                atomically $ writeTVar live.lsLatest (Just (sess0, meta0))
+                (sess1, meta1) <- applyInbox runner live
+                sess2 <- case mAgent of
+                    Just agent -> refreshHeadPartialTurn (buildContext agent sess1 (sessionIdToConversationId sid)) sess1
+                    Nothing -> pure sess1
+                atomically $ writeTVar live.lsRun Nothing
+                let status = sessionStatusOf sess2
+                result <- store runner live meta1 sess2 status Nothing
+                emit runner $ RunStopped sid status
+                pure $ either (Left . Conflict) Right result
 
     noRun =
         runner.srHost.hostBackend.sbLoadMeta sid >>= \case

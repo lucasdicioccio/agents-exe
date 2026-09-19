@@ -262,3 +262,25 @@ reported warnings, now fixed:
   migrations 1–3.
 - `agents-server-tests`: 9 pass, including the two-owner flow and loading a
   tokens file.
+
+## Phase 8 — MCP over HTTP ✅ COMPLETE
+
+- `AgentsServer.Mcp`: the Streamable HTTP transport, answering with JSON,
+  one `ask_<slug>` tool per root agent, runs through the session runner.
+- `AgentsServer.Api`:
+  - routes `POST /mcp` (405 for other methods);
+  - refuses non-loopback `Origin`s when authentication is off (403
+    `forbidden_origin`), as the MCP transport requires against DNS rebinding;
+  - `waitForRun` is shared by the REST and MCP handlers.
+- `docs/agents-server.md`: an MCP over HTTP section, and the origin rule.
+
+### Verification
+
+- `agents-server-tests`: 12 pass. New tests: an MCP flow
+  (initialize with version negotiation, the notification's 202, tools/list,
+  tools/call with `_meta.session_id`, unknown tool, unknown method, batch,
+  GET 405), a deferred call reported through MCP then completed over REST,
+  and origin checks with and without authentication.
+- The official Python MCP SDK (2.2.0, `streamable_http_client`) against the
+  binary and a fake OpenAI endpoint: initialize (2025-06-18), list tools,
+  call `ask_weather`, which reported the deferred call and its token.

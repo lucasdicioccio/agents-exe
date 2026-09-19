@@ -25,7 +25,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Vector as Vector
 import qualified Network.HTTP.Client as Http
-import Network.HTTP.Types (Method, statusCode, urlEncode)
+import Network.HTTP.Types (Header, Method, statusCode, urlEncode)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Prod.Tracer (silent)
 import System.FilePath ((</>))
@@ -56,6 +56,9 @@ main =
             , testCase "shutdown ends event streams and releases waiting requests" shutdownTest
             , testCase "with tokens, callers need one and only see their own sessions" authTest
             , testCase "tokens files hold hashed or plain tokens" tokensFileTest
+            , testCase "MCP over HTTP: initialize, list tools, call an agent" mcpTest
+            , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
+            , testCase "without authentication, non-local browser origins are refused" originTest
             ]
 
 -------------------------------------------------------------------------------
@@ -255,6 +258,66 @@ tokensFileTest = withSystemTempDirectory "agents-server-tokens" $ \dir -> do
         Left (_ :: IOException) -> pure ()
         Right _ -> assertFailure "a malformed digest was accepted"
 
+mcpTest :: Assertion
+mcpTest = withServer "{}" mockCompletion $ \srv -> do
+    let rpc i method params = Aeson.object ["jsonrpc" .= ("2.0" :: Text), "id" .= (i :: Int), "method" .= (method :: Text), "params" .= params]
+    (initStatus, initialized) <- call srv "POST" "/mcp" (Just (rpc 1 "initialize" (Aeson.object ["protocolVersion" .= ("2025-03-26" :: Text), "capabilities" .= Aeson.object [], "clientInfo" .= Aeson.object ["name" .= ("test" :: Text), "version" .= ("1" :: Text)]])))
+    initStatus @?= 200
+    field "protocolVersion" (field "result" initialized) @?= "2025-03-26"
+    (notified, empty) <- call srv "POST" "/mcp" (Just (Aeson.object ["jsonrpc" .= ("2.0" :: Text), "method" .= ("notifications/initialized" :: Text)]))
+    (notified, empty) @?= (202, Aeson.Null)
+    (_, listed) <- call srv "POST" "/mcp" (Just (rpc 2 "tools/list" (Aeson.object [])))
+    case arrayField "tools" (field "result" listed) of
+        [tool] -> do
+            field "name" tool @?= "ask_server-test"
+            field "required" (field "inputSchema" tool) @?= Aeson.toJSON ["prompt" :: Text]
+        other -> assertFailure ("expected one tool, got " <> show other)
+    (_, called) <- call srv "POST" "/mcp" (Just (rpc 3 "tools/call" (Aeson.object ["name" .= ("ask_server-test" :: Text), "arguments" .= Aeson.object ["prompt" .= ("hello" :: Text)]])))
+    let result = field "result" called
+    field "isError" result @?= Aeson.Bool False
+    map (field "text") (arrayField "content" result) @?= ["done"]
+    let sid = textField "session_id" (field "_meta" result)
+    (getStatus, view) <- call srv "GET" ("/v1/sessions/" <> sid) Nothing
+    (getStatus, field "status" view) @?= (200, "idle")
+    (_, unknownTool) <- call srv "POST" "/mcp" (Just (rpc 4 "tools/call" (Aeson.object ["name" .= ("ask_nobody" :: Text), "arguments" .= Aeson.object ["prompt" .= ("hi" :: Text)]])))
+    field "code" (field "error" unknownTool) @?= Aeson.Number (-32602)
+    (_, unknownMethod) <- call srv "POST" "/mcp" (Just (rpc 5 "sampling/createMessage" (Aeson.object [])))
+    field "code" (field "error" unknownMethod) @?= Aeson.Number (-32601)
+    (_, batch) <- call srv "POST" "/mcp" (Just (Aeson.toJSON [rpc 6 "ping" (Aeson.object []), Aeson.object ["jsonrpc" .= ("2.0" :: Text), "method" .= ("notifications/cancelled" :: Text)]]))
+    case batch of
+        Aeson.Array xs -> map (field "id") (Vector.toList xs) @?= [Aeson.Number 6]
+        other -> assertFailure ("expected a batch answer, got " <> show other)
+    (getMcp, _) <- call srv "GET" "/mcp" Nothing
+    getMcp @?= 405
+
+mcpDeferredTest :: Assertion
+mcpDeferredTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv -> do
+    let params = Aeson.object ["name" .= ("ask_server-test" :: Text), "arguments" .= Aeson.object ["prompt" .= ("fetch it" :: Text)]]
+    (_, called) <- call srv "POST" "/mcp" (Just (Aeson.object ["jsonrpc" .= ("2.0" :: Text), "id" .= (1 :: Int), "method" .= ("tools/call" :: Text), "params" .= params]))
+    let result = field "result" called
+    field "isError" result @?= Aeson.Bool False
+    token <- case arrayField "content" result of
+        [_, calls] -> case Aeson.eitherDecodeStrict (Text.encodeUtf8 (textField "text" calls)) of
+            Right (Aeson.Array xs) | [c] <- Vector.toList xs -> pure (textField "continuation_token" c)
+            other -> assertFailure ("expected the pending calls, got " <> show other)
+        other -> assertFailure ("expected two contents, got " <> show other)
+    (done, final) <- call srv "POST" ("/v1/continuations/" <> token <> "?wait=true") (Just (Aeson.object ["result" .= ("42" :: Text)]))
+    (done, field "status" final) @?= (200, "idle")
+
+originTest :: Assertion
+originTest = do
+    withServer "{}" mockCompletion $ \srv -> do
+        (remote, err) <- call srv{srvHeaders = [("Origin", "http://evil.example")]} "GET" "/v1/agents" Nothing
+        (remote, field "error" err) @?= (403, "forbidden_origin")
+        (local, _) <- call srv{srvHeaders = [("Origin", "http://localhost:3000")]} "GET" "/v1/agents" Nothing
+        local @?= 200
+        (ipv6, _) <- call srv{srvHeaders = [("Origin", "http://[::1]:3000")]} "GET" "/v1/agents" Nothing
+        ipv6 @?= 200
+    let tokens = authTokensFromList [("alice-token", "alice")]
+    withServerAuth (Just tokens) "{}" mockCompletion $ \srv -> do
+        (withToken, _) <- call srv{srvHeaders = [("Origin", "http://evil.example")], srvToken = Just "alice-token"} "GET" "/v1/agents" Nothing
+        withToken @?= 200
+
 -------------------------------------------------------------------------------
 -- Server fixture
 -------------------------------------------------------------------------------
@@ -265,6 +328,7 @@ data Srv = Srv
     , srvManager :: Http.Manager
     , srvToken :: Maybe ByteString.ByteString
     -- ^ Sent as a bearer token.
+    , srvHeaders :: [Header]
     }
 
 {- | Run the application on a free port over a fresh database, with one
@@ -289,7 +353,7 @@ withServerAuth auth extraConfig complete k =
             withSessionRunner host $ \runner -> do
                 env0 <- newServerEnv host runner auth
                 let env = env0{envKeepAlive = 300_000}
-                testWithApplication (pure (application env)) $ \p -> k (Srv p env manager Nothing)
+                testWithApplication (pure (application env)) $ \p -> k (Srv p env manager Nothing [])
   where
     baseConfig =
         Aeson.object
@@ -352,6 +416,7 @@ request srv method path body = do
             , Http.requestHeaders =
                 [("Content-Type", "application/json") | Just _ <- [body]]
                     <> [("Authorization", "Bearer " <> t) | Just t <- [srv.srvToken]]
+                    <> srv.srvHeaders
             }
 
 -- | Status and JSON body (@null@ when empty).

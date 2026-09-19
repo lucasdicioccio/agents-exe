@@ -10,9 +10,9 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
-import Data.IORef (atomicModifyIORef', newIORef)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
+import Data.IORef (atomicModifyIORef', newIORef)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -446,4 +446,3 @@ waitUntil check = go (250 :: Int)
     go n = do
         ok <- check
         if ok then pure () else threadDelay 20_000 >> go (n - 1)
-
