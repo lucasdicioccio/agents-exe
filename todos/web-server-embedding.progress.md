@@ -141,3 +141,37 @@ reported warnings, now fixed:
 - `cabal build all --enable-tests` succeeded.
 - `agents-tests`: 930 tests pass, including 7 new
   `ContinuationConsistencyTests`.
+
+## Phase 5 — Session runner ✅ COMPLETE
+
+- `System.Agents.Host`: `Host`, `HostConfig` / `defaultHostConfig`,
+  `HostTrace`, `HostError`, `withHost` (WAL, busy timeout, migrations, agent
+  files, sub-agent tools storing into the database).
+- `System.Agents.Host.Runner`: `SessionRunner` with `createSession`,
+  `postMessage`, `resume`, `completeCall`, `cancelRun`, `getSession`,
+  `awaitRun`, `deleteSession` (dry run and cascade), `subscribe`,
+  `recoverOnStartup`, `runnerStats`, and an idle-session reaper.
+- `Session.Types`: `DeferredCallView` and `pendingDeferredCalls`; the CLI's
+  `extractDeferredCalls` wraps them.
+- `Session.Async`: `csCountSession` and `csDeleteSession`.
+
+### Differences from the first version of the spec (spec updated)
+
+- Results completed during a run are queued and applied by the run, instead
+  of being written by `completeCall`, which would make the run's next
+  versioned store conflict.
+- Events use one runner-wide broadcast channel; `subscribe` returns a
+  blocking "next event" action for one session, which survives eviction.
+- `NoActiveRun` error; `csCountSession` for dry runs; deletion also refused
+  while an ancestor runs; runner agents always run asynchronously.
+- After a cancel, background calls below the head turn are reported as
+  cancelled by the next run (late results), not by `cancelRun` itself.
+
+### Verification
+
+- Library under `-Wall -Werror`: clean. `cabal build all --enable-tests`
+  succeeded.
+- `agents-tests`: 940 tests pass, including 10 new `RunnerTests`. The runner
+  tests passed 15 repeated runs. The test suite is not built with
+  `-threaded`; the bundled SQLite is `THREADSAFE=1` (serialized), which the
+  threaded server in Phase 6 relies on.

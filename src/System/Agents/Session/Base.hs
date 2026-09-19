@@ -19,6 +19,8 @@ module System.Agents.Session.Base (
     isBlockedOnDeferredCalls,
     hasBackgroundCalls,
     backgroundCalls,
+    DeferredCallView (..),
+    pendingDeferredCalls,
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),

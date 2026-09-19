@@ -119,14 +119,7 @@ parseResultFile bs
 -- | Extract all deferred calls from the latest partial turn of a session.
 extractDeferredCalls :: Session -> [(ToolCallId, Maybe ContinuationToken, Text, ToolCallDisposition)]
 extractDeferredCalls session =
-    case getPartialTurn session of
-        Nothing -> []
-        Just partial ->
-            [ (tc.tcId, tc.tcContinuation, callName tc.tcCall, disp)
-            | tc <- partial.pTrackedToolCalls
-            , tc.tcState == Deferred
-            , let disp = appliedDisposition tc.tcPolicy
-            ]
+    [(v.dcvToolCallId, v.dcvToken, v.dcvToolName, v.dcvDisposition) | v <- pendingDeferredCalls session]
 
 -- | Extract deferred calls whose base disposition is 'RunIsolated'.
 extractIsolatedCalls :: Session -> [(ToolCallId, ContinuationToken, LlmToolCall, ToolCallDisposition)]
@@ -147,10 +140,6 @@ findTrackedCall session cid =
     case getPartialTurn session of
         Nothing -> Nothing
         Just partial -> listToMaybe [tc | tc <- partial.pTrackedToolCalls, tc.tcId == cid]
-
--- | Extract the disposition stored in an applied policy.
-appliedDisposition :: AppliedPolicy -> ToolCallDisposition
-appliedDisposition policy = policy.apDisposition
 
 -- | Extract the function name from an LLM tool call.
 callName :: LlmToolCall -> Text

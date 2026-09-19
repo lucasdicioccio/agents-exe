@@ -205,30 +205,35 @@ sub-session; it used to be an unrelated random ID. The parent link is kept at
 runtime (`ctxParentConversation`), and backends store it as
 `parent_session_id` (Phase 3).
 
-#### 2.2 `System.Agents.Host` (Phase 5)
+#### 2.2 `System.Agents.Host` (implemented, Phase 5)
 
 ```haskell
 data Host = Host
-    { hostAgents  :: Map AgentSlug OSAgentNode
-    -- ^ Root agents loaded at startup, addressable by slug.
-    , hostDeps    :: AgentDeps
-    -- ^ SinkNone: the runner stores sessions itself (§4.2).
-    , hostBackend :: SessionBackend
-    , hostTracer  :: Tracer IO HostTrace
+    { hostAgents         :: Map Text OSAgentNode   -- root agents, by slug
+    , hostDeps           :: AgentDeps              -- root agents: SinkNone, the runner stores
+    , hostSubAgentDeps   :: AgentDeps              -- sub-agents: SinkBackend hostBackend
+    , hostBackend        :: SessionBackend
+    , hostContinuations  :: ContinuationStore
+    , hostTracer         :: Tracer IO HostTrace
+    , hostLiveSessionTtl :: NominalDiffTime
     }
 
 data HostConfig = HostConfig
-    { hcAgentFiles   :: [FilePath]
-    , hcApiKeysFile  :: FilePath
-    , hcDatabasePath :: FilePath
-    , hcCompletion   :: Maybe (OSAgentNode -> Completion)
-    }
+    { hcAgentFiles :: [FilePath], hcApiKeysFile :: FilePath, hcDatabasePath :: FilePath
+    , hcCompletion :: Maybe (OSAgentNode -> Completion), hcLiveSessionTtl :: NominalDiffTime }
+defaultHostConfig :: [FilePath] -> FilePath -> FilePath -> HostConfig   -- TTL 15 minutes
 
--- | Load every agent tree, open the database, run migrations, and build
--- stores. Agent trees (and their MCP server processes) live as long as the
--- continuation.
 withHost :: HostConfig -> Tracer IO HostTrace -> (Host -> IO a) -> IO a
 ```
+
+`withHost` opens the database with `journal_mode = WAL` and
+`busy_timeout = 5000`, runs the session and continuation migrations, loads
+each agent file (sub-agent tools get `hostSubAgentDeps`, and session tools a
+`backendCatalog`), and refuses duplicate root slugs (`HostError`). Both
+dependency sets share the continuation store and the completion override.
+The bundled SQLite is built with `THREADSAFE=1` (serialized), so one
+connection is shared by all threads; no statement sequence relies on
+`changes()`.
 
 ### 3. Storage
 
@@ -320,7 +325,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 
 The `tool_continuations(session_id, completed_at)` index belongs to the
 continuation store's migrations (Phase 4). Connection settings
-(`journal_mode=WAL`, `busy_timeout`, `foreign_keys`) are set by `withHost`
+(`journal_mode=WAL`, `busy_timeout`) are set by `withHost`
 when it opens the database (Phase 5), not by the library backends, which
 work on connections their callers own.
 
@@ -380,17 +385,19 @@ Agents store their session before each step, so the session a run stops in
 is not stored by the agent: callers store it (the session commands and
 one-shot `run` do; the runner stores after every step, §4.2).
 
-### 4. `System.Agents.Host.Runner`: session lifecycle
+### 4. `System.Agents.Host.Runner`: session lifecycle (implemented, Phase 5)
 
 ```haskell
 data SessionRunner  -- opaque
 
-newSessionRunner :: Host -> IO SessionRunner
-shutdownSessionRunner :: SessionRunner -> IO ()   -- cancels live runs, stores their sessions
+newSessionRunner      :: Host -> IO SessionRunner
+shutdownSessionRunner :: SessionRunner -> IO ()   -- cancels active runs, stores their sessions
+withSessionRunner     :: Host -> (SessionRunner -> IO a) -> IO a
+runnerStats           :: SessionRunner -> IO RunnerStats   -- live sessions, active runs
 
 data RunMode = StepOnce | UntilBlocked
 
-createSession :: SessionRunner -> AgentSlug -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
+createSession :: SessionRunner -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
 postMessage   :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
 resume        :: SessionRunner -> SessionId -> RunMode -> IO (Either RunnerError SessionMeta)
 completeCall  :: SessionRunner -> ContinuationToken -> UserToolResponse -> Bool {- auto-resume -} -> IO (Either RunnerError SessionMeta)
@@ -398,7 +405,7 @@ cancelRun     :: SessionRunner -> SessionId -> IO (Either RunnerError SessionMet
 getSession    :: SessionRunner -> SessionId -> IO (Maybe (Session, SessionMeta))
 awaitRun      :: SessionRunner -> SessionId -> NominalDiffTime -> IO (Either RunnerError (SessionMeta, Bool {- run still active -}))
 deleteSession :: SessionRunner -> SessionId -> DeleteMode -> IO (Either RunnerError DeletionPlan)
-subscribe     :: SessionRunner -> SessionId -> IO (TChan SessionEvent)   -- dupTChan of a broadcast channel
+subscribe     :: SessionRunner -> SessionId -> IO (IO SessionEvent)   -- blocking "next event"
 recoverOnStartup :: SessionRunner -> IO [SessionId]
 
 data NewMessage = NewMessage { nmText :: Text, nmMedia :: [MediaAttachment] }
@@ -406,44 +413,51 @@ data NewMessage = NewMessage { nmText :: Text, nmMedia :: [MediaAttachment] }
 data DeleteMode = DryRun | DeleteForReal
 
 data DeletionPlan = DeletionPlan
-    { dpSessions      :: [SessionId]   -- ^ the session and all descendants, leaves first
+    { dpSessions      :: [SessionId]   -- ^ the session and all descendants, deepest first
     , dpContinuations :: Int           -- ^ continuation rows removed (or that would be)
     , dpDryRun        :: Bool
     }
 
 data RunnerError
-    = UnknownAgent AgentSlug | UnknownSession SessionId | UnknownToken ContinuationToken
+    = UnknownAgent Text | UnknownSession SessionId | UnknownToken ContinuationToken
     | TokenAlreadyCompleted ContinuationToken
-    | RunInProgress SessionId          -- ^ a live run owns the session (or, on delete, a descendant)
+    | RunInProgress SessionId          -- ^ a run owns the session (on delete: one of the tree, or an ancestor)
+    | NoActiveRun SessionId            -- ^ cancel without a run (HTTP 409 no_active_run)
     | NotAcceptingMessages SessionId SessionStatus
     | Conflict VersionConflict
 ```
+
+Agents built by the runner always run asynchronously
+(`withExecutionMode Asynchronous`), like the CLI `session` commands, so that
+runs can stop and resume.
 
 #### 4.1 Per-session state
 
 ```haskell
 data LiveSession = LiveSession
-    { lsLock   :: MVar ()                          -- serialises every mutation
-    , lsRun    :: TVar (Maybe (Async ()))          -- the active run, if any
-    , lsAgent  :: TVar (Maybe (Agent (LlmTurnContent, Session)))
-    -- ^ The agent with its World + AsyncEngine, kept between runs so background
-    -- calls started by an earlier run can still be polled and cancelled (G8).
-    , lsEvents :: TChan SessionEvent               -- broadcast
+    { lsLock        :: MVar ()                          -- serialises every change
+    , lsRun         :: TVar (Maybe (Async ()))          -- the active run, if any
+    , lsAgent       :: TVar (Maybe (Agent …))           -- kept between runs (G8)
+    , lsLatest      :: TVar (Maybe (Session, SessionMeta))  -- last version stored or loaded
+    , lsInbox       :: TVar [(ContinuationToken, UserToolResponse)]  -- see 4.3
     , lsLastTouched :: TVar UTCTime
+    , lsEvicted     :: TVar Bool
     }
 -- held in: TVar (Map SessionId LiveSession)
 ```
 
-* The runner creates a `LiveSession` on first access. A reaper thread evicts
-  entries idle for `hcLiveSessionTtl` (15 min, configurable) that have no active run
-  and no `Running` calls, and calls `shutdownAsyncEngine` on eviction.
-* The first run of a session builds its agent with `buildAgent` and then
-  `withAsyncEngine` (after installing a World the way `Step.hs:917` does),
-  and keeps it in `lsAgent`. Later runs reuse it, so the engine is not shut
-  down between requests. That means the runner does **not** use
-  `runUntilBlocked`/`withEngineShutdown` directly. It runs its own loop over
-  `runStepM`, with the same stop conditions as `runUntilBlocked`, and shuts
-  the engine down only on cancel, eviction, or runner shutdown.
+* The runner creates a `LiveSession` on first access. A reaper thread (every
+  half TTL, between 50 ms and 60 s) evicts sessions idle for longer than
+  `hostLiveSessionTtl` that have no active run and no `Running` call, and
+  shuts their engine down. An operation that took a `LiveSession` just before
+  it was evicted notices `lsEvicted` once it holds the lock, and retries with
+  a fresh one.
+* The first run of a session builds its agent with `buildAgent` and keeps it
+  in `lsAgent`. `runStepM` installs a World and an engine on demand and
+  returns the agent holding them; the runner keeps that agent, so the engine
+  survives between runs. The runner has its own loop over `runStepM`, with
+  the stop conditions of `runUntilBlocked`, and shuts the engine down only on
+  cancel, eviction, deletion, or runner shutdown.
 * `Running` calls whose engine was lost (restart or eviction) are resolved as
   orphaned by `pollRunningCall` on the next step. No new code is needed.
 
@@ -477,17 +491,24 @@ because the runner does the versioned stores itself.
 active run and a pending deferred call can coexist. For example, a deferred
 call waits while a background call is still running.
 
-`completeCall` on a session with an active run:
+Writing the woken session while the run is in a step would make the run's
+next versioned store conflict. So `completeCall` on a session with an active
+run, under the lock:
 
-* takes the lock;
-* applies `wakeSessionWith` to the **latest stored** session and stores it
-  with CAS;
-* sets a `TVar Bool` "external input arrived" flag on the `LiveSession`.
+* checks the token against the run's latest version (and the queue), and
+  answers `UnknownToken` or `TokenAlreadyCompleted` right away;
+* otherwise appends the result to `lsInbox` and returns.
 
-The run loop reloads the session from the backend before each step when that
-flag is set, and resets it. Without an active run, `completeCall` stores the
-change and, if `auto-resume` is true and the turn is now complete, starts an
-`UntilBlocked` run.
+Before each step and before deciding to stop, the run, under the lock,
+applies the queued results with `wakeSessionWith` (which also marks the
+continuations completed) and stores the result. A run that was about to
+stop on deferred calls therefore carries on when their results are queued.
+`cancelRun` applies the queue too.
+
+Without an active run, `completeCall` applies the result and stores it at
+once, and with auto-resume starts an `UntilBlocked` run when the session is
+`ready`. Two concurrent completions of one turn are serialised by the lock:
+the first stores, the second sees the first's version (tested).
 
 #### 4.4 Follow-up messages
 
@@ -520,14 +541,20 @@ data SessionEvent
 ```
 
 `DeferredCallView` is the same data `agents-exe session pending` prints: tool
-name, call id, token, disposition, and arguments. Move
-`extractDeferredCalls` (`CLI/SessionDurable.hs:120`) into the library as
-`Session.Types.pendingDeferredCalls :: Session -> [DeferredCallView]` and have
-the CLI use it.
+name, call id, token, disposition, and the call with its arguments. It lives
+in `Session.Types` with `pendingDeferredCalls :: Session -> [DeferredCallView]`;
+the CLI's `extractDeferredCalls` wraps it.
+
+Every stored version emits `SessionUpdated` (with the head turn), including
+the stores at the start and end of a run. Events go through one runner-wide
+broadcast channel: `subscribe` returns an action yielding the next event of
+one session, so a subscriber keeps its stream when the session is evicted
+and loaded again. Each event is also traced as `HostRunnerTrace kind sid`.
 
 #### 4.6 Startup recovery
 
-`recoverOnStartup` queries `status = running`. For each session found:
+`recoverOnStartup` queries `status = running`. For each session found that
+this runner is not running itself:
 
 1. Load it.
 2. Set its status to `sessionStatusOf s`.
@@ -540,11 +567,25 @@ recovered. Automatic resume can be added later as `--resume-interrupted`.
 
 #### 4.7 Cancellation
 
-`cancelRun` cancels the run's `Async`, then calls `shutdownAsyncEngine`, which
-cancels background calls; they end as `Failed "async tool call was
-cancelled"`. It then stores the session and sets its status from
-`sessionStatusOf`. Sub-agent runs execute inside the parent's tool call, so
-cancelling the parent cancels them.
+`cancelRun` cancels the run's `Async` without holding the lock (the run takes
+it to store its steps), then, under the lock and only if that run still
+owns the session:
+
+1. shuts the engine down, which marks background calls cancelled in the
+   World, and keeps the agent (and World) with no engine, so the next run
+   gets a fresh engine on the same World;
+2. applies queued external results;
+3. refreshes the head partial turn from the World, so its cancelled calls
+   become `Failed "async tool call was cancelled"`;
+4. stores the session with the status its turns imply, and emits
+   `RunStopped`.
+
+Background calls below the head (the LLM already got a placeholder for them)
+stay `Running` in the stored session. The next run's late-result collection
+finds them cancelled in the kept World and tells the LLM, in a user message,
+as for any late result (tested). If the session is evicted first, they are
+reported as orphaned instead. Sub-agent runs execute inside the parent's
+tool call, so cancelling the parent cancels them.
 
 #### 4.8 Waiting for a run
 
@@ -572,9 +613,12 @@ their continuation rows. `deleteSession`:
 
 Deleting leaves first means a crash part-way through never leaves a
 sub-session whose parent is gone; running the delete again finishes the job.
-This needs one new `ContinuationStore` field,
+This needs two new `ContinuationStore` fields:
+`csCountSession :: SessionId -> IO Int` for dry runs, and
 `csDeleteSession :: SessionId -> IO Int`, which deletes every row of a session
-(pending or completed) and returns the count. The runner does the cascade,
+(pending or completed) and returns the count. Deletion is also refused while
+an *ancestor* of the session has an active run: its sub-agent calls write
+into the tree, and would recreate what was deleted. The runner does the cascade,
 not SQL foreign keys, so the file backend behaves the same.
 
 ### 5. HTTP API (`agents-server`)
@@ -700,28 +744,22 @@ tracker.
   resumes to a final answer; a token lookup through the index loads no
   session; without an index the sessions are searched; migrations run once.
 
-### Phase 5: `SessionRunner` (G6, G8)
+### Phase 5: `SessionRunner` (G6, G8) ✅
 
-* Everything in §4, with `withHost`.
-* Tests, all with a mock LLM through `hostCompletion`:
-  * create, then run until blocked on deferred calls, `completeCall`
-    with auto-resume, final answer;
-  * two concurrent `completeCall`s for two tokens of the same turn: both
-    results present afterwards (the lost-update regression);
-  * `postMessage` while running gives `RunInProgress`; after idle it produces
-    a second LLM turn;
-  * `RunAsync` call started in run 1 finishes and is picked up in run 2
-    (engine kept between runs);
-  * cancel during a slow tool: status becomes not-running, background call
-    `Failed "…cancelled"`;
-  * recovery: a row with `status = running` and a `Running` call becomes
-    `ready`; the next resume marks the call orphaned;
-  * `awaitRun` returns when the run stops, and with "still active" after a
-    short timeout on a slow tool;
-  * delete cascade: a parent with a sub-session and continuation rows; the
-    dry run lists all of them and leaves the database unchanged; the real
-    delete removes all of them; both fail with `RunInProgress` while the
-    sub-session's parent run is active.
+* `System.Agents.Host` (`withHost`) and `System.Agents.Host.Runner` (§4).
+* `DeferredCallView` / `pendingDeferredCalls`; `csCountSession` and
+  `csDeleteSession`.
+* Tests (`RunnerTests`, mock LLM through the host's completion override):
+  deferred call completed with auto-resume, with the event sequence; two
+  concurrent completions of one turn both land; messages refused during a
+  run and accepted after, giving a second LLM turn; a background call
+  started in one run picked up by the next; cancel during a background call,
+  then the cancellation reported on the next run; recovery of a session left
+  running, its call orphaned on resume; `awaitRun` with timeout and
+  completion; delete cascade (refused during the parent's run, also for the
+  sub-session; dry run changes nothing; real delete removes sessions and
+  continuation rows); idle eviction and reload; `withHost` over agent and
+  database files.
 
 ### Phase 6: `agents-server` executable
 

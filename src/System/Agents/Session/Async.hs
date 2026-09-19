@@ -263,6 +263,10 @@ data ContinuationStore = ContinuationStore
     -- ^ List all pending continuation snapshots for a session
     , csCleanupExpired :: IO ()
     -- ^ Remove expired continuations
+    , csCountSession :: SessionId -> IO Int
+    -- ^ How many continuations (pending or completed) a session has
+    , csDeleteSession :: SessionId -> IO Int
+    -- ^ Delete every continuation of a session; returns how many there were
     }
 
 -------------------------------------------------------------------------------
@@ -404,6 +408,8 @@ mkSqliteContinuationStore conn = do
             , csDelete = sqliteDeleteContinuation conn
             , csListPending = sqliteListPending conn
             , csCleanupExpired = cleanupExpiredContinuations conn
+            , csCountSession = sqliteCountSession conn
+            , csDeleteSession = sqliteDeleteSessionContinuations conn
             }
 
 -- | Migrations of the tool continuations table.
@@ -499,6 +505,22 @@ sqliteCompleteContinuation conn token result = do
             (now, resultJson, tokenStr) ::
             IO [Only Text]
     pure $ not (null rows)
+
+-- | Count the continuations of a session.
+sqliteCountSession :: Connection -> SessionId -> IO Int
+sqliteCountSession conn (SessionId sid) = do
+    rows <-
+        query conn [sql| SELECT COUNT(*) FROM tool_continuations WHERE session_id = ? |] (Only $ UUID.toText sid) ::
+            IO [Only Int]
+    pure $ maybe 0 fromOnly (listToMaybe rows)
+
+-- | Delete the continuations of a session.
+sqliteDeleteSessionContinuations :: Connection -> SessionId -> IO Int
+sqliteDeleteSessionContinuations conn (SessionId sid) = do
+    rows <-
+        query conn [sql| DELETE FROM tool_continuations WHERE session_id = ? RETURNING token |] (Only $ UUID.toText sid) ::
+            IO [Only Text]
+    pure $ length rows
 
 -- | The session of a continuation, pending or completed.
 sqliteFindSession :: Connection -> ContinuationToken -> IO (Maybe SessionId)

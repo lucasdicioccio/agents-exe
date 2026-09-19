@@ -29,6 +29,8 @@ module System.Agents.Session.Types (
     isBlockedOnDeferredCalls,
     hasBackgroundCalls,
     backgroundCalls,
+    DeferredCallView (..),
+    pendingDeferredCalls,
     Turn (..),
     UserTurnContent (..),
     LlmTurnContent (..),
@@ -186,6 +188,36 @@ sessionStatusOf sess =
         (PartialUserTurn _ _ : _)
             | isBlockedOnDeferredCalls sess -> StatusWaitingExternal
             | otherwise -> StatusReady
+
+-- | A deferred call waiting for an external result, as shown to operators.
+data DeferredCallView = DeferredCallView
+    { dcvToolCallId :: ToolCallId
+    , dcvToken :: Maybe ContinuationToken
+    , dcvToolName :: Text
+    , dcvDisposition :: ToolCallDisposition
+    , dcvCall :: LlmToolCall
+    -- ^ The call as the LLM made it, with its arguments.
+    }
+    deriving (Show, Eq)
+
+instance ToJSON DeferredCallView where
+    toJSON v =
+        Aeson.object
+            [ "tool_call_id" .= v.dcvToolCallId
+            , "continuation_token" .= v.dcvToken
+            , "tool" .= v.dcvToolName
+            , "disposition" .= v.dcvDisposition
+            , "call" .= v.dcvCall
+            ]
+
+-- | The deferred calls of the head partial turn.
+pendingDeferredCalls :: Session -> [DeferredCallView]
+pendingDeferredCalls sess =
+    [ DeferredCallView tc.tcId tc.tcContinuation (llmToolCallName tc.tcCall) tc.tcPolicy.apDisposition tc.tcCall
+    | PartialUserTurn partial _ <- take 1 sess.turns
+    , tc <- partial.pTrackedToolCalls
+    , tc.tcState == Deferred
+    ]
 
 {- | Whether the head partial turn has deferred calls and nothing else to
 run or wait for (no ready or running calls).

@@ -87,6 +87,7 @@ import qualified DeveloperToolboxPatchTests
 import qualified AgentFactoryTests
 import qualified SessionMetadataTests
 import qualified ContinuationConsistencyTests
+import qualified RunnerTests
 import qualified DurableWorkflowTests
 
 main :: IO ()
@@ -135,6 +136,7 @@ tests =
         , AgentFactoryTests.tests
         , SessionMetadataTests.tests
         , ContinuationConsistencyTests.tests
+        , RunnerTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
