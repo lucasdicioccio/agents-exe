@@ -951,20 +951,44 @@ and the riskier ones come after the ones they build on. Choices marked
   (warp) that checks the deltas, the stored answer, and the request's
   `stream` fields.
 
-### Phase 12: agents from the database
+### Phase 12: agents from the database ✅
 
-* Table `agents(slug, json, updated_at)` in the host's database. Agents in it
-  are loaded next to `--agent-file` ones; a slug in both is an error.
-* An agent tree can be loaded from an in-memory `AgentDescription`
-  (`AgentTree.loadAgentTreeFrom`): the file-discovery step is replaced by a
-  graph of one node. *Default*: database agents cannot use tools that need
-  files (bash tool directories, OpenAPI/PostgREST files, skills); builtin
-  toolboxes and MCP servers work, and `extraAgents` may name other database
-  agents.
-* Endpoints `PUT /v1/agents/:slug` and `DELETE /v1/agents/:slug`, allowed to
-  the owners listed in `--admin-owners` (and to anyone without
-  authentication). A change reloads that agent: new sessions use it, live
-  sessions keep their built agent until evicted.
+* `System.Agents.AgentStore`: `StoredAgent` (config, `updated_at`,
+  `updated_by`), `AgentStore` (`asList`, `asPut`, `asDelete`),
+  `mkSqliteAgentStore` (table `agents`, component `agents`),
+  `fileBasedFields`. `agents-postgres` has `mkPostgresAgentStore`.
+  `HostStores.hsAgents :: Maybe AgentStore`; `withHost` and
+  `withPostgresStores` provide one.
+* `AgentTree.loadAgentTreeFromConfig`: a tree of one agent from an in-memory
+  `Agent`, reusing the loader's later phases (create, wire tools, build) on a
+  one-node graph, with no file discovery.
+* `Host`: `hostStoredAgents` (loaded stored agents in a `TVar`, the store, a
+  loader, and a lock serialising edits); `hostAllAgents`, `lookupAgent`,
+  `putStoredAgent`, `deleteStoredAgent`, `AgentEditError`. The runner looks
+  agents up through `lookupAgent`, so new sessions see changes at once.
+* `agents-server`: `GET/PUT/DELETE /v1/agents/:slug`, `source` in listings,
+  MCP `tools/list` includes stored agents, and `--admin-owners`.
+* Differences from the plan:
+  * **`extraAgents` is refused**, like the other file-based fields: stored
+    agents have no sub-agents yet.
+  * **Editing needs `--admin-owners`, which needs `--auth-tokens`**. The
+    plan let anyone edit agents without authentication. An agent definition
+    can start MCP servers, which are commands on the server's machine, so
+    edits are off by default.
+  * **A file agent hides a stored agent with its slug**: the stored one is
+    skipped at startup, and the skip is logged. Refusing to start instead
+    would leave no way to fix the database through the API.
+* Known limitation: replacing or deleting a stored agent does not stop MCP
+  servers it started (the tree loader has no cleanup); they end with the
+  server.
+* Tests:
+  * runner level: store, replace, and refuse (file-based fields, a file
+    agent's slug); run a session on a stored agent; reload after a restart;
+    a file agent hiding a stored one, with the skip traced; delete persists;
+  * server: admin and non-admin, 201 and then 200, listing with sources,
+    refusals, sessions and MCP on a stored agent, delete, and edits disabled
+    by default;
+  * Postgres: put, replace, list, and delete.
 
 ## Remaining later work
 
@@ -973,7 +997,9 @@ and the riskier ones come after the ones they build on. Choices marked
   by `dockerRunner`.
 * **Several server processes on one Postgres database**: live-run ownership
   through a lease column (`run_owner`, `run_lease_until`).
-* **Database agents with files**: tool directories stored with the agent.
+* **Database agents with files or sub-agents**: tool directories stored with
+  the agent; `extraAgents` naming other stored agents.
+* **Stopping a stored agent's MCP servers** when it is replaced or deleted.
 
 ## Decisions
 
@@ -1004,7 +1030,9 @@ later work; see [Milestone 2](#milestone-2-the-later-work)):
 8. **Postgres lives in its own `agents-postgres` library**; the host takes
    its stores from the caller.
 9. **Token streaming is opt-in** (`--stream-tokens`).
-10. **Database agents cannot use file-based tools** in their first version.
+10. **Database agents cannot use file-based tools** in their first version,
+    nor `extraAgents`. Storing agents needs `--admin-owners` (and so
+    authentication). A file agent hides a stored agent with the same slug.
 
 ## Related docs
 

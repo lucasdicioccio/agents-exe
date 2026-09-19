@@ -36,6 +36,7 @@ module System.Agents.AgentTree (
     -- * Loading and initialization
     loadAgentTreeConfig,
     loadAgentTree,
+    loadAgentTreeFromConfig,
     LoadAgentResult (..),
     withAgentTree,
     LoadingError (..),
@@ -982,6 +983,34 @@ loadAgentTree props = do
                                             -- Store registry in tree
                                             let finalTree = tree{osTreeRegistry = registry}
                                             pure $ Initialized finalTree
+
+{- | Load a tree of one agent from a configuration held in memory (e.g. read
+from a database) instead of a file. Nothing is discovered on disk: the agent
+has no sub-agents, and any file-based tools it names resolve against the
+given directory. 'props.rootAgentFile' is not read.
+-}
+loadAgentTreeFromConfig :: Props -> FilePath -> Agent -> IO LoadAgentResult
+loadAgentTreeFromConfig props baseDir agent = do
+    registry <- newAgentRegistry
+    let agentSlug = AgentsBase.slug agent
+        node =
+            AgentConfigNode
+                { nodeFile = baseDir </> (Text.unpack agentSlug <> ".json")
+                , nodeConfig = agent
+                , nodeChildren = []
+                , nodeExtraRefs = []
+                }
+        graph = AgentConfigGraph (Map.singleton agentSlug node) (Map.singleton agentSlug []) agentSlug
+    agentsResult <- createAgents props graph registry
+    case agentsResult of
+        Left errs -> pure $ Errors errs
+        Right nodeMap -> do
+            toolErrors <- wireToolReferences props graph nodeMap
+            case NonEmpty.nonEmpty toolErrors of
+                Just errs -> pure $ Errors errs
+                Nothing -> case buildAgentTree graph nodeMap of
+                    Left errs -> pure $ Errors errs
+                    Right tree -> pure $ Initialized tree{osTreeRegistry = registry}
 
 -- | Run an action with a loaded agent tree.
 withAgentTree :: Props -> (LoadAgentResult -> IO a) -> IO a

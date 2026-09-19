@@ -387,12 +387,13 @@ sessionAgent runner live meta =
         Just agent -> pure (Right agent)
         Nothing -> case meta.smAgent of
             Nothing -> pure $ Left $ UnknownAgent ""
-            Just slug -> case Map.lookup slug runner.srHost.hostAgents of
-                Nothing -> pure $ Left $ UnknownAgent slug
-                Just node -> do
-                    agent <- newAgent runner live.lsSessionId node
-                    atomically $ writeTVar live.lsAgent (Just agent)
-                    pure $ Right agent
+            Just slug ->
+                lookupAgent runner.srHost slug >>= \case
+                    Nothing -> pure $ Left $ UnknownAgent slug
+                    Just node -> do
+                        agent <- newAgent runner live.lsSessionId node
+                        atomically $ writeTVar live.lsAgent (Just agent)
+                        pure $ Right agent
 
 -- | A root agent for a session, always asynchronous: runs can pause and resume.
 newAgent :: SessionRunner -> SessionId -> OSAgentNode -> IO RunnerAgent
@@ -507,22 +508,23 @@ createSession runner = createSessionAs runner Nothing
 
 -- | Like 'createSession', for an owner.
 createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
-createSessionAs runner owner slug message mode
-    | not (Map.member slug runner.srHost.hostAgents) = pure $ Left $ UnknownAgent slug
-    | otherwise = do
-        sid <- newSessionId
-        withLive runner sid $ \live -> do
-            now <- getCurrentTime
-            let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
-            sessionAgent runner live meta0 >>= \case
-                Left err -> pure (Left err)
-                Right agent -> do
-                    sPrompt <- agent.sysPrompt
-                    sTools <- agent.sysTools
-                    sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery message.nmText message.nmMedia)
-                    store runner live meta0 sess StatusReady Nothing >>= \case
-                        Left conflict -> pure (Left (Conflict conflict))
-                        Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m sess meta) mode
+createSessionAs runner owner slug message mode =
+    lookupAgent runner.srHost slug >>= \case
+        Nothing -> pure $ Left $ UnknownAgent slug
+        Just _ -> do
+            sid <- newSessionId
+            withLive runner sid $ \live -> do
+                now <- getCurrentTime
+                let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
+                sessionAgent runner live meta0 >>= \case
+                    Left err -> pure (Left err)
+                    Right agent -> do
+                        sPrompt <- agent.sysPrompt
+                        sTools <- agent.sysTools
+                        sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery message.nmText message.nmMedia)
+                        store runner live meta0 sess StatusReady Nothing >>= \case
+                            Left conflict -> pure (Left (Conflict conflict))
+                            Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m sess meta) mode
 
 -- | Add a user message to an idle session, and start a run unless the mode is 'Nothing'.
 postMessage :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)

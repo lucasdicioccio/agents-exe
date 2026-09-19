@@ -38,6 +38,7 @@ cabal run agents-server -- \
 | `--live-session-ttl SECONDS` | `900` | How long an idle session keeps its in-memory state (including background tool calls) before it is dropped. It is reloaded from the database on next use. |
 | `--shutdown-grace SECONDS` | `10` | How long open requests get to finish on shutdown. |
 | `--auth-tokens FILE` | (none) | Bearer tokens and their owners. See [Authentication](#authentication). |
+| `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API. Needs `--auth-tokens`. See [Storing agents](#storing-agents). |
 | `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
 
 Sub-agents work as they do elsewhere: their sessions are stored in the same
@@ -252,7 +253,10 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 |---|---|---|---|
 | `GET /healthz` | | `200 {ok, live_sessions, active_runs}` | |
 | `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
-| `GET /v1/agents` | | `200 [{slug, description, tools}]` | |
+| `GET /v1/agents` | | `200 [{slug, description, tools, source, …}]` | |
+| `GET /v1/agents/:slug` | | `200` agent | 404 `unknown_agent` |
+| `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
+| `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
 | `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request` |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
 | `GET /v1/sessions/:id` | | `200` session | 404 `unknown_session` |
@@ -304,6 +308,47 @@ Several servers may share one Postgres database: every write is versioned,
 so a conflicting write is detected and refused (`409 conflict`). Runs are
 not coordinated between servers, though: route all requests for a session to
 the same server.
+
+---
+
+## Storing agents
+
+Besides `--agent-file`, agents can live in the server's database and be
+created, replaced, and deleted over the API. Storing agents is off unless
+`--admin-owners` names the owners allowed to do it, which needs
+`--auth-tokens`: an agent definition can start MCP servers, which are
+commands run on the server's machine.
+
+```bash
+curl -X PUT localhost:8080/v1/agents/helper -H 'Authorization: Bearer <admin token>' -d '{
+  "apiKeyId": "openai", "flavor": "OpenAIv1",
+  "modelUrl": "https://api.openai.com/v1", "modelName": "gpt-4o-mini",
+  "announce": "a helpful assistant", "systemPrompt": ["You help."],
+  "builtinToolboxes": [], "mcpServers": []
+}'
+```
+
+* The body is what goes under `contents` in an agent file. The slug comes
+  from the path.
+* A stored agent cannot use anything that refers to files:
+  `toolDirectory`, `bashToolboxes`, `openApiToolboxes`,
+  `postgrestToolboxes`, `extraAgents`, `skillSources`, `autoEnableSkills`
+  (`400 agent_uses_files`). Builtin toolboxes and MCP servers work, as do the
+  execution mode and tool-call policy.
+* The agent is loaded before it is stored: if an MCP server fails to start,
+  the answer is `400 agent_failed_to_load` and nothing is stored.
+* A slug used by an agent file cannot be stored (`409
+  agent_defined_by_file`). If an agent file with the slug of a stored agent
+  appears later, the file wins, and the stored agent is skipped at startup
+  (logged as `agents.stored_skipped`).
+* `GET /v1/agents` lists both kinds, with `source: "file"` or `"database"`.
+  Stored agents also show `config`, `updated_at`, and `updated_by`.
+* New sessions use a replaced agent at once. Sessions already in memory keep
+  the version they built until they are idle long enough to be dropped
+  (`--live-session-ttl`). Sessions of a deleted agent stay, but runs on them
+  fail with `unknown_agent` until an agent with that slug exists again.
+* MCP servers started for a stored agent keep running when the agent is
+  replaced or deleted, until the server stops.
 
 ---
 

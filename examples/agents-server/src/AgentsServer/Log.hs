@@ -62,6 +62,7 @@ hostTraceLogger :: Logger -> Tracer IO HostTrace
 hostTraceLogger logger = Tracer $ \case
     HostRunnerTrace kind sid -> logLine logger kind ["session_id" .= sid]
     HostRecoveredSessions sids -> logLine logger "sessions.recovered" ["session_ids" .= sids]
+    HostStoredAgentSkipped slug reason -> logLine logger "agents.stored_skipped" ["slug" .= slug, "reason" .= reason]
     HostAgentTrace t -> agentTrace [] t
     HostSubAgentTrace (OneShotTool.OneShotTrace t) -> agentTrace ["sub_agent" .= True] t
     HostTreeTrace t -> logLine logger "agent_tree" ["event" .= constructorName t]

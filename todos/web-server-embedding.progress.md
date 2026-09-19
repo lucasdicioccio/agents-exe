@@ -334,3 +334,22 @@ reported warnings, now fixed:
   streaming endpoint.
 - The non-streaming path through the binary still works (fake endpoint,
   deferred call reported).
+
+## Phase 12 — Agents from the database ✅ COMPLETE
+
+- `AgentStore` (new), `AgentTree.loadAgentTreeFromConfig`, stored agents in
+  `Host`, `mkPostgresAgentStore`, `/v1/agents/:slug` endpoints,
+  `--admin-owners`. See the spec for the differences from the plan.
+- Docs: a "Storing agents" section in `docs/agents-server.md`.
+
+### Verification
+
+- `agents-tests`: 947 pass (a new runner test for stored agents).
+- `agents-server-tests`: 15 pass.
+- `agents-postgres-tests`: 6 pass.
+- Smoke test of the binary with authentication:
+  - a non-admin PUT is refused (403); an admin PUT stores an agent whose MCP
+    server is `agents-exe mcp-server`, and its tool
+    (`mcp_weather_ask_weather_000`) is listed;
+  - after a restart the agent is reloaded from SQLite with its tool;
+  - no tokens in the logs, and no MCP server process left after shutdown.

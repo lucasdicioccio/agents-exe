@@ -182,6 +182,7 @@ library agents-lib
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
                     , System.Agents.AgentFactory
+                    , System.Agents.AgentStore
                     , System.Agents.Host
                     , System.Agents.Host.Runner
                     , System.Agents.OneShot

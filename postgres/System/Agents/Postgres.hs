@@ -20,6 +20,7 @@ module System.Agents.Postgres (
     openPostgresPool,
     mkPostgresSessionStore,
     mkPostgresContinuationStore,
+    mkPostgresAgentStore,
     isPostgresUrl,
 
     -- * Migrations
@@ -56,6 +57,8 @@ import Database.PostgreSQL.Simple (
  )
 import Database.PostgreSQL.Simple.ToField (Action, ToField (..))
 
+import System.Agents.AgentStore (AgentStore (..), StoredAgent (..))
+import qualified System.Agents.Base as Base
 import System.Agents.Host (HostStores (..))
 import System.Agents.Session.Async (ContinuationStore (..), ContinuationToken (..), ToolContinuationSnapshot (..))
 import System.Agents.Session.Base (Session, SessionId (..), SessionStatus (..), UserToolResponse, parseSessionStatus, sessionStatusOf, sessionStatusText)
@@ -80,7 +83,8 @@ withPostgresStores url action =
     bracket (openPostgresPool url 10) destroyAllResources $ \pool -> do
         sessions <- mkPostgresSessionStore pool
         continuations <- mkPostgresContinuationStore pool
-        action (HostStores sessions continuations)
+        agents <- mkPostgresAgentStore pool
+        action (HostStores sessions continuations (Just agents))
 
 -- | A pool of at most the given number of connections, idle ones closed after a minute.
 openPostgresPool :: ByteString -> Int -> IO (Pool Connection)
@@ -408,3 +412,42 @@ listPending conn sid = do
         query conn "SELECT token, context_json FROM tool_continuations WHERE session_id = ? AND completed_at IS NULL" (Only (sessionIdText sid)) ::
             IO [(Text, Text)]
     pure [(ContinuationToken uuid, snap) | (t, json) <- rows, Just uuid <- [UUID.fromText t], Just snap <- [decodeJson json]]
+
+-------------------------------------------------------------------------------
+-- Agents
+-------------------------------------------------------------------------------
+
+agentMigrations :: [PgMigration]
+agentMigrations =
+    [ PgMigration 1 $
+        statements
+            [ "CREATE TABLE IF NOT EXISTS agents (\
+              \ slug TEXT PRIMARY KEY,\
+              \ json TEXT NOT NULL,\
+              \ updated_at TIMESTAMPTZ NOT NULL,\
+              \ updated_by TEXT)"
+            ]
+    ]
+
+-- | An agent store on the pool, after migrating its table.
+mkPostgresAgentStore :: Pool Connection -> IO AgentStore
+mkPostgresAgentStore pool = do
+    runPostgresMigrations pool "agents" agentMigrations
+    let with = withResource pool
+    pure
+        AgentStore
+            { asList = with $ \c -> do
+                rows <- query_ c "SELECT json, updated_at, updated_by FROM agents ORDER BY slug" :: IO [(Text, UTCTime, Maybe Text)]
+                pure [StoredAgent agent updated by | (json, updated, by) <- rows, Just agent <- [decodeJson json]]
+            , asPut = \by agent -> with $ \c -> do
+                now <- nowMicros
+                void $
+                    execute
+                        c
+                        "INSERT INTO agents (slug, json, updated_at, updated_by) VALUES (?, ?, ?, ?)\
+                        \ ON CONFLICT (slug) DO UPDATE SET\
+                        \ json = excluded.json, updated_at = excluded.updated_at, updated_by = excluded.updated_by"
+                        (Base.slug agent, encodeJson agent, now, by)
+                pure $ StoredAgent agent now by
+            , asDelete = \slug -> with $ \c -> (> 0) <$> execute c "DELETE FROM agents WHERE slug = ?" (Only slug)
+            }

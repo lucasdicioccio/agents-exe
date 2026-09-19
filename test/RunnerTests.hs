@@ -12,14 +12,15 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
-import Data.IORef (atomicModifyIORef', newIORef)
+import qualified Data.ByteString.Lazy.Char8 as LBS8
+import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (getCurrentTime)
 import Data.UUID.V4 (nextRandom)
 import Database.SQLite.Simple (open)
-import Prod.Tracer (silent)
+import Prod.Tracer (Tracer (..), silent)
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
@@ -56,6 +57,7 @@ tests =
         , testCase "idle sessions are evicted and come back on demand" evictionTest
         , testCase "withHost loads agents and serves sessions from a database file" withHostTest
         , testCase "a subscriber skips other sessions' events" subscribeFilterTest
+        , testCase "stored agents survive a restart; a file agent hides a stored one" storedAgentsTest
         ]
 
 -------------------------------------------------------------------------------
@@ -311,6 +313,59 @@ subscribeFilterTest = do
         kinds <- eventsUntilStopped next
         assertBool ("events of b: " <> show kinds) ("run.started" `elem` kinds)
 
+storedAgentsTest :: Assertion
+storedAgentsTest =
+    withSystemTempDirectory "agents-stored" $ \dir -> do
+        let keysFile = dir </> "keys.json"
+            dbFile = dir </> "agents.db"
+            agentFile slug = dir </> (slug <> ".json")
+            config slug extra =
+                "{\"slug\": \""
+                    <> slug
+                    <> "\", \"apiKeyId\": \"none\", \"flavor\": \"OpenAIv1\", "
+                    <> "\"modelUrl\": \"http://127.0.0.1:1\", \"modelName\": \"mock\", \"announce\": \"test\", "
+                    <> "\"systemPrompt\": [\"You are a test\"]"
+                    <> extra
+                    <> "}"
+            writeAgentFile slug = writeFile (agentFile slug) ("{\"tag\": \"OpenAIAgentDescription\", \"contents\": " <> config slug "" <> "}")
+            decodeAgent txt = either (assertFailure . ("bad config: " <>)) pure (Aeson.eitherDecode (LBS8.pack txt))
+            cfg files = (defaultHostConfig (map agentFile files) keysFile dbFile){hcCompletion = Just (const mockCompletion)}
+        writeFile keysFile "{}"
+        writeAgentFile "smoke"
+        helper <- decodeAgent (config "helper" "")
+        withHost (cfg ["smoke"]) silent $ \host -> do
+            first <- putStoredAgent host (Just "alice") helper
+            fmap snd first @?= Right True
+            second <- putStoredAgent host (Just "alice") helper
+            fmap snd second @?= Right False
+            withFiles <- decodeAgent (config "files" ", \"toolDirectory\": \"tools\"")
+            fmap snd <$> putStoredAgent host Nothing withFiles >>= (@?= Left (AgentUsesFiles ["toolDirectory"]))
+            smoke <- decodeAgent (config "smoke" "")
+            fmap snd <$> putStoredAgent host Nothing smoke >>= (@?= Left (AgentDefinedByFile "smoke"))
+            withSessionRunner host $ \runner -> do
+                meta <- expectRight =<< createSession runner "helper" (message "hello") (Just UntilBlocked)
+                (idle, _) <- expectRight =<< awaitRun runner meta.smSessionId 5
+                idle.smStatus @?= StatusIdle
+        -- After a restart the stored agent is back.
+        withHost (cfg ["smoke"]) silent $ \host ->
+            Map.keys <$> hostAllAgents host >>= (@?= ["helper", "smoke"])
+        -- A file agent with the same slug hides it, and the skip is traced.
+        writeAgentFile "helper"
+        traces <- newIORef []
+        let tracer = Tracer $ \t -> atomicModifyIORef' traces (\ts -> (t : ts, ()))
+        withHost (cfg ["smoke", "helper"]) tracer $ \host -> do
+            agents <- hostAllAgents host
+            [slug | (slug, (FromFile, _)) <- Map.toList agents] @?= ["helper", "smoke"]
+            deleteStoredAgent host "helper" >>= (@?= Left (AgentDefinedByFile "helper"))
+        skipped <- readIORef traces
+        [slug | HostStoredAgentSkipped slug _ <- skipped] @?= ["helper"]
+        -- Deleted agents stay deleted.
+        withHost (cfg ["smoke"]) silent $ \host -> do
+            deleteStoredAgent host "helper" >>= (@?= Right ())
+            deleteStoredAgent host "helper" >>= (@?= Left (NoStoredAgent "helper"))
+        withHost (cfg ["smoke"]) silent $ \host ->
+            Map.keys <$> hostAllAgents host >>= (@?= ["smoke"])
+
 -------------------------------------------------------------------------------
 -- Fixtures
 -------------------------------------------------------------------------------
@@ -322,9 +377,11 @@ testHost nodes complete = do
     backend <- mkSqliteSessionStore conn
     store <- mkSqliteContinuationStore conn
     let deps = (defaultAgentDeps []){adContinuationStore = Just store, adCompletion = Just complete}
+    stored <- noStoredAgents
     pure
         Host
             { hostAgents = Map.fromList [(Base.slug n.osNodeConfig, n) | n <- nodes]
+            , hostStoredAgents = stored
             , hostDeps = deps
             , hostSubAgentDeps = deps{adSessionSink = SinkBackend backend}
             , hostBackend = backend

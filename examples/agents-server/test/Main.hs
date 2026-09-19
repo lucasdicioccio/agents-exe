@@ -17,6 +17,7 @@ import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Char8 as Char8
@@ -63,6 +64,8 @@ main =
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
             , testCase "without authentication, non-local browser origins are refused" originTest
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
+            , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
+            , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
             ]
 
 -------------------------------------------------------------------------------
@@ -327,7 +330,7 @@ streamingTest = do
     requests <- newIORef []
     testWithApplication (pure (fakeStreamingLlm requests)) $ \llmPort -> do
         let extra = "{\"modelUrl\": \"http://127.0.0.1:" <> show llmPort <> "/v1\"}"
-        withServerConfig Nothing extra (\c -> c{hcCompletion = Nothing, hcStreamTokens = True}) $ \srv -> do
+        withServerConfig Nothing extra (\c -> c{hcCompletion = Nothing, hcStreamTokens = True}) id $ \srv -> do
             (_, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
             let sid = textField "session_id" view
             withEvents srv sid $ \next -> do
@@ -363,6 +366,66 @@ fakeStreamingLlm requests req respond = do
         , Aeson.object ["choices" .= ([] :: [Aeson.Value]), "usage" .= Aeson.object ["prompt_tokens" .= (3 :: Int), "completion_tokens" .= (2 :: Int), "total_tokens" .= (5 :: Int)]]
         ]
 
+storedAgentsTest :: Assertion
+storedAgentsTest = do
+    let tokens = authTokensFromList [("alice-token", "alice"), ("bob-token", "bob")]
+    withServerConfig (Just tokens) "{}" (\c -> c{hcCompletion = Just (const mockCompletion)}) (\e -> e{envAdmins = ["alice"]}) $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+            bob = anonymous{srvToken = Just "bob-token"}
+            helper extra = Just (storedConfig extra)
+        (notAdmin, err) <- call bob "PUT" "/v1/agents/helper" (helper [])
+        (notAdmin, field "error" err) @?= (403, "forbidden")
+        (created, view) <- call alice "PUT" "/v1/agents/helper" (helper [])
+        (created, field "source" view, field "updated_by" view) @?= (201, "database", "alice")
+        (replaced, _) <- call alice "PUT" "/v1/agents/helper" (helper ["announce" .= ("a better helper" :: Text)])
+        replaced @?= 200
+        (_, listed) <- call bob "GET" "/v1/agents" Nothing
+        case listed of
+            Aeson.Array xs -> map (\a -> (field "slug" a, field "source" a)) (Vector.toList xs) @?= [("helper", "database"), ("server-test", "file")]
+            other -> assertFailure ("expected a list, got " <> show other)
+        (_, one) <- call bob "GET" "/v1/agents/helper" Nothing
+        field "description" one @?= "a better helper"
+        let refused extra path code = do
+                (status, e) <- call alice "PUT" path (helper extra)
+                (path, status, field "error" e) @?= (path, fst code, snd code)
+        refused ["toolDirectory" .= ("tools" :: Text)] "/v1/agents/files" (400, "agent_uses_files")
+        refused [] "/v1/agents/server-test" (409, "agent_defined_by_file")
+        refused ["slug" .= ("other" :: Text)] "/v1/agents/helper" (400, "bad_request")
+        (sessionStatus, session) <- call bob "POST" "/v1/sessions?wait=true" (Just (Aeson.object ["agent" .= ("helper" :: Text), "prompt" .= ("hi" :: Text)]))
+        (sessionStatus, field "status" session, field "agent" session) @?= (201, "idle", "helper")
+        (_, tools) <- call bob "POST" "/mcp" (Just (Aeson.object ["jsonrpc" .= ("2.0" :: Text), "id" .= (1 :: Int), "method" .= ("tools/list" :: Text)]))
+        map (field "name") (arrayField "tools" (field "result" tools)) @?= ["ask_helper", "ask_server-test"]
+        (deleted, _) <- call alice "DELETE" "/v1/agents/helper" Nothing
+        deleted @?= 200
+        (again, e1) <- call alice "DELETE" "/v1/agents/helper" Nothing
+        (again, field "error" e1) @?= (404, "unknown_agent")
+        (gone, e2) <- call bob "POST" "/v1/sessions" (Just (Aeson.object ["agent" .= ("helper" :: Text), "prompt" .= ("hi" :: Text)]))
+        (gone, field "error" e2) @?= (404, "unknown_agent")
+
+agentEditsDisabledTest :: Assertion
+agentEditsDisabledTest = withServer "{}" mockCompletion $ \srv -> do
+    (status, err) <- call srv "PUT" "/v1/agents/helper" (Just (storedConfig []))
+    (status, field "error" err) @?= (403, "agent_edits_disabled")
+
+-- | An agent configuration that needs no files, with extra fields.
+storedConfig :: [Aeson.Pair] -> Aeson.Value
+storedConfig extra =
+    case (base, Aeson.object extra) of
+        (Aeson.Object a, Aeson.Object b) -> Aeson.Object (KeyMap.union b a)
+        (a, _) -> a
+  where
+    base =
+        Aeson.object
+            [ "apiKeyId" .= ("none" :: Text)
+            , "flavor" .= ("OpenAIv1" :: Text)
+            , "modelUrl" .= ("http://127.0.0.1:1" :: Text)
+            , "modelName" .= ("mock" :: Text)
+            , "announce" .= ("a stored agent" :: Text)
+            , "systemPrompt" .= ["You help" :: Text]
+            , "builtinToolboxes" .= ([] :: [Text])
+            , "mcpServers" .= ([] :: [Text])
+            ]
+
 -------------------------------------------------------------------------------
 -- Server fixture
 -------------------------------------------------------------------------------
@@ -383,11 +446,11 @@ withServer :: String -> Completion -> (Srv -> IO a) -> IO a
 withServer = withServerAuth Nothing
 
 withServerAuth :: Maybe AuthTokens -> String -> Completion -> (Srv -> IO a) -> IO a
-withServerAuth auth extraConfig complete = withServerConfig auth extraConfig (\c -> c{hcCompletion = Just (const complete)})
+withServerAuth auth extraConfig complete = withServerConfig auth extraConfig (\c -> c{hcCompletion = Just (const complete)}) id
 
--- | The most general fixture: the host configuration is adjusted by the caller.
-withServerConfig :: Maybe AuthTokens -> String -> (HostConfig -> HostConfig) -> (Srv -> IO a) -> IO a
-withServerConfig auth extraConfig adjust k =
+-- | The most general fixture: the caller adjusts the host configuration and the server environment.
+withServerConfig :: Maybe AuthTokens -> String -> (HostConfig -> HostConfig) -> (ServerEnv -> ServerEnv) -> (Srv -> IO a) -> IO a
+withServerConfig auth extraConfig adjust adjustEnv k =
     withSystemTempDirectory "agents-server" $ \dir -> do
         let agentFile = dir </> "agent.json"
             keysFile = dir </> "keys.json"
@@ -401,7 +464,7 @@ withServerConfig auth extraConfig adjust k =
         withHost cfg silent $ \host ->
             withSessionRunner host $ \runner -> do
                 env0 <- newServerEnv host runner auth
-                let env = env0{envKeepAlive = 300_000}
+                let env = adjustEnv env0{envKeepAlive = 300_000}
                 testWithApplication (pure (application env)) $ \p -> k (Srv p env manager Nothing [])
   where
     baseConfig =

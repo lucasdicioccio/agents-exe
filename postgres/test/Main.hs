@@ -39,7 +39,10 @@ import System.Process (callProcess, readProcess)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import qualified Data.Aeson.Types as Aeson
 import System.Agents.AgentFactory (Completion)
+import System.Agents.AgentStore (AgentStore (..), StoredAgent (..))
+import qualified System.Agents.Base as Base
 import System.Agents.Host
 import System.Agents.Host.Runner
 import System.Agents.Postgres
@@ -76,6 +79,7 @@ main = do
                         , testCase "queries filter, order, and limit" (queryTest baseUrl)
                         , testCase "concurrent compare-and-stores: exactly one wins" (concurrentCasTest baseUrl)
                         , testCase "a runner flow: deferred call, completion, cascade delete" (runnerTest baseUrl)
+                        , testCase "stored agents: put, replace, list, delete" (agentStoreTest baseUrl)
                         ]
 
 -------------------------------------------------------------------------------
@@ -88,7 +92,7 @@ migrationsTest baseUrl = withDatabase baseUrl $ \url -> do
     withPostgresStores url $ \_ -> pure ()
     bracket (connectPostgreSQL url) close $ \conn -> do
         rows <- query_ conn "SELECT component, version FROM schema_migrations ORDER BY component, version" :: IO [(Text, Int)]
-        rows @?= [("continuations", 1), ("sessions", 1)]
+        rows @?= [("agents", 1), ("continuations", 1), ("sessions", 1)]
 
 casTest :: String -> Assertion
 casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
@@ -151,6 +155,23 @@ concurrentCasTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores ur
     Just (_, final) <- backend.sbLoadMeta sid
     final.smVersion @?= 2
 
+-- | The agent the runner test serves.
+agentConfig :: Aeson.Value
+agentConfig =
+    Aeson.object
+        [ "slug" .= ("pg-test" :: Text)
+        , "apiKeyId" .= ("none" :: Text)
+        , "flavor" .= ("OpenAIv1" :: Text)
+        , "modelUrl" .= ("http://127.0.0.1:1" :: Text)
+        , "modelName" .= ("mock" :: Text)
+        , "announce" .= ("a test agent" :: Text)
+        , "systemPrompt" .= ["You are a test" :: Text]
+        , "builtinToolboxes" .= ([] :: [Text])
+        , "mcpServers" .= ([] :: [Text])
+        , "executionMode" .= ("asynchronous" :: Text)
+        , "toolCallPolicyConfig" .= Aeson.object ["default" .= Aeson.object ["tag" .= ("defer" :: Text), "reason" .= ("external" :: Text)], "rules" .= ([] :: [Text])]
+        ]
+
 runnerTest :: String -> Assertion
 runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "agents-pg-host" $ \dir -> do
     let agentFile = dir </> "agent.json"
@@ -181,21 +202,19 @@ runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "age
                 getSession runner sid >>= \case
                     Nothing -> pure ()
                     Just _ -> assertFailure "the session survived its deletion"
-  where
-    agentConfig =
-        Aeson.object
-            [ "slug" .= ("pg-test" :: Text)
-            , "apiKeyId" .= ("none" :: Text)
-            , "flavor" .= ("OpenAIv1" :: Text)
-            , "modelUrl" .= ("http://127.0.0.1:1" :: Text)
-            , "modelName" .= ("mock" :: Text)
-            , "announce" .= ("a test agent" :: Text)
-            , "systemPrompt" .= ["You are a test" :: Text]
-            , "builtinToolboxes" .= ([] :: [Text])
-            , "mcpServers" .= ([] :: [Text])
-            , "executionMode" .= ("asynchronous" :: Text)
-            , "toolCallPolicyConfig" .= Aeson.object ["default" .= Aeson.object ["tag" .= ("defer" :: Text), "reason" .= ("external" :: Text)], "rules" .= ([] :: [Text])]
-            ]
+
+agentStoreTest :: String -> Assertion
+agentStoreTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
+    agentStore <- maybe (assertFailure "no agent store") pure stores.hsAgents
+    agent <- either (assertFailure . ("bad config: " <>)) pure (Aeson.parseEither Aeson.parseJSON agentConfig)
+    first <- agentStore.asPut (Just "alice") agent
+    first.saUpdatedBy @?= Just "alice"
+    _ <- agentStore.asPut Nothing agent
+    listed <- agentStore.asList
+    map (\sa -> (Base.slug sa.saConfig, sa.saUpdatedBy)) listed @?= [("pg-test", Nothing)]
+    agentStore.asDelete "pg-test" >>= (@?= True)
+    agentStore.asDelete "pg-test" >>= (@?= False)
+    agentStore.asList >>= (@?= 0) . length
 
 -------------------------------------------------------------------------------
 -- Mock LLM

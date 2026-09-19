@@ -21,7 +21,7 @@ module AgentsServer.Api (
 import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM
 import Control.Exception (Exception, SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
-import Control.Monad (forM, unless, when)
+import Control.Monad (unless, when)
 import Data.Aeson ((.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -44,9 +44,10 @@ import Text.Read (readMaybe)
 
 import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
 import AgentsServer.Mcp (McpContext (..), handleMcp)
+import System.Agents.AgentStore (StoredAgent (..))
 import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
-import System.Agents.Host (Host (..))
+import System.Agents.Host (AgentEditError (..), AgentSource (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
 import System.Agents.Host.Runner
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls, sessionStatusText)
@@ -66,12 +67,17 @@ data ServerEnv = ServerEnv
     {- ^ With tokens, every endpoint but @/healthz@ needs a bearer token, and
     callers only see their own sessions. Without, everything is open.
     -}
+    , envAdmins :: [Text]
+    {- ^ Owners allowed to store and delete agents. Empty: nobody can, which
+    is the default, as an agent definition can start MCP servers (commands
+    run on this machine).
+    -}
     }
 
 newServerEnv :: Host -> SessionRunner -> Maybe AuthTokens -> IO ServerEnv
 newServerEnv host runner auth = do
     shutdown <- newTVarIO False
-    pure $ ServerEnv host runner shutdown 15_000_000 auth
+    pure $ ServerEnv host runner shutdown 15_000_000 auth []
 
 -- | Who is calling: an owner when authentication is on, 'Nothing' when off.
 newtype Caller = Caller (Maybe Text)
@@ -143,6 +149,9 @@ route env req = case (requestMethod req, path) of
 routeAuthenticated :: ServerEnv -> Request -> Caller -> [Text] -> IO Response
 routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("GET", ["v1", "agents"]) -> listAgents env
+    ("GET", ["v1", "agents", slug]) -> getAgentH env slug
+    ("PUT", ["v1", "agents", slug]) -> requireAdmin env caller >>= \by -> putAgentH env req by slug
+    ("DELETE", ["v1", "agents", slug]) -> requireAdmin env caller >> deleteAgentH env slug
     ("POST", ["v1", "sessions"]) -> createH env req caller
     ("GET", ["v1", "sessions"]) -> listSessions env req caller
     ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env)
@@ -166,6 +175,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     knownPath = \case
         ["healthz"] -> True
         ["v1", "agents"] -> True
+        ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
         ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "pending", "events"]
@@ -231,15 +241,70 @@ healthz env = do
 
 listAgents :: ServerEnv -> IO Response
 listAgents env = do
-    agents <- forM (Map.toList env.envHost.hostAgents) $ \(slug, node) -> do
-        tools <- readTVarIO node.osNodeTools
-        pure $
-            Aeson.object
-                [ "slug" .= slug
-                , "description" .= Base.announce node.osNodeConfig
-                , "tools" .= [t.declareTool.toolDescriptionName.getToolName | t <- tools]
-                ]
-    pure $ json status200 agents
+    agents <- hostAllAgents env.envHost
+    json status200 <$> mapM (uncurry agentView) (Map.toList agents)
+
+-- | An agent: its description, tools, and where it comes from.
+agentView :: Text -> (AgentSource, OSAgentNode) -> IO Aeson.Value
+agentView slug (source, node) = do
+    tools <- readTVarIO node.osNodeTools
+    pure $
+        Aeson.object $
+            [ "slug" .= slug
+            , "description" .= Base.announce node.osNodeConfig
+            , "tools" .= [t.declareTool.toolDescriptionName.getToolName | t <- tools]
+            ]
+                <> case source of
+                    FromFile -> ["source" .= ("file" :: Text)]
+                    FromDatabase sa ->
+                        [ "source" .= ("database" :: Text)
+                        , "updated_at" .= sa.saUpdatedAt
+                        , "updated_by" .= sa.saUpdatedBy
+                        , "config" .= sa.saConfig
+                        ]
+
+getAgentH :: ServerEnv -> Text -> IO Response
+getAgentH env slug =
+    Map.lookup slug <$> hostAllAgents env.envHost >>= \case
+        Nothing -> throwIO $ fromRunnerError (UnknownAgent slug)
+        Just entry -> json status200 <$> agentView slug entry
+
+{- | Store an agent. The body is the @contents@ of an agent file; its slug
+is the one in the path.
+-}
+putAgentH :: ServerEnv -> Request -> Maybe Text -> Text -> IO Response
+putAgentH env req by slug = do
+    body <- jsonBody req
+    case KeyMap.lookup "slug" body of
+        Just (Aeson.String other) | other /= slug -> badRequest ("the body's slug is " <> other <> ", the path's " <> slug)
+        _ -> pure ()
+    agent <- parseBody (KeyMap.insert "slug" (Aeson.String slug) body) (Aeson.parseJSON . Aeson.Object)
+    putStoredAgent env.envHost by agent >>= \case
+        Left err -> throwIO $ fromEditError err
+        Right (_, created) ->
+            getAgentH env slug >>= \rsp ->
+                pure $ if created then mapResponseStatus (const status201) rsp else rsp
+
+deleteAgentH :: ServerEnv -> Text -> IO Response
+deleteAgentH env slug =
+    deleteStoredAgent env.envHost slug >>= \case
+        Left err -> throwIO $ fromEditError err
+        Right () -> pure $ json status200 $ Aeson.object ["deleted" .= slug]
+
+fromEditError :: AgentEditError -> ApiError
+fromEditError = \case
+    EditsUnsupported -> ApiError status403 "agent_edits_disabled" "this server stores no agents"
+    AgentDefinedByFile slug -> ApiError status409 "agent_defined_by_file" (slug <> " comes from an agent file and cannot be changed over the API")
+    AgentUsesFiles fields -> ApiError status400 "agent_uses_files" ("stored agents cannot use file-based fields: " <> Text.intercalate ", " fields)
+    AgentFailedToLoad err -> ApiError status400 "agent_failed_to_load" err
+    NoStoredAgent slug -> ApiError status404 "unknown_agent" ("no stored agent named " <> slug)
+
+-- | The caller, if allowed to edit agents.
+requireAdmin :: ServerEnv -> Caller -> IO (Maybe Text)
+requireAdmin env (Caller owner)
+    | null env.envAdmins = throwIO $ ApiError status403 "agent_edits_disabled" "storing agents is disabled (see --admin-owners)"
+    | Just o <- owner, o `elem` env.envAdmins = pure owner
+    | otherwise = throwIO $ ApiError status403 "forbidden" "only admin owners can store or delete agents"
 
 createH :: ServerEnv -> Request -> Caller -> IO Response
 createH env req (Caller owner) = do
@@ -355,10 +420,11 @@ continuationH env req caller tokenText = do
 mcpH :: ServerEnv -> Request -> Caller -> IO Response
 mcpH env req (Caller owner) = do
     raw <- readBody req
+    agents <- Map.map snd <$> hostAllAgents env.envHost
     let ctx =
             McpContext
                 { mcRunner = env.envRunner
-                , mcAgents = env.envHost.hostAgents
+                , mcAgents = agents
                 , mcOwner = owner
                 , mcWait = \sid -> waitForRun env sid 120
                 }

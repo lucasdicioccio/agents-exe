@@ -21,19 +21,36 @@ module System.Agents.Host (
     withHost,
     HostStores (..),
     withHostStores,
+
+    -- * Agents
+    StoredAgents,
+    noStoredAgents,
+    AgentSource (..),
+    hostAllAgents,
+    lookupAgent,
+    AgentEditError (..),
+    putStoredAgent,
+    deleteStoredAgent,
 ) where
 
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
 import Control.Exception (Exception, throwIO)
+import Control.Monad (forM_)
+import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Time (NominalDiffTime)
 import Database.SQLite.Simple (Only (..), query_, withConnection)
-import Prod.Tracer (Tracer, contramap)
+import Prod.Tracer (Tracer, contramap, runTracer)
+import System.FilePath ((</>))
 
 import System.Agents.AgentFactory (AgentDeps (..), Completion, SessionSink (..), defaultAgentDeps)
 import qualified System.Agents.AgentFactory as AgentFactory
-import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), readOpenApiKeysFile, withAgentTree)
+import System.Agents.AgentStore (AgentStore (..), StoredAgent (..), fileBasedFields, mkSqliteAgentStore)
+import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfig, readOpenApiKeysFile, withAgentTree)
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.AgentTree.Trace (TreeTrace)
 import qualified System.Agents.Base as Base
@@ -44,7 +61,9 @@ import System.Agents.SessionStore (SessionBackend, backendCatalog, mkSqliteSessi
 -- | Loaded agents and the stores sessions live in.
 data Host = Host
     { hostAgents :: Map Text OSAgentNode
-    -- ^ Root agents, by slug.
+    -- ^ Root agents from files, by slug. See 'hostAllAgents' for all of them.
+    , hostStoredAgents :: StoredAgents
+    -- ^ Root agents from the database, which can change while the host runs.
     , hostDeps :: AgentDeps
     -- ^ For root agents: no session sink, the runner stores their sessions.
     , hostSubAgentDeps :: AgentDeps
@@ -92,6 +111,8 @@ data HostTrace
     | HostRecoveredSessions ![SessionId]
     | -- | A runner event, by kind (e.g. @run.started@), for a session.
       HostRunnerTrace !Text !SessionId
+    | -- | A stored agent that was not loaded, and why.
+      HostStoredAgentSkipped !Text !Text
     deriving (Show)
 
 data HostError
@@ -101,10 +122,12 @@ data HostError
 
 instance Exception HostError
 
--- | Where a host keeps sessions and continuations.
+-- | Where a host keeps sessions, continuations, and stored agents.
 data HostStores = HostStores
     { hsSessions :: SessionBackend
     , hsContinuations :: ContinuationStore
+    , hsAgents :: Maybe AgentStore
+    -- ^ 'Nothing': agents come from files only.
     }
 
 {- | Load the agents, open and migrate the SQLite database, and run the action.
@@ -120,7 +143,8 @@ withHost cfg tracer action =
         _ <- query_ conn "PRAGMA busy_timeout = 5000" :: IO [Only Int]
         backend <- mkSqliteSessionStore conn
         store <- mkSqliteContinuationStore conn
-        withHostStores cfg (HostStores backend store) tracer action
+        agents <- mkSqliteAgentStore conn
+        withHostStores cfg (HostStores backend store (Just agents)) tracer action
 
 {- | Like 'withHost', with stores the caller opened (e.g. on Postgres, with
 @agents-postgres@).
@@ -150,11 +174,30 @@ withHostStores cfg stores tracer action = do
             withAgentTree (props file) $ \case
                 Errors errs -> throwIO $ AgentLoadFailed file (show errs)
                 Initialized tree -> loadAll rest $ \roots -> k (tree.osTreeRoot : roots)
+        loadStored agent =
+            loadAgentTreeFromConfig (props ("<database>" </> Text.unpack (Base.slug agent) <> ".json")) "." agent >>= \case
+                Errors errs -> pure $ Left $ Text.intercalate "; " (map (`formatLoadingError` Map.empty) (toList errs))
+                Initialized tree -> pure $ Right tree.osTreeRoot
     loadAll cfg.hcAgentFiles $ \roots -> do
         agents <- indexBySlug roots
+        loaded <- newTVarIO Map.empty
+        lock <- newMVar ()
+        let storedAgents = StoredAgents stores.hsAgents loaded loadStored lock
+        forM_ stores.hsAgents $ \agentStore -> do
+            saved <- agentStore.asList
+            forM_ saved $ \sa -> do
+                let slug = Base.slug sa.saConfig
+                    skip = runTracer tracer . HostStoredAgentSkipped slug
+                if Map.member slug agents
+                    then skip "an agent file has the same slug"
+                    else
+                        loadStored sa.saConfig >>= \case
+                            Left err -> skip err
+                            Right node -> atomically $ modifyTVar' loaded (Map.insert slug (sa, node))
         action
             Host
                 { hostAgents = agents
+                , hostStoredAgents = storedAgents
                 , hostDeps = rootDeps
                 , hostSubAgentDeps = subDeps
                 , hostBackend = backend
@@ -174,3 +217,87 @@ withHostStores cfg stores tracer action = do
              in if Map.member slug acc
                     then throwIO $ DuplicateAgentSlug slug
                     else go (Map.insert slug node acc) rest
+
+-------------------------------------------------------------------------------
+-- Stored agents
+-------------------------------------------------------------------------------
+
+-- | Agents kept in the database, loaded next to the agents from files.
+data StoredAgents = StoredAgents
+    { stStore :: Maybe AgentStore
+    , stLoaded :: TVar (Map Text (StoredAgent, OSAgentNode))
+    , stLoad :: Base.Agent -> IO (Either Text OSAgentNode)
+    , stLock :: MVar ()
+    -- ^ Serialises edits.
+    }
+
+-- | No stored agents, and no way to store any (e.g. for tests).
+noStoredAgents :: IO StoredAgents
+noStoredAgents = do
+    loaded <- newTVarIO Map.empty
+    lock <- newMVar ()
+    pure $ StoredAgents Nothing loaded (\_ -> pure (Left "this host stores no agents")) lock
+
+data AgentSource = FromFile | FromDatabase StoredAgent
+
+-- | Every root agent, by slug. A file agent hides a stored one with its slug.
+hostAllAgents :: Host -> IO (Map Text (AgentSource, OSAgentNode))
+hostAllAgents host = do
+    stored <- readTVarIO host.hostStoredAgents.stLoaded
+    pure $
+        Map.union
+            (Map.map (\node -> (FromFile, node)) host.hostAgents)
+            (Map.map (\(sa, node) -> (FromDatabase sa, node)) stored)
+
+lookupAgent :: Host -> Text -> IO (Maybe OSAgentNode)
+lookupAgent host slug = fmap snd . Map.lookup slug <$> hostAllAgents host
+
+data AgentEditError
+    = -- | The host has no agent store.
+      EditsUnsupported
+    | AgentDefinedByFile Text
+    | -- | The configuration uses these file-based fields.
+      AgentUsesFiles [Text]
+    | AgentFailedToLoad Text
+    | NoStoredAgent Text
+    deriving (Show, Eq)
+
+{- | Store an agent and load it, replacing a stored agent with its slug.
+Sessions that already built the previous version keep it until the runner
+drops them from memory. Returns whether the agent is new.
+-}
+putStoredAgent :: Host -> Maybe Text -> Base.Agent -> IO (Either AgentEditError (StoredAgent, Bool))
+putStoredAgent host by agent = case st.stStore of
+    Nothing -> pure $ Left EditsUnsupported
+    Just agentStore -> withMVar st.stLock $ \_ -> do
+        let slug = Base.slug agent
+        if Map.member slug host.hostAgents
+            then pure $ Left $ AgentDefinedByFile slug
+            else case fileBasedFields agent of
+                fields@(_ : _) -> pure $ Left $ AgentUsesFiles fields
+                [] ->
+                    st.stLoad agent >>= \case
+                        Left err -> pure $ Left $ AgentFailedToLoad err
+                        Right node -> do
+                            sa <- agentStore.asPut by agent
+                            existed <- Map.member slug <$> readTVarIO st.stLoaded
+                            atomically $ modifyTVar' st.stLoaded (Map.insert slug (sa, node))
+                            pure $ Right (sa, not existed)
+  where
+    st = host.hostStoredAgents
+
+{- | Remove a stored agent. Its sessions stay; runs on them fail until an
+agent with the slug exists again.
+-}
+deleteStoredAgent :: Host -> Text -> IO (Either AgentEditError ())
+deleteStoredAgent host slug = case st.stStore of
+    Nothing -> pure $ Left EditsUnsupported
+    Just agentStore -> withMVar st.stLock $ \_ ->
+        if Map.member slug host.hostAgents
+            then pure $ Left $ AgentDefinedByFile slug
+            else do
+                removed <- agentStore.asDelete slug
+                atomically $ modifyTVar' st.stLoaded (Map.delete slug)
+                pure $ if removed then Right () else Left (NoStoredAgent slug)
+  where
+    st = host.hostStoredAgents

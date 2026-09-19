@@ -8,10 +8,13 @@ module AgentsServer.Server (
     runServer,
 ) where
 
-import Control.Monad (void)
+import Control.Exception (throwIO)
+import Control.Monad (void, when)
 import Data.Aeson ((.=))
 import qualified Data.Map.Strict as Map
 import Data.String (fromString)
+import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Time (NominalDiffTime)
 import Network.Wai.Handler.Warp
 import Options.Applicative
@@ -38,6 +41,8 @@ data ServerOptions = ServerOptions
     -- ^ Bearer tokens and their owners; without, no authentication.
     , soStreamTokens :: Bool
     -- ^ Stream LLM answers as @text.delta@ events.
+    , soAdminOwners :: [Text]
+    -- ^ Owners allowed to store and delete agents.
     }
 
 serverOptions :: Parser ServerOptions
@@ -52,6 +57,9 @@ serverOptions =
         <*> option auto (long "shutdown-grace" <> metavar "SECONDS" <> value 10 <> showDefault <> help "Time open requests get to finish on shutdown")
         <*> optional (strOption (long "auth-tokens" <> metavar "FILE" <> help "Bearer tokens and their owners; callers then only see their own sessions"))
         <*> switch (long "stream-tokens" <> help "Stream LLM answers, sending text.delta events as the text arrives")
+        <*> ( maybe [] (filter (not . Text.null) . map Text.strip . Text.splitOn ",")
+                <$> optional (strOption (long "admin-owners" <> metavar "OWNER,…" <> help "Owners allowed to store and delete agents over the API (needs --auth-tokens)"))
+            )
 
 {- | Load the agents, open the database, and serve until SIGTERM or SIGINT.
 
@@ -63,6 +71,9 @@ the database.
 runServer :: ServerOptions -> Logger -> IO ()
 runServer opts logger = do
     auth <- traverse loadAuthTokens opts.soAuthTokens
+    when (not (null opts.soAdminOwners) && null auth) $
+        throwIO $
+            userError "--admin-owners needs --auth-tokens: without authentication, owners cannot be told apart"
     let cfg =
             (defaultHostConfig opts.soAgentFiles opts.soApiKeysFile opts.soDatabase)
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
@@ -76,12 +87,14 @@ runServer opts logger = do
     withStores $ \host ->
         withSessionRunner host $ \runner -> do
             _ <- recoverOnStartup runner
-            env <- newServerEnv host runner auth
+            env0 <- newServerEnv host runner auth
+            let env = env0{envAdmins = opts.soAdminOwners}
             let started =
                     logLine logger "server.started" $
                         [ "bind" .= opts.soBind
                         , "port" .= opts.soPort
                         , "agents" .= Map.keys host.hostAgents
+                        , "admin_owners" .= opts.soAdminOwners
                         , "database" .= redactDatabase opts.soDatabase
                         , "authentication" .= (maybe "none" (const "bearer") auth :: String)
                         ]
