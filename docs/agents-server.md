@@ -32,7 +32,7 @@ cabal run agents-server -- \
 |---|---|---|
 | `--agent-file FILE` | (required) | A root agent file. Repeat it to serve several agents; each is addressed by its `slug`, which must be unique. |
 | `--api-keys FILE` | (required) | The API keys file, as for `agents-exe`. |
-| `--db FILE` | `agents-server.db` | SQLite database for sessions and continuation tokens. Created and migrated on start. |
+| `--db FILE\|URL` | `agents-server.db` | Where sessions and continuation tokens live: a SQLite file, or a `postgresql://` URL (see [Postgres](#postgres)). Created or migrated on start. |
 | `--bind HOST` | `127.0.0.1` | Address to listen on. |
 | `--port PORT` | `8080` | Port to listen on. |
 | `--live-session-ttl SECONDS` | `900` | How long an idle session keeps its in-memory state (including background tool calls) before it is dropped. It is reloaded from the database on next use. |
@@ -276,6 +276,19 @@ continuation tokens. It is refused while a run is active on any of them or on
 a parent session. `dry_run=true` answers with what would be removed and
 changes nothing.
 
+### Postgres
+
+`--db postgresql://user:password@host:5432/agents` stores sessions in
+Postgres instead of SQLite. The server creates its tables on start
+(`sessions`, `tool_continuations`, `schema_migrations`); the database must
+exist and the user must be allowed to create tables. The logs show the URL
+without its user and password.
+
+Several servers may share one Postgres database: every write is versioned,
+so a conflicting write is detected and refused (`409 conflict`). Runs are
+not coordinated between servers, though: route all requests for a session to
+the same server.
+
 ---
 
 ## Authentication
@@ -417,9 +430,7 @@ The HTTP layer itself is in `examples/agents-server/src/AgentsServer/Api.hs`.
 ## Not yet supported
 
 * Per-owner API keys: all owners share the server's keys.
-* Several server processes sharing one database: each process serialises
-  its own writes, and version checks detect the others, but runs are not
-  coordinated between processes.
+* Coordinating runs between several servers sharing a Postgres database.
 * Streaming LLM tokens.
 
 See `todos/web-server-embedding.md` for the design and the planned work.

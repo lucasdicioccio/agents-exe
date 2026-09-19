@@ -300,3 +300,19 @@ reported warnings, now fixed:
   and text-zipper only under `agents-tui`, and nowhere in `agents-lib`'s
   transitive closure.
 - `cabal test all`: 941 + 12 pass. `agents-exe --help` runs.
+
+## Phase 10 — Postgres backend ✅ COMPLETE
+
+- `agents-postgres` library and `agents-postgres-tests` suite (see the spec).
+- `Host.withHostStores` / `HostStores`; `withHost` uses it.
+- `agents-server --db postgresql://…`; `redactDatabase` for the log.
+- Docs: a Postgres section in `docs/agents-server.md`, and the library in
+  the table in `docs/architecture.md`.
+
+### Verification
+
+- `agents-postgres-tests`: 5 pass against a throwaway Postgres 16 cluster.
+- Smoke test of the binary on a Postgres 16 cluster:
+  - created a session blocked on a deferred call, restarted the server, and
+    completed the call: the session reached `idle`, with consistent rows;
+  - the URL's password is absent from the log, which holds only JSON lines.

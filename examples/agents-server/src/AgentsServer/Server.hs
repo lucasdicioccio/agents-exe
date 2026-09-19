@@ -20,8 +20,10 @@ import System.Posix.Signals (Handler (CatchOnce), installHandler, sigINT, sigTER
 import AgentsServer.Api
 import AgentsServer.Auth (loadAuthTokens)
 import AgentsServer.Log
+import qualified Data.ByteString.Char8 as Char8
 import System.Agents.Host
 import System.Agents.Host.Runner (recoverOnStartup, withSessionRunner)
+import System.Agents.Postgres (isPostgresUrl, withPostgresStores)
 
 data ServerOptions = ServerOptions
     { soAgentFiles :: [FilePath]
@@ -41,7 +43,7 @@ serverOptions =
     ServerOptions
         <$> some (strOption (long "agent-file" <> metavar "FILE" <> help "Root agent file; repeat for several agents"))
         <*> strOption (long "api-keys" <> metavar "FILE" <> help "API keys file")
-        <*> strOption (long "db" <> metavar "FILE" <> value "agents-server.db" <> showDefault <> help "SQLite database for sessions")
+        <*> strOption (long "db" <> metavar "FILE|URL" <> value "agents-server.db" <> showDefault <> help "SQLite file, or postgresql:// URL, for sessions")
         <*> strOption (long "bind" <> metavar "HOST" <> value "127.0.0.1" <> showDefault <> help "Address to listen on")
         <*> option auto (long "port" <> metavar "PORT" <> value 8080 <> showDefault <> help "Port to listen on")
         <*> (fromInteger <$> option auto (long "live-session-ttl" <> metavar "SECONDS" <> value 900 <> showDefault <> help "Idle time before a session's in-memory state is dropped"))
@@ -62,7 +64,12 @@ runServer opts logger = do
             (defaultHostConfig opts.soAgentFiles opts.soApiKeysFile opts.soDatabase)
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
                 }
-    withHost cfg (hostTraceLogger logger) $ \host ->
+        tracer = hostTraceLogger logger
+        withStores k
+            | isPostgresUrl opts.soDatabase =
+                withPostgresStores (Char8.pack opts.soDatabase) $ \stores -> withHostStores cfg stores tracer k
+            | otherwise = withHost cfg tracer k
+    withStores $ \host ->
         withSessionRunner host $ \runner -> do
             _ <- recoverOnStartup runner
             env <- newServerEnv host runner auth
@@ -71,7 +78,7 @@ runServer opts logger = do
                         [ "bind" .= opts.soBind
                         , "port" .= opts.soPort
                         , "agents" .= Map.keys host.hostAgents
-                        , "database" .= opts.soDatabase
+                        , "database" .= redactDatabase opts.soDatabase
                         , "authentication" .= (maybe "none" (const "bearer") auth :: String)
                         ]
                             <> [ "warning" .= ("no authentication: anyone who can reach this address can run the agents" :: String)
@@ -95,3 +102,16 @@ runServer opts logger = do
                 closeSocket
         void $ installHandler sigTERM (CatchOnce stop) Nothing
         void $ installHandler sigINT (CatchOnce stop) Nothing
+
+{- | A database for the logs: a Postgres URL loses its user and password,
+@postgresql://user:secret\@db.example/agents@ becoming
+@postgresql://db.example/agents@.
+-}
+redactDatabase :: String -> String
+redactDatabase db = case break (== ':') db of
+    (scheme, ':' : '/' : '/' : rest)
+        | isPostgresUrl db ->
+            let (authority, path) = break (== '/') rest
+                host = reverse (takeWhile (/= '@') (reverse authority))
+             in scheme <> "://" <> host <> path
+    _ -> db

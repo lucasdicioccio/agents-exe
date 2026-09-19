@@ -311,6 +311,51 @@ library agents-tui
                       vector,
                       vty
 
+-- Sessions and continuations in Postgres; a separate library so that
+-- agents-lib does not depend on libpq.
+library agents-postgres
+    import:           warnings
+    visibility:       public
+    hs-source-dirs:   postgres
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    exposed-modules:  System.Agents.Postgres
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      bytestring,
+                      postgresql-simple,
+                      resource-pool,
+                      text,
+                      time,
+                      uuid
+
+test-suite agents-postgres-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   postgres/test
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      agents-postgres,
+                      aeson,
+                      async,
+                      bytestring,
+                      directory,
+                      filepath,
+                      network,
+                      postgresql-simple,
+                      process,
+                      prodapi,
+                      tasty,
+                      tasty-hunit,
+                      temporary,
+                      text,
+                      time
+
 executable agents-exe
     import:           warnings
     main-is:          Main.hs
@@ -389,6 +434,7 @@ library agents-server-internal
                     , AgentsServer.Server
     build-depends:    base >=4.18.3.0,
                       agents-lib,
+                      agents-postgres,
                       aeson,
                       async,
                       bytestring,

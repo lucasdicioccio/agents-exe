@@ -19,6 +19,8 @@ module System.Agents.Host (
     HostTrace (..),
     HostError (..),
     withHost,
+    HostStores (..),
+    withHostStores,
 ) where
 
 import Control.Exception (Exception, throwIO)
@@ -61,6 +63,7 @@ data HostConfig = HostConfig
     -- ^ Root agent files; each root is addressable by its slug.
     , hcApiKeysFile :: FilePath
     , hcDatabasePath :: FilePath
+    -- ^ SQLite database, for 'withHost'; 'withHostStores' ignores it.
     , hcCompletion :: Maybe (OSAgentNode -> Completion)
     -- ^ Replaces every LLM call, e.g. with a mock in tests.
     , hcLiveSessionTtl :: NominalDiffTime
@@ -93,7 +96,13 @@ data HostError
 
 instance Exception HostError
 
-{- | Load the agents, open and migrate the database, and run the action.
+-- | Where a host keeps sessions and continuations.
+data HostStores = HostStores
+    { hsSessions :: SessionBackend
+    , hsContinuations :: ContinuationStore
+    }
+
+{- | Load the agents, open and migrate the SQLite database, and run the action.
 
 The database gets WAL journaling and a busy timeout, so that the CLI (or a
 second process) can read it while the host writes. Agent trees, and the MCP
@@ -106,39 +115,48 @@ withHost cfg tracer action =
         _ <- query_ conn "PRAGMA busy_timeout = 5000" :: IO [Only Int]
         backend <- mkSqliteSessionStore conn
         store <- mkSqliteContinuationStore conn
-        keys <- readOpenApiKeysFile cfg.hcApiKeysFile
-        let rootDeps =
-                (defaultAgentDeps keys)
-                    { adContinuationStore = Just store
-                    , adCompletion = cfg.hcCompletion
-                    }
-            subDeps = rootDeps{adSessionSink = SinkBackend backend}
-            props file =
-                Props
-                    { apiKeys = keys
-                    , apiKeysFile = cfg.hcApiKeysFile
-                    , rootAgentFile = file
-                    , interactiveTracer = contramap HostTreeTrace tracer
-                    , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap HostSubAgentTrace tracer) subDeps
-                    , sessionCatalog = backendCatalog backend
-                    }
-            loadAll [] k = k []
-            loadAll (file : rest) k =
-                withAgentTree (props file) $ \case
-                    Errors errs -> throwIO $ AgentLoadFailed file (show errs)
-                    Initialized tree -> loadAll rest $ \roots -> k (tree.osTreeRoot : roots)
-        loadAll cfg.hcAgentFiles $ \roots -> do
-            agents <- indexBySlug roots
-            action
-                Host
-                    { hostAgents = agents
-                    , hostDeps = rootDeps
-                    , hostSubAgentDeps = subDeps
-                    , hostBackend = backend
-                    , hostContinuations = store
-                    , hostTracer = tracer
-                    , hostLiveSessionTtl = cfg.hcLiveSessionTtl
-                    }
+        withHostStores cfg (HostStores backend store) tracer action
+
+{- | Like 'withHost', with stores the caller opened (e.g. on Postgres, with
+@agents-postgres@).
+-}
+withHostStores :: HostConfig -> HostStores -> Tracer IO HostTrace -> (Host -> IO a) -> IO a
+withHostStores cfg stores tracer action = do
+    let backend = stores.hsSessions
+        store = stores.hsContinuations
+    keys <- readOpenApiKeysFile cfg.hcApiKeysFile
+    let rootDeps =
+            (defaultAgentDeps keys)
+                { adContinuationStore = Just store
+                , adCompletion = cfg.hcCompletion
+                }
+        subDeps = rootDeps{adSessionSink = SinkBackend backend}
+        props file =
+            Props
+                { apiKeys = keys
+                , apiKeysFile = cfg.hcApiKeysFile
+                , rootAgentFile = file
+                , interactiveTracer = contramap HostTreeTrace tracer
+                , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap HostSubAgentTrace tracer) subDeps
+                , sessionCatalog = backendCatalog backend
+                }
+        loadAll [] k = k []
+        loadAll (file : rest) k =
+            withAgentTree (props file) $ \case
+                Errors errs -> throwIO $ AgentLoadFailed file (show errs)
+                Initialized tree -> loadAll rest $ \roots -> k (tree.osTreeRoot : roots)
+    loadAll cfg.hcAgentFiles $ \roots -> do
+        agents <- indexBySlug roots
+        action
+            Host
+                { hostAgents = agents
+                , hostDeps = rootDeps
+                , hostSubAgentDeps = subDeps
+                , hostBackend = backend
+                , hostContinuations = store
+                , hostTracer = tracer
+                , hostLiveSessionTtl = cfg.hcLiveSessionTtl
+                }
   where
     indexBySlug :: [OSAgentNode] -> IO (Map Text OSAgentNode)
     indexBySlug = go Map.empty

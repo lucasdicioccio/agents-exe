@@ -894,22 +894,35 @@ and the riskier ones come after the ones they build on. Choices marked
 * *Default*: `agents-lib` itself is the core instead of a new `agents-core`
   name, so nothing that depends on `agents-lib` breaks.
 
-### Phase 10: Postgres backend
+### Phase 10: Postgres backend ✅
 
-* A public sub-library `agents-postgres` (on `postgresql-simple`) with
-  `mkPostgresSessionStore` and `mkPostgresContinuationStore`, the same
-  schema and migrations as SQLite (component-scoped `schema_migrations`),
-  CAS as `UPDATE … WHERE version = ? RETURNING`. Connections come from a
-  small pool (`resource-pool`, if already in the plan; otherwise one
-  connection behind an `MVar`).
-* `System.Agents.Host.withHostStores` takes the two stores from the caller, so
-  `agents-lib` does not depend on libpq. `agents-server --db` accepts
-  `postgres://…` / `postgresql://…` as well as a SQLite path.
-* With several server processes on one database, runs are not coordinated
-  (a lease column is future work); CAS still detects conflicting writes.
-* Tests: the backend contract (CAS, queries, continuations) and a runner flow
-  against a throwaway cluster started with `initdb`/`pg_ctl` in a temp
-  directory; the suite skips when the binaries are missing.
+* Public sub-library `agents-postgres` (`postgres/System/Agents/Postgres.hs`,
+  on `postgresql-simple` and the `resource-pool` already used by
+  `agents-lib`): `withPostgresStores`, `openPostgresPool` (10 connections),
+  `mkPostgresSessionStore`, `mkPostgresContinuationStore`, `isPostgresUrl`,
+  `runPostgresMigrations`.
+* Same schema and semantics as SQLite. Postgres starts at migration 1 with the
+  full current schema: `TIMESTAMPTZ`, and session JSON as `TEXT`, not `JSONB`,
+  which rejects `\u0000`. CAS is `INSERT … ON CONFLICT DO UPDATE … WHERE
+  version = 0 RETURNING` or `UPDATE … WHERE version = ? RETURNING`.
+  Timestamps are truncated to microseconds, as Postgres stores them, so the
+  metadata handed out matches what a query returns.
+* Migrations run in one transaction per component, under a
+  `pg_advisory_xact_lock`, with `client_min_messages = warning` so that
+  Postgres notices do not reach stderr.
+* `System.Agents.Host.withHostStores` takes `HostStores` from the caller;
+  `withHost` is the SQLite case. `agents-server --db` takes a
+  `postgres://`/`postgresql://` URL; the startup log drops its user and
+  password.
+* Tests (`agents-postgres-tests`, threaded): a throwaway cluster
+  (`initdb` + `pg_ctl` from `pg_config --bindir`, a free port on
+  127.0.0.1), one fresh database per test; `AGENTS_TEST_POSTGRES_URL` uses an
+  existing server instead, and without either the suite skips. They cover
+  migrations running once; CAS with conflicts, labels, and the kept
+  running status; queries (agent, owner, parent, status, limit, before); 16
+  concurrent CAS with exactly one winner; and a runner flow (deferred call,
+  completion, token already completed, cascade delete).
+* Not done: coordinating runs between servers (lease column).
 
 ### Phase 11: token streaming
 
