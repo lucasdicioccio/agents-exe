@@ -179,7 +179,9 @@ data SessionLabels = SessionLabels
     , slParent :: Maybe SessionId
     -- ^ Session of the agent that called this one as a tool.
     , slOwner :: Maybe Text
-    -- ^ Reserved for multi-tenancy.
+    {- ^ Who the session belongs to, when a host authenticates its callers.
+    Sub-sessions have none: they belong to the owner of their root session.
+    -}
     }
     deriving (Show, Eq)
 
@@ -266,6 +268,7 @@ data SessionQuery = SessionQuery
     { sqAgent :: Maybe Text
     , sqStatuses :: Maybe [SessionStatus]
     , sqParent :: Maybe SessionId
+    , sqOwner :: Maybe Text
     , sqUpdatedBefore :: Maybe UTCTime
     , sqLimit :: Maybe Int
     }
@@ -273,7 +276,7 @@ data SessionQuery = SessionQuery
 
 -- | A query matching every session.
 allSessionsQuery :: SessionQuery
-allSessionsQuery = SessionQuery Nothing Nothing Nothing Nothing Nothing
+allSessionsQuery = SessionQuery Nothing Nothing Nothing Nothing Nothing Nothing
 
 -- | Whether metadata matches a query's criteria (ignoring its limit).
 matchesQuery :: SessionQuery -> SessionMeta -> Bool
@@ -281,6 +284,7 @@ matchesQuery q m =
     maybe True (\a -> m.smAgent == Just a) q.sqAgent
         && maybe True (m.smStatus `elem`) q.sqStatuses
         && maybe True (\p -> m.smParent == Just p) q.sqParent
+        && maybe True (\o -> m.smOwner == Just o) q.sqOwner
         && maybe True (m.smUpdatedAt <) q.sqUpdatedBefore
 
 -- | Apply a query to metadata listed from a backend that cannot filter itself.
@@ -467,6 +471,8 @@ sessionMigrations =
                     conn
                     [sql| UPDATE sessions SET status = ? WHERE session_id = ? |]
                     (sessionStatusText (sessionStatusOf sess), sid)
+    , Migration 3 $ \conn ->
+        execute_ conn [sql| CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner, updated_at) |]
     ]
 
 -- | Create or migrate the SQLite session schema.
@@ -614,6 +620,7 @@ sqliteQuerySessions conn q
                     [ (\a -> ("agent_slug = ?", [toField a])) <$> q.sqAgent
                     , (\ss -> ("status IN (" <> Text.intercalate ", " ("?" <$ ss) <> ")", map (toField . sessionStatusText) ss)) <$> q.sqStatuses
                     , (\p -> ("parent_session_id = ?", [toField (sessionIdText p)])) <$> q.sqParent
+                    , (\o -> ("owner = ?", [toField o])) <$> q.sqOwner
                     , (\t -> ("updated_at < ?", [toField t])) <$> q.sqUpdatedBefore
                     ]
             whereClause

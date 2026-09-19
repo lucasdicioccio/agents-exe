@@ -21,7 +21,7 @@ The deliverable is:
 
 * Multi-tenancy: per-user isolation, per-user API keys, and sandboxing of bash
   or MCP tools. The data model reserves an `owner` column so this can come
-  later without a migration (see [Later work](#later-work)).
+  later without a migration (see [Milestone 2](#milestone-2-the-later-work)).
 * A Postgres backend. The interfaces below are designed so it can be added as
   a separate backend.
 * Streaming LLM tokens. Clients get updates at step granularity.
@@ -822,26 +822,115 @@ tracker.
 
 ---
 
-## Later work
+## Milestone 2: the later work
 
-* **Multi-tenancy**: authentication middleware; `owner` filled from the
-  caller and enforced in every `sbQuery`/`sbLoadMeta`; per-owner API keys in
-  `buildAgent`; default policy `runIsolated` for bash and MCP tools, backed by
-  `dockerRunner`.
-* **Postgres backend**: `SessionBackend` and `ContinuationStore` against
-  `postgresql-simple`, as a separate sub-library so the core does not depend
-  on libpq. CAS is the same `UPDATE … WHERE version = ?`. With several server
-  processes, `lsLock` only serialises within one process and CAS covers the
-  rest; live-run ownership then needs a lease column (`run_owner`,
-  `run_lease_until`).
-* **Agents from the database** instead of files: needs `AgentTree` to accept
-  in-memory configs (`Props.rootAgentFile` is a path today).
-* **Token streaming**: streaming in `LLMs/OpenAI` and a `TokenDelta` event.
-* **`agents-core` sub-library** without `brick`/`vty`.
-* **MCP server over HTTP**: serve the existing MCP server
-  (`MCP/Server.hs`) from `agents-server` using the Streamable HTTP transport,
-  reusing the `Host` so MCP clients and the REST API share agents and
-  storage.
+Recorded 2026-09-19, when the user asked to continue with the later work.
+Each item becomes a phase, in this order: each phase is useful on its own,
+and the riskier ones come after the ones they build on. Choices marked
+*default* were made without asking; they are listed again under Decisions.
+
+### Phase 7: authentication and owners ✅
+
+* `agents-server --auth-tokens tokens.json`: `{"tokens": [{"owner": "alice",
+  "sha256": "<hex>"}, {"owner": "bob", "token": "<plain>"}]}`. With it, every
+  endpoint but `/healthz` needs `Authorization: Bearer <token>` (401
+  `unauthorized` otherwise, with `WWW-Authenticate: Bearer`). Without it,
+  nothing changes. Tokens are compared by SHA-256 digest (*default*: a
+  static file, like the API keys file; no token issuing or expiry).
+* Sessions created by a caller record its owner (`createSessionAs`).
+  Sub-sessions record none: a session belongs to the owner of its **root**
+  session (`sessionOwner` walks up `parent_session_id`). This needs no
+  change to how sub-agents store themselves.
+* Another owner's session answers 404, as if it did not exist, for every
+  endpoint including continuations (404 `unknown_token`). Listing filters by
+  owner (`SessionQuery.sqOwner`, index `(owner, updated_at)`, migration 3);
+  `?parent=` lists the sub-sessions of an owned session.
+* Sessions stored before authentication was turned on have no owner and are
+  invisible to every caller (*default*).
+* Not in this phase: per-owner API keys and a default `runIsolated` policy
+  for bash and MCP tools. Both need agents built per owner, including
+  sub-agent tools, which the host builds once at load time today. They stay
+  in [Remaining later work](#remaining-later-work).
+
+### Phase 8: MCP over HTTP
+
+* `POST /mcp` on `agents-server` speaks MCP's Streamable HTTP transport, reusing
+  the protocol types in `MCP/Base.hs`. Each request gets a plain JSON response
+  (the transport allows that instead of an SSE stream). Notifications and
+  responses from the client answer 202. `GET /mcp` answers 405: there are no
+  server-initiated messages.
+* Tools: one `ask_<slug>` per root agent, input `{prompt}` (as the stdio
+  server). A call creates a session through the runner and waits for it (up to
+  the `timeout` default). The result text is the final answer; a session
+  that stops on deferred calls, or is still running, returns the session id
+  and pending continuation tokens as text, with `isError` false for
+  `waiting_external`, so clients can finish through the REST API.
+* The same bearer tokens and owners apply. `Mcp-Session-Id` is not used
+  (*default*: every request stands alone; MCP sessions are optional).
+
+### Phase 9: TUI out of the core library
+
+* A new public sub-library `agents-tui` holds `System.Agents.TUI.*` (except
+  `TUI.ToolCallActivity`, which has no brick/vty import and is used by the
+  tests), `System.Agents.CLI.TUI`, `System.Agents.CLI.Config`, and
+  `System.Agents.CLI` (which imports them). `agents-lib` drops `brick`,
+  `vty`, `text-zipper`, and the unused `data-clist`. `agents-exe` depends on
+  both. Module names do not change.
+* *Default*: `agents-lib` itself becomes the core instead of a new
+  `agents-core` name, so nothing that depends on `agents-lib` breaks.
+
+### Phase 10: Postgres backend
+
+* A public sub-library `agents-postgres` (on `postgresql-simple`) with
+  `mkPostgresSessionStore` and `mkPostgresContinuationStore`, the same
+  schema and migrations as SQLite (component-scoped `schema_migrations`),
+  CAS as `UPDATE … WHERE version = ? RETURNING`. Connections come from a
+  small pool (`resource-pool`, if already in the plan; otherwise one
+  connection behind an `MVar`).
+* `System.Agents.Host.withHostStores` takes the two stores from the caller, so
+  `agents-lib` does not depend on libpq. `agents-server --db` accepts
+  `postgres://…` / `postgresql://…` as well as a SQLite path.
+* With several server processes on one database, runs are not coordinated
+  (a lease column is future work); CAS still detects conflicting writes.
+* Tests: the backend contract (CAS, queries, continuations) and a runner flow
+  against a throwaway cluster started with `initdb`/`pg_ctl` in a temp
+  directory; the suite skips when the binaries are missing.
+
+### Phase 11: token streaming
+
+* `OpenAI` completions can stream (`"stream": true` with
+  `stream_options.include_usage`): the SSE chunks are folded back into the
+  usual response JSON, so parsing and tool calls are unchanged, and each text
+  delta goes to a callback.
+* `AgentDeps.adOnTextDelta` wires the callback; the runner gives each session's
+  agent one that emits `TextDelta sid text` (`event: text.delta` on the SSE
+  stream). Streaming is opt-in: `HostConfig.hcStreamTokens` /
+  `agents-server --stream-tokens` (*default* off, as providers differ).
+  Sub-agents do not stream.
+
+### Phase 12: agents from the database
+
+* Table `agents(slug, json, updated_at)` in the host's database. Agents in it
+  are loaded next to `--agent-file` ones; a slug in both is an error.
+* An agent tree can be loaded from an in-memory `AgentDescription`
+  (`AgentTree.loadAgentTreeFrom`): the file-discovery step is replaced by a
+  graph of one node. *Default*: database agents cannot use tools that need
+  files (bash tool directories, OpenAPI/PostgREST files, skills); builtin
+  toolboxes and MCP servers work, and `extraAgents` may name other database
+  agents.
+* Endpoints `PUT /v1/agents/:slug` and `DELETE /v1/agents/:slug`, allowed to
+  the owners listed in `--admin-owners` (and to anyone without
+  authentication). A change reloads that agent: new sessions use it, live
+  sessions keep their built agent until evicted.
+
+## Remaining later work
+
+* **Per-owner API keys and isolation**: build agents per owner, including
+  sub-agent tools; default policy `runIsolated` for bash and MCP tools, backed
+  by `dockerRunner`.
+* **Several server processes on one Postgres database**: live-run ownership
+  through a lease column (`run_owner`, `run_lease_until`).
+* **Database agents with files**: tool directories stored with the agent.
 
 ## Decisions
 
@@ -856,7 +945,23 @@ Recorded 2026-09-18.
    (`hcLiveSessionTtl`, configurable). A background call still running when
    its session is evicted ends up orphaned.
 4. **The MCP server over HTTP is wanted, but later** (see
-   [Later work](#later-work)).
+   [Phase 8](#phase-8-mcp-over-http)).
+
+Recorded 2026-09-19 (defaults taken when the user asked to continue with the
+later work; see [Milestone 2](#milestone-2-the-later-work)):
+
+5. **Authentication is a static bearer-tokens file** mapping tokens (or their
+   SHA-256) to owners. A session belongs to the owner of its root session;
+   other owners get 404. Sessions without an owner are invisible once
+   authentication is on.
+6. **MCP over HTTP answers each request with plain JSON** and does not use
+   MCP sessions.
+7. **`agents-lib` becomes the core** by moving the TUI into a new
+   `agents-tui` library, rather than creating an `agents-core` library.
+8. **Postgres lives in its own `agents-postgres` library**; the host takes
+   its stores from the caller.
+9. **Token streaming is opt-in** (`--stream-tokens`).
+10. **Database agents cannot use file-based tools** in their first version.
 
 ## Related docs
 

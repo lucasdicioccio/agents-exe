@@ -183,7 +183,7 @@ migrationTests =
             initializeSessionSchema conn
             initializeSessionSchema conn
             versions <- query_ conn "SELECT version FROM schema_migrations WHERE component = 'sessions' ORDER BY version" :: IO [Only Int]
-            map fromOnly versions @?= [1, 2]
+            map fromOnly versions @?= [1, 2, 3]
         ]
 
 -------------------------------------------------------------------------------

@@ -35,6 +35,8 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import AgentsServer.Api
+import AgentsServer.Auth (authTokensFromList, authenticate, bearerToken, loadAuthTokens, tokenDigest)
+import Control.Exception (IOException, try)
 import System.Agents.AgentFactory (Completion)
 import System.Agents.Host
 import System.Agents.Host.Runner (withSessionRunner)
@@ -52,6 +54,8 @@ main =
             , testCase "agents and health" agentsHealthTest
             , testCase "errors have a status and a code" errorsTest
             , testCase "shutdown ends event streams and releases waiting requests" shutdownTest
+            , testCase "with tokens, callers need one and only see their own sessions" authTest
+            , testCase "tokens files hold hashed or plain tokens" tokensFileTest
             ]
 
 -------------------------------------------------------------------------------
@@ -197,6 +201,60 @@ shutdownTest = do
             ended @?= Just ""
         putMVar gate ()
 
+authTest :: Assertion
+authTest = do
+    let tokens = authTokensFromList [("alice-token", "alice"), ("bob-token", "bob")]
+    withServerAuth (Just tokens) deferAll (firstThen [remoteCall "call_1"]) $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+            bob = anonymous{srvToken = Just "bob-token"}
+            stranger = anonymous{srvToken = Just "guessed"}
+        (health, _) <- call anonymous "GET" "/healthz" Nothing
+        health @?= 200
+        (noToken, err) <- call anonymous "GET" "/v1/agents" Nothing
+        (noToken, field "error" err) @?= (401, "unauthorized")
+        (badToken, _) <- call stranger "GET" "/v1/agents" Nothing
+        badToken @?= 401
+        (created, view) <- call alice "POST" "/v1/sessions?wait=true" (Just (createBody []))
+        (created, field "owner" view) @?= (201, "alice")
+        let sid = textField "session_id" view
+        token <- case arrayField "pending" view of
+            [c] -> pure (textField "continuation_token" c)
+            other -> assertFailure ("expected one pending call, got " <> show other)
+        let hidden who path method body code = do
+                (status, v) <- call who method path body
+                (path, status, field "error" v) @?= (path, 404, code)
+        hidden bob ("/v1/sessions/" <> sid) "GET" Nothing "unknown_session"
+        hidden bob ("/v1/sessions/" <> sid <> "/events") "GET" Nothing "unknown_session"
+        hidden bob ("/v1/sessions/" <> sid) "DELETE" Nothing "unknown_session"
+        hidden bob ("/v1/sessions?parent=" <> sid) "GET" Nothing "unknown_session"
+        hidden bob ("/v1/continuations/" <> token) "POST" (Just (Aeson.object ["result" .= ("x" :: Text)])) "unknown_token"
+        (_, bobList) <- call bob "GET" "/v1/sessions" Nothing
+        arrayField "sessions" bobList @?= []
+        (_, aliceList) <- call alice "GET" "/v1/sessions" Nothing
+        map (textField "session_id") (arrayField "sessions" aliceList) @?= [sid]
+        (done, final) <- call alice "POST" ("/v1/continuations/" <> token <> "?wait=true") (Just (Aeson.object ["result" .= ("42" :: Text)]))
+        (done, field "status" final) @?= (200, "idle")
+
+tokensFileTest :: Assertion
+tokensFileTest = withSystemTempDirectory "agents-server-tokens" $ \dir -> do
+    let path = dir </> "tokens.json"
+        aliceDigest = tokenDigest "alice-token"
+    writeFile path $
+        "{\"tokens\": [{\"owner\": \"alice\", \"sha256\": \""
+            <> Text.unpack (Text.toUpper aliceDigest)
+            <> "\"}, "
+            <> "{\"owner\": \"bob\", \"token\": \"bob-token\"}]}"
+    tokens <- loadAuthTokens path
+    map (authenticate tokens) ["alice-token", "bob-token", "carol-token"] @?= [Just "alice", Just "bob", Nothing]
+    bearerToken "Bearer abc" @?= Just "abc"
+    bearerToken "bearer abc" @?= Just "abc"
+    bearerToken "Basic abc" @?= Nothing
+    writeFile path "{\"tokens\": [{\"owner\": \"alice\", \"sha256\": \"not-hex\"}]}"
+    bad <- try (loadAuthTokens path)
+    case bad of
+        Left (_ :: IOException) -> pure ()
+        Right _ -> assertFailure "a malformed digest was accepted"
+
 -------------------------------------------------------------------------------
 -- Server fixture
 -------------------------------------------------------------------------------
@@ -205,13 +263,18 @@ data Srv = Srv
     { srvPort :: Int
     , srvEnv :: ServerEnv
     , srvManager :: Http.Manager
+    , srvToken :: Maybe ByteString.ByteString
+    -- ^ Sent as a bearer token.
     }
 
 {- | Run the application on a free port over a fresh database, with one
 agent (slug @server-test@, extra config fields merged in) and a mock LLM.
 -}
 withServer :: String -> Completion -> (Srv -> IO a) -> IO a
-withServer extraConfig complete k =
+withServer = withServerAuth Nothing
+
+withServerAuth :: Maybe AuthTokens -> String -> Completion -> (Srv -> IO a) -> IO a
+withServerAuth auth extraConfig complete k =
     withSystemTempDirectory "agents-server" $ \dir -> do
         let agentFile = dir </> "agent.json"
             keysFile = dir </> "keys.json"
@@ -224,9 +287,9 @@ withServer extraConfig complete k =
         manager <- Http.newManager Http.defaultManagerSettings{Http.managerResponseTimeout = Http.responseTimeoutMicro 30_000_000}
         withHost cfg silent $ \host ->
             withSessionRunner host $ \runner -> do
-                env0 <- newServerEnv host runner
+                env0 <- newServerEnv host runner auth
                 let env = env0{envKeepAlive = 300_000}
-                testWithApplication (pure (application env)) $ \p -> k (Srv p env manager)
+                testWithApplication (pure (application env)) $ \p -> k (Srv p env manager Nothing)
   where
     baseConfig =
         Aeson.object
@@ -286,7 +349,9 @@ request srv method path body = do
         req
             { Http.method = method
             , Http.requestBody = maybe mempty (Http.RequestBodyLBS . Aeson.encode) body
-            , Http.requestHeaders = [("Content-Type", "application/json") | Just _ <- [body]]
+            , Http.requestHeaders =
+                [("Content-Type", "application/json") | Just _ <- [body]]
+                    <> [("Authorization", "Bearer " <> t) | Just t <- [srv.srvToken]]
             }
 
 -- | Status and JSON body (@null@ when empty).

@@ -13,6 +13,7 @@ parameters; see @docs/agents-server.md@ for the full reference.
 module AgentsServer.Api (
     ServerEnv (..),
     newServerEnv,
+    AuthTokens,
     requestShutdown,
     application,
 ) where
@@ -41,12 +42,14 @@ import Network.HTTP.Types
 import Network.Wai
 import Text.Read (readMaybe)
 
+import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
 import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host (Host (..))
 import System.Agents.Host.Runner
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls, sessionStatusText)
+import System.Agents.Session.Wake (findSessionForToken)
 import System.Agents.SessionStore (SessionBackend (..), SessionMeta (..), SessionQuery (..), allSessionsQuery)
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
@@ -58,12 +61,19 @@ data ServerEnv = ServerEnv
     -- ^ Set on shutdown: event streams end, waiting requests answer at once.
     , envKeepAlive :: Int
     -- ^ Microseconds of silence before an event stream sends a keepalive.
+    , envAuth :: Maybe AuthTokens
+    {- ^ With tokens, every endpoint but @/healthz@ needs a bearer token, and
+    callers only see their own sessions. Without, everything is open.
+    -}
     }
 
-newServerEnv :: Host -> SessionRunner -> IO ServerEnv
-newServerEnv host runner = do
+newServerEnv :: Host -> SessionRunner -> Maybe AuthTokens -> IO ServerEnv
+newServerEnv host runner auth = do
     shutdown <- newTVarIO False
-    pure $ ServerEnv host runner shutdown 15_000_000
+    pure $ ServerEnv host runner shutdown 15_000_000 auth
+
+-- | Who is calling: an owner when authentication is on, 'Nothing' when off.
+newtype Caller = Caller (Maybe Text)
 
 -- | End event streams and release waiting requests; runs carry on.
 requestShutdown :: ServerEnv -> IO ()
@@ -81,7 +91,11 @@ instance Exception ApiError
 
 errorResponse :: ApiError -> Response
 errorResponse (ApiError status code msg) =
-    json status $ Aeson.object ["error" .= code, "message" .= msg]
+    responseLBS status headers (Aeson.encode (Aeson.object ["error" .= code, "message" .= msg]))
+  where
+    headers =
+        (hContentType, jsonType)
+            : [("WWW-Authenticate", "Bearer") | status == status401]
 
 fromRunnerError :: RunnerError -> ApiError
 fromRunnerError = \case
@@ -116,11 +130,19 @@ application env req respond = do
             | otherwise -> respond $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
 
 route :: ServerEnv -> Request -> IO Response
-route env req = case (requestMethod req, filter (not . Text.null) (pathInfo req)) of
+route env req = case (requestMethod req, path) of
     ("GET", ["healthz"]) -> healthz env
+    _ -> do
+        caller <- authenticateRequest env req
+        routeAuthenticated env req caller path
+  where
+    path = filter (not . Text.null) (pathInfo req)
+
+routeAuthenticated :: ServerEnv -> Request -> Caller -> [Text] -> IO Response
+routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("GET", ["v1", "agents"]) -> listAgents env
-    ("POST", ["v1", "sessions"]) -> createH env req
-    ("GET", ["v1", "sessions"]) -> listSessions env req
+    ("POST", ["v1", "sessions"]) -> createH env req caller
+    ("GET", ["v1", "sessions"]) -> listSessions env req caller
     ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env)
     ("DELETE", ["v1", "sessions", sid]) -> withSession sid (deleteH env req)
     ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
@@ -128,14 +150,14 @@ route env req = case (requestMethod req, filter (not . Text.null) (pathInfo req)
     ("POST", ["v1", "sessions", sid, "cancel"]) -> withSession sid (cancelH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
-    ("POST", ["v1", "continuations", token]) -> continuationH env req token
-    (_, path)
+    ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
+    _
         | knownPath path -> throwIO $ ApiError status405 "method_not_allowed" "method not allowed on this path"
         | otherwise -> throwIO $ ApiError status404 "not_found" "no such endpoint"
   where
     withSession :: Text -> (SessionId -> IO Response) -> IO Response
     withSession txt k = case UUID.fromText txt of
-        Just uuid -> k (SessionId uuid)
+        Just uuid -> authorize env caller (SessionId uuid) >> k (SessionId uuid)
         Nothing -> throwIO $ ApiError status404 "unknown_session" ("not a session id: " <> txt)
 
     knownPath = \case
@@ -146,6 +168,28 @@ route env req = case (requestMethod req, filter (not . Text.null) (pathInfo req)
         ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "pending", "events"]
         ["v1", "continuations", _] -> True
         _ -> False
+
+-------------------------------------------------------------------------------
+-- Authentication
+-------------------------------------------------------------------------------
+
+authenticateRequest :: ServerEnv -> Request -> IO Caller
+authenticateRequest env req = case env.envAuth of
+    Nothing -> pure (Caller Nothing)
+    Just tokens ->
+        case lookup hAuthorization (requestHeaders req) >>= bearerToken >>= authenticate tokens of
+            Just owner -> pure (Caller (Just owner))
+            Nothing -> throwIO $ ApiError status401 "unauthorized" "a valid bearer token is required"
+
+{- | Refuse access to another owner's session. It answers as if the session
+did not exist, so callers cannot probe for other owners' sessions.
+-}
+authorize :: ServerEnv -> Caller -> SessionId -> IO ()
+authorize _ (Caller Nothing) _ = pure ()
+authorize env (Caller (Just owner)) sid =
+    sessionOwner env.envRunner sid >>= \case
+        Just (Just o) | o == owner -> pure ()
+        _ -> throwIO $ fromRunnerError (UnknownSession sid)
 
 -------------------------------------------------------------------------------
 -- Handlers
@@ -168,8 +212,8 @@ listAgents env = do
                 ]
     pure $ json status200 agents
 
-createH :: ServerEnv -> Request -> IO Response
-createH env req = do
+createH :: ServerEnv -> Request -> Caller -> IO Response
+createH env req (Caller owner) = do
     w <- waitParams req
     body <- jsonBody req
     (agent, msg, mode) <- parseBody body $ \o -> do
@@ -177,7 +221,7 @@ createH env req = do
         msg <- messageFields o
         mode <- runField o
         pure (agent, msg, mode)
-    meta <- orThrow $ createSession env.envRunner agent msg mode
+    meta <- orThrow $ createSessionAs env.envRunner owner agent msg mode
     let sid = meta.smSessionId
     view <- afterRun env w sid
     pure $
@@ -186,19 +230,22 @@ createH env req = do
             [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId sid))]
             (Aeson.encode view)
 
-listSessions :: ServerEnv -> Request -> IO Response
-listSessions env req = do
+listSessions :: ServerEnv -> Request -> Caller -> IO Response
+listSessions env req caller@(Caller owner) = do
     let params = queryParams req
     statuses <- traverse (mapM parseStatus . Text.splitOn ",") (param "status" params)
     parent <- traverse (maybe (badRequest "parent must be a session id") (pure . SessionId) . UUID.fromText) (param "parent" params)
     limit <- maybe (pure 50) (parseNumber "limit") (param "limit" params)
     unless (limit >= 1 && limit <= 500) $ badRequest "limit must be between 1 and 500"
     before <- traverse parseTime (param "before" params)
+    -- Sub-sessions record no owner: list them through their parent.
+    mapM_ (authorize env caller) parent
     let query =
             allSessionsQuery
                 { sqAgent = param "agent" params
                 , sqStatuses = statuses
                 , sqParent = parent
+                , sqOwner = maybe owner (const Nothing) parent
                 , sqUpdatedBefore = before
                 , sqLimit = Just limit
                 }
@@ -250,11 +297,20 @@ pendingH env sid = do
     (sess, _) <- loadSession env sid
     pure $ json status200 $ Aeson.object ["calls" .= pendingDeferredCalls sess]
 
-continuationH :: ServerEnv -> Request -> Text -> IO Response
-continuationH env req tokenText = do
+continuationH :: ServerEnv -> Request -> Caller -> Text -> IO Response
+continuationH env req caller tokenText = do
     token <- case UUID.fromText tokenText of
         Just uuid -> pure (ContinuationToken uuid)
         Nothing -> throwIO $ ApiError status404 "unknown_token" "not a continuation token"
+    case caller of
+        Caller Nothing -> pure ()
+        Caller (Just _) -> do
+            let host = env.envHost
+            findSessionForToken (Just host.hostContinuations) host.hostBackend token >>= \case
+                Nothing -> throwIO $ fromRunnerError (UnknownToken token)
+                Just sid -> do
+                    owned <- try (authorize env caller sid)
+                    either (\(_ :: ApiError) -> throwIO (fromRunnerError (UnknownToken token))) pure owned
     w <- waitParams req
     body <- jsonBody req
     (result, autoResume) <- parseBody body $ \o -> do

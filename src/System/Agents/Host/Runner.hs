@@ -32,6 +32,8 @@ module System.Agents.Host.Runner (
     NewMessage (..),
     RunnerError (..),
     createSession,
+    createSessionAs,
+    sessionOwner,
     postMessage,
     resume,
     completeCall,
@@ -490,13 +492,17 @@ failRun runner live reason = withMVar live.lsLock $ \_ -> do
 
 -- | Create a session for an agent, and start a run unless the mode is 'Nothing'.
 createSession :: SessionRunner -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
-createSession runner slug message mode
+createSession runner = createSessionAs runner Nothing
+
+-- | Like 'createSession', for an owner.
+createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
+createSessionAs runner owner slug message mode
     | not (Map.member slug runner.srHost.hostAgents) = pure $ Left $ UnknownAgent slug
     | otherwise = do
         sid <- newSessionId
         withLive runner sid $ \live -> do
             now <- getCurrentTime
-            let meta0 = (freshSessionMeta sid now){smAgent = Just slug}
+            let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
             sessionAgent runner live meta0 >>= \case
                 Left err -> pure (Left err)
                 Right agent -> do
@@ -638,6 +644,19 @@ cancelRun runner sid = do
         runner.srHost.hostBackend.sbLoadMeta sid >>= \case
             Nothing -> pure $ Left $ UnknownSession sid
             Just _ -> pure $ Left $ NoActiveRun sid
+
+{- | Who a session belongs to: the owner of its root session, since
+sub-sessions record none. 'Nothing' when the session does not exist.
+-}
+sessionOwner :: SessionRunner -> SessionId -> IO (Maybe (Maybe Text))
+sessionOwner runner = go []
+  where
+    go seen sid =
+        runner.srHost.hostBackend.sbLoadMeta sid >>= \case
+            Nothing -> pure Nothing
+            Just (_, meta) -> case meta.smParent of
+                Just parent | parent `notElem` seen -> go (sid : seen) parent
+                _ -> pure (Just meta.smOwner)
 
 -- | The latest stored version of a session.
 getSession :: SessionRunner -> SessionId -> IO (Maybe (Session, SessionMeta))

@@ -353,6 +353,7 @@ library agents-server-internal
     import:           warnings
     hs-source-dirs:   examples/agents-server/src
     exposed-modules:  AgentsServer.Api
+                    , AgentsServer.Auth
                     , AgentsServer.Log
                     , AgentsServer.Server
     build-depends:    base >=4.18.3.0,
@@ -361,6 +362,7 @@ library agents-server-internal
                       async,
                       bytestring,
                       containers,
+                      crypton,
                       http-client,
                       http-types,
                       optparse-applicative,

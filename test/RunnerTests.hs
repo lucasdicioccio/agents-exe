@@ -52,7 +52,7 @@ tests =
         , testCase "cancelling stops the run and its background calls" cancelTest
         , testCase "sessions left running are recovered, their calls orphaned" recoveryTest
         , testCase "awaitRun waits for the run or the timeout" awaitRunTest
-        , testCase "deleting cascades to sub-sessions and continuations" deleteTest
+        , testCase "deleting cascades to sub-sessions and continuations; sub-sessions have their root's owner" deleteTest
         , testCase "idle sessions are evicted and come back on demand" evictionTest
         , testCase "withHost loads agents and serves sessions from a database file" withHostTest
         , testCase "a subscriber skips other sessions' events" subscribeFilterTest
@@ -232,11 +232,13 @@ deleteTest = do
     agentId <- AgentId <$> nextRandom
     atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId]
     withSessionRunner host $ \runner -> do
-        meta <- expectRight =<< createSession runner "parent" (message "delegate") (Just UntilBlocked)
+        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (message "delegate") (Just UntilBlocked)
         let sid = meta.smSessionId
             children = map (.smSessionId) <$> host.hostBackend.sbQuery allSessionsQuery{sqParent = Just sid}
         waitUntil $ not . null <$> children
         [childSid] <- children
+        owners <- mapM (sessionOwner runner) [sid, childSid]
+        owners @?= [Just (Just "alice"), Just (Just "alice")]
         busyParent <- deleteSession runner sid DryRun
         busyParent @?= Left (RunInProgress sid)
         busyChild <- deleteSession runner childSid DeleteForReal

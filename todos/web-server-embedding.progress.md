@@ -229,3 +229,36 @@ reported warnings, now fixed:
   - SIGTERM with an open events stream: exit 0 in 0.01 s;
   - the API key reached the LLM but not the log.
 - The guide's Haskell snippet typechecks.
+
+## Phase 7 — Authentication and owners ✅ COMPLETE
+
+- Spec: new "Milestone 2" section planning Phases 7–12, with the defaults
+  taken recorded as decisions 5–10.
+- `SessionStore`: `SessionQuery.sqOwner` (SQLite, file, composite), and
+  migration 3 adding an `(owner, updated_at)` index.
+- `Host.Runner`: `createSessionAs` (with an owner) and `sessionOwner`, which
+  returns the owner of the root session.
+- `agents-server`:
+  - `AgentsServer.Auth`: loads the tokens file (`sha256` or plain `token`
+    entries), compares tokens by SHA-256 digest, parses `Bearer` headers.
+  - `--auth-tokens`: 401 `unauthorized` without a valid token (`/healthz`
+    stays open). Every session endpoint checks the owner, answering 404 for
+    another owner's session. Continuations check the owner of the token's
+    session, answering 404 `unknown_token`. Listing filters by owner, or by
+    an owned `parent`.
+  - `server.started` logs `authentication: bearer|none`.
+- `docs/agents-server.md`: an Authentication section.
+
+### Not done here
+
+- Per-owner API keys and a default isolation policy (see "Remaining later
+  work" in the spec).
+
+### Verification
+
+- `cabal build all --enable-tests` under `-Wall -Werror`: clean.
+- `agents-tests`: 941 pass. The delete test now also checks that a
+  sub-session has its root's owner. The migrations test expects
+  migrations 1–3.
+- `agents-server-tests`: 9 pass, including the two-owner flow and loading a
+  tokens file.

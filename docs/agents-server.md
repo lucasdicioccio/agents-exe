@@ -10,9 +10,10 @@ machinery as the `session` CLI commands (see
 [durable-workflows-howto.md](durable-workflows-howto.md)): an agent can pause on
 deferred tool calls, and the server resumes it when the results arrive.
 
-> **No authentication.** Anyone who can reach the server can run its agents,
-> with its API keys. It binds to `127.0.0.1` by default; keep it there, or put
-> it behind a proxy that authenticates callers.
+> **Authentication is off by default.** Without `--auth-tokens`, anyone who
+> can reach the server can run its agents, with its API keys. It binds to
+> `127.0.0.1` by default. See [Authentication](#authentication) before exposing
+> it.
 
 ---
 
@@ -36,6 +37,7 @@ cabal run agents-server -- \
 | `--port PORT` | `8080` | Port to listen on. |
 | `--live-session-ttl SECONDS` | `900` | How long an idle session keeps its in-memory state (including background tool calls) before it is dropped. It is reloaded from the database on next use. |
 | `--shutdown-grace SECONDS` | `10` | How long open requests get to finish on shutdown. |
+| `--auth-tokens FILE` | (none) | Bearer tokens and their owners. See [Authentication](#authentication). |
 
 Sub-agents work as they do elsewhere: their sessions are stored in the same
 database, linked to the parent session.
@@ -245,7 +247,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict` |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
 
-Other errors: `404 not_found` for an unknown path, `405 method_not_allowed`,
+Other errors: `401 unauthorized` when authentication is on,
+`404 not_found` for an unknown path, `405 method_not_allowed`,
 `413 payload_too_large` for bodies over 32 MiB, and `500 internal_error`.
 
 **Messages** (`prompt`, `media`). `media` is a list of
@@ -270,6 +273,37 @@ cancelled calls are reported to the LLM on the next run.
 continuation tokens. It is refused while a run is active on any of them or on
 a parent session. `dry_run=true` answers with what would be removed and
 changes nothing.
+
+---
+
+## Authentication
+
+With `--auth-tokens tokens.json`, every endpoint except `/healthz` needs an
+`Authorization: Bearer <token>` header, and each caller only sees their own
+sessions. The file maps tokens to owners:
+
+```json
+{"tokens": [
+  {"owner": "alice", "sha256": "42f5d7b6be1957766e51c84756eb7a7c19a0e690a75d628238e2ab78f0ba9d19"},
+  {"owner": "bob", "token": "a-long-random-token"}
+]}
+```
+
+`sha256` is the hex SHA-256 of the token (`printf %s TOKEN | sha256sum`), so
+the file need not hold the token itself. `token` holds it in plain text.
+Several tokens may share an owner. The file is read at startup.
+
+* A missing or unknown token answers `401 unauthorized`.
+* A session belongs to the caller who created it. Sub-sessions, created by
+  sub-agents, belong to the owner of their root session.
+* Another owner's session answers `404`, exactly as a session that does not
+  exist, including its continuation tokens (`404 unknown_token`).
+* `GET /v1/sessions` lists the caller's own sessions. Sub-sessions are
+  listed through their parent: `?parent=<session id>`.
+* Sessions created while authentication was off have no owner, and no caller
+  sees them once it is on.
+
+All owners share the agents and the API keys of the server.
 
 ---
 
@@ -302,7 +336,7 @@ and, when known, `session_id`:
 
 | `kind` | Fields |
 |---|---|
-| `server.started` | `bind`, `port`, `agents`, `database`, `authentication` |
+| `server.started` | `bind`, `port`, `agents`, `database`, `authentication` (`bearer` or `none`) |
 | `http.request` | `method`, `path`, `status`, `ms` (when the response starts) |
 | `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed` | `session_id` |
 | `llm.request` / `llm.response` | `bytes`, token counts |
@@ -347,7 +381,7 @@ The HTTP layer itself is in `examples/agents-server/src/AgentsServer/Api.hs`.
 
 ## Not yet supported
 
-* Authentication and per-user sessions.
+* Per-owner API keys: all owners share the server's keys.
 * Several server processes sharing one database: each process serialises
   its own writes, and version checks detect the others, but runs are not
   coordinated between processes.
