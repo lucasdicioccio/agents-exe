@@ -38,6 +38,7 @@ cabal run agents-server -- \
 | `--live-session-ttl SECONDS` | `900` | How long an idle session keeps its in-memory state (including background tool calls) before it is dropped. It is reloaded from the database on next use. |
 | `--shutdown-grace SECONDS` | `10` | How long open requests get to finish on shutdown. |
 | `--auth-tokens FILE` | (none) | Bearer tokens and their owners. See [Authentication](#authentication). |
+| `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
 
 Sub-agents work as they do elsewhere: their sessions are stored in the same
 database, linked to the parent session.
@@ -199,6 +200,7 @@ per change:
 | `calls.deferred` | `{session_id, calls}`: the run stopped on these deferred calls. |
 | `run.stopped` | `{session_id, status}` |
 | `session.failed` | `{session_id, message}`, followed by `run.stopped` with status `failed`. |
+| `text.delta` | `{session_id, text}`: the next piece of the LLM's answer, with `--stream-tokens` only. |
 
 A typical run, from a `resume`:
 
@@ -221,6 +223,20 @@ data: {"session_id":"4ed4…","calls":[{"continuation_token":"0dd0…",…}]}
 event: run.stopped
 data: {"session_id":"4ed4…","status":"waiting_external"}
 ```
+
+### Streaming answers
+
+With `--stream-tokens`, the server asks the LLM for a streamed answer
+(`"stream": true`) and forwards each piece of text as a `text.delta` event,
+before the answer is stored. Concatenating a step's deltas gives the text of
+the LLM turn that the following `session.updated` carries. Tool calls
+are not streamed: they appear in the stored turn as usual. Sub-agents do not
+stream.
+
+The option applies to every agent of the server. It needs an endpoint that
+supports streaming: OpenAI and most OpenAI-compatible APIs do. For the
+`OpenAIv1` flavor the server also asks for token usage in the last chunk
+(`stream_options.include_usage`).
 
 The stream stays open across runs. It sends a `: keepalive` comment after 15
 seconds without events. Events are not replayed: a client that reconnects
@@ -431,6 +447,5 @@ The HTTP layer itself is in `examples/agents-server/src/AgentsServer/Api.hs`.
 
 * Per-owner API keys: all owners share the server's keys.
 * Coordinating runs between several servers sharing a Postgres database.
-* Streaming LLM tokens.
 
 See `todos/web-server-embedding.md` for the design and the planned work.

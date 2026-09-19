@@ -316,3 +316,21 @@ reported warnings, now fixed:
   - created a session blocked on a deferred call, restarted the server, and
     completed the call: the session reached `idle`, with consistent rows;
   - the URL's password is absent from the log, which holds only JSON lines.
+
+## Phase 11 — Token streaming ✅ COMPLETE
+
+- `LLMs/OpenAIStream.hs` (new), `HttpClient.postStream`,
+  `OpenAI.callLLMPayloadStreaming` and `withOverloadedRetry`,
+  `OpenAICompletionConfig.cfgOnTextDelta`, `AgentDeps.adOnTextDelta`,
+  `HostConfig.hcStreamTokens`, `SessionEvent.TextDelta`,
+  `agents-server --stream-tokens`.
+- Docs: a "Streaming answers" section and the `text.delta` event in
+  `docs/agents-server.md`.
+
+### Verification
+
+- `agents-tests`: 5 new `OpenAIStreamTests`.
+- `agents-server-tests`: 13 pass, including streaming against a fake
+  streaming endpoint.
+- The non-streaming path through the binary still works (fake endpoint,
+  deferred call reported).

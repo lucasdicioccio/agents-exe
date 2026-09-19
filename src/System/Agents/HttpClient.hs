@@ -3,6 +3,7 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 
 module System.Agents.HttpClient where
 
@@ -47,6 +48,17 @@ data Runtime = Runtime
     {- ^ Execute a fully-built HTTP request.
     This allows custom headers, methods, and body to be specified.
     -}
+    , postStream ::
+        forall a.
+        Tracer IO Trace ->
+        Text ->
+        Maybe Aeson.Value ->
+        (HttpClient.BodyReader -> IO a) ->
+        IO (Either ScoopError (HttpTypes.Status, Either LByteString.ByteString a))
+    {- ^ POST, and read a successful response's body as it arrives with the
+    given reader. Other responses are read whole ('Left'). The trace carries
+    the response without its body.
+    -}
     }
 
 data Token
@@ -69,7 +81,7 @@ newRuntime token =
 
 httpsClientApi :: Token -> Manager -> Runtime
 httpsClientApi token manager =
-    Runtime getF postF runRequestF
+    Runtime getF postF runRequestF postStreamF
   where
     getF tracer u = do
         let modHeaders = addHeaders defaultHeaders . addBasicTokenAuth token
@@ -84,6 +96,18 @@ httpsClientApi token manager =
         rsp <- HttpClient.httpLbs req manager
         runTracer tracer $ RunRequest req rsp
         pure $ Right rsp
+
+    postStreamF :: Tracer IO Trace -> Text -> Maybe Aeson.Value -> (HttpClient.BodyReader -> IO a) -> IO (Either ScoopError (HttpTypes.Status, Either LByteString.ByteString a))
+    postStreamF tracer u mbodyVal readBody = do
+        let modHeaders = (\r -> r{HttpClient.method = "POST"}) . addHeaders defaultHeaders . addBasicTokenAuth token
+        let modbody = maybe id (\val -> \r -> r{HttpClient.requestBody = HttpClient.RequestBodyLBS (Aeson.encode val)}) mbodyVal
+        req <- modbody . modHeaders <$> HttpClient.parseRequest (Text.unpack u)
+        HttpClient.withResponse req manager $ \rsp -> do
+            runTracer tracer $ RunRequest req (LByteString.empty <$ rsp)
+            let status = HttpClient.responseStatus rsp
+            if HttpTypes.statusIsSuccessful status
+                then (\a -> Right (status, Right a)) <$> readBody (HttpClient.responseBody rsp)
+                else (\chunks -> Right (status, Left (LByteString.fromChunks chunks))) <$> HttpClient.brConsume (HttpClient.responseBody rsp)
 
     -- \| Execute a fully-built request, adding auth headers but preserving
     -- all other request properties (method, body, custom headers).

@@ -414,6 +414,7 @@ eventFrame event = sseFrame (sessionEventKind event) $ case event of
     CallsDeferred sid calls -> Aeson.object ["session_id" .= sid, "calls" .= calls]
     RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= status]
     SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
+    TextDelta sid text -> Aeson.object ["session_id" .= sid, "text" .= text]
 
 -- | One event; JSON encoding has no raw newlines, so @data@ is one line.
 sseFrame :: Text -> Aeson.Value -> Builder

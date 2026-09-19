@@ -97,6 +97,10 @@ data AgentDeps = AgentDeps
     {- ^ Replaces the LLM call, e.g. with a mock in tests. 'Nothing' calls the
     agent's configured OpenAI-compatible endpoint.
     -}
+    , adOnTextDelta :: Maybe (Text.Text -> IO ())
+    {- ^ Streams the LLM's answers, passing each piece of text here as it
+    arrives. Ignored when 'adCompletion' replaces the LLM call.
+    -}
     }
 
 -- | Dependencies that store nothing.
@@ -108,6 +112,7 @@ defaultAgentDeps keys =
         , adContinuationStore = Nothing
         , adToolCache = Nothing
         , adCompletion = Nothing
+        , adOnTextDelta = Nothing
         }
 
 -- | Dependencies that store sessions as files, as the CLI and TUI do.
@@ -148,7 +153,7 @@ buildAgent tracer deps role convId node = do
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO node.osNodeTools
     completeF <- case deps.adCompletion of
         Just mkCompletion -> pure (mkCompletion node)
-        Nothing -> openAICompletion tracer deps.adApiKeys agentCfg
+        Nothing -> openAICompletion tracer deps.adApiKeys deps.adOnTextDelta agentCfg
     let (callStack, parent) = case role of
             RootAgent -> ([CallStackEntry "root" convId 0], Nothing)
             SubAgent parentConv stack -> (stack, Just parentConv)
@@ -200,8 +205,8 @@ buildAgent tracer deps role convId node = do
     sinkBackend _ = Nothing
 
 -- | The completion function for the agent's configured endpoint and API key.
-openAICompletion :: Tracer IO Trace -> LoadedApiKeys -> Base.Agent -> IO Completion
-openAICompletion tracer keys agentCfg = do
+openAICompletion :: Tracer IO Trace -> LoadedApiKeys -> Maybe (Text.Text -> IO ()) -> Base.Agent -> IO Completion
+openAICompletion tracer keys onTextDelta agentCfg = do
     let mApiKey = snd <$> find ((== Base.apiKeyId agentCfg) . fst) keys
     httpRuntime <- case mApiKey of
         Just apiKey -> HttpClient.newRuntime (HttpClient.BearerToken $ Text.decodeUtf8 $ OpenAI.revealApiKey apiKey)
@@ -214,4 +219,5 @@ openAICompletion tracer keys agentCfg = do
                 , cfgBaseUrl = OpenAI.ApiBaseUrl $ Base.modelUrl agentCfg
                 , cfgModelName = Base.modelName agentCfg
                 , cfgModelFlavor = Maybe.fromMaybe OpenAI.OpenAIv1 $ OpenAI.parseFlavor $ Base.flavor agentCfg
+                , cfgOnTextDelta = onTextDelta
                 }

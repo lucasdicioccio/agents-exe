@@ -52,6 +52,8 @@ data Host = Host
     , hostBackend :: SessionBackend
     , hostContinuations :: ContinuationStore
     , hostTracer :: Tracer IO HostTrace
+    , hostStreamTokens :: Bool
+    -- ^ Whether the runner streams LLM answers as text deltas.
     , hostLiveSessionTtl :: NominalDiffTime
     {- ^ How long an idle session keeps its in-memory agent (and the
     background calls it runs) before the runner evicts it.
@@ -67,6 +69,8 @@ data HostConfig = HostConfig
     , hcCompletion :: Maybe (OSAgentNode -> Completion)
     -- ^ Replaces every LLM call, e.g. with a mock in tests.
     , hcLiveSessionTtl :: NominalDiffTime
+    , hcStreamTokens :: Bool
+    -- ^ Stream root agents' LLM answers (see 'hostStreamTokens').
     }
 
 -- | A configuration with the default idle time of 15 minutes.
@@ -78,6 +82,7 @@ defaultHostConfig files keysFile dbPath =
         , hcDatabasePath = dbPath
         , hcCompletion = Nothing
         , hcLiveSessionTtl = 15 * 60
+        , hcStreamTokens = False
         }
 
 data HostTrace
@@ -155,6 +160,7 @@ withHostStores cfg stores tracer action = do
                 , hostBackend = backend
                 , hostContinuations = store
                 , hostTracer = tracer
+                , hostStreamTokens = cfg.hcStreamTokens
                 , hostLiveSessionTtl = cfg.hcLiveSessionTtl
                 }
   where

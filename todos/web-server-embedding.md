@@ -924,17 +924,32 @@ and the riskier ones come after the ones they build on. Choices marked
   completion, token already completed, cascade delete).
 * Not done: coordinating runs between servers (lease column).
 
-### Phase 11: token streaming
+### Phase 11: token streaming ✅
 
-* `OpenAI` completions can stream (`"stream": true` with
-  `stream_options.include_usage`): the SSE chunks are folded back into the
-  usual response JSON, so parsing and tool calls are unchanged, and each text
-  delta goes to a callback.
-* `AgentDeps.adOnTextDelta` wires the callback; the runner gives each session's
-  agent one that emits `TextDelta sid text` (`event: text.delta` on the SSE
-  stream). Streaming is opt-in: `HostConfig.hcStreamTokens` /
-  `agents-server --stream-tokens` (*default* off, as providers differ).
-  Sub-agents do not stream.
+* `System.Agents.LLMs.OpenAIStream`: reads a streamed chat completion
+  (server-sent events, `data: [DONE]`) and folds the chunks back into the
+  JSON of a non-streamed completion. It handles content, reasoning, tool calls
+  assembled by `index` from name and argument pieces, `finish_reason`, the
+  final `usage` chunk, and an `error` object sent mid-stream. Parsing, tool
+  calls, and storage do not change. Each non-empty text delta goes to a
+  callback.
+* `HttpClient.Runtime.postStream`: POST with a body reader for successful
+  answers (others are read whole, so the overloaded-retry check still
+  works). `OpenAI.callLLMPayloadStreaming` shares the retry logic
+  (`withOverloadedRetry`) with `callLLMPayload`.
+* `OpenAICompletionConfig.cfgOnTextDelta` switches a completion to streaming
+  and adds `"stream": true` (plus `stream_options.include_usage` for the
+  `OpenAIv1` flavor only, as other providers may refuse it).
+  `AgentDeps.adOnTextDelta` passes it through `buildAgent`.
+* `HostConfig.hcStreamTokens` / `hostStreamTokens`; the runner gives each
+  session's agent a callback emitting `TextDelta sid text`, which is not
+  traced (one per token, and it is content). `agents-server --stream-tokens`;
+  `event: text.delta` with `{session_id, text}`.
+* Tests: five unit tests of the fold (text, tool call pieces, null content,
+  a body read in 7-byte pieces with CRLF, comments and `[DONE]`, a stream
+  error), and an end-to-end server test against a fake streaming endpoint
+  (warp) that checks the deltas, the stored answer, and the request's
+  `stream` fields.
 
 ### Phase 12: agents from the database
 

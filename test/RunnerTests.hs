@@ -330,6 +330,7 @@ testHost nodes complete = do
             , hostBackend = backend
             , hostContinuations = store
             , hostTracer = silent
+            , hostStreamTokens = False
             , hostLiveSessionTtl = 15 * 60
             }
 

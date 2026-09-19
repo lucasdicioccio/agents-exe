@@ -33,6 +33,10 @@ data OpenAICompletionConfig = OpenAICompletionConfig
     , cfgBaseUrl :: OpenAI.ApiBaseUrl
     , cfgModelName :: Text
     , cfgModelFlavor :: OpenAI.ModelFlavor
+    , cfgOnTextDelta :: Maybe (Text -> IO ())
+    {- ^ When set, the completion is streamed and each piece of the answer's
+    text is passed here as it arrives.
+    -}
     }
 
 {- | Creates a completion function that uses OpenAI's API via callLLMPayload.
@@ -43,7 +47,9 @@ mkOpenAICompletion :: OpenAICompletionConfig -> (LlmCompletion -> IO (LlmRespons
 mkOpenAICompletion config completion = do
     let payload = buildPayload completion
 
-    result <- OpenAI.callLLMPayload config.cfgTracer config.cfgRuntime config.cfgBaseUrl payload
+    result <- case config.cfgOnTextDelta of
+        Nothing -> OpenAI.callLLMPayload config.cfgTracer config.cfgRuntime config.cfgBaseUrl payload
+        Just onText -> OpenAI.callLLMPayloadStreaming config.cfgTracer config.cfgRuntime config.cfgBaseUrl payload onText
 
     case result of
         Left err -> ioError $ userError $ "LLM API call failed: " ++ err
@@ -70,6 +76,14 @@ mkOpenAICompletion config completion = do
                     ++ ["tools" .= tools | not (null tools)]
                     ++ ["prompt_cache_key" .= key | Just key <- [promptCacheKey]]
                     ++ flavorSpecificFields config.cfgModelFlavor
+                    ++ streamFields
+
+    -- Usage in the last chunk is an OpenAI option that other providers may refuse.
+    streamFields = case config.cfgOnTextDelta of
+        Nothing -> []
+        Just _ ->
+            ["stream" .= True]
+                ++ ["stream_options" .= Aeson.object ["include_usage" .= True] | config.cfgModelFlavor == OpenAI.OpenAIv1]
 
     -- Convert SystemTool (which contains JSON text) to OpenAI Tool.
     -- Since OpenAI.Tool doesn't have a FromJSON instance, we parse the JSON

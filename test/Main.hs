@@ -87,6 +87,7 @@ import qualified DeveloperToolboxPatchTests
 import qualified AgentFactoryTests
 import qualified SessionMetadataTests
 import qualified ContinuationConsistencyTests
+import qualified OpenAIStreamTests
 import qualified RunnerTests
 import qualified DurableWorkflowTests
 
@@ -136,6 +137,7 @@ tests =
         , AgentFactoryTests.tests
         , SessionMetadataTests.tests
         , ContinuationConsistencyTests.tests
+        , OpenAIStreamTests.tests
         , RunnerTests.tests
         ]
 

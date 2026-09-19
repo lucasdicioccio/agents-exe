@@ -72,7 +72,7 @@ import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Prod.Tracer (contramap, runTracer)
 import System.Timeout (timeout)
 
-import System.Agents.AgentFactory (AgentRole (..), buildAgent)
+import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
 import System.Agents.AgentTree (OSAgentNode)
 import System.Agents.Host
 import System.Agents.Media.Types (MediaAttachment)
@@ -129,6 +129,8 @@ data SessionEvent
       CallsDeferred SessionId [DeferredCallView]
     | RunStopped SessionId SessionStatus
     | SessionFailed SessionId Text
+    | -- | A piece of the LLM's answer, when the host streams tokens.
+      TextDelta SessionId Text
     deriving (Show)
 
 -- | The event's name in the HTTP events stream.
@@ -139,6 +141,7 @@ sessionEventKind = \case
     CallsDeferred{} -> "calls.deferred"
     RunStopped{} -> "run.stopped"
     SessionFailed{} -> "session.failed"
+    TextDelta{} -> "text.delta"
 
 sessionEventSession :: SessionEvent -> SessionId
 sessionEventSession = \case
@@ -147,6 +150,7 @@ sessionEventSession = \case
     CallsDeferred sid _ -> sid
     RunStopped sid _ -> sid
     SessionFailed sid _ -> sid
+    TextDelta sid _ -> sid
 
 data DeleteMode = DryRun | DeleteForReal
     deriving (Show, Eq)
@@ -319,7 +323,10 @@ evictIdle runner = do
 emit :: SessionRunner -> SessionEvent -> IO ()
 emit runner event = do
     atomically $ writeTChan runner.srEvents event
-    runTracer runner.srHost.hostTracer $ HostRunnerTrace (sessionEventKind event) (sessionEventSession event)
+    case event of
+        -- One per token: too many, and too revealing, for the logs.
+        TextDelta{} -> pure ()
+        _ -> runTracer runner.srHost.hostTracer $ HostRunnerTrace (sessionEventKind event) (sessionEventSession event)
 
 {- | Next events of one session. Each call to 'subscribe' gets its own
 stream, starting now; the returned action blocks until the next event.
@@ -391,7 +398,10 @@ sessionAgent runner live meta =
 newAgent :: SessionRunner -> SessionId -> OSAgentNode -> IO RunnerAgent
 newAgent runner sid node = do
     let host = runner.srHost
-    agent <- buildAgent (contramap HostAgentTrace host.hostTracer) host.hostDeps RootAgent (sessionIdToConversationId sid) node
+    let deps
+            | host.hostStreamTokens = host.hostDeps{adOnTextDelta = Just (emit runner . TextDelta sid)}
+            | otherwise = host.hostDeps
+    agent <- buildAgent (contramap HostAgentTrace host.hostTracer) deps RootAgent (sessionIdToConversationId sid) node
     pure $ withExecutionMode Asynchronous agent
 
 -------------------------------------------------------------------------------

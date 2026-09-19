@@ -10,6 +10,7 @@ port, a mock LLM, and real HTTP requests.
 -}
 module Main (main) where
 
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Data.Aeson ((.=))
@@ -17,15 +18,17 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString.Lazy as LByteString
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Vector as Vector
 import qualified Network.HTTP.Client as Http
-import Network.HTTP.Types (Header, Method, statusCode, urlEncode)
+import Network.HTTP.Types (Header, Method, status200, statusCode, urlEncode)
+import qualified Network.Wai as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Prod.Tracer (silent)
 import System.FilePath ((</>))
@@ -59,6 +62,7 @@ main =
             , testCase "MCP over HTTP: initialize, list tools, call an agent" mcpTest
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
             , testCase "without authentication, non-local browser origins are refused" originTest
+            , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             ]
 
 -------------------------------------------------------------------------------
@@ -318,6 +322,47 @@ originTest = do
         (withToken, _) <- call srv{srvHeaders = [("Origin", "http://evil.example")], srvToken = Just "alice-token"} "GET" "/v1/agents" Nothing
         withToken @?= 200
 
+streamingTest :: Assertion
+streamingTest = do
+    requests <- newIORef []
+    testWithApplication (pure (fakeStreamingLlm requests)) $ \llmPort -> do
+        let extra = "{\"modelUrl\": \"http://127.0.0.1:" <> show llmPort <> "/v1\"}"
+        withServerConfig Nothing extra (\c -> c{hcCompletion = Nothing, hcStreamTokens = True}) $ \srv -> do
+            (_, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+            let sid = textField "session_id" view
+            withEvents srv sid $ \next -> do
+                _snapshot <- next
+                _ <- call srv "POST" ("/v1/sessions/" <> sid <> "/resume") Nothing
+                events <- untilStopped next
+                [field "text" d | ("text.delta", d) <- events] @?= ["Hel", "lo world"]
+                field "status" (snd (last events)) @?= "idle"
+            (_, final) <- call srv "GET" ("/v1/sessions/" <> sid) Nothing
+            let transcript = LByteString.toStrict (Aeson.encode (field "session" final))
+            assertBool "the whole answer is stored" ("Hello world" `ByteString.isInfixOf` transcript)
+    sent <- readIORef requests
+    map (field "stream") sent @?= [Aeson.Bool True]
+    map (field "include_usage" . field "stream_options") sent @?= [Aeson.Bool True]
+
+{- | An OpenAI-compatible endpoint streaming "Hello world" in two pieces,
+with a pause after each chunk. Records the request bodies.
+-}
+fakeStreamingLlm :: IORef [Aeson.Value] -> Wai.Application
+fakeStreamingLlm requests req respond = do
+    body <- Wai.strictRequestBody req
+    mapM_ (\v -> modifyIORef' requests (<> [v])) (Aeson.decode body :: Maybe Aeson.Value)
+    respond $ Wai.responseStream status200 [("Content-Type", "text/event-stream")] $ \write flush ->
+        mapM_ (\frame -> write (Builder.lazyByteString frame) >> flush >> threadDelay 20_000) frames
+  where
+    frames = map (\v -> "data: " <> Aeson.encode v <> "\n\n") chunks <> ["data: [DONE]\n\n"]
+    choice fields = Aeson.object ["choices" .= [Aeson.object (("index" .= (0 :: Int)) : fields)]]
+    chunks =
+        [ choice ["delta" .= Aeson.object ["role" .= ("assistant" :: Text), "content" .= ("" :: Text)]]
+        , choice ["delta" .= Aeson.object ["content" .= ("Hel" :: Text)]]
+        , choice ["delta" .= Aeson.object ["content" .= ("lo world" :: Text)]]
+        , choice ["delta" .= Aeson.object [], "finish_reason" .= ("stop" :: Text)]
+        , Aeson.object ["choices" .= ([] :: [Aeson.Value]), "usage" .= Aeson.object ["prompt_tokens" .= (3 :: Int), "completion_tokens" .= (2 :: Int), "total_tokens" .= (5 :: Int)]]
+        ]
+
 -------------------------------------------------------------------------------
 -- Server fixture
 -------------------------------------------------------------------------------
@@ -338,7 +383,11 @@ withServer :: String -> Completion -> (Srv -> IO a) -> IO a
 withServer = withServerAuth Nothing
 
 withServerAuth :: Maybe AuthTokens -> String -> Completion -> (Srv -> IO a) -> IO a
-withServerAuth auth extraConfig complete k =
+withServerAuth auth extraConfig complete = withServerConfig auth extraConfig (\c -> c{hcCompletion = Just (const complete)})
+
+-- | The most general fixture: the host configuration is adjusted by the caller.
+withServerConfig :: Maybe AuthTokens -> String -> (HostConfig -> HostConfig) -> (Srv -> IO a) -> IO a
+withServerConfig auth extraConfig adjust k =
     withSystemTempDirectory "agents-server" $ \dir -> do
         let agentFile = dir </> "agent.json"
             keysFile = dir </> "keys.json"
@@ -347,7 +396,7 @@ withServerAuth auth extraConfig complete k =
             Aeson.encode $
                 Aeson.object ["tag" .= ("OpenAIAgentDescription" :: Text), "contents" .= merge baseConfig extra]
         writeFile keysFile "{}"
-        let cfg = (defaultHostConfig [agentFile] keysFile (dir </> "agents.db")){hcCompletion = Just (const complete)}
+        let cfg = adjust (defaultHostConfig [agentFile] keysFile (dir </> "agents.db"))
         manager <- Http.newManager Http.defaultManagerSettings{Http.managerResponseTimeout = Http.responseTimeoutMicro 30_000_000}
         withHost cfg silent $ \host ->
             withSessionRunner host $ \runner -> do

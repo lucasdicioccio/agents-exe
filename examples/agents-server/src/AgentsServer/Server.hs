@@ -36,6 +36,8 @@ data ServerOptions = ServerOptions
     -- ^ Seconds to let open requests finish on shutdown.
     , soAuthTokens :: Maybe FilePath
     -- ^ Bearer tokens and their owners; without, no authentication.
+    , soStreamTokens :: Bool
+    -- ^ Stream LLM answers as @text.delta@ events.
     }
 
 serverOptions :: Parser ServerOptions
@@ -49,6 +51,7 @@ serverOptions =
         <*> (fromInteger <$> option auto (long "live-session-ttl" <> metavar "SECONDS" <> value 900 <> showDefault <> help "Idle time before a session's in-memory state is dropped"))
         <*> option auto (long "shutdown-grace" <> metavar "SECONDS" <> value 10 <> showDefault <> help "Time open requests get to finish on shutdown")
         <*> optional (strOption (long "auth-tokens" <> metavar "FILE" <> help "Bearer tokens and their owners; callers then only see their own sessions"))
+        <*> switch (long "stream-tokens" <> help "Stream LLM answers, sending text.delta events as the text arrives")
 
 {- | Load the agents, open the database, and serve until SIGTERM or SIGINT.
 
@@ -63,6 +66,7 @@ runServer opts logger = do
     let cfg =
             (defaultHostConfig opts.soAgentFiles opts.soApiKeysFile opts.soDatabase)
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
+                , hcStreamTokens = opts.soStreamTokens
                 }
         tracer = hostTraceLogger logger
         withStores k
