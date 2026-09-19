@@ -549,7 +549,13 @@ Every stored version emits `SessionUpdated` (with the head turn), including
 the stores at the start and end of a run. Events go through one runner-wide
 broadcast channel: `subscribe` returns an action yielding the next event of
 one session, so a subscriber keeps its stream when the session is evicted
-and loaded again. Each event is also traced as `HostRunnerTrace kind sid`.
+and loaded again. `subscribeSTM` gives the same stream as a transaction that
+consumes one event of any session and yields `Nothing` for another session's,
+to combine with timers or flags (the HTTP events stream uses it). Filtering
+must consume other sessions' events one transaction at a time: a `retry`
+after `readTChan` rolls the read back, which in the first version of
+`subscribe` blocked a subscriber for good on another session's event. Each
+event is also traced as `HostRunnerTrace kind sid`.
 
 #### 4.6 Startup recovery
 
@@ -621,49 +627,67 @@ an *ancestor* of the session has an active run: its sub-agent calls write
 into the tree, and would recreate what was deleted. The runner does the cascade,
 not SQL foreign keys, so the file backend behaves the same.
 
-### 5. HTTP API (`agents-server`)
+### 5. HTTP API (`agents-server`) (implemented, Phase 6)
 
-The server is a new executable in `examples/agents-server/` using `wai` and
-`warp`; these are the only new dependencies, and only for that executable. It
-writes SSE by hand with a `responseStream`, which needs no `wai-extra`. All
-bodies are JSON. Session objects embed the raw `Session` JSON that is already
-stored, so clients can reuse `session-print` logic.
+The server lives in `examples/agents-server/`, on `wai` and `warp`. The
+application code is a private sub-library, `agents-server-internal`
+(`AgentsServer.Api`, `AgentsServer.Log`, `AgentsServer.Server`), shared by the
+`agents-server` executable and its `agents-server-tests` suite; `agents-lib`
+does not depend on wai or warp. SSE is written by hand with `responseStream`
+(no `wai-extra`). All bodies are JSON. Session objects embed the raw
+`Session` JSON that is already stored, so clients can reuse `session-print`
+logic. The user guide is `docs/agents-server.md`.
 
 ```
 agents-server --agent-file a.json [--agent-file b.json …] --api-keys keys.json \
-              --db ./agents-server.db --port 8080 [--bind 127.0.0.1]
+              [--db ./agents-server.db] [--port 8080] [--bind 127.0.0.1] \
+              [--live-session-ttl 900] [--shutdown-grace 10]
 ```
 
 The server binds to `127.0.0.1` by default. There is no authentication in
-milestone 1 (see non-goals); the startup log says so.
+milestone 1 (see non-goals); the `server.started` log line says so.
 
 | Method & path | Body | Success | Errors |
 |---|---|---|---|
 | `GET /v1/agents` | | `200 [{slug, description, tools:[name]}]` | |
-| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?:[{mime, base64}], run?: "none"\|"step"\|"until_blocked"}` (default `until_blocked`) | `201 SessionView` | 404 unknown agent, 400 bad body |
-| `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions:[SessionMetaView], next_before}` | |
-| `GET /v1/sessions/:id` | | `200 SessionView` | 404 |
-| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?}` | `202 SessionView`, or `200` when waited | 404, 409 `run_in_progress`, 409 `not_accepting_messages` |
-| `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?: "step"\|"until_blocked"}` | `202 SessionView`, or `200` when waited | 404, 409 `run_in_progress` |
+| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?:[{mime, base64, filename?}], run?: "none"\|"step"\|"until_blocked"}` (default `until_blocked`) | `201 SessionView`, `Location` header | 404 `unknown_agent`, 400 `bad_request` |
+| `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions:[SessionMetaView], next_before}` | 400 |
+| `GET /v1/sessions/:id` | | `200 SessionView` | 404 `unknown_session` |
+| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?}` | `202`/`200 SessionView` | 404, 409 `run_in_progress`, 409 `not_accepting_messages` |
+| `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?: "step"\|"until_blocked"}` or no body | `202`/`200 SessionView` | 404, 409 `run_in_progress` |
 | `POST /v1/sessions/:id/cancel` | | `200 SessionMetaView` | 404, 409 `no_active_run` |
 | `GET /v1/sessions/:id/pending` | | `200 {calls:[DeferredCallView]}` | 404 |
-| `POST /v1/continuations/:token?wait=&timeout=` | `{result: UserToolResponse \| string, resume?: bool}` (default `true`) | `202 SessionView`, or `200` when waited or not resumed | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict` |
+| `POST /v1/continuations/:token?wait=&timeout=` | `{result: UserToolResponse \| string, resume?: bool}` (default `true`) | `202`/`200 SessionView` | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict` |
 | `GET /v1/sessions/:id/events` | | `200 text/event-stream` | 404 |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions:[id], continuations, dry_run}` | 404, 409 `run_in_progress` (also for a dry run, when the real delete would fail) |
 | `GET /healthz` | | `200 {ok:true, live_sessions, active_runs}` | |
 
-`SessionMetaView` = `{session_id, agent, parent_session_id, status,
-status_detail, version, created_at, updated_at}`.
+Other errors: 404 `not_found` (unknown path), 405 `method_not_allowed`, 413
+`payload_too_large` (bodies over 32 MiB), 500 `internal_error`. A malformed
+session id answers 404 `unknown_session`, a malformed token 404
+`unknown_token`.
+
+`SessionMetaView` is the `SessionMeta` JSON: `{session_id, agent,
+parent_session_id, owner, status, status_detail, version, created_at,
+updated_at}` (`owner` is always null in milestone 1).
 `SessionView` = `SessionMetaView` + `{session: <Session JSON>, pending:
 [DeferredCallView]}`.
 Errors are `{error: "<code>", message: "<text>"}`.
 
+**Listing.** Newest first by `updated_at`. `status` takes a comma-separated
+list; `limit` is 1–500, default 50. When a page is full, `next_before` is the
+`updated_at` of its last session, used as `before=` (strictly older) for the
+next page. A session with exactly the boundary's `updated_at` would be
+skipped; timestamps have nanosecond precision, so that takes two writes in
+the same instant.
+
 **Waiting.** Every endpoint that can start a run (create, messages, resume,
 continuations) takes the same two query parameters:
 
-* `wait=true|false`, default `false`. With `false`, the server answers as soon
-  as the run has started. With `true`, it answers when the run stops (idle,
-  blocked on deferred calls, or failed), using `awaitRun`.
+* `wait=true|false`, default `false` (`?wait` alone means true). With
+  `false`, the server answers as soon as the run has started. With `true`, it
+  answers when the run stops (idle, blocked on deferred calls, or failed),
+  using `awaitRun`.
 * `timeout=<seconds>`, only used with `wait=true`. Default 120, maximum 600;
   larger values are clamped. If it expires, the server answers with the
   current state (`status: "running"`) and the run carries on. Clients then
@@ -672,27 +696,47 @@ continuations) takes the same two query parameters:
 The response body is always the `SessionView` at the time of answering, so a
 waiting client gets the final turn and any pending deferred calls in one
 round trip. A client disconnecting while waiting does not cancel the run.
-Creation always answers `201`; the other endpoints answer `200` when the run
-has stopped (or none was started) and `202` while it is still going.
+Creation always answers `201`. The other endpoints answer `202` when the
+stored status is `running` at the time of answering (a run is still going,
+including a continuation queued into an active run) and `200` otherwise.
+On shutdown, waiting requests answer at once with the current state.
 
 **Deleting.** `dry_run=true` returns the same body as a real delete,
 listing every session and the number of continuation rows that would be
 removed, and changes nothing.
 
-SSE stream: each `SessionEvent` becomes `event: <kind>` plus
-`data: <json>`, where kind is `run.started`, `session.updated`,
-`calls.deferred`, `run.stopped`, or `session.failed`. On connect the server
-first sends `event: snapshot` with the `SessionMetaView`, so clients never
-need a separate GET to sync. The server sends a `: keepalive` comment every
-15 s.
+**SSE stream.** Each `SessionEvent` becomes `event: <kind>` plus one
+`data: <json>` line, where kind is `run.started` (`{session_id, mode}`),
+`session.updated` (`SessionMetaView` + `head_turn`), `calls.deferred`
+(`{session_id, calls}`), `run.stopped` (`{session_id, status}`), or
+`session.failed` (`{session_id, message}`). On connect the server first sends
+`event: snapshot` with the `SessionMetaView`, so clients never need a
+separate GET to sync; it subscribes before loading the snapshot, so no event
+falls in between. A run's `session.updated` for the running version comes
+just before its `run.started`. The server sends a `: keepalive` comment
+after 15 s without events (warp pauses its idle timeout while the handler
+runs, so quiet streams and long waits are not cut). Streams end on shutdown.
+Events are not replayed on reconnect. The stream reads events with
+`subscribeSTM`, combined with the keepalive timer and the shutdown flag in
+one transaction, so a timer firing never drops an event.
 
-### 6. Tracing and logs
+**Shutdown.** On SIGTERM or SIGINT: stop accepting connections, end event
+streams and release waiting requests, give open requests
+`--shutdown-grace` seconds, then `shutdownSessionRunner` (cancels active runs,
+storing their sessions) and close the database.
+
+### 6. Tracing and logs (implemented, Phase 6)
 
 `HostTrace` wraps the existing traces (`OneShot.Trace`, tool registration,
 OpenAI) plus runner events. The server prints them as JSON lines on stderr,
-one object per line with `ts`, `session_id` when known, and `kind`. API keys
-must never be logged. Phase 6 includes checking the HTTP and OpenAI traces for
-headers or keys before they are printed.
+one object per line with `ts`, `kind`, and `session_id` when known.
+`AgentsServer.Log` summarises each trace field by field instead of `show`ing
+it: LLM traces give byte and token counts, the HTTP client trace gives
+method, host, path, and status only (its request carries the API key in a
+header), and tool and agent-tree traces give their constructor name. Prompts,
+payloads, headers, and API keys are never printed; a smoke test with a fake
+key checked the log. Each HTTP request logs method, path, status, and time
+to first byte.
 
 ---
 
@@ -761,18 +805,20 @@ tracker.
   continuation rows); idle eviction and reload; `withHost` over agent and
   database files.
 
-### Phase 6: `agents-server` executable
+### Phase 6: `agents-server` executable ✅
 
 * wai/warp app, routes, SSE, CLI flags, graceful shutdown on SIGTERM (stop
   accepting, `shutdownSessionRunner`, close the database).
 * `docs/agents-server.md` user guide, plus links from
   `docs/durable-workflows-howto.md`.
-* Tests: a `tasty` integration test that starts the app on a random
-  port with a mock LLM and replays the canonical demo flow over HTTP,
-  asserting SSE event order `snapshot`, `run.started`, `session.updated`…,
-  `calls.deferred`, `run.stopped`. The same flow with `wait=true` needs no
-  events stream: the create call returns the blocked session with its pending
-  calls, and the continuation call returns the final answer.
+* Tests (`agents-server-tests`, threaded, the application on a random port
+  with a mock LLM): the demo flow over SSE (snapshot, then per run
+  `run.started` … `calls.deferred`, `run.stopped`, then the continuation's
+  run ending `idle`); the same flow with `wait=true` and no events stream
+  (the create call returns the blocked session with its pending call, the
+  continuation call the final answer); keepalives; listing pages and filters;
+  delete with dry run; agents and health; error codes; shutdown releasing
+  waiting requests and ending streams.
 
 ---
 

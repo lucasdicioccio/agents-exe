@@ -55,6 +55,7 @@ tests =
         , testCase "deleting cascades to sub-sessions and continuations" deleteTest
         , testCase "idle sessions are evicted and come back on demand" evictionTest
         , testCase "withHost loads agents and serves sessions from a database file" withHostTest
+        , testCase "a subscriber skips other sessions' events" subscribeFilterTest
         ]
 
 -------------------------------------------------------------------------------
@@ -292,6 +293,21 @@ withHostTest =
                 unknown <- createSession runner "nobody" (message "hello") Nothing
                 fmap (.smSessionId) unknown @?= Left (UnknownAgent "nobody")
         doesFileExist dbFile >>= assertBool "database file created"
+
+subscribeFilterTest :: Assertion
+subscribeFilterTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        a <- expectRight =<< createSession runner "test-agent" (message "first") Nothing
+        b <- expectRight =<< createSession runner "test-agent" (message "second") Nothing
+        next <- subscribe runner b.smSessionId
+        -- Session a's events come first in the stream.
+        _ <- expectRight =<< resume runner a.smSessionId UntilBlocked
+        _ <- expectRight =<< awaitRun runner a.smSessionId 5
+        _ <- expectRight =<< resume runner b.smSessionId UntilBlocked
+        kinds <- eventsUntilStopped next
+        assertBool ("events of b: " <> show kinds) ("run.started" `elem` kinds)
 
 -------------------------------------------------------------------------------
 -- Fixtures

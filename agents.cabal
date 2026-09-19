@@ -8,6 +8,7 @@ maintainer:         lucas@dicioccio.fr
 category:           System
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
+                    docs/agents-server.md
                     docs/durable-workflows-howto.md
 extra-source-files: docs/binary-tool.md
 
@@ -343,6 +344,71 @@ executable durable-workflow-demo
                       text,
                       uuid
     hs-source-dirs:   examples/durable-workflow-demo
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+
+-- The HTTP server lives in a private library so that its test suite can
+-- run the application; wai and warp stay out of agents-lib.
+library agents-server-internal
+    import:           warnings
+    hs-source-dirs:   examples/agents-server/src
+    exposed-modules:  AgentsServer.Api
+                    , AgentsServer.Log
+                    , AgentsServer.Server
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      async,
+                      bytestring,
+                      containers,
+                      http-client,
+                      http-types,
+                      optparse-applicative,
+                      prodapi,
+                      stm,
+                      text,
+                      time,
+                      unix,
+                      uuid,
+                      wai,
+                      warp
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+
+executable agents-server
+    import:           warnings
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    build-depends:    base >=4.18.3.0,
+                      agents-server-internal,
+                      aeson,
+                      optparse-applicative
+    hs-source-dirs:   examples/agents-server/app
+    default-language: Haskell2010
+
+test-suite agents-server-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   examples/agents-server/test
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      agents-server-internal,
+                      aeson,
+                      async,
+                      bytestring,
+                      containers,
+                      filepath,
+                      http-client,
+                      http-types,
+                      tasty,
+                      tasty-hunit,
+                      temporary,
+                      prodapi,
+                      text,
+                      vector,
+                      warp
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
 

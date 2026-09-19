@@ -82,8 +82,8 @@ data HostTrace
     | HostSubAgentTrace !OneShotTool.Trace
     | HostTreeTrace !TreeTrace
     | HostRecoveredSessions ![SessionId]
-    | HostRunnerTrace !Text !SessionId
-    -- ^ A runner event, by kind (e.g. @run.started@), for a session.
+    | -- | A runner event, by kind (e.g. @run.started@), for a session.
+      HostRunnerTrace !Text !SessionId
     deriving (Show)
 
 data HostError

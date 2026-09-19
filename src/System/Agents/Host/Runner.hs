@@ -50,6 +50,7 @@ module System.Agents.Host.Runner (
     sessionEventKind,
     sessionEventSession,
     subscribe,
+    subscribeSTM,
 ) where
 
 import Control.Concurrent (threadDelay)
@@ -323,10 +324,22 @@ stream, starting now; the returned action blocks until the next event.
 -}
 subscribe :: SessionRunner -> SessionId -> IO (IO SessionEvent)
 subscribe runner sid = do
+    next <- subscribeSTM runner sid
+    -- One transaction per event: after a 'readTChan', 'retry' would roll the
+    -- read back and block on the same event of another session forever.
+    let loop = atomically next >>= maybe loop pure
+    pure loop
+
+{- | Like 'subscribe', as a transaction to combine with others (timers,
+shutdown flags). Each run consumes one event of any session, and yields
+'Nothing' for another session's event.
+-}
+subscribeSTM :: SessionRunner -> SessionId -> IO (STM (Maybe SessionEvent))
+subscribeSTM runner sid = do
     chan <- atomically $ dupTChan runner.srEvents
-    pure $ atomically $ do
+    pure $ do
         event <- readTChan chan
-        if sessionEventSession event == sid then pure event else retry
+        pure $ if sessionEventSession event == sid then Just event else Nothing
 
 -- | Store a new version of a session (call under its lock).
 store :: SessionRunner -> LiveSession -> SessionMeta -> Session -> SessionStatus -> Maybe Text -> IO (Either VersionConflict SessionMeta)

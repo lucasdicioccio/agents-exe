@@ -175,3 +175,57 @@ reported warnings, now fixed:
   tests passed 15 repeated runs. The test suite is not built with
   `-threaded`; the bundled SQLite is `THREADSAFE=1` (serialized), which the
   threaded server in Phase 6 relies on.
+
+## Phase 6 — `agents-server` executable ✅ COMPLETE
+
+- `examples/agents-server/`:
+  - `src/AgentsServer/Api.hs`: the wai application (routing, JSON views,
+    `wait`/`timeout`, SSE with keepalives and a shutdown flag).
+  - `src/AgentsServer/Log.hs`: JSON-line logs on stderr, traces summarised
+    field by field.
+  - `src/AgentsServer/Server.hs`: CLI options, startup (host, runner,
+    startup recovery), warp settings, SIGTERM/SIGINT handling.
+  - `app/Main.hs`, `test/Main.hs`.
+- `agents.cabal`: private library `agents-server-internal`, executable
+  `agents-server`, test suite `agents-server-tests` (all threaded where it
+  matters). wai 3.2.4 and warp 3.4.12 were already in the build plan, so
+  nothing new is downloaded.
+- `Host.Runner`:
+  - Fixed `subscribe`: it filtered with `retry` after `readTChan`, which rolls
+    the read back, so a subscriber blocked forever on the first event of
+    another session. The Phase 5 tests only ever had one session emitting.
+    New regression test `a subscriber skips other sessions' events` (fails on
+    the old code: no events after 5 s).
+  - New `subscribeSTM`, used by the events stream.
+- `docs/agents-server.md`; links from `docs/durable-workflows-howto.md` and
+  `README.md`; added to `extra-doc-files`.
+
+### Differences from the first version of the spec (spec updated)
+
+- The app code is a private sub-library so the test suite can run it.
+- `SessionMetaView` is the `SessionMeta` JSON, so it includes `owner`
+  (always null for now).
+- Status codes: `202` exactly when the stored status is `running` at the
+  time of answering, `200` otherwise; creation always `201`, with a
+  `Location` header.
+- In the events stream, a run's `session.updated` (running version) comes
+  just before its `run.started`: the runner stores, then announces.
+- Additions: `--live-session-ttl`, `--shutdown-grace`, `filename` on media,
+  `mode` on resume, 404 `not_found`, 405, 413 (32 MiB bodies), list
+  `limit` 1–500 (default 50), comma-separated `status`.
+- On shutdown, waiting requests answer at once and event streams end, so the
+  grace period is only for other requests.
+
+### Verification
+
+- `cabal build all --enable-tests` under `-Wall -Werror`: clean.
+- `agents-tests`: 941 tests pass (one new runner test).
+- `agents-server-tests`: 7 tests pass; 30 repeated runs plus 10 with
+  `+RTS -N4`, no failures.
+- Smoke tests of the binary against a fake OpenAI endpoint:
+  - health, agents, and a created session answered by the LLM;
+  - a deferred call completed over HTTP, with the events stream;
+  - a restart on the same database, with the session still there;
+  - SIGTERM with an open events stream: exit 0 in 0.01 s;
+  - the API key reached the LLM but not the log.
+- The guide's Haskell snippet typechecks.

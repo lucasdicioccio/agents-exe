@@ -23,6 +23,9 @@ This guide covers:
 * [Building your own durable agent](#building-your-own-durable-agent) in
   Haskell.
 
+To run durable agents behind an HTTP API, with sessions in SQLite, see
+[agents-server.md](agents-server.md).
+
 ---
 
 ## Running the demonstrator
@@ -409,4 +412,6 @@ cabal test agents-tests
 * `docs/sessions.md` — session storage and multi-location stores.
 * `docs/async-tool-calls.md` — background tool calls in the same process,
   with progress, cancellation and partial answers.
+* `docs/agents-server.md` — the same flow over HTTP, with sessions in SQLite
+  and live events.
 
