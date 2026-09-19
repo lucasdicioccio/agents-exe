@@ -878,16 +878,21 @@ and the riskier ones come after the ones they build on. Choices marked
   an `Origin` other than localhost, 127.0.0.1, or [::1] with 403
   `forbidden_origin`. With authentication, origins are not checked.
 
-### Phase 9: TUI out of the core library
+### Phase 9: TUI out of the core library ✅
 
-* A new public sub-library `agents-tui` holds `System.Agents.TUI.*` (except
-  `TUI.ToolCallActivity`, which has no brick/vty import and is used by the
-  tests), `System.Agents.CLI.TUI`, `System.Agents.CLI.Config`, and
-  `System.Agents.CLI` (which imports them). `agents-lib` drops `brick`,
-  `vty`, `text-zipper`, and the unused `data-clist`. `agents-exe` depends on
-  both. Module names do not change.
-* *Default*: `agents-lib` itself becomes the core instead of a new
-  `agents-core` name, so nothing that depends on `agents-lib` breaks.
+* New public sub-library `agents-tui` (source directory `tui/`) with the 25
+  modules that need brick or vty, or import them: `System.Agents.TUI.*`
+  (except `TUI.ToolCallActivity`, which is pure and used by the tests),
+  `System.Agents.CLI.TUI`, `System.Agents.CLI.Config`, and `System.Agents.CLI`.
+  Module names do not change. Only `agents-exe` imports them.
+* `agents-lib` drops `brick`, `vty`, `text-zipper`, and the unused
+  `data-clist`; nothing in its dependency closure pulls brick or vty any
+  more. `agents-exe` depends on both libraries.
+* The moved files live in their own source directory: with a shared `src/`,
+  GHC would compile core modules again inside `agents-tui` instead of using
+  `agents-lib`.
+* *Default*: `agents-lib` itself is the core instead of a new `agents-core`
+  name, so nothing that depends on `agents-lib` breaks.
 
 ### Phase 10: Postgres backend
 

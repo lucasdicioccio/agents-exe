@@ -34,12 +34,10 @@ library agents-lib
                     , System.Agents.AgentTree.Trace
                     , System.Agents.ApiKeys
                     , System.Agents.Base
-                    , System.Agents.CLI
                     , System.Agents.CLI.Aliases
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
                     , System.Agents.CLI.CheckToolCall
-                    , System.Agents.CLI.Config
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
@@ -58,7 +56,6 @@ library agents-lib
                     , System.Agents.CLI.SessionIndex
                     , System.Agents.CLI.SessionSearch
                     , System.Agents.CLI.Spec
-                    , System.Agents.CLI.TUI
                     , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.Combinators.ProgressiveDisclosure
@@ -192,29 +189,7 @@ library agents-lib
                     , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
-                    , System.Agents.TUI.Core
-                    , System.Agents.TUI.Types
-                    , System.Agents.TUI.Types.Core
-                    , System.Agents.TUI.Types.Conversation
-                    , System.Agents.TUI.Types.State
-                    , System.Agents.TUI.Buffer
-                    , System.Agents.TUI.Clipboard
-                    , System.Agents.TUI.Render
-                    , System.Agents.TUI.Render.Attributes
-                    , System.Agents.TUI.Render.Conversation
-                    , System.Agents.TUI.Render.Dialog
-                    , System.Agents.TUI.Render.Layout
-                    , System.Agents.TUI.Render.Utils
-                    , System.Agents.TUI.Render.Widgets
-                    , System.Agents.TUI.Event
-                    , System.Agents.TUI.Event.Dialog
-                    , System.Agents.TUI.Event.Conversation
-                    , System.Agents.TUI.Event.Queue
-                    , System.Agents.TUI.Event.Attachment
-                    , System.Agents.TUI.Event.Navigation
-                    , System.Agents.TUI.KeyMapping
                     , System.Agents.TUI.ToolCallActivity
-                    , System.Agents.TUI.MessageComposer
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.ToolSchema
@@ -226,7 +201,6 @@ library agents-lib
                       aeson-pretty,
                       async,
                       base64-bytestring,
-                      brick,
                       bytestring,
                       case-insensitive,
                       conduit,
@@ -234,7 +208,6 @@ library agents-lib
                       containers,
                       contravariant,
                       crypto-api,
-                      data-clist,
                       data-default,
                       deepseq,
                       direct-sqlite,
@@ -272,15 +245,71 @@ library agents-lib
                       stm-conduit,
                       temporary,
                       text,
-                      text-zipper,
                       time,
                       unix,
                       unliftio,
                       unordered-containers,
                       uuid,
                       vector,
-                      vty,
                       yaml
+
+-- The terminal UI, kept out of agents-lib so that programs embedding the
+-- agents (such as agents-server) do not depend on brick and vty.
+library agents-tui
+    import:           warnings
+    visibility:       public
+    hs-source-dirs:   tui
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    exposed-modules:  System.Agents.CLI
+                    , System.Agents.CLI.Config
+                    , System.Agents.CLI.TUI
+                    , System.Agents.TUI.Buffer
+                    , System.Agents.TUI.Clipboard
+                    , System.Agents.TUI.Core
+                    , System.Agents.TUI.Event
+                    , System.Agents.TUI.Event.Attachment
+                    , System.Agents.TUI.Event.Conversation
+                    , System.Agents.TUI.Event.Dialog
+                    , System.Agents.TUI.Event.Navigation
+                    , System.Agents.TUI.Event.Queue
+                    , System.Agents.TUI.KeyMapping
+                    , System.Agents.TUI.MessageComposer
+                    , System.Agents.TUI.Render
+                    , System.Agents.TUI.Render.Attributes
+                    , System.Agents.TUI.Render.Conversation
+                    , System.Agents.TUI.Render.Dialog
+                    , System.Agents.TUI.Render.Layout
+                    , System.Agents.TUI.Render.Utils
+                    , System.Agents.TUI.Render.Widgets
+                    , System.Agents.TUI.Types
+                    , System.Agents.TUI.Types.Conversation
+                    , System.Agents.TUI.Types.Core
+                    , System.Agents.TUI.Types.State
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      aeson-pretty,
+                      async,
+                      base64-bytestring,
+                      brick,
+                      bytestring,
+                      containers,
+                      data-default,
+                      directory,
+                      filepath,
+                      lens,
+                      process,
+                      process-extras,
+                      prodapi,
+                      stm,
+                      temporary,
+                      text,
+                      text-zipper,
+                      time,
+                      uuid,
+                      vector,
+                      vty
 
 executable agents-exe
     import:           warnings
@@ -288,6 +317,7 @@ executable agents-exe
     ghc-options:      -threaded
     build-depends:    base  >=4.18.3.0,
                       agents-lib,
+                      agents-tui,
                       aeson,
                       aeson-pretty,
                       bytestring,

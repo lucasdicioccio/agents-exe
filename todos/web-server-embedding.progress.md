@@ -284,3 +284,19 @@ reported warnings, now fixed:
 - The official Python MCP SDK (2.2.0, `streamable_http_client`) against the
   binary and a fake OpenAI endpoint: initialize (2025-06-18), list tools,
   call `ask_weather`, which reported the deferred call and its token.
+
+## Phase 9 — TUI out of the core library ✅ COMPLETE
+
+- `git mv` of 25 modules from `src/` to `tui/`: `TUI.*` except
+  `ToolCallActivity`, plus `CLI.TUI`, `CLI.Config`, and `CLI`.
+- `agents.cabal`: new public library `agents-tui`. `agents-lib` loses
+  those modules and `brick`, `vty`, `text-zipper`, `data-clist`.
+  `agents-exe` adds `agents-tui`.
+- `docs/architecture.md`: a "Libraries and executables" table.
+
+### Verification
+
+- `cabal build all --enable-tests`: clean. The build plan shows brick, vty,
+  and text-zipper only under `agents-tui`, and nowhere in `agents-lib`'s
+  transitive closure.
+- `cabal test all`: 941 + 12 pass. `agents-exe --help` runs.
