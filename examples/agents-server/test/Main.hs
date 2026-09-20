@@ -23,6 +23,7 @@ import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString.Lazy as LByteString
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -66,6 +67,9 @@ main =
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
+            , testCase "the openapi document covers every route and resolves" openApiTest
+            , testCase "the chat page is served only when it is enabled" uiPageTest
+            , testCase "EventSource may carry its token as a query parameter" accessTokenTest
             ]
 
 -------------------------------------------------------------------------------
@@ -425,6 +429,111 @@ storedConfig extra =
             , "builtinToolboxes" .= ([] :: [Text])
             , "mcpServers" .= ([] :: [Text])
             ]
+
+-------------------------------------------------------------------------------
+-- Self-description
+-------------------------------------------------------------------------------
+
+{- | The document is the contract a client that has never heard of
+agents-exe reads, so it must describe every route, need no token, and leave
+no dangling reference.
+-}
+openApiTest :: Assertion
+openApiTest = do
+    let tokens = authTokensFromList [("alice-token", "alice")]
+    withServerAuth (Just tokens) "{}" mockCompletion $ \anonymous -> do
+        (status, doc) <- call anonymous "GET" "/openapi.json" Nothing
+        status @?= 200
+        -- Every path the router answers, and nothing else.
+        let documented = case field "paths" doc of
+                Aeson.Object o -> [Key.toText k | k <- KeyMap.keys o]
+                _ -> []
+        sortText documented
+            @?= [ "/healthz"
+                , "/mcp"
+                , "/v1/agents"
+                , "/v1/agents/{slug}"
+                , "/v1/continuations/{token}"
+                , "/v1/sessions"
+                , "/v1/sessions/{id}"
+                , "/v1/sessions/{id}/cancel"
+                , "/v1/sessions/{id}/events"
+                , "/v1/sessions/{id}/messages"
+                , "/v1/sessions/{id}/pending"
+                , "/v1/sessions/{id}/resume"
+                ]
+        let known = case field "schemas" (field "components" doc) of
+                Aeson.Object o -> [Key.toText k | k <- KeyMap.keys o]
+                _ -> []
+        assertBool "schemas are published" (not (null known))
+        assertBool "every $ref resolves" (all (`elem` known) (refNames doc))
+        -- The orientation text names the flow a newcomer must follow.
+        let blurb = textField "description" (field "info" doc)
+        mapM_
+            (\needle -> assertBool (Text.unpack ("the description mentions " <> needle)) (needle `Text.isInfixOf` blurb))
+            ["/v1/agents", "/v1/sessions", "/v1/continuations/{token}", "deferred"]
+
+-- | Every schema name a @$ref@ points at, anywhere in the document.
+refNames :: Aeson.Value -> [Text]
+refNames = \case
+    Aeson.Object o ->
+        case KeyMap.lookup "$ref" o of
+            Just (Aeson.String r) -> [Text.takeWhileEnd (/= '/') r]
+            _ -> concatMap refNames (KeyMap.elems o)
+    Aeson.Array xs -> concatMap refNames (Vector.toList xs)
+    _ -> []
+
+sortText :: [Text] -> [Text]
+sortText = List.sort
+
+uiPageTest :: Assertion
+uiPageTest = do
+    -- Off by default in the fixture, as on a non-loopback bind.
+    withServer "{}" mockCompletion $ \srv -> do
+        (off, _) <- call srv "GET" "/" Nothing
+        off @?= 404
+    withServerConfig Nothing "{}" id (\env -> env{envUI = True}) $ \srv -> do
+        (status, contentType, body) <- rawGet srv "GET" "/"
+        status @?= 200
+        contentType @?= Just "text/html; charset=utf-8"
+        mapM_
+            (\needle -> assertBool (show needle <> " is on the page") (needle `ByteString.isInfixOf` body))
+            ["<!DOCTYPE html>", "/v1/sessions", "/v1/continuations/", "EventSource", "openapi.json"]
+
+{- | @EventSource@ cannot set headers, so the event stream also takes the
+token as a query parameter. No other endpoint does.
+-}
+accessTokenTest :: Assertion
+accessTokenTest = do
+    let tokens = authTokensFromList [("alice-token", "alice")]
+    withServerAuth (Just tokens) "{}" mockCompletion $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+        (_, view) <- call alice "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+        let sid = textField "session_id" view
+            query = "?access_token=alice-token"
+        -- The stream opens and sends its snapshot.
+        (streamStatus, _, body) <- rawGet anonymous "GET" ("/v1/sessions/" <> sid <> "/events" <> query)
+        streamStatus @?= 200
+        assertBool "the stream sent a snapshot" ("event: snapshot" `ByteString.isInfixOf` body)
+        -- The same parameter is refused everywhere else.
+        (rejected, err) <- call anonymous "GET" ("/v1/sessions/" <> sid <> query) Nothing
+        (rejected, field "error" err) @?= (401, "unauthorized")
+        (listRejected, _) <- call anonymous "GET" ("/v1/sessions" <> query) Nothing
+        listRejected @?= 401
+
+{- | Status, content type, and body bytes. The event stream is read only
+until the server closes it, which 'requestShutdown' does.
+-}
+rawGet :: Srv -> Method -> Text -> IO (Int, Maybe ByteString.ByteString, ByteString.ByteString)
+rawGet srv method path = do
+    req <- request srv method path Nothing
+    Http.withResponse req srv.srvManager $ \rsp -> do
+        chunk <- Http.brRead (Http.responseBody rsp)
+        pure
+            ( statusCode (Http.responseStatus rsp)
+            , lookup "Content-Type" (Http.responseHeaders rsp)
+            , chunk
+            )
 
 -------------------------------------------------------------------------------
 -- Server fixture

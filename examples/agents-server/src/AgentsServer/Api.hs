@@ -44,6 +44,8 @@ import Text.Read (readMaybe)
 
 import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
 import AgentsServer.Mcp (McpContext (..), handleMcp)
+import AgentsServer.OpenApi (apiDocument)
+import AgentsServer.UI (uiPage)
 import System.Agents.AgentStore (StoredAgent (..))
 import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
@@ -72,12 +74,18 @@ data ServerEnv = ServerEnv
     is the default, as an agent definition can start MCP servers (commands
     run on this machine).
     -}
+    , envUI :: Bool
+    -- ^ Serve the chat page at @/@; see "AgentsServer.UI".
+    , envDocument :: Aeson.Value
+    {- ^ The OpenAPI document, built once: it is the same for every
+    request, and deriving it again per request would be wasted work.
+    -}
     }
 
 newServerEnv :: Host -> SessionRunner -> Maybe AuthTokens -> IO ServerEnv
 newServerEnv host runner auth = do
     shutdown <- newTVarIO False
-    pure $ ServerEnv host runner shutdown 15_000_000 auth []
+    pure $ ServerEnv host runner shutdown 15_000_000 auth [] False (Aeson.toJSON (apiDocument Nothing))
 
 -- | Who is calling: an owner when authentication is on, 'Nothing' when off.
 newtype Caller = Caller (Maybe Text)
@@ -136,15 +144,27 @@ application env req respond = do
             | Just apiError <- fromException e -> respond (errorResponse apiError)
             | otherwise -> respond $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
 
+{- | The three endpoints a client can reach before it has a token describe
+the server itself; everything else needs one, when tokens are in use.
+-}
 route :: ServerEnv -> Request -> IO Response
 route env req = case (requestMethod req, path) of
     ("GET", ["healthz"]) -> healthz env
+    ("GET", ["openapi.json"]) -> pure $ json status200 env.envDocument
+    ("GET", []) | env.envUI -> pure uiResponse
     _ -> do
         checkOrigin env req
-        caller <- authenticateRequest env req
+        caller <- authenticateRequest env req path
         routeAuthenticated env req caller path
   where
     path = filter (not . Text.null) (pathInfo req)
+
+uiResponse :: Response
+uiResponse =
+    responseLBS
+        status200
+        [(hContentType, "text/html; charset=utf-8")]
+        (LByteString.fromStrict (Text.encodeUtf8 uiPage))
 
 routeAuthenticated :: ServerEnv -> Request -> Caller -> [Text] -> IO Response
 routeAuthenticated env req caller path = case (requestMethod req, path) of
@@ -173,7 +193,9 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         Nothing -> throwIO $ ApiError status404 "unknown_session" ("not a session id: " <> txt)
 
     knownPath = \case
+        [] -> env.envUI
         ["healthz"] -> True
+        ["openapi.json"] -> True
         ["v1", "agents"] -> True
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
@@ -212,13 +234,22 @@ isLoopbackOrigin origin = case Text.breakOn "://" (Text.decodeUtf8Lenient origin
         | "[" `Text.isPrefixOf` hp = Text.takeWhile (/= ']') hp <> "]"
         | otherwise = Text.takeWhile (/= ':') hp
 
-authenticateRequest :: ServerEnv -> Request -> IO Caller
-authenticateRequest env req = case env.envAuth of
+{- | The bearer token of a request. The event stream also accepts it as an
+@access_token@ query parameter, because @EventSource@ cannot set headers;
+no other endpoint does, and the request log records no query strings.
+-}
+authenticateRequest :: ServerEnv -> Request -> [Text] -> IO Caller
+authenticateRequest env req path = case env.envAuth of
     Nothing -> pure (Caller Nothing)
     Just tokens ->
-        case lookup hAuthorization (requestHeaders req) >>= bearerToken >>= authenticate tokens of
+        case asum [headerToken, queryToken] >>= authenticate tokens of
             Just owner -> pure (Caller (Just owner))
             Nothing -> throwIO $ ApiError status401 "unauthorized" "a valid bearer token is required"
+  where
+    headerToken = lookup hAuthorization (requestHeaders req) >>= bearerToken
+    queryToken = case path of
+        ["v1", "sessions", _, "events"] -> Text.encodeUtf8 <$> param "access_token" (queryParams req)
+        _ -> Nothing
 
 {- | Refuse access to another owner's session. It answers as if the session
 did not exist, so callers cannot probe for other owners' sessions.

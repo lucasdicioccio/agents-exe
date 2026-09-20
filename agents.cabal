@@ -433,7 +433,11 @@ library agents-server-internal
                     , AgentsServer.Auth
                     , AgentsServer.Log
                     , AgentsServer.Mcp
+                    , AgentsServer.OpenApi
+                    , AgentsServer.Routes
                     , AgentsServer.Server
+                    , AgentsServer.Types
+                    , AgentsServer.UI
     build-depends:    base >=4.18.3.0,
                       agents-lib,
                       agents-postgres,
@@ -442,10 +446,17 @@ library agents-server-internal
                       bytestring,
                       containers,
                       crypton,
+                      http-api-data,
                       http-client,
                       http-types,
+                      insert-ordered-containers,
+                      lens,
+                      openapi3,
                       optparse-applicative,
                       prodapi,
+                      servant,
+                      servant-openapi3,
+                      servant-server,
                       stm,
                       text,
                       time,

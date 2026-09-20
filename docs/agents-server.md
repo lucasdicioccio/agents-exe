@@ -40,9 +40,38 @@ cabal run agents-server -- \
 | `--auth-tokens FILE` | (none) | Bearer tokens and their owners. See [Authentication](#authentication). |
 | `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API. Needs `--auth-tokens`. See [Storing agents](#storing-agents). |
 | `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
+| `--no-ui` | off | Do not serve the chat page at `/`. See [Finding your way around](#finding-your-way-around). |
 
 Sub-agents work as they do elsewhere: their sessions are stored in the same
 database, linked to the parent session.
+
+### Finding your way around
+
+The server describes itself, so a client that knows only its URL can start
+using it:
+
+| Path | What it is |
+|---|---|
+| `GET /` | A small chat page, for a person at this machine. Served on a loopback bind, or when `--auth-tokens` is on; `--no-ui` turns it off. |
+| `GET /openapi.json` | The whole API as an OpenAPI 3 document, generated from the routes. |
+| `GET /healthz` | Liveness and counters. |
+
+None of the three needs a bearer token: they describe the server, not its
+sessions or its agents.
+
+The OpenAPI document is the machine-readable reference, and it is generated
+from the same servant types that route the requests, so it cannot drift from
+the server. An agents-exe agent can use it directly as a toolbox:
+
+```json
+"openApiToolboxes": [
+  {"tag": "OpenAPIServer", "contents": {"SpecUrl": "http://127.0.0.1:8080/openapi.json"}}
+]
+```
+
+The chat page is one self-contained HTML document with no build step and no
+assets. It starts sessions, follows their event streams, and offers a box to
+complete deferred tool calls, so it doubles as a worked example of the API.
 
 ### An agent for the examples
 
@@ -183,6 +212,8 @@ A result posted while a run is active is checked and queued, and the run
 applies it before its next step. If the result makes the session able to
 progress, a run about to stop keeps going instead. Posting with
 `"resume": false` stores the result without starting a run; `resume` later.
+While a run is active the result is queued for it, and `resume` is ignored:
+the run applies it either way.
 
 ---
 
@@ -251,6 +282,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 
 | Method and path | Body | Success | Errors |
 |---|---|---|---|
+| `GET /` | | `200 text/html` chat page | 404 when the page is off |
+| `GET /openapi.json` | | `200` OpenAPI 3 document | |
 | `GET /healthz` | | `200 {ok, live_sessions, active_runs}` | |
 | `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
 | `GET /v1/agents` | | `200 [{slug, description, tools, source, …}]` | |
@@ -268,7 +301,10 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict` |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
 
-Other errors: `401 unauthorized` when authentication is on,
+Any endpoint that reads a body or a query parameter can answer
+`400 bad_request`; the table names it only where it is the usual outcome.
+Other errors: `401 unauthorized` when authentication is on (with a
+`WWW-Authenticate: Bearer` header),
 `403 forbidden_origin` when it is off (see [Authentication](#authentication)),
 `404 not_found` for an unknown path, `405 method_not_allowed`,
 `413 payload_too_large` for bodies over 32 MiB, and `500 internal_error`.
@@ -283,7 +319,7 @@ Other errors: `401 unauthorized` when authentication is on,
 
 **Listing.** Sessions come newest first (by `updated_at`). Filters:
 `agent=<slug>`, `status=<s1,s2,…>`, `parent=<session id>` (the sub-sessions
-of a session). `limit` is 1 to 500 (default 50). When a page is full,
+of a session; another owner's session answers `404 unknown_session`). `limit` is 1 to 500 (default 50). When a page is full,
 `next_before` holds the `updated_at` of its last session: pass it as
 `before=` to get the next page.
 
@@ -300,8 +336,8 @@ changes nothing.
 
 `--db postgresql://user:password@host:5432/agents` stores sessions in
 Postgres instead of SQLite. The server creates its tables on start
-(`sessions`, `tool_continuations`, `schema_migrations`); the database must
-exist and the user must be allowed to create tables. The logs show the URL
+(`sessions`, `tool_continuations`, `agents`, `schema_migrations`); the
+database must exist and the user must be allowed to create tables. The logs show the URL
 without its user and password.
 
 Several servers may share one Postgres database: every write is versioned,
@@ -378,6 +414,9 @@ Several tokens may share an owner. The file is read at startup.
   listed through their parent: `?parent=<session id>`.
 * Sessions created while authentication was off have no owner, and no caller
   sees them once it is on.
+* `GET /v1/sessions/:id/events` also accepts the token as an `access_token`
+  query parameter, because a browser's `EventSource` cannot set headers. No
+  other endpoint does, and the request log records no query strings.
 
 All owners share the agents and the API keys of the server.
 
@@ -386,6 +425,8 @@ header that is not `localhost`, `127.0.0.1`, or `[::1]` answer
 `403 forbidden_origin`. This stops a web page from reaching a local server
 through DNS rebinding. Clients that send no `Origin` (curl, servers, MCP
 clients) are not affected. With authentication on, origins are not checked.
+`/healthz`, `/openapi.json` and `/` are answered before the check, so a
+monitor or a documentation browser reaches them from anywhere.
 
 ---
 
@@ -406,6 +447,10 @@ send the same bearer token as REST clients.
   them through `POST /v1/continuations/:token`. If the run is still going when
   the wait ends, the result gives the session id to follow.
 * A failed run returns a result with `isError: true`.
+* A body that is not a JSON-RPC message, or an empty batch, answers `400`
+  with a JSON-RPC error (`-32700`, `-32600`). An unknown method answers
+  `-32601`, and an unknown tool or bad arguments `-32602`, both inside a
+  `200`.
 * Every request gets a plain JSON response. Notifications answer `202`.
   The server sends no requests or notifications of its own, so `GET /mcp`
   answers `405`. MCP sessions (`Mcp-Session-Id`) are not used.
@@ -432,8 +477,9 @@ were running are reported to the LLM as orphaned on the next run. Nothing is
 resumed automatically: `resume` them.
 
 Background tool calls (`runAsync`) live in the server process. They survive
-between runs of a session, but not a restart, and not the session being idle
-for longer than `--live-session-ttl`. Deferred calls are the durable kind:
+between runs of a session, but not a restart. A session is not dropped at
+the TTL while one of its background calls is still running: it is kept until
+they finish. Deferred calls are the durable kind:
 their tokens stay valid across restarts.
 
 ---
@@ -445,12 +491,15 @@ and, when known, `session_id`:
 
 | `kind` | Fields |
 |---|---|
-| `server.started` | `bind`, `port`, `agents`, `database`, `authentication` (`bearer` or `none`) |
+| `server.started` | `bind`, `port`, `agents`, `admin_owners`, `database`, `authentication` (`bearer` or `none`), `ui`, and `warning` when authentication is off |
 | `http.request` | `method`, `path`, `status`, `ms` (when the response starts) |
 | `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed` | `session_id` |
 | `llm.request` / `llm.response` | `bytes`, token counts |
 | `llm.http` | `method`, `host`, `path`, `status` |
 | `sessions.recovered` | `session_ids` |
+| `agents.stored_skipped` | `slug`, `reason`: a stored agent hidden by an agent file |
+| `agent_tree`, `tool`, `tool.portal` | `event`: what the agent loader and the tools reported |
+| `llm.backoff` | `attempt`, `delay_seconds` |
 | `server.signal`, `server.stopping`, `server.stopped`, `server.failed` | |
 
 Prompts, LLM payloads, HTTP headers, and API keys are never logged.

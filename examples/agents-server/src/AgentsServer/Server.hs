@@ -11,7 +11,9 @@ module AgentsServer.Server (
 import Control.Exception (throwIO)
 import Control.Monad (void, when)
 import Data.Aeson ((.=))
+import qualified Data.Aeson as Aeson
 import qualified Data.Map.Strict as Map
+import Data.Maybe (isJust)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -23,6 +25,8 @@ import System.Posix.Signals (Handler (CatchOnce), installHandler, sigINT, sigTER
 import AgentsServer.Api
 import AgentsServer.Auth (loadAuthTokens)
 import AgentsServer.Log
+import AgentsServer.OpenApi (apiDocument)
+import AgentsServer.UI (uiEnabled)
 import qualified Data.ByteString.Char8 as Char8
 import System.Agents.Host
 import System.Agents.Host.Runner (recoverOnStartup, withSessionRunner)
@@ -43,6 +47,8 @@ data ServerOptions = ServerOptions
     -- ^ Stream LLM answers as @text.delta@ events.
     , soAdminOwners :: [Text]
     -- ^ Owners allowed to store and delete agents.
+    , soNoUI :: Bool
+    -- ^ Do not serve the chat page, even on a loopback bind.
     }
 
 serverOptions :: Parser ServerOptions
@@ -60,6 +66,7 @@ serverOptions =
         <*> ( maybe [] (filter (not . Text.null) . map Text.strip . Text.splitOn ",")
                 <$> optional (strOption (long "admin-owners" <> metavar "OWNER,…" <> help "Owners allowed to store and delete agents over the API (needs --auth-tokens)"))
             )
+        <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
 
 {- | Load the agents, open the database, and serve until SIGTERM or SIGINT.
 
@@ -88,7 +95,13 @@ runServer opts logger = do
         withSessionRunner host $ \runner -> do
             _ <- recoverOnStartup runner
             env0 <- newServerEnv host runner auth
-            let env = env0{envAdmins = opts.soAdminOwners}
+            let ui = not opts.soNoUI && uiEnabled (Text.pack opts.soBind) (isJust auth)
+                env =
+                    env0
+                        { envAdmins = opts.soAdminOwners
+                        , envUI = ui
+                        , envDocument = Aeson.toJSON (apiDocument (Just (baseUrl opts)))
+                        }
             let started =
                     logLine logger "server.started" $
                         [ "bind" .= opts.soBind
@@ -97,6 +110,7 @@ runServer opts logger = do
                         , "admin_owners" .= opts.soAdminOwners
                         , "database" .= redactDatabase opts.soDatabase
                         , "authentication" .= (maybe "none" (const "bearer") auth :: String)
+                        , "ui" .= ui
                         ]
                             <> [ "warning" .= ("no authentication: anyone who can reach this address can run the agents" :: String)
                                | Nothing <- [auth]
@@ -119,6 +133,17 @@ runServer opts logger = do
                 closeSocket
         void $ installHandler sigTERM (CatchOnce stop) Nothing
         void $ installHandler sigINT (CatchOnce stop) Nothing
+
+{- | The URL the OpenAPI document names as this server's own. A wildcard
+bind is reported as localhost, which is where a reader of the document on
+this machine would reach it.
+-}
+baseUrl :: ServerOptions -> Text
+baseUrl opts = "http://" <> host <> ":" <> Text.pack (show opts.soPort)
+  where
+    host
+        | opts.soBind `elem` ["0.0.0.0", "::", "*"] = "127.0.0.1"
+        | otherwise = Text.pack opts.soBind
 
 {- | A database for the logs: a Postgres URL loses its user and password,
 @postgresql://user:secret\@db.example/agents@ becoming

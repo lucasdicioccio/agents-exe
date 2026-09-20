@@ -990,6 +990,41 @@ and the riskier ones come after the ones they build on. Choices marked
     by default;
   * Postgres: put, replace, list, and delete.
 
+### Phase 13: self-description and a chat page ✅
+
+The server answered `404` at `/` and published nothing a client could read:
+the only reference was `docs/agents-server.md`, which a caller holding just a
+URL does not have.
+
+* **Routes as a servant type** (`AgentsServer.Routes`). Every endpoint whose
+  shape OpenAPI can express is now described by `DocumentedAPI`, and
+  `GET /openapi.json` is generated from it, so the published document cannot
+  drift from the routes. The event stream and `POST /mcp` stay hand-written
+  (`AgentsServer.OpenApi`): neither server-sent events nor JSON-RPC is
+  expressible, and a wrong schema would be worse than a described one.
+* **Bodies as types** (`AgentsServer.Types`), carrying both the JSON encoding
+  the API already used and an OpenAPI schema, with per-field descriptions and
+  enums added by hand because openapi3 does not read Haddock. The turn tree
+  stays an opaque object: it belongs to the library, not to the protocol.
+* **A chat page** at `/` (`AgentsServer.UI`): one self-contained HTML
+  document, no build step, no assets. It is served on a loopback bind, or
+  when `--auth-tokens` is on; `--no-ui` turns it off.
+* **`access_token` on the event stream only**, because `EventSource` cannot
+  set headers. The request log records no query strings, so the token does
+  not reach the logs.
+
+Deviations from the plan:
+
+* The rewrite is staged. The servant types describe and generate the
+  document; the wai router still dispatches. Moving dispatch onto servant
+  needs `UVerb` for the 200/201/202 answers and `Raw` for the stream, and
+  would rewrite 646 tested lines for no change a client can see. A test
+  asserts the document's paths are exactly the router's, so the two cannot
+  drift in the meantime.
+* `openapi3` needed the freeze's `index-state` bumped: 3.2.4 caps QuickCheck
+  below the pinned 2.16, and 3.2.5 (which allows it) was published after the
+  pinned index date. Every previously pinned version is unchanged.
+
 ## Remaining later work
 
 * **Per-owner API keys and isolation**: build agents per owner, including
@@ -1000,6 +1035,7 @@ and the riskier ones come after the ones they build on. Choices marked
 * **Database agents with files or sub-agents**: tool directories stored with
   the agent; `extraAgents` naming other stored agents.
 * **Stopping a stored agent's MCP servers** when it is replaced or deleted.
+* **Dispatching through servant**, replacing the wai router (see Phase 13).
 
 ## Decisions
 
@@ -1033,6 +1069,13 @@ later work; see [Milestone 2](#milestone-2-the-later-work)):
 10. **Database agents cannot use file-based tools** in their first version,
     nor `extraAgents`. Storing agents needs `--admin-owners` (and so
     authentication). A file agent hides a stored agent with the same slug.
+
+Recorded 2026-09-20:
+
+11. **The OpenAPI document is generated from servant types**, rather than
+    hand-written or derived from a full servant rewrite of the dispatcher.
+12. **The chat page is loopback-only by default** and off with `--no-ui`.
+    It is plain HTML and JavaScript in one document, with no build step.
 
 ## Related docs
 
