@@ -60,7 +60,7 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
 import Control.Lens (to, use, (%=), (.=), (^.))
-import Control.Monad (void, when)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -71,9 +71,7 @@ import qualified Data.Vector as Vector
 
 import Prod.Tracer (Tracer (..), contramap)
 
-import System.Agents.AgentTree (OSAgentNode (..), osNodeTools)
 import System.Agents.Base (ConversationId (..), newConversationId)
-import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (
@@ -210,8 +208,7 @@ runConversation tracer baseTuiAgent session = do
     inChan <- liftIO $ newBChan 100
     let notifyProgress = buildOnProgress convId outChan
     let node = tuiNode baseTuiAgent
-    agent0 <- liftIO $ OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    agent1 <- liftIO $ agentEvaluateActiveTools (contramap (OneShotTrace . OneShot.mapProgressiveDisclosureTrace) tracer) (osNodeTools node) agent0
+    agent1 <- liftIO $ OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
     coreRef <- use tuiCore
 
     -- Get the World and EventQueue from Core for subcall visibility

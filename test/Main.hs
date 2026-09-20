@@ -84,6 +84,12 @@ import qualified DeveloperToolboxWriteRangeTests
 -- Import DeveloperToolbox patch-file specific tests
 import qualified DeveloperToolboxPatchTests
 -- Import durable workflow (Phase 2) tests
+import qualified AgentFactoryTests
+import qualified SessionMetadataTests
+import qualified ContinuationConsistencyTests
+import qualified MediaContentPartTests
+import qualified OpenAIStreamTests
+import qualified RunnerTests
 import qualified DurableWorkflowTests
 
 main :: IO ()
@@ -129,6 +135,12 @@ tests =
         , DeveloperToolboxPatchTests.tests
         , DurableWorkflowDeterminismTests.tests
         , DurableWorkflowTests.tests
+        , AgentFactoryTests.tests
+        , SessionMetadataTests.tests
+        , ContinuationConsistencyTests.tests
+        , MediaContentPartTests.tests
+        , OpenAIStreamTests.tests
+        , RunnerTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

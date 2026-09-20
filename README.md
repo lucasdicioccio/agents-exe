@@ -499,6 +499,7 @@ Absent this file, agents load from `~/.config/agents-exe/default`.
 - [CLI Commands](docs/cli-commands.md) - Detailed CLI documentation
 - [TUI Guide](docs/tui.md) - Terminal UI documentation
 - [MCP Documentation](docs/mcp.md) - Model Context Protocol integration
+- [agents-server](docs/agents-server.md) - Agents over HTTP, with sessions in SQLite
 
 # Roadmap
 

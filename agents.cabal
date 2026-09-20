@@ -8,6 +8,7 @@ maintainer:         lucas@dicioccio.fr
 category:           System
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
+                    docs/agents-server.md
                     docs/durable-workflows-howto.md
 extra-source-files: docs/binary-tool.md
 
@@ -21,8 +22,8 @@ common warnings
     ghc-options: -Wall -Werror
 
 library agents-lib
-    visibility:       public
     import:           warnings
+    visibility:       public
     hs-source-dirs:   src
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
@@ -33,12 +34,10 @@ library agents-lib
                     , System.Agents.AgentTree.Trace
                     , System.Agents.ApiKeys
                     , System.Agents.Base
-                    , System.Agents.CLI
                     , System.Agents.CLI.Aliases
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
                     , System.Agents.CLI.CheckToolCall
-                    , System.Agents.CLI.Config
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
@@ -57,7 +56,6 @@ library agents-lib
                     , System.Agents.CLI.SessionIndex
                     , System.Agents.CLI.SessionSearch
                     , System.Agents.CLI.Spec
-                    , System.Agents.CLI.TUI
                     , System.Agents.CLI.ToolCall
                     , System.Agents.CLI.TraceUtils
                     , System.Agents.Combinators.ProgressiveDisclosure
@@ -159,6 +157,7 @@ library agents-lib
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
+                    , System.Agents.LLMs.OpenAIStream
                     , System.Agents.Runtime
                     , System.Agents.Runtime.Runtime
                     , System.Agents.Runtime.Trace
@@ -182,35 +181,17 @@ library agents-lib
                     , System.Agents.SessionStore
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
+                    , System.Agents.AgentFactory
+                    , System.Agents.AgentStore
+                    , System.Agents.Host
+                    , System.Agents.Host.Runner
                     , System.Agents.OneShot
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client
                     , System.Agents.MCP.Client.Runtime
                     , System.Agents.MCP.Server
                     , System.Agents.MCP.Server.Runtime
-                    , System.Agents.TUI.Core
-                    , System.Agents.TUI.Types
-                    , System.Agents.TUI.Types.Core
-                    , System.Agents.TUI.Types.Conversation
-                    , System.Agents.TUI.Types.State
-                    , System.Agents.TUI.Buffer
-                    , System.Agents.TUI.Clipboard
-                    , System.Agents.TUI.Render
-                    , System.Agents.TUI.Render.Attributes
-                    , System.Agents.TUI.Render.Conversation
-                    , System.Agents.TUI.Render.Dialog
-                    , System.Agents.TUI.Render.Layout
-                    , System.Agents.TUI.Render.Utils
-                    , System.Agents.TUI.Render.Widgets
-                    , System.Agents.TUI.Event
-                    , System.Agents.TUI.Event.Dialog
-                    , System.Agents.TUI.Event.Conversation
-                    , System.Agents.TUI.Event.Queue
-                    , System.Agents.TUI.Event.Attachment
-                    , System.Agents.TUI.Event.Navigation
-                    , System.Agents.TUI.KeyMapping
                     , System.Agents.TUI.ToolCallActivity
-                    , System.Agents.TUI.MessageComposer
                     , System.Agents.ToolPortal
                     , System.Agents.ToolRegistration
                     , System.Agents.ToolSchema
@@ -222,7 +203,6 @@ library agents-lib
                       aeson-pretty,
                       async,
                       base64-bytestring,
-                      brick,
                       bytestring,
                       case-insensitive,
                       conduit,
@@ -230,7 +210,6 @@ library agents-lib
                       containers,
                       contravariant,
                       crypto-api,
-                      data-clist,
                       data-default,
                       deepseq,
                       direct-sqlite,
@@ -268,15 +247,116 @@ library agents-lib
                       stm-conduit,
                       temporary,
                       text,
-                      text-zipper,
                       time,
                       unix,
                       unliftio,
                       unordered-containers,
                       uuid,
                       vector,
-                      vty,
                       yaml
+
+-- The terminal UI, kept out of agents-lib so that programs embedding the
+-- agents (such as agents-server) do not depend on brick and vty.
+library agents-tui
+    import:           warnings
+    visibility:       public
+    hs-source-dirs:   tui
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    exposed-modules:  System.Agents.CLI
+                    , System.Agents.CLI.Config
+                    , System.Agents.CLI.TUI
+                    , System.Agents.TUI.Buffer
+                    , System.Agents.TUI.Clipboard
+                    , System.Agents.TUI.Core
+                    , System.Agents.TUI.Event
+                    , System.Agents.TUI.Event.Attachment
+                    , System.Agents.TUI.Event.Conversation
+                    , System.Agents.TUI.Event.Dialog
+                    , System.Agents.TUI.Event.Navigation
+                    , System.Agents.TUI.Event.Queue
+                    , System.Agents.TUI.KeyMapping
+                    , System.Agents.TUI.MessageComposer
+                    , System.Agents.TUI.Render
+                    , System.Agents.TUI.Render.Attributes
+                    , System.Agents.TUI.Render.Conversation
+                    , System.Agents.TUI.Render.Dialog
+                    , System.Agents.TUI.Render.Layout
+                    , System.Agents.TUI.Render.Utils
+                    , System.Agents.TUI.Render.Widgets
+                    , System.Agents.TUI.Types
+                    , System.Agents.TUI.Types.Conversation
+                    , System.Agents.TUI.Types.Core
+                    , System.Agents.TUI.Types.State
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      aeson-pretty,
+                      async,
+                      base64-bytestring,
+                      brick,
+                      bytestring,
+                      containers,
+                      data-default,
+                      directory,
+                      filepath,
+                      lens,
+                      process,
+                      process-extras,
+                      prodapi,
+                      stm,
+                      temporary,
+                      text,
+                      text-zipper,
+                      time,
+                      uuid,
+                      vector,
+                      vty
+
+-- Sessions and continuations in Postgres; a separate library so that
+-- agents-lib does not depend on libpq.
+library agents-postgres
+    import:           warnings
+    visibility:       public
+    hs-source-dirs:   postgres
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    exposed-modules:  System.Agents.Postgres
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      aeson,
+                      bytestring,
+                      postgresql-simple,
+                      resource-pool,
+                      text,
+                      time,
+                      uuid
+
+test-suite agents-postgres-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   postgres/test
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      agents-postgres,
+                      aeson,
+                      async,
+                      bytestring,
+                      directory,
+                      filepath,
+                      network,
+                      postgresql-simple,
+                      process,
+                      prodapi,
+                      tasty,
+                      tasty-hunit,
+                      temporary,
+                      text,
+                      time
 
 executable agents-exe
     import:           warnings
@@ -284,6 +364,7 @@ executable agents-exe
     ghc-options:      -threaded
     build-depends:    base  >=4.18.3.0,
                       agents-lib,
+                      agents-tui,
                       aeson,
                       aeson-pretty,
                       bytestring,
@@ -343,11 +424,95 @@ executable durable-workflow-demo
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
 
+-- The HTTP server lives in a private library so that its test suite can
+-- run the application; wai and warp stay out of agents-lib.
+library agents-server-internal
+    import:           warnings
+    hs-source-dirs:   examples/agents-server/src
+    exposed-modules:  AgentsServer.Api
+                    , AgentsServer.Auth
+                    , AgentsServer.Log
+                    , AgentsServer.Mcp
+                    , AgentsServer.OpenApi
+                    , AgentsServer.Routes
+                    , AgentsServer.Server
+                    , AgentsServer.Types
+                    , AgentsServer.UI
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      agents-postgres,
+                      aeson,
+                      async,
+                      bytestring,
+                      containers,
+                      crypton,
+                      http-api-data,
+                      http-client,
+                      http-types,
+                      insert-ordered-containers,
+                      lens,
+                      openapi3,
+                      optparse-applicative,
+                      prodapi,
+                      servant,
+                      servant-openapi3,
+                      servant-server,
+                      stm,
+                      text,
+                      time,
+                      unix,
+                      uuid,
+                      vector,
+                      wai,
+                      warp
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+
+executable agents-server
+    import:           warnings
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    build-depends:    base >=4.18.3.0,
+                      agents-server-internal,
+                      aeson,
+                      optparse-applicative
+    hs-source-dirs:   examples/agents-server/app
+    default-language: Haskell2010
+
+test-suite agents-server-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   examples/agents-server/test
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    build-depends:    base >=4.18.3.0,
+                      agents-lib,
+                      agents-server-internal,
+                      aeson,
+                      async,
+                      bytestring,
+                      containers,
+                      filepath,
+                      http-client,
+                      http-types,
+                      tasty,
+                      tasty-hunit,
+                      temporary,
+                      prodapi,
+                      text,
+                      vector,
+                      wai,
+                      warp
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings, OverloadedRecordDot
+
 test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
     other-modules:    ActivationSessionTests
+                    , AgentFactoryTests
+                    , ContinuationConsistencyTests
                     , AsyncToolCallsTests
                     , DeveloperToolboxTests
                     , DeveloperToolboxPatchTests
@@ -371,8 +536,12 @@ test-suite agents-tests
                     , OS.PersistenceTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
+                    , MediaContentPartTests
+                    , OpenAIStreamTests
+                    , RunnerTests
                     , SessionEditTests
                     , SessionDurableTests
+                    , SessionMetadataTests
                     , SessionPrintTests
                     , SkillsTests
                     , ToolPortalTests
@@ -381,6 +550,7 @@ test-suite agents-tests
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
                       agents-lib,
+                      base64-bytestring,
                       aeson,
                       async,
                       bytestring,

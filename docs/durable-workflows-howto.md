@@ -23,6 +23,9 @@ This guide covers:
 * [Building your own durable agent](#building-your-own-durable-agent) in
   Haskell.
 
+To run durable agents behind an HTTP API, with sessions in SQLite, see
+[agents-server.md](agents-server.md).
+
 ---
 
 ## Running the demonstrator
@@ -107,6 +110,9 @@ Dispositions can be decorated with timeouts, retries, cache keys, or labels:
 Decorate [WithTimeout 30, WithRetries 2] RunSync
 ```
 
+Agents loaded from JSON can declare the same policy without Haskell code; see
+[Configuring an agent for durable mode](#configuring-an-agent-for-durable-mode).
+
 ### 3. Pluggable executor
 
 `ToolExecutor` decouples *how* a call runs from the session loop.  The
@@ -131,28 +137,104 @@ When a call is deferred, the runtime optionally stores a serialisable
 
 ## CLI commands for operators
 
-The `agents session` command group operates on stored sessions.  These
-commands load sessions through the configured file-based `SessionStore` and
-use the first supplied `--agent-file` when execution needs to advance.
+The `agents-exe session` command group creates and operates on stored
+sessions.  These commands load sessions through the configured file-based
+`SessionStore` and use the first supplied `--agent-file` when execution needs
+to advance.  Every command that advances execution forces the agent into
+asynchronous mode.
 
-> **Note:** The CLI commands set the agent to asynchronous mode but keep the
-> default `defaultToolCallPolicy`, which runs every call synchronously.  To
-> actually defer calls from the CLI, the loaded agent must be configured with
-> a custom policy through the programmatic API shown in the next section.
+### Configuring an agent for durable mode
+
+To defer calls from the CLI, declare a tool-call policy in the agent JSON.  The
+policy and execution mode are applied everywhere the agent runs: `run`, the
+TUI, the `session` commands, and sub-agents.
+
+```json
+{
+  "slug": "my-agent",
+  "executionMode": "asynchronous",
+  "toolCallPolicyConfig": {
+    "default": {"tag": "runSync"},
+    "rules": [
+      {"tool": "fetch_remote_a", "disposition": {"tag": "defer", "reason": "external worker"}},
+      {"tool": "fetch_remote_b", "disposition": {"tag": "defer", "reason": "external worker"}},
+      {"tool": "build_project", "disposition": {"tag": "runAsync"}}
+    ]
+  }
+}
+```
+
+Rules match on the exact tool name; calls that match no rule get `default`.
+Available disposition tags are `runSync`, `runAsync`, `runIsolated` (with a
+`spec`), `defer` (with a `reason`), and `decorate` (with `decorators` and
+`inner`).  Without `toolCallPolicyConfig`, every call runs synchronously and
+nothing is ever deferred.
+
+See [async-tool-calls.md](async-tool-calls.md) for the related
+`asyncYieldStrategy`, `maxConcurrency`, and `asyncCallTimeoutSeconds` fields.
+
+### Walkthrough
+
+```bash
+# 1. Create a session holding the initial prompt.  The LLM is not called yet.
+agents-exe --agent-file ./my-agent.json session start \
+    --prompt "Fetch the local and remote data, then summarise it"
+# session-id: <session-id>
+
+# 2. Advance until the turn yields on deferred calls.
+agents-exe --agent-file ./my-agent.json session resume <session-id>
+
+# 3. See what is waiting on the outside world.
+agents-exe session pending <session-id>
+
+# 4. Provide each deferred result.
+agents-exe session complete <token> result.txt
+
+# 5. Let the LLM continue with all results.
+agents-exe --agent-file ./my-agent.json session resume <session-id>
+```
+
+`agents-exe run` can start the same flow: when a turn waits on deferred calls
+it stops, stores the session, and prints a JSON report with the session id
+and continuation tokens.  Continue it with `session complete` and
+`session resume`.
+
+### Start a new session
+
+```bash
+agents-exe --agent-file ./my-agent.json session start --prompt "..."
+agents-exe --agent-file ./my-agent.json session start --step --prompt "..."
+```
+
+Creates a new asynchronous session whose first turn contains the prompt, stores
+it, and prints its `session-id`.  By default no scheduling happens, which
+leaves every step to an external process or operator.  With `--step`, it also
+runs one scheduling step right away.  It accepts the same prompt options as
+`run` (`--prompt`, `--file`, media attachments, and so on).
+
+### Run exactly one step
+
+```bash
+agents-exe --agent-file ./my-agent.json session step <session-id>
+```
+
+Runs a single scheduling step and prints the resulting session state: a turn
+waiting for the LLM, the LLM's tool calls, a yielded partial turn, or the
+final answer.
 
 ### Pause after one async step
 
 ```bash
-agents session pause <session-id> --agent-file ./my-agent.json
+agents-exe --agent-file ./my-agent.json session pause <session-id>
 ```
 
-Runs one asynchronous step and persists the resulting session.  If the turn
-yields, it prints the continuation tokens for deferred calls.
+Runs one asynchronous step and persists the resulting session, like `step`.
+If the turn yields, it prints the continuation tokens for deferred calls.
 
 ### Resume until completion or next yield
 
 ```bash
-agents session resume <session-id> --agent-file ./my-agent.json
+agents-exe --agent-file ./my-agent.json session resume <session-id>
 ```
 
 Calls `resumeSession` and persists after each yield.
@@ -160,7 +242,7 @@ Calls `resumeSession` and persists after each yield.
 ### List pending deferred calls
 
 ```bash
-agents session pending <session-id>
+agents-exe session pending <session-id>
 ```
 
 Shows each deferred call's tool name, call id, continuation token, and
@@ -174,11 +256,11 @@ is treated as plain text.
 ```bash
 # JSON result
 echo '{"type":"text","content":"42"}' > result.json
-agents session complete <token> result.json
+agents-exe session complete <token> result.json
 
 # Plain-text result
 echo "42" > result.txt
-agents session complete <token> result.txt
+agents-exe session complete <token> result.txt
 ```
 
 `complete` scans all sessions in the store to find the one containing the
@@ -187,7 +269,7 @@ token.
 ### Run deferred isolated calls
 
 ```bash
-agents session run-isolated <session-id> --agent-file ./my-agent.json
+agents-exe --agent-file ./my-agent.json session run-isolated <session-id>
 ```
 
 If the agent has `ctxDeploymentRunner` configured, this executes deferred
@@ -323,9 +405,13 @@ cabal test agents-tests
 
 * `todos/durable-workflows.md` — design plan and architectural decisions.
 * `todos/durable-workflows.progress.md` — implementation progress.
+* `todos/durable-workflows-cli-start-plan.md` — design of `session start` and
+  `session step`.
 * `examples/durable-workflow-demo/Main.hs` — runnable mock-LLM demo.
 * `docs/cli-commands.md` — full CLI reference, including `agents session`.
 * `docs/sessions.md` — session storage and multi-location stores.
 * `docs/async-tool-calls.md` — background tool calls in the same process,
   with progress, cancellation and partial answers.
+* `docs/agents-server.md` — the same flow over HTTP, with sessions in SQLite
+  and live events.
 

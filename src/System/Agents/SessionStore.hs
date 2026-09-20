@@ -3,6 +3,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeOperators #-}
 
 {- | Session storage management with multi-location support.
 
@@ -27,6 +28,23 @@ module System.Agents.SessionStore (
     sessionIdToConversationId,
     conversationIdToSessionId,
 
+    -- * Session Metadata
+    SessionLabels (..),
+    noLabels,
+    SessionMeta (..),
+    freshSessionMeta,
+    SessionQuery (..),
+    allSessionsQuery,
+    matchesQuery,
+    VersionConflict (..),
+
+    -- * Session Catalog
+    SessionCatalog (..),
+    CatalogEntry (..),
+    fileCatalog,
+    backendCatalog,
+    isFileBusy,
+
     -- * File Backend
     FileSessionStore (..),
     mkFileSessionStore,
@@ -36,6 +54,8 @@ module System.Agents.SessionStore (
     SqliteSessionStore (..),
     mkSqliteSessionStore,
     initializeSessionSchema,
+    Migration (..),
+    runMigrations,
 
     -- * Composite Backend
     CompositeSessionStore (..),
@@ -69,27 +89,38 @@ module System.Agents.SessionStore (
     isSessionFile,
 ) where
 
-import Control.Exception (IOException, catch, try)
-import Control.Monad (filterM, forM_)
+import Control.Applicative ((<|>))
+import Control.Exception (IOException, bracket, catch, try)
+import Control.Monad (filterM, forM, forM_, unless)
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.List (foldl', isInfixOf, isPrefixOf, sortOn)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
 import Data.Time (UTCTime, getCurrentTime)
 import qualified Data.UUID as UUID
-import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query, query_)
+import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query, query_, withTransaction, (:.) (..))
 import Database.SQLite.Simple.QQ (sql)
+import Database.SQLite.Simple.ToField (toField)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, getModificationTime, listDirectory, removeFile)
 import System.FilePath (takeFileName, (</>))
+import System.IO (IOMode (..), hClose, openBinaryFile)
 import System.IO.Error (ioeGetErrorString)
 
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Session.Types (Session (..), SessionId (..))
+import System.Agents.Session.Types (
+    Session (..),
+    SessionId (..),
+    SessionStatus (..),
+    parseSessionStatus,
+    sessionStatusOf,
+    sessionStatusText,
+ )
 
 -------------------------------------------------------------------------------
 -- Session Backend Interface
@@ -100,16 +131,33 @@ import System.Agents.Session.Types (Session (..), SessionId (..))
 A 'SessionBackend' hides the details of where and how sessions are persisted,
 allowing agents to store sessions in files, SQLite, or a composite of multiple
 backends without changing the caller.
+
+Every stored session carries a 'SessionMeta'. Each write increments its
+version: 'sbCompareAndStore' only writes when the version is the one the
+caller loaded, so concurrent writers detect each other.
 -}
 data SessionBackend = SessionBackend
     { sbStore :: SessionId -> Session -> IO ()
-    -- ^ Persist a session under the given session id.
+    {- ^ Persist a session under the given session id, unconditionally. The
+    status is refreshed from 'sessionStatusOf', unless it is 'StatusRunning'.
+    -}
     , sbLoad :: SessionId -> IO (Maybe Session)
     -- ^ Load a session by id. Returns 'Nothing' if not found or unreadable.
     , sbList :: IO [(SessionId, UTCTime)]
     -- ^ List all stored sessions with their last update time.
     , sbDelete :: SessionId -> IO ()
     -- ^ Delete a session by id.
+    , sbStoreLabelled :: SessionLabels -> SessionId -> Session -> IO ()
+    -- ^ Like 'sbStore', also recording the given labels.
+    , sbLoadMeta :: SessionId -> IO (Maybe (Session, SessionMeta))
+    -- ^ Load a session with its metadata.
+    , sbCompareAndStore :: SessionMeta -> Session -> IO (Either VersionConflict SessionMeta)
+    {- ^ Store the session with exactly the given metadata, if the stored
+    version still equals 'smVersion' (0 when the session was never stored).
+    Returns the metadata as written, with the incremented version.
+    -}
+    , sbQuery :: SessionQuery -> IO [SessionMeta]
+    -- ^ Metadata of matching sessions, most recently updated first.
     }
 
 -- | Convert a 'SessionId' to a 'ConversationId'.
@@ -121,13 +169,150 @@ conversationIdToSessionId :: ConversationId -> SessionId
 conversationIdToSessionId (ConversationId uuid) = SessionId uuid
 
 -------------------------------------------------------------------------------
+-- Session Metadata
+-------------------------------------------------------------------------------
+
+-- | Labels recorded next to a session. 'Nothing' keeps the stored value.
+data SessionLabels = SessionLabels
+    { slAgent :: Maybe Text
+    -- ^ Slug of the agent running the session.
+    , slParent :: Maybe SessionId
+    -- ^ Session of the agent that called this one as a tool.
+    , slOwner :: Maybe Text
+    {- ^ Who the session belongs to, when a host authenticates its callers.
+    Sub-sessions have none: they belong to the owner of their root session.
+    -}
+    }
+    deriving (Show, Eq)
+
+noLabels :: SessionLabels
+noLabels = SessionLabels Nothing Nothing Nothing
+
+-- | What a backend records next to each session.
+data SessionMeta = SessionMeta
+    { smSessionId :: SessionId
+    , smAgent :: Maybe Text
+    , smParent :: Maybe SessionId
+    , smOwner :: Maybe Text
+    , smStatus :: SessionStatus
+    , smStatusDetail :: Maybe Text
+    -- ^ Why the session failed, for 'StatusFailed'.
+    , smVersion :: Int
+    -- ^ Incremented on every write; 0 for a session never stored.
+    , smCreatedAt :: UTCTime
+    , smUpdatedAt :: UTCTime
+    }
+    deriving (Show, Eq)
+
+instance Aeson.ToJSON SessionMeta where
+    toJSON m =
+        Aeson.object
+            [ "session_id" Aeson..= m.smSessionId
+            , "agent" Aeson..= m.smAgent
+            , "parent_session_id" Aeson..= m.smParent
+            , "owner" Aeson..= m.smOwner
+            , "status" Aeson..= m.smStatus
+            , "status_detail" Aeson..= m.smStatusDetail
+            , "version" Aeson..= m.smVersion
+            , "created_at" Aeson..= m.smCreatedAt
+            , "updated_at" Aeson..= m.smUpdatedAt
+            ]
+
+instance Aeson.FromJSON SessionMeta where
+    parseJSON = Aeson.withObject "SessionMeta" $ \v ->
+        SessionMeta
+            <$> v Aeson..: "session_id"
+            <*> v Aeson..:? "agent"
+            <*> v Aeson..:? "parent_session_id"
+            <*> v Aeson..:? "owner"
+            <*> v Aeson..: "status"
+            <*> v Aeson..:? "status_detail"
+            <*> v Aeson..: "version"
+            <*> v Aeson..: "created_at"
+            <*> v Aeson..: "updated_at"
+
+-- | Metadata for a session that was never stored (version 0).
+freshSessionMeta :: SessionId -> UTCTime -> SessionMeta
+freshSessionMeta sid now =
+    SessionMeta
+        { smSessionId = sid
+        , smAgent = Nothing
+        , smParent = Nothing
+        , smOwner = Nothing
+        , smStatus = StatusReady
+        , smStatusDetail = Nothing
+        , smVersion = 0
+        , smCreatedAt = now
+        , smUpdatedAt = now
+        }
+
+{- | The metadata an unconditional store ('sbStoreLabelled') writes, given the
+stored metadata.
+-}
+storedMeta :: UTCTime -> SessionLabels -> Session -> SessionMeta -> SessionMeta
+storedMeta now labels sess old =
+    old
+        { smAgent = labels.slAgent <|> old.smAgent
+        , smParent = labels.slParent <|> old.smParent
+        , smOwner = labels.slOwner <|> old.smOwner
+        , smStatus = if running then StatusRunning else sessionStatusOf sess
+        , smStatusDetail = if running then old.smStatusDetail else Nothing
+        , smVersion = old.smVersion + 1
+        , smUpdatedAt = now
+        }
+  where
+    running = old.smStatus == StatusRunning
+
+-- | Which sessions 'sbQuery' returns. Absent criteria match everything.
+data SessionQuery = SessionQuery
+    { sqAgent :: Maybe Text
+    , sqStatuses :: Maybe [SessionStatus]
+    , sqParent :: Maybe SessionId
+    , sqOwner :: Maybe Text
+    , sqUpdatedBefore :: Maybe UTCTime
+    , sqLimit :: Maybe Int
+    }
+    deriving (Show, Eq)
+
+-- | A query matching every session.
+allSessionsQuery :: SessionQuery
+allSessionsQuery = SessionQuery Nothing Nothing Nothing Nothing Nothing Nothing
+
+-- | Whether metadata matches a query's criteria (ignoring its limit).
+matchesQuery :: SessionQuery -> SessionMeta -> Bool
+matchesQuery q m =
+    maybe True (\a -> m.smAgent == Just a) q.sqAgent
+        && maybe True (m.smStatus `elem`) q.sqStatuses
+        && maybe True (\p -> m.smParent == Just p) q.sqParent
+        && maybe True (\o -> m.smOwner == Just o) q.sqOwner
+        && maybe True (m.smUpdatedAt <) q.sqUpdatedBefore
+
+-- | Apply a query to metadata listed from a backend that cannot filter itself.
+applyQuery :: SessionQuery -> [SessionMeta] -> [SessionMeta]
+applyQuery q =
+    maybe id take q.sqLimit . sortOn (Down . (.smUpdatedAt)) . filter (matchesQuery q)
+
+-- | A compare-and-store found another version than the one expected.
+data VersionConflict = VersionConflict
+    { vcSessionId :: SessionId
+    , vcExpected :: Int
+    , vcActual :: Int
+    }
+    deriving (Show, Eq)
+
+-------------------------------------------------------------------------------
 -- File Backend
 -------------------------------------------------------------------------------
 
 {- | File-backed session backend.
 
 Stores sessions as JSON files in a single directory using the same
-@conv.<uuid>.json@ naming scheme as the legacy 'SessionStore'.
+@conv.<uuid>.json@ naming scheme as the legacy 'SessionStore', and their
+metadata in @meta.<uuid>.json@ next to them. A session file without metadata
+(e.g. written by the legacy store) reads as version 0.
+
+Compare-and-store is not atomic across processes: it reads, compares, then
+writes. Use SQLite when several processes write the same sessions.
 -}
 newtype FileSessionStore = FileSessionStore FilePath
 {- | Create a file-backed session backend, ensuring the directory exists.
@@ -144,18 +329,70 @@ mkFileSessionStore path = do
 -- | Build a 'SessionBackend' from an existing 'FileSessionStore'.
 fileSessionBackend :: FileSessionStore -> SessionBackend
 fileSessionBackend (FileSessionStore path) =
-    let simpleStore = mkSimpleSessionStore path
-     in SessionBackend
-            { sbStore = \sid sess -> storeSession simpleStore (sessionIdToConversationId sid) sess
-            , sbLoad = \sid -> readSession simpleStore (sessionIdToConversationId sid)
-            , sbList = do
-                files <- findSessionFiles simpleStore
-                pure $ map (\info -> (conversationIdToSessionId info.sessionInfoConversationId, info.sessionInfoModTime)) files
-            , sbDelete = \sid -> do
-                let convId = sessionIdToConversationId sid
-                let path' = sessionWritePath simpleStore convId
-                removeFile path' `catch` \(_ :: IOException) -> pure ()
-            }
+    SessionBackend
+        { sbStore = storeLabelled noLabels
+        , sbLoad = \sid -> readSession simpleStore (sessionIdToConversationId sid)
+        , sbList = do
+            files <- findSessionFiles simpleStore
+            pure $ map (\info -> (conversationIdToSessionId info.sessionInfoConversationId, info.sessionInfoModTime)) files
+        , sbDelete = \sid -> do
+            removeIfPresent $ sessionWritePath simpleStore (sessionIdToConversationId sid)
+            removeIfPresent $ metaPath sid
+        , sbStoreLabelled = storeLabelled
+        , sbLoadMeta = loadMeta
+        , sbCompareAndStore = \meta sess -> do
+            current <- maybe 0 (.smVersion) <$> readMeta meta.smSessionId
+            if current /= meta.smVersion
+                then pure $ Left $ VersionConflict meta.smSessionId meta.smVersion current
+                else do
+                    now <- getCurrentTime
+                    let written = meta{smVersion = current + 1, smUpdatedAt = now}
+                    write written sess
+                    pure $ Right written
+        , sbQuery = \q -> do
+            files <- findSessionFiles simpleStore
+            metas <- mapM (fmap (fmap snd) . loadMeta . conversationIdToSessionId . (.sessionInfoConversationId)) files
+            pure $ applyQuery q (catMaybes metas)
+        }
+  where
+    simpleStore = mkSimpleSessionStore path
+
+    metaPath :: SessionId -> FilePath
+    metaPath (SessionId uuid) = path </> ("meta." <> UUID.toString uuid <> ".json")
+
+    readMeta :: SessionId -> IO (Maybe SessionMeta)
+    readMeta sid = do
+        let p = metaPath sid
+        exists <- doesFileExist p
+        if exists then Aeson.decodeStrict' <$> ByteString.readFile p else pure Nothing
+
+    write :: SessionMeta -> Session -> IO ()
+    write meta sess = do
+        storeSession simpleStore (sessionIdToConversationId meta.smSessionId) sess
+        LByteString.writeFile (metaPath meta.smSessionId) (Aeson.encode meta)
+
+    storeLabelled :: SessionLabels -> SessionId -> Session -> IO ()
+    storeLabelled labels sid sess = do
+        now <- getCurrentTime
+        old <- fromMaybe (freshSessionMeta sid now) <$> readMeta sid
+        write (storedMeta now labels sess old) sess
+
+    loadMeta :: SessionId -> IO (Maybe (Session, SessionMeta))
+    loadMeta sid = do
+        mSess <- readSession simpleStore (sessionIdToConversationId sid)
+        case mSess of
+            Nothing -> pure Nothing
+            Just sess -> do
+                mMeta <- readMeta sid
+                meta <- case mMeta of
+                    Just m -> pure m
+                    Nothing -> do
+                        mtime <- getModificationTime (sessionWritePath simpleStore (sessionIdToConversationId sid))
+                        pure (freshSessionMeta sid mtime){smStatus = sessionStatusOf sess}
+                pure $ Just (sess, meta)
+
+    removeIfPresent :: FilePath -> IO ()
+    removeIfPresent p = removeFile p `catch` \(_ :: IOException) -> pure ()
 
 -------------------------------------------------------------------------------
 -- SQLite Backend
@@ -163,27 +400,84 @@ fileSessionBackend (FileSessionStore path) =
 
 {- | SQLite-backed session backend.
 
-Stores sessions as JSON rows in a @sessions@ table with
-@session_id@, @created_at@, @updated_at@, and @json@ columns.
+Stores sessions as JSON rows in a @sessions@ table, with their metadata in
+columns. Compare-and-store is a single conditional statement, so it is
+atomic across threads and processes sharing the database.
 -}
 newtype SqliteSessionStore = SqliteSessionStore Connection
 
--- | Schema statements for the sessions table.
-sessionSchemaStatements :: [Query]
-sessionSchemaStatements =
-    [ [sql| CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            created_at TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP NOT NULL,
-            json TEXT NOT NULL
+{- | A schema migration: applied once, in version order, inside a transaction,
+and recorded in @schema_migrations@ under a component name.
+-}
+data Migration = Migration
+    { migrationVersion :: Int
+    , migrationApply :: Connection -> IO ()
+    }
+
+-- | Apply the migrations of a component that were not applied yet.
+runMigrations :: Connection -> Text -> [Migration] -> IO ()
+runMigrations conn component migrations = do
+    execute_
+        conn
+        [sql| CREATE TABLE IF NOT EXISTS schema_migrations (
+            component TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            applied_at TIMESTAMP NOT NULL,
+            PRIMARY KEY (component, version)
         ) |]
-    , [sql| CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at) |]
+    applied <-
+        map fromOnly
+            <$> (query conn [sql| SELECT version FROM schema_migrations WHERE component = ? |] (Only component) :: IO [Only Int])
+    forM_ (sortOn (.migrationVersion) migrations) $ \m ->
+        unless (m.migrationVersion `elem` applied) $
+            withTransaction conn $ do
+                m.migrationApply conn
+                now <- getCurrentTime
+                execute
+                    conn
+                    [sql| INSERT INTO schema_migrations (component, version, applied_at) VALUES (?, ?, ?) |]
+                    (component, m.migrationVersion, now)
+
+-- | Migrations of the @sessions@ table.
+sessionMigrations :: [Migration]
+sessionMigrations =
+    [ Migration 1 $ \conn -> do
+        execute_
+            conn
+            [sql| CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL,
+                json TEXT NOT NULL
+            ) |]
+        execute_ conn [sql| CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at) |]
+    , Migration 2 $ \conn -> do
+        mapM_
+            (execute_ conn)
+            [ [sql| ALTER TABLE sessions ADD COLUMN agent_slug TEXT |]
+            , [sql| ALTER TABLE sessions ADD COLUMN parent_session_id TEXT |]
+            , [sql| ALTER TABLE sessions ADD COLUMN owner TEXT |]
+            , [sql| ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ready' |]
+            , [sql| ALTER TABLE sessions ADD COLUMN status_detail TEXT |]
+            , [sql| ALTER TABLE sessions ADD COLUMN version INTEGER NOT NULL DEFAULT 0 |]
+            , [sql| CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status, updated_at) |]
+            , [sql| CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id) |]
+            ]
+        -- Derive the status of sessions stored before this migration.
+        rows <- query_ conn [sql| SELECT session_id, json FROM sessions |] :: IO [(Text, Text)]
+        forM_ rows $ \(sid, json) ->
+            forM_ (Aeson.decodeStrict' (TextEnc.encodeUtf8 json)) $ \sess ->
+                execute
+                    conn
+                    [sql| UPDATE sessions SET status = ? WHERE session_id = ? |]
+                    (sessionStatusText (sessionStatusOf sess), sid)
+    , Migration 3 $ \conn ->
+        execute_ conn [sql| CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner, updated_at) |]
     ]
 
--- | Initialize the SQLite session schema.
+-- | Create or migrate the SQLite session schema.
 initializeSessionSchema :: Connection -> IO ()
-initializeSessionSchema conn =
-    forM_ sessionSchemaStatements (execute_ conn)
+initializeSessionSchema conn = runMigrations conn "sessions" sessionMigrations
 
 {- | Create a SQLite-backed session backend and initialize its schema.
 
@@ -201,58 +495,151 @@ mkSqliteSessionStore conn = do
 sqliteSessionBackend :: Connection -> SessionBackend
 sqliteSessionBackend conn =
     SessionBackend
-        { sbStore = sqliteStoreSession conn
-        , sbLoad = sqliteLoadSession conn
+        { sbStore = sqliteStoreSession conn noLabels
+        , sbLoad = fmap (fmap fst) . sqliteLoadMeta conn
         , sbList = sqliteListSessions conn
         , sbDelete = sqliteDeleteSession conn
+        , sbStoreLabelled = sqliteStoreSession conn
+        , sbLoadMeta = sqliteLoadMeta conn
+        , sbCompareAndStore = sqliteCompareAndStore conn
+        , sbQuery = sqliteQuerySessions conn
         }
 
-sqliteStoreSession :: Connection -> SessionId -> Session -> IO ()
-sqliteStoreSession conn sid sess = do
+sessionIdText :: SessionId -> Text
+sessionIdText (SessionId uuid) = UUID.toText uuid
+
+encodeSession :: Session -> Text
+encodeSession = TextEnc.decodeUtf8 . LByteString.toStrict . Aeson.encode
+
+-- | Columns read into a 'SessionMeta', in 'MetaRow' order.
+metaColumns :: Text
+metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at"
+
+type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime)
+
+metaFromRow :: MetaRow -> Maybe SessionMeta
+metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated)) = do
+    uuid <- UUID.fromText sid
+    pure
+        SessionMeta
+            { smSessionId = SessionId uuid
+            , smAgent = agent
+            , smParent = SessionId <$> (UUID.fromText =<< parent)
+            , smOwner = owner
+            , smStatus = fromMaybe StatusReady (parseSessionStatus status)
+            , smStatusDetail = detail
+            , smVersion = version
+            , smCreatedAt = created
+            , smUpdatedAt = updated
+            }
+
+sqliteStoreSession :: Connection -> SessionLabels -> SessionId -> Session -> IO ()
+sqliteStoreSession conn labels sid sess = do
     now <- getCurrentTime
-    let SessionId uuid = sid
-    let json = TextEnc.decodeUtf8 $ LByteString.toStrict $ Aeson.encode sess
     execute
         conn
-        [sql| INSERT INTO sessions (session_id, created_at, updated_at, json)
-              VALUES (?, ?, ?, ?)
+        [sql| INSERT INTO sessions
+                (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, version)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
               ON CONFLICT(session_id) DO UPDATE SET
                 updated_at = excluded.updated_at,
-                json = excluded.json |]
-        (UUID.toText uuid, now, now, json)
+                json = excluded.json,
+                agent_slug = COALESCE(excluded.agent_slug, sessions.agent_slug),
+                parent_session_id = COALESCE(excluded.parent_session_id, sessions.parent_session_id),
+                owner = COALESCE(excluded.owner, sessions.owner),
+                status = CASE WHEN sessions.status = 'running' THEN sessions.status ELSE excluded.status END,
+                status_detail = CASE WHEN sessions.status = 'running' THEN sessions.status_detail ELSE NULL END,
+                version = sessions.version + 1 |]
+        ( (sessionIdText sid, now, now, encodeSession sess, labels.slAgent)
+            :. (sessionIdText <$> labels.slParent, labels.slOwner, sessionStatusText (sessionStatusOf sess))
+        )
 
-sqliteLoadSession :: Connection -> SessionId -> IO (Maybe Session)
-sqliteLoadSession conn sid = do
-    let SessionId uuid = sid
+sqliteLoadMeta :: Connection -> SessionId -> IO (Maybe (Session, SessionMeta))
+sqliteLoadMeta conn sid = do
     rows <-
         query
             conn
-            [sql| SELECT json FROM sessions WHERE session_id = ? |]
-            (Only $ UUID.toText uuid) ::
-            IO [Only Text]
+            (Query $ "SELECT json, " <> metaColumns <> " FROM sessions WHERE session_id = ?")
+            (Only $ sessionIdText sid) ::
+            IO [Only Text :. MetaRow]
+    pure $ case rows of
+        [Only json :. row] -> (,) <$> Aeson.decodeStrict' (TextEnc.encodeUtf8 json) <*> metaFromRow row
+        _ -> Nothing
+
+sqliteCompareAndStore :: Connection -> SessionMeta -> Session -> IO (Either VersionConflict SessionMeta)
+sqliteCompareAndStore conn meta sess = do
+    now <- getCurrentTime
+    let sid = sessionIdText meta.smSessionId
+        columns =
+            (now, encodeSession sess, meta.smAgent, sessionIdText <$> meta.smParent)
+                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail)
+    rows <-
+        if meta.smVersion == 0
+            then
+                query
+                    conn
+                    [sql| INSERT INTO sessions
+                            (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                          ON CONFLICT(session_id) DO UPDATE SET
+                            updated_at = excluded.updated_at,
+                            json = excluded.json,
+                            agent_slug = excluded.agent_slug,
+                            parent_session_id = excluded.parent_session_id,
+                            owner = excluded.owner,
+                            status = excluded.status,
+                            status_detail = excluded.status_detail,
+                            version = sessions.version + 1
+                          WHERE sessions.version = 0
+                          RETURNING version, created_at |]
+                    ((sid, now) :. columns)
+            else
+                query
+                    conn
+                    [sql| UPDATE sessions SET
+                            updated_at = ?, json = ?, agent_slug = ?, parent_session_id = ?,
+                            owner = ?, status = ?, status_detail = ?, version = version + 1
+                          WHERE session_id = ? AND version = ?
+                          RETURNING version, created_at |]
+                    (columns :. (sid, meta.smVersion))
     case rows of
-        [Only json] -> pure $ Aeson.decode $ LByteString.fromStrict $ TextEnc.encodeUtf8 json
-        _ -> pure Nothing
+        [(version, created)] ->
+            pure $ Right meta{smVersion = version, smCreatedAt = created, smUpdatedAt = now}
+        _ -> do
+            current <-
+                query conn [sql| SELECT version FROM sessions WHERE session_id = ? |] (Only sid) ::
+                    IO [Only Int]
+            pure $ Left $ VersionConflict meta.smSessionId meta.smVersion (maybe 0 fromOnly (listToMaybe current))
+
+sqliteQuerySessions :: Connection -> SessionQuery -> IO [SessionMeta]
+sqliteQuerySessions conn q
+    | q.sqStatuses == Just [] = pure []
+    | otherwise = do
+        let criteria =
+                catMaybes
+                    [ (\a -> ("agent_slug = ?", [toField a])) <$> q.sqAgent
+                    , (\ss -> ("status IN (" <> Text.intercalate ", " ("?" <$ ss) <> ")", map (toField . sessionStatusText) ss)) <$> q.sqStatuses
+                    , (\p -> ("parent_session_id = ?", [toField (sessionIdText p)])) <$> q.sqParent
+                    , (\o -> ("owner = ?", [toField o])) <$> q.sqOwner
+                    , (\t -> ("updated_at < ?", [toField t])) <$> q.sqUpdatedBefore
+                    ]
+            whereClause
+                | null criteria = ""
+                | otherwise = " WHERE " <> Text.intercalate " AND " (map fst criteria)
+            statement =
+                "SELECT " <> metaColumns <> " FROM sessions" <> whereClause <> " ORDER BY updated_at DESC LIMIT ?"
+        rows <-
+            query conn (Query statement) (concatMap snd criteria <> [toField (fromMaybe (-1) q.sqLimit)]) ::
+                IO [MetaRow]
+        pure $ mapMaybe metaFromRow rows
 
 sqliteListSessions :: Connection -> IO [(SessionId, UTCTime)]
-sqliteListSessions conn = do
-    rows <-
-        query_
-            conn
-            [sql| SELECT session_id, updated_at FROM sessions ORDER BY updated_at DESC |] ::
-            IO [(Text, UTCTime)]
-    pure $
-        mapMaybe
-            ( \(sidText, mtime) -> case UUID.fromText sidText of
-                Just uuid -> Just (SessionId uuid, mtime)
-                Nothing -> Nothing
-            )
-            rows
+sqliteListSessions conn =
+    map (\m -> (m.smSessionId, m.smUpdatedAt)) <$> sqliteQuerySessions conn allSessionsQuery
 
 sqliteDeleteSession :: Connection -> SessionId -> IO ()
-sqliteDeleteSession conn sid = do
-    let SessionId uuid = sid
-    execute conn [sql| DELETE FROM sessions WHERE session_id = ? |] (Only $ UUID.toText uuid)
+sqliteDeleteSession conn sid =
+    execute conn [sql| DELETE FROM sessions WHERE session_id = ? |] (Only $ sessionIdText sid)
 
 -------------------------------------------------------------------------------
 -- Composite Backend
@@ -260,8 +647,9 @@ sqliteDeleteSession conn sid = do
 
 {- | Composite session backend.
 
-Reads fall back across all provided backends in order. Writes (store/delete) go
-to the first backend only, which acts as the primary target.
+Reads fall back across all provided backends in order. Writes (store/delete)
+and metadata queries go to the first backend only, which acts as the primary
+target.
 
 Listing aggregates entries from all backends and deduplicates by 'SessionId',
 keeping the first occurrence (highest-priority backend).
@@ -272,24 +660,28 @@ newtype CompositeSessionStore = CompositeSessionStore [SessionBackend]
 mkCompositeSessionStore :: [SessionBackend] -> SessionBackend
 mkCompositeSessionStore backends =
     SessionBackend
-        { sbStore = \sid sess -> case backends of
-            (primary : _) -> sbStore primary sid sess
-            [] -> pure ()
-        , sbLoad = fallbackLoad backends
+        { sbStore = \sid sess -> onPrimary () $ \p -> sbStore p sid sess
+        , sbLoad = fallback sbLoad
         , sbList = dedupeBy fst . concat <$> mapM sbList backends
-        , sbDelete = \sid -> case backends of
-            (primary : _) -> sbDelete primary sid
-            [] -> pure ()
+        , sbDelete = \sid -> onPrimary () $ \p -> sbDelete p sid
+        , sbStoreLabelled = \labels sid sess -> onPrimary () $ \p -> sbStoreLabelled p labels sid sess
+        , sbLoadMeta = fallback sbLoadMeta
+        , sbCompareAndStore = \meta sess ->
+            onPrimary (Left $ VersionConflict meta.smSessionId meta.smVersion 0) $ \p -> sbCompareAndStore p meta sess
+        , sbQuery = \q -> onPrimary [] $ \p -> sbQuery p q
         }
+  where
+    onPrimary :: a -> (SessionBackend -> IO a) -> IO a
+    onPrimary none f = case backends of
+        (primary : _) -> f primary
+        [] -> pure none
 
--- | Try loading from each backend in order until one succeeds.
-fallbackLoad :: [SessionBackend] -> SessionId -> IO (Maybe Session)
-fallbackLoad [] _ = pure Nothing
-fallbackLoad (b : bs) sid = do
-    mSess <- sbLoad b sid
-    case mSess of
-        Just sess -> pure $ Just sess
-        Nothing -> fallbackLoad bs sid
+    -- Try each backend in order until one has the session.
+    fallback :: (SessionBackend -> SessionId -> IO (Maybe a)) -> SessionId -> IO (Maybe a)
+    fallback get sid = go backends
+      where
+        go [] = pure Nothing
+        go (b : bs) = get b sid >>= maybe (go bs) (pure . Just)
 
 -------------------------------------------------------------------------------
 -- Legacy Session Store Configuration
@@ -585,9 +977,6 @@ findSessionsInDir dir = do
                     Just cid -> pure $ Just $ SessionFileInfo path mtime cid
                     Nothing -> error $ "Unexpected: file passed isSessionFile but failed parse: " ++ path
 
-    catMaybes :: [Maybe a] -> [a]
-    catMaybes = foldr (maybe id (:)) []
-
 {- | Find all session files across all read locations.
 
 This function:
@@ -646,3 +1035,76 @@ listSessions store = do
     -- Load each session file (locked/inaccessible files will return Nothing)
     mapM (\info -> (sessionInfoPath info,,sessionInfoConversationId info) <$> readSessionFromFile (sessionInfoPath info)) sessionFiles
 
+
+-------------------------------------------------------------------------------
+-- Session Catalog
+-------------------------------------------------------------------------------
+
+-- | One session as listed by a 'SessionCatalog'.
+data CatalogEntry = CatalogEntry
+    { ceConversationId :: ConversationId
+    , ceUpdatedAt :: Maybe UTCTime
+    , ceSession :: Maybe Session
+    -- ^ 'Nothing' when the session cannot be read, e.g. a locked file.
+    , ceBusy :: Bool
+    -- ^ Being written: a locked file, or a running session.
+    }
+
+{- | Read-only access to stored sessions, for tools that inspect them.
+
+Sessions are identified by conversation ID: the file name in the file store,
+and the same UUID as the session ID in a 'SessionBackend'.
+-}
+data SessionCatalog = SessionCatalog
+    { catList :: IO [CatalogEntry]
+    -- ^ All sessions, most recently updated first.
+    , catRead :: ConversationId -> IO (Maybe Session)
+    }
+
+instance Show SessionCatalog where
+    show _ = "SessionCatalog"
+
+-- | The sessions of a file 'SessionStore', across all its read locations.
+fileCatalog :: SessionStore -> SessionCatalog
+fileCatalog store =
+    SessionCatalog
+        { catList = do
+            files <- findSessionFiles store
+            forM files $ \info -> do
+                mSess <- readSessionFromFile info.sessionInfoPath
+                busy <- isFileBusy info.sessionInfoPath
+                pure
+                    CatalogEntry
+                        { ceConversationId = info.sessionInfoConversationId
+                        , ceUpdatedAt = Just info.sessionInfoModTime
+                        , ceSession = mSess
+                        , ceBusy = busy
+                        }
+        , catRead = readSession store
+        }
+
+-- | The sessions of a 'SessionBackend'.
+backendCatalog :: SessionBackend -> SessionCatalog
+backendCatalog backend =
+    SessionCatalog
+        { catList = do
+            metas <- sbQuery backend allSessionsQuery
+            forM metas $ \meta -> do
+                mSess <- sbLoad backend meta.smSessionId
+                pure
+                    CatalogEntry
+                        { ceConversationId = sessionIdToConversationId meta.smSessionId
+                        , ceUpdatedAt = Just meta.smUpdatedAt
+                        , ceSession = mSess
+                        , ceBusy = meta.smStatus == StatusRunning
+                        }
+        , catRead = sbLoad backend . conversationIdToSessionId
+        }
+
+-- | Whether a file is locked by a writer, so that it cannot be opened now.
+isFileBusy :: FilePath -> IO Bool
+isFileBusy path = do
+    result <- try $ bracket (openBinaryFile path ReadMode) hClose (\_ -> pure ())
+    case result of
+        Left (ioe :: IOException) -> pure $ isResourceBusyError ioe
+        Right _ -> pure False

@@ -116,17 +116,6 @@ runUntilBlocked convId agent sess =
                 Left r -> pure (Left r)
                 Right sess1 -> go latest agent1 sess1
 
-{- | Whether the head partial turn has deferred calls and nothing else to
-run or wait for (no ready or running calls).
--}
-isBlockedOnDeferredCalls :: Session -> Bool
-isBlockedOnDeferredCalls session =
-    case getPartialTurn session of
-        Nothing -> False
-        Just partial ->
-            let states = map (.tcState) partial.pTrackedToolCalls
-             in Deferred `elem` states && Ready `notElem` states && Running `notElem` states
-
 -------------------------------------------------------------------------------
 -- Asynchronous Execution with Progress Callbacks
 -------------------------------------------------------------------------------

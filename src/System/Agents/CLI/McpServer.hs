@@ -27,6 +27,7 @@ module System.Agents.CLI.McpServer (
 import Control.Concurrent.STM (readTVarIO)
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.MCP.Server as McpServer
@@ -108,8 +109,8 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
                         Prod.traceBoth
                             ttTracer
                             traceUsefulPromptStderr
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
-                    , AgentTree.sessionStore = sessionStore
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
+                    , AgentTree.sessionCatalog = SessionStore.fileCatalog sessionStore
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

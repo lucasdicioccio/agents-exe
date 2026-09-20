@@ -8,6 +8,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -33,17 +34,88 @@ data OpenAICompletionConfig = OpenAICompletionConfig
     , cfgBaseUrl :: OpenAI.ApiBaseUrl
     , cfgModelName :: Text
     , cfgModelFlavor :: OpenAI.ModelFlavor
+    , cfgOnTextDelta :: Maybe (Text -> IO ())
+    {- ^ When set, the completion is streamed and each piece of the answer's
+    text is passed here as it arrives.
+    -}
     }
 
 {- | Creates a completion function that uses OpenAI's API via callLLMPayload.
 This function converts the LlmCompletion into an OpenAI-compatible payload,
 calls the LLM, and parses the response into LlmResponse and [LlmToolCall].
 -}
+
+{- | One attachment, as an OpenAI content part.
+
+A PDF travels as a @file@ part and an image as an @image_url@ part. Anything
+else used to be sent as an image too, which providers reject outright
+(@invalid image input@), so a text attachment could never work. Text is now
+inlined as a @text@ part instead, labelled with its filename so the model can
+tell it from the prompt.
+
+Only content that really is text is inlined: the MIME type must say so and
+the bytes must decode as UTF-8. Whatever is left over keeps the old
+behaviour, since some providers do accept audio and video that way.
+-}
+mediaContentPart :: MediaAttachment -> Aeson.Value
+mediaContentPart media
+    | isPdf =
+        Aeson.object
+            [ "type" .= ("file" :: Text)
+            , "file"
+                .= Aeson.object
+                    [ "filename" .= maybe "document.pdf" id media.mediaFilename
+                    , "file_data" .= dataUrl
+                    ]
+            ]
+    | Just contents <- inlinableText =
+        Aeson.object
+            [ "type" .= ("text" :: Text)
+            , "text" .= (label <> contents)
+            ]
+    | otherwise =
+        Aeson.object
+            [ "type" .= ("image_url" :: Text)
+            , "image_url" .= Aeson.object ["url" .= dataUrl]
+            ]
+  where
+    dataUrl = "data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data
+    -- The type alone, without any "; charset=..." that follows it.
+    mime = Text.toLower (Text.strip (Text.takeWhile (/= ';') media.mediaMimeType))
+    isPdf = mime == "application/pdf"
+    label =
+        "Attached file "
+            <> maybe "(unnamed)" id media.mediaFilename
+            <> " ("
+            <> mime
+            <> "):\n"
+    isTextual =
+        "text/" `Text.isPrefixOf` mime
+            || "+json" `Text.isSuffixOf` mime
+            || "+xml" `Text.isSuffixOf` mime
+            || mime
+                `elem` [ "application/json"
+                       , "application/xml"
+                       , "application/javascript"
+                       , "application/x-ndjson"
+                       , "application/yaml"
+                       , "application/x-yaml"
+                       , "application/toml"
+                       , "application/sql"
+                       ]
+    inlinableText
+        | not isTextual = Nothing
+        | otherwise = case Base64.decode (Text.encodeUtf8 media.mediaBase64Data) of
+            Left _ -> Nothing
+            Right bytes -> either (const Nothing) Just (Text.decodeUtf8' bytes)
+
 mkOpenAICompletion :: OpenAICompletionConfig -> (LlmCompletion -> IO (LlmResponse, [LlmToolCall]))
 mkOpenAICompletion config completion = do
     let payload = buildPayload completion
 
-    result <- OpenAI.callLLMPayload config.cfgTracer config.cfgRuntime config.cfgBaseUrl payload
+    result <- case config.cfgOnTextDelta of
+        Nothing -> OpenAI.callLLMPayload config.cfgTracer config.cfgRuntime config.cfgBaseUrl payload
+        Just onText -> OpenAI.callLLMPayloadStreaming config.cfgTracer config.cfgRuntime config.cfgBaseUrl payload onText
 
     case result of
         Left err -> ioError $ userError $ "LLM API call failed: " ++ err
@@ -70,6 +142,14 @@ mkOpenAICompletion config completion = do
                     ++ ["tools" .= tools | not (null tools)]
                     ++ ["prompt_cache_key" .= key | Just key <- [promptCacheKey]]
                     ++ flavorSpecificFields config.cfgModelFlavor
+                    ++ streamFields
+
+    -- Usage in the last chunk is an OpenAI option that other providers may refuse.
+    streamFields = case config.cfgOnTextDelta of
+        Nothing -> []
+        Just _ ->
+            ["stream" .= True]
+                ++ ["stream_options" .= Aeson.object ["include_usage" .= True] | config.cfgModelFlavor == OpenAI.OpenAIv1]
 
     -- Convert SystemTool (which contains JSON text) to OpenAI Tool.
     -- Since OpenAI.Tool doesn't have a FromJSON instance, we parse the JSON
@@ -270,26 +350,7 @@ mkOpenAICompletion config completion = do
 
     -- Convert a MediaAttachment to OpenAI content part format
     mediaAttachmentToContentPart :: MediaAttachment -> Aeson.Value
-    mediaAttachmentToContentPart media =
-        let isPdf = "application/pdf" `Text.isPrefixOf` media.mediaMimeType
-         in if isPdf
-                then -- PDF files use file_data format
-                    Aeson.object
-                        [ "type" .= ("file" :: Text)
-                        , "file"
-                            .= Aeson.object
-                                [ "filename" .= maybe "document.pdf" id media.mediaFilename
-                                , "file_data" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                                ]
-                        ]
-                else -- Images and other media use image_url format
-                    Aeson.object
-                        [ "type" .= ("image_url" :: Text)
-                        , "image_url"
-                            .= Aeson.object
-                                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                                ]
-                        ]
+    mediaAttachmentToContentPart = mediaContentPart
 
     -- Convert a tool call/response pair to OpenAI message format
     toolResponseToMessages :: (LlmToolCall, UserToolResponse) -> [Aeson.Value]
@@ -319,15 +380,7 @@ mkOpenAICompletion config completion = do
                     [ Aeson.object
                         [ "role" .= ("tool" :: Text)
                         , "tool_call_id" .= toolCallId
-                        , "content"
-                            .= [ Aeson.object
-                                    [ "type" .= ("image_url" :: Text)
-                                    , "image_url"
-                                        .= Aeson.object
-                                            [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                                            ]
-                                    ]
-                               ]
+                        , "content" .= [mediaContentPart media]
                         ]
                     ]
                 MixedResponse parts ->
@@ -345,26 +398,7 @@ mkOpenAICompletion config completion = do
             [ "type" .= ("text" :: Text)
             , "text" .= txt
             ]
-    contentPartToOpenAI (MediaPart media) =
-        let isPdf = "application/pdf" `Text.isPrefixOf` media.mediaMimeType
-         in if isPdf
-                then -- PDF files use file_data format
-                    Aeson.object
-                        [ "type" .= ("file" :: Text)
-                        , "file"
-                            .= Aeson.object
-                                [ "filename" .= maybe "document.pdf" id media.mediaFilename
-                                , "file_data" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                                ]
-                        ]
-                else -- Images and other media use image_url format
-                    Aeson.object
-                        [ "type" .= ("image_url" :: Text)
-                        , "image_url"
-                            .= Aeson.object
-                                [ "url" .= ("data:" <> media.mediaMimeType <> ";base64," <> media.mediaBase64Data)
-                                ]
-                        ]
+    contentPartToOpenAI (MediaPart media) = mediaContentPart media
 
     -- Add flavor-specific fields to the payload
     flavorSpecificFields :: OpenAI.ModelFlavor -> [(Aeson.Key, Aeson.Value)]

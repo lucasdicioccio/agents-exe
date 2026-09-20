@@ -20,6 +20,7 @@ module System.Agents.CLI.TUI (
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.TUI.Core as TUI
@@ -67,8 +68,8 @@ handleTUI tracer sessionStore apiKeysFile mKeymapPath agentFiles = do
                     , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFile
                     , AgentTree.interactiveTracer = (Prod.contramap AgentTreeTrace tracer)
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) sessionStore apiKeys
-                    , AgentTree.sessionStore = sessionStore
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
+                    , AgentTree.sessionCatalog = SessionStore.fileCatalog sessionStore
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

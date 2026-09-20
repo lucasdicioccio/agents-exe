@@ -17,6 +17,7 @@ module System.Agents.LLMs.OpenAI (
     Response (..),
     TokenUsage (..),
     callLLMPayload,
+    callLLMPayloadStreaming,
     calculatePayloadBytes,
     parseLLMResponse,
     waitRateLimit,
@@ -47,6 +48,7 @@ import Prod.Tracer (Tracer (..), contramap, runTracer)
 import Text.Read (readMaybe)
 
 import qualified System.Agents.HttpClient as HttpClient
+import qualified System.Agents.LLMs.OpenAIStream as Stream
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..), jsonSchema)
 
 -------------------------------------------------------------------------------
@@ -397,19 +399,8 @@ callLLMPayload ::
     payload ->
     IO (Either String Value)
 callLLMPayload tracer rt baseUrl payload =
-    callWithRetry 0
+    withOverloadedRetry tracer makeRequest
   where
-    callWithRetry :: Int -> IO (Either String Value)
-    callWithRetry attempt = do
-        result <- makeRequest
-        case result of
-            Left err -> pure $ Left err
-            Right (status, bodyVal)
-                | status == HttpStatus.status429 && isOverloadedError (Aeson.encode bodyVal) ->
-                    handleOverloaded attempt
-                | HttpStatus.statusIsSuccessful status -> pure $ Right bodyVal
-                | otherwise -> pure $ Left $ "HTTP error: " ++ show status
-
     makeRequest :: IO (Either String (HttpStatus.Status, Aeson.Value))
     makeRequest = do
         let payloadVal = Aeson.toJSON payload
@@ -430,6 +421,64 @@ callLLMPayload tracer rt baseUrl payload =
                         let mTokenUsage = extractTokenUsage body
                         runTracer tracer (GotChatCompletion body responseBytes mTokenUsage)
                         pure $ Right (status, body)
+
+{- | Like 'callLLMPayload', for a payload asking for a stream
+(@"stream": true@): each text delta goes to the callback as it arrives, and
+the result is the completion JSON a non-streamed call would have returned.
+-}
+callLLMPayloadStreaming ::
+    (ToJSON payload) =>
+    Tracer IO Trace ->
+    HttpClient.Runtime ->
+    ApiBaseUrl ->
+    payload ->
+    (Text -> IO ()) ->
+    IO (Either String Value)
+callLLMPayloadStreaming tracer rt baseUrl payload onText =
+    withOverloadedRetry tracer makeRequest
+  where
+    makeRequest :: IO (Either String (HttpStatus.Status, Aeson.Value))
+    makeRequest = do
+        let payloadVal = Aeson.toJSON payload
+            requestBytes = calculatePayloadBytes payloadVal
+        runTracer tracer (CallChatCompletion payloadVal requestBytes (Just (requestBytes `div` 4)))
+        httpRsp <-
+            HttpClient.postStream
+                rt
+                (contramap HttpClientTrace tracer)
+                (baseUrl.getBaseUrl <> "/chat/completions")
+                (Just payloadVal)
+                (\reader -> Stream.readChatCompletionStream onText (NetHttpClient.brRead reader))
+        case httpRsp of
+            Left (HttpClient.SomeError err) -> pure $ Left err
+            Right (status, Left raw) ->
+                -- An error answer: decoded when JSON, for the overloaded check.
+                pure $ Right (status, maybe (String (Text.decodeUtf8Lenient (LByteString.toStrict raw))) id (Aeson.decode raw))
+            Right (_, Right (Left err)) -> pure $ Left $ "LLM stream error: " <> C8.unpack (LByteString.toStrict (Aeson.encode err))
+            Right (status, Right (Right body)) -> do
+                runTracer tracer (GotChatCompletion body (calculatePayloadBytes body) (extractTokenUsage body))
+                pure $ Right (status, body)
+
+{- | Run a request, retrying with back-off while the provider reports being
+overloaded (HTTP 429 with an "overloaded" body).
+-}
+withOverloadedRetry ::
+    Tracer IO Trace ->
+    IO (Either String (HttpStatus.Status, Aeson.Value)) ->
+    IO (Either String Value)
+withOverloadedRetry tracer makeRequest =
+    callWithRetry 0
+  where
+    callWithRetry :: Int -> IO (Either String Value)
+    callWithRetry attempt = do
+        result <- makeRequest
+        case result of
+            Left err -> pure $ Left err
+            Right (status, bodyVal)
+                | status == HttpStatus.status429 && isOverloadedError (Aeson.encode bodyVal) ->
+                    handleOverloaded attempt
+                | HttpStatus.statusIsSuccessful status -> pure $ Right bodyVal
+                | otherwise -> pure $ Left $ "HTTP error: " ++ show status
 
     handleOverloaded :: Int -> IO (Either String Value)
     handleOverloaded attempt =

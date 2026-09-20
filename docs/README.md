@@ -11,7 +11,7 @@ The Agents framework provides a complete infrastructure for:
 - **Tool System**: Extensible tool registration with support for bash scripts, MCP servers, and OpenAPI integrations
 - **Session Management**: Persistent conversation sessions with turn-based interactions
 - **Durable Workflows**: Asynchronous, resumable execution with deferred tool calls and isolated deployments
-- **Multiple Interfaces**: CLI, TUI (Terminal UI), and MCP server modes
+- **Multiple Interfaces**: CLI, TUI (Terminal UI), MCP server, and an HTTP server
 
 ## Quick Start
 
@@ -173,6 +173,7 @@ including a runnable mock-LLM demonstrator.
 - [MCP Protocol](mcp.md) - Model Context Protocol integration
 - [Session Management](sessions.md) - Session lifecycle and persistence
 - [Durable Workflows How-To](durable-workflows-howto.md) - Resumable async execution
+- [agents-server](agents-server.md) - Agents over HTTP: sessions, events, OpenAPI, and a chat page
 - [Asynchronous Tool Calls](async-tool-calls.md) - Background tool calls, progress and cancellation
 - [Terminal UI](tui.md) - TUI interface
 - [CLI Reference](cli-commands.md) - Command reference

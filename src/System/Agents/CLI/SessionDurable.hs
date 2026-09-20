@@ -48,13 +48,13 @@ import System.Exit (exitFailure)
 import System.IO (stderr)
 
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.Base as Base
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.OneShot (PromptScriptOptions (..), loadPromptScriptOptions)
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.OneShot (nodeToAgent)
-import System.Agents.Session.AgentConfig (applyAgentDurableConfig, buildToolCallPolicy, llmToolCallName)
+import System.Agents.Session.AgentConfig (applyAgentDurableConfig, buildToolCallPolicy)
 import System.Agents.Session.Base
 import System.Agents.Session.Step (getPartialTurn, runStepM)
 import System.Agents.Session.Wake (resumeSession, wakeSession)
@@ -119,14 +119,7 @@ parseResultFile bs
 -- | Extract all deferred calls from the latest partial turn of a session.
 extractDeferredCalls :: Session -> [(ToolCallId, Maybe ContinuationToken, Text, ToolCallDisposition)]
 extractDeferredCalls session =
-    case getPartialTurn session of
-        Nothing -> []
-        Just partial ->
-            [ (tc.tcId, tc.tcContinuation, callName tc.tcCall, disp)
-            | tc <- partial.pTrackedToolCalls
-            , tc.tcState == Deferred
-            , let disp = appliedDisposition tc.tcPolicy
-            ]
+    [(v.dcvToolCallId, v.dcvToken, v.dcvToolName, v.dcvDisposition) | v <- pendingDeferredCalls session]
 
 -- | Extract deferred calls whose base disposition is 'RunIsolated'.
 extractIsolatedCalls :: Session -> [(ToolCallId, ContinuationToken, LlmToolCall, ToolCallDisposition)]
@@ -147,10 +140,6 @@ findTrackedCall session cid =
     case getPartialTurn session of
         Nothing -> Nothing
         Just partial -> listToMaybe [tc | tc <- partial.pTrackedToolCalls, tc.tcId == cid]
-
--- | Extract the disposition stored in an applied policy.
-appliedDisposition :: AppliedPolicy -> ToolCallDisposition
-appliedDisposition policy = policy.apDisposition
 
 -- | Extract the function name from an LLM tool call.
 callName :: LlmToolCall -> Text
@@ -187,24 +176,11 @@ formatSessionId (SessionId uuid) = UUID.toText uuid
 -- Agent construction
 -------------------------------------------------------------------------------
 
-{- | Build an execution agent from the first supplied agent file.
-
-The agent is configured for the session's conversation id so that resumed
-execution carries the same lineage. The caller can further customise the
-agent (e.g. set asynchronous mode) before running steps.
+{- | Build an execution agent from the first supplied agent file for a given
+conversation id, with 'AgentFactory.buildAgent'. Durable settings from the
+JSON agent config are applied. The caller can further customise the agent
+(e.g. set asynchronous mode) before running steps.
 -}
--- | Load the JSON agent configuration from a file.
-loadJsonAgentFile :: FilePath -> IO Base.Agent
-loadJsonAgentFile path = do
-    result <- Aeson.eitherDecodeFileStrict' path
-    case result of
-        Left err -> do
-            Text.hPutStrLn stderr $ "Error parsing agent file " <> Text.pack path <> ": " <> Text.pack err
-            exitFailure
-        Right (Base.AgentDescription agent) -> pure agent
-
--- | Build an execution agent from the first supplied agent file for a given
--- conversation id. Durable settings from the JSON agent config are applied.
 buildAgentForFile ::
     SessionStore.SessionStore ->
     FilePath ->
@@ -216,7 +192,6 @@ buildAgentForFile _ _ [] _ _ = do
     Text.hPutStrLn stderr "Error: session commands that advance execution require an agent file (use --agent-file)"
     exitFailure
 buildAgentForFile store apiKeysFile (agentFile : _) convId action = do
-    jsonAgent <- loadJsonAgentFile agentFile
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let props =
             AgentTree.Props
@@ -224,16 +199,21 @@ buildAgentForFile store apiKeysFile (agentFile : _) convId action = do
                 , AgentTree.apiKeysFile = apiKeysFile
                 , AgentTree.rootAgentFile = agentFile
                 , AgentTree.interactiveTracer = silent
-                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool silent store apiKeys
-                , AgentTree.sessionStore = store
+                , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool silent (AgentFactory.fileAgentDeps store apiKeys)
+                , AgentTree.sessionCatalog = SessionStore.fileCatalog store
                 }
     AgentTree.withAgentTree props $ \case
         AgentTree.Errors errs -> do
             Text.hPutStrLn stderr $ "Error loading agent tree: " <> Text.pack (show errs)
             exitFailure
         AgentTree.Initialized tree -> do
-            agent0 <- nodeToAgent store Nothing convId silent apiKeys (AgentTree.osTreeRoot tree)
-            let agent = applyAgentDurableConfig jsonAgent agent0
+            agent <-
+                AgentFactory.buildAgent
+                    silent
+                    (AgentFactory.fileAgentDeps store apiKeys)
+                    AgentFactory.RootAgent
+                    convId
+                    (AgentTree.osTreeRoot tree)
             action agent
 
 -- | Build an execution agent from the first supplied agent file.
@@ -288,16 +268,13 @@ handleStart _ _ [] _ _ _ = do
     exitFailure
 handleStart store apiKeysFile agentFiles aliases opts runStep = do
     (promptText, mediaAttachments) <- loadPromptScriptOptions aliases Nothing opts
-    convId <- Base.newConversationId
     sid <- newSessionId
-    tid <- newTurnId
+    let convId = SessionStore.sessionIdToConversationId sid
     buildAgentForFile store apiKeysFile agentFiles convId $ \agent0 -> do
         let agent = agent0{ctxExecutionMode = Asynchronous}
         sPrompt <- sysPrompt agent
         sTools <- sysTools agent
-        let uQuery = Just (UserQuery promptText mediaAttachments)
-        let initialTurn = UserTurn (UserTurnContent sPrompt sTools uQuery []) Nothing
-        let sess = Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous)
+        sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery promptText mediaAttachments)
         if runStep
             then do
                 (_agent, result) <- runStepM convId agent sess

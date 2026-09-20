@@ -107,8 +107,8 @@ This is passed to the toolbox to configure how session introspection
 operations should behave (scope, limits, etc.).
 -}
 data SessionIntrospectionConfig = SessionIntrospectionConfig
-    { introspectionStore :: SessionStore.SessionStore
-    -- ^ Session store for accessing session files
+    { introspectionCatalog :: SessionStore.SessionCatalog
+    -- ^ Sessions the capabilities can list and read
     , introspectionCurrentSessionId :: Maybe SessionId
     -- ^ Current session ID for scope filtering
     , introspectionCurrentForkedFrom :: Maybe SessionId
@@ -123,10 +123,10 @@ data SessionIntrospectionConfig = SessionIntrospectionConfig
     deriving (Show)
 
 -- | Default session introspection configuration.
-defaultSessionIntrospectionConfig :: SessionStore.SessionStore -> SessionIntrospectionConfig
-defaultSessionIntrospectionConfig store =
+defaultSessionIntrospectionConfig :: SessionStore.SessionCatalog -> SessionIntrospectionConfig
+defaultSessionIntrospectionConfig catalog =
     SessionIntrospectionConfig
-        { introspectionStore = store
+        { introspectionCatalog = catalog
         , introspectionCurrentSessionId = Nothing
         , introspectionCurrentForkedFrom = Nothing
         , introspectionScope = ScopeSubtree

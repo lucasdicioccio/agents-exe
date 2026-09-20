@@ -28,6 +28,7 @@ import System.IO (stderr)
 
 import Prod.Tracer (Tracer, contramap)
 import qualified System.Agents.AgentTree as AgentTree
+import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 
@@ -119,8 +120,8 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                     , AgentTree.apiKeysFile = apiKeysFile
                     , AgentTree.rootAgentFile = agentFilePath
                     , AgentTree.interactiveTracer = contramap AgentTreeTrace tracer
-                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap OneShotToolTrace tracer) SessionStore.defaultSessionStore apiKeys
-                    , AgentTree.sessionStore = SessionStore.defaultSessionStore
+                    , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps SessionStore.defaultSessionStore apiKeys)
+                    , AgentTree.sessionCatalog = SessionStore.fileCatalog SessionStore.defaultSessionStore
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do

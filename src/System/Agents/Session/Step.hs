@@ -571,25 +571,6 @@ refreshHeadPartialTurn ctx sess =
                         pure sess{turns = turn : rest}
         _ -> pure sess
 
-{- | Whether the session has background calls whose placeholder was shown to
-the LLM and whose result has not been delivered yet.
-
-Such calls live in partial turns below the head. Step functions use this to
-keep the session going (instead of stopping) until their results arrive.
--}
-hasBackgroundCalls :: Session -> Bool
-hasBackgroundCalls sess =
-    not (null (backgroundCalls sess))
-
--- | Running, undelivered calls in partial turns below the head turn.
-backgroundCalls :: Session -> [TrackedToolCall]
-backgroundCalls sess =
-    [ tc
-    | PartialUserTurn partial _ <- drop 1 sess.turns
-    , tc <- partial.pTrackedToolCalls
-    , tcState tc == Running
-    , not (tcDeliveredLate tc)
-    ]
 
 {- | Collect the results of background calls that finished since the LLM saw
 their placeholder.
@@ -666,9 +647,9 @@ lateResultsQuery calls =
   where
     describe tc =
         let callId = maybe "(unknown id)" id (providerToolCallId tc.tcCall)
-            name = maybe "unknown tool" (\(ToolCall n _) -> n) (parseToolCallFromLlmToolCall tc.tcCall)
+            toolName = maybe "unknown tool" (\(ToolCall n _) -> n) (parseToolCallFromLlmToolCall tc.tcCall)
             status = if tcState tc == Completed then "completed" else "failed"
-         in "tool_call_id " <> callId <> " (" <> name <> ") " <> status <> ":\n" <> maybe "" renderResult (tcResult tc)
+         in "tool_call_id " <> callId <> " (" <> toolName <> ") " <> status <> ":\n" <> maybe "" renderResult (tcResult tc)
 
     renderResult (TextResponse txt) = txt
     renderResult (JsonResponse val) = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))

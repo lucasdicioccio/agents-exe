@@ -1,0 +1,159 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | Command-line options and the server's lifecycle.
+module AgentsServer.Server (
+    ServerOptions (..),
+    serverOptions,
+    runServer,
+) where
+
+import Control.Exception (throwIO)
+import Control.Monad (void, when)
+import Data.Aeson ((.=))
+import qualified Data.Aeson as Aeson
+import qualified Data.Map.Strict as Map
+import Data.Maybe (isJust)
+import Data.String (fromString)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import Data.Time (NominalDiffTime)
+import Network.Wai.Handler.Warp
+import Options.Applicative
+import System.Posix.Signals (Handler (CatchOnce), installHandler, sigINT, sigTERM)
+
+import AgentsServer.Api
+import AgentsServer.Auth (loadAuthTokens)
+import AgentsServer.Log
+import AgentsServer.OpenApi (apiDocument)
+import AgentsServer.UI (uiEnabled)
+import qualified Data.ByteString.Char8 as Char8
+import System.Agents.Host
+import System.Agents.Host.Runner (recoverOnStartup, withSessionRunner)
+import System.Agents.Postgres (isPostgresUrl, withPostgresStores)
+
+data ServerOptions = ServerOptions
+    { soAgentFiles :: [FilePath]
+    , soApiKeysFile :: FilePath
+    , soDatabase :: FilePath
+    , soBind :: String
+    , soPort :: Int
+    , soLiveSessionTtl :: NominalDiffTime
+    , soShutdownGrace :: Int
+    -- ^ Seconds to let open requests finish on shutdown.
+    , soAuthTokens :: Maybe FilePath
+    -- ^ Bearer tokens and their owners; without, no authentication.
+    , soStreamTokens :: Bool
+    -- ^ Stream LLM answers as @text.delta@ events.
+    , soAdminOwners :: [Text]
+    -- ^ Owners allowed to store and delete agents.
+    , soNoUI :: Bool
+    -- ^ Do not serve the chat page, even on a loopback bind.
+    }
+
+serverOptions :: Parser ServerOptions
+serverOptions =
+    ServerOptions
+        <$> some (strOption (long "agent-file" <> metavar "FILE" <> help "Root agent file; repeat for several agents"))
+        <*> strOption (long "api-keys" <> metavar "FILE" <> help "API keys file")
+        <*> strOption (long "db" <> metavar "FILE|URL" <> value "agents-server.db" <> showDefault <> help "SQLite file, or postgresql:// URL, for sessions")
+        <*> strOption (long "bind" <> metavar "HOST" <> value "127.0.0.1" <> showDefault <> help "Address to listen on")
+        <*> option auto (long "port" <> metavar "PORT" <> value 8080 <> showDefault <> help "Port to listen on")
+        <*> (fromInteger <$> option auto (long "live-session-ttl" <> metavar "SECONDS" <> value 900 <> showDefault <> help "Idle time before a session's in-memory state is dropped"))
+        <*> option auto (long "shutdown-grace" <> metavar "SECONDS" <> value 10 <> showDefault <> help "Time open requests get to finish on shutdown")
+        <*> optional (strOption (long "auth-tokens" <> metavar "FILE" <> help "Bearer tokens and their owners; callers then only see their own sessions"))
+        <*> switch (long "stream-tokens" <> help "Stream LLM answers, sending text.delta events as the text arrives")
+        <*> ( maybe [] (filter (not . Text.null) . map Text.strip . Text.splitOn ",")
+                <$> optional (strOption (long "admin-owners" <> metavar "OWNER,…" <> help "Owners allowed to store and delete agents over the API (needs --auth-tokens)"))
+            )
+        <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
+
+{- | Load the agents, open the database, and serve until SIGTERM or SIGINT.
+
+On a signal the server stops accepting connections, ends event streams,
+answers waiting requests with the current state, gives open requests the
+grace period, then cancels active runs (storing their sessions) and closes
+the database.
+-}
+runServer :: ServerOptions -> Logger -> IO ()
+runServer opts logger = do
+    auth <- traverse loadAuthTokens opts.soAuthTokens
+    when (not (null opts.soAdminOwners) && null auth) $
+        throwIO $
+            userError "--admin-owners needs --auth-tokens: without authentication, owners cannot be told apart"
+    let cfg =
+            (defaultHostConfig opts.soAgentFiles opts.soApiKeysFile opts.soDatabase)
+                { hcLiveSessionTtl = opts.soLiveSessionTtl
+                , hcStreamTokens = opts.soStreamTokens
+                }
+        tracer = hostTraceLogger logger
+        withStores k
+            | isPostgresUrl opts.soDatabase =
+                withPostgresStores (Char8.pack opts.soDatabase) $ \stores -> withHostStores cfg stores tracer k
+            | otherwise = withHost cfg tracer k
+    withStores $ \host ->
+        withSessionRunner host $ \runner -> do
+            _ <- recoverOnStartup runner
+            env0 <- newServerEnv host runner auth
+            let ui = not opts.soNoUI && uiEnabled (Text.pack opts.soBind) (isJust auth)
+                env =
+                    env0
+                        { envAdmins = opts.soAdminOwners
+                        , envUI = ui
+                        , envDocument = Aeson.toJSON (apiDocument (Just (baseUrl opts)))
+                        }
+            let started =
+                    logLine logger "server.started" $
+                        [ "bind" .= opts.soBind
+                        , "port" .= opts.soPort
+                        , "agents" .= Map.keys host.hostAgents
+                        , "admin_owners" .= opts.soAdminOwners
+                        , "database" .= redactDatabase opts.soDatabase
+                        , "authentication" .= (maybe "none" (const "bearer") auth :: String)
+                        , "ui" .= ui
+                        ]
+                            <> [ "warning" .= ("no authentication: anyone who can reach this address can run the agents" :: String)
+                               | Nothing <- [auth]
+                               ]
+                settings =
+                    setHost (fromString opts.soBind)
+                        . setPort opts.soPort
+                        . setBeforeMainLoop started
+                        . setGracefulShutdownTimeout (Just opts.soShutdownGrace)
+                        . setInstallShutdownHandler (onSignals env)
+                        $ defaultSettings
+            runSettings settings (requestLogger logger (application env))
+            logLine logger "server.stopping" []
+    logLine logger "server.stopped" []
+  where
+    onSignals env closeSocket = do
+        let stop = do
+                logLine logger "server.signal" []
+                requestShutdown env
+                closeSocket
+        void $ installHandler sigTERM (CatchOnce stop) Nothing
+        void $ installHandler sigINT (CatchOnce stop) Nothing
+
+{- | The URL the OpenAPI document names as this server's own. A wildcard
+bind is reported as localhost, which is where a reader of the document on
+this machine would reach it.
+-}
+baseUrl :: ServerOptions -> Text
+baseUrl opts = "http://" <> host <> ":" <> Text.pack (show opts.soPort)
+  where
+    host
+        | opts.soBind `elem` ["0.0.0.0", "::", "*"] = "127.0.0.1"
+        | otherwise = Text.pack opts.soBind
+
+{- | A database for the logs: a Postgres URL loses its user and password,
+@postgresql://user:secret\@db.example/agents@ becoming
+@postgresql://db.example/agents@.
+-}
+redactDatabase :: String -> String
+redactDatabase db = case break (== ':') db of
+    (scheme, ':' : '/' : '/' : rest)
+        | isPostgresUrl db ->
+            let (authority, path) = break (== '/') rest
+                host = reverse (takeWhile (/= '@') (reverse authority))
+             in scheme <> "://" <> host <> path
+    _ -> db

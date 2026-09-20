@@ -427,6 +427,21 @@ data ToolRegistration = ToolRegistration
 5. **SystemToolbox**: Builtin system information tools
 6. **Subagent Tools**: Other agents exposed as callable tools
 
+## Libraries and executables
+
+`agents.cabal` builds several components:
+
+| Component | Source | Contents |
+|---|---|---|
+| `agents-lib` (public library) | `src/` | The core: agents, tools, sessions, storage, the OS layer, the MCP stdio server, CLI commands other than the TUI. No terminal-UI dependencies. |
+| `agents-postgres` (public library) | `postgres/` | Session and continuation stores in Postgres, for `withHostStores`. Kept apart so that `agents-lib` does not need libpq. |
+| `agents-tui` (public library) | `tui/` | The terminal UI (`System.Agents.TUI.*`, `CLI.TUI`, `CLI.Config`, `CLI`), on brick and vty. |
+| `agents-exe` | `app/` | The command-line tool, on both libraries. |
+| `agents-server-internal`, `agents-server` | `examples/agents-server/` | The HTTP server (wai, warp). See [agents-server.md](agents-server.md). |
+| `agq`, `durable-workflow-demo` | `agq/`, `examples/durable-workflow-demo/` | Other executables. |
+
+Programs that embed agents depend on `agents-lib` only.
+
 ## Module Dependencies
 
 ```

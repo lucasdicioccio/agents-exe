@@ -73,7 +73,7 @@ module System.Agents.Session.Async (
     hasPendingContinuations,
 ) where
 
-import Control.Monad (forM, forM_)
+import Control.Monad (forM)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (catMaybes, listToMaybe)
@@ -83,6 +83,7 @@ import Data.Time (UTCTime, getCurrentTime)
 import qualified Data.UUID as UUID
 import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query)
 import Database.SQLite.Simple.QQ (sql)
+import System.Agents.SessionStore (Migration (..), runMigrations)
 import GHC.Generics (Generic)
 
 import System.Agents.Session.Types (
@@ -249,15 +250,23 @@ data ContinuationStore = ContinuationStore
     { csStore :: ToolContinuationSnapshot -> IO ()
     -- ^ Store a new continuation snapshot
     , csLoad :: ContinuationToken -> IO (Maybe ToolContinuationSnapshot)
-    -- ^ Load a continuation snapshot by token
+    -- ^ Load a pending continuation snapshot by token
+    , csFindSession :: ContinuationToken -> IO (Maybe SessionId)
+    -- ^ The session a continuation belongs to, whether pending or completed
     , csComplete :: ContinuationToken -> UserToolResponse -> IO Bool
-    -- ^ Mark a continuation as completed with the result
+    {- ^ Mark a pending continuation as completed with the result. Returns
+    'False' when the token is unknown or already completed.
+    -}
     , csDelete :: ContinuationToken -> IO ()
     -- ^ Delete a continuation
     , csListPending :: SessionId -> IO [(ContinuationToken, ToolContinuationSnapshot)]
     -- ^ List all pending continuation snapshots for a session
     , csCleanupExpired :: IO ()
     -- ^ Remove expired continuations
+    , csCountSession :: SessionId -> IO Int
+    -- ^ How many continuations (pending or completed) a session has
+    , csDeleteSession :: SessionId -> IO Int
+    -- ^ Delete every continuation of a session; returns how many there were
     }
 
 -------------------------------------------------------------------------------
@@ -394,13 +403,24 @@ mkSqliteContinuationStore conn = do
         ContinuationStore
             { csStore = sqliteStoreContinuation conn
             , csLoad = sqliteLoadContinuation conn
+            , csFindSession = sqliteFindSession conn
             , csComplete = sqliteCompleteContinuation conn
             , csDelete = sqliteDeleteContinuation conn
             , csListPending = sqliteListPending conn
             , csCleanupExpired = cleanupExpiredContinuations conn
+            , csCountSession = sqliteCountSession conn
+            , csDeleteSession = sqliteDeleteSessionContinuations conn
             }
 
--- | Schema for the tool continuations table.
+-- | Migrations of the tool continuations table.
+continuationMigrations :: [Migration]
+continuationMigrations =
+    [ Migration 1 $ \conn -> mapM_ (execute_ conn) continuationSchemaStatements
+    , Migration 2 $ \conn ->
+        execute_ conn [sql| CREATE INDEX IF NOT EXISTS idx_continuations_session_completed ON tool_continuations(session_id, completed_at) |]
+    ]
+
+-- | The original schema of the tool continuations table.
 continuationSchemaStatements :: [Query]
 continuationSchemaStatements =
     [ [sql| CREATE TABLE IF NOT EXISTS tool_continuations (
@@ -418,11 +438,9 @@ continuationSchemaStatements =
     , [sql| CREATE INDEX IF NOT EXISTS idx_continuations_completed ON tool_continuations(completed_at) |]
     ]
 
--- | Initialize the continuation schema.
+-- | Create or migrate the continuation schema.
 initializeContinuationSchema :: Connection -> IO ()
-initializeContinuationSchema conn =
-    forM_ continuationSchemaStatements $ \stmt ->
-        execute_ conn stmt
+initializeContinuationSchema conn = runMigrations conn "continuations" continuationMigrations
 
 -- | Remove expired continuations.
 cleanupExpiredContinuations :: Connection -> IO ()
@@ -475,18 +493,47 @@ sqliteCompleteContinuation conn token result = do
     let tokenStr = tokenToText token
     let resultJson = TextEnc.decodeUtf8 $ LBS.toStrict $ Aeson.encode result
     now <- getCurrentTime
-    -- Only update if not already completed
-    execute
-        conn
-        [sql| UPDATE tool_continuations
-              SET completed_at = ?, result_json = ?
-              WHERE token = ? AND completed_at IS NULL |]
-        (now, resultJson, tokenStr)
-    -- Check if any row was updated
-    rows <- query conn [sql| SELECT changes() |] () :: IO [Only Int]
-    case rows of
-        [Only n] -> pure $ n > 0
-        _ -> pure False
+    -- Only update if not already completed; RETURNING tells whether it did,
+    -- without relying on changes(), which other users of the connection move
+    rows <-
+        query
+            conn
+            [sql| UPDATE tool_continuations
+                  SET completed_at = ?, result_json = ?
+                  WHERE token = ? AND completed_at IS NULL
+                  RETURNING token |]
+            (now, resultJson, tokenStr) ::
+            IO [Only Text]
+    pure $ not (null rows)
+
+-- | Count the continuations of a session.
+sqliteCountSession :: Connection -> SessionId -> IO Int
+sqliteCountSession conn (SessionId sid) = do
+    rows <-
+        query conn [sql| SELECT COUNT(*) FROM tool_continuations WHERE session_id = ? |] (Only $ UUID.toText sid) ::
+            IO [Only Int]
+    pure $ maybe 0 fromOnly (listToMaybe rows)
+
+-- | Delete the continuations of a session.
+sqliteDeleteSessionContinuations :: Connection -> SessionId -> IO Int
+sqliteDeleteSessionContinuations conn (SessionId sid) = do
+    rows <-
+        query conn [sql| DELETE FROM tool_continuations WHERE session_id = ? RETURNING token |] (Only $ UUID.toText sid) ::
+            IO [Only Text]
+    pure $ length rows
+
+-- | The session of a continuation, pending or completed.
+sqliteFindSession :: Connection -> ContinuationToken -> IO (Maybe SessionId)
+sqliteFindSession conn token = do
+    rows <-
+        query
+            conn
+            [sql| SELECT session_id FROM tool_continuations WHERE token = ? |]
+            (Only $ tokenToText token) ::
+            IO [Only Text]
+    pure $ case rows of
+        [Only sid] -> SessionId <$> UUID.fromText sid
+        _ -> Nothing
 
 -- | Delete a continuation.
 sqliteDeleteContinuation :: Connection -> ContinuationToken -> IO ()
