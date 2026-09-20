@@ -70,8 +70,18 @@ the server. An agents-exe agent can use it directly as a toolbox:
 ```
 
 The chat page is one self-contained HTML document with no build step and no
-assets. It starts sessions, follows their event streams, and offers a box to
-complete deferred tool calls, so it doubles as a worked example of the API.
+assets. It starts sessions, follows their event streams, offers a box to
+complete deferred tool calls, and attaches files, so it doubles as a worked
+example of the API.
+
+**Attachments.** *Attach* adds files to the next message, up to 20 MB in
+total (the body limit is 32 MiB and base64 adds a third). They are sent as
+the `media` field described under
+[API reference](#api-reference). What the agent can do with them depends on
+the model and the file: a PDF is sent as a `file` content part, and
+**anything else is sent as an image**, so a text or CSV attachment is
+refused by most providers. Attach images and PDFs, and only to a model that
+accepts them.
 
 ### An agent for the examples
 

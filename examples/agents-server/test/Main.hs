@@ -70,6 +70,7 @@ main =
             , testCase "the openapi document covers every route and resolves" openApiTest
             , testCase "the chat page is served only when it is enabled" uiPageTest
             , testCase "EventSource may carry its token as a query parameter" accessTokenTest
+            , testCase "an attached file is stored on the turn that carried it" mediaRoundTripTest
             ]
 
 -------------------------------------------------------------------------------
@@ -493,12 +494,20 @@ uiPageTest = do
         (off, _) <- call srv "GET" "/" Nothing
         off @?= 404
     withServerConfig Nothing "{}" id (\env -> env{envUI = True}) $ \srv -> do
-        (status, contentType, body) <- rawGet srv "GET" "/"
+        (status, contentType, body) <- fetchWhole srv "GET" "/"
         status @?= 200
         contentType @?= Just "text/html; charset=utf-8"
         mapM_
             (\needle -> assertBool (show needle <> " is on the page") (needle `ByteString.isInfixOf` body))
-            ["<!DOCTYPE html>", "/v1/sessions", "/v1/continuations/", "EventSource", "openapi.json"]
+            [ "<!DOCTYPE html>"
+            , "/v1/sessions"
+            , "/v1/continuations/"
+            , "EventSource"
+            , "openapi.json"
+            , -- attachments: the picker, and the key the API wants
+              "type='file'"
+            , "mediaPayload"
+            ]
 
 {- | @EventSource@ cannot set headers, so the event stream also takes the
 token as a query parameter. No other endpoint does.
@@ -512,7 +521,7 @@ accessTokenTest = do
         let sid = textField "session_id" view
             query = "?access_token=alice-token"
         -- The stream opens and sends its snapshot.
-        (streamStatus, _, body) <- rawGet anonymous "GET" ("/v1/sessions/" <> sid <> "/events" <> query)
+        (streamStatus, body) <- fetchFirstChunk anonymous "GET" ("/v1/sessions/" <> sid <> "/events" <> query)
         streamStatus @?= 200
         assertBool "the stream sent a snapshot" ("event: snapshot" `ByteString.isInfixOf` body)
         -- The same parameter is refused everywhere else.
@@ -521,19 +530,65 @@ accessTokenTest = do
         (listRejected, _) <- call anonymous "GET" ("/v1/sessions" <> query) Nothing
         listRejected @?= 401
 
-{- | Status, content type, and body bytes. The event stream is read only
-until the server closes it, which 'requestShutdown' does.
+-- | Status, content type, and the whole body.
+fetchWhole :: Srv -> Method -> Text -> IO (Int, Maybe ByteString.ByteString, ByteString.ByteString)
+fetchWhole srv method path = do
+    req <- request srv method path Nothing
+    rsp <- Http.httpLbs req srv.srvManager
+    pure
+        ( statusCode (Http.responseStatus rsp)
+        , lookup "Content-Type" (Http.responseHeaders rsp)
+        , LByteString.toStrict (Http.responseBody rsp)
+        )
+
+{- | Status and the first chunk only: an event stream never ends on its own,
+so reading it whole would block.
 -}
-rawGet :: Srv -> Method -> Text -> IO (Int, Maybe ByteString.ByteString, ByteString.ByteString)
-rawGet srv method path = do
+fetchFirstChunk :: Srv -> Method -> Text -> IO (Int, ByteString.ByteString)
+fetchFirstChunk srv method path = do
     req <- request srv method path Nothing
     Http.withResponse req srv.srvManager $ \rsp -> do
         chunk <- Http.brRead (Http.responseBody rsp)
-        pure
-            ( statusCode (Http.responseStatus rsp)
-            , lookup "Content-Type" (Http.responseHeaders rsp)
-            , chunk
-            )
+        pure (statusCode (Http.responseStatus rsp), chunk)
+
+{- | A message with media is stored as @{text, media}@ rather than a bare
+string, and the attachment comes back under different keys from the ones it
+was sent with. The chat page reads both, so both are pinned here.
+-}
+mediaRoundTripTest :: Assertion
+mediaRoundTripTest = withServer "{}" mockCompletion $ \srv -> do
+    let body =
+            Aeson.object
+                [ "agent" .= ("server-test" :: Text)
+                , "prompt" .= ("what is in this file?" :: Text)
+                , "media"
+                    .= [ Aeson.object
+                            [ "mime" .= ("text/plain" :: Text)
+                            , "base64" .= ("aGVsbG8=" :: Text)
+                            , "filename" .= ("note.txt" :: Text)
+                            ]
+                       ]
+                ]
+    (status, view) <- call srv "POST" "/v1/sessions?wait=true" (Just body)
+    status @?= 201
+    let userTurns =
+            [ field "userQuery" (field "contents" t)
+            | t <- arrayField "turns" (field "session" view)
+            , textField "tag" t `elem` ["UserTurn", "PartialUserTurn"]
+            ]
+    case userTurns of
+        (query : _) -> do
+            -- A bare string once it has media would lose the attachment.
+            field "text" query @?= "what is in this file?"
+            case arrayField "media" query of
+                [attachment] ->
+                    ( field "mimeType" attachment
+                    , field "base64Data" attachment
+                    , field "filename" attachment
+                    )
+                        @?= ("text/plain", "aGVsbG8=", "note.txt")
+                other -> assertFailure ("expected one attachment, got " <> show (length other))
+        [] -> assertFailure "no user turn was stored"
 
 -------------------------------------------------------------------------------
 -- Server fixture
