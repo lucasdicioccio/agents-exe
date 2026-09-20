@@ -536,6 +536,7 @@ test-suite agents-tests
                     , OS.PersistenceTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
+                    , MediaContentPartTests
                     , OpenAIStreamTests
                     , RunnerTests
                     , SessionEditTests
@@ -549,6 +550,7 @@ test-suite agents-tests
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
                       agents-lib,
+                      base64-bytestring,
                       aeson,
                       async,
                       bytestring,

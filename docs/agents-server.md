@@ -79,10 +79,10 @@ total (the body limit is 32 MiB and base64 adds a third). They are sent as
 the `media` field described under
 [API reference](#api-reference), and the agent's model must accept them.
 
-A PDF is sent as a `file` content part; **everything else is sent as an
-image**. So images work, and a text, CSV or JSON attachment reaches the
-provider as a malformed image and is refused (`invalid image input`, or the
-provider's equivalent). Attach images and PDFs.
+A PDF is sent as a `file` content part, text is inlined into the message,
+and anything else is sent as an image. So images, PDFs and text files
+(including CSV, JSON, YAML and Markdown) all work; audio and video depend
+on the provider.
 
 ### An agent for the examples
 
