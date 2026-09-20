@@ -77,11 +77,12 @@ example of the API.
 **Attachments.** *Attach* adds files to the next message, up to 20 MB in
 total (the body limit is 32 MiB and base64 adds a third). They are sent as
 the `media` field described under
-[API reference](#api-reference). What the agent can do with them depends on
-the model and the file: a PDF is sent as a `file` content part, and
-**anything else is sent as an image**, so a text or CSV attachment is
-refused by most providers. Attach images and PDFs, and only to a model that
-accepts them.
+[API reference](#api-reference), and the agent's model must accept them.
+
+A PDF is sent as a `file` content part; **everything else is sent as an
+image**. So images work, and a text, CSV or JSON attachment reaches the
+provider as a malformed image and is refused (`invalid image input`, or the
+provider's equivalent). Attach images and PDFs.
 
 ### An agent for the examples
 
