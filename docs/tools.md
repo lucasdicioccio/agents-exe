@@ -214,6 +214,14 @@ When a bash tool runs, it receives context via environment variables:
 | `AGENT_AGENT_ID` | Agent UUID (if available) |
 | `AGENT_SESSION_JSON` | Full session as JSON |
 
+A `FileSystemDirectory`/`SingleTool` toolbox description can also carry a
+`Bindings` list, tying an argument to a fixed value or to an agent
+parameter — the argument disappears from the tool's schema entirely, and
+the model never sees or chooses the value. A parameter's value can also be
+passed as an environment variable only (`"mode": "env"`), the one way to
+bind a `secret` parameter safely. See
+[Parameters, Bindings & Narrowing Sub-Agents](parameters-and-bindings.md).
+
 ### Bash Toolbox
 
 The `BashToolbox` module manages script discovery and execution:
@@ -322,6 +330,9 @@ OpenAPI tools convert REST API specifications into LLM-callable tools.
 }
 ```
 
+This description can also carry a `Bindings` list, same as a bash toolbox —
+see [Parameters, Bindings & Narrowing Sub-Agents](parameters-and-bindings.md).
+
 ### Conversion Process
 
 ```haskell
@@ -394,6 +405,9 @@ PostgREST tools generate database query tools from PostgREST APIs.
   ]
 }
 ```
+
+This description can also carry a `Bindings` list, same as a bash toolbox —
+see [Parameters, Bindings & Narrowing Sub-Agents](parameters-and-bindings.md).
 
 ### Generated Tools
 

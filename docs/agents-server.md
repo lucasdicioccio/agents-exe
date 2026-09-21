@@ -41,6 +41,8 @@ cabal run agents-server -- \
 | `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API. Needs `--auth-tokens`. See [Storing agents](#storing-agents). |
 | `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
 | `--no-ui` | off | Do not serve the chat page at `/`. See [Finding your way around](#finding-your-way-around). |
+| `--set NAME=VALUE`, `--set-json NAME=JSON` | (none) | Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters). |
+| `--pin NAME=VALUE`, `--pin-json NAME=JSON` | (none) | Like `--set`, but sessions cannot override it. Repeatable. See [Parameters](#parameters). |
 
 Sub-agents work as they do elsewhere: their sessions are stored in the same
 database, linked to the parent session.
@@ -228,6 +230,65 @@ the run applies it either way.
 
 ---
 
+## Parameters
+
+An agent's declared `parameters` (see
+[Parameters, Bindings & Narrowing Sub-Agents](parameters-and-bindings.md))
+can be bound straight into tool arguments the model never sees — a tenant
+id, an API token, anything the caller of this session knows and the model
+does not need to. `agents-server` is where a `session`- or `message`-scope
+parameter actually varies per caller: give it a value in the same `params`
+object every request that can start a run accepts:
+
+```console
+curl -sS localhost:8080/v1/sessions \
+    -d '{"agent": "invoices-agent", "prompt": "how many invoices are overdue?", "params": {"tenant": "acme-corp"}}'
+```
+
+`params` is an object of parameter name to value; a `null` value clears a
+previously-set session-scope value. A `session`-scope value is kept in this
+process's memory for the life of the session — a client must resupply it
+after a restart or an idle eviction, or the next run that needs it fails
+with `params_required`. A `message`-scope value applies to that one run
+only and is never stored. A secret value is never returned by any endpoint:
+`GET /v1/sessions/:id`'s own `params` field only ever holds the
+non-secret session-scope values (the current, actual values); `GET
+/v1/agents/:slug`'s `parameters` field describes the agent's own
+declarations generically — one entry per parameter, with `bound` and
+`pinned` flags, never a value.
+
+A request whose `params` do not check out is refused before anything runs:
+
+| Error | Meaning |
+|---|---|
+| `422 unknown_params` | A name the agent does not declare. |
+| `403 forbidden_params` | A `process`-scope parameter, or one pinned with `--pin`/`--pin-json` at server start: only the operator may set it. |
+| `422 invalid_params` | A `secret` parameter's value was not given as a string. |
+| `422 params_required` | A required parameter has no value once this request's `params` are applied — process value or default, session value, and message value combined. |
+
+`--set NAME=VALUE`, `--set-json NAME=JSON`, `--pin NAME=VALUE`, and
+`--pin-json NAME=JSON` on `agents-server` itself set process-scope values
+every session shares, the same flags and meaning as `agents-exe` (except
+`--params-file`, which only `agents-exe` has).
+
+### `whenUnbound: "expose"` and live sessions
+
+A binding's argument marked `whenUnbound: "expose"` reappears in a tool's
+schema for as long as its parameter is unbound *for that session* — the
+tool list a session sees changes the moment `params` sets or clears the
+value, with no agent rebuild or restart.
+
+### Setting parameters over MCP
+
+A `tools/call` sets parameters two ways, both string-keyed to the JSON
+values requests use, and both scoped to that one call, like a
+message-scope value: `Agents-Param-<name>: <value>` request headers (every
+value is a string), and/or `_meta."agents-exe/params"` on the call itself
+(any JSON value; overrides a same-named header). Both go through the same
+validation table above.
+
+---
+
 ## Following a session live
 
 `GET /v1/sessions/:id/events` is a
@@ -301,15 +362,15 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /v1/agents/:slug` | | `200` agent | 404 `unknown_agent` |
 | `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
 | `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
-| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request` |
+| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
 | `GET /v1/sessions/:id` | | `200` session | 404 `unknown_session` |
-| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages` |
-| `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?}` or no body | `202` or `200` session | 404, 409 `run_in_progress` |
+| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
+| `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?, params?}` or no body | `202` or `200` session | 404, 409 `run_in_progress`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/cancel` | | `200` session metadata | 404, 409 `no_active_run` |
 | `GET /v1/sessions/:id/pending` | | `200 {calls}` | 404 |
 | `GET /v1/sessions/:id/events` | | `200 text/event-stream` | 404 |
-| `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict` |
+| `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?, params?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict`, see [Parameters](#parameters) |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
 
 Any endpoint that reads a body or a query parameter can answer
@@ -449,7 +510,9 @@ Point a client at `http://127.0.0.1:8080/mcp`; with `--auth-tokens`, it must
 send the same bearer token as REST clients.
 
 * Each root agent is one tool, `ask_<slug>`, with a single string argument
-  `prompt`.
+  `prompt`. Parameters for the session that call creates can be set with
+  `Agents-Param-<name>` headers or `_meta` — see
+  [Setting parameters over MCP](#setting-parameters-over-mcp).
 * A call creates a session, owned by the caller, and waits for its run (up to
   120 seconds). The result is the agent's final answer. `_meta.session_id`
   names the session, which is also visible through the REST API.

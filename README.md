@@ -303,6 +303,39 @@ A typical config-tree for an agent:
     /ping.sh        # some bash tool
 ```
 
+### Parameters, Bindings & Narrowing Sub-Agents
+
+Most tool frameworks give the model every argument, or hide them all behind
+a hand-written wrapper. `agents-exe` instead lets an agent's author declare
+named **parameters** — a tenant id, an API token — and **bind** them
+directly into any tool's arguments, bash, OpenAPI, or PostgREST. The bound
+argument disappears from the tool's schema entirely: the model never sees
+it, never chooses it, and never gets a chance to leak it. A `secret`
+parameter never enters the conversation, the session file, or a trace at
+all.
+
+```json
+{
+  "parameters": [{ "name": "tenant", "scope": "session", "required": true }],
+  "bashToolboxes": [
+    { "tag": "FileSystemDirectory", "contents": {
+      "Path": "./tools",
+      "Bindings": [{ "arg": "tenant_id", "value": { "tag": "Param", "contents": "tenant" } }]
+    } }
+  ]
+}
+```
+
+The same mechanism reaches down the agent tree: one agent can hand a
+sub-agent a task while binding *the sub-agent's own tools* for that one
+call — `describe_agent` shows what is still open, `bindings`/`with` on the
+`prompt_agent_<slug>` call fill it in, and `derive_agent` saves a
+narrowing under a name for the rest of the session — all without touching
+the sub-agent's file, and `agents-server` sessions can each carry their
+own parameter values over HTTP. See
+[Parameters, Bindings & Narrowing Sub-Agents](docs/parameters-and-bindings.md)
+for the full picture.
+
 ### API Keys
 
 Agents need an API key to authenticate against the LLM endpoint.
@@ -500,6 +533,7 @@ Absent this file, agents load from `~/.config/agents-exe/default`.
 - [TUI Guide](docs/tui.md) - Terminal UI documentation
 - [MCP Documentation](docs/mcp.md) - Model Context Protocol integration
 - [agents-server](docs/agents-server.md) - Agents over HTTP, with sessions in SQLite
+- [Parameters, Bindings & Narrowing Sub-Agents](docs/parameters-and-bindings.md) - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
 
 # Roadmap
 
