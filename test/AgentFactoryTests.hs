@@ -143,6 +143,7 @@ testNode extraFields = do
         Aeson.Error err -> fail err
     tools <- newTVarIO []
     params <- newTVarIO mempty
+    exposeBindings <- newTVarIO []
     agentId <- AgentId <$> nextRandom
     pure
         OSAgentNode
@@ -152,6 +153,7 @@ testNode extraFields = do
             , osNodeChildren = []
             , osNodeTools = tools
             , osNodeParams = params
+            , osNodeExposeBindings = exposeBindings
             }
   where
     merge (Aeson.Object a) (Aeson.Object b) = Aeson.Object (b <> a)

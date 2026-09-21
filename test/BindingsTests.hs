@@ -29,6 +29,7 @@ import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Bindings
 import qualified System.Agents.Tools.Base as ToolBase
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import System.Agents.Tools.Context (ToolExecutionContext (..), mkMinimalContext)
 import qualified System.Agents.Tools.Context as Context
 import System.Agents.Tools.Params.Types (ParamValue (..))
@@ -46,6 +47,7 @@ tests =
         , schemaReductionTests
         , argumentMergeTests
         , paramBindingTests
+        , exposeBindingTests
         , specializeProcessParamsTests
         , resolveParamSecretsTests
         , bashArityTests
@@ -204,6 +206,65 @@ paramBindingTests =
                     _ <- ToolBase.toolRun t nullTracer testCtx (Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)])
                     seen <- getSeen
                     seen @?= Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)]
+        ]
+  where
+    fakeCall = error "findTool in this fake ignores its argument"
+
+-------------------------------------------------------------------------------
+-- Expose: the argument reappears in the schema when unbound (Phase 7)
+-------------------------------------------------------------------------------
+
+exposeBindingTests :: TestTree
+exposeBindingTests =
+    testGroup
+        "Expose bindings (§7)"
+        [ testCase "applyBindings leaves an Expose argument in the static schema" $ do
+            (reg, _) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Expose]
+                reg' = applyBindings bindings reg
+                remainingKeys = map propertyKey (toolDescriptionParamProperties (declareTool reg'))
+            remainingKeys @?= ["tenant_id", "token", "since"]
+        , testCase "narrowExposedSchema hides it once the parameter is bound" $ do
+            (reg, _) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Expose]
+                reg' = narrowExposedSchema (Map.fromList [("tenant", ParamValue (Aeson.String "acme") False)]) bindings reg
+                remainingKeys = map propertyKey (toolDescriptionParamProperties (declareTool reg'))
+            remainingKeys @?= ["token", "since"]
+        , testCase "narrowExposedSchema leaves it visible while unbound" $ do
+            (reg, _) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Expose]
+                reg' = narrowExposedSchema Map.empty bindings reg
+                remainingKeys = map propertyKey (toolDescriptionParamProperties (declareTool reg'))
+            remainingKeys @?= ["tenant_id", "token", "since"]
+        , testCase "bound: the value wins over whatever the model sent" $ do
+            (reg, getSeen) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Expose]
+                reg' = applyBindings bindings reg
+                ctx = ctxWithParams [("tenant", ParamValue (Aeson.String "acme") False)]
+            case findTool reg' fakeCall of
+                Nothing -> assertFailure "expected findTool to find the fake tool"
+                Just t -> do
+                    _ <- ToolBase.toolRun t nullTracer ctx (Aeson.object ["tenant_id" Aeson..= ("attacker-chosen" :: Text), "since" Aeson..= ("2026-01-01" :: Text)])
+                    seen <- getSeen
+                    seen @?= Aeson.object ["tenant_id" Aeson..= ("acme" :: Text), "since" Aeson..= ("2026-01-01" :: Text)]
+        , testCase "unbound: the model's own value passes through untouched" $ do
+            (reg, getSeen) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Expose]
+                reg' = applyBindings bindings reg
+            case findTool reg' fakeCall of
+                Nothing -> assertFailure "expected findTool to find the fake tool"
+                Just t -> do
+                    _ <- ToolBase.toolRun t nullTracer testCtx (Aeson.object ["tenant_id" Aeson..= ("model-chosen" :: Text), "since" Aeson..= ("2026-01-01" :: Text)])
+                    seen <- getSeen
+                    seen @?= Aeson.object ["tenant_id" Aeson..= ("model-chosen" :: Text), "since" Aeson..= ("2026-01-01" :: Text)]
+        , testCase "exposedSecretBindings flags an Expose binding on a secret parameter" $ do
+            let bindings =
+                    [ Binding Nothing "tenant_id" (Param "tenant") Expose
+                    , Binding Nothing "token" (Param "api_token") Expose
+                    , Binding Nothing "since" (Literal (Aeson.String "2026-01-01")) Expose
+                    ]
+                flagged = exposedSecretBindings (Set.fromList ["api_token"]) bindings
+            map bindArg flagged @?= ["token"]
         ]
   where
     fakeCall = error "findTool in this fake ignores its argument"

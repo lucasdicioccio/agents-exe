@@ -147,9 +147,11 @@ loadAgentTools ::
     Agent ->
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
-    -- | Returns the agent's resolved parameters (for the node's params TVar)
-    -- alongside any loading errors.
-    IO (Params, [LoadingError])
+    {- | Returns the agent's resolved parameters (for the node's params TVar),
+    the toolbox-level bindings with @whenUnbound: "expose"@ (§7, for the
+    node's expose-bindings TVar) alongside any loading errors.
+    -}
+    IO (Params, [Bindings.Binding], [LoadingError])
 loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent toolsTVar = do
     let decls = fromMaybe [] agent.parameters
     (resolvedParams, missingRequired) <- ParamsResolve.resolveProcessParameters apiKeysFile processParams decls
@@ -158,17 +160,15 @@ loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent tools
                 "required parameter(s) not bound: " <> Text.unpack (Text.intercalate ", " missingRequired)
             | not (null missingRequired)
             ]
-    errors <-
-        catMaybes
-            <$> sequence
-                [ loadBashTools tracer resolvedParams agent toolsTVar
-                , loadMcpServers tracer agent toolsTVar
-                , loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
-                , loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
-                , loadBuiltinToolboxes tracer sessionStore agent toolsTVar
-                , loadSkillsTools tracer agent toolsTVar
-                ]
-    pure (resolvedParams, paramError ++ errors)
+    (bashErr, bashExpose) <- loadBashTools tracer resolvedParams agent toolsTVar
+    mcpErr <- loadMcpServers tracer agent toolsTVar
+    (openApiErr, openApiExpose) <- loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
+    (postgrestErr, postgrestExpose) <- loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
+    builtinErr <- loadBuiltinToolboxes tracer sessionStore agent toolsTVar
+    skillsErr <- loadSkillsTools tracer agent toolsTVar
+    let errors = catMaybes [bashErr, mcpErr, openApiErr, postgrestErr, builtinErr, skillsErr]
+        exposeBindings = bashExpose ++ openApiExpose ++ postgrestExpose
+    pure (resolvedParams, exposeBindings, paramError ++ errors)
 
 -------------------------------------------------------------------------------
 -- Bash Tool Loading
@@ -192,13 +192,13 @@ loadBashTools ::
     Params ->
     Agent ->
     TVar [ToolRegistration] ->
-    IO (Maybe LoadingError)
+    IO (Maybe LoadingError, [Bindings.Binding])
 loadBashTools tracer resolvedParams agent toolsTVar = do
     let descriptions = collectBashDescriptions agent
         secretParamNames = Set.fromList [p.paramName | p <- fromMaybe [] agent.parameters, p.paramSecret]
 
     if null descriptions
-        then pure Nothing
+        then pure (Nothing, [])
         else do
             result <-
                 BashToolbox.initializeMultiSourceToolbox
@@ -207,14 +207,14 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
 
             case result of
                 Left (BashToolbox.LoadingError _msg _errs) -> do
-                    pure $ Just $ BashLoadingError "Failed to load some bash tools"
+                    pure (Just $ BashLoadingError "Failed to load some bash tools", [])
                 Right multiSourceTools -> do
                     -- readMultiSourceTools now returns [(Maybe Activation, [ScriptDescription])]
                     -- where each tuple contains the activation config for that source and its scripts
                     activationAndScripts <- BashToolbox.readMultiSourceTools multiSourceTools
 
                     case concatMap (checkSecretBindingModes secretParamNames) activationAndScripts of
-                        (err : _) -> pure $ Just $ BashLoadingError err
+                        (err : _) -> pure (Just $ BashLoadingError err, [])
                         [] -> do
                             -- Create registrations for each script, applying the source's activation
                             -- config and any partial-application bindings (todos/tool-partial-application.md)
@@ -223,9 +223,13 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
                                     makeRegistrations (mbActivation, toolBindings, scripts) =
                                         let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
                                          in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
+                                exposeBindings =
+                                    concatMap
+                                        (\(_, toolBindings, _) -> filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings)
+                                        activationAndScripts
 
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
-                            pure Nothing
+                            pure (Nothing, exposeBindings)
 
 {- | Load-time guard against a secret parameter binding to a bash argument
 whose calling mode is not @env@: a positional/@--foo@/@--foo=@ argument
@@ -359,15 +363,15 @@ loadOpenAPIToolboxes ::
     Params ->
     Agent ->
     TVar [ToolRegistration] ->
-    IO (Maybe LoadingError)
+    IO (Maybe LoadingError, [Bindings.Binding])
 loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar = do
     let toolboxes = fromMaybe [] (openApiToolboxes agent)
 
     if null toolboxes
-        then pure Nothing
+        then pure (Nothing, [])
         else do
-            errors <- mapM (loadOpenAPIToolbox (contramap OpenAPIToolboxTrace tracer) baseDir apiKeysFile resolvedParams toolsTVar) toolboxes
-            pure $ collectFirstError errors
+            results <- mapM (loadOpenAPIToolbox (contramap OpenAPIToolboxTrace tracer) baseDir apiKeysFile resolvedParams toolsTVar) toolboxes
+            pure (collectFirstError (map fst results), concatMap snd results)
 
 -- | Load a single OpenAPI toolbox and register its tools.
 loadOpenAPIToolbox ::
@@ -377,32 +381,33 @@ loadOpenAPIToolbox ::
     Params ->
     TVar [ToolRegistration] ->
     OpenAPIToolboxDescription ->
-    IO (Maybe LoadingError)
+    IO (Maybe LoadingError, [Bindings.Binding])
 loadOpenAPIToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolveOpenAPIDescription baseDir description
 
     case configResult of
-        Left err -> pure $ Just $ OpenAPILoadingError err
+        Left err -> pure (Just $ OpenAPILoadingError err, [])
         Right (config, toolBindings) -> do
             -- Initialize the toolbox with API keys file for secret resolution
             initResult <- OpenAPIToolbox.initializeToolbox apiKeysFile tracer config
 
             case initResult of
-                Left err -> pure $ Just $ OpenAPILoadingError (show err)
+                Left err -> pure (Just $ OpenAPILoadingError (show err), [])
                 Right toolbox -> do
                     -- Register all tools from the toolbox
                     -- Activation is extracted from openApiActivation in registerOpenAPITool
                     regResult <- ToolReg.registerOpenAPITools toolbox
 
                     case regResult of
-                        Left err -> pure $ Just $ OpenAPILoadingError err
+                        Left err -> pure (Just $ OpenAPILoadingError err, [])
                         Right registrations -> do
                             -- Argument bindings work through the generic combinator (todos/tool-partial-application.md, §3.3)
                             let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
                                 bound = map (Bindings.applyBindings specialized) registrations
+                                exposeBindings = filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ bound)
-                            pure Nothing
+                            pure (Nothing, exposeBindings)
 
 -- | Resolve an OpenAPI description to its configuration and its argument bindings.
 resolveOpenAPIDescription ::
@@ -448,15 +453,15 @@ loadPostgRESToolboxes ::
     Params ->
     Agent ->
     TVar [ToolRegistration] ->
-    IO (Maybe LoadingError)
+    IO (Maybe LoadingError, [Bindings.Binding])
 loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes
-        then pure Nothing
+        then pure (Nothing, [])
         else do
-            errors <- mapM (loadPostgRESTToolbox (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile resolvedParams toolsTVar) toolboxes
-            pure $ collectFirstError errors
+            results <- mapM (loadPostgRESTToolbox (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile resolvedParams toolsTVar) toolboxes
+            pure (collectFirstError (map fst results), concatMap snd results)
 
 -- | Load a single PostgREST toolbox and register its tools.
 loadPostgRESTToolbox ::
@@ -466,31 +471,32 @@ loadPostgRESTToolbox ::
     Params ->
     TVar [ToolRegistration] ->
     PostgRESTToolboxDescription ->
-    IO (Maybe LoadingError)
+    IO (Maybe LoadingError, [Bindings.Binding])
 loadPostgRESTToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolvePostgRESTDescription baseDir description
 
     case configResult of
-        Left err -> pure $ Just $ PostgRESTLoadingError err
+        Left err -> pure (Just $ PostgRESTLoadingError err, [])
         Right (config, toolBindings) -> do
             -- Initialize the toolbox with API keys file for secret resolution
             initResult <- PostgRESToolbox.initializeToolbox apiKeysFile tracer config
 
             case initResult of
-                Left err -> pure $ Just $ PostgRESTLoadingError (show err)
+                Left err -> pure (Just $ PostgRESTLoadingError (show err), [])
                 Right toolbox -> do
                     -- Register all tools from the toolbox
                     -- Activation is extracted from postgrestActivation in registerPostgRESTool
                     regResult <- ToolReg.registerPostgRESTools toolbox
 
                     case regResult of
-                        Left err -> pure $ Just $ PostgRESTLoadingError err
+                        Left err -> pure (Just $ PostgRESTLoadingError err, [])
                         Right registrations -> do
                             let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
                                 bound = map (Bindings.applyBindings specialized) registrations
+                                exposeBindings = filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ bound)
-                            pure Nothing
+                            pure (Nothing, exposeBindings)
 
 -- | Resolve a PostgREST description to its configuration and its argument bindings.
 resolvePostgRESTDescription ::

@@ -1,6 +1,8 @@
 # Spec: partial application of tool arguments
 
-Status: in progress (2026-09-21). Phase 1 done (`97961e0`). Phase 2 done
+Status: Phases 1-7 done as of 2026-09-21; only the optional §8.4
+(`derive_agent`) remains, deferred per the spec's own text. Phase 1 done
+(`97961e0`). Phase 2 done
 except the tool-cache key (G8) and MCP server `env` (G4) (`03783fb`,
 `b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not
 just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`,
@@ -96,9 +98,44 @@ refill a parameter the reference's own static `with` (§7) already fills. A
 that reaches it, and any inherited binding addressed at it or below,
 rather than applying them.
 
+Phase 7 (`Expose`) done, checked with the `agents-tests` suite
+(`BindingsTests.hs`'s new "Expose bindings (§7)" group) and live with
+`agents-exe check` against fixture agents (an `Expose`-bound bash argument
+stays in the schema when its parameter is a session-scope parameter that
+`check` never resolves; a secret parameter bound with `whenUnbound:
+"expose"` is a load-time `ExposedSecretParameter` error). A binding whose
+`whenUnbound` is `"expose"` is left out of `applyBindings`'s *static*
+schema reduction entirely (D3's opt-in exception): the shared registration
+keeps the argument declared, so it is never hidden or shown by mistake for
+every session at once. `Bindings.narrowExposedSchema :: Params -> [Binding]
+-> ToolRegistration -> ToolRegistration` re-hides it when the parameter
+happens to resolve in a given snapshot; `System.Agents.Combinators.
+ProgressiveDisclosure.agentEvaluateActiveTools` calls it fresh on every
+read of the tool list — the same "read fresh on every access" pattern it
+already used for activation — against a new `IO Params` action
+(`AgentFactory.AgentDeps.adLiveParams`) read only when the node has at
+least one `Expose` binding. Outside `agents-server`, `adLiveParams`
+defaults to `pure mempty`: an `Expose`d argument then behaves like a
+process-scope-only binding, decided once from `osNodeParams`, since there
+is no notion of a session distinct from the process. `agents-server`'s
+`Host/Runner.newAgent` overrides it with `readTVarIO live.lsParams`, so the
+tool list a session sees updates the moment `prepareParams` writes a new
+session-scope value in — no agent rebuild, no registration mutation. A
+message-scope value (this run only, never written to `lsParams`) is not
+seen by this mechanism and so is treated as unbound for schema-visibility
+purposes; the value itself is still merged correctly at call time
+regardless, since that path (`wrapTool`, unchanged) already reads
+`ctxParams` fresh per call. `AgentTree.loadAgentToolboxes` collects every
+`Expose` binding for a node (toolbox-level, returned out of
+`ToolLoader.loadAgentTools`/`loadBashTools`/`loadOpenAPIToolboxes`/
+`loadPostgRESToolboxes`; and agent-level, from `Agent.bindings`) into a new
+`OSAgentNode.osNodeExposeBindings` TVar, and rejects any of them bound to a
+declared `secret` parameter (`Bindings.exposedSecretBindings`, a new
+`ExposedSecretParameter` `LoadingError`): exposing a secret back to the
+model would just let it retype the value in plain text.
+
 Not started: §8.4 (`derive_agent`, sugar over §8.3, "to be built only if
-§8.3 proves verbose in practice" per the spec itself) and Phase 7
-(`Expose`).
+§8.3 proves verbose in practice" per the spec itself).
 
 ## Goal
 

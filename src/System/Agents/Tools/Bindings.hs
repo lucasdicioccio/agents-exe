@@ -21,12 +21,15 @@ module System.Agents.Tools.Bindings (
     module System.Agents.Tools.Bindings.Types,
     applyBindings,
     specializeProcessParams,
+    narrowExposedSchema,
+    exposedSecretBindings,
 ) where
 
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Key (fromText)
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import Prod.Tracer (runTracer)
 
@@ -36,7 +39,7 @@ import System.Agents.Tools.Base (CallResult (..))
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Bindings.Types
 import System.Agents.Tools.Context (ToolExecutionContext (..))
-import System.Agents.Tools.Params.Types (ParamValue (..))
+import System.Agents.Tools.Params.Types (ParamName, ParamValue (..))
 
 {- | Applies the bindings that match this registration's tool name: drops
 the bound arguments from the schema, and merges their values into every
@@ -50,13 +53,19 @@ applyBindings allBindings tr =
         [] -> tr
         _ ->
             tr
-                { declareTool = reduceSchema relevant tr.declareTool
+                { declareTool = reduceSchema staticallyHidden tr.declareTool
                 , innerTool = wrapTool toolNameText relevant () tr.innerTool
                 , findTool = \call -> fmap (wrapTool toolNameText relevant call) (tr.findTool call)
                 }
   where
     ToolName toolNameText = tr.declareTool.toolDescriptionName
     relevant = bindingsForTool toolNameText allBindings
+    -- 'Expose' bindings (§7) are deliberately left out of the *static*
+    -- reduction: whether their argument is hidden depends on whether the
+    -- parameter is bound for the current session, which is decided fresh on
+    -- every read by 'narrowExposedSchema', not once when the registration is
+    -- built (D3's exception).
+    staticallyHidden = filter ((/= Expose) . bindWhenUnbound) relevant
 
 reduceSchema :: [Binding] -> ToolDescription -> ToolDescription
 reduceSchema bindings td =
@@ -66,6 +75,48 @@ reduceSchema bindings td =
         }
   where
     boundArgs = map bindArg bindings
+
+{- | Re-hides an 'Expose' binding's argument from a registration's schema
+when its parameter happens to be bound in the given 'Params' (§7). Meant to
+be called fresh on every read of the tool list (see
+'System.Agents.Combinators.ProgressiveDisclosure.agentEvaluateActiveTools'),
+against the current session's resolved parameters, so the same shared
+registration can show a different schema to different sessions without ever
+being mutated. A registration with no 'Expose' binding for a currently-bound
+parameter is returned unchanged.
+
+The value itself is not merged here: 'wrapTool' (via 'applyBindings') already
+merges any bound value at call time, from the call's own 'ToolExecutionContext',
+independently of what the schema showed when the model chose to call the tool.
+-}
+narrowExposedSchema :: Map.Map ParamName ParamValue -> [Binding] -> ToolRegistration -> ToolRegistration
+narrowExposedSchema params allBindings tr =
+    case boundNow of
+        [] -> tr
+        _ -> tr{declareTool = reduceSchema boundNow tr.declareTool}
+  where
+    ToolName toolNameText = tr.declareTool.toolDescriptionName
+    exposable = filter ((== Expose) . bindWhenUnbound) (bindingsForTool toolNameText allBindings)
+    boundNow = filter isResolved exposable
+    isResolved :: Binding -> Bool
+    isResolved b = case bindValue b of
+        Literal _ -> True
+        Param p -> Map.member p params
+
+{- | 'Expose' bindings whose parameter is declared @secret@ (§6): exposing the
+argument back to the model would let it simply retype the secret value in
+plain text, defeating the reason it was marked secret in the first place.
+Meant for a load-time check (an error in @agents-exe check@, like the other
+binding-safety checks), not for filtering at read time.
+-}
+exposedSecretBindings :: Set.Set ParamName -> [Binding] -> [Binding]
+exposedSecretBindings secretParamNames = filter isExposedSecret
+  where
+    isExposedSecret :: Binding -> Bool
+    isExposedSecret b =
+        bindWhenUnbound b == Expose && case bindValue b of
+            Param p -> p `Set.member` secretParamNames
+            Literal _ -> False
 
 wrapTool :: Text -> [Binding] -> call -> Tool call -> Tool call
 wrapTool toolName bindings call (ToolBase.Tool def run) =
@@ -88,7 +139,12 @@ resolveBindings params = go []
             Just pv -> go ((fromText b.bindArg, pv.pvValue) : acc) bs
             Nothing -> case b.bindWhenUnbound of
                 Fail -> Left (b.bindArg, p)
-                _ -> go acc bs -- Omit / (Expose, treated as Omit until Phase 7)
+                -- Omit: the argument is left out, silently.
+                -- Expose (§7): same merge behaviour — nothing to override,
+                -- so whatever the model itself sent for the argument (now
+                -- visible in its schema, per 'narrowExposedSchema') passes
+                -- through untouched.
+                _ -> go acc bs
 
 mergeValue :: [(Aeson.Key, Aeson.Value)] -> Aeson.Value -> Aeson.Value
 mergeValue pairs val =

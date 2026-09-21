@@ -238,6 +238,12 @@ data OSAgentNode = OSAgentNode
     declared defaults (see @todos/tool-partial-application.md@). Written
     once by 'loadAgentToolboxes'; empty until then.
     -}
+    , osNodeExposeBindings :: TVar [Bindings.Binding]
+    {- ^ This node's own @whenUnbound: "expose"@ bindings (toolbox-level and
+    agent-level, §7): the ones whose argument reappears in the schema when
+    the parameter is unbound for the current session. Written once by
+    'loadAgentToolboxes', alongside 'osNodeParams'; empty until then.
+    -}
     }
 
 {- | The OS-native agent tree.
@@ -368,6 +374,10 @@ data LoadingError
     | -- | Path and error message
       ConfigFileError FilePath String
     | ToolLoaderError ToolLoader.LoadingError
+    | -- | A @whenUnbound: "expose"@ binding (§7) referencing a @secret@
+      -- parameter (argument, parameter name): exposing it back to the model
+      -- would let it simply retype the secret in plain text.
+      ExposedSecretParameter Text ParamName
     | OtherError String
     deriving (Show)
 
@@ -386,6 +396,8 @@ formatLoadingError (PostgRESTInitError desc msg) _ =
 formatLoadingError (ConfigFileError path msg) _ =
     "Configuration File Error in " <> Text.pack path <> ": " <> Text.pack msg
 formatLoadingError (ToolLoaderError toolErr) _ = formatToolLoaderError toolErr
+formatLoadingError (ExposedSecretParameter arg pName) _ =
+    "argument '" <> arg <> "' is bound with whenUnbound: \"expose\" to secret parameter '" <> pName <> "': a secret cannot be exposed back to the model"
 formatLoadingError (OtherError msg) _ = Text.pack msg
 
 -- | Format ToolLoader errors
@@ -697,6 +709,7 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
     -- Create mutable tools TVar for this agent
     toolsTVar <- newTVarIO []
     paramsTVar <- newTVarIO Map.empty
+    exposeBindingsTVar <- newTVarIO []
 
     -- Create node
     let osNode =
@@ -707,6 +720,7 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
                 , osNodeChildren = [] -- Populated separately
                 , osNodeTools = toolsTVar
                 , osNodeParams = paramsTVar
+                , osNodeExposeBindings = exposeBindingsTVar
                 }
 
     pure $ Right osNode
@@ -752,7 +766,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
         Just osNode -> do
             let baseDir = FilePath.takeDirectory node.nodeFile
             let agent = node.nodeConfig
-            (resolvedParams, toolLoaderErrors) <-
+            (resolvedParams, toolboxExposeBindings, toolLoaderErrors) <-
                 ToolLoader.loadAgentTools
                     (contramap ToolLoaderTrace props.interactiveTracer)
                     baseDir
@@ -765,12 +779,25 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
             -- Agent-level bindings (§8.1, Phase 6): applied after every
             -- toolbox has registered its tools, since @tool@ here matches
             -- the LLM-visible name directly, across toolboxes.
-            case AgentsBase.bindings agent of
-                Nothing -> pure ()
-                Just agentBindings -> do
+            let agentBindings = Maybe.fromMaybe [] (AgentsBase.bindings agent)
+            case agentBindings of
+                [] -> pure ()
+                _ -> do
                     let specialized = Bindings.specializeProcessParams resolvedParams agentBindings
                     atomically $ modifyTVar' (osNodeTools osNode) (map (Bindings.applyBindings specialized))
-            pure $ map convertToolLoaderError toolLoaderErrors
+            -- Every whenUnbound: "expose" binding for this node (§7), toolbox-
+            -- and agent-level: kept aside (not baked into the shared schema,
+            -- see 'Bindings.narrowExposedSchema') for a per-session re-read.
+            let agentExposeBindings = filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) agentBindings
+                exposeBindings = toolboxExposeBindings ++ agentExposeBindings
+            atomically $ writeTVar (osNodeExposeBindings osNode) exposeBindings
+            let secretParamNames = Set.fromList [p.paramName | p <- Maybe.fromMaybe [] (AgentsBase.parameters agent), p.paramSecret]
+                exposedSecretErrors =
+                    [ ExposedSecretParameter b.bindArg p
+                    | b <- Bindings.exposedSecretBindings secretParamNames exposeBindings
+                    , Bindings.Param p <- [b.bindValue]
+                    ]
+            pure $ exposedSecretErrors ++ map convertToolLoaderError toolLoaderErrors
 
 {- | Wire tools for a single agent by appending sub-agent tools to the TVar.
 

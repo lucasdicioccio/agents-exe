@@ -427,17 +427,24 @@ sessionAgent runner live meta =
                 lookupAgent runner.srHost slug >>= \case
                     Nothing -> pure $ Left $ UnknownAgent slug
                     Just node -> do
-                        agent <- newAgent runner live.lsSessionId node
+                        agent <- newAgent runner live node
                         atomically $ writeTVar live.lsAgent (Just agent)
                         pure $ Right agent
 
--- | A root agent for a session, always asynchronous: runs can pause and resume.
-newAgent :: SessionRunner -> SessionId -> OSAgentNode -> IO RunnerAgent
-newAgent runner sid node = do
+{- | A root agent for a session, always asynchronous: runs can pause and
+resume. Its tool list re-reads 'LiveSession.lsParams' fresh on every turn
+(via 'adLiveParams'), so an @whenUnbound: "expose"@ argument (§7) hides or
+reappears as the session's own parameters are set, without ever rebuilding
+the agent.
+-}
+newAgent :: SessionRunner -> LiveSession -> OSAgentNode -> IO RunnerAgent
+newAgent runner live node = do
     let host = runner.srHost
-    let deps
+        sid = live.lsSessionId
+    let deps0
             | host.hostStreamTokens = host.hostDeps{adOnTextDelta = Just (emit runner . TextDelta sid)}
             | otherwise = host.hostDeps
+        deps = deps0{adLiveParams = readTVarIO live.lsParams}
     agent <- buildAgent (contramap HostAgentTrace host.hostTracer) deps RootAgent (sessionIdToConversationId sid) node
     pure $ withExecutionMode Asynchronous agent
 

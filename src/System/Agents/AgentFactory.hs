@@ -39,6 +39,7 @@ module System.Agents.AgentFactory (
 
 import Control.Concurrent.STM (readTVarIO)
 import Data.List (find)
+import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -64,6 +65,7 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.Tools.Cache (ToolCache)
 import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import System.Agents.Tools.Params.Types (Params)
 
 -------------------------------------------------------------------------------
 -- Traces
@@ -101,6 +103,17 @@ data AgentDeps = AgentDeps
     {- ^ Streams the LLM's answers, passing each piece of text here as it
     arrives. Ignored when 'adCompletion' replaces the LLM call.
     -}
+    , adLiveParams :: IO Params
+    {- ^ The current session/message-scope parameter overlay (§7,
+    @todos/tool-partial-application.md@), read fresh every time the tool
+    list is built: what decides, for this agent's own @whenUnbound: "expose"@
+    bindings, whether their argument is currently bound (hidden) or not
+    (visible). 'pure mempty' outside @agents-server@, where there is no
+    notion of a session distinct from the process: an 'Expose'd argument then
+    behaves like a process-scope-only binding, decided once from
+    'osNodeParams'. @agents-server@'s 'System.Agents.Host.Runner' overrides
+    this per session, backed by that session's own live parameter store.
+    -}
     }
 
 -- | Dependencies that store nothing.
@@ -113,6 +126,7 @@ defaultAgentDeps keys =
         , adToolCache = Nothing
         , adCompletion = Nothing
         , adOnTextDelta = Nothing
+        , adLiveParams = pure mempty
         }
 
 -- | Dependencies that store sessions as files, as the CLI and TUI do.
@@ -152,6 +166,7 @@ buildAgent tracer deps role convId node = do
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO node.osNodeTools
     resolvedParams <- readTVarIO node.osNodeParams
+    exposeBindings <- readTVarIO node.osNodeExposeBindings
     completeF <- case deps.adCompletion of
         Just mkCompletion -> pure (mkCompletion node)
         Nothing -> openAICompletion tracer deps.adApiKeys deps.adOnTextDelta agentCfg
@@ -199,6 +214,8 @@ buildAgent tracer deps role convId node = do
     disclosed <-
         agentEvaluateActiveTools
             (contramap mapProgressiveDisclosureTrace tracer)
+            (fmap (`Map.union` resolvedParams) deps.adLiveParams)
+            exposeBindings
             node.osNodeTools
             (applyAgentDurableConfig agentCfg base)
     pure $ agentPersistSession deps.adSessionSink labels convId disclosed
