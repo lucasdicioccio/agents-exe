@@ -307,6 +307,7 @@ testContextSnapshot =
         , tecsCallStack = []
         , tecsAllowedTools = []
         , tecsParentConversation = Nothing
+        , tecsParams = mempty
         }
 
 -------------------------------------------------------------------------------
@@ -467,6 +468,7 @@ snapshotSerializationTest =
                     , tecsCallStack = []
                     , tecsAllowedTools = []
                     , tecsParentConversation = Nothing
+                    , tecsParams = mempty
                     }
         let snapshot =
                 ToolContinuationSnapshot

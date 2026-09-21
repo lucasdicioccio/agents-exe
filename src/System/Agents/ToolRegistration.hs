@@ -125,6 +125,7 @@ import System.Agents.Tools.PostgREST.Converter (
     buildToolParameters,
     methodToText,
  )
+import qualified System.Agents.Tools.Bindings.Types as Bindings
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
@@ -142,6 +143,7 @@ data Trace
     | LuaToolsTrace !LuaTools.Trace
     | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
     | PostgRESToolboxTrace !PostgRESToolbox.Trace
+    | BindingsTrace !Bindings.BindingsTrace
     deriving (Show)
 
 -------------------------------------------------------------------------------

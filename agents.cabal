@@ -100,6 +100,8 @@ library agents-lib
                     , System.Agents.Tools.BashToolbox
                     , System.Agents.Tools.Bindings
                     , System.Agents.Tools.Bindings.Types
+                    , System.Agents.Tools.Params
+                    , System.Agents.Tools.Params.Types
                     , System.Agents.Tools.Cache
                     , System.Agents.Tools.Context
                     , System.Agents.Tools.DeveloperToolbox

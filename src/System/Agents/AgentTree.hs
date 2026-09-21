@@ -99,6 +99,7 @@ import qualified System.FilePath as FilePath
 -- Import ToolLoader qualified to avoid name collisions with LoadingError
 import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import System.Agents.AgentTree.Trace
+import System.Agents.Tools.Params.Types (ProcessParams)
 import System.Agents.ApiKeys (
     LoadedApiKeys,
     readOpenApiKeysFile,
@@ -372,6 +373,7 @@ formatToolLoaderError (ToolLoader.SystemLoadingError msg) = "System Toolbox Load
 formatToolLoaderError (ToolLoader.DeveloperLoadingError msg) = "Developer Toolbox Loading Error: " <> Text.pack msg
 formatToolLoaderError (ToolLoader.LuaLoadingError msg) = "Lua Toolbox Loading Error: " <> Text.pack msg
 formatToolLoaderError (ToolLoader.SkillsLoadingError msg) = "Skills Toolbox Loading Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.ParameterLoadingError msg) = "Parameter Error: " <> Text.pack msg
 
 data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)
@@ -391,6 +393,10 @@ data Props = Props
     -- ^ Function to create a tool registration from an agent node
     , sessionCatalog :: SessionCatalog
     -- ^ Sessions visible to session introspection capabilities (e.g., @list-sessions@)
+    , processParams :: ProcessParams
+    -- ^ Operator-supplied parameter values (@--set@/@--set-json@/@--pin@/@--pin-json@/
+    -- @--params-file@), resolved against each agent's declared parameters
+    -- (see @todos/tool-partial-application.md@). Defaults to empty.
     }
 
 -------------------------------------------------------------------------------
@@ -711,6 +717,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
                     baseDir
                     props.apiKeysFile -- Pass the API keys file path for secret resolution
                     props.sessionCatalog -- Sessions for session introspection
+                    props.processParams
                     agent
                     (osNodeTools osNode)
             pure $ map convertToolLoaderError toolLoaderErrors

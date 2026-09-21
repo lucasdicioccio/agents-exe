@@ -326,6 +326,7 @@ minimalBaseAgent =
         , Base.asyncYieldStrategy = Nothing
         , Base.maxConcurrency = Nothing
         , Base.asyncCallTimeoutSeconds = Nothing
+        , Base.parameters = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.

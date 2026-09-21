@@ -179,6 +179,7 @@ agentFromOverrides overrides =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , parameters = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -206,6 +207,7 @@ mergeAgentWithOverrides ref overrides =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , parameters = Nothing
         }
 
 -------------------------------------------------------------------------------

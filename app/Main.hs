@@ -33,6 +33,7 @@ import System.FilePath (takeDirectory, (</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..))
+import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 import System.Agents.CLI.Aliases (
     AliasDefinition,
     defaultAliases,
@@ -129,6 +130,7 @@ defaultOpenAIAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , parameters = Nothing
         }
 
 -- | Mistral AI agent configuration
@@ -160,6 +162,7 @@ mistralAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , parameters = Nothing
         }
 
 -- | Ollama local LLM agent configuration
@@ -191,6 +194,7 @@ ollamaAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , parameters = Nothing
         }
 
 -- | Orchestrator agent that can delegate to other agents
@@ -231,6 +235,7 @@ orchestratorAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , parameters = Nothing
         }
 
 -- | Ensure the config directory structure exists with default files
@@ -503,6 +508,9 @@ data Prog = Prog
     , progPromptAliases :: Map Text AliasDefinition
     , mainCommand :: Command
     , progSessionStore :: SessionStore.SessionStore
+    , progParams :: ProcessParams
+    -- ^ Operator-supplied parameter values from @--set@/@--pin@ (see
+    -- @todos/tool-partial-application.md@).
     }
 
 -- | Available commands
@@ -1349,6 +1357,30 @@ parseProgOptions argparserargs =
                     )
             )
         <*> pure argparserargs.defaultSessionStore
+        <*> parseProcessParamsOptions
+
+-- | Parse @--set@/@--pin@ (repeatable) into 'ProcessParams'. @--pin@ marks
+-- the value so a future session/message-scope override cannot replace it
+-- (see @todos/tool-partial-application.md@, §4).
+parseProcessParamsOptions :: Parser ProcessParams
+parseProcessParamsOptions =
+    Map.fromList . concat
+        <$> sequenceA
+            [ many (parseOneParam False "set" "NAME=VALUE" "Set a parameter value; repeatable")
+            , many (parseOneParam True "pin" "NAME=VALUE" "Set a parameter value that cannot be overridden; repeatable")
+            ]
+  where
+    parseOneParam :: Bool -> String -> String -> String -> Parser (Text, ProcessValue)
+    parseOneParam pinned longName meta helpText =
+        option
+            (eitherReader (parseNameValue pinned))
+            (long longName <> metavar meta <> help helpText)
+
+    parseNameValue :: Bool -> String -> Either String (Text, ProcessValue)
+    parseNameValue pinned raw = case break (== '=') raw of
+        (name, '=' : val) | not (null name) ->
+            Right (Text.pack name, ProcessValue (Aeson.String (Text.pack val)) pinned)
+        _ -> Left ("expected NAME=VALUE, got: " <> raw)
 
 -------------------------------------------------------------------------------
 -- Main Entry Point
@@ -1436,7 +1468,7 @@ runCommand :: Prog -> Prod.Tracer IO Trace -> SessionStore.SessionStore -> [File
 runCommand pargs baseTracer sessionStore files =
     case pargs.mainCommand of
         Check checkOpts ->
-            CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile files
+            CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile pargs.progParams files
         CheckToolCall opts ->
             CheckToolCallCmd.handleCheckToolCall Prod.silent opts
         Config opts ->
@@ -1450,7 +1482,7 @@ runCommand pargs baseTracer sessionStore files =
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
-            OneShotCmd.handleOneShot (Prod.contramap OneShotCmdTrace baseTracer) sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
+            OneShotCmd.handleOneShot (Prod.contramap OneShotCmdTrace baseTracer) sessionStore pargs.apiKeysFile pargs.progParams files pargs.progPromptAliases opts
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         DescribeTool opts ->

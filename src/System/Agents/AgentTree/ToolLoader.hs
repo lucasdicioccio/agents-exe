@@ -61,6 +61,8 @@ import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
 import qualified System.Agents.Tools.Bindings as Bindings
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.Params as ParamsResolve
+import System.Agents.Tools.Params.Types (Params, ProcessParams)
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
@@ -99,6 +101,7 @@ data LoadingError
     | DeveloperLoadingError String
     | LuaLoadingError String
     | SkillsLoadingError String
+    | ParameterLoadingError String
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -133,23 +136,32 @@ loadAgentTools ::
     FilePath ->
     -- | Session store for session introspection capabilities
     SessionCatalog ->
+    -- | Operator-supplied parameter values (@--set@/@--pin@/etc.)
+    ProcessParams ->
     -- | The agent configuration
     Agent ->
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
     IO [LoadingError]
-loadAgentTools tracer baseDir apiKeysFile sessionStore agent toolsTVar = do
+loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent toolsTVar = do
+    let decls = fromMaybe [] agent.parameters
+    (resolvedParams, missingRequired) <- ParamsResolve.resolveProcessParameters apiKeysFile processParams decls
+    let paramError =
+            [ ParameterLoadingError $
+                "required parameter(s) not bound: " <> Text.unpack (Text.intercalate ", " missingRequired)
+            | not (null missingRequired)
+            ]
     errors <-
         catMaybes
             <$> sequence
-                [ loadBashTools tracer agent toolsTVar
+                [ loadBashTools tracer resolvedParams agent toolsTVar
                 , loadMcpServers tracer agent toolsTVar
                 , loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar
                 , loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar
                 , loadBuiltinToolboxes tracer sessionStore agent toolsTVar
                 , loadSkillsTools tracer agent toolsTVar
                 ]
-    pure errors
+    pure (paramError ++ errors)
 
 -------------------------------------------------------------------------------
 -- Bash Tool Loading
@@ -170,10 +182,11 @@ control (e.g., progressive disclosure via on-demand activation).
 -}
 loadBashTools ::
     Tracer IO Trace ->
+    Params ->
     Agent ->
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
-loadBashTools tracer agent toolsTVar = do
+loadBashTools tracer resolvedParams agent toolsTVar = do
     let descriptions = collectBashDescriptions agent
 
     if null descriptions
@@ -197,7 +210,8 @@ loadBashTools tracer agent toolsTVar = do
                     let registrations = concatMap makeRegistrations activationAndScripts
                           where
                             makeRegistrations (mbActivation, bindings, scripts) =
-                                map (Bindings.applyBindings bindings . ToolReg.registerBashToolInLLM mbActivation) scripts
+                                let specialized = Bindings.specializeProcessParams resolvedParams bindings
+                                 in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
 
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing

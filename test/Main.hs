@@ -281,6 +281,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -308,6 +309,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -337,6 +339,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -372,6 +375,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -412,6 +416,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -449,6 +454,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -570,6 +576,7 @@ bashToolboxTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -598,6 +605,7 @@ bashToolboxTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

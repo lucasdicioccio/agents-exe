@@ -64,10 +64,13 @@ import Data.Text (Text)
 import Data.Time (NominalDiffTime)
 import GHC.Generics (Generic)
 
+import qualified Data.Map.Strict as Map
+
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Types (Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
+import System.Agents.Tools.Params.Types (ParamValue (..), Params)
 
 -------------------------------------------------------------------------------
 -- Call Stack Entry
@@ -310,6 +313,11 @@ data ToolExecutionContext = ToolExecutionContext
     typically calls started by a process that is gone — without carrying
     the whole session in 'ctxFullSession'.
     -}
+    , ctxParams :: Params
+    {- ^ Resolved parameter values available for tool argument bindings
+    (see @todos/tool-partial-application.md@). Never includes anything the
+    LLM sent; only what the process, session or message supplied.
+    -}
     }
     deriving (Generic)
 
@@ -325,6 +333,7 @@ instance Eq ToolExecutionContext where
             && ctxMaxDepth a == ctxMaxDepth b
             && ctxAllowedTools a == ctxAllowedTools b
             && ctxParentConversation a == ctxParentConversation b
+            && ctxParams a == ctxParams b
 
 -- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and ctxProgressCallback are not compared
 -- (functions, TVars, and TQueue can't be compared)
@@ -365,6 +374,8 @@ instance Show ToolExecutionContext where
             ++ cancelHookStr
             ++ ", ctxSessionToolCalls = "
             ++ show (length (ctxSessionToolCalls ctx))
+            ++ ", ctxParams = "
+            ++ show (ctxParams ctx)
             ++ " }"
       where
         portalStr = "<portal>"
@@ -388,8 +399,11 @@ instance ToJSON ToolExecutionContext where
             , "maxDepth" .= ctxMaxDepth ctx
             , "allowedTools" .= ctxAllowedTools ctx
             , "parentConversation" .= ctxParentConversation ctx
+            , "params" .= ctxParams ctx
             -- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and
-            -- ctxProgressCallback are intentionally omitted (not serializable)
+            -- ctxProgressCallback are intentionally omitted (not serializable).
+            -- ctxParams serializes through ParamValue's redacting ToJSON, so
+            -- secret values never appear here either.
             ]
 
 instance FromJSON ToolExecutionContext where
@@ -410,6 +424,7 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> pure []
+            <*> pure Map.empty
 
 
 {- | Serializable subset of 'ToolExecutionContext' suitable for durable
@@ -426,6 +441,11 @@ data ToolExecutionContextSnapshot = ToolExecutionContextSnapshot
     , tecsCallStack :: [CallStackEntry]
     , tecsAllowedTools :: [Text]
     , tecsParentConversation :: Maybe ConversationId
+    , tecsParams :: Params
+    {- ^ Non-secret parameter values only: secrets are memory-only and never
+    survive a snapshot (see @todos/tool-partial-application.md@, §5/§6). A
+    re-hydrated call whose tool needs a secret parameter fails at call time.
+    -}
     }
     deriving (Show, Eq, Generic)
 
@@ -442,6 +462,7 @@ contextSnapshot ctx =
         , tecsCallStack = ctxCallStack ctx
         , tecsAllowedTools = ctxAllowedTools ctx
         , tecsParentConversation = ctxParentConversation ctx
+        , tecsParams = Map.filter (not . pvSecret) (ctxParams ctx)
         }
 
 {- | Re-hydrate a full execution context from a snapshot.
@@ -473,6 +494,7 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = tecsParams snap
         }
 -------------------------------------------------------------------------------
 -- Construction Helpers
@@ -505,6 +527,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
         }
 
 {- | Create a minimal 'ToolExecutionContext' with only required identifiers.
@@ -545,6 +568,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
         }
 
 {- | Create a root-level context for the start of agent execution (depth 0).
@@ -593,6 +617,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
         }
 
 {- | Create a context with tool portal support.
@@ -643,6 +668,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
         }
 
 {- | Create a nested context for subcall execution with OS integration.

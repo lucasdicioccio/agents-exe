@@ -17,6 +17,7 @@ import GHC.Generics (Generic)
 
 import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.Bindings.Types (Binding)
+import System.Agents.Tools.Params.Types (ParameterDecl)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
@@ -1630,6 +1631,9 @@ data Agent
     -- ^ Maximum number of async tool calls running at once for this agent
     , asyncCallTimeoutSeconds :: Maybe Int
     -- ^ Give up on an async tool call that has run for this long
+    , parameters :: Maybe [ParameterDecl]
+    -- ^ Named holes this agent's tool bindings may refer to (see
+    -- @todos/tool-partial-application.md@).
     }
     deriving (Show, Eq, Generic)
 

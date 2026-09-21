@@ -23,10 +23,18 @@ import Test.Tasty.HUnit
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.Tools.Base (mapToolResult)
+import System.Agents.Tools.Base (CallResult (..))
 import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescription (..), ToolName (..))
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Bindings
 import qualified System.Agents.Tools.Base as ToolBase
+import qualified Data.Map.Strict as Map
+import System.Agents.Tools.Context (ToolExecutionContext (..), mkMinimalContext)
+import qualified System.Agents.Tools.Context as Context
+import System.Agents.Tools.Params.Types (ParamValue (..))
+import System.Agents.Base (ConversationId (..))
+import System.Agents.Session.Types (SessionId (..), TurnId (..))
+import Data.UUID (nil)
 
 tests :: TestTree
 tests =
@@ -35,6 +43,8 @@ tests =
         [ globMatchingTests
         , schemaReductionTests
         , argumentMergeTests
+        , paramBindingTests
+        , specializeProcessParamsTests
         , bashArityTests
         , bashEnvModeTests
         ]
@@ -64,6 +74,16 @@ globMatchingTests =
 
 nullTracer :: Tracer IO a
 nullTracer = Tracer (const (pure ()))
+
+dummyPortal :: Context.ToolPortal
+dummyPortal _ _ = error "portal not used in these tests"
+
+testCtx :: ToolExecutionContext
+testCtx = mkMinimalContext (SessionId nil) (ConversationId nil) (TurnId nil) dummyPortal
+
+-- | 'testCtx' with the given parameter values set.
+ctxWithParams :: [(Text, ParamValue)] -> ToolExecutionContext
+ctxWithParams kvs = testCtx{ctxParams = Map.fromList kvs}
 
 -- | A minimal fake registration, standing in for any toolbox kind: applyBindings
 -- only looks at 'declareTool', 'innerTool' and 'findTool'.
@@ -116,7 +136,7 @@ argumentMergeTests =
             case findTool reg' fakeCall of
                 Nothing -> assertFailure "expected findTool to find the fake tool"
                 Just t -> do
-                    _ <- ToolBase.toolRun t nullTracer undefined (Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)])
+                    _ <- ToolBase.toolRun t nullTracer testCtx (Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)])
                     seen <- getSeen
                     seen @?= Aeson.object ["tenant_id" Aeson..= ("acme" :: Text), "since" Aeson..= ("2026-01-01" :: Text)]
         , testCase "bound value wins even if the LLM sends the same key" $ do
@@ -126,7 +146,7 @@ argumentMergeTests =
             case findTool reg' fakeCall of
                 Nothing -> assertFailure "expected findTool to find the fake tool"
                 Just t -> do
-                    _ <- ToolBase.toolRun t nullTracer undefined (Aeson.object ["tenant_id" Aeson..= ("attacker-chosen" :: Text)])
+                    _ <- ToolBase.toolRun t nullTracer testCtx (Aeson.object ["tenant_id" Aeson..= ("attacker-chosen" :: Text)])
                     seen <- getSeen
                     seen @?= Aeson.object ["tenant_id" Aeson..= ("acme" :: Text)]
         , testCase "no matching binding leaves the registration untouched" $ do
@@ -138,6 +158,73 @@ argumentMergeTests =
         ]
   where
     fakeCall = error "findTool in this fake ignores its argument"
+
+-------------------------------------------------------------------------------
+-- Param bindings, resolved from ctxParams at call time (Phase 2)
+-------------------------------------------------------------------------------
+
+paramBindingTests :: TestTree
+paramBindingTests =
+    testGroup
+        "Param bindings"
+        [ testCase "a bound Param resolves from ctxParams" $ do
+            (reg, getSeen) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Fail]
+                reg' = applyBindings bindings reg
+                ctx = ctxWithParams [("tenant", ParamValue (Aeson.String "acme") False)]
+            case findTool reg' fakeCall of
+                Nothing -> assertFailure "expected findTool to find the fake tool"
+                Just t -> do
+                    _ <- ToolBase.toolRun t nullTracer ctx (Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)])
+                    seen <- getSeen
+                    seen @?= Aeson.object ["tenant_id" Aeson..= ("acme" :: Text), "since" Aeson..= ("2026-01-01" :: Text)]
+        , testCase "an unbound required Param fails the call, without reaching the tool" $ do
+            (reg, getSeen) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Fail]
+                reg' = applyBindings bindings reg
+            case findTool reg' fakeCall of
+                Nothing -> assertFailure "expected findTool to find the fake tool"
+                Just t -> do
+                    result <- ToolBase.toolRun t nullTracer testCtx (Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)])
+                    case result of
+                        ToolNotFound _ -> pure ()
+                        other -> assertFailure ("expected ToolNotFound, got: " <> show other)
+                    seen <- getSeen
+                    seen @?= Aeson.Null -- the underlying tool was never called
+        , testCase "an unbound Param with whenUnbound=Omit lets the call through without it" $ do
+            (reg, getSeen) <- fakeRegistration
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Omit]
+                reg' = applyBindings bindings reg
+            case findTool reg' fakeCall of
+                Nothing -> assertFailure "expected findTool to find the fake tool"
+                Just t -> do
+                    _ <- ToolBase.toolRun t nullTracer testCtx (Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)])
+                    seen <- getSeen
+                    seen @?= Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)]
+        ]
+  where
+    fakeCall = error "findTool in this fake ignores its argument"
+
+-------------------------------------------------------------------------------
+-- specializeProcessParams: rewriting a process-scope Param into a Literal
+-------------------------------------------------------------------------------
+
+specializeProcessParamsTests :: TestTree
+specializeProcessParamsTests =
+    testGroup
+        "specializeProcessParams"
+        [ testCase "a resolved parameter becomes a Literal" $ do
+            let resolved = Map.fromList [("tenant", ParamValue (Aeson.String "acme") False)]
+                bindings = [Binding Nothing "tenant_id" (Param "tenant") Fail]
+            specializeProcessParams resolved bindings
+                @?= [Binding Nothing "tenant_id" (Literal (Aeson.String "acme")) Fail]
+        , testCase "an unresolved parameter is left as a Param" $ do
+            let bindings = [Binding Nothing "tenant_id" (Param "tenant") Fail]
+            specializeProcessParams Map.empty bindings @?= bindings
+        , testCase "a Literal binding is left untouched" $ do
+            let bindings = [Binding Nothing "tenant_id" (Literal (Aeson.String "x")) Fail]
+            specializeProcessParams Map.empty bindings @?= bindings
+        ]
 
 -------------------------------------------------------------------------------
 -- Bash arity (G5)

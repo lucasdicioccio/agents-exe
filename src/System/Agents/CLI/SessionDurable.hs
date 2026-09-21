@@ -201,6 +201,7 @@ buildAgentForFile store apiKeysFile (agentFile : _) convId action = do
                 , AgentTree.interactiveTracer = silent
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool silent (AgentFactory.fileAgentDeps store apiKeys)
                 , AgentTree.sessionCatalog = SessionStore.fileCatalog store
+                , AgentTree.processParams = mempty
                 }
     AgentTree.withAgentTree props $ \case
         AgentTree.Errors errs -> do
@@ -430,6 +431,7 @@ handleRunIsolated store apiKeysFile agentFiles sid = do
                 , Ctx.tecsCallStack = []
                 , Ctx.tecsAllowedTools = []
                 , Ctx.tecsParentConversation = Nothing
+                , Ctx.tecsParams = mempty
                 }
 
 -- | Short human-readable summary of a tool response.

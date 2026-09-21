@@ -168,6 +168,7 @@ withHostStores cfg stores tracer action = do
                 , interactiveTracer = contramap HostTreeTrace tracer
                 , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap HostSubAgentTrace tracer) subDeps
                 , sessionCatalog = backendCatalog backend
+                , processParams = mempty
                 }
         loadAll [] k = k []
         loadAll (file : rest) k =
