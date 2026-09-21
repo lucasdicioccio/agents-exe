@@ -1,6 +1,10 @@
 # Spec: partial application of tool arguments
 
-Status: proposed (2026-09-21)
+Status: in progress (2026-09-21). Phase 1 done (`97961e0`). Phase 2 core
+done (`03783fb`): parameters, `ctxParams`, `--set`/`--pin`, process-scope
+resolution for bash toolboxes. Not yet done from Phase 2: `--set-json`,
+`--params-file`, `--pin-json`, bash argv redaction (G7), tool-cache key
+(G8), MCP server `env` (G4). Phases 3-7 not started.
 
 ## Goal
 
