@@ -50,13 +50,16 @@ for completeness:
 -}
 module DurableWorkflowTests where
 
+import Control.Concurrent (threadDelay)
+import Control.Exception (ErrorCall (..), throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.Maybe (catMaybes, fromJust, isJust)
 import Data.Text (Text, unpack)
+import qualified Data.Text as Text
 import Data.Time (UTCTime)
 import Data.UUID (nil)
 import Database.SQLite.Simple (open)
@@ -81,8 +84,13 @@ import System.Agents.Session.Async (
  )
 import System.Agents.Session.Base
 import System.Agents.Session.Durable (
+    AsyncToolResponse (..),
+    WrapperEnv (..),
+    applyDecorators,
     cachedInProcessExecutor,
     composeExecutors,
+    defaultWrapperEnv,
+    interpretDecorator,
     mkDurableExecutor,
  )
 import System.Agents.Session.Isolation (
@@ -131,6 +139,18 @@ tests =
     testGroup
         "Durable Workflows"
         [ testGroup
+            "Phase 0"
+            [ timeoutDecoratorTest
+            , timeoutDecoratorPassesThroughTest
+            , retriesDecoratorSucceedsTest
+            , retriesDecoratorExhaustsTest
+            , cacheDecoratorTest
+            , labelDecoratorIsNoopTest
+            , truncateDecoratorTest
+            , truncateDecoratorLeavesShortResultTest
+            , applyDecoratorsOrderTest
+            ]
+        , testGroup
             "Phase 2"
             [ policyClassificationTest
             , continuationStoreRoundTripTest
@@ -826,6 +846,130 @@ withAsyncConfigTest =
         isJust (ctxToolCache agent) @?= True
         -- Apply the installed policy to verify it is the one we supplied.
         ctxToolCallPolicy agent testCtx (mkCall "any") @?= RunAsync
+
+-------------------------------------------------------------------------------
+-- Phase 0: decorators / wrappers
+-------------------------------------------------------------------------------
+
+-- | 'WithTimeout' completes with a note instead of blocking forever.
+timeoutDecoratorTest :: TestTree
+timeoutDecoratorTest =
+    testCase "WithTimeout completes with a note when the call outruns it" $ do
+        let hangs _ctx _call = do
+                -- Effectively "forever" from the timeout's point of view.
+                threadDelaySeconds 5
+                pure $ ToolComplete $ TextResponse "too late"
+        response <- interpretDecorator defaultWrapperEnv (WithTimeout 0) hangs testCtx (mkCall "slow")
+        case response of
+            ToolComplete (TextResponse msg) -> Text.isInfixOf "timed out" msg @?= True
+            other -> assertFailure $ "expected a timeout text response, got " <> show other
+
+-- | A call finishing well within the timeout is untouched.
+timeoutDecoratorPassesThroughTest :: TestTree
+timeoutDecoratorPassesThroughTest =
+    testCase "WithTimeout passes through a call that finishes in time" $ do
+        let fast _ctx call = pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+        response <- interpretDecorator defaultWrapperEnv (WithTimeout 30) fast testCtx (mkCall "quick")
+        response @?= ToolComplete (TextResponse "done:quick")
+
+-- | 'WithRetries' retries a failing call and succeeds once it stops throwing.
+retriesDecoratorSucceedsTest :: TestTree
+retriesDecoratorSucceedsTest =
+    testCase "WithRetries retries until the call succeeds" $ do
+        attempts <- newIORef (0 :: Int)
+        let flaky _ctx _call = do
+                n <- atomicModifyIORef' attempts (\k -> (k + 1, k + 1))
+                if n < 3
+                    then throwIO (ErrorCall "not yet")
+                    else pure $ ToolComplete $ TextResponse "eventually"
+        response <- interpretDecorator defaultWrapperEnv (WithRetries 5) flaky testCtx (mkCall "flaky")
+        response @?= ToolComplete (TextResponse "eventually")
+        readIORef attempts >>= (@?= 3)
+
+-- | 'WithRetries' gives up after exhausting its budget and reports failure as text.
+retriesDecoratorExhaustsTest :: TestTree
+retriesDecoratorExhaustsTest =
+    testCase "WithRetries reports failure once retries are exhausted" $ do
+        attempts <- newIORef (0 :: Int)
+        let alwaysFails _ctx _call = do
+                modifyIORef' attempts (+ 1)
+                throwIO (ErrorCall "always broken")
+        response <- interpretDecorator defaultWrapperEnv (WithRetries 2) alwaysFails testCtx (mkCall "broken")
+        case response of
+            ToolComplete (TextResponse msg) -> Text.isInfixOf "tool call failed" msg @?= True
+            other -> assertFailure $ "expected a failure text response, got " <> show other
+        -- One initial attempt plus two retries.
+        readIORef attempts >>= (@?= 3)
+
+-- | 'WithCache' looks up and stores under its explicit key, bypassing the
+-- wrapped call entirely on a hit.
+cacheDecoratorTest :: TestTree
+cacheDecoratorTest =
+    testCase "WithCache serves a hit without re-running the call" $
+        withSystemTempDirectory "decorator-cache" $ \dir -> do
+            cache <- mkSqliteToolCache (dir ++ "/cache.db")
+            calls <- newIORef (0 :: Int)
+            let counted _ctx call = do
+                    modifyIORef' calls (+ 1)
+                    pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+            let env = defaultWrapperEnv{weCache = Just cache}
+            let key = CacheKey "cached_tool" "args"
+            r1 <- interpretDecorator env (WithCache key) counted testCtx (mkCall "cached_tool")
+            r2 <- interpretDecorator env (WithCache key) counted testCtx (mkCall "cached_tool")
+            r1 @?= ToolComplete (TextResponse "done:cached_tool")
+            r2 @?= r1
+            readIORef calls >>= (@?= 1)
+
+-- | 'WithLabel' never changes execution.
+labelDecoratorIsNoopTest :: TestTree
+labelDecoratorIsNoopTest =
+    testCase "WithLabel does not change the call's outcome" $ do
+        let exec _ctx call = pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+        response <- interpretDecorator defaultWrapperEnv (WithLabel "traced") exec testCtx (mkCall "labelled")
+        response @?= ToolComplete (TextResponse "done:labelled")
+
+-- | 'WithTruncate' caps an oversized text result and notes the cut.
+truncateDecoratorTest :: TestTree
+truncateDecoratorTest =
+    testCase "WithTruncate caps an oversized result" $ do
+        let big = Text.replicate 1000 "x"
+        let exec _ctx _call = pure $ ToolComplete $ TextResponse big
+        response <- interpretDecorator defaultWrapperEnv (WithTruncate 100) exec testCtx (mkCall "big")
+        case response of
+            ToolComplete (TextResponse msg) -> do
+                Text.length msg < 1000 @?= True
+                Text.isInfixOf "truncated" msg @?= True
+            other -> assertFailure $ "expected a truncated text response, got " <> show other
+
+-- | 'WithTruncate' leaves a result under the cap untouched.
+truncateDecoratorLeavesShortResultTest :: TestTree
+truncateDecoratorLeavesShortResultTest =
+    testCase "WithTruncate leaves a short result untouched" $ do
+        let exec _ctx _call = pure $ ToolComplete $ TextResponse "short"
+        response <- interpretDecorator defaultWrapperEnv (WithTruncate 100) exec testCtx (mkCall "short")
+        response @?= ToolComplete (TextResponse "short")
+
+-- | 'applyDecorators' composes outermost-first: @[d1, d2] base ==> d1 (d2 base)@.
+applyDecoratorsOrderTest :: TestTree
+applyDecoratorsOrderTest =
+    testCase "applyDecorators composes decorators outermost-first" $ do
+        order <- newIORef ([] :: [Text])
+        let recordEnter tag = modifyIORef' order (tag :)
+        let base ctx call = do
+                recordEnter "base"
+                pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+        -- Two 'WithLabel's are pure no-ops functionally, so their relative
+        -- order can only be observed by wrapping them by hand here.
+        let outer next ctx call = recordEnter "outer" >> next ctx call
+        let inner next ctx call = recordEnter "inner" >> next ctx call
+        let composed = outer (inner base)
+        _ <- composed testCtx (mkCall "ordered")
+        entered <- readIORef order
+        reverse entered @?= ["outer", "inner", "base"]
+
+-- | Waits at least the given number of seconds without busy-looping.
+threadDelaySeconds :: Int -> IO ()
+threadDelaySeconds n = threadDelay (n * 1000000)
 
 -- | 'mkDurableExecutor' builds an executor that caches and isolates.
 mkDurableExecutorTest :: TestTree

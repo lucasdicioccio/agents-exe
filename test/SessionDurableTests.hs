@@ -344,6 +344,18 @@ policyConfigTests =
                         [ Base.ToolCallPolicyRule "bash_command" (Defer (Reason "approval"))
                         , Base.ToolCallPolicyRule "fetch_remote" RunAsync
                         ]
+                        []
+            let json = Aeson.encode cfg
+            Aeson.decode json @?= Just cfg
+        , testCase "round-trips wrappers" $ do
+            let cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        []
+                        [ Base.ToolCallWrapperRule
+                            (Base.WrapperMatch (Just "http_*"))
+                            [WithTimeout 30, WithRetries 2]
+                        ]
             let json = Aeson.encode cfg
             Aeson.decode json @?= Just cfg
         , testCase "parses example policy config JSON" $ do
@@ -363,6 +375,27 @@ policyConfigTests =
                 Just cfg -> do
                     Base.tpcDefaultDisposition cfg @?= RunSync
                     map Base.tprToolName (Base.tpcRules cfg) @?= ["bash_command", "fetch_remote"]
+                    Base.tpcWrappers cfg @?= []
+        , testCase "parses wrappers from JSON" $ do
+            let json =
+                    LBS8.pack $
+                        unlines
+                            [ "{"
+                            , "  \"default\": {\"tag\":\"runSync\"},"
+                            , "  \"rules\": [],"
+                            , "  \"wrappers\": ["
+                            , "    {\"match\":{\"tool\":\"http_*\"},\"decorators\":["
+                            , "      {\"tag\":\"retries\",\"count\":2},"
+                            , "      {\"tag\":\"timeout\",\"seconds\":30}"
+                            , "    ]}"
+                            , "  ]"
+                            , "}"
+                            ]
+            case Aeson.decode json :: Maybe Base.ToolCallPolicyConfig of
+                Nothing -> assertFailure "failed to parse policy config"
+                Just cfg -> do
+                    map (Base.wmTool . Base.twrMatch) (Base.tpcWrappers cfg) @?= [Just "http_*"]
+                    map Base.twrDecorators (Base.tpcWrappers cfg) @?= [[WithRetries 2, WithTimeout 30]]
         ]
 
 -- | 'buildToolCallPolicy' tests.
@@ -371,13 +404,24 @@ buildPolicyTests =
     testGroup
         "buildToolCallPolicy"
         [ testCase "uses rule disposition for matching tool" $ do
-            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))]
+            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))] []
             let policy = buildToolCallPolicy cfg
             policy undefined (mkCall "defer_me") @?= Defer (Reason "test")
         , testCase "uses default disposition for unknown tool" $ do
-            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))]
+            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))] []
             let policy = buildToolCallPolicy cfg
             policy undefined (mkCall "unknown") @?= RunSync
+        , testCase "composes matching wrapper decorators onto the base disposition" $ do
+            let cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        []
+                        [ Base.ToolCallWrapperRule (Base.WrapperMatch (Just "http_*")) [WithTimeout 30]
+                        , Base.ToolCallWrapperRule (Base.WrapperMatch (Just "*")) [WithLabel "traced"]
+                        ]
+            let policy = buildToolCallPolicy cfg
+            policy undefined (mkCall "http_get") @?= Decorate [WithTimeout 30, WithLabel "traced"] RunSync
+            policy undefined (mkCall "bash_command") @?= Decorate [WithLabel "traced"] RunSync
         ]
 
 -- | 'applyAgentDurableConfig' tests.
@@ -391,7 +435,7 @@ applyConfigTests =
             let agent' = applyAgentDurableConfig jsonAgent agent
             ctxExecutionMode agent' @?= Asynchronous
         , testCase "sets tool-call policy from JSON agent" $ do
-            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "bash_command" (Defer (Reason "approval"))]
+            let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "bash_command" (Defer (Reason "approval"))] []
             let jsonAgent = minimalBaseAgent{Base.toolCallPolicyConfig = Just cfg}
             let agent = mkAsyncAgent defaultToolCallPolicy
             let agent' = applyAgentDurableConfig jsonAgent agent

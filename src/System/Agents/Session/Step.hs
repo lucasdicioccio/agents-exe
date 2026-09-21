@@ -825,20 +825,35 @@ executeTrackedCallWithCache agent ctx tc = do
                     pure result
         Nothing -> executeCall agent ctx tc.tcCall
 
--- | Execute a single tool call using the agent's configured executor or toolCall.
--- When a 'DeploymentRunner' is configured but no explicit 'ToolExecutor' is set,
--- isolated calls are dispatched through the runner and non-isolated calls fall
--- back to the agent's 'toolCall'.
+{- | Execute a single tool call using the agent's configured executor or toolCall.
+When a 'DeploymentRunner' is configured but no explicit 'ToolExecutor' is set,
+isolated calls are dispatched through the runner and non-isolated calls fall
+back to the agent's 'toolCall'.
+
+The decorators carried by the call's resolved 'ToolCallDisposition' (see
+'flattenDisposition') wrap the selected execution path, so a 'wrappers' rule
+in the agent's @toolCallPolicyConfig@ (timeout, retries, cache, truncate)
+applies regardless of which branch below runs the call.
+-}
 executeCall :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
-executeCall agent ctx call =
-    case agent.ctxToolExecutor of
-        Just executor -> executor.execSync ctx call
-        Nothing ->
-            case agent.ctxDeploymentRunner of
-                Just runner ->
-                    let executor = isolatedExecutor agent.ctxToolCallPolicy runner (inProcessExecutor agent.toolCall)
-                     in executor.execSync ctx call
-                Nothing -> agent.toolCall ctx call
+executeCall agent ctx call = do
+    response <- applyDecorators wrapperEnv decorators baseExec ctx call
+    case response of
+        ToolComplete result -> pure result
+        ToolYield{} -> pure $ TextResponse "tool call yielded unexpectedly under a synchronous executor"
+  where
+    wrapperEnv = WrapperEnv{weCache = agent.ctxToolCache}
+    (decorators, _base) = flattenDisposition (agent.ctxToolCallPolicy ctx call)
+    baseExec ctx' call' = ToolComplete <$> baseExecSync ctx' call'
+    baseExecSync ctx' call' =
+        case agent.ctxToolExecutor of
+            Just executor -> executor.execSync ctx' call'
+            Nothing ->
+                case agent.ctxDeploymentRunner of
+                    Just runner ->
+                        let executor = isolatedExecutor agent.ctxToolCallPolicy runner (inProcessExecutor agent.toolCall)
+                         in executor.execSync ctx' call'
+                    Nothing -> agent.toolCall ctx' call'
 
 {- | Build a ToolExecutionContext based on the agent's configuration.
 

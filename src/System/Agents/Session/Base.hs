@@ -116,6 +116,13 @@ module System.Agents.Session.Base (
     mkDurableExecutor,
     flattenDisposition,
     isolatedExecutor,
+    AsyncToolResponse (..),
+    Exec,
+    ToolMiddleware,
+    WrapperEnv (..),
+    defaultWrapperEnv,
+    interpretDecorator,
+    applyDecorators,
     mkIsolationEnvelope,
     mkIsolationSuccessEnvelope,
     mkIsolationErrorEnvelope,
@@ -157,21 +164,28 @@ import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Durable (
+    AsyncToolResponse (..),
     DeploymentRunner (..),
+    Exec,
     IsolationEnvelope (..),
     IsolationError (..),
     IsolationResultEnvelope (..),
     IsolationResultStatus (..),
     ToolCallPolicy,
     ToolExecutor (..),
+    ToolMiddleware,
+    WrapperEnv (..),
+    applyDecorators,
     cachingExecutor,
     cachedInProcessExecutor,
     composeExecutors,
     defaultToolCallPolicy,
+    defaultWrapperEnv,
     dockerRunner,
     flattenDisposition,
     functionRunner,
     inProcessExecutor,
+    interpretDecorator,
     isolatedExecutor,
     localProcessRunner,
     mkDurableExecutor,
@@ -556,12 +570,30 @@ withAsyncEngine maxConcurrency agent =
             -- Register the tool-call stores first so the engine and the
             -- agent share the same world value.
             world <- TCT.ensureToolCallComponentsIO world0
-            engine <- mkAsyncEngine world (executeCall agent) maxConcurrency agent.ctxAsyncCallTimeout
+            engine <- mkAsyncEngine world (executeCallSync agent) maxConcurrency agent.ctxAsyncCallTimeout
             pure agent{ctxWorld = Just world, ctxAsyncEngine = Just engine}
+
+{- | Execute a call synchronously through the agent's executor (or its
+native 'toolCall'), applying the decorators its resolved policy carries.
+
+Mirrors 'System.Agents.Session.Step.executeCall' (minus the
+'DeploymentRunner' fallback, which 'ctxToolExecutor' already covers for
+every agent built through 'withDurableExecutor'). It lives here, rather
+than being shared with that module, because 'Step' imports this module and
+a shared definition would make the two modules depend on each other.
+-}
+executeCallSync :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+executeCallSync agent ctx call = do
+    response <- applyDecorators wrapperEnv decorators baseExec ctx call
+    case response of
+        ToolComplete result -> pure result
+        ToolYield{} -> pure $ TextResponse "tool call yielded unexpectedly under a synchronous executor"
   where
-    executeCall :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
-    executeCall a ctx call =
-        case a.ctxToolExecutor of
-            Just executor -> executor.execSync ctx call
-            Nothing -> a.toolCall ctx call
+    wrapperEnv = WrapperEnv{weCache = agent.ctxToolCache}
+    (decorators, _base) = flattenDisposition (agent.ctxToolCallPolicy ctx call)
+    baseExec ctx' call' = ToolComplete <$> baseExecSync ctx' call'
+    baseExecSync ctx' call' =
+        case agent.ctxToolExecutor of
+            Just executor -> executor.execSync ctx' call'
+            Nothing -> agent.toolCall ctx' call'
 

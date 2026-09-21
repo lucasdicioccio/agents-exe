@@ -5,10 +5,11 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.!=), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
+import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
@@ -22,7 +23,7 @@ import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
-import System.Agents.Session.Types (AsyncYieldStrategy, ExecutionMode, ToolCallDisposition)
+import System.Agents.Session.Types (AsyncYieldStrategy, Decorator, ExecutionMode, ToolCallDisposition)
 
 -- Import FileSandbox types for unified sandboxing
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
@@ -1536,6 +1537,11 @@ data ToolCallPolicyConfig = ToolCallPolicyConfig
     -- ^ Default disposition when no rule matches
     , tpcRules :: [ToolCallPolicyRule]
     -- ^ Per-tool disposition rules
+    , tpcWrappers :: [ToolCallWrapperRule]
+    -- ^ Decorators contributed by every matching wrapper rule, applied
+    -- outermost-first in file order, composed onto whichever disposition
+    -- 'tpcRules' \/ 'tpcDefaultDisposition' picked. Unlike 'tpcRules'
+    -- (first match wins), every matching wrapper rule applies.
     }
     deriving (Show, Eq, Generic)
 
@@ -1544,6 +1550,7 @@ instance ToJSON ToolCallPolicyConfig where
         Aeson.object
             [ "default" .= tpcDefaultDisposition cfg
             , "rules" .= tpcRules cfg
+            , "wrappers" .= tpcWrappers cfg
             ]
 
 instance FromJSON ToolCallPolicyConfig where
@@ -1551,6 +1558,7 @@ instance FromJSON ToolCallPolicyConfig where
         ToolCallPolicyConfig
             <$> v .: "default"
             <*> v .: "rules"
+            <*> v .:? "wrappers" .!= []
 
 {- | A single rule mapping a tool name to a disposition.
 -}
@@ -1574,6 +1582,54 @@ instance FromJSON ToolCallPolicyRule where
         ToolCallPolicyRule
             <$> v .: "tool"
             <*> v .: "disposition"
+
+{- | A wrapper rule: every tool call whose name matches 'wmTool' (a glob)
+gets 'twrDecorators' composed onto its disposition, in addition to whatever
+'tpcRules' \/ 'tpcDefaultDisposition' picked as the base. All matching
+wrapper rules apply (unlike 'ToolCallPolicyRule', where the first match
+wins), which is what lets a decorator (a timeout, a retry policy, a
+truncation cap) reach many tools without repeating it in every rule.
+-}
+data ToolCallWrapperRule = ToolCallWrapperRule
+    { twrMatch :: WrapperMatch
+    -- ^ Which tool calls this rule contributes decorators to
+    , twrDecorators :: [Decorator]
+    -- ^ Decorators contributed by this rule, outermost-first
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolCallWrapperRule where
+    toJSON rule =
+        Aeson.object
+            [ "match" .= twrMatch rule
+            , "decorators" .= twrDecorators rule
+            ]
+
+instance FromJSON ToolCallWrapperRule where
+    parseJSON = Aeson.withObject "ToolCallWrapperRule" $ \v ->
+        ToolCallWrapperRule
+            <$> v .: "match"
+            <*> v .: "decorators"
+
+{- | Predicate selecting which tool calls a 'ToolCallWrapperRule' applies to.
+
+Only 'wmTool' (a glob on the LLM-visible tool name, e.g. @"http_*"@) is
+matched today. A toolbox-name predicate is part of the spec but has no
+runtime source to match against yet; add 'wmToolbox' matching once a
+call's toolbox identity is threaded through 'ToolExecutionContext'.
+-}
+newtype WrapperMatch = WrapperMatch
+    { wmTool :: Maybe Text
+    -- ^ Glob on the LLM-visible tool name; 'Nothing' matches every tool
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON WrapperMatch where
+    toJSON m = Aeson.object $ catMaybes [("tool" .=) <$> wmTool m]
+
+instance FromJSON WrapperMatch where
+    parseJSON = Aeson.withObject "WrapperMatch" $ \v ->
+        WrapperMatch <$> v .:? "tool"
 
 
 -------------------------------------------------------------------------------

@@ -474,6 +474,8 @@ data Decorator
     -- ^ Use a specific cache key (overrides default)
     | WithLabel Text
     -- ^ Human-readable label for observability
+    | WithTruncate Int
+    -- ^ Cap the result to at most this many bytes, noting the cut to the model
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Decorator where
@@ -499,6 +501,11 @@ instance ToJSON Decorator where
                     [ "tag" .= ("label" :: Text)
                     , "label" .= label
                     ]
+            WithTruncate maxBytes ->
+                Aeson.object
+                    [ "tag" .= ("truncate" :: Text)
+                    , "maxBytes" .= maxBytes
+                    ]
 
 instance FromJSON Decorator where
     parseJSON = Aeson.withObject "Decorator" $ \v -> do
@@ -508,6 +515,7 @@ instance FromJSON Decorator where
             "retries" -> WithRetries <$> v .: "count"
             "cache" -> WithCache <$> v .: "key"
             "label" -> WithLabel <$> v .: "label"
+            "truncate" -> WithTruncate <$> v .: "maxBytes"
             _ -> fail $ "Unknown Decorator tag: " ++ Text.unpack tag
 
 {- | Decision made for a single tool call.

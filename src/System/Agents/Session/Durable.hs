@@ -33,6 +33,15 @@ module System.Agents.Session.Durable (
     composeExecutors,
     mkDurableExecutor,
 
+    -- * Decorators / wrappers (Phase 0 of the session-mailbox spec)
+    AsyncToolResponse (..),
+    Exec,
+    ToolMiddleware,
+    WrapperEnv (..),
+    defaultWrapperEnv,
+    interpretDecorator,
+    applyDecorators,
+
     -- * Isolated execution
     DeploymentRunner (..),
     IsolationError (..),
@@ -54,8 +63,17 @@ module System.Agents.Session.Durable (
     functionRunner,
 ) where
 
+import Control.Exception (SomeException, try)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (listToMaybe)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TEE
 import Data.Time (getCurrentTime)
+import System.Timeout (timeout)
 
 import System.Agents.Session.Async (AsyncToolResponse (..), newContinuationToken)
 import System.Agents.Session.Isolation (
@@ -74,6 +92,7 @@ import System.Agents.Session.Isolation (
     parseIsolationResultEnvelopeLBS,
  )
 import System.Agents.Session.Types (
+    CacheKey (..),
     Decorator (..),
     IsolationSpec (..),
     LlmToolCall (..),
@@ -82,7 +101,7 @@ import System.Agents.Session.Types (
  )
 import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..))
 import qualified System.Agents.Tools.Cache as Cache
-import System.Agents.Tools.Context (ToolExecutionContext, contextSnapshot)
+import System.Agents.Tools.Context (ToolExecutionContext (..), contextSnapshot)
 
 -------------------------------------------------------------------------------
 -- Policy
@@ -115,6 +134,142 @@ flattenDisposition disp = case disp of
         let (more, base) = flattenDisposition inner
          in (decorators ++ more, base)
     other -> ([], other)
+
+-------------------------------------------------------------------------------
+-- Decorators / wrappers
+-------------------------------------------------------------------------------
+
+{- | A tool execution, in the form every decorator wraps.
+
+'AsyncToolResponse' rather than 'UserToolResponse' so that a future
+decorator (a @before@ hook, Phase 5) can answer 'ToolYield' without
+blocking the caller.
+-}
+type Exec = ToolExecutionContext -> LlmToolCall -> IO AsyncToolResponse
+
+-- | A decorator, once interpreted, wraps an 'Exec' into another 'Exec'.
+type ToolMiddleware = Exec -> Exec
+
+{- | Environment available to 'interpretDecorator'.
+
+Carries the pieces a decorator needs that are not visible on the call
+itself: a tool cache for 'WithCache' to look up and store into.
+-}
+newtype WrapperEnv = WrapperEnv
+    { weCache :: Maybe ToolCache
+    -- ^ Cache backing 'WithCache'. Without one, 'WithCache' is a no-op.
+    }
+
+-- | A 'WrapperEnv' with no cache configured.
+defaultWrapperEnv :: WrapperEnv
+defaultWrapperEnv = WrapperEnv{weCache = Nothing}
+
+{- | Interpret one 'Decorator' as 'ToolMiddleware'.
+
+* 'WithTimeout' races the call against the timeout; on expiry it completes
+  with a 'TextResponse' explaining the timeout rather than propagating an
+  exception, so a timed-out call still looks like a normal tool result to
+  the LLM.
+* 'WithRetries' retries on any exception raised by the wrapped call, up to
+  the given count, reporting each retry through 'ctxProgressCallback' when
+  one is configured.
+* 'WithCache' looks up 'weCache' by the decorator's explicit 'CacheKey'
+  before running the call, and stores a completed result under that key.
+  A yielded result is never cached (there is nothing to store yet).
+* 'WithLabel' is metadata for observability; it does not change execution.
+* 'WithTruncate' caps a completed text\/JSON result to at most the given
+  number of bytes, noting the cut to the model. Media and mixed results are
+  passed through unchanged.
+-}
+interpretDecorator :: WrapperEnv -> Decorator -> ToolMiddleware
+interpretDecorator env dec next ctx call = case dec of
+    WithLabel _label -> next ctx call
+    WithTimeout seconds -> do
+        result <- timeout (max 0 seconds * 1000000) (next ctx call)
+        pure $ case result of
+            Just response -> response
+            Nothing ->
+                ToolComplete $
+                    TextResponse $
+                        "tool call timed out after " <> Text.pack (show seconds) <> "s"
+    WithRetries count -> retryLoop (max 0 count)
+    -- 'Decorator's 'CacheKey' (Session.Types) and 'ToolCache's 'CacheKey'
+    -- (Tools.Cache) are distinct, identically-shaped types; convert.
+    WithCache key -> case env.weCache of
+        Nothing -> next ctx call
+        Just cache -> do
+            let cacheKey = Cache.CacheKey key.ckToolName key.ckArgumentsHash
+            mCached <- cache.cacheLookup cacheKey
+            case mCached of
+                Just cached -> pure $ ToolComplete cached.crResult
+                Nothing -> do
+                    response <- next ctx call
+                    case response of
+                        ToolComplete result -> do
+                            now <- getCurrentTime
+                            cache.cacheStore cacheKey $ CachedResult result now Nothing
+                            pure response
+                        ToolYield{} -> pure response
+    WithTruncate maxBytes -> truncateResponse maxBytes <$> next ctx call
+  where
+    retryLoop attemptsLeft = do
+        outcome <- try (next ctx call) :: IO (Either SomeException AsyncToolResponse)
+        case outcome of
+            Right response -> pure response
+            Left err
+                | attemptsLeft <= 0 ->
+                    pure $ ToolComplete $ TextResponse $ "tool call failed: " <> Text.pack (show err)
+                | otherwise -> do
+                    reportRetry ctx attemptsLeft
+                    retryLoop (attemptsLeft - 1)
+
+-- | Report an in-progress retry through the context's progress callback, if any.
+reportRetry :: ToolExecutionContext -> Int -> IO ()
+reportRetry ctx attemptsLeft =
+    case ctx.ctxProgressCallback of
+        Nothing -> pure ()
+        Just report ->
+            report $
+                Aeson.object
+                    [ "event" Aeson..= ("retrying" :: Text)
+                    , "attemptsLeft" Aeson..= attemptsLeft
+                    ]
+
+-- | Cap a completed response to at most 'maxBytes'; pass a yielded response through.
+truncateResponse :: Int -> AsyncToolResponse -> AsyncToolResponse
+truncateResponse maxBytes response = case response of
+    ToolComplete result -> ToolComplete (truncateUserToolResponse maxBytes result)
+    ToolYield{} -> response
+
+-- | Cap 'TextResponse'\/'JsonResponse' payloads; leave media\/mixed untouched.
+truncateUserToolResponse :: Int -> UserToolResponse -> UserToolResponse
+truncateUserToolResponse maxBytes result = case result of
+    TextResponse txt
+        | BS.length (TE.encodeUtf8 txt) > maxBytes -> TextResponse (truncateText maxBytes txt)
+        | otherwise -> result
+    JsonResponse val ->
+        let encoded = TE.decodeUtf8With TEE.lenientDecode $ LBS.toStrict $ Aeson.encode val
+         in if BS.length (TE.encodeUtf8 encoded) > maxBytes
+                then TextResponse (truncateText maxBytes encoded)
+                else result
+    other -> other
+
+-- | Cut a 'Text' down to at most 'maxBytes' UTF-8 bytes, noting the cut.
+truncateText :: Int -> Text -> Text
+truncateText maxBytes txt =
+    TE.decodeUtf8With TEE.lenientDecode (BS.take maxBytes (TE.encodeUtf8 txt))
+        <> "\n[truncated: result exceeded "
+        <> Text.pack (show maxBytes)
+        <> " bytes]"
+
+{- | Compose the given decorators, outermost first, around an 'Exec'.
+
+@applyDecorators env [d1, d2] base@ behaves as @d1 (d2 base)@: the first
+decorator in the list is the outermost, matching how 'flattenDisposition'
+orders decorators from a (possibly nested) 'Decorate'.
+-}
+applyDecorators :: WrapperEnv -> [Decorator] -> Exec -> Exec
+applyDecorators env decorators base = foldr (interpretDecorator env) base decorators
 
 -------------------------------------------------------------------------------
 -- Executor interface
