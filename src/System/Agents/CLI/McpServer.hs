@@ -111,6 +111,7 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
                             traceUsefulPromptStderr
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
                     , AgentTree.sessionCatalog = SessionStore.fileCatalog sessionStore
+                    , AgentTree.processParams = mempty
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

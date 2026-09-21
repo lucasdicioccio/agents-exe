@@ -43,7 +43,10 @@ import System.Agents.Tools.Activation.Session (
     makeDeactivateTool,
     makeDiscoverTools,
  )
+import qualified System.Agents.Tools.Bindings as Bindings
+import System.Agents.Tools.Bindings.Types (Binding)
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import System.Agents.Tools.Params.Types (Params)
 
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -83,17 +86,25 @@ on each access, allowing runtime changes to the available tools.
 Tools with 'OnDemandActivated' activation are only visible when their toolgroup
 is active. Tools with 'AlwaysActivated' or no activation are always visible.
 
+Also re-hides every @whenUnbound: "expose"@ argument (§7,
+@todos/tool-partial-application.md@) whose parameter happens to be bound,
+against a fresh read of @liveParams@ each time the tool list is built: the
+same "read fresh on every access" pattern this decorator already uses for
+activation, so the shared registrations never need to be mutated per
+session. An agent with no such bindings ('exposeBindings' empty) pays for
+none of this: @liveParams@ is never even read.
+
 Example usage:
 
 @
 import System.Agents.Combinators.ProgressiveDisclosure (agentEvaluateActiveTools)
 
 agent <- nodeToAgent store mPath convId tracer loadedApiKeys node
-dynamicAgent <- agentEvaluateActiveTools (osNodeTools node) agent
+dynamicAgent <- agentEvaluateActiveTools tracer (pure mempty) [] (osNodeTools node) agent
 @
 -}
-agentEvaluateActiveTools :: forall r. Tracer IO Trace -> TVar [ToolRegistration] -> Agent r -> IO (Agent r)
-agentEvaluateActiveTools tracer toolsTVar agent = do
+agentEvaluateActiveTools :: forall r. Tracer IO Trace -> IO Params -> [Binding] -> TVar [ToolRegistration] -> Agent r -> IO (Agent r)
+agentEvaluateActiveTools tracer liveParams exposeBindings toolsTVar agent = do
     -- Create an IORef to track the current session
     -- Use nil UUIDs for initial empty session
     let emptySessionId = SessionId nilUUID
@@ -132,7 +143,16 @@ agentEvaluateActiveTools tracer toolsTVar agent = do
         let activationState = foldSession currentSession
 
         -- Read the ToolRegistrations from the TVar
-        allToolRegs <- readTVarIO tvar
+        rawToolRegs <- readTVarIO tvar
+
+        -- Re-hide any 'Expose' argument whose parameter is bound for this
+        -- session (§7): read fresh, never baked into 'tvar' itself.
+        allToolRegs <-
+            if null exposeBindings
+                then pure rawToolRegs
+                else do
+                    params <- liveParams
+                    pure $ map (Bindings.narrowExposedSchema params exposeBindings) rawToolRegs
 
         -- Extract all unique toolgroups from the registrations (returns a Set)
         let allToolgroups :: Set ToolgroupName

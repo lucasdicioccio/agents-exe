@@ -28,7 +28,9 @@ import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar)
 import Control.Exception (SomeException, try)
 import qualified Data.Aeson as Aeson
 import Data.Either (partitionEithers)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Prod.Tracer (Tracer (..), contramap)
 import System.Directory (getCurrentDirectory)
@@ -59,7 +61,13 @@ import System.Agents.Base (
 import System.Agents.SessionStore (SessionCatalog)
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
+import System.Agents.ToolSchema (getToolName)
+import qualified System.Agents.Tools.Bindings as Bindings
+import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import System.Agents.Tools.Activation (Activation)
+import qualified System.Agents.Tools.Params as ParamsResolve
+import System.Agents.Tools.Params.Types (ParameterDecl (..), Params, ProcessParams)
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
@@ -98,6 +106,7 @@ data LoadingError
     | DeveloperLoadingError String
     | LuaLoadingError String
     | SkillsLoadingError String
+    | ParameterLoadingError String
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -132,23 +141,34 @@ loadAgentTools ::
     FilePath ->
     -- | Session store for session introspection capabilities
     SessionCatalog ->
+    -- | Operator-supplied parameter values (@--set@/@--pin@/etc.)
+    ProcessParams ->
     -- | The agent configuration
     Agent ->
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
-    IO [LoadingError]
-loadAgentTools tracer baseDir apiKeysFile sessionStore agent toolsTVar = do
-    errors <-
-        catMaybes
-            <$> sequence
-                [ loadBashTools tracer agent toolsTVar
-                , loadMcpServers tracer agent toolsTVar
-                , loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar
-                , loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar
-                , loadBuiltinToolboxes tracer sessionStore agent toolsTVar
-                , loadSkillsTools tracer agent toolsTVar
-                ]
-    pure errors
+    {- | Returns the agent's resolved parameters (for the node's params TVar),
+    the toolbox-level bindings with @whenUnbound: "expose"@ (§7, for the
+    node's expose-bindings TVar) alongside any loading errors.
+    -}
+    IO (Params, [Bindings.Binding], [LoadingError])
+loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent toolsTVar = do
+    let decls = fromMaybe [] agent.parameters
+    (resolvedParams, missingRequired) <- ParamsResolve.resolveProcessParameters apiKeysFile processParams decls
+    let paramError =
+            [ ParameterLoadingError $
+                "required parameter(s) not bound: " <> Text.unpack (Text.intercalate ", " missingRequired)
+            | not (null missingRequired)
+            ]
+    (bashErr, bashExpose) <- loadBashTools tracer resolvedParams agent toolsTVar
+    mcpErr <- loadMcpServers tracer agent toolsTVar
+    (openApiErr, openApiExpose) <- loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
+    (postgrestErr, postgrestExpose) <- loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
+    builtinErr <- loadBuiltinToolboxes tracer sessionStore agent toolsTVar
+    skillsErr <- loadSkillsTools tracer agent toolsTVar
+    let errors = catMaybes [bashErr, mcpErr, openApiErr, postgrestErr, builtinErr, skillsErr]
+        exposeBindings = bashExpose ++ openApiExpose ++ postgrestExpose
+    pure (resolvedParams, exposeBindings, paramError ++ errors)
 
 -------------------------------------------------------------------------------
 -- Bash Tool Loading
@@ -169,14 +189,16 @@ control (e.g., progressive disclosure via on-demand activation).
 -}
 loadBashTools ::
     Tracer IO Trace ->
+    Params ->
     Agent ->
     TVar [ToolRegistration] ->
-    IO (Maybe LoadingError)
-loadBashTools tracer agent toolsTVar = do
+    IO (Maybe LoadingError, [Bindings.Binding])
+loadBashTools tracer resolvedParams agent toolsTVar = do
     let descriptions = collectBashDescriptions agent
+        secretParamNames = Set.fromList [p.paramName | p <- fromMaybe [] agent.parameters, p.paramSecret]
 
     if null descriptions
-        then pure Nothing
+        then pure (Nothing, [])
         else do
             result <-
                 BashToolbox.initializeMultiSourceToolbox
@@ -185,20 +207,54 @@ loadBashTools tracer agent toolsTVar = do
 
             case result of
                 Left (BashToolbox.LoadingError _msg _errs) -> do
-                    pure $ Just $ BashLoadingError "Failed to load some bash tools"
+                    pure (Just $ BashLoadingError "Failed to load some bash tools", [])
                 Right multiSourceTools -> do
                     -- readMultiSourceTools now returns [(Maybe Activation, [ScriptDescription])]
                     -- where each tuple contains the activation config for that source and its scripts
                     activationAndScripts <- BashToolbox.readMultiSourceTools multiSourceTools
 
-                    -- Create registrations for each script, applying the source's activation config
-                    let registrations = concatMap makeRegistrations activationAndScripts
-                          where
-                            makeRegistrations (mbActivation, scripts) =
-                                map (ToolReg.registerBashToolInLLM mbActivation) scripts
+                    case concatMap (checkSecretBindingModes secretParamNames) activationAndScripts of
+                        (err : _) -> pure (Just $ BashLoadingError err, [])
+                        [] -> do
+                            -- Create registrations for each script, applying the source's activation
+                            -- config and any partial-application bindings (todos/tool-partial-application.md)
+                            let registrations = concatMap makeRegistrations activationAndScripts
+                                  where
+                                    makeRegistrations (mbActivation, toolBindings, scripts) =
+                                        let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
+                                         in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
+                                exposeBindings =
+                                    concatMap
+                                        (\(_, toolBindings, _) -> filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings)
+                                        activationAndScripts
 
-                    atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
-                    pure Nothing
+                            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
+                            pure (Nothing, exposeBindings)
+
+{- | Load-time guard against a secret parameter binding to a bash argument
+whose calling mode is not @env@: a positional/@--foo@/@--foo=@ argument
+shows up in @ps@ and in traces, so a secret bound there would leak
+regardless of how carefully the model is kept from seeing it.
+-}
+checkSecretBindingModes :: Set.Set Text.Text -> (Maybe Activation, [Bindings.Binding], [BashTools.ScriptDescription]) -> [String]
+checkSecretBindingModes secretParamNames (_, toolBindings, scripts) =
+    [ "secret parameter '"
+      <> Text.unpack p
+      <> "' is bound to argument '"
+      <> Text.unpack b.bindArg
+      <> "' of bash tool '"
+      <> Text.unpack toolName
+      <> "', whose calling mode is not 'env' (it would leak via `ps` and traces)"
+    | script <- scripts
+    , let toolName = getToolName (ToolReg.bash2LLMName script)
+    , let relevant = Bindings.bindingsForTool toolName toolBindings
+    , let argModeByName = Map.fromList [(a.argName, a.argCallingMode) | a <- script.scriptInfo.scriptArgs]
+    , b <- relevant
+    , Bindings.Param p <- [b.bindValue]
+    , p `Set.member` secretParamNames
+    , Just mode <- [Map.lookup b.bindArg argModeByName]
+    , mode /= BashTools.Env
+    ]
 
 {- | Collect all bash toolbox descriptions from the agent config.
 Note: Relative paths in bash toolboxes are resolved relative to the
@@ -207,7 +263,7 @@ execution's current working directory.
 collectBashDescriptions :: Agent -> [BashToolboxDescription]
 collectBashDescriptions agent =
     let legacyDir = case toolDirectory agent of
-            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing]
+            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing Nothing]
             Nothing -> []
         toolboxDescs = fromMaybe [] (bashToolboxes agent)
      in legacyDir ++ toolboxDescs
@@ -304,58 +360,64 @@ loadOpenAPIToolboxes ::
     Tracer IO Trace ->
     FilePath ->
     FilePath ->
+    Params ->
     Agent ->
     TVar [ToolRegistration] ->
-    IO (Maybe LoadingError)
-loadOpenAPIToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
+    IO (Maybe LoadingError, [Bindings.Binding])
+loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar = do
     let toolboxes = fromMaybe [] (openApiToolboxes agent)
 
     if null toolboxes
-        then pure Nothing
+        then pure (Nothing, [])
         else do
-            errors <- mapM (loadOpenAPIToolbox (contramap OpenAPIToolboxTrace tracer) baseDir apiKeysFile toolsTVar) toolboxes
-            pure $ collectFirstError errors
+            results <- mapM (loadOpenAPIToolbox (contramap OpenAPIToolboxTrace tracer) baseDir apiKeysFile resolvedParams toolsTVar) toolboxes
+            pure (collectFirstError (map fst results), concatMap snd results)
 
 -- | Load a single OpenAPI toolbox and register its tools.
 loadOpenAPIToolbox ::
     Tracer IO OpenAPIToolbox.Trace ->
     FilePath ->
     FilePath ->
+    Params ->
     TVar [ToolRegistration] ->
     OpenAPIToolboxDescription ->
-    IO (Maybe LoadingError)
-loadOpenAPIToolbox tracer baseDir apiKeysFile toolsTVar description = do
+    IO (Maybe LoadingError, [Bindings.Binding])
+loadOpenAPIToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolveOpenAPIDescription baseDir description
 
     case configResult of
-        Left err -> pure $ Just $ OpenAPILoadingError err
-        Right config -> do
+        Left err -> pure (Just $ OpenAPILoadingError err, [])
+        Right (config, toolBindings) -> do
             -- Initialize the toolbox with API keys file for secret resolution
             initResult <- OpenAPIToolbox.initializeToolbox apiKeysFile tracer config
 
             case initResult of
-                Left err -> pure $ Just $ OpenAPILoadingError (show err)
+                Left err -> pure (Just $ OpenAPILoadingError (show err), [])
                 Right toolbox -> do
                     -- Register all tools from the toolbox
                     -- Activation is extracted from openApiActivation in registerOpenAPITool
                     regResult <- ToolReg.registerOpenAPITools toolbox
 
                     case regResult of
-                        Left err -> pure $ Just $ OpenAPILoadingError err
+                        Left err -> pure (Just $ OpenAPILoadingError err, [])
                         Right registrations -> do
-                            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
-                            pure Nothing
+                            -- Argument bindings work through the generic combinator (todos/tool-partial-application.md, §3.3)
+                            let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
+                                bound = map (Bindings.applyBindings specialized) registrations
+                                exposeBindings = filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings
+                            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ bound)
+                            pure (Nothing, exposeBindings)
 
--- | Resolve an OpenAPI description to its configuration.
+-- | Resolve an OpenAPI description to its configuration and its argument bindings.
 resolveOpenAPIDescription ::
     FilePath ->
     OpenAPIToolboxDescription ->
-    IO (Either String OpenAPIToolbox.Config)
+    IO (Either String (OpenAPIToolbox.Config, [Bindings.Binding]))
 resolveOpenAPIDescription _baseDir (OpenAPIServer desc) =
     pure $
-        Right $
-            OpenAPIToolbox.Config
+        Right
+            ( OpenAPIToolbox.Config
                 { OpenAPIToolbox.configUrl = openApiSpecUrl desc
                 , OpenAPIToolbox.configBaseUrl = openApiBaseUrl desc
                 , OpenAPIToolbox.configHeaders = fromMaybe mempty (openApiHeaders desc)
@@ -364,6 +426,8 @@ resolveOpenAPIDescription _baseDir (OpenAPIServer desc) =
                 , OpenAPIToolbox.configSecrets = fromMaybe [] (openApiSecrets desc)
                 , OpenAPIToolbox.configActivation = openApiActivation desc
                 }
+            , fromMaybe [] (openApiBindings desc)
+            )
 resolveOpenAPIDescription baseDir (OpenAPIServerOnDiskDescription (OpenAPIServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
     result <- Aeson.eitherDecodeFileStrict' fullPath
@@ -386,58 +450,63 @@ loadPostgRESToolboxes ::
     Tracer IO Trace ->
     FilePath ->
     FilePath ->
+    Params ->
     Agent ->
     TVar [ToolRegistration] ->
-    IO (Maybe LoadingError)
-loadPostgRESToolboxes tracer baseDir apiKeysFile agent toolsTVar = do
+    IO (Maybe LoadingError, [Bindings.Binding])
+loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar = do
     let toolboxes = fromMaybe [] (postgrestToolboxes agent)
 
     if null toolboxes
-        then pure Nothing
+        then pure (Nothing, [])
         else do
-            errors <- mapM (loadPostgRESTToolbox (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile toolsTVar) toolboxes
-            pure $ collectFirstError errors
+            results <- mapM (loadPostgRESTToolbox (contramap PostgRESToolboxTrace tracer) baseDir apiKeysFile resolvedParams toolsTVar) toolboxes
+            pure (collectFirstError (map fst results), concatMap snd results)
 
 -- | Load a single PostgREST toolbox and register its tools.
 loadPostgRESTToolbox ::
     Tracer IO PostgRESToolbox.Trace ->
     FilePath ->
     FilePath ->
+    Params ->
     TVar [ToolRegistration] ->
     PostgRESTToolboxDescription ->
-    IO (Maybe LoadingError)
-loadPostgRESTToolbox tracer baseDir apiKeysFile toolsTVar description = do
+    IO (Maybe LoadingError, [Bindings.Binding])
+loadPostgRESTToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar description = do
     -- Resolve the description to get the actual config
     configResult <- resolvePostgRESTDescription baseDir description
 
     case configResult of
-        Left err -> pure $ Just $ PostgRESTLoadingError err
-        Right config -> do
+        Left err -> pure (Just $ PostgRESTLoadingError err, [])
+        Right (config, toolBindings) -> do
             -- Initialize the toolbox with API keys file for secret resolution
             initResult <- PostgRESToolbox.initializeToolbox apiKeysFile tracer config
 
             case initResult of
-                Left err -> pure $ Just $ PostgRESTLoadingError (show err)
+                Left err -> pure (Just $ PostgRESTLoadingError (show err), [])
                 Right toolbox -> do
                     -- Register all tools from the toolbox
                     -- Activation is extracted from postgrestActivation in registerPostgRESTool
                     regResult <- ToolReg.registerPostgRESTools toolbox
 
                     case regResult of
-                        Left err -> pure $ Just $ PostgRESTLoadingError err
+                        Left err -> pure (Just $ PostgRESTLoadingError err, [])
                         Right registrations -> do
-                            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
-                            pure Nothing
+                            let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
+                                bound = map (Bindings.applyBindings specialized) registrations
+                                exposeBindings = filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings
+                            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ bound)
+                            pure (Nothing, exposeBindings)
 
--- | Resolve a PostgREST description to its configuration.
+-- | Resolve a PostgREST description to its configuration and its argument bindings.
 resolvePostgRESTDescription ::
     FilePath ->
     PostgRESTToolboxDescription ->
-    IO (Either String PostgRESToolbox.Config)
+    IO (Either String (PostgRESToolbox.Config, [Bindings.Binding]))
 resolvePostgRESTDescription _baseDir (PostgRESTServer desc) =
     pure $
-        Right $
-            PostgRESToolbox.Config
+        Right
+            ( PostgRESToolbox.Config
                 { PostgRESToolbox.configUrl = postgrestSpecUrl desc
                 , PostgRESToolbox.configBaseUrl = postgrestBaseUrl desc
                 , PostgRESToolbox.configHeaders = fromMaybe mempty (postgrestHeaders desc)
@@ -447,6 +516,8 @@ resolvePostgRESTDescription _baseDir (PostgRESTServer desc) =
                 , PostgRESToolbox.configSecrets = fromMaybe [] (postgrestSecrets desc)
                 , PostgRESToolbox.configActivation = postgrestActivation desc
                 }
+            , fromMaybe [] (postgrestBindings desc)
+            )
 resolvePostgRESTDescription baseDir (PostgRESTServerOnDiskDescription (PostgRESTServerOnDisk path)) = do
     let fullPath = if FilePath.isRelative path then baseDir </> path else path
     result <- Aeson.eitherDecodeFileStrict' fullPath

@@ -1,0 +1,359 @@
+# Parameters, bindings, and narrowing sub-agents
+
+Most agent frameworks give a tool's arguments to the model in full, or hide
+them entirely behind a wrapper script the author has to hand-maintain. This
+feature gives you a middle ground with no code: an agent's author declares a
+handful of named **parameters** — a tenant id, an API token, a base URL — and
+then **binds** them straight into any tool's arguments. The model never sees
+the bound value, never has to be told it, and never gets a chance to
+mistype, leak, or override it. A secret parameter never even enters the
+conversation, the session file, or a trace.
+
+The same mechanism reaches down the agent tree: one agent can partially
+apply a *sub-agent's* tools before handing it a task — "call the diff
+reviewer, but its own `git diff` tool is pinned to this repo and this
+branch" — without changing the sub-agent's file at all, and without ever
+seeing the values the sub-agent's own author chose to keep hidden.
+
+If you only need one binding once, [Bindings](#bindings) is all you need.
+The rest of this document exists for when you need more: per-session
+values from `agents-server`, sub-agents that narrow other sub-agents, or a
+narrowing worth reusing under a name.
+
+- [Quick example](#quick-example)
+- [Declaring parameters](#declaring-parameters)
+- [Supplying values](#supplying-values)
+- [Bindings](#bindings)
+- [Secrets](#secrets)
+- [Passing parameters to sub-agents (`with`)](#passing-parameters-to-sub-agents-with)
+- [Narrowing sub-agents at call time](#narrowing-sub-agents-at-call-time)
+- [Naming a narrowing (`derive_agent`)](#naming-a-narrowing-derive_agent)
+- [Design notes](#design-notes)
+
+## Quick example
+
+An agent that declares a `tenant` parameter and binds it into a bash tool's
+`tenant_id` argument, so the model can call `query-invoices` without ever
+knowing — or choosing — which tenant it is querying:
+
+```json
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "invoices-agent",
+    "apiKeyId": "openai",
+    "flavor": "openai",
+    "modelUrl": "https://api.openai.com/v1",
+    "modelName": "gpt-4",
+    "announce": "answers questions about a tenant's invoices",
+    "systemPrompt": ["You are an invoices assistant."],
+    "parameters": [
+      { "name": "tenant", "scope": "session", "required": true }
+    ],
+    "bashToolboxes": [
+      {
+        "tag": "FileSystemDirectory",
+        "contents": {
+          "Path": "./tools",
+          "Bindings": [
+            { "arg": "tenant_id", "value": { "tag": "Param", "contents": "tenant" } }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+`query-invoices`' schema, as the model sees it, has no `tenant_id`
+argument at all — it is indistinguishable from a tool that never had one.
+Run it with a value for `tenant`:
+
+```console
+agents-exe run --agent-file agent.json --set tenant=acme-corp --prompt "how many invoices are overdue?"
+```
+
+## Declaring parameters
+
+An agent's `parameters` field is a list of named holes its author declares;
+a caller supplies the value. Nothing here is visible to the model — a
+parameter is plumbing, not a tool argument the LLM fills in.
+
+```json
+{
+  "parameters": [
+    {
+      "name": "tenant",
+      "description": "which tenant's data to operate on",
+      "scope": "session",
+      "required": true
+    },
+    {
+      "name": "github_token",
+      "secret": true,
+      "scope": "process",
+      "default": { "tag": "EnvVar", "contents": "GITHUB_TOKEN" }
+    }
+  ]
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `name` | — | Matched by `Param` bindings, `--set`/`--pin`, `with`, and the HTTP API. |
+| `description` | (none) | For the operator's own documentation; never shown to the model. |
+| `secret` | `false` | The value is a string, and is never persisted, traced, or returned by any API — see [Secrets](#secrets). |
+| `scope` | `"process"` | Who may supply it: `"process"` (only the operator, at startup), `"session"` or `"message"` (a caller of `agents-server`, see [Supplying values](#supplying-values)). |
+| `required` | `true` | An unbound required parameter is an error before any LLM call — at startup for a process-scope parameter, at session creation or message post for the others. |
+| `default` | (none) | Resolved once, at tree load, if nothing else supplies a value first. Reuses the same source shapes as a toolbox secret: `{"tag": "Given", "contents": "literal"}`, `{"tag": "EnvVar", "contents": "NAME"}`, `{"tag": "FileSystem", "contents": "/path"}`, `{"tag": "Command", "contents": ["cmd", "arg1", "arg2"]}`, or `{"tag": "ApiKey", "contents": "key-id"}` (an entry of the `--api-keys` file). |
+
+Resolution order for one parameter, first hit wins: a pinned process value
+(`--pin`) short-circuits everything else; then a message-scope value; then
+a session-scope value; then a process value (`--set`/`--set-json`/
+`--params-file`); then `default`; otherwise it is unbound.
+
+## Supplying values
+
+### `agents-exe` (process scope)
+
+```console
+agents-exe run --agent-file agent.json \
+    --set tenant=acme-corp \
+    --set-json max_results=10 \
+    --pin region=eu-west-1 \
+    --params-file ./params.json \
+    --prompt "..."
+```
+
+| Flag | Meaning |
+|---|---|
+| `--set NAME=VALUE` | Sets a parameter to a string value. Repeatable. |
+| `--set-json NAME=JSON` | Sets a parameter to any JSON value (number, bool, object...). Repeatable. |
+| `--pin NAME=VALUE` | Like `--set`, but the value cannot be overridden by a session- or message-scope value from `agents-server` — useful to lock a container to one tenant. Repeatable. |
+| `--pin-json NAME=JSON` | The JSON form of `--pin`. Repeatable. |
+| `--params-file FILE` | A JSON file of `{"name": value, ...}`. Flags win over a file's values. |
+
+These flags work the same way on `agents-server` (see
+[agents-server.md](agents-server.md#parameters)), where they set values
+every session shares.
+
+### `agents-server` (session and message scope)
+
+A session- or message-scope parameter is supplied per request, in the same
+`params` object used by `POST /v1/sessions`, `.../messages`, `.../resume`,
+and `POST /v1/continuations/:token`:
+
+```console
+curl -sS localhost:8080/v1/sessions \
+    -d '{"agent": "invoices-agent", "message": {"text": "how many invoices are overdue?"}, "params": {"tenant": "acme-corp"}}'
+```
+
+A session-scope value is kept in memory for the life of the session (a
+client must resupply it after a restart or eviction); a message-scope value
+lasts for that one run only. Neither is ever written to the session file —
+see [agents-server.md](agents-server.md#parameters) for the full request
+shape and error responses, and for setting parameters over MCP-over-HTTP
+via `Agents-Param-<name>` headers.
+
+## Bindings
+
+A `Bindings` list on a toolbox description ties one tool's argument to a
+fixed value or to a parameter. It is supported on bash toolboxes (both
+`FileSystemDirectory` and `SingleTool`), OpenAPI toolboxes, and PostgREST
+toolboxes:
+
+```json
+{
+  "tag": "FileSystemDirectory",
+  "contents": {
+    "Path": "./tools",
+    "Bindings": [
+      { "arg": "tenant_id", "value": { "tag": "Param", "contents": "tenant" } },
+      { "arg": "token", "value": { "tag": "Param", "contents": "github_token" } },
+      { "tool": "export-*", "arg": "format", "value": { "tag": "Literal", "contents": "csv" } }
+    ]
+  }
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `tool` | (all tools) | A glob (`*` matches any run of characters) against the tool's name, to bind the same argument differently across several tools. |
+| `arg` | — | The argument name, as the underlying tool declares it. |
+| `value` | — | `{"tag": "Literal", "contents": <json>}` for a fixed value chosen by the agent's author, or `{"tag": "Param", "contents": "<parameter name>"}`, resolved fresh at call time. |
+| `whenUnbound` | `"fail"` | What happens if a `Param` binding has no value at call time: `"fail"` (the call fails with a message an operator can act on; the model just sees a generic "tool not found"), `"omit"` (the argument is left out — only valid for an optional argument), or `"expose"` (the argument reappears in the tool's schema for the model to fill in itself, for as long as it is unbound — see below). |
+
+A bound argument is removed from the tool's schema entirely — indistinguishable
+from a tool that never had it. If the model sends the argument's name
+anyway, the bound value wins.
+
+An agent itself can also carry a top-level `bindings` list, applied after
+every toolbox's own bindings and matched by the tool's final, LLM-visible
+name — the one way to bind an argument on a tool from a toolbox that has no
+per-tool `tool` glob of its own (a bash tool, for instance):
+
+```json
+{
+  "bindings": [
+    { "tool": "bash_query_invoices", "arg": "tenant_id", "value": { "tag": "Param", "contents": "tenant" } }
+  ]
+}
+```
+
+### `whenUnbound: "expose"`
+
+Most bindings should fail or omit when unbound: a tool the model can only
+half-use is worse than one it cannot see. `"expose"` is the deliberate
+exception, for an argument that is *usually* supplied for the model but
+should fall back to letting the model choose when it is not: the tool's
+schema is a live function of whether the session currently has a value for
+that parameter, updating as an `agents-server` session's parameters are set
+— no agent rebuild, no restart. A secret parameter cannot use
+`"expose"`: it would just let the model retype the secret in plain text,
+defeating the reason it was marked secret.
+
+## Secrets
+
+A `secret: true` parameter's value is a string, and:
+
+* is redacted (`"<secret>"`) everywhere it might otherwise be printed,
+  logged, or traced;
+* is never persisted — a session's stored parameters only ever include
+  non-secret ones; a secret session-scope value lives only in
+  `agents-server`'s own memory, and is lost on restart or eviction;
+* is never returned by any `agents-server` API response;
+* never appears in the conversation itself: a bound value is merged into
+  the tool call just before dispatch, after the model's turn is already
+  decided, so it is not part of the session's own history.
+
+A bash tool argument bound to a secret parameter must use the bash `env`
+calling mode (`"mode": "env"`), which passes it as an environment variable
+rather than on the command line — anything else would show up in `ps` and
+in traces regardless of how carefully the framework kept it from the model.
+`agents-exe check` refuses to load an agent that gets this wrong.
+
+## Passing parameters to sub-agents (`with`)
+
+Parameter *values* never travel to a sub-agent implicitly — a name like
+`tenant` is not special, and a sub-agent that happens to declare the same
+parameter name should not silently inherit whatever the caller set. An
+`extraAgents` reference's `with` field says explicitly which of the
+sub-agent's own parameters the caller fills, and from what:
+
+```json
+{
+  "extraAgents": [
+    {
+      "slug": "diff-reviewer",
+      "path": "./diff-reviewer.json",
+      "with": {
+        "repo_token": { "tag": "Param", "contents": "github_token" }
+      }
+    }
+  ]
+}
+```
+
+`with` is resolved against the caller's own parameters when the sub-agent
+is actually prompted, and is checked at load time: every key must be a
+parameter the sub-agent declares, and every required session-scope
+parameter of the sub-agent must be covered — by `with`, or by the
+sub-agent's own process value or default.
+
+## Narrowing sub-agents at call time
+
+Every sub-agent reachable through `extraAgents` or a `toolDirectory` gets a
+`prompt_agent_<slug>` tool. Two more things come with it, letting an agent
+partially apply a sub-agent's *own* tools — or one of *its* sub-agents',
+arbitrarily deep — for one call, without touching any file:
+
+* **`describe_agent {"slug": "<helper>"}`** — registered whenever an agent
+  has at least one helper. It shows, from the caller's own position in the
+  chain, what is still open: the helper's declared parameters (and whether
+  each is already bound), its tools' still-open arguments, and the same
+  view recursively for its own helpers. A helper marked `narrowable: false`
+  (see below) shows only its `announce`.
+* **`bindings` and `with` on the `prompt_agent_<slug>` call itself** — the
+  same shapes as a toolbox's `Bindings` and a reference's `with`, but
+  chosen by the calling model, for this one call:
+
+  ```json
+  {
+    "what": "review this diff for security issues",
+    "bindings": [
+      { "arg": "repo", "value": { "tag": "Literal", "contents": "backend" } },
+      { "agent": "linter", "arg": "strict", "value": { "tag": "Literal", "contents": true } }
+    ],
+    "with": { "severity_threshold": { "tag": "Literal", "contents": "high" } }
+  }
+  ```
+
+  Each binding's optional `agent` field addresses where it applies:
+  omitted for the helper itself, a slash-separated path (`"linter"`,
+  `"a/b"`) for one of its own helpers, or `"**"` for the helper and
+  everything below it. A binding not addressed at the helper itself
+  travels down, re-rooted, for the helper to apply in turn when *it*
+  prompts one of its own helpers — so a grandparent can bind an argument
+  three levels down in one call. A call-time `with` cannot refill a
+  parameter the reference's own static `with` already fills.
+
+A helper's `extraAgents` reference can set `"narrowable": false` (default:
+`true`) to refuse all of this: `describe_agent` shows only its `announce`,
+and any `bindings`/`with` on a call into it — direct or inherited from
+above — is refused. Bound arguments stay bound either way: `narrowable`
+only controls whether *more* can be bound from outside, not whether an
+operator's own bindings in the helper's file are visible.
+
+Errors the calling model can act on — an unknown helper, no tool matching
+a glob, no such open argument, a `narrowable: false` target — are reported
+before the helper runs, naming what is still open, so one retry usually
+suffices. What is actually bound never appears in the response either way,
+by the same rule as any other binding.
+
+## Naming a narrowing (`derive_agent`)
+
+Repeating the same `bindings` on every call costs tokens and invites
+inconsistency. `derive_agent` saves one under a name for the rest of the
+session:
+
+```json
+{
+  "from": "diff-reviewer",
+  "slug": "backend-strict",
+  "bindings": [{ "arg": "repo", "value": { "tag": "Literal", "contents": "backend" } }],
+  "with": { "severity_threshold": { "tag": "Literal", "contents": "high" } }
+}
+```
+
+and any later `prompt_agent_<from>` call reuses it with `"as": "<slug>"`,
+instead of repeating `bindings`/`with`. It is sugar, not a new mechanism —
+nothing is stored beyond that `derive_agent` call landing in the session's
+own history, folded back into a table the next time it is needed. An
+unknown `as` name tells the model to call `derive_agent` first, and
+`narrowable: false` refuses `derive_agent` and `as` the same way it
+refuses an inline `bindings`/`with`.
+
+## Design notes
+
+A handful of decisions shape all of the above, in case they explain a
+surprise:
+
+* **The author decides what is bindable, not the caller.** Otherwise any
+  client of `agents-server` could pin any argument of any tool.
+* **The schema is static**, except for `"expose"`: a bound argument is
+  hidden whether or not a value is currently present, so the tool list
+  stays identical across sessions — simpler prompt caching, simpler
+  reasoning about what the model can do.
+* **No templating.** A parameter never appears inside a system prompt or a
+  path string; it only ever fills a tool argument. Templating changes the
+  agent's definition per session and puts values in front of the model,
+  which is a different feature with different risks.
+* **Values live in the call context, never in the registration.** A
+  toolbox loads once and is shared across every session that uses it
+  (hot-reload, one MCP connection, one SQLite handle); rebuilding it per
+  session would mean re-describing every script and restarting every MCP
+  server.
+
+See `todos/tool-partial-application.md` in the repository for the full
+design rationale and the phased implementation history, if you want the
+"why" behind any of the above in more depth.

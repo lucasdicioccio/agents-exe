@@ -183,7 +183,7 @@ migrationTests =
             initializeSessionSchema conn
             initializeSessionSchema conn
             versions <- query_ conn "SELECT version FROM schema_migrations WHERE component = 'sessions' ORDER BY version" :: IO [Only Int]
-            map fromOnly versions @?= [1, 2, 3]
+            map fromOnly versions @?= [1, 2, 3, 4]
         ]
 
 -------------------------------------------------------------------------------
@@ -283,7 +283,7 @@ subAgentParentTest = do
                         else mockCompletion completion
                 }
     childAgentId <- AgentId <$> nextRandom
-    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent deps child "parent" childAgentId]
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent deps child "parent" childAgentId Nothing True]
     sid <- newSessionId
     let convId = sessionIdToConversationId sid
     agent <- buildAgent silent deps RootAgent convId parent

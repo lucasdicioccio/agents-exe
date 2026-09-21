@@ -41,6 +41,7 @@ import qualified AsyncToolCallsTests
 import qualified SessionPrintTests
 -- Import EndpointPredicate tests
 import qualified EndpointPredicateTests
+import qualified BindingsTests
 -- Import Skills tests
 -- Import FileSandbox predicate tests
 import qualified FileSandboxPredicateTests
@@ -91,6 +92,7 @@ import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
 import qualified RunnerTests
 import qualified DurableWorkflowTests
+import qualified NarrowingTests
 
 main :: IO ()
 main = defaultMain tests
@@ -120,6 +122,8 @@ tests =
         , AsyncToolCallsTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
+        , BindingsTests.tests
+        , NarrowingTests.tests
         , SkillsTests.skillsTestSuite
         , FileSandboxPredicateTests.tests
         , ActivationSessionTests.activationSessionTestSuite
@@ -168,16 +172,22 @@ extraAgentRefTests =
     testGroup
         "ExtraAgentRef JSON serialization"
         [ testCase "serialize to JSON" $ do
-            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json" }
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
             let json = encode ref
             Text.unpack (decodeUtf8 json) @?= "{\"slug\":\"helper-bot\",\"path\":\"./helpers/bot.json\"}"
         , testCase "deserialize from JSON" $ do
             let json = "{\"slug\":\"helper-bot\",\"path\":\"./helpers/bot.json\"}"
             let mRef = decode (encodeUtf8 json) :: Maybe Base.ExtraAgentRef
-            mRef @?= Just (Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json" })
+            mRef @?= Just (Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing })
         , testCase "round-trip" $ do
-            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "superb-agent", Base.extraAgentPath = "../superb/agent.json" }
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "superb-agent", Base.extraAgentPath = "../superb/agent.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
             let json = encode ref
+            let mRef = decode json :: Maybe Base.ExtraAgentRef
+            mRef @?= Just ref
+        , testCase "narrowable: false round-trips (§8, Phase 6)" $ do
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "diff-reviewer", Base.extraAgentPath = "./diff-reviewer.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Just False }
+            let json = encode ref
+            Text.unpack (decodeUtf8 json) @?= "{\"slug\":\"diff-reviewer\",\"path\":\"./diff-reviewer.json\",\"narrowable\":false}"
             let mRef = decode json :: Maybe Base.ExtraAgentRef
             mRef @?= Just ref
         ]
@@ -270,7 +280,7 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
-                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
+                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -279,6 +289,8 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -306,6 +318,8 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -326,7 +340,7 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
-                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
+                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -335,6 +349,8 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -370,6 +386,8 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -410,6 +428,8 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -447,6 +467,8 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -496,6 +518,7 @@ bashToolboxTests =
                     , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Nothing
                     , Base.fsDirActivation = Nothing
+                    , Base.fsDirBindings = Nothing
                     }
             let json = encode desc
             let mDesc = decode json :: Maybe Base.FileSystemDirectoryDescription
@@ -506,6 +529,7 @@ bashToolboxTests =
                     , Base.fsDirPath = "./extra-tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
                     , Base.fsDirActivation = Nothing
+                    , Base.fsDirBindings = Nothing
                     }
             let json = encode desc
             let mDesc = decode json :: Maybe Base.FileSystemDirectoryDescription
@@ -514,6 +538,7 @@ bashToolboxTests =
             let desc = Base.SingleToolDescription
                     { Base.singleToolPath = "/path/to/special-tool.sh"
                     , Base.singleToolActivation = Nothing
+                    , Base.singleToolBindings = Nothing
                     }
             let json = encode desc
             let mDesc = decode json :: Maybe Base.SingleToolDescription
@@ -524,6 +549,7 @@ bashToolboxTests =
                     , Base.fsDirPath = "./tools"
                     , Base.fsDirBasenameFilter = Just ".sh"
                     , Base.fsDirActivation = Nothing
+                    , Base.fsDirBindings = Nothing
                     }
             let wrapped = Base.FileSystemDirectory desc
             let json = encode wrapped
@@ -533,14 +559,15 @@ bashToolboxTests =
             let desc = Base.SingleToolDescription
                     { Base.singleToolPath = "/path/to/tool.sh"
                     , Base.singleToolActivation = Nothing
+                    , Base.singleToolBindings = Nothing
                     }
             let wrapped = Base.SingleTool desc
             let json = encode wrapped
             let mWrapped = decode json :: Maybe Base.BashToolboxDescription
             mWrapped @?= Just wrapped
         , testCase "agent with bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing Nothing
-            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh" Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./tools" Nothing Nothing Nothing
+            let single = Base.SingleTool $ Base.SingleToolDescription "/path/to/special.sh" Nothing Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"
@@ -563,12 +590,14 @@ bashToolboxTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
             mAgent @?= Just agent
         , testCase "agent with both legacy toolDirectory and bashToolboxes" $ do
-            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing Nothing
+            let fsDir = Base.FileSystemDirectory $ Base.FileSystemDirectoryDescription Nothing "./extra-tools" Nothing Nothing Nothing
             let agent = Base.Agent
                     { Base.slug = "test-agent"
                     , Base.apiKeyId = "openai"
@@ -591,6 +620,8 @@ bashToolboxTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
+                    , Base.parameters = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

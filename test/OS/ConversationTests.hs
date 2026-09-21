@@ -944,6 +944,8 @@ mkAgentWithWorld world mode policy =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
+        , ctxInheritedBindings = []
         }
 
 -------------------------------------------------------------------------------

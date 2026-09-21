@@ -64,10 +64,14 @@ import Data.Text (Text)
 import Data.Time (NominalDiffTime)
 import GHC.Generics (Generic)
 
+import qualified Data.Map.Strict as Map
+
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Types (Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
+import System.Agents.Tools.Bindings.Types (DerivedNarrowing (..), ScopedBinding (..))
+import System.Agents.Tools.Params.Types (ParamValue (..), Params)
 
 -------------------------------------------------------------------------------
 -- Call Stack Entry
@@ -310,6 +314,25 @@ data ToolExecutionContext = ToolExecutionContext
     typically calls started by a process that is gone — without carrying
     the whole session in 'ctxFullSession'.
     -}
+    , ctxParams :: Params
+    {- ^ Resolved parameter values available for tool argument bindings
+    (see @todos/tool-partial-application.md@). Never includes anything the
+    LLM sent; only what the process, session or message supplied.
+    -}
+    , ctxInheritedBindings :: [ScopedBinding]
+    {- ^ Bindings an ancestor placed on a helper reachable below this
+    agent, already re-rooted at this agent's position
+    (@todos/tool-partial-application.md@, §8.3). 'runSubAgent' filters and
+    re-roots this list again when it prompts one of this agent's own
+    helpers.
+    -}
+    , ctxDerivedNarrowings :: Map.Map (Text, Text) DerivedNarrowing
+    {- ^ The session's narrowings named by @derive_agent@ (@todos/tool-
+    partial-application.md@, §8.4), keyed by @(the helper's slug, the
+    model-chosen name)@: a fold over the session's own history, nothing
+    else. Like 'ctxSessionToolCalls', recomputed fresh wherever this
+    context is built from a live session; empty when built without one.
+    -}
     }
     deriving (Generic)
 
@@ -325,6 +348,9 @@ instance Eq ToolExecutionContext where
             && ctxMaxDepth a == ctxMaxDepth b
             && ctxAllowedTools a == ctxAllowedTools b
             && ctxParentConversation a == ctxParentConversation b
+            && ctxParams a == ctxParams b
+            && ctxInheritedBindings a == ctxInheritedBindings b
+            && ctxDerivedNarrowings a == ctxDerivedNarrowings b
 
 -- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and ctxProgressCallback are not compared
 -- (functions, TVars, and TQueue can't be compared)
@@ -365,6 +391,12 @@ instance Show ToolExecutionContext where
             ++ cancelHookStr
             ++ ", ctxSessionToolCalls = "
             ++ show (length (ctxSessionToolCalls ctx))
+            ++ ", ctxParams = "
+            ++ show (ctxParams ctx)
+            ++ ", ctxInheritedBindings = "
+            ++ show (ctxInheritedBindings ctx)
+            ++ ", ctxDerivedNarrowings = "
+            ++ show (ctxDerivedNarrowings ctx)
             ++ " }"
       where
         portalStr = "<portal>"
@@ -388,8 +420,14 @@ instance ToJSON ToolExecutionContext where
             , "maxDepth" .= ctxMaxDepth ctx
             , "allowedTools" .= ctxAllowedTools ctx
             , "parentConversation" .= ctxParentConversation ctx
+            , "params" .= ctxParams ctx
+            , "inheritedBindings" .= filter (not . sbSecret) (ctxInheritedBindings ctx)
+            , "derivedNarrowings" .= Map.toList (ctxDerivedNarrowings ctx)
             -- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and
-            -- ctxProgressCallback are intentionally omitted (not serializable)
+            -- ctxProgressCallback are intentionally omitted (not serializable).
+            -- ctxParams serializes through ParamValue's redacting ToJSON, and
+            -- a secret-valued inherited binding is dropped outright, so
+            -- secret values never appear here either.
             ]
 
 instance FromJSON ToolExecutionContext where
@@ -410,6 +448,9 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> pure []
+            <*> pure Map.empty
+            <*> pure []
+            <*> pure Map.empty
 
 
 {- | Serializable subset of 'ToolExecutionContext' suitable for durable
@@ -426,6 +467,13 @@ data ToolExecutionContextSnapshot = ToolExecutionContextSnapshot
     , tecsCallStack :: [CallStackEntry]
     , tecsAllowedTools :: [Text]
     , tecsParentConversation :: Maybe ConversationId
+    , tecsParams :: Params
+    {- ^ Non-secret parameter values only: secrets are memory-only and never
+    survive a snapshot (see @todos/tool-partial-application.md@, §5/§6). A
+    re-hydrated call whose tool needs a secret parameter fails at call time.
+    -}
+    , tecsInheritedBindings :: [ScopedBinding]
+    -- ^ Non-secret inherited bindings only, for the same reason as 'tecsParams'.
     }
     deriving (Show, Eq, Generic)
 
@@ -442,6 +490,8 @@ contextSnapshot ctx =
         , tecsCallStack = ctxCallStack ctx
         , tecsAllowedTools = ctxAllowedTools ctx
         , tecsParentConversation = ctxParentConversation ctx
+        , tecsParams = Map.filter (not . pvSecret) (ctxParams ctx)
+        , tecsInheritedBindings = filter (not . sbSecret) (ctxInheritedBindings ctx)
         }
 
 {- | Re-hydrate a full execution context from a snapshot.
@@ -473,6 +523,9 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = tecsParams snap
+        , ctxInheritedBindings = tecsInheritedBindings snap
+        , ctxDerivedNarrowings = Map.empty
         }
 -------------------------------------------------------------------------------
 -- Construction Helpers
@@ -505,6 +558,9 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
+        , ctxInheritedBindings = []
+        , ctxDerivedNarrowings = Map.empty
         }
 
 {- | Create a minimal 'ToolExecutionContext' with only required identifiers.
@@ -545,6 +601,9 @@ mkMinimalContext sessId convId tId portal =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
+        , ctxInheritedBindings = []
+        , ctxDerivedNarrowings = Map.empty
         }
 
 {- | Create a root-level context for the start of agent execution (depth 0).
@@ -593,6 +652,9 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
+        , ctxInheritedBindings = []
+        , ctxDerivedNarrowings = Map.empty
         }
 
 {- | Create a context with tool portal support.
@@ -643,6 +705,9 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxSessionToolCalls = []
+        , ctxParams = Map.empty
+        , ctxInheritedBindings = []
+        , ctxDerivedNarrowings = Map.empty
         }
 
 {- | Create a nested context for subcall execution with OS integration.

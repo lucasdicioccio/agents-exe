@@ -105,6 +105,8 @@ mkAsyncAgent policy =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
+        , ctxInheritedBindings = []
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -326,6 +328,8 @@ minimalBaseAgent =
         , Base.asyncYieldStrategy = Nothing
         , Base.maxConcurrency = Nothing
         , Base.asyncCallTimeoutSeconds = Nothing
+        , Base.bindings = Nothing
+        , Base.parameters = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.

@@ -276,6 +276,7 @@ flattenArguments = mconcat . fmap flatten1
     flatten1 (arg, Just txt) =
         case arg.argCallingMode of
             Stdin -> []
+            ST.Env -> []
             Positional -> [txt]
             DashDashEqual -> [mconcat ["--", arg.argName, "=", txt]]
             DashDashSpace -> [mconcat ["--", arg.argName], txt]
@@ -288,6 +289,7 @@ flattenInput = Text.unlines . mconcat . fmap flatten1
     flatten1 (arg, Just txt) =
         case arg.argCallingMode of
             Stdin -> [txt]
+            ST.Env -> []
             Positional -> []
             DashDashEqual -> []
             DashDashSpace -> []

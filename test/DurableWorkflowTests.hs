@@ -246,6 +246,8 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxDeploymentRunner = mRunner
         , ctxSessionBackend = mBackend
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
+        , ctxInheritedBindings = []
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -275,6 +277,8 @@ mkSimpleAgent =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
+        , ctxInheritedBindings = []
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -307,6 +311,8 @@ testContextSnapshot =
         , tecsCallStack = []
         , tecsAllowedTools = []
         , tecsParentConversation = Nothing
+        , tecsParams = mempty
+        , tecsInheritedBindings = []
         }
 
 -------------------------------------------------------------------------------
@@ -467,6 +473,8 @@ snapshotSerializationTest =
                     , tecsCallStack = []
                     , tecsAllowedTools = []
                     , tecsParentConversation = Nothing
+                    , tecsParams = mempty
+                    , tecsInheritedBindings = []
                     }
         let snapshot =
                 ToolContinuationSnapshot

@@ -62,6 +62,7 @@ import System.Agents.CLI.PromptScript (
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.OS.AgentHandle (AgentHandle, createAgentHandle, getAgentId, getAgentTools)
 import System.Agents.ToolRegistration (ToolRegistration)
+import qualified System.Agents.Tools.Params.Types as Params
 import System.Exit (exitFailure)
 import System.IO (stderr)
 
@@ -349,6 +350,8 @@ handleOneShot ::
     SessionStore.SessionStore ->
     -- | Path to API keys file
     FilePath ->
+    -- | Operator-supplied parameter values (@--set@/@--pin@)
+    Params.ProcessParams ->
     -- | List of agent files (only first is used)
     [FilePath] ->
     -- | Available prompt aliases
@@ -356,7 +359,7 @@ handleOneShot ::
     -- | One-shot options
     OneShotOptions ->
     IO ()
-handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
+handleOneShot tracer sessionStore apiKeysFile processParams agentFiles aliases opts = do
     (promptContents, mediaAttachments) <-
         loadPromptScriptOptions aliases opts.sessionFile opts.promptScriptOptions
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
@@ -381,5 +384,6 @@ handleOneShot tracer sessionStore apiKeysFile agentFiles aliases opts = do
                 , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
                 , AgentTree.sessionCatalog = SessionStore.fileCatalog sessionStore
+                , AgentTree.processParams = processParams
                 }
 

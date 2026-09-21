@@ -53,6 +53,7 @@ module System.Agents.Tools.Secrets (
     resolveSecrets,
     resolveSecret,
     resolveSecretSource,
+    partitionParamSecrets,
     applySecretsToHeaders,
     applySecretsToQueryString,
 
@@ -69,6 +70,7 @@ module System.Agents.Tools.Secrets (
 import Control.Exception (IOException, try)
 import Data.ByteString.Base64 as Base64
 import Data.Char (digitToInt, isHexDigit, isSpace)
+import qualified Data.List as List
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
@@ -101,6 +103,12 @@ The secret can come from various locations:
 * 'FileSystem': Read from a file path (useful for Docker secrets, systemd credentials)
 * 'EnvVar': Read from an environment variable
 * 'Command': Execute a command and use its stdout as the secret
+* 'ParamSource': Read from an agent parameter, resolved per request
+  from the call's @ctxParams@ rather than once at load time (see
+  @todos/tool-partial-application.md@, §3.3). 'resolveSecrets' /
+  'resolveSecretSource' never resolve this source; callers that support
+  it (the OpenAPI and PostgREST toolboxes) filter it out before calling
+  'resolveSecrets' and resolve it themselves per request.
 -}
 data SecretSource
     = -- | An inline text value
@@ -113,6 +121,11 @@ data SecretSource
       EnvVar Text
     | -- | Execute a command with arguments
       Command Text [Text]
+    | -- | Read from an agent parameter, resolved per request. The 'Text' is
+      -- a parameter name (kept as plain 'Text' here, not a 'ParamName'
+      -- alias, so this module needs no dependency on
+      -- "System.Agents.Tools.Params.Types").
+      ParamSource Text
     deriving (Show, Eq, Ord)
 
 -- -------------------------------------------------------------------------
@@ -201,7 +214,8 @@ instance FromJSON SecretSource where
                 case contents of
                     (name : args) -> pure $ Command name args
                     [] -> fail "Command source requires at least a command name"
-            _ -> fail "Unknown SecretSource tag. Expected: Given, ApiKey, FileSystem, EnvVar, Command"
+            "ParamSource" -> ParamSource <$> o .: "contents"
+            _ -> fail "Unknown SecretSource tag. Expected: Given, ApiKey, FileSystem, EnvVar, Command, ParamSource"
 
 instance ToJSON SecretSource where
     toJSON (Given txt) =
@@ -217,6 +231,8 @@ instance ToJSON SecretSource where
             [ "tag" .= ("Command" :: Text)
             , "contents" .= (name : args)
             ]
+    toJSON (ParamSource name) =
+        Aeson.object ["tag" .= ("ParamSource" :: Text), "contents" .= name]
 
 instance FromJSON SecretDecoder where
     parseJSON = Aeson.withObject "SecretDecoder" $ \o -> do
@@ -321,6 +337,19 @@ resolveSecrets ::
 resolveSecrets apiKeysFile secrets =
     sequence <$> traverse (resolveSecret apiKeysFile) secrets
 
+{- | Splits a list of secrets into those sourced from a parameter
+('ParamSource', resolved per request) and the rest (resolved once, here,
+at load time). Callers that support 'ParamSource' call this before
+'resolveSecrets', so the load-time resolver never sees (and never fails
+on) a secret it cannot resolve yet.
+-}
+partitionParamSecrets :: [Secret] -> ([Secret], [Secret])
+partitionParamSecrets = List.partition isParamSourced
+  where
+    isParamSourced s = case secretSource s of
+        ParamSource _ -> True
+        _ -> False
+
 {- | Resolve a single secret.
 
 Reads from the source, decodes the value, and prepares it for serialization.
@@ -380,6 +409,12 @@ resolveSecretSource _ (Command name args) = do
         ExitSuccess -> pure $ Right $ Text.pack stdout
         ExitFailure code ->
             pure $ Left $ CommandFailed name code (Text.pack stderr)
+resolveSecretSource _ (ParamSource name) =
+    pure $
+        Left $
+            SourceNotFound $
+                "parameter '" <> name <> "' is resolved per request, not by resolveSecretSource; "
+                    <> "this SecretSource must be filtered out before calling resolveSecrets"
 
 -- -------------------------------------------------------------------------
 -- Secret Decoding

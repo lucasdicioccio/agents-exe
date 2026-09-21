@@ -122,6 +122,7 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                     , AgentTree.interactiveTracer = contramap AgentTreeTrace tracer
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps SessionStore.defaultSessionStore apiKeys)
                     , AgentTree.sessionCatalog = SessionStore.fileCatalog SessionStore.defaultSessionStore
+                    , AgentTree.processParams = mempty
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do

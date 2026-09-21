@@ -17,6 +17,7 @@ import Data.Maybe (isJust)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TextEnc
 import Data.Time (NominalDiffTime)
 import Network.Wai.Handler.Warp
 import Options.Applicative
@@ -31,6 +32,7 @@ import qualified Data.ByteString.Char8 as Char8
 import System.Agents.Host
 import System.Agents.Host.Runner (recoverOnStartup, withSessionRunner)
 import System.Agents.Postgres (isPostgresUrl, withPostgresStores)
+import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 
 data ServerOptions = ServerOptions
     { soAgentFiles :: [FilePath]
@@ -49,6 +51,11 @@ data ServerOptions = ServerOptions
     -- ^ Owners allowed to store and delete agents.
     , soNoUI :: Bool
     -- ^ Do not serve the chat page, even on a loopback bind.
+    , soProcessParams :: ProcessParams
+    {- ^ @--set@/@--set-json@/@--pin@/@--pin-json@: process-scope parameter
+    values shared by every loaded agent (@todos/tool-partial-application.md@,
+    §4). A pinned one cannot be overridden by a session or message value.
+    -}
     }
 
 serverOptions :: Parser ServerOptions
@@ -67,6 +74,43 @@ serverOptions =
                 <$> optional (strOption (long "admin-owners" <> metavar "OWNER,…" <> help "Owners allowed to store and delete agents over the API (needs --auth-tokens)"))
             )
         <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
+        <*> parseProcessParamsOptions
+
+{- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
+'ProcessParams'. The @-json@ variant accepts any JSON value; the plain
+variant always produces a string. @--pin@ marks the value so a session or
+message value cannot override it (see @todos/tool-partial-application.md@, §4).
+-}
+parseProcessParamsOptions :: Parser ProcessParams
+parseProcessParamsOptions =
+    Map.fromList . concat
+        <$> sequenceA
+            [ many (parseOneParam False "set" "NAME=VALUE" "Set a process-scope parameter value; repeatable" parseStringValue)
+            , many (parseOneParam True "pin" "NAME=VALUE" "Set a parameter value that sessions cannot override; repeatable" parseStringValue)
+            , many (parseOneParam False "set-json" "NAME=JSON" "Set a parameter to any JSON value; repeatable" parseJsonValue)
+            , many (parseOneParam True "pin-json" "NAME=JSON" "Set a JSON parameter value that sessions cannot override; repeatable" parseJsonValue)
+            ]
+  where
+    parseOneParam :: Bool -> String -> String -> String -> (String -> Either String Aeson.Value) -> Parser (Text, ProcessValue)
+    parseOneParam pinned longName meta helpText parseVal =
+        option
+            (eitherReader (parseNameValue pinned parseVal))
+            (long longName <> metavar meta <> help helpText)
+
+    parseNameValue :: Bool -> (String -> Either String Aeson.Value) -> String -> Either String (Text, ProcessValue)
+    parseNameValue pinned parseVal raw = case break (== '=') raw of
+        (name, '=' : val) | not (null name) -> do
+            v <- parseVal val
+            Right (Text.pack name, ProcessValue v pinned)
+        _ -> Left ("expected NAME=VALUE, got: " <> raw)
+
+    parseStringValue :: String -> Either String Aeson.Value
+    parseStringValue = Right . Aeson.String . Text.pack
+
+    parseJsonValue :: String -> Either String Aeson.Value
+    parseJsonValue raw = case Aeson.eitherDecodeStrict (TextEnc.encodeUtf8 (Text.pack raw)) of
+        Left err -> Left ("invalid JSON: " <> err)
+        Right v -> Right v
 
 {- | Load the agents, open the database, and serve until SIGTERM or SIGINT.
 
@@ -85,6 +129,7 @@ runServer opts logger = do
             (defaultHostConfig opts.soAgentFiles opts.soApiKeysFile opts.soDatabase)
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
                 , hcStreamTokens = opts.soStreamTokens
+                , hcProcessParams = opts.soProcessParams
                 }
         tracer = hostTraceLogger logger
         withStores k

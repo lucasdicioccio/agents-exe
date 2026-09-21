@@ -178,8 +178,8 @@ openapiTool toolbox apiTool =
             }
   where
     call = ()
-    run tracer _ctx args = do
-        result <- OpenAPIToolbox.handleToolCall (contramap (\t -> ToolsTrace (OpenAPIToolboxTraceInner t)) tracer) toolbox apiTool args
+    run tracer ctx args = do
+        result <- OpenAPIToolbox.handleToolCall (contramap (\t -> ToolsTrace (OpenAPIToolboxTraceInner t)) tracer) toolbox apiTool ctx args
         case result of
             Left err -> do
                 pure $ OpenAPIToolError call (Text.unpack err)

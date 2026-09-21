@@ -100,7 +100,7 @@ import System.Agents.Tools.Base (
     mapToolResult,
  )
 import qualified System.Agents.Tools.Base as ToolBase
-import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..))
+import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.Context (ToolCall, ToolExecutionContext)
 import qualified System.Agents.Tools.Context as Context
@@ -125,6 +125,7 @@ import System.Agents.Tools.PostgREST.Converter (
     buildToolParameters,
     methodToText,
  )
+import qualified System.Agents.Tools.Bindings.Types as Bindings
 import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
@@ -142,6 +143,7 @@ data Trace
     | LuaToolsTrace !LuaTools.Trace
     | OpenAPIToolboxTrace !OpenAPIToolbox.Trace
     | PostgRESToolboxTrace !PostgRESToolbox.Trace
+    | BindingsTrace !Bindings.BindingsTrace
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -265,7 +267,7 @@ mapArg arg =
         { propertyKey = arg.argName
         , propertyType = OpaqueParamType arg.argBackingTypeString
         , propertyDescription = arg.argDescription
-        , propertyRequired = True
+        , propertyRequired = arg.argTypeArity == Single
         }
 
 {- | Register a bash tool with the LLM system.

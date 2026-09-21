@@ -24,14 +24,18 @@ import Control.Exception (Exception, SomeAsyncException, SomeException, displayE
 import Control.Monad (unless, when)
 import Data.Aeson ((.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString as ByteString
 import Data.ByteString.Builder (Builder, byteString, lazyByteString)
 import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.CaseInsensitive as CI
 import Data.Foldable (asum)
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -57,6 +61,7 @@ import System.Agents.Session.Wake (findSessionForToken)
 import System.Agents.SessionStore (SessionBackend (..), SessionMeta (..), SessionQuery (..), allSessionsQuery)
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
+import System.Agents.Tools.Params.Types (ParamName, ParamScope (..), ParameterDecl (..), ProcessValue (..))
 
 data ServerEnv = ServerEnv
     { envHost :: Host
@@ -123,6 +128,11 @@ fromRunnerError = \case
     NotAcceptingMessages _ status ->
         ApiError status409 "not_accepting_messages" ("the session is " <> sessionStatusText status <> ", not idle")
     Conflict _ -> ApiError status409 "conflict" "the session was modified by another writer; retry"
+    UnknownParams names -> ApiError status422 "unknown_params" ("unknown parameter(s): " <> Text.intercalate ", " names)
+    ForbiddenParams names ->
+        ApiError status403 "forbidden_params" ("process-scope or pinned parameter(s) cannot be set here: " <> Text.intercalate ", " names)
+    InvalidParams names -> ApiError status422 "invalid_params" ("secret parameter(s) must be given as strings: " <> Text.intercalate ", " names)
+    MissingRequiredParams names -> ApiError status422 "params_required" ("required parameter(s) not bound: " <> Text.intercalate ", " names)
 
 orThrow :: IO (Either RunnerError a) -> IO a
 orThrow action = action >>= either (throwIO . fromRunnerError) pure
@@ -273,17 +283,37 @@ healthz env = do
 listAgents :: ServerEnv -> IO Response
 listAgents env = do
     agents <- hostAllAgents env.envHost
-    json status200 <$> mapM (uncurry agentView) (Map.toList agents)
+    json status200 <$> mapM (uncurry (agentView env.envHost)) (Map.toList agents)
 
--- | An agent: its description, tools, and where it comes from.
-agentView :: Text -> (AgentSource, OSAgentNode) -> IO Aeson.Value
-agentView slug (source, node) = do
+{- | An agent: its description, tools, where it comes from, and its
+declared parameters (@todos/tool-partial-application.md@, Phase 4). A
+parameter's value is never included, only whether the process already
+supplies one (@bound@) and whether it can be overridden (@pinned@: false
+when the operator locked it down with @--pin@, or when it is process-scope).
+-}
+agentView :: Host -> Text -> (AgentSource, OSAgentNode) -> IO Aeson.Value
+agentView host slug (source, node) = do
     tools <- readTVarIO node.osNodeTools
+    resolved <- readTVarIO node.osNodeParams
+    let pinnedNames = Set.fromList [n | (n, pv) <- Map.toList host.hostProcessParams, pv.pvPinned]
+        decls = fromMaybe [] (Base.parameters node.osNodeConfig) :: [ParameterDecl]
+        paramView :: ParameterDecl -> Aeson.Value
+        paramView d =
+            Aeson.object $
+                [ "name" .= d.paramName
+                , "secret" .= d.paramSecret
+                , "scope" .= d.paramScope
+                , "required" .= d.paramRequired
+                , "bound" .= Map.member d.paramName resolved
+                , "pinned" .= (d.paramScope == ScopeProcess || d.paramName `Set.member` pinnedNames)
+                ]
+                    <> maybe [] (\desc -> ["description" .= desc]) d.paramDescription
     pure $
         Aeson.object $
             [ "slug" .= slug
             , "description" .= Base.announce node.osNodeConfig
             , "tools" .= [t.declareTool.toolDescriptionName.getToolName | t <- tools]
+            , "parameters" .= map paramView decls
             ]
                 <> case source of
                     FromFile -> ["source" .= ("file" :: Text)]
@@ -298,7 +328,7 @@ getAgentH :: ServerEnv -> Text -> IO Response
 getAgentH env slug =
     Map.lookup slug <$> hostAllAgents env.envHost >>= \case
         Nothing -> throwIO $ fromRunnerError (UnknownAgent slug)
-        Just entry -> json status200 <$> agentView slug entry
+        Just entry -> json status200 <$> agentView env.envHost slug entry
 
 {- | Store an agent. The body is the @contents@ of an agent file; its slug
 is the one in the path.
@@ -341,12 +371,13 @@ createH :: ServerEnv -> Request -> Caller -> IO Response
 createH env req (Caller owner) = do
     w <- waitParams req
     body <- jsonBody req
-    (agent, msg, mode) <- parseBody body $ \o -> do
+    (agent, msg, mode, params) <- parseBody body $ \o -> do
         agent <- o .: "agent"
         msg <- messageFields o
         mode <- runField o
-        pure (agent, msg, mode)
-    meta <- orThrow $ createSessionAs env.envRunner owner agent msg mode
+        params <- paramsField o
+        pure (agent, msg, mode, params)
+    meta <- orThrow $ createSessionAs env.envRunner owner agent msg mode params
     let sid = meta.smSessionId
     view <- afterRun env w sid
     pure $
@@ -399,19 +430,22 @@ messagesH :: ServerEnv -> Request -> SessionId -> IO Response
 messagesH env req sid = do
     w <- waitParams req
     body <- jsonBody req
-    (msg, mode) <- parseBody body $ \o -> (,) <$> messageFields o <*> runField o
-    _ <- orThrow $ postMessage env.envRunner sid msg mode
+    (msg, mode, params) <- parseBody body $ \o -> (,,) <$> messageFields o <*> runField o <*> paramsField o
+    _ <- orThrow $ postMessage env.envRunner sid msg mode params
     runResponse <$> afterRun env w sid
 
 resumeH :: ServerEnv -> Request -> SessionId -> IO Response
 resumeH env req sid = do
     w <- waitParams req
     body <- jsonBodyOrEmpty req
-    mode <- parseBody body $ \o ->
-        o .:? "mode" >>= \case
-            Nothing -> pure UntilBlocked
-            Just m -> maybe (fail "mode must be \"step\" or \"until_blocked\"") pure (runModeFromText m)
-    _ <- orThrow $ resume env.envRunner sid mode
+    (mode, params) <- parseBody body $ \o -> do
+        mode <-
+            o .:? "mode" >>= \case
+                Nothing -> pure UntilBlocked
+                Just m -> maybe (fail "mode must be \"step\" or \"until_blocked\"") pure (runModeFromText m)
+        params <- paramsField o
+        pure (mode, params)
+    _ <- orThrow $ resume env.envRunner sid mode params
     runResponse <$> afterRun env w sid
 
 cancelH :: ServerEnv -> SessionId -> IO Response
@@ -438,14 +472,15 @@ continuationH env req caller tokenText = do
                     either (\(_ :: ApiError) -> throwIO (fromRunnerError (UnknownToken token))) pure owned
     w <- waitParams req
     body <- jsonBody req
-    (result, autoResume) <- parseBody body $ \o -> do
+    (result, autoResume, params) <- parseBody body $ \o -> do
         result <-
             o .: "result" >>= \case
                 Aeson.String txt -> pure (TextResponse txt)
                 other -> Aeson.parseJSON other
         autoResume <- fromMaybe True <$> o .:? "resume"
-        pure (result, autoResume)
-    meta <- orThrow $ completeCall env.envRunner token result autoResume
+        params <- paramsField o
+        pure (result, autoResume, params)
+    meta <- orThrow $ completeCall env.envRunner token result autoResume params
     runResponse <$> afterRun env w meta.smSessionId
 
 mcpH :: ServerEnv -> Request -> Caller -> IO Response
@@ -458,11 +493,29 @@ mcpH env req (Caller owner) = do
                 , mcAgents = agents
                 , mcOwner = owner
                 , mcWait = \sid -> waitForRun env sid 120
+                , mcHeaderParams = headerParams req
                 }
     (status, answer) <- handleMcp ctx raw
     pure $ case answer of
         Just value -> json status value
         Nothing -> responseLBS status [] ""
+
+{- | Parameter values from this request's @Agents-Param-<name>@ headers
+(@todos/tool-partial-application.md@, Phase 5). Every value is a string;
+a @tools/call@'s @_meta@ can carry any JSON value and overrides these.
+-}
+headerParams :: Request -> Map Text Aeson.Value
+headerParams req =
+    Map.fromList
+        [ (pName, Aeson.String (Text.decodeUtf8 value))
+        | (name, value) <- requestHeaders req
+        , let nameText = Text.decodeUtf8 (CI.original name)
+        , Text.toLower (Text.take (Text.length prefix) nameText) == prefix
+        , let pName = Text.drop (Text.length prefix) nameText
+        , not (Text.null pName)
+        ]
+  where
+    prefix = "agents-param-"
 
 -------------------------------------------------------------------------------
 -- Events
@@ -630,6 +683,17 @@ runField o =
         Nothing -> pure (Just UntilBlocked)
         Just ("none" :: Text) -> pure Nothing
         Just other -> maybe (fail "run must be \"none\", \"step\", or \"until_blocked\"") (pure . Just) (runModeFromText other)
+
+{- | @params@: an object of parameter name to value. A @null@ value clears a
+session-scope value rather than setting one
+(@todos/tool-partial-application.md@, Phase 4).
+-}
+paramsField :: Aeson.Object -> Aeson.Parser (Map ParamName Aeson.Value)
+paramsField o =
+    o .:? "params" >>= \case
+        Nothing -> pure Map.empty
+        Just (Aeson.Object obj) -> pure $ Map.fromList [(Key.toText k, v) | (k, v) <- KeyMap.toList obj]
+        Just _ -> fail "params must be an object"
 
 runModeFromText :: Text -> Maybe RunMode
 runModeFromText = \case

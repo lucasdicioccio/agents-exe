@@ -16,6 +16,8 @@ import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
 import System.Agents.Tools.Activation (Activation)
+import System.Agents.Tools.Bindings.Types (Binding, BindingValue)
+import System.Agents.Tools.Params.Types (ParamName, ParameterDecl)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
@@ -96,6 +98,23 @@ data ExtraAgentRef
     -- ^ The slug to use when referring to this agent
     , extraAgentPath :: FilePath
     -- ^ Path to the agent's JSON configuration file
+    , extraAgentWith :: Maybe (Map ParamName BindingValue)
+    {- ^ Fills the referenced agent's parameters for every call made through
+    this reference (@todos/tool-partial-application.md@, §7, Phase 5). Keys
+    are the *child's* parameter names; values are resolved against the
+    *calling* agent's 'ctxParams' at call time, lexically, so a message-scope
+    value of the caller is passed like any other. Secrecy travels with the
+    resolved value. The child's own process values and defaults still apply
+    underneath.
+    -}
+    , extraAgentNarrowable :: Maybe Bool
+    {- ^ Whether an ancestor above the agent that owns this reference may
+    narrow this helper (or anything below it) via @describe_agent@ /
+    @bindings@ on @prompt_agent_*@ (@todos/tool-partial-application.md@, §8,
+    Phase 6). Default: 'True'. When 'False', @describe_agent@ shows only
+    this helper's announce, and any binding addressed at it (or below) is
+    refused.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -104,6 +123,7 @@ extraAgentRefOptions :: Aeson.Options
 extraAgentRefOptions =
     Aeson.defaultOptions
         { Aeson.fieldLabelModifier = kebabCase . dropPrefix "extraAgent"
+        , Aeson.omitNothingFields = True
         }
   where
     -- Convert camelCase to kebab-case
@@ -168,6 +188,8 @@ data FileSystemDirectoryDescription
     -- ^ Optional filter for tool filenames (e.g., ".sh" to load only .sh files)
     , fsDirActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , fsDirBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -217,6 +239,8 @@ data SingleToolDescription = SingleToolDescription
     -- ^ Path to the single executable tool
     , singleToolActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , singleToolBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -355,6 +379,8 @@ data OpenAPIServerDescription
     -- ^ Optional list of secrets to resolve and include in requests
     , openApiActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , openApiBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -528,6 +554,8 @@ data PostgRESTServerDescription
     -- ^ Optional list of secrets to resolve and include in requests
     , postgrestActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , postgrestBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1625,6 +1653,16 @@ data Agent
     -- ^ Maximum number of async tool calls running at once for this agent
     , asyncCallTimeoutSeconds :: Maybe Int
     -- ^ Give up on an async tool call that has run for this long
+    , parameters :: Maybe [ParameterDecl]
+    -- ^ Named holes this agent's tool bindings may refer to (see
+    -- @todos/tool-partial-application.md@).
+    , bindings :: Maybe [Binding]
+    {- ^ Agent-level bindings (@todos/tool-partial-application.md@, §8.1):
+    like toolbox-level bindings, but @tool@ matches the LLM-visible tool
+    name directly, so bindings can target tools from any toolbox,
+    including bash tools (which have no toolbox name to hang a
+    toolbox-level binding on). Applied after toolbox-level bindings.
+    -}
     }
     deriving (Show, Eq, Generic)
 

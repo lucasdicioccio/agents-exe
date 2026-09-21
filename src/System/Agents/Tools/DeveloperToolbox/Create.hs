@@ -179,6 +179,8 @@ agentFromOverrides overrides =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , bindings = Nothing
+        , parameters = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -206,6 +208,8 @@ mergeAgentWithOverrides ref overrides =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , bindings = Nothing
+        , parameters = Nothing
         }
 
 -------------------------------------------------------------------------------
@@ -350,4 +354,5 @@ mergeToolConfig ref config =
                 Bash.Positional -> "positional"
                 Bash.DashDashSpace -> "dashdashspace"
                 Bash.DashDashEqual -> "dashdashequal"
+                Bash.Env -> "env"
             }

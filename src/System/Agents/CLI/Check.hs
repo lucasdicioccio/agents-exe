@@ -31,6 +31,7 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
+import qualified System.Agents.Tools.Params.Types as Params
 
 data Trace
     = AgentTreeTrace !AgentTree.TreeTrace
@@ -62,10 +63,12 @@ handleCheck ::
     CheckOptions ->
     -- | Path to the API keys file
     FilePath ->
+    -- | Operator-supplied parameter values (@--set@/@--pin@)
+    Params.ProcessParams ->
     -- | List of agent files to check
     [FilePath] ->
     IO ()
-handleCheck tracer opts apiKeysFile agentFiles = do
+handleCheck tracer opts apiKeysFile processParams agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
     forM_ agentFiles $ \agentFile -> do
@@ -77,6 +80,7 @@ handleCheck tracer opts apiKeysFile agentFiles = do
                 , AgentTree.interactiveTracer = Prod.contramap AgentTreeTrace tracer
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps SessionStore.defaultSessionStore apiKeys)
                 , AgentTree.sessionCatalog = SessionStore.fileCatalog SessionStore.defaultSessionStore
+                , AgentTree.processParams = processParams
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs

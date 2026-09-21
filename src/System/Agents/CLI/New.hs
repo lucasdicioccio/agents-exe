@@ -268,6 +268,8 @@ buildAgentConfig catalog opts = do
                 , asyncYieldStrategy = Nothing
                 , maxConcurrency = Nothing
                 , asyncCallTimeoutSeconds = Nothing
+                , bindings = Nothing
+                , parameters = Nothing
                 }
 
     pure (presetName, agent)
