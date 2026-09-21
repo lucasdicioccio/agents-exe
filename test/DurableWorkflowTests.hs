@@ -246,6 +246,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxDeploymentRunner = mRunner
         , ctxSessionBackend = mBackend
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -275,6 +276,7 @@ mkSimpleAgent =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

@@ -35,6 +35,8 @@ import System.Agents.Tools.Params.Types (ParamValue (..))
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import Data.UUID (nil)
+import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
+import qualified System.Agents.Tools.Secrets as Secrets
 
 tests :: TestTree
 tests =
@@ -45,6 +47,7 @@ tests =
         , argumentMergeTests
         , paramBindingTests
         , specializeProcessParamsTests
+        , resolveParamSecretsTests
         , bashArityTests
         , bashEnvModeTests
         ]
@@ -224,6 +227,32 @@ specializeProcessParamsTests =
         , testCase "a Literal binding is left untouched" $ do
             let bindings = [Binding Nothing "tenant_id" (Literal (Aeson.String "x")) Fail]
             specializeProcessParams Map.empty bindings @?= bindings
+        ]
+
+-------------------------------------------------------------------------------
+-- ParamSource secrets, resolved per request (Phase 3)
+-------------------------------------------------------------------------------
+
+resolveParamSecretsTests :: TestTree
+resolveParamSecretsTests =
+    testGroup
+        "OpenAPI ParamSource secrets"
+        [ testCase "a bound Param resolves to a ResolvedSecret" $ do
+            let secret = Secrets.Secret (Secrets.ParamSource "callback_token") (Secrets.Clear False) (Secrets.Header "Authorization" (Just "Bearer {{secret}}"))
+                params = Map.fromList [("callback_token", ParamValue (Aeson.String "tok-123") True)]
+            OpenAPIToolbox.resolveParamSecrets params [secret]
+                @?= Right [Secrets.ResolvedSecret "tok-123" (Secrets.Header "Authorization" (Just "Bearer {{secret}}"))]
+        , testCase "an unbound Param is an error, not a silent omission" $ do
+            let secret = Secrets.Secret (Secrets.ParamSource "callback_token") (Secrets.Clear False) (Secrets.Header "Authorization" Nothing)
+            case OpenAPIToolbox.resolveParamSecrets Map.empty [secret] of
+                Left _ -> pure ()
+                Right r -> assertFailure ("expected a resolution error, got: " <> show r)
+        , testCase "a non-string parameter value is an error" $ do
+            let secret = Secrets.Secret (Secrets.ParamSource "callback_token") (Secrets.Clear False) (Secrets.Header "Authorization" Nothing)
+                params = Map.fromList [("callback_token", ParamValue (Aeson.Number 42) False)]
+            case OpenAPIToolbox.resolveParamSecrets params [secret] of
+                Left _ -> pure ()
+                Right r -> assertFailure ("expected a resolution error, got: " <> show r)
         ]
 
 -------------------------------------------------------------------------------

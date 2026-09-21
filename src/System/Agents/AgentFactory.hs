@@ -151,6 +151,7 @@ buildAgent tracer deps role convId node = do
     let agentCfg = node.osNodeConfig
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
     sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO node.osNodeTools
+    resolvedParams <- readTVarIO node.osNodeParams
     completeF <- case deps.adCompletion of
         Just mkCompletion -> pure (mkCompletion node)
         Nothing -> openAICompletion tracer deps.adApiKeys deps.adOnTextDelta agentCfg
@@ -192,6 +193,7 @@ buildAgent tracer deps role convId node = do
                 , ctxDeploymentRunner = Nothing
                 , ctxSessionBackend = sinkBackend deps.adSessionSink
                 , ctxAsyncEngine = Nothing
+                , ctxParams = resolvedParams
                 }
     disclosed <-
         agentEvaluateActiveTools

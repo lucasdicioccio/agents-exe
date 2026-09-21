@@ -361,6 +361,8 @@ data OpenAPIServerDescription
     -- ^ Optional list of secrets to resolve and include in requests
     , openApiActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , openApiBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -534,6 +536,8 @@ data PostgRESTServerDescription
     -- ^ Optional list of secrets to resolve and include in requests
     , postgrestActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , postgrestBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 

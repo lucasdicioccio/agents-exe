@@ -99,7 +99,7 @@ import qualified System.FilePath as FilePath
 -- Import ToolLoader qualified to avoid name collisions with LoadingError
 import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import System.Agents.AgentTree.Trace
-import System.Agents.Tools.Params.Types (ProcessParams)
+import System.Agents.Tools.Params.Types (Params, ProcessParams)
 import System.Agents.ApiKeys (
     LoadedApiKeys,
     readOpenApiKeysFile,
@@ -223,6 +223,11 @@ data OSAgentNode = OSAgentNode
     , osNodeChildren :: [OSAgentNode]
     , osNodeTools :: TVar [ToolRegistration]
     -- ^ Mutable tools for this agent (OS-native via STM)
+    , osNodeParams :: TVar Params
+    {- ^ This agent's parameters, resolved against process-level values and
+    declared defaults (see @todos/tool-partial-application.md@). Written
+    once by 'loadAgentToolboxes'; empty until then.
+    -}
     }
 
 {- | The OS-native agent tree.
@@ -658,6 +663,7 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
 
     -- Create mutable tools TVar for this agent
     toolsTVar <- newTVarIO []
+    paramsTVar <- newTVarIO Map.empty
 
     -- Create node
     let osNode =
@@ -667,6 +673,7 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
                 , osNodeAgentId = agentId
                 , osNodeChildren = [] -- Populated separately
                 , osNodeTools = toolsTVar
+                , osNodeParams = paramsTVar
                 }
 
     pure $ Right osNode
@@ -711,7 +718,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
         Just osNode -> do
             let baseDir = FilePath.takeDirectory node.nodeFile
             let agent = node.nodeConfig
-            toolLoaderErrors <-
+            (resolvedParams, toolLoaderErrors) <-
                 ToolLoader.loadAgentTools
                     (contramap ToolLoaderTrace props.interactiveTracer)
                     baseDir
@@ -720,6 +727,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
                     props.processParams
                     agent
                     (osNodeTools osNode)
+            atomically $ writeTVar (osNodeParams osNode) resolvedParams
             pure $ map convertToolLoaderError toolLoaderErrors
 
 {- | Wire tools for a single agent by appending sub-agent tools to the TVar.

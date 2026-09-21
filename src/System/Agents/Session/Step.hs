@@ -872,6 +872,7 @@ buildContext agent sess convId =
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess
+            , Ctx.ctxParams = agent.ctxParams
             }
 
 -- | Tracked calls of every partial turn of a session, newest turn first.

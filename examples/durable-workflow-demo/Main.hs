@@ -162,6 +162,7 @@ mkDemoAgent convId = do
             , ctxDeploymentRunner = Nothing
             , ctxSessionBackend = Nothing
             , ctxAsyncEngine = Nothing
+            , ctxParams = mempty
             }
 
 -------------------------------------------------------------------------------

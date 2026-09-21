@@ -754,4 +754,5 @@ mkAgent world strategy tool =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxParams = mempty
         }

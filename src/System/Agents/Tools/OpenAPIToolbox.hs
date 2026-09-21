@@ -77,6 +77,7 @@ module System.Agents.Tools.OpenAPIToolbox (
     -- * Tool execution
     createToolHandler,
     handleToolCall,
+    resolveParamSecrets,
 
     -- * Path formatting
     formatPath,
@@ -122,7 +123,8 @@ import Prod.Tracer (Tracer (..), contramap, runTracer)
 import qualified System.Agents.HttpClient as HttpClient
 import System.Agents.Tools.Activation (Activation)
 import System.Agents.Tools.Base (CallResult (..))
-import System.Agents.Tools.Context (ToolExecutionContext)
+import System.Agents.Tools.Context (ToolExecutionContext (..))
+import qualified System.Agents.Tools.Params.Types as Params
 import System.Agents.Tools.EndpointPredicate (
     EndpointPredicate,
     matchesOpenAPITool,
@@ -260,6 +262,9 @@ data Toolbox = Toolbox
     -- ^ HTTP client runtime
     , resolvedSecrets :: [Secrets.ResolvedSecret]
     -- ^ Secrets resolved at initialization
+    , paramSecrets :: [Secrets.Secret]
+    -- ^ Secrets sourced from a 'Secrets.ParamSource', resolved per request
+    -- from the call's 'ctxParams' (see @todos/tool-partial-application.md@, §3.3)
     , staticHeaders :: Map Text Text
     -- ^ Static headers from config
     , toolboxFilter :: Maybe EndpointPredicate
@@ -327,8 +332,10 @@ initializeToolbox ::
     Config ->
     IO (Either InitializationError Toolbox)
 initializeToolbox apiKeysFile tracer config = do
-    -- Resolve secrets first
-    eResolvedSecrets <- Secrets.resolveSecrets apiKeysFile (configSecrets config)
+    -- ParamSource secrets are resolved per request, not here (they need ctxParams).
+    let (paramSourcedSecrets, loadTimeSecrets) = Secrets.partitionParamSecrets (configSecrets config)
+    -- Resolve the rest now
+    eResolvedSecrets <- Secrets.resolveSecrets apiKeysFile loadTimeSecrets
     case eResolvedSecrets of
         Left err -> do
             runTracer tracer $ SecretsResolutionErrorTrace (Text.pack $ show err)
@@ -386,6 +393,7 @@ initializeToolbox apiKeysFile tracer config = do
                                         , toolboxNameMapping = nameMapping
                                         , httpRuntime = runtime
                                         , resolvedSecrets = resolvedSecrets
+                                        , paramSecrets = paramSourcedSecrets
                                         , staticHeaders = config.configHeaders
                                         , toolboxFilter = config.configFilter
                                         , openApiActivation = config.configActivation
@@ -486,8 +494,8 @@ createToolHandler ::
     ToolExecutionContext ->
     Value ->
     IO (CallResult ())
-createToolHandler toolbox tool tracer _ctx args = do
-    result <- handleToolCall tracer toolbox tool args
+createToolHandler toolbox tool tracer ctx args = do
+    result <- handleToolCall tracer toolbox tool ctx args
     case result of
         Left err -> do
             runTracer tracer (ToolExecutionErrorTrace err)
@@ -511,9 +519,10 @@ handleToolCall ::
     Tracer IO Trace ->
     Toolbox ->
     InternalTool ->
+    ToolExecutionContext ->
     Value ->
     IO (Either Text (Text, ToolResult))
-handleToolCall tracer toolbox tool args = do
+handleToolCall tracer toolbox tool ctx args = do
     case args of
         Object obj -> do
             -- Extract parameters from the JSON object
@@ -526,26 +535,50 @@ handleToolCall tracer toolbox tool args = do
             -- Build full URL
             let fullUrl = buildFullUrl (toolboxBaseUrl toolbox) formattedPath
 
-            -- Build headers: static headers + resolved secrets
-            let secretHeaders = Secrets.applySecretsToHeaders (resolvedSecrets toolbox) Map.empty
-            let allHeaders = Map.unions [secretHeaders, staticHeaders toolbox]
+            case resolveParamSecrets ctx.ctxParams (paramSecrets toolbox) of
+                Left err -> pure $ Left ("failed to resolve a parameter-sourced secret: " <> err)
+                Right paramResolvedSecrets -> do
+                    let allResolvedSecrets = resolvedSecrets toolbox ++ paramResolvedSecrets
 
-            -- Apply query string secrets
-            let secretQueryParams = Secrets.applySecretsToQueryString (resolvedSecrets toolbox) Map.empty
-            let finalQueryParams = Map.union queryParams secretQueryParams
+                    -- Build headers: static headers + resolved secrets
+                    let secretHeaders = Secrets.applySecretsToHeaders allResolvedSecrets Map.empty
+                    let allHeaders = Map.unions [secretHeaders, staticHeaders toolbox]
 
-            -- Make HTTP request
-            let method = toolMethod tool
-            runTracer tracer $ CallingEndpointTrace method fullUrl formattedPath
+                    -- Apply query string secrets
+                    let secretQueryParams = Secrets.applySecretsToQueryString allResolvedSecrets Map.empty
+                    let finalQueryParams = Map.union queryParams secretQueryParams
 
-            result <- executeRequest tracer toolbox.httpRuntime method fullUrl finalQueryParams bodyValue allHeaders
+                    -- Make HTTP request
+                    let method = toolMethod tool
+                    runTracer tracer $ CallingEndpointTrace method fullUrl formattedPath
 
-            case result of
-                Left err -> pure $ Left err
-                Right (textResult, toolResult) -> do
-                    runTracer tracer $ EndpointResponseTrace (resultStatus toolResult)
-                    pure $ Right (textResult, toolResult)
+                    result <- executeRequest tracer toolbox.httpRuntime method fullUrl finalQueryParams bodyValue allHeaders
+
+                    case result of
+                        Left err -> pure $ Left err
+                        Right (textResult, toolResult) -> do
+                            runTracer tracer $ EndpointResponseTrace (resultStatus toolResult)
+                            pure $ Right (textResult, toolResult)
         _ -> pure $ Left "Tool arguments must be a JSON object"
+
+{- | Resolves the secrets sourced from a 'Secrets.ParamSource' against the
+call's parameter values. Returns an error naming the parameter when it is
+not a string or not bound; the caller decides what to do with it (D8: the
+model gets a generic tool failure, not this message).
+-}
+resolveParamSecrets :: Map Text Params.ParamValue -> [Secrets.Secret] -> Either Text [Secrets.ResolvedSecret]
+resolveParamSecrets params = traverse resolveOne
+  where
+    resolveOne :: Secrets.Secret -> Either Text Secrets.ResolvedSecret
+    resolveOne s = case s.secretSource of
+        Secrets.ParamSource name -> case Map.lookup name params of
+            Nothing -> Left ("parameter not bound: " <> name)
+            Just pv -> case pv.pvValue of
+                Aeson.String txt -> case Secrets.decodeSecret s.secretDecoder txt of
+                    Left err -> Left (Text.pack (show err))
+                    Right decoded -> Right (Secrets.ResolvedSecret decoded s.secretSerializer)
+                _ -> Left ("parameter '" <> name <> "' is not a string value")
+        _ -> Left "resolveParamSecrets called on a non-ParamSource secret (this is a bug)"
 
 -- | Extract parameters from the JSON object based on operation definition.
 extractParams ::

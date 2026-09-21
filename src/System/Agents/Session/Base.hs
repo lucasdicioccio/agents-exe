@@ -185,6 +185,7 @@ import System.Agents.Session.Durable (
 import System.Agents.SessionStore (SessionBackend (..))
 import System.Agents.Tools.Cache (ToolCache (..))
 import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
+import System.Agents.Tools.Params.Types (Params)
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Types
@@ -342,6 +343,12 @@ data Agent r = Agent
     {- ^ Optional concurrent async execution engine. When present,
     'RunAsync' calls are executed concurrently in background threads
     and their OS entity lifecycle is kept in sync.
+    -}
+    , ctxParams :: Params
+    {- ^ This agent's parameters, resolved against process-level (and,
+    later, session/message-level) values (see
+    @todos/tool-partial-application.md@). Copied into every tool call's
+    'ToolExecutionContext' by 'buildContext'.
     -}
     }
     deriving (Functor)
