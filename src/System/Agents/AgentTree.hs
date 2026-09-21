@@ -858,8 +858,15 @@ wireAgentTools props graph nodeMap (nodeSlug, node) =
                     | not (Map.null directHelpers)
                     ]
 
+            -- derive_agent (§8.4): sugar over the same helpers, letting the
+            -- model save a narrowing under a name for the rest of the session.
+            let deriveTools =
+                    [ deriveAgentTool directHelpers
+                    | not (Map.null directHelpers)
+                    ]
+
             -- Atomically append helper tools to the node's tools TVar
-            atomically $ modifyTVar' (osNodeTools osNode) (\existingTools -> existingTools ++ helperTools ++ describeTools)
+            atomically $ modifyTVar' (osNodeTools osNode) (\existingTools -> existingTools ++ helperTools ++ describeTools ++ deriveTools)
 
             pure withErrors
 
@@ -1003,7 +1010,11 @@ describeAgentTool configNodes osNodes directHelpers =
                         | reg <- toolRegs
                         , let td = declareTool reg
                               ToolName toolNameText = toolDescriptionName td
-                        , not ("io_prompt_agent_" `Text.isPrefixOf` toolNameText || toolNameText == "io_describe_agent")
+                        , not
+                            ( "io_prompt_agent_" `Text.isPrefixOf` toolNameText
+                                || toolNameText == "io_describe_agent"
+                                || toolNameText == "io_derive_agent"
+                            )
                         ]
                     childSlugs = List.nub (cfgNode.nodeChildren ++ filter (/= nodeSlug) cfgNode.nodeExtraRefs)
                 helpersJSON <-
@@ -1031,6 +1042,80 @@ describeAgentTool configNodes osNodes directHelpers =
                         , "helpers" .= helpersJSON
                         ]
             _ -> pure $ Aeson.object ["slug" .= nodeSlug, "error" .= ("not loaded" :: Text)]
+
+{- | Builds the @derive_agent@ tool for one agent (§8.4): saves a
+@bindings@/@with@ narrowing — the same shape a @prompt_agent_\<from\>@ call
+could carry directly (§8.3) — under a name, for the rest of the session.
+Nothing is stored beyond the session's own history: this tool only checks
+that @from@ names a valid, narrowable helper and echoes back what it
+saved; 'Bindings.deriveAgentTable' folds the session's turns to
+reconstruct the table later, when @prompt_agent_\<from\>@ is called with
+@"as": "\<slug\>"@ ('System.Agents.AgentTree.OneShotTool.turnAgentRuntimeIntoIOTool').
+-}
+deriveAgentTool ::
+    -- | This agent's own direct helpers: slug, narrowable, and the @with@ of the reference (if any)
+    Map.Map AgentSlug (Bool, Maybe (Map ParamName BindingValue)) ->
+    ToolRegistration
+deriveAgentTool directHelpers =
+    registerIOScriptInLLM io props
+  where
+    props =
+        [ ParamProperty
+            { propertyKey = "from"
+            , propertyType = StringParamType
+            , propertyDescription = "the slug of one of this agent's own helpers, as named by its prompt_agent_<slug> tool"
+            , propertyRequired = True
+            }
+        , ParamProperty
+            { propertyKey = "slug"
+            , propertyType = StringParamType
+            , propertyDescription = "the name to save this narrowing under; prompt_agent_<from> accepts it back as \"as\""
+            , propertyRequired = True
+            }
+        , ParamProperty
+            { propertyKey = "bindings"
+            , propertyType = OpaqueParamType "array"
+            , propertyDescription = "same shape as prompt_agent_<from>'s own \"bindings\" argument"
+            , propertyRequired = False
+            }
+        , ParamProperty
+            { propertyKey = "with"
+            , propertyType = OpaqueParamType "object"
+            , propertyDescription = "same shape as prompt_agent_<from>'s own \"with\" argument"
+            , propertyRequired = False
+            }
+        ]
+
+    io =
+        IOTools.IOScript
+            ( IOTools.IOScriptDescription
+                "derive_agent"
+                "saves a bindings/with narrowing of one of this agent's own helpers under a name, for the rest of this session; prompt_agent_<from> accepts it back with \"as\": \"<slug>\""
+            )
+            runDerive
+
+    runDerive :: ToolExecutionContext -> Bindings.DeriveAgentArgs -> IO CByteString.ByteString
+    runDerive _ctx args =
+        case Map.lookup (Bindings.daFrom args) directHelpers of
+            Nothing ->
+                pure $
+                    Text.encodeUtf8 $
+                        "unknown helper '" <> Bindings.daFrom args <> "'; this agent's helpers are: "
+                            <> Text.intercalate ", " (Map.keys directHelpers)
+            Just (narrowable, _mWith)
+                | not narrowable ->
+                    pure $
+                        Text.encodeUtf8 $
+                            "agent '" <> Bindings.daFrom args <> "' is not narrowable: derive_agent is refused"
+                | otherwise ->
+                    pure $
+                        LBS.toStrict $
+                            Aeson.encode $
+                                Aeson.object
+                                    [ "stored" .= True
+                                    , "from" .= Bindings.daFrom args
+                                    , "slug" .= Bindings.daSlug args
+                                    ]
 
 -------------------------------------------------------------------------------
 -- Phase 4: Build Agent Tree

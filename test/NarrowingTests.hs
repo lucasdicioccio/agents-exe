@@ -56,6 +56,7 @@ tests =
         "Narrowing helpers (Phase 6)"
         [ addressAlgebraTests
         , describeAgentTests
+        , deriveAgentTests
         ]
 
 -------------------------------------------------------------------------------
@@ -221,6 +222,69 @@ describeAgentTests =
                         field "slug" json @?= Aeson.String "middle"
                         field "narrowable" json @?= Aeson.Bool False
                         assertBool "no 'helpers' key when refused" (not (hasField "helpers" json))
+        ]
+  where
+    ctx0 = mkMinimalContext (SessionId nil) (ConversationId nil) (TurnId nil) (\_ _ -> error "portal not used")
+
+-------------------------------------------------------------------------------
+-- derive_agent, end to end against a loaded tree (§8.4)
+-------------------------------------------------------------------------------
+
+deriveAgentTests :: TestTree
+deriveAgentTests =
+    testGroup
+        "derive_agent"
+        [ testCase "root gets derive_agent alongside describe_agent" $
+            withRootTools True $ \tools ->
+                assertBool "derive_agent is registered" (Just () == (const () <$> findToolNamed "io_derive_agent" tools))
+        , testCase "deriving a narrowing for a known, narrowable helper stores it" $
+            withRootTools True $ \tools ->
+                case findToolNamed "io_derive_agent" tools of
+                    Nothing -> assertFailure "derive_agent not registered"
+                    Just reg -> do
+                        json <- callTool reg (Aeson.object ["from" Aeson..= ("middle" :: Text), "slug" Aeson..= ("cached" :: Text)])
+                        field "stored" json @?= Aeson.Bool True
+                        field "from" json @?= Aeson.String "middle"
+                        field "slug" json @?= Aeson.String "cached"
+        , testCase "deriving against an unknown helper tells the model" $
+            withRootTools True $ \tools ->
+                case findToolNamed "io_derive_agent" tools of
+                    Nothing -> assertFailure "derive_agent not registered"
+                    Just reg -> do
+                        result <- toolRun (innerTool reg) nullTracer ctx0 (Aeson.object ["from" Aeson..= ("nope" :: Text), "slug" Aeson..= ("cached" :: Text)])
+                        case result of
+                            BlobToolSuccess _ bs _ -> assertBool "mentions the unknown helper" ("nope" `Text.isInfixOf` Text.pack (show bs))
+                            other -> assertFailure ("expected a successful call, got: " <> show other)
+        , testCase "deriving against a non-narrowable helper is refused" $
+            withRootTools False $ \tools ->
+                case findToolNamed "io_derive_agent" tools of
+                    Nothing -> assertFailure "derive_agent not registered"
+                    Just reg -> do
+                        result <- toolRun (innerTool reg) nullTracer ctx0 (Aeson.object ["from" Aeson..= ("middle" :: Text), "slug" Aeson..= ("cached" :: Text)])
+                        case result of
+                            BlobToolSuccess _ bs _ -> assertBool "says not narrowable" ("not narrowable" `Text.isInfixOf` Text.pack (show bs))
+                            other -> assertFailure ("expected a successful call, got: " <> show other)
+        , testCase "prompt_agent_<slug> with an unknown 'as' tells the model to derive it first" $
+            withRootTools True $ \tools ->
+                case findToolNamed "io_prompt_agent_middle" tools of
+                    Nothing -> assertFailure "prompt_agent_middle not registered"
+                    Just reg -> do
+                        result <- toolRun (innerTool reg) nullTracer ctx0 (Aeson.object ["what" Aeson..= ("hi" :: Text), "as" Aeson..= ("nope" :: Text)])
+                        case result of
+                            BlobToolSuccess _ bs _ -> do
+                                let msg = Text.pack (show bs)
+                                assertBool "mentions the unknown narrowing" ("nope" `Text.isInfixOf` msg)
+                                assertBool "points at derive_agent" ("derive_agent" `Text.isInfixOf` msg)
+                            other -> assertFailure ("expected a successful call, got: " <> show other)
+        , testCase "prompt_agent_<slug> refuses 'as' when the helper is not narrowable" $
+            withRootTools False $ \tools ->
+                case findToolNamed "io_prompt_agent_middle" tools of
+                    Nothing -> assertFailure "prompt_agent_middle not registered"
+                    Just reg -> do
+                        result <- toolRun (innerTool reg) nullTracer ctx0 (Aeson.object ["what" Aeson..= ("hi" :: Text), "as" Aeson..= ("cached" :: Text)])
+                        case result of
+                            BlobToolSuccess _ bs _ -> assertBool "says not narrowable" ("not narrowable" `Text.isInfixOf` Text.pack (show bs))
+                            other -> assertFailure ("expected a successful call, got: " <> show other)
         ]
   where
     ctx0 = mkMinimalContext (SessionId nil) (ConversationId nil) (TurnId nil) (\_ _ -> error "portal not used")

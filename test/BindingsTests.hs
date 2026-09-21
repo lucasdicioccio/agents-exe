@@ -28,13 +28,23 @@ import System.Agents.ToolSchema (ParamProperty (..), ParamType (..), ToolDescrip
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Bindings
 import qualified System.Agents.Tools.Base as ToolBase
+import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Agents.Tools.Context (ToolExecutionContext (..), mkMinimalContext)
 import qualified System.Agents.Tools.Context as Context
 import System.Agents.Tools.Params.Types (ParamValue (..))
 import System.Agents.Base (ConversationId (..))
-import System.Agents.Session.Types (SessionId (..), TurnId (..))
+import System.Agents.Session.Types (
+    LlmToolCall (..),
+    Session (..),
+    SessionId (..),
+    SystemPrompt (..),
+    Turn (..),
+    TurnId (..),
+    UserToolResponse (..),
+    UserTurnContent (..),
+ )
 import Data.UUID (nil)
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.Secrets as Secrets
@@ -48,6 +58,7 @@ tests =
         , argumentMergeTests
         , paramBindingTests
         , exposeBindingTests
+        , deriveAgentTableTests
         , specializeProcessParamsTests
         , resolveParamSecretsTests
         , bashArityTests
@@ -268,6 +279,82 @@ exposeBindingTests =
         ]
   where
     fakeCall = error "findTool in this fake ignores its argument"
+
+-------------------------------------------------------------------------------
+-- Naming a narrowing: deriveAgentTable folds derive_agent calls (§8.4)
+-------------------------------------------------------------------------------
+
+-- | A native-shaped 'LlmToolCall' calling @io_derive_agent@ with the given arguments.
+deriveCall :: Text -> Text -> [AgentBinding] -> Map.Map Text BindingValue -> LlmToolCall
+deriveCall from slug bindings withMap =
+    LlmToolCall $
+        Aeson.object
+            [ "callToolName" Aeson..= ("io_derive_agent" :: Text)
+            , "callArgs"
+                Aeson..= Aeson.object
+                    ( ["from" Aeson..= from, "slug" Aeson..= slug]
+                        ++ ["bindings" Aeson..= bindings | not (null bindings)]
+                        ++ ["with" Aeson..= withMap | not (Map.null withMap)]
+                    )
+            ]
+
+-- | The response @derive_agent@'s own tool gives on success.
+storedResponse :: Text -> Text -> UserToolResponse
+storedResponse from slug =
+    TextResponse $
+        Text.decodeUtf8With lenientDecode $
+            LByteString.toStrict $
+                Aeson.encode $
+                    Aeson.object ["stored" Aeson..= True, "from" Aeson..= from, "slug" Aeson..= slug]
+
+-- | A minimal session whose one turn carries the given (call, response) pairs.
+sessionWith :: [(LlmToolCall, UserToolResponse)] -> Session
+sessionWith pairs =
+    Session
+        [UserTurn (UserTurnContent (SystemPrompt "") [] Nothing pairs) Nothing]
+        (SessionId nil)
+        Nothing
+        (TurnId nil)
+        (Just 1)
+        Nothing
+
+deriveAgentTableTests :: TestTree
+deriveAgentTableTests =
+    testGroup
+        "deriveAgentTable (§8.4)"
+        [ testCase "a successful derive_agent call is recorded, keyed by (from, slug)" $ do
+            let sess = sessionWith [(deriveCall "middle" "cached" [] Map.empty, storedResponse "middle" "cached")]
+            Map.lookup ("middle", "cached") (deriveAgentTable sess) @?= Just (DerivedNarrowing [] Map.empty)
+        , testCase "the bindings and with are carried over" $ do
+            let binding = AgentBinding AgentHere Nothing "tenant_id" (Literal (Aeson.String "acme")) Fail
+                withMap = Map.fromList [("api_key", Param "my_key")]
+                sess = sessionWith [(deriveCall "middle" "cached" [binding] withMap, storedResponse "middle" "cached")]
+            Map.lookup ("middle", "cached") (deriveAgentTable sess) @?= Just (DerivedNarrowing [binding] withMap)
+        , testCase "a call whose response does not say 'stored: true' is not recorded" $ do
+            let sess = sessionWith [(deriveCall "middle" "cached" [] Map.empty, TextResponse "unknown helper 'middle'")]
+            Map.member ("middle", "cached") (deriveAgentTable sess) @?= False
+        , testCase "a call to a different tool is ignored" $ do
+            let otherCall = LlmToolCall $ Aeson.object ["callToolName" Aeson..= ("io_prompt_agent_middle" :: Text), "callArgs" Aeson..= Aeson.object ["what" Aeson..= ("hi" :: Text)]]
+                sess = sessionWith [(otherCall, storedResponse "middle" "cached")]
+            deriveAgentTable sess @?= Map.empty
+        , testCase "a later call for the same key replaces the earlier one" $ do
+            let binding = AgentBinding AgentHere Nothing "tenant_id" (Literal (Aeson.String "acme")) Fail
+                sess =
+                    sessionWith
+                        [ (deriveCall "middle" "cached" [] Map.empty, storedResponse "middle" "cached")
+                        , (deriveCall "middle" "cached" [binding] Map.empty, storedResponse "middle" "cached")
+                        ]
+            Map.lookup ("middle", "cached") (deriveAgentTable sess) @?= Just (DerivedNarrowing [binding] Map.empty)
+        , testCase "different helpers or names are kept apart" $ do
+            let sess =
+                    sessionWith
+                        [ (deriveCall "middle" "cached" [] Map.empty, storedResponse "middle" "cached")
+                        , (deriveCall "middle" "other" [] Map.empty, storedResponse "middle" "other")
+                        , (deriveCall "grandchild" "cached" [] Map.empty, storedResponse "grandchild" "cached")
+                        ]
+            Set.fromList (Map.keys (deriveAgentTable sess))
+                @?= Set.fromList [("middle", "cached"), ("middle", "other"), ("grandchild", "cached")]
+        ]
 
 -------------------------------------------------------------------------------
 -- specializeProcessParams: rewriting a process-scope Param into a Literal

@@ -83,6 +83,7 @@ import System.Agents.Tools.Bindings.Types (
     AgentBinding (..),
     Binding (..),
     BindingValue (..),
+    DerivedNarrowing (..),
     ScopedBinding (..),
     WhenUnbound (..),
     reRootBindings,
@@ -116,6 +117,12 @@ data PromptOtherAgent = PromptOtherAgent
     the calling model. Cannot refill a parameter the reference's @with@
     already fills.
     -}
+    , poaAs :: Maybe Text
+    {- ^ Reuses a narrowing @derive_agent@ saved under this name for this
+    helper, earlier in the session (§8.4). Its @bindings@ apply before this
+    call's own 'poaBindings'; its @with@ fills what this call's own
+    'poaWith' and the reference's static @with@ do not.
+    -}
     }
     deriving (Show)
 
@@ -125,6 +132,7 @@ instance Aeson.FromJSON PromptOtherAgent where
             <$> v Aeson..: "what"
             <*> v Aeson..:? "bindings"
             <*> v Aeson..:? "with"
+            <*> v Aeson..:? "as"
 
 -------------------------------------------------------------------------------
 -- Type Conversions
@@ -232,6 +240,15 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     <> "{\"tag\": \"Param\", \"contents\": \"<your own parameter name>\"}}"
             , propertyRequired = False
             }
+        , ParamProperty
+            { propertyKey = "as"
+            , propertyType = StringParamType
+            , propertyDescription =
+                "reuses a narrowing saved earlier in this session with derive_agent {\"from\": \""
+                    <> Base.slug agent
+                    <> "\", \"slug\": \"<name>\", ...}, by that name; its bindings/with apply before this call's own"
+            , propertyRequired = False
+            }
         ]
 
     -- Create the IO script that wraps the agent
@@ -245,14 +262,30 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
 
     -- Run the sub-agent with the given prompt and execution context
     runSubAgent :: ToolExecutionContext -> PromptOtherAgent -> IO CByteString.ByteString
-    runSubAgent ctx (PromptOtherAgent query mBindingsArg mCallWith)
+    runSubAgent ctx (PromptOtherAgent query mBindingsArg mCallWith mAs)
         | not narrowable, Just _ <- mBindingsArg =
             pure $ Text.encodeUtf8 $ "agent '" <> Base.slug agent <> "' is not narrowable: 'bindings' on this call is refused"
         | not narrowable, Just _ <- mCallWith =
             pure $ Text.encodeUtf8 $ "agent '" <> Base.slug agent <> "' is not narrowable: 'with' on this call is refused"
-        | otherwise = case resolveCallBindings ctx.ctxParams (fromMaybe [] mBindingsArg) of
+        | not narrowable, Just _ <- mAs =
+            pure $ Text.encodeUtf8 $ "agent '" <> Base.slug agent <> "' is not narrowable: 'as' on this call is refused"
+        | otherwise = case mAs of
+            Nothing -> proceed (fromMaybe [] mBindingsArg) (fromMaybe Map.empty mCallWith)
+            Just asSlug -> case Map.lookup (Base.slug agent, asSlug) ctx.ctxDerivedNarrowings of
+                Nothing ->
+                    pure $
+                        Text.encodeUtf8 $
+                            "no narrowing named '" <> asSlug <> "' has been derived for '" <> Base.slug agent
+                                <> "'; call derive_agent {\"from\": \"" <> Base.slug agent <> "\", \"slug\": \"" <> asSlug <> "\", ...} first"
+                Just dn ->
+                    proceed
+                        (dn.dnBindings ++ fromMaybe [] mBindingsArg)
+                        (Map.union (fromMaybe Map.empty mCallWith) dn.dnWith)
+      where
+        proceed :: [AgentBinding] -> Map.Map ParamName BindingValue -> IO CByteString.ByteString
+        proceed bindingsArg callWith = case resolveCallBindings ctx.ctxParams bindingsArg of
             Left err -> pure $ Text.encodeUtf8 err
-            Right ownScoped -> runSubAgentWithBindings ctx query ownScoped (fromMaybe Map.empty mCallWith)
+            Right ownScoped -> runSubAgentWithBindings ctx query ownScoped callWith
 
     runSubAgentWithBindings :: ToolExecutionContext -> Text -> [ScopedBinding] -> Map.Map ParamName BindingValue -> IO CByteString.ByteString
     runSubAgentWithBindings ctx query ownScoped callWith = do

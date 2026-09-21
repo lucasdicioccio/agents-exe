@@ -37,6 +37,7 @@ import System.Agents.Session.Base
 import System.Agents.Session.Compat (parseToolCallFromLlmToolCall)
 import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.ToolSchema (ParamProperty)
+import qualified System.Agents.Tools.Bindings as Bindings
 import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..))
 import qualified System.Agents.Tools.Cache as Cache
 import System.Agents.Tools.Context (ToolExecutionContext, ToolCall (..), mkToolExecutionContext)
@@ -872,6 +873,9 @@ buildContext agent sess convId =
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess
+            , -- The session's derive_agent narrowings (§8.4), folded fresh
+              -- from its own turns each time, the same as ctxSessionToolCalls.
+              Ctx.ctxDerivedNarrowings = Bindings.deriveAgentTable sess
             , Ctx.ctxParams = agent.ctxParams
             , Ctx.ctxInheritedBindings = agent.ctxInheritedBindings
             }

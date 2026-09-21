@@ -23,22 +23,38 @@ module System.Agents.Tools.Bindings (
     specializeProcessParams,
     narrowExposedSchema,
     exposedSecretBindings,
+
+    -- * Naming a narrowing (§8.4)
+    DeriveAgentArgs (..),
+    deriveAgentTable,
 ) where
 
+import Data.Foldable (foldl')
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Key (fromText)
 import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson.Types (parseMaybe)
+import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text.Encoding as Text
 import Prod.Tracer (runTracer)
 
 import System.Agents.ToolRegistration (Tool, ToolRegistration (..), Trace (..))
 import System.Agents.ToolSchema (ParamProperty (..), ToolDescription (..), ToolName (..))
+import qualified System.Agents.Session.Compat as SessionCompat
+import System.Agents.Session.Types (
+    Session (..),
+    Turn (..),
+    UserToolResponse (..),
+    UserTurnContent (..),
+    partialCompletedResponses,
+ )
 import System.Agents.Tools.Base (CallResult (..))
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Bindings.Types
-import System.Agents.Tools.Context (ToolExecutionContext (..))
+import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext (..))
 import System.Agents.Tools.Params.Types (ParamName, ParamValue (..))
 
 {- | Applies the bindings that match this registration's tool name: drops
@@ -166,3 +182,69 @@ specializeProcessParams resolved = map go
     go b = case b.bindValue of
         Param p | Just pv <- Map.lookup p resolved -> b{bindValue = Literal pv.pvValue}
         _ -> b
+
+-------------------------------------------------------------------------------
+-- Naming a narrowing (§8.4)
+-------------------------------------------------------------------------------
+
+{- | The arguments of a @derive_agent@ call: the same shape as
+@prompt_agent_\<slug\>@'s own @bindings@/@with@ (§8.3), plus @from@ (which
+helper this narrows) and @slug@ (the name to save it under, for the rest of
+the session).
+-}
+data DeriveAgentArgs = DeriveAgentArgs
+    { daFrom :: Text
+    , daSlug :: Text
+    , daBindings :: Maybe [AgentBinding]
+    , daWith :: Maybe (Map.Map ParamName BindingValue)
+    }
+    deriving (Show, Eq)
+
+instance Aeson.FromJSON DeriveAgentArgs where
+    parseJSON = Aeson.withObject "DeriveAgentArgs" $ \o ->
+        DeriveAgentArgs
+            <$> o Aeson..: "from"
+            <*> o Aeson..: "slug"
+            <*> o Aeson..:? "bindings"
+            <*> o Aeson..:? "with"
+
+{- | The session's derived narrowings (§8.4): a fold over every successful
+@derive_agent@ call (matched by its function name and a @"stored": true@
+response, the same convention 'System.Agents.AgentTree''s @derive_agent@
+tool itself produces), keyed by @(from, slug)@. A later call for the same
+key replaces the earlier one, the same last-write-wins fold
+'System.Agents.Tools.Activation.Session.foldSession' uses for toolgroup
+activation.
+
+Nothing beyond the session's own turns is stored for this, so — like
+'System.Agents.Tools.Context.ctxSessionToolCalls' — this is meant to be
+recomputed fresh wherever a 'ToolExecutionContext' is built from a live
+'Session', not persisted or snapshotted on its own.
+-}
+deriveAgentTable :: Session -> Map.Map (Text, Text) DerivedNarrowing
+deriveAgentTable sess = foldl' step Map.empty (concatMap pairsOf sess.turns)
+  where
+    pairsOf (UserTurn utc _) = utc.userToolResponses
+    pairsOf (PartialUserTurn putc _) = partialCompletedResponses putc
+    pairsOf (LlmTurn _ _) = []
+
+    step table (call, resp)
+        | Just tc <- SessionCompat.parseToolCallFromLlmToolCall call
+        , tc.callToolName == "io_derive_agent"
+        , Just args <- parseMaybe Aeson.parseJSON tc.callArgs
+        , storedOk resp =
+            Map.insert
+                (daFrom args, daSlug args)
+                (DerivedNarrowing (fromMaybe' (daBindings args)) (fromMaybe' (daWith args)))
+                table
+        | otherwise = table
+
+    fromMaybe' :: Monoid m => Maybe m -> m
+    fromMaybe' = maybe mempty id
+
+    storedOk :: UserToolResponse -> Bool
+    storedOk (TextResponse txt) =
+        case Aeson.decode (LByteString.fromStrict (Text.encodeUtf8 txt)) of
+            Just (Aeson.Object o) -> KeyMap.lookup "stored" o == Just (Aeson.Bool True)
+            _ -> False
+    storedOk _ = False

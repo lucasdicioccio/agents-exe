@@ -26,10 +26,14 @@ module System.Agents.Tools.Bindings.Types (
     AgentBinding (..),
     ScopedBinding (..),
     reRootBindings,
+
+    -- * Naming a narrowing (§8.4)
+    DerivedNarrowing (..),
 ) where
 
 import Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
@@ -164,6 +168,12 @@ parseAgentAddress Nothing = AgentHere
 parseAgentAddress (Just "**") = AgentEverywhere
 parseAgentAddress (Just t) = AgentPath (Text.splitOn "/" t)
 
+-- | The inverse of 'parseAgentAddress': what the JSON @agent@ key would have been.
+renderAgentAddress :: AgentAddress -> Maybe Text
+renderAgentAddress AgentHere = Nothing
+renderAgentAddress AgentEverywhere = Just "**"
+renderAgentAddress (AgentPath ps) = Just (Text.intercalate "/" ps)
+
 {- | Re-roots an 'AgentAddress' one level down, at a named child. 'Nothing'
 means this address does not apply below that child at all; 'Just' carries
 the address relative to the child. 'AgentHere' never descends: a binding
@@ -200,6 +210,16 @@ instance Aeson.FromJSON AgentBinding where
             <*> o Aeson..: "value"
             <*> (maybe Fail id <$> o Aeson..:? "whenUnbound")
 
+instance Aeson.ToJSON AgentBinding where
+    toJSON b =
+        Aeson.object $
+            maybe [] (\a -> ["agent" Aeson..= a]) (renderAgentAddress b.abAgent)
+                ++ maybe [] (\t -> ["tool" Aeson..= t]) b.abTool
+                ++ [ "arg" Aeson..= b.abArg
+                   , "value" Aeson..= b.abValue
+                   , "whenUnbound" Aeson..= b.abWhenUnbound
+                   ]
+
 {- | A binding already resolved against its caller's parameters, travelling
 down 'ToolExecutionContext.ctxInheritedBindings' for a call to a helper
 several levels below the one that supplied it (§8.3). Unlike 'Binding',
@@ -233,4 +253,25 @@ reRootBindings childSlug = go
     go (sb : sbs) = case descendAddress childSlug (sbAddress sb) of
         Just addr' -> sb{sbAddress = addr'} : go sbs
         Nothing -> go sbs
+
+-------------------------------------------------------------------------------
+-- Naming a narrowing (§8.4)
+-------------------------------------------------------------------------------
+
+{- | A narrowing saved under a name for the rest of the session (§8.4): the
+same @bindings@/@with@ a @prompt_agent_\<slug\>@ call could carry directly
+(§8.3), saved once by @derive_agent@ and reused with @"as": "\<slug\>"@. It
+is sugar, not a new mechanism: nothing is stored beyond the session's own
+history of successful @derive_agent@ calls, which is exactly what
+'System.Agents.Tools.Bindings.deriveAgentTable' folds over to reconstruct
+this value.
+-}
+data DerivedNarrowing = DerivedNarrowing
+    { dnBindings :: [AgentBinding]
+    , dnWith :: Map.Map ParamName BindingValue
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance Aeson.ToJSON DerivedNarrowing
+instance Aeson.FromJSON DerivedNarrowing
 

@@ -1,7 +1,6 @@
 # Spec: partial application of tool arguments
 
-Status: Phases 1-7 done as of 2026-09-21; only the optional §8.4
-(`derive_agent`) remains, deferred per the spec's own text. Phase 1 done
+Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done
 (`97961e0`). Phase 2 done
 except the tool-cache key (G8) and MCP server `env` (G4) (`03783fb`,
 `b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not
@@ -134,8 +133,28 @@ declared `secret` parameter (`Bindings.exposedSecretBindings`, a new
 `ExposedSecretParameter` `LoadingError`): exposing a secret back to the
 model would just let it retype the value in plain text.
 
-Not started: §8.4 (`derive_agent`, sugar over §8.3, "to be built only if
-§8.3 proves verbose in practice" per the spec itself).
+§8.4 (`derive_agent`) done, checked with the `agents-tests` suite
+(`BindingsTests.hs`'s `deriveAgentTable` group; `NarrowingTests.hs`'s
+`derive_agent` group against the loaded three-level tree) and live with
+`agents-exe check`. `derive_agent {from, slug, bindings, with}` is a new
+tool, registered by `wireAgentTools` alongside `describe_agent` for any
+agent with at least one helper: it checks `from` names a known, narrowable
+direct helper and, if so, echoes back `{"stored": true, "from", "slug"}` —
+nothing else happens, and nothing is stored beyond that call landing in the
+session's own history. `prompt_agent_<from>` gains an optional `as`
+argument; at call time, `System.Agents.Tools.Bindings.deriveAgentTable`
+folds the *current* session's turns (matching successful `derive_agent`
+calls by function name and response, the same "recomputed fresh, not
+persisted" treatment as `ctxSessionToolCalls`) into a `Map (from, slug)
+DerivedNarrowing`, exposed on a new `ToolExecutionContext.
+ctxDerivedNarrowings` field set in `Session/Step.buildContext` — so this
+works for every front-end without any wiring, no `includeFullSession` op-
+in needed. `runSubAgent` looks up `(helper, as)`; an unknown name is an
+error the calling model can retry (naming `derive_agent`, per D8). When
+found, the derived `bindings` apply before the call's own explicit ones,
+and the derived `with` fills what the call's own `with` and the
+reference's static `with` (§7) do not. A `narrowable: false` helper refuses
+`derive_agent` and `as` the same way it already refuses `bindings`/`with`.
 
 ## Goal
 
