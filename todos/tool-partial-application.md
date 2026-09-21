@@ -1,10 +1,15 @@
 # Spec: partial application of tool arguments
 
-Status: in progress (2026-09-21). Phase 1 done (`97961e0`). Phase 2 core
-done (`03783fb`): parameters, `ctxParams`, `--set`/`--pin`, process-scope
-resolution for bash toolboxes. Not yet done from Phase 2: `--set-json`,
-`--params-file`, `--pin-json`, bash argv redaction (G7), tool-cache key
-(G8), MCP server `env` (G4). Phases 3-7 not started.
+Status: in progress (2026-09-21). Phase 1 done (`97961e0`). Phase 2 done
+except the tool-cache key (G8) and MCP server `env` (G4) (`03783fb`,
+`b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not
+just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`,
+process-scope resolution, secret-argv-mode load-time guard (G7).
+Phase 3 done (`8a41cd8`): OpenAPI/PostgREST argument bindings via the
+generic combinator, `ParamSource` secrets resolved per request. Not
+started: Phase 4 (session-level parameters in agents-server, `seal`,
+session tokens, fork), Phase 5 (sub-agent `with`, MCP-over-HTTP), Phase
+6 (narrowing helpers down the call chain), Phase 7 (`Expose`).
 
 ## Goal
 
