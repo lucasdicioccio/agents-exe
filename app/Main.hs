@@ -14,6 +14,8 @@ import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
+import qualified Data.Aeson.Key as Aeson.Key
+import qualified Data.Aeson.KeyMap as Aeson.KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.List (find)
@@ -22,6 +24,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TextEnc
 import qualified Data.Text.IO as Text
 import Data.Time (UTCTime, defaultTimeLocale, parseTimeM)
 import GHC.Generics (Generic)
@@ -509,8 +512,11 @@ data Prog = Prog
     , mainCommand :: Command
     , progSessionStore :: SessionStore.SessionStore
     , progParams :: ProcessParams
-    -- ^ Operator-supplied parameter values from @--set@/@--pin@ (see
-    -- @todos/tool-partial-application.md@).
+    -- ^ Operator-supplied parameter values from @--set@/@--set-json@/@--pin@/@--pin-json@
+    -- (see @todos/tool-partial-application.md@).
+    , progParamsFiles :: [FilePath]
+    -- ^ @--params-file@ paths, read and merged into 'progParams' at
+    -- startup (flags win over a file's values on conflict).
     }
 
 -- | Available commands
@@ -1358,29 +1364,65 @@ parseProgOptions argparserargs =
             )
         <*> pure argparserargs.defaultSessionStore
         <*> parseProcessParamsOptions
+        <*> many
+            ( strOption
+                ( long "params-file"
+                    <> metavar "FILE"
+                    <> help "JSON file of {\"name\": value, ...} parameter values; repeatable. Flags win over a file's values."
+                )
+            )
 
--- | Parse @--set@/@--pin@ (repeatable) into 'ProcessParams'. @--pin@ marks
--- the value so a future session/message-scope override cannot replace it
--- (see @todos/tool-partial-application.md@, §4).
+{- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
+'ProcessParams'. The @-json@ variant accepts any JSON value; the plain
+variant always produces a string. @--pin@ marks the value so a future
+session/message-scope override cannot replace it (see
+@todos/tool-partial-application.md@, §4).
+-}
 parseProcessParamsOptions :: Parser ProcessParams
 parseProcessParamsOptions =
     Map.fromList . concat
         <$> sequenceA
-            [ many (parseOneParam False "set" "NAME=VALUE" "Set a parameter value; repeatable")
-            , many (parseOneParam True "pin" "NAME=VALUE" "Set a parameter value that cannot be overridden; repeatable")
+            [ many (parseOneParam False "set" "NAME=VALUE" "Set a parameter value; repeatable" parseStringValue)
+            , many (parseOneParam True "pin" "NAME=VALUE" "Set a parameter value that cannot be overridden; repeatable" parseStringValue)
+            , many (parseOneParam False "set-json" "NAME=JSON" "Set a parameter to any JSON value; repeatable" parseJsonValue)
+            , many (parseOneParam True "pin-json" "NAME=JSON" "Set a JSON parameter value that cannot be overridden; repeatable" parseJsonValue)
             ]
   where
-    parseOneParam :: Bool -> String -> String -> String -> Parser (Text, ProcessValue)
-    parseOneParam pinned longName meta helpText =
+    parseOneParam :: Bool -> String -> String -> String -> (String -> Either String Aeson.Value) -> Parser (Text, ProcessValue)
+    parseOneParam pinned longName meta helpText parseVal =
         option
-            (eitherReader (parseNameValue pinned))
+            (eitherReader (parseNameValue pinned parseVal))
             (long longName <> metavar meta <> help helpText)
 
-    parseNameValue :: Bool -> String -> Either String (Text, ProcessValue)
-    parseNameValue pinned raw = case break (== '=') raw of
-        (name, '=' : val) | not (null name) ->
-            Right (Text.pack name, ProcessValue (Aeson.String (Text.pack val)) pinned)
+    parseNameValue :: Bool -> (String -> Either String Aeson.Value) -> String -> Either String (Text, ProcessValue)
+    parseNameValue pinned parseVal raw = case break (== '=') raw of
+        (name, '=' : val) | not (null name) -> do
+            v <- parseVal val
+            Right (Text.pack name, ProcessValue v pinned)
         _ -> Left ("expected NAME=VALUE, got: " <> raw)
+
+    parseStringValue :: String -> Either String Aeson.Value
+    parseStringValue = Right . Aeson.String . Text.pack
+
+    parseJsonValue :: String -> Either String Aeson.Value
+    parseJsonValue raw = case Aeson.eitherDecodeStrict (TextEnc.encodeUtf8 (Text.pack raw)) of
+        Left err -> Left ("invalid JSON: " <> err)
+        Right v -> Right v
+
+-- | Read a @--params-file@'s @{"name": value, ...}@ object into 'ProcessParams'.
+-- An entry may also be @{"value": ..., "pinned": true}@ to pin it.
+parseParamsFileValue :: Aeson.Value -> Either String ProcessParams
+parseParamsFileValue (Aeson.Object o) =
+    Map.fromList <$> mapM entry (Aeson.KeyMap.toList o)
+  where
+    entry (k, Aeson.Object fields)
+        | Just v <- Aeson.KeyMap.lookup "value" fields =
+            let pinned = case Aeson.KeyMap.lookup "pinned" fields of
+                    Just (Aeson.Bool b) -> b
+                    _ -> False
+             in Right (Aeson.Key.toText k, ProcessValue v pinned)
+    entry (k, v) = Right (Aeson.Key.toText k, ProcessValue v False)
+parseParamsFileValue _ = Left "expected a JSON object of {\"name\": value, ...}"
 
 -------------------------------------------------------------------------------
 -- Main Entry Point
@@ -1424,15 +1466,29 @@ main = do
         -- Use the SessionStore from program configuration
         let sessionStore = pargs.progSessionStore
 
+        -- Merge --params-file values under the flag-supplied ones (flags win)
+        fileParams <- mapM readParamsFile pargs.progParamsFiles
+        let mergedParams = Map.union pargs.progParams (Map.unions fileParams)
+            pargs' = pargs{progParams = mergedParams}
+
         -- Resolve agent files based on selected slug
-        resolvedAgentFiles <- resolveAgentFiles pargs.agentFiles pargs.selectedAgentSlug
+        resolvedAgentFiles <- resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
 
         case resolvedAgentFiles of
             Left err -> do
                 Text.hPutStrLn stderr err
                 exitFailure
             Right agentFiles' ->
-                runCommand pargs baseTracer sessionStore agentFiles'
+                runCommand pargs' baseTracer sessionStore agentFiles'
+
+    readParamsFile :: FilePath -> IO ProcessParams
+    readParamsFile path = do
+        raw <- LByteString.readFile path
+        case Aeson.eitherDecode raw >>= parseParamsFileValue of
+            Left err -> do
+                Text.hPutStrLn stderr (Text.pack ("--params-file " <> path <> ": " <> err))
+                exitFailure
+            Right params -> pure params
 
 -- | Resolve agent files based on optional slug selection
 resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])

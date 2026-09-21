@@ -28,7 +28,9 @@ import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar)
 import Control.Exception (SomeException, try)
 import qualified Data.Aeson as Aeson
 import Data.Either (partitionEithers)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Prod.Tracer (Tracer (..), contramap)
 import System.Directory (getCurrentDirectory)
@@ -59,10 +61,13 @@ import System.Agents.Base (
 import System.Agents.SessionStore (SessionCatalog)
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
+import System.Agents.ToolSchema (getToolName)
 import qualified System.Agents.Tools.Bindings as Bindings
+import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import System.Agents.Tools.Activation (Activation)
 import qualified System.Agents.Tools.Params as ParamsResolve
-import System.Agents.Tools.Params.Types (Params, ProcessParams)
+import System.Agents.Tools.Params.Types (ParameterDecl (..), Params, ProcessParams)
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
@@ -188,6 +193,7 @@ loadBashTools ::
     IO (Maybe LoadingError)
 loadBashTools tracer resolvedParams agent toolsTVar = do
     let descriptions = collectBashDescriptions agent
+        secretParamNames = Set.fromList [p.paramName | p <- fromMaybe [] agent.parameters, p.paramSecret]
 
     if null descriptions
         then pure Nothing
@@ -205,16 +211,44 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
                     -- where each tuple contains the activation config for that source and its scripts
                     activationAndScripts <- BashToolbox.readMultiSourceTools multiSourceTools
 
-                    -- Create registrations for each script, applying the source's activation
-                    -- config and any partial-application bindings (todos/tool-partial-application.md)
-                    let registrations = concatMap makeRegistrations activationAndScripts
-                          where
-                            makeRegistrations (mbActivation, bindings, scripts) =
-                                let specialized = Bindings.specializeProcessParams resolvedParams bindings
-                                 in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
+                    case concatMap (checkSecretBindingModes secretParamNames) activationAndScripts of
+                        (err : _) -> pure $ Just $ BashLoadingError err
+                        [] -> do
+                            -- Create registrations for each script, applying the source's activation
+                            -- config and any partial-application bindings (todos/tool-partial-application.md)
+                            let registrations = concatMap makeRegistrations activationAndScripts
+                                  where
+                                    makeRegistrations (mbActivation, bindings, scripts) =
+                                        let specialized = Bindings.specializeProcessParams resolvedParams bindings
+                                         in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
 
-                    atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
-                    pure Nothing
+                            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
+                            pure Nothing
+
+{- | Load-time guard against a secret parameter binding to a bash argument
+whose calling mode is not @env@: a positional/@--foo@/@--foo=@ argument
+shows up in @ps@ and in traces, so a secret bound there would leak
+regardless of how carefully the model is kept from seeing it.
+-}
+checkSecretBindingModes :: Set.Set Text.Text -> (Maybe Activation, [Bindings.Binding], [BashTools.ScriptDescription]) -> [String]
+checkSecretBindingModes secretParamNames (_, bindings, scripts) =
+    [ "secret parameter '"
+      <> Text.unpack p
+      <> "' is bound to argument '"
+      <> Text.unpack b.bindArg
+      <> "' of bash tool '"
+      <> Text.unpack toolName
+      <> "', whose calling mode is not 'env' (it would leak via `ps` and traces)"
+    | script <- scripts
+    , let toolName = getToolName (ToolReg.bash2LLMName script)
+    , let relevant = Bindings.bindingsForTool toolName bindings
+    , let argModeByName = Map.fromList [(a.argName, a.argCallingMode) | a <- script.scriptInfo.scriptArgs]
+    , b <- relevant
+    , Bindings.Param p <- [b.bindValue]
+    , p `Set.member` secretParamNames
+    , Just mode <- [Map.lookup b.bindArg argModeByName]
+    , mode /= BashTools.Env
+    ]
 
 {- | Collect all bash toolbox descriptions from the agent config.
 Note: Relative paths in bash toolboxes are resolved relative to the
