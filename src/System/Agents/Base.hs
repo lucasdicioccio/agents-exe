@@ -16,6 +16,7 @@ import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
 import System.Agents.Tools.Activation (Activation)
+import System.Agents.Tools.Bindings.Types (Binding)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
@@ -168,6 +169,8 @@ data FileSystemDirectoryDescription
     -- ^ Optional filter for tool filenames (e.g., ".sh" to load only .sh files)
     , fsDirActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , fsDirBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -217,6 +220,8 @@ data SingleToolDescription = SingleToolDescription
     -- ^ Path to the single executable tool
     , singleToolActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , singleToolBindings :: Maybe [Binding]
+    -- ^ Optional partial application of tool arguments (see @todos/tool-partial-application.md@)
     }
     deriving (Show, Ord, Eq, Generic)
 

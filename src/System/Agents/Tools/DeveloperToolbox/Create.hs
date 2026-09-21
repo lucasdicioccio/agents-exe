@@ -350,4 +350,5 @@ mergeToolConfig ref config =
                 Bash.Positional -> "positional"
                 Bash.DashDashSpace -> "dashdashspace"
                 Bash.DashDashEqual -> "dashdashequal"
+                Bash.Env -> "env"
             }

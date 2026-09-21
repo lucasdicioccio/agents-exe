@@ -98,6 +98,8 @@ library agents-lib
                     , System.Agents.Tools.Base
                     , System.Agents.Tools.Bash
                     , System.Agents.Tools.BashToolbox
+                    , System.Agents.Tools.Bindings
+                    , System.Agents.Tools.Bindings.Types
                     , System.Agents.Tools.Cache
                     , System.Agents.Tools.Context
                     , System.Agents.Tools.DeveloperToolbox
@@ -512,6 +514,7 @@ test-suite agents-tests
     main-is:          Main.hs
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
+                    , BindingsTests
                     , ContinuationConsistencyTests
                     , AsyncToolCallsTests
                     , DeveloperToolboxTests

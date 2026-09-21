@@ -20,6 +20,7 @@ module System.Agents.Tools.Bash (
     InvalidScriptError (..),
     RunScriptError (..),
     parseArgsForValue,
+    parseEnvForValue,
     runValue,
 
     -- * Environment and context
@@ -81,6 +82,7 @@ import System.Agents.Tools.ScriptTypes (
     ScriptDescription (..),
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
+    argEnvVarName,
     translateArguments,
  )
 
@@ -277,6 +279,7 @@ flattenArguments = mconcat . fmap flatten1
     flatten1 (arg, Just txt) =
         case arg.argCallingMode of
             Stdin -> []
+            Env -> []
             Positional -> [txt]
             DashDashEqual -> [mconcat ["--", arg.argName, "=", txt]]
             DashDashSpace -> [mconcat ["--", arg.argName], txt]
@@ -289,15 +292,36 @@ flattenInput = Text.unlines . mconcat . fmap flatten1
     flatten1 (arg, Just txt) =
         case arg.argCallingMode of
             Stdin -> [txt]
+            Env -> []
             Positional -> []
             DashDashEqual -> []
             DashDashSpace -> []
+
+{- | Flattens 'Env'-mode arguments into environment variable pairs. The
+variable name is the argument name, upper-cased with @-@ turned into @_@
+(see 'argEnvVarName').
+-}
+flattenEnv :: [(ScriptArg, Maybe Text)] -> [(String, String)]
+flattenEnv = mconcat . fmap flatten1
+  where
+    flatten1 :: (ScriptArg, Maybe Text) -> [(String, String)]
+    flatten1 (_, Nothing) = []
+    flatten1 (arg, Just txt) =
+        case arg.argCallingMode of
+            Env -> [(Text.unpack (argEnvVarName arg.argName), Text.unpack txt)]
+            _ -> []
 
 -- | Tries parsing command line arguments from an opaque JSON object.
 parseArgsForValue :: ScriptDescription -> Aeson.Value -> Either String ([Text], Text)
 parseArgsForValue script val = do
     args <- Aeson.parseEither (translateArguments script.scriptInfo) val
     pure (flattenArguments args, flattenInput args)
+
+-- | Tries parsing environment-mode arguments from an opaque JSON object.
+parseEnvForValue :: ScriptDescription -> Aeson.Value -> Either String [(String, String)]
+parseEnvForValue script val = do
+    args <- Aeson.parseEither (translateArguments script.scriptInfo) val
+    pure (flattenEnv args)
 
 -------------------------------------------------------------------------------
 -- Environment Variable Names for Session Context
@@ -394,11 +418,12 @@ runValue tracer script mCtx val = do
             pure $ Left $ SerializeArgumentErrors path val err
         Right (argz, stdin) -> do
             let args = "run" : [Text.unpack arg | arg <- argz]
+            let envArgs = either (const []) id (parseEnvForValue script val)
             runTracer tracer (RunCommandStart path args)
 
             -- Get the current environment and add session context
             baseEnv <- getEnvironment
-            let toolEnv = buildToolEnvironment mCtx baseEnv
+            let toolEnv = envArgs ++ buildToolEnvironment mCtx baseEnv
 
             -- Create the process with the modified environment
             let process = (proc path args){env = Just toolEnv}

@@ -30,6 +30,7 @@ import System.FilePath (takeFileName, (</>))
 import System.Agents.Base (BashToolboxDescription (..), FileSystemDirectoryDescription (..), SingleToolDescription (..))
 import System.Agents.Tools.Activation (Activation)
 import qualified System.Agents.Tools.Bash as BashTools
+import System.Agents.Tools.Bindings.Types (Binding)
 
 -------------------------------------------------------------------------------
 
@@ -46,26 +47,31 @@ data Trace
 Tracks the source configuration and the tools loaded from it.
 -}
 data ToolSource
-    = -- | Directory source with filter, full path, and activation config
-      DirectorySource FilePath (Maybe Text) FilePath (Maybe Activation)
-    | -- | Single executable file with activation config
-      SingleSource FilePath (Maybe Activation)
+    = -- | Directory source with filter, full path, activation and bindings config
+      DirectorySource FilePath (Maybe Text) FilePath (Maybe Activation) [Binding]
+    | -- | Single executable file with activation and bindings config
+      SingleSource FilePath (Maybe Activation) [Binding]
     deriving (Show)
 
 -- | Get the source path for display/tracing.
 sourcePath :: ToolSource -> FilePath
-sourcePath (DirectorySource origPath _ _ _) = origPath
-sourcePath (SingleSource path _) = path
+sourcePath (DirectorySource origPath _ _ _ _) = origPath
+sourcePath (SingleSource path _ _) = path
 
 -- | Get the resolved path for loading.
 resolvedPath :: ToolSource -> FilePath
-resolvedPath (DirectorySource _ _ resolved _) = resolved
-resolvedPath (SingleSource path _) = path
+resolvedPath (DirectorySource _ _ resolved _ _) = resolved
+resolvedPath (SingleSource path _ _) = path
 
 -- | Get the activation configuration for this source.
 sourceActivation :: ToolSource -> Maybe Activation
-sourceActivation (DirectorySource _ _ _ activation) = activation
-sourceActivation (SingleSource _ activation) = activation
+sourceActivation (DirectorySource _ _ _ activation _) = activation
+sourceActivation (SingleSource _ activation _) = activation
+
+-- | Get the partial-application bindings configured for this source.
+sourceBindings :: ToolSource -> [Binding]
+sourceBindings (DirectorySource _ _ _ _ bindings) = bindings
+sourceBindings (SingleSource _ _ bindings) = bindings
 
 -------------------------------------------------------------------------------
 
@@ -97,14 +103,14 @@ descriptionToSource (FileSystemDirectory desc) = do
     let fsDir = fromMaybe "" desc.fsDirRoot </> desc.fsDirPath
         resolved = if isRelative fsDir then cwd </> fsDir else desc.fsDirPath
 
-    pure $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved desc.fsDirActivation
+    pure $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved desc.fsDirActivation (fromMaybe [] desc.fsDirBindings)
 descriptionToSource (SingleTool desc) = do
     cwd <- getCurrentDirectory
 
     -- Build the full path
     let resolved = if isRelative desc.singleToolPath then cwd </> desc.singleToolPath else desc.singleToolPath
 
-    pure $ SingleSource resolved desc.singleToolActivation
+    pure $ SingleSource resolved desc.singleToolActivation (fromMaybe [] desc.singleToolBindings)
 
 -- | Check if a path is relative (simple heuristic).
 isRelative :: FilePath -> Bool
@@ -149,8 +155,8 @@ initializeSource ::
     ToolSource ->
     IO (Either LoadingError BackgroundBashTools)
 initializeSource tracer toolSource = case toolSource of
-    DirectorySource _ mFilter path _ -> initializeDirectorySource tracer mFilter path toolSource
-    SingleSource path _ -> initializeSingleSource tracer path toolSource
+    DirectorySource _ mFilter path _ _ -> initializeDirectorySource tracer mFilter path toolSource
+    SingleSource path _ _ -> initializeSingleSource tracer path toolSource
 
 -- | Initialize a directory source.
 initializeDirectorySource ::
@@ -243,15 +249,15 @@ initializeBackroundToolbox ::
     FilePath ->
     IO (Either LoadingError BackgroundBashTools)
 initializeBackroundToolbox tracer tooldir = do
-    let toolSource = DirectorySource tooldir Nothing tooldir Nothing
+    let toolSource = DirectorySource tooldir Nothing tooldir Nothing []
     initializeSource tracer toolSource
 
--- | Read all tools from a multi-source toolbox along with their activation config.
-readMultiSourceTools :: MultiSourceBashTools -> IO [(Maybe Activation, [BashTools.ScriptDescription])]
+-- | Read all tools from a multi-source toolbox along with their activation and bindings config.
+readMultiSourceTools :: MultiSourceBashTools -> IO [(Maybe Activation, [Binding], [BashTools.ScriptDescription])]
 readMultiSourceTools multi = do
     mapM readSourceTools multi.sources
   where
-    readSourceTools :: BackgroundBashTools -> IO (Maybe Activation, [BashTools.ScriptDescription])
+    readSourceTools :: BackgroundBashTools -> IO (Maybe Activation, [Binding], [BashTools.ScriptDescription])
     readSourceTools bg = do
         scripts <- Background.readBackgroundVal bg.tools
-        pure (sourceActivation bg.source, scripts)
+        pure (sourceActivation bg.source, sourceBindings bg.source, scripts)

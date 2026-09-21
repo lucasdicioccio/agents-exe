@@ -59,6 +59,7 @@ import System.Agents.Base (
 import System.Agents.SessionStore (SessionCatalog)
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
+import qualified System.Agents.Tools.Bindings as Bindings
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
@@ -191,11 +192,12 @@ loadBashTools tracer agent toolsTVar = do
                     -- where each tuple contains the activation config for that source and its scripts
                     activationAndScripts <- BashToolbox.readMultiSourceTools multiSourceTools
 
-                    -- Create registrations for each script, applying the source's activation config
+                    -- Create registrations for each script, applying the source's activation
+                    -- config and any partial-application bindings (todos/tool-partial-application.md)
                     let registrations = concatMap makeRegistrations activationAndScripts
                           where
-                            makeRegistrations (mbActivation, scripts) =
-                                map (ToolReg.registerBashToolInLLM mbActivation) scripts
+                            makeRegistrations (mbActivation, bindings, scripts) =
+                                map (Bindings.applyBindings bindings . ToolReg.registerBashToolInLLM mbActivation) scripts
 
                     atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                     pure Nothing
@@ -207,7 +209,7 @@ execution's current working directory.
 collectBashDescriptions :: Agent -> [BashToolboxDescription]
 collectBashDescriptions agent =
     let legacyDir = case toolDirectory agent of
-            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing]
+            Just dir -> [FileSystemDirectory $ FileSystemDirectoryDescription Nothing dir Nothing Nothing Nothing]
             Nothing -> []
         toolboxDescs = fromMaybe [] (bashToolboxes agent)
      in legacyDir ++ toolboxDescs

@@ -20,6 +20,7 @@ module System.Agents.Tools.ScriptTypes (
 
     -- * Argument Translation
     translateArguments,
+    argEnvVarName,
 ) where
 
 import Data.Aeson (FromJSON, ToJSON, (.:?), (.=))
@@ -27,6 +28,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import Data.List as List
 import Data.Text (Text)
+import qualified Data.Text as Text
 import GHC.Generics (Generic)
 
 -------------------------------------------------------------------------------
@@ -60,6 +62,7 @@ data ScriptArgCallingMode
     | Positional
     | DashDashSpace
     | DashDashEqual
+    | Env
     deriving (Show, Eq, Ord)
 
 instance ToJSON ScriptArgCallingMode where
@@ -68,6 +71,7 @@ instance ToJSON ScriptArgCallingMode where
         Positional -> Aeson.String "positional"
         DashDashSpace -> Aeson.String "dashdashspace"
         DashDashEqual -> Aeson.String "dashdashequal"
+        Env -> Aeson.String "env"
 
 instance FromJSON ScriptArgCallingMode where
     parseJSON v = case v of
@@ -75,6 +79,7 @@ instance FromJSON ScriptArgCallingMode where
         Aeson.String "positional" -> pure Positional
         Aeson.String "dashdashspace" -> pure DashDashSpace
         Aeson.String "dashdashequal" -> pure DashDashEqual
+        Aeson.String "env" -> pure Env
         _ ->
             fail $
                 List.unlines
@@ -84,6 +89,7 @@ instance FromJSON ScriptArgCallingMode where
                     , "- stdin"
                     , "- dashdashspace"
                     , "- dashdashequal"
+                    , "- env"
                     ]
 
 data ScriptArg
@@ -193,6 +199,15 @@ translateArguments script = Aeson.withObject "Args" $ \v -> do
 
     textToKey :: Text -> Aeson.Key
     textToKey = read . Prelude.show
+
+{- | Environment variable name for an 'Env'-mode argument: the argument name,
+upper-cased, with @-@ turned into @_@.
+-}
+argEnvVarName :: Text -> Text
+argEnvVarName = Text.map dash . Text.toUpper
+  where
+    dash '-' = '_'
+    dash c = c
 
 data ScriptDescription
     = ScriptDescription
