@@ -17,8 +17,9 @@ module AgentsServer.Mcp (
     toolNameFor,
 ) where
 
-import Data.Aeson ((.:), (.=))
+import Data.Aeson ((.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Lazy as LByteString
@@ -39,6 +40,7 @@ import System.Agents.Host.Runner
 import qualified System.Agents.MCP.Base as Mcp
 import System.Agents.Session.Base (LlmResponse (..), LlmTurnContent (..), Session (..), SessionId (..), SessionStatus (..), Turn (..), pendingDeferredCalls)
 import System.Agents.SessionStore (SessionMeta (..))
+import System.Agents.Tools.Params.Types (ParamName)
 
 data McpContext = McpContext
     { mcRunner :: SessionRunner
@@ -47,6 +49,13 @@ data McpContext = McpContext
     -- ^ Owner of the sessions that tool calls create.
     , mcWait :: SessionId -> IO ()
     -- ^ Wait for a session's run to stop, within the server's limits.
+    , mcHeaderParams :: Map ParamName Aeson.Value
+    {- ^ Parameter values from this request's @Agents-Param-<name>@ headers
+    (@todos/tool-partial-application.md@, Phase 5). Every value is a
+    string. A @tools/call@'s @_meta.\"agents-exe\/params\"@ overrides these
+    by name; each call is one run, so session and message scope coincide
+    here.
+    -}
     }
 
 {- | Answer the body of a @POST /mcp@: a JSON-RPC message or a batch.
@@ -137,10 +146,10 @@ agentTool slug node =
 callTool :: McpContext -> Aeson.Value -> IO (Either RpcError Aeson.Value)
 callTool ctx params = case Aeson.parseMaybe parseCall params of
     Nothing -> pure $ Left (-32602, "tools/call needs a tool name and a string argument \"prompt\"")
-    Just (name, prompt) -> case [slug | slug <- Map.keys ctx.mcAgents, toolNameFor slug == name] of
+    Just (name, prompt, metaParams) -> case [slug | slug <- Map.keys ctx.mcAgents, toolNameFor slug == name] of
         [] -> pure $ Left (-32602, "unknown tool: " <> name)
         (slug : _) ->
-            createSessionAs ctx.mcRunner ctx.mcOwner slug (NewMessage prompt []) (Just UntilBlocked) Map.empty >>= \case
+            createSessionAs ctx.mcRunner ctx.mcOwner slug (NewMessage prompt []) (Just UntilBlocked) (Map.union metaParams ctx.mcHeaderParams) >>= \case
                 Left err -> pure $ Right $ toolResult True Nothing [Text.pack (show err)]
                 Right meta -> do
                     let sid = meta.smSessionId
@@ -151,7 +160,23 @@ callTool ctx params = case Aeson.parseMaybe parseCall params of
         name <- o .: "name"
         args <- o .: "arguments"
         prompt <- Aeson.withObject "arguments" (.: "prompt") args
-        pure (name, prompt)
+        metaParams <- parseMetaParams o
+        pure (name, prompt, metaParams)
+
+{- | @_meta.\"agents-exe\/params\"@ on a @tools/call@ request
+(@todos/tool-partial-application.md@, Phase 5): any JSON value per
+parameter, unlike the always-string HTTP headers.
+-}
+parseMetaParams :: Aeson.Object -> Aeson.Parser (Map ParamName Aeson.Value)
+parseMetaParams o =
+    o .:? "_meta" >>= \case
+        Nothing -> pure Map.empty
+        Just meta -> Aeson.withObject "_meta" metaObject meta
+  where
+    metaObject m = case KeyMap.lookup "agents-exe/params" m of
+        Nothing -> pure Map.empty
+        Just (Aeson.Object obj) -> pure $ Map.fromList [(Key.toText k, v) | (k, v) <- KeyMap.toList obj]
+        Just _ -> fail "_meta.\"agents-exe/params\" must be an object"
 
 -- | The tool result for a session after its run stopped, or the wait ended.
 outcome :: SessionId -> Maybe (Session, SessionMeta) -> Aeson.Value

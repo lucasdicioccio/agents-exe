@@ -16,8 +16,8 @@ import qualified Data.UUID.V4 as UUID
 import GHC.Generics (Generic)
 
 import System.Agents.Tools.Activation (Activation)
-import System.Agents.Tools.Bindings.Types (Binding)
-import System.Agents.Tools.Params.Types (ParameterDecl)
+import System.Agents.Tools.Bindings.Types (Binding, BindingValue)
+import System.Agents.Tools.Params.Types (ParamName, ParameterDecl)
 import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
@@ -98,6 +98,15 @@ data ExtraAgentRef
     -- ^ The slug to use when referring to this agent
     , extraAgentPath :: FilePath
     -- ^ Path to the agent's JSON configuration file
+    , extraAgentWith :: Maybe (Map ParamName BindingValue)
+    {- ^ Fills the referenced agent's parameters for every call made through
+    this reference (@todos/tool-partial-application.md@, §7, Phase 5). Keys
+    are the *child's* parameter names; values are resolved against the
+    *calling* agent's 'ctxParams' at call time, lexically, so a message-scope
+    value of the caller is passed like any other. Secrecy travels with the
+    resolved value. The child's own process values and defaults still apply
+    underneath.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -106,6 +115,7 @@ extraAgentRefOptions :: Aeson.Options
 extraAgentRefOptions =
     Aeson.defaultOptions
         { Aeson.fieldLabelModifier = kebabCase . dropPrefix "extraAgent"
+        , Aeson.omitNothingFields = True
         }
   where
     -- Convert camelCase to kebab-case

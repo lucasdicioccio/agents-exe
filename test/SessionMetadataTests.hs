@@ -283,7 +283,7 @@ subAgentParentTest = do
                         else mockCompletion completion
                 }
     childAgentId <- AgentId <$> nextRandom
-    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent deps child "parent" childAgentId]
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent deps child "parent" childAgentId Nothing]
     sid <- newSessionId
     let convId = sessionIdToConversationId sid
     agent <- buildAgent silent deps RootAgent convId parent

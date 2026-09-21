@@ -63,6 +63,7 @@ main =
             , testCase "tokens files hold hashed or plain tokens" tokensFileTest
             , testCase "MCP over HTTP: initialize, list tools, call an agent" mcpTest
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
+            , testCase "MCP over HTTP: Agents-Param- headers and _meta set session params" mcpParamsTest
             , testCase "without authentication, non-local browser origins are refused" originTest
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
@@ -315,6 +316,32 @@ mcpDeferredTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv -
         other -> assertFailure ("expected two contents, got " <> show other)
     (done, final) <- call srv "POST" ("/v1/continuations/" <> token <> "?wait=true") (Just (Aeson.object ["result" .= ("42" :: Text)]))
     (done, field "status" final) @?= (200, "idle")
+
+mcpParamsTest :: Assertion
+mcpParamsTest =
+    withServer withTenantParam mockCompletion $ \srv -> do
+        let call' :: Text -> Text -> Maybe Aeson.Value -> Aeson.Value
+            call' name prompt meta = Aeson.object $ ["name" .= name, "arguments" .= Aeson.object ["prompt" .= prompt]] <> maybe [] (\m -> ["_meta" .= m]) meta
+            rpc i method params = Aeson.object ["jsonrpc" .= ("2.0" :: Text), "id" .= (i :: Int), "method" .= (method :: Text), "params" .= params]
+        -- a missing required parameter is refused before the run starts
+        (_, missing) <- call srv "POST" "/mcp" (Just (rpc 1 "tools/call" (call' "ask_server-test" "hi" Nothing)))
+        field "isError" (field "result" missing) @?= Aeson.Bool True
+        -- an Agents-Param- header supplies it
+        let withHeader = srv{srvHeaders = [("Agents-Param-tenant", "acme-corp")]}
+        (_, viaHeader) <- call withHeader "POST" "/mcp" (Just (rpc 2 "tools/call" (call' "ask_server-test" "hi" Nothing)))
+        field "isError" (field "result" viaHeader) @?= Aeson.Bool False
+        let sid1 = textField "session_id" (field "_meta" (field "result" viaHeader))
+        (_, view1) <- call srv "GET" ("/v1/sessions/" <> sid1) Nothing
+        field "tenant" (field "params" view1) @?= Aeson.String "acme-corp"
+        -- _meta."agents-exe/params" on the call overrides the header
+        let meta = Aeson.object ["agents-exe/params" .= Aeson.object ["tenant" .= ("from-meta" :: Text)]]
+        (_, viaMeta) <- call withHeader "POST" "/mcp" (Just (rpc 3 "tools/call" (call' "ask_server-test" "hi" (Just meta))))
+        field "isError" (field "result" viaMeta) @?= Aeson.Bool False
+        let sid2 = textField "session_id" (field "_meta" (field "result" viaMeta))
+        (_, view2) <- call srv "GET" ("/v1/sessions/" <> sid2) Nothing
+        field "tenant" (field "params" view2) @?= Aeson.String "from-meta"
+  where
+    withTenantParam = "{\"parameters\": [{\"name\": \"tenant\", \"scope\": \"session\", \"required\": true}]}"
 
 originTest :: Assertion
 originTest = do

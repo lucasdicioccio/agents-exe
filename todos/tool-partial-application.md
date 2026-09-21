@@ -31,8 +31,32 @@ fully wired and correct; this is a documentation-only gap).
 it needed a secret parameter that a restart lost (§5's documented
 recovery behaviour).
 
-Not started: Phase 5 (sub-agent `with`, MCP-over-HTTP), Phase 6
-(narrowing helpers down the call chain), Phase 7 (`Expose`).
+Phase 5 (sub-agents and MCP over HTTP) done, checked live with `agents-exe
+check` against fixture agents and with an `agents-server` integration
+test: `ExtraAgentRef` gains `with` (§7), a map from the *child's*
+parameter names to `BindingValue`s in the *parent's* scope;
+`AgentConfigNode.nodeExtraWith` carries it from discovery through to
+`wireAgentTools`, which checks it at load time (every `with` key must be
+a declared parameter of the child; every required session-scope parameter
+of the child must be covered by `with` or by the child's own process
+value/default) and reports failures through the existing
+`LoadingError`/`OtherError` path. `Props.agentToTool` and
+`turnAgentRuntimeIntoIOTool` gained a `Maybe (Map ParamName BindingValue)`
+argument (`Nothing` for a child reached through a toolDirectory, which has
+no reference site to hang a `with` on); `runSubAgent` resolves it against
+the caller's `ctxParams` at call time (`OneShotTool.hs`'s new
+`resolveWith`) and overlays the result onto the child's own resolved
+params, so the child's own process values and defaults still apply
+underneath. A `Literal` in `with` is never secret; a `Param` inherits
+secrecy from the caller's value. MCP over HTTP (`AgentsServer/Mcp.hs`,
+`Api.hs`) gained `Agents-Param-<name>` request headers (always strings)
+and `_meta."agents-exe/params"` on a `tools/call` (any JSON, overrides the
+headers by name); each call is one run, so session and message scope
+coincide there, and both go through the same validation table as the REST
+API.
+
+Not started: Phase 6 (narrowing helpers down the call chain), Phase 7
+(`Expose`).
 
 ## Goal
 

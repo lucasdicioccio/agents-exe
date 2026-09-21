@@ -99,7 +99,8 @@ import qualified System.FilePath as FilePath
 -- Import ToolLoader qualified to avoid name collisions with LoadingError
 import qualified System.Agents.AgentTree.ToolLoader as ToolLoader
 import System.Agents.AgentTree.Trace
-import System.Agents.Tools.Params.Types (Params, ProcessParams)
+import System.Agents.Tools.Bindings.Types (BindingValue)
+import System.Agents.Tools.Params.Types (ParamName, ParamScope (..), ParameterDecl (..), Params, ProcessParams)
 import System.Agents.ApiKeys (
     LoadedApiKeys,
     readOpenApiKeysFile,
@@ -253,6 +254,12 @@ data AgentConfigNode = AgentConfigNode
     -- ^ Child agents from toolDirectory (slugs only)
     , nodeExtraRefs :: [AgentSlug]
     -- ^ Extra agents referenced via extra-agents config
+    , nodeExtraWith :: Map AgentSlug (Map ParamName BindingValue)
+    {- ^ The @with@ of each extra-agents entry, keyed by the referenced
+    agent's slug (@todos/tool-partial-application.md@, §7, Phase 5). A
+    child reached only through 'nodeChildren' (a toolDirectory) has no
+    entry here: it gets process values and defaults only.
+    -}
     }
     deriving (Show)
 
@@ -394,8 +401,13 @@ data Props = Props
     -- ^ Path to API keys file (for resolving ApiKey secret sources)
     , rootAgentFile :: FilePath
     , interactiveTracer :: Tracer IO TreeTrace
-    , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> ToolRegistration
-    -- ^ Function to create a tool registration from an agent node
+    , agentToTool :: OSAgentNode -> AgentSlug -> AgentId -> Maybe (Map ParamName BindingValue) -> ToolRegistration
+    {- ^ Function to create a tool registration from an agent node. The
+    'with' map, when present, is this reference's @with@
+    (@todos/tool-partial-application.md@, §7): 'Nothing' for a child
+    reached through a toolDirectory, which gets no reference site to hang
+    one on.
+    -}
     , sessionCatalog :: SessionCatalog
     -- ^ Sessions visible to session introspection capabilities (e.g., @list-sessions@)
     , processParams :: ProcessParams
@@ -495,8 +507,10 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                             childFiles <- discoverChildFiles rootDir agent
 
                             -- Get extra agent refs
-                            let extraRefs = maybe [] (fmap extraAgentSlug) (extraAgents agent)
-                            let extraPaths = maybe [] (fmap extraAgentPath) (extraAgents agent)
+                            let refs = maybe [] id (extraAgents agent)
+                            let extraRefs = map extraAgentSlug refs
+                            let extraPaths = map extraAgentPath refs
+                            let extraWith = Map.fromList [(r.extraAgentSlug, w) | r <- refs, Just w <- [r.extraAgentWith]]
 
                             -- Resolve extra agent paths to absolute/normalized paths
                             let resolvedExtraPaths = map (\p -> FilePath.normalise (rootDir </> p)) extraPaths
@@ -508,6 +522,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
                                         , nodeConfig = agent
                                         , nodeChildren = [] -- Will be populated when children are processed
                                         , nodeExtraRefs = extraRefs
+                                        , nodeExtraWith = extraWith
                                         }
 
                             let visited' = Map.insert agentSlug node visited
@@ -698,9 +713,10 @@ wireToolReferences ::
 wireToolReferences props graph nodeMap = do
     -- First load configured toolboxes for all agents
     toolboxErrors <- mapM (loadAgentToolboxes props nodeMap) (Map.toList graph.graphNodes)
-    -- Then wire helper agent tools
-    mapM_ (wireAgentTools props graph nodeMap) (Map.toList graph.graphNodes)
-    pure (concat toolboxErrors)
+    -- Then wire helper agent tools (needs every node's osNodeParams already
+    -- resolved above, to check a 'with' against the child's own defaults)
+    wiringErrors <- mapM (wireAgentTools props graph nodeMap) (Map.toList graph.graphNodes)
+    pure (concat toolboxErrors ++ concat wiringErrors)
 
 {- | Load toolboxes for a single agent.
 
@@ -741,13 +757,13 @@ wireAgentTools ::
     AgentConfigGraph ->
     Map.Map AgentSlug OSAgentNode ->
     (AgentSlug, AgentConfigNode) ->
-    IO ()
+    IO [LoadingError]
 wireAgentTools props _graph nodeMap (nodeSlug, node) =
     case Map.lookup nodeSlug nodeMap of
-        Nothing -> pure () -- Should not happen
+        Nothing -> pure [] -- Should not happen
         Just osNode -> do
-            -- Look up child nodes
-            let validChildren = Maybe.catMaybes [Map.lookup childSlug nodeMap | childSlug <- node.nodeChildren]
+            -- Look up child nodes (no reference site, so no 'with')
+            let validChildren = [(childNode, Nothing) | childSlug <- node.nodeChildren, Just childNode <- [Map.lookup childSlug nodeMap]]
 
             -- Look up extra agent nodes
             -- Partition extra refs to skip self-references during wiring
@@ -759,16 +775,58 @@ wireAgentTools props _graph nodeMap (nodeSlug, node) =
                     ReferenceValidationTrace $
                         SelfReferenceDetected nodeSlug node.nodeFile nodeSlug
 
-            let validExtras = Maybe.catMaybes [Map.lookup refSlug nodeMap | refSlug <- otherExtraRefs]
+            let validExtras =
+                    [ (extraNode, Map.lookup refSlug node.nodeExtraWith)
+                    | refSlug <- otherExtraRefs
+                    , Just extraNode <- [Map.lookup refSlug nodeMap]
+                    ]
 
-            -- Combine all helper nodes
+            -- Combine all helper nodes, each with its 'with' (if any)
             let allHelpers = validChildren ++ validExtras
 
+            withErrors <- concat <$> mapM (uncurry (checkWith node)) validExtras
+
             -- Create tool registrations for helper agents
-            let helperTools = [props.agentToTool helperNode (slug (osNodeConfig helperNode)) (osNodeAgentId helperNode) | helperNode <- allHelpers]
+            let helperTools =
+                    [ props.agentToTool helperNode (slug (osNodeConfig helperNode)) (osNodeAgentId helperNode) mWith
+                    | (helperNode, mWith) <- allHelpers
+                    ]
 
             -- Atomically append helper tools to the node's tools TVar
             atomically $ modifyTVar' (osNodeTools osNode) (\existingTools -> existingTools ++ helperTools)
+
+            pure withErrors
+
+{- | Checks one extra-agents reference's @with@ (§7, Phase 5): every key
+must be a parameter the child declares, and every required session-scope
+parameter of the child must be covered, either by @with@ or by the child's
+own process value/default (already resolved into its 'osNodeParams' by the
+time this runs, see 'wireToolReferences').
+-}
+checkWith :: AgentConfigNode -> OSAgentNode -> Maybe (Map ParamName BindingValue) -> IO [LoadingError]
+checkWith _ _ Nothing = pure []
+checkWith parentNode childNode (Just withMap) = do
+    resolved <- readTVarIO (osNodeParams childNode)
+    let childSlug = slug (osNodeConfig childNode)
+        decls = Maybe.fromMaybe [] (AgentsBase.parameters (osNodeConfig childNode))
+        declNames = Set.fromList (map paramName decls)
+        unknown = [n | n <- Map.keys withMap, not (Set.member n declNames)]
+        uncovered =
+            [ paramName d
+            | d <- decls
+            , paramScope d == ScopeSession
+            , paramRequired d
+            , not (Map.member (paramName d) withMap)
+            , not (Map.member (paramName d) resolved)
+            ]
+        errs =
+            [ "'with' for extra agent '" <> childSlug <> "' in " <> Text.pack parentNode.nodeFile <> " names unknown parameter(s): " <> Text.intercalate ", " unknown
+            | not (null unknown)
+            ]
+                ++ [ "'with' for extra agent '" <> childSlug <> "' in " <> Text.pack parentNode.nodeFile <> " does not cover required parameter(s): " <> Text.intercalate ", " uncovered
+                   | not (null uncovered)
+                   ]
+    pure [OtherError (Text.unpack e) | e <- errs]
 
 -------------------------------------------------------------------------------
 -- Phase 4: Build Agent Tree
@@ -1014,6 +1072,7 @@ loadAgentTreeFromConfig props baseDir agent = do
                 , nodeConfig = agent
                 , nodeChildren = []
                 , nodeExtraRefs = []
+                , nodeExtraWith = Map.empty
                 }
         graph = AgentConfigGraph (Map.singleton agentSlug node) (Map.singleton agentSlug []) agentSlug
     agentsResult <- createAgents props graph registry

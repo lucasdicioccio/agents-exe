@@ -77,9 +77,11 @@ import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 
 -- Import ToolExecutionContext with qualified access to avoid ambiguity with Agent fields.
 -- DuplicateRecordFields allows both Agent and ToolExecutionContext to have the same field names.
+import System.Agents.Tools.Bindings.Types (BindingValue (..))
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext (..))
 import qualified System.Agents.Tools.Context as Ctx
 import qualified System.Agents.Tools.IO as IOTools
+import System.Agents.Tools.Params.Types (ParamName, ParamValue (..), Params)
 
 -------------------------------------------------------------------------------
 -- Trace Types
@@ -161,9 +163,14 @@ turnAgentRuntimeIntoIOTool ::
     Base.AgentSlug ->
     -- | The ID of the calling agent (for tracing)
     Base.AgentId ->
+    {- | This reference's @with@ (@todos/tool-partial-application.md@, §7):
+    fills the child's parameters from the caller's 'ctxParams' at call
+    time. 'Nothing' for a child reached through a toolDirectory.
+    -}
+    Maybe (Map.Map ParamName BindingValue) ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId =
+turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith =
     registerIOScriptInLLM io props
   where
     agent = node.osNodeConfig
@@ -216,10 +223,12 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId =
                 (SubAgent parentBaseConvId subcallCallStack)
                 subcallBaseConvId
                 node
+        let withOverlay = resolveWith ctx.ctxParams (fromMaybe Map.empty mWith)
         let sessionAgent =
                 sessionAgent0
                     { SessionBase.ctxWorld = mWorld
                     , SessionBase.ctxEventQueue = mEventQueue
+                    , SessionBase.ctxParams = Map.union withOverlay sessionAgent0.ctxParams
                     }
 
         -- Set the query on the agent
@@ -467,6 +476,19 @@ updateConversationStatus world osConvId newStatus = do
                             }
                 setComponent world entityId updatedState
         Nothing -> pure ()
+
+{- | Resolves a reference's @with@ against the caller's 'ctxParams'
+(@todos/tool-partial-application.md@, §7). A 'Param' that the caller has no
+value for is left out: the child falls back to its own process value or
+default, and a still-required, still-missing parameter fails the call the
+same way an unbound binding does. A 'Literal' is never secret, since it is
+the agent author's own text, not something routed through the model.
+-}
+resolveWith :: Params -> Map.Map ParamName BindingValue -> Params
+resolveWith callerParams = Map.mapMaybe resolveOne
+  where
+    resolveOne (Literal v) = Just (ParamValue v False)
+    resolveOne (Param p) = Map.lookup p callerParams
 
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r

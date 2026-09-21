@@ -30,6 +30,7 @@ import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString as ByteString
 import Data.ByteString.Builder (Builder, byteString, lazyByteString)
 import qualified Data.ByteString.Lazy as LByteString
+import qualified Data.CaseInsensitive as CI
 import Data.Foldable (asum)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -492,11 +493,29 @@ mcpH env req (Caller owner) = do
                 , mcAgents = agents
                 , mcOwner = owner
                 , mcWait = \sid -> waitForRun env sid 120
+                , mcHeaderParams = headerParams req
                 }
     (status, answer) <- handleMcp ctx raw
     pure $ case answer of
         Just value -> json status value
         Nothing -> responseLBS status [] ""
+
+{- | Parameter values from this request's @Agents-Param-<name>@ headers
+(@todos/tool-partial-application.md@, Phase 5). Every value is a string;
+a @tools/call@'s @_meta@ can carry any JSON value and overrides these.
+-}
+headerParams :: Request -> Map Text Aeson.Value
+headerParams req =
+    Map.fromList
+        [ (pName, Aeson.String (Text.decodeUtf8 value))
+        | (name, value) <- requestHeaders req
+        , let nameText = Text.decodeUtf8 (CI.original name)
+        , Text.toLower (Text.take (Text.length prefix) nameText) == prefix
+        , let pName = Text.drop (Text.length prefix) nameText
+        , not (Text.null pName)
+        ]
+  where
+    prefix = "agents-param-"
 
 -------------------------------------------------------------------------------
 -- Events

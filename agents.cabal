@@ -449,6 +449,7 @@ library agents-server-internal
                       aeson,
                       async,
                       bytestring,
+                      case-insensitive,
                       containers,
                       crypton,
                       http-api-data,

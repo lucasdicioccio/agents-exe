@@ -170,15 +170,15 @@ extraAgentRefTests =
     testGroup
         "ExtraAgentRef JSON serialization"
         [ testCase "serialize to JSON" $ do
-            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json" }
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing }
             let json = encode ref
             Text.unpack (decodeUtf8 json) @?= "{\"slug\":\"helper-bot\",\"path\":\"./helpers/bot.json\"}"
         , testCase "deserialize from JSON" $ do
             let json = "{\"slug\":\"helper-bot\",\"path\":\"./helpers/bot.json\"}"
             let mRef = decode (encodeUtf8 json) :: Maybe Base.ExtraAgentRef
-            mRef @?= Just (Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json" })
+            mRef @?= Just (Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing })
         , testCase "round-trip" $ do
-            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "superb-agent", Base.extraAgentPath = "../superb/agent.json" }
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "superb-agent", Base.extraAgentPath = "../superb/agent.json", Base.extraAgentWith = Nothing }
             let json = encode ref
             let mRef = decode json :: Maybe Base.ExtraAgentRef
             mRef @?= Just ref
@@ -272,7 +272,7 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
-                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
+                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing }
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -330,7 +330,7 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
-                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json" }
+                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing }
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing

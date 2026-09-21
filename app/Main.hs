@@ -227,9 +227,9 @@ orchestratorAgent =
         , builtinToolboxes = Just []
         , extraAgents =
             Just
-                [ ExtraAgentRef "openai-assistant" "openai-assistant.json"
-                , ExtraAgentRef "mistral-assistant" "mistral-assistant.json"
-                , ExtraAgentRef "ollama-assistant" "ollama-assistant.json"
+                [ ExtraAgentRef "openai-assistant" "openai-assistant.json" Nothing
+                , ExtraAgentRef "mistral-assistant" "mistral-assistant.json" Nothing
+                , ExtraAgentRef "ollama-assistant" "ollama-assistant.json" Nothing
                 ]
         , skillSources = Nothing
         , autoEnableSkills = Nothing
