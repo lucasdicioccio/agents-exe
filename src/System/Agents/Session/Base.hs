@@ -185,6 +185,7 @@ import System.Agents.Session.Durable (
 import System.Agents.SessionStore (SessionBackend (..))
 import System.Agents.Tools.Cache (ToolCache (..))
 import System.Agents.Tools.Context (CallStackEntry, ToolExecutionContext, ToolPortal)
+import System.Agents.Tools.Bindings.Types (ScopedBinding)
 import System.Agents.Tools.Params.Types (Params)
 -- Re-export all session types from Session.Types for backward compatibility
 import System.Agents.Media.Types (MediaAttachment)
@@ -349,6 +350,12 @@ data Agent r = Agent
     later, session/message-level) values (see
     @todos/tool-partial-application.md@). Copied into every tool call's
     'ToolExecutionContext' by 'buildContext'.
+    -}
+    , ctxInheritedBindings :: [ScopedBinding]
+    {- ^ Bindings an ancestor placed on one of this agent's own helpers, or
+    on this agent itself (@todos/tool-partial-application.md@, §8.3).
+    Copied into every tool call's 'ToolExecutionContext' by 'buildContext',
+    same as 'ctxParams'.
     -}
     }
     deriving (Functor)

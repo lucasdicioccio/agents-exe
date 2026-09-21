@@ -133,6 +133,7 @@ defaultOpenAIAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , bindings = Nothing
         , parameters = Nothing
         }
 
@@ -165,6 +166,7 @@ mistralAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , bindings = Nothing
         , parameters = Nothing
         }
 
@@ -197,6 +199,7 @@ ollamaAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , bindings = Nothing
         , parameters = Nothing
         }
 
@@ -227,9 +230,9 @@ orchestratorAgent =
         , builtinToolboxes = Just []
         , extraAgents =
             Just
-                [ ExtraAgentRef "openai-assistant" "openai-assistant.json" Nothing
-                , ExtraAgentRef "mistral-assistant" "mistral-assistant.json" Nothing
-                , ExtraAgentRef "ollama-assistant" "ollama-assistant.json" Nothing
+                [ ExtraAgentRef "openai-assistant" "openai-assistant.json" Nothing Nothing
+                , ExtraAgentRef "mistral-assistant" "mistral-assistant.json" Nothing Nothing
+                , ExtraAgentRef "ollama-assistant" "ollama-assistant.json" Nothing Nothing
                 ]
         , skillSources = Nothing
         , autoEnableSkills = Nothing
@@ -238,6 +241,7 @@ orchestratorAgent =
         , asyncYieldStrategy = Nothing
         , maxConcurrency = Nothing
         , asyncCallTimeoutSeconds = Nothing
+        , bindings = Nothing
         , parameters = Nothing
         }
 

@@ -432,6 +432,7 @@ handleRunIsolated store apiKeysFile agentFiles sid = do
                 , Ctx.tecsAllowedTools = []
                 , Ctx.tecsParentConversation = Nothing
                 , Ctx.tecsParams = mempty
+                , Ctx.tecsInheritedBindings = []
                 }
 
 -- | Short human-readable summary of a tool response.

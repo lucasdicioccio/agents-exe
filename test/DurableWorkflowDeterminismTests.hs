@@ -108,6 +108,7 @@ mkAsyncAgent policy =
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
+        , ctxInheritedBindings = []
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

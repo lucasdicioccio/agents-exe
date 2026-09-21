@@ -519,6 +519,7 @@ test-suite agents-tests
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
                     , BindingsTests
+                    , NarrowingTests
                     , ContinuationConsistencyTests
                     , AsyncToolCallsTests
                     , DeveloperToolboxTests

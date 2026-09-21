@@ -232,7 +232,7 @@ deleteTest = do
                 then readMVar gate >> mockCompletion c
                 else firstThen [childCall, remoteCall "call_2"] c
     agentId <- AgentId <$> nextRandom
-    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing]
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
     withSessionRunner host $ \runner -> do
         meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (message "delegate") (Just UntilBlocked) Map.empty
         let sid = meta.smSessionId

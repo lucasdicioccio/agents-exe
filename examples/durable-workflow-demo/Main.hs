@@ -163,6 +163,7 @@ mkDemoAgent convId = do
             , ctxSessionBackend = Nothing
             , ctxAsyncEngine = Nothing
             , ctxParams = mempty
+            , ctxInheritedBindings = []
             }
 
 -------------------------------------------------------------------------------

@@ -945,6 +945,7 @@ mkAgentWithWorld world mode policy =
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
+        , ctxInheritedBindings = []
         }
 
 -------------------------------------------------------------------------------

@@ -107,6 +107,14 @@ data ExtraAgentRef
     resolved value. The child's own process values and defaults still apply
     underneath.
     -}
+    , extraAgentNarrowable :: Maybe Bool
+    {- ^ Whether an ancestor above the agent that owns this reference may
+    narrow this helper (or anything below it) via @describe_agent@ /
+    @bindings@ on @prompt_agent_*@ (@todos/tool-partial-application.md@, §8,
+    Phase 6). Default: 'True'. When 'False', @describe_agent@ shows only
+    this helper's announce, and any binding addressed at it (or below) is
+    refused.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1648,6 +1656,13 @@ data Agent
     , parameters :: Maybe [ParameterDecl]
     -- ^ Named holes this agent's tool bindings may refer to (see
     -- @todos/tool-partial-application.md@).
+    , bindings :: Maybe [Binding]
+    {- ^ Agent-level bindings (@todos/tool-partial-application.md@, §8.1):
+    like toolbox-level bindings, but @tool@ matches the LLM-visible tool
+    name directly, so bindings can target tools from any toolbox,
+    including bash tools (which have no toolbox name to hang a
+    toolbox-level binding on). Applied after toolbox-level bindings.
+    -}
     }
     deriving (Show, Eq, Generic)
 

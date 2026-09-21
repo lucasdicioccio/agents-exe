@@ -220,8 +220,8 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
                             -- config and any partial-application bindings (todos/tool-partial-application.md)
                             let registrations = concatMap makeRegistrations activationAndScripts
                                   where
-                                    makeRegistrations (mbActivation, bindings, scripts) =
-                                        let specialized = Bindings.specializeProcessParams resolvedParams bindings
+                                    makeRegistrations (mbActivation, toolBindings, scripts) =
+                                        let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
                                          in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
 
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
@@ -233,7 +233,7 @@ shows up in @ps@ and in traces, so a secret bound there would leak
 regardless of how carefully the model is kept from seeing it.
 -}
 checkSecretBindingModes :: Set.Set Text.Text -> (Maybe Activation, [Bindings.Binding], [BashTools.ScriptDescription]) -> [String]
-checkSecretBindingModes secretParamNames (_, bindings, scripts) =
+checkSecretBindingModes secretParamNames (_, toolBindings, scripts) =
     [ "secret parameter '"
       <> Text.unpack p
       <> "' is bound to argument '"
@@ -243,7 +243,7 @@ checkSecretBindingModes secretParamNames (_, bindings, scripts) =
       <> "', whose calling mode is not 'env' (it would leak via `ps` and traces)"
     | script <- scripts
     , let toolName = getToolName (ToolReg.bash2LLMName script)
-    , let relevant = Bindings.bindingsForTool toolName bindings
+    , let relevant = Bindings.bindingsForTool toolName toolBindings
     , let argModeByName = Map.fromList [(a.argName, a.argCallingMode) | a <- script.scriptInfo.scriptArgs]
     , b <- relevant
     , Bindings.Param p <- [b.bindValue]
@@ -384,7 +384,7 @@ loadOpenAPIToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar descripti
 
     case configResult of
         Left err -> pure $ Just $ OpenAPILoadingError err
-        Right (config, bindings) -> do
+        Right (config, toolBindings) -> do
             -- Initialize the toolbox with API keys file for secret resolution
             initResult <- OpenAPIToolbox.initializeToolbox apiKeysFile tracer config
 
@@ -399,7 +399,7 @@ loadOpenAPIToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar descripti
                         Left err -> pure $ Just $ OpenAPILoadingError err
                         Right registrations -> do
                             -- Argument bindings work through the generic combinator (todos/tool-partial-application.md, §3.3)
-                            let specialized = Bindings.specializeProcessParams resolvedParams bindings
+                            let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
                                 bound = map (Bindings.applyBindings specialized) registrations
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ bound)
                             pure Nothing
@@ -473,7 +473,7 @@ loadPostgRESTToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar descrip
 
     case configResult of
         Left err -> pure $ Just $ PostgRESTLoadingError err
-        Right (config, bindings) -> do
+        Right (config, toolBindings) -> do
             -- Initialize the toolbox with API keys file for secret resolution
             initResult <- PostgRESToolbox.initializeToolbox apiKeysFile tracer config
 
@@ -487,7 +487,7 @@ loadPostgRESTToolbox tracer baseDir apiKeysFile resolvedParams toolsTVar descrip
                     case regResult of
                         Left err -> pure $ Just $ PostgRESTLoadingError err
                         Right registrations -> do
-                            let specialized = Bindings.specializeProcessParams resolvedParams bindings
+                            let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
                                 bound = map (Bindings.applyBindings specialized) registrations
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ bound)
                             pure Nothing

@@ -92,6 +92,7 @@ import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
 import qualified RunnerTests
 import qualified DurableWorkflowTests
+import qualified NarrowingTests
 
 main :: IO ()
 main = defaultMain tests
@@ -122,6 +123,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , BindingsTests.tests
+        , NarrowingTests.tests
         , SkillsTests.skillsTestSuite
         , FileSandboxPredicateTests.tests
         , ActivationSessionTests.activationSessionTestSuite
@@ -170,16 +172,22 @@ extraAgentRefTests =
     testGroup
         "ExtraAgentRef JSON serialization"
         [ testCase "serialize to JSON" $ do
-            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing }
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
             let json = encode ref
             Text.unpack (decodeUtf8 json) @?= "{\"slug\":\"helper-bot\",\"path\":\"./helpers/bot.json\"}"
         , testCase "deserialize from JSON" $ do
             let json = "{\"slug\":\"helper-bot\",\"path\":\"./helpers/bot.json\"}"
             let mRef = decode (encodeUtf8 json) :: Maybe Base.ExtraAgentRef
-            mRef @?= Just (Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing })
+            mRef @?= Just (Base.ExtraAgentRef { Base.extraAgentSlug = "helper-bot", Base.extraAgentPath = "./helpers/bot.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing })
         , testCase "round-trip" $ do
-            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "superb-agent", Base.extraAgentPath = "../superb/agent.json", Base.extraAgentWith = Nothing }
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "superb-agent", Base.extraAgentPath = "../superb/agent.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
             let json = encode ref
+            let mRef = decode json :: Maybe Base.ExtraAgentRef
+            mRef @?= Just ref
+        , testCase "narrowable: false round-trips (§8, Phase 6)" $ do
+            let ref = Base.ExtraAgentRef { Base.extraAgentSlug = "diff-reviewer", Base.extraAgentPath = "./diff-reviewer.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Just False }
+            let json = encode ref
+            Text.unpack (decodeUtf8 json) @?= "{\"slug\":\"diff-reviewer\",\"path\":\"./diff-reviewer.json\",\"narrowable\":false}"
             let mRef = decode json :: Maybe Base.ExtraAgentRef
             mRef @?= Just ref
         ]
@@ -272,7 +280,7 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
-                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing }
+                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -281,6 +289,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let json = encode agent
@@ -309,6 +318,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let json = encode agent
@@ -330,7 +340,7 @@ agentSerializationTests =
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
                     , Base.extraAgents = Just
-                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing }
+                        [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
                         ]
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -339,6 +349,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let desc = Base.AgentDescription agent
@@ -375,6 +386,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let json = encode agent
@@ -416,6 +428,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let json = encode agent
@@ -454,6 +467,7 @@ agentSerializationTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     , Base.extraAgents = Nothing
                     }
@@ -576,6 +590,7 @@ bashToolboxTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let json = encode agent
@@ -605,6 +620,7 @@ bashToolboxTests =
                     , Base.asyncYieldStrategy = Nothing
                     , Base.maxConcurrency = Nothing
                     , Base.asyncCallTimeoutSeconds = Nothing
+                    , bindings = Nothing
                     , Base.parameters = Nothing
                     }
             let json = encode agent

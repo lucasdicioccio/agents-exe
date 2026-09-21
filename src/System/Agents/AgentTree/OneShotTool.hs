@@ -21,7 +21,7 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-import Control.Concurrent.STM (TQueue, atomically, newTVarIO, writeTQueue)
+import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeTQueue)
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
@@ -77,7 +77,16 @@ import System.Agents.ToolSchema (ParamProperty (..), ParamType (..))
 
 -- Import ToolExecutionContext with qualified access to avoid ambiguity with Agent fields.
 -- DuplicateRecordFields allows both Agent and ToolExecutionContext to have the same field names.
-import System.Agents.Tools.Bindings.Types (BindingValue (..))
+import qualified System.Agents.Tools.Bindings as Bindings
+import System.Agents.Tools.Bindings.Types (
+    AgentAddress (..),
+    AgentBinding (..),
+    Binding (..),
+    BindingValue (..),
+    ScopedBinding (..),
+    WhenUnbound (..),
+    reRootBindings,
+ )
 import System.Agents.Tools.Context (CallStackEntry (..), ToolExecutionContext (..))
 import qualified System.Agents.Tools.Context as Ctx
 import qualified System.Agents.Tools.IO as IOTools
@@ -94,14 +103,28 @@ newtype Trace
 -------------------------------------------------------------------------------
 
 -- | Data type for the prompt argument to the sub-agent.
-newtype PromptOtherAgent = PromptOtherAgent
+data PromptOtherAgent = PromptOtherAgent
     { what :: Text
+    , poaBindings :: Maybe [AgentBinding]
+    {- ^ Narrows one of the helper's own tool arguments, or one of its
+    helpers' (@todos/tool-partial-application.md@, §8.3). Resolved against
+    the caller's 'ctxParams' when this call is made.
+    -}
+    , poaWith :: Maybe (Map.Map ParamName BindingValue)
+    {- ^ Call-time @with@ (§8.3): fills the helper's own parameters for
+    this call, same as the reference's static @with@ (§7), but chosen by
+    the calling model. Cannot refill a parameter the reference's @with@
+    already fills.
+    -}
     }
     deriving (Show)
 
 instance Aeson.FromJSON PromptOtherAgent where
     parseJSON = Aeson.withObject "PromptOtherAgent" $ \v ->
-        PromptOtherAgent <$> v Aeson..: "what"
+        PromptOtherAgent
+            <$> v Aeson..: "what"
+            <*> v Aeson..:? "bindings"
+            <*> v Aeson..:? "with"
 
 -------------------------------------------------------------------------------
 -- Type Conversions
@@ -168,9 +191,15 @@ turnAgentRuntimeIntoIOTool ::
     time. 'Nothing' for a child reached through a toolDirectory.
     -}
     Maybe (Map.Map ParamName BindingValue) ->
+    {- | Whether this reference is narrowable (@todos/tool-partial-application.md@,
+    §8, Phase 6): 'True' for a child reached through a toolDirectory. When
+    'False', any @bindings@/@with@ on this call, and any inherited binding
+    addressed at this agent or below, are refused.
+    -}
+    Bool ->
     -- | The resulting tool registration
     ToolRegistration
-turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith =
+turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowable =
     registerIOScriptInLLM io props
   where
     agent = node.osNodeConfig
@@ -182,6 +211,26 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith =
             , propertyType = StringParamType
             , propertyDescription = "the prompt to call the specialized-agent with"
             , propertyRequired = True
+            }
+        , ParamProperty
+            { propertyKey = "bindings"
+            , propertyType = OpaqueParamType "array"
+            , propertyDescription =
+                "narrows some of this helper's own open tool arguments, or one of its "
+                    <> "own helpers' (see describe_agent): [{\"agent\": \"<path below this helper, "
+                    <> "or omitted for the helper itself, or \\\"**\\\" for it and everything below>\", "
+                    <> "\"tool\": \"<glob, optional>\", \"arg\": \"<name>\", "
+                    <> "\"value\": {\"tag\": \"Literal\", \"contents\": <json>} | {\"tag\": \"Param\", \"contents\": \"<your own parameter name>\"}}]"
+            , propertyRequired = False
+            }
+        , ParamProperty
+            { propertyKey = "with"
+            , propertyType = OpaqueParamType "object"
+            , propertyDescription =
+                "fills some of this helper's own parameters for this call only: "
+                    <> "{\"<helper's parameter name>\": {\"tag\": \"Literal\", \"contents\": <json>} | "
+                    <> "{\"tag\": \"Param\", \"contents\": \"<your own parameter name>\"}}"
+            , propertyRequired = False
             }
         ]
 
@@ -196,7 +245,17 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith =
 
     -- Run the sub-agent with the given prompt and execution context
     runSubAgent :: ToolExecutionContext -> PromptOtherAgent -> IO CByteString.ByteString
-    runSubAgent ctx (PromptOtherAgent query) = do
+    runSubAgent ctx (PromptOtherAgent query mBindingsArg mCallWith)
+        | not narrowable, Just _ <- mBindingsArg =
+            pure $ Text.encodeUtf8 $ "agent '" <> Base.slug agent <> "' is not narrowable: 'bindings' on this call is refused"
+        | not narrowable, Just _ <- mCallWith =
+            pure $ Text.encodeUtf8 $ "agent '" <> Base.slug agent <> "' is not narrowable: 'with' on this call is refused"
+        | otherwise = case resolveCallBindings ctx.ctxParams (fromMaybe [] mBindingsArg) of
+            Left err -> pure $ Text.encodeUtf8 err
+            Right ownScoped -> runSubAgentWithBindings ctx query ownScoped (fromMaybe Map.empty mCallWith)
+
+    runSubAgentWithBindings :: ToolExecutionContext -> Text -> [ScopedBinding] -> Map.Map ParamName BindingValue -> IO CByteString.ByteString
+    runSubAgentWithBindings ctx query ownScoped callWith = do
         -- Extract the conversation ID from the execution context for tracing
         -- ctx.ctxConversationId is Base.ConversationId
         let parentBaseConvId = ctx.ctxConversationId
@@ -213,6 +272,27 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith =
         let mEventQueue = Ctx.ctxEventQueue ctx
         let mParentBaseConv = Ctx.ctxParentConversation ctx
 
+        -- Narrowing helpers, down the call chain (§8.3, Phase 6): the
+        -- caller's inherited bindings, re-rooted at this helper, plus this
+        -- call's own bindings. Those addressed at the helper itself are
+        -- applied now, wrapping its tools for this call only (the shared,
+        -- loaded toolboxes are never mutated); the rest travel in the
+        -- sub-agent's own 'ctxInheritedBindings' for it to apply when it
+        -- prompts its own helpers.
+        let inheritedHere = if narrowable then reRootBindings (Base.slug agent) ctx.ctxInheritedBindings else []
+            allScoped = ownScoped ++ inheritedHere
+            hereBindings = [sb | sb <- allScoped, sbAddress sb == AgentHere]
+            restBindings = [sb | sb <- allScoped, sbAddress sb /= AgentHere]
+        nodeForCall <-
+            if null hereBindings
+                then pure node
+                else do
+                    rawTools <- readTVarIO node.osNodeTools
+                    let toolBindings = [Binding (sbTool sb) (sbArg sb) (Literal (sbValue sb)) Omit | sb <- hereBindings]
+                        wrappedTools = map (Bindings.applyBindings toolBindings) rawTools
+                    wrappedToolsTVar <- newTVarIO wrappedTools
+                    pure node{osNodeTools = wrappedToolsTVar}
+
         -- Build the sub-agent with the caller's dependencies, then attach the
         -- OS integration fields: the World and EventQueue are essential for
         -- nested subcalls to be visible in the TUI
@@ -222,13 +302,18 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith =
                 deps
                 (SubAgent parentBaseConvId subcallCallStack)
                 subcallBaseConvId
-                node
-        let withOverlay = resolveWith ctx.ctxParams (fromMaybe Map.empty mWith)
+                nodeForCall
+        -- A call-time 'with' (§8.3) cannot refill a parameter the
+        -- reference's own static 'with' (§7) already fills.
+        let refWith = fromMaybe Map.empty mWith
+            effectiveCallWith = Map.difference callWith refWith
+            withOverlay = resolveWith ctx.ctxParams (Map.union refWith effectiveCallWith)
         let sessionAgent =
                 sessionAgent0
                     { SessionBase.ctxWorld = mWorld
                     , SessionBase.ctxEventQueue = mEventQueue
                     , SessionBase.ctxParams = Map.union withOverlay sessionAgent0.ctxParams
+                    , SessionBase.ctxInheritedBindings = restBindings
                     }
 
         -- Set the query on the agent
@@ -489,6 +574,28 @@ resolveWith callerParams = Map.mapMaybe resolveOne
   where
     resolveOne (Literal v) = Just (ParamValue v False)
     resolveOne (Param p) = Map.lookup p callerParams
+
+{- | Resolves a @prompt_agent_*@ call's own @bindings@ argument
+(@todos/tool-partial-application.md@, §8.3) against the caller's
+'ctxParams'. A 'Literal' value is never secret (the caller's own model
+wrote it); a 'Param' inherits secrecy from the caller's value. An
+unresolvable 'Param' fails the whole call when its policy is 'Fail' (told
+to the caller's model, so it can retry, per D8's "errors the model can fix
+are told to it"), and is dropped silently when it is not: the target
+argument is simply left unbound, as if the binding had not been given.
+-}
+resolveCallBindings :: Params -> [AgentBinding] -> Either Text [ScopedBinding]
+resolveCallBindings callerParams = go []
+  where
+    go :: [ScopedBinding] -> [AgentBinding] -> Either Text [ScopedBinding]
+    go acc [] = Right (reverse acc)
+    go acc (b : bs) = case abValue b of
+        Literal v -> go (ScopedBinding (abAgent b) (abTool b) (abArg b) v False : acc) bs
+        Param p -> case Map.lookup p callerParams of
+            Just pv -> go (ScopedBinding (abAgent b) (abTool b) (abArg b) (pvValue pv) (pvSecret pv) : acc) bs
+            Nothing -> case abWhenUnbound b of
+                Fail -> Left $ "binding for argument '" <> abArg b <> "' has no value for parameter '" <> p <> "'"
+                _ -> go acc bs
 
 -- | Set the user query on an agent.
 agentSetQuery :: UserQuery -> Agent r -> Agent r

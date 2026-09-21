@@ -18,6 +18,14 @@ module System.Agents.Tools.Bindings.Types (
     globMatches,
     bindingsForTool,
     BindingsTrace (..),
+
+    -- * Narrowing helpers (§8, Phase 6)
+    AgentAddress (..),
+    parseAgentAddress,
+    descendAddress,
+    AgentBinding (..),
+    ScopedBinding (..),
+    reRootBindings,
 ) where
 
 import Data.Aeson (Value)
@@ -128,4 +136,101 @@ data BindingsTrace
         , utParam :: ParamName
         }
     deriving (Show, Eq)
+
+-------------------------------------------------------------------------------
+-- Narrowing helpers, down the call chain (§8, Phase 6)
+-------------------------------------------------------------------------------
+
+{- | Where a binding on a @prompt_agent_*@ call applies, relative to the
+helper being prompted (@todos/tool-partial-application.md@, §8.3).
+
+* 'AgentHere': the prompted helper itself (the JSON @agent@ key is absent).
+* 'AgentPath': a helper reached by following these slugs below the
+  prompted helper (@"diff-reviewer"@, @"a/b"@).
+* 'AgentEverywhere': the prompted helper and everything below it (@"**"@).
+-}
+data AgentAddress
+    = AgentHere
+    | AgentPath [Text]
+    | AgentEverywhere
+    deriving (Show, Eq, Ord, Generic)
+
+instance Aeson.ToJSON AgentAddress
+instance Aeson.FromJSON AgentAddress
+
+-- | Parses the JSON @agent@ key of a @prompt_agent_*@ binding into an 'AgentAddress'.
+parseAgentAddress :: Maybe Text -> AgentAddress
+parseAgentAddress Nothing = AgentHere
+parseAgentAddress (Just "**") = AgentEverywhere
+parseAgentAddress (Just t) = AgentPath (Text.splitOn "/" t)
+
+{- | Re-roots an 'AgentAddress' one level down, at a named child. 'Nothing'
+means this address does not apply below that child at all; 'Just' carries
+the address relative to the child. 'AgentHere' never descends: a binding
+addressed at the current agent is consumed there, not passed further.
+-}
+descendAddress :: Text -> AgentAddress -> Maybe AgentAddress
+descendAddress _ AgentHere = Nothing
+descendAddress childSlug (AgentPath (p : ps))
+    | p == childSlug = Just (if null ps then AgentHere else AgentPath ps)
+    | otherwise = Nothing
+descendAddress _ (AgentPath []) = Nothing
+descendAddress _ AgentEverywhere = Just AgentEverywhere
+
+{- | One entry of a @prompt_agent_*@ call's @bindings@ argument (§8.3): the
+model-chosen counterpart to a toolbox- or agent-level 'Binding', with an
+extra @agent@ address picking which helper (below the one being prompted)
+it targets.
+-}
+data AgentBinding = AgentBinding
+    { abAgent :: AgentAddress
+    , abTool :: Maybe ToolGlob
+    , abArg :: Text
+    , abValue :: BindingValue
+    , abWhenUnbound :: WhenUnbound
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance Aeson.FromJSON AgentBinding where
+    parseJSON = Aeson.withObject "AgentBinding" $ \o ->
+        AgentBinding
+            <$> (parseAgentAddress <$> o Aeson..:? "agent")
+            <*> o Aeson..:? "tool"
+            <*> o Aeson..: "arg"
+            <*> o Aeson..: "value"
+            <*> (maybe Fail id <$> o Aeson..:? "whenUnbound")
+
+{- | A binding already resolved against its caller's parameters, travelling
+down 'ToolExecutionContext.ctxInheritedBindings' for a call to a helper
+several levels below the one that supplied it (§8.3). Unlike 'Binding',
+the value is a concrete JSON value (never a 'Param' still to resolve): it
+was resolved exactly once, at the call site that introduced it, against
+that caller's own parameters at that moment.
+-}
+data ScopedBinding = ScopedBinding
+    { sbAddress :: AgentAddress
+    , sbTool :: Maybe ToolGlob
+    , sbArg :: Text
+    , sbValue :: Value
+    , sbSecret :: Bool
+    -- ^ Whether the resolved value came from a secret parameter. Never
+    -- shown in a trace or a context snapshot's non-secret projection.
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance Aeson.ToJSON ScopedBinding
+instance Aeson.FromJSON ScopedBinding
+
+{- | Re-roots every binding that applies below a named child, for a call
+into that child (§8.3): drops bindings addressed at the current agent
+itself (already applied there) or at some other child, and descends the
+rest by one level.
+-}
+reRootBindings :: Text -> [ScopedBinding] -> [ScopedBinding]
+reRootBindings childSlug = go
+  where
+    go [] = []
+    go (sb : sbs) = case descendAddress childSlug (sbAddress sb) of
+        Just addr' -> sb{sbAddress = addr'} : go sbs
+        Nothing -> go sbs
 

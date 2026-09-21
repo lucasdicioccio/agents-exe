@@ -873,6 +873,7 @@ buildContext agent sess convId =
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess
             , Ctx.ctxParams = agent.ctxParams
+            , Ctx.ctxInheritedBindings = agent.ctxInheritedBindings
             }
 
 -- | Tracked calls of every partial turn of a session, newest turn first.

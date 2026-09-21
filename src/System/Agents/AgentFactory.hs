@@ -194,6 +194,7 @@ buildAgent tracer deps role convId node = do
                 , ctxSessionBackend = sinkBackend deps.adSessionSink
                 , ctxAsyncEngine = Nothing
                 , ctxParams = resolvedParams
+                , ctxInheritedBindings = []
                 }
     disclosed <-
         agentEvaluateActiveTools

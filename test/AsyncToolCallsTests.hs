@@ -755,4 +755,5 @@ mkAgent world strategy tool =
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
+        , ctxInheritedBindings = []
         }

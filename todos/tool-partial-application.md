@@ -55,7 +55,49 @@ headers by name); each call is one run, so session and message scope
 coincide there, and both go through the same validation table as the REST
 API.
 
-Not started: Phase 6 (narrowing helpers down the call chain), Phase 7
+Phase 6 (narrowing helpers down the call chain) done, checked with the
+`agents-tests` suite (`NarrowingTests.hs`: the `AgentAddress` algebra, and
+`describe_agent` end to end against a loaded three-level tree) and with
+`agents-exe check` against fixture agents: `Agent` gains a top-level
+`bindings` list (§8.1), applied in `loadAgentToolboxes` after every
+toolbox's own bindings, matching by the LLM-visible tool name across
+toolboxes (bash tools have no toolbox name of their own to hang a
+toolbox-level binding on). `ExtraAgentRef` gains `narrowable` (default
+`True`); `AgentConfigNode.nodeExtraNarrowable` carries it alongside
+`nodeExtraWith`. `describe_agent` (§8.2) is registered by `wireAgentTools`
+next to `prompt_agent_<slug>` for any agent with at least one helper; it
+recurses over `nodeChildren`/`nodeExtraRefs`, cut at `maxDescribeDepth` and
+at cycles, shows each declared parameter with a `bound` flag (already
+resolved, or covered by the reference's `with`) and each tool's still-open
+arguments (its current, already-bound-reduced schema minus anything the
+caller's inherited bindings already cover), and reports only `announce`
+for a `narrowable: false` reference. `prompt_agent_<slug>` gains optional
+`bindings` and `with` arguments (§8.3): `AgentBinding`/`ScopedBinding`/
+`AgentAddress` (`Bindings/Types.hs`) represent a binding addressed at the
+prompted helper (`Here`), one of its own helpers (a slash-separated
+`AgentPath`), or all of them (`"**"`/`Everywhere`); `descendAddress`/
+`reRootBindings` re-root an address (or a whole list of `ScopedBinding`s)
+one level down when a call descends into a named child. `runSubAgent`
+resolves the call's own `bindings` against the caller's `ctxParams`
+(`resolveCallBindings`; an unresolvable required `Param` fails the call
+with a message the calling model can act on, per D8), combines them with
+the caller's own `ctxInheritedBindings` re-rooted at the prompted helper,
+applies whatever is addressed at the helper itself to a *fresh* copy of
+its `osNodeTools` (`applyBindings`, scoped to this call only — the shared,
+loaded toolboxes are never mutated) via a throwaway `OSAgentNode` passed to
+`buildAgent`, and carries the rest into the sub-agent's own
+`SessionBase.ctxInheritedBindings` for it to apply, in turn, when it
+prompts its own helpers. `ToolExecutionContext`/`Session.Base.Agent` both
+gained `ctxInheritedBindings :: [ScopedBinding]`, threaded through
+`buildContext` like `ctxParams`; `ToolExecutionContextSnapshot` keeps only
+its non-secret entries, same as `tecsParams`. A call-time `with` cannot
+refill a parameter the reference's own static `with` (§7) already fills. A
+`narrowable: false` reference refuses any `bindings`/`with` on the call
+that reaches it, and any inherited binding addressed at it or below,
+rather than applying them.
+
+Not started: §8.4 (`derive_agent`, sugar over §8.3, "to be built only if
+§8.3 proves verbose in practice" per the spec itself) and Phase 7
 (`Expose`).
 
 ## Goal

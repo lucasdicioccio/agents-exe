@@ -55,6 +55,7 @@ handleInitialize apiKeysFile agentFiles = do
                 , asyncYieldStrategy = Nothing
                 , maxConcurrency = Nothing
                 , asyncCallTimeoutSeconds = Nothing
+                , bindings = Nothing
                 , parameters = Nothing
                 }
 
