@@ -61,11 +61,13 @@ import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
 import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
+import qualified Data.Aeson as Aeson
 import Data.Foldable (for_)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
@@ -73,7 +75,8 @@ import Prod.Tracer (contramap, runTracer)
 import System.Timeout (timeout)
 
 import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
-import System.Agents.AgentTree (OSAgentNode)
+import System.Agents.AgentTree (OSAgentNode (osNodeConfig))
+import qualified System.Agents.Base as Base
 import System.Agents.Host
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Async (ContinuationStore (..))
@@ -88,6 +91,14 @@ import System.Agents.SessionStore (
     allSessionsQuery,
     freshSessionMeta,
     sessionIdToConversationId,
+ )
+import System.Agents.Tools.Params.Types (
+    ParamName,
+    ParamScope (..),
+    ParameterDecl (..),
+    ParamValue (..),
+    Params,
+    ProcessValue (..),
  )
 
 -------------------------------------------------------------------------------
@@ -118,6 +129,14 @@ data RunnerError
     | NoActiveRun SessionId
     | NotAcceptingMessages SessionId SessionStatus
     | Conflict VersionConflict
+    | -- | Supplied parameter names the agent does not declare.
+      UnknownParams [ParamName]
+    | -- | Supplied parameter names that are process-scope, or pinned by the operator.
+      ForbiddenParams [ParamName]
+    | -- | Supplied values for @secret@ parameters that are not JSON strings.
+      InvalidParams [ParamName]
+    | -- | Required parameters still unbound once caller-supplied values are merged in.
+      MissingRequiredParams [ParamName]
     deriving (Show, Eq)
 
 -- | What happened to a session, in the order it happened.
@@ -186,6 +205,12 @@ data LiveSession = LiveSession
     -- ^ Results accepted while a run is active; the run applies them.
     , lsLastTouched :: TVar UTCTime
     , lsEvicted :: TVar Bool
+    , lsParams :: TVar Params
+    {- ^ Session-scope parameter values, secret and non-secret, kept only in
+    this process's memory. Lost on restart or eviction; a client must
+    resupply them, or the next run that needs one fails with
+    'MissingRequiredParams' (@todos/tool-partial-application.md@, Phase 4).
+    -}
     }
 
 data RunnerStats = RunnerStats
@@ -268,6 +293,7 @@ getLive runner sid = do
             <*> newTVarIO []
             <*> newTVarIO now
             <*> newTVarIO False
+            <*> newTVarIO Map.empty
 
 lookupLive :: SessionRunner -> SessionId -> IO (Maybe LiveSession)
 lookupLive runner sid = Map.lookup sid <$> readTVarIO runner.srLive
@@ -353,11 +379,21 @@ subscribeSTM runner sid = do
 -- | Store a new version of a session (call under its lock).
 store :: SessionRunner -> LiveSession -> SessionMeta -> Session -> SessionStatus -> Maybe Text -> IO (Either VersionConflict SessionMeta)
 store runner live meta sess status detail = do
-    result <- runner.srHost.hostBackend.sbCompareAndStore meta{smStatus = status, smStatusDetail = detail} sess
+    nonSecretParams <- nonSecretSessionParams live
+    result <-
+        runner.srHost.hostBackend.sbCompareAndStore
+            meta{smStatus = status, smStatusDetail = detail, smParams = nonSecretParams}
+            sess
     for_ result $ \meta' -> do
         atomically $ writeTVar live.lsLatest (Just (sess, meta'))
         emit runner $ SessionUpdated live.lsSessionId meta' (headTurn sess)
     pure result
+
+-- | The session's session-scope parameters that may be persisted (never secret ones).
+nonSecretSessionParams :: LiveSession -> IO (Map ParamName Aeson.Value)
+nonSecretSessionParams live = do
+    ps <- readTVarIO live.lsParams
+    pure $ Map.map (.pvValue) (Map.filter (not . (.pvSecret)) ps)
 
 -- | Like 'store', throwing 'ConcurrentModification' on a conflict.
 storeOrThrow :: SessionRunner -> LiveSession -> SessionMeta -> Session -> SessionStatus -> IO SessionMeta
@@ -406,15 +442,101 @@ newAgent runner sid node = do
     pure $ withExecutionMode Asynchronous agent
 
 -------------------------------------------------------------------------------
+-- Session-level parameters (todos/tool-partial-application.md, Phase 4)
+-------------------------------------------------------------------------------
+
+-- | Overlay parameter values on top of an agent's process-level 'ctxParams'.
+withParams :: Params -> RunnerAgent -> RunnerAgent
+withParams overlay agent = agent{ctxParams = Map.union overlay agent.ctxParams}
+
+-- | The loaded node for a session's agent, by its recorded slug.
+agentNodeFor :: SessionRunner -> SessionMeta -> IO (Either RunnerError OSAgentNode)
+agentNodeFor runner meta = case meta.smAgent of
+    Nothing -> pure $ Left $ UnknownAgent ""
+    Just slug -> maybe (Left (UnknownAgent slug)) Right <$> lookupAgent runner.srHost slug
+
+-- | The parameters an agent declares.
+nodeParameterDecls :: OSAgentNode -> [ParameterDecl]
+nodeParameterDecls node = fromMaybe [] (Base.parameters (osNodeConfig node))
+
+{- | Validate caller-supplied parameter values against an agent's
+declarations, splitting them by scope. A @null@ value removes a session-scope
+value rather than setting one.
+-}
+resolveSuppliedParams ::
+    Set.Set ParamName ->
+    [ParameterDecl] ->
+    Map ParamName Aeson.Value ->
+    Either RunnerError (Map ParamName ParamValue, Map ParamName ParamValue, [ParamName])
+resolveSuppliedParams forbidden decls supplied
+    | not (null unknown) = Left $ UnknownParams unknown
+    | not (null forbiddenNames) = Left $ ForbiddenParams forbiddenNames
+    | not (null invalid) = Left $ InvalidParams invalid
+    | otherwise = Right (sessionPs, messagePs, removals)
+  where
+    byName = Map.fromList [(d.paramName, d) | d <- decls]
+    supplied' = Map.toList supplied
+    unknown = [n | (n, _) <- supplied', not (Map.member n byName)]
+    forbiddenNames = [n | (n, _) <- supplied', n `Set.member` forbidden]
+    isString (Aeson.String _) = True
+    isString _ = False
+    invalid =
+        [ n
+        | (n, v) <- supplied'
+        , v /= Aeson.Null
+        , maybe False (.paramSecret) (Map.lookup n byName)
+        , not (isString v)
+        ]
+    removals = [n | (n, Aeson.Null) <- supplied', maybe False ((== ScopeSession) . (.paramScope)) (Map.lookup n byName)]
+    toValue :: Text -> Aeson.Value -> ParamValue
+    toValue n v = ParamValue v (maybe False (.paramSecret) (Map.lookup n byName))
+    withScope s =
+        Map.fromList
+            [ (n, toValue n v)
+            | (n, v) <- supplied'
+            , v /= Aeson.Null
+            , maybe False ((== s) . (.paramScope)) (Map.lookup n byName)
+            ]
+    sessionPs = withScope ScopeSession
+    messagePs = withScope ScopeMessage
+
+{- | Validate the caller-supplied parameters of one request, update the
+session's persisted session-scope values, and return the overlay to apply
+for the run this request may start (session-scope values plus this
+request's message-scope ones).
+-}
+prepareParams :: SessionRunner -> LiveSession -> OSAgentNode -> Map ParamName Aeson.Value -> IO (Either RunnerError Params)
+prepareParams runner live node supplied = do
+    let decls = nodeParameterDecls node
+        pinned = Set.fromList [n | (n, pv) <- Map.toList runner.srHost.hostProcessParams, pv.pvPinned]
+        forbidden = Set.fromList [d.paramName | d <- decls, d.paramScope == ScopeProcess] <> pinned
+    case resolveSuppliedParams forbidden decls supplied of
+        Left err -> pure (Left err)
+        Right (sessionPs, messagePs, removals) -> do
+            sessionSnapshot <- atomically $ do
+                modifyTVar' live.lsParams (\m -> Map.union sessionPs (foldr Map.delete m removals))
+                readTVar live.lsParams
+            pure $ Right (Map.union messagePs sessionSnapshot)
+
+-- | Required parameters still unbound once 'prepareParams' overlay is merged in.
+missingRequiredParams :: OSAgentNode -> RunnerAgent -> Params -> [ParamName]
+missingRequiredParams node agent overlay =
+    [d.paramName | d <- decls, d.paramRequired, not (Map.member d.paramName resolved)]
+  where
+    decls = nodeParameterDecls node
+    resolved = Map.union overlay agent.ctxParams :: Params
+
+-------------------------------------------------------------------------------
 -- Runs
 -------------------------------------------------------------------------------
 
 -- | Start a run from the given version (call under the session's lock).
-startRun :: SessionRunner -> LiveSession -> RunMode -> Session -> SessionMeta -> IO (Either RunnerError SessionMeta)
-startRun runner live mode sess meta =
+startRun :: SessionRunner -> LiveSession -> RunMode -> Params -> Session -> SessionMeta -> IO (Either RunnerError SessionMeta)
+startRun runner live mode overlay sess meta =
     sessionAgent runner live meta >>= \case
         Left err -> pure (Left err)
-        Right agent ->
+        Right agent0 -> do
+            let agent = withParams overlay agent0
             store runner live meta sess StatusRunning Nothing >>= \case
                 Left conflict -> pure (Left (Conflict conflict))
                 Right meta' -> do
@@ -504,54 +626,78 @@ failRun runner live reason = withMVar live.lsLock $ \_ -> do
 
 -- | Create a session for an agent, and start a run unless the mode is 'Nothing'.
 createSession :: SessionRunner -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
-createSession runner = createSessionAs runner Nothing
+createSession runner slug message mode = createSessionAs runner Nothing slug message mode Map.empty
 
--- | Like 'createSession', for an owner.
-createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
-createSessionAs runner owner slug message mode =
+-- | Like 'createSession', for an owner, with caller-supplied parameter values.
+createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionAs runner owner slug message mode supplied =
     lookupAgent runner.srHost slug >>= \case
         Nothing -> pure $ Left $ UnknownAgent slug
-        Just _ -> do
+        Just node -> do
             sid <- newSessionId
-            withLive runner sid $ \live -> do
-                now <- getCurrentTime
-                let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
-                sessionAgent runner live meta0 >>= \case
+            withLive runner sid $ \live ->
+                prepareParams runner live node supplied >>= \case
                     Left err -> pure (Left err)
-                    Right agent -> do
-                        sPrompt <- agent.sysPrompt
-                        sTools <- agent.sysTools
-                        sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery message.nmText message.nmMedia)
-                        store runner live meta0 sess StatusReady Nothing >>= \case
-                            Left conflict -> pure (Left (Conflict conflict))
-                            Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m sess meta) mode
+                    Right overlay -> do
+                        now <- getCurrentTime
+                        let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
+                        sessionAgent runner live meta0 >>= \case
+                            Left err -> pure (Left err)
+                            Right agent -> case missingRequiredParams node agent overlay of
+                                missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                [] -> do
+                                    sPrompt <- agent.sysPrompt
+                                    sTools <- agent.sysTools
+                                    sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery message.nmText message.nmMedia)
+                                    store runner live meta0 sess StatusReady Nothing >>= \case
+                                        Left conflict -> pure (Left (Conflict conflict))
+                                        Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
 
 -- | Add a user message to an idle session, and start a run unless the mode is 'Nothing'.
-postMessage :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
-postMessage runner sid message mode =
+postMessage :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+postMessage runner sid message mode supplied =
     withLive runner sid $ \live ->
         withIdle runner live $ \sess meta -> do
             let status = sessionStatusOf sess
             if status /= StatusIdle
                 then pure $ Left $ NotAcceptingMessages sid status
                 else
-                    sessionAgent runner live meta >>= \case
+                    agentNodeFor runner meta >>= \case
                         Left err -> pure (Left err)
-                        Right agent -> do
-                            sPrompt <- agent.sysPrompt
-                            sTools <- agent.sysTools
-                            tid <- newTurnId
-                            let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) []) Nothing
-                                sess' = sess{turns = turn : sess.turns, turnId = tid}
-                            store runner live meta sess' StatusReady Nothing >>= \case
-                                Left conflict -> pure (Left (Conflict conflict))
-                                Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m sess' meta') mode
+                        Right node ->
+                            prepareParams runner live node supplied >>= \case
+                                Left err -> pure (Left err)
+                                Right overlay ->
+                                    sessionAgent runner live meta >>= \case
+                                        Left err -> pure (Left err)
+                                        Right agent -> case missingRequiredParams node agent overlay of
+                                            missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                            [] -> do
+                                                sPrompt <- agent.sysPrompt
+                                                sTools <- agent.sysTools
+                                                tid <- newTurnId
+                                                let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) []) Nothing
+                                                    sess' = sess{turns = turn : sess.turns, turnId = tid}
+                                                store runner live meta sess' StatusReady Nothing >>= \case
+                                                    Left conflict -> pure (Left (Conflict conflict))
+                                                    Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
 
 -- | Start a run on a session that has none.
-resume :: SessionRunner -> SessionId -> RunMode -> IO (Either RunnerError SessionMeta)
-resume runner sid mode =
+resume :: SessionRunner -> SessionId -> RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+resume runner sid mode supplied =
     withLive runner sid $ \live ->
-        withIdle runner live $ \sess meta -> startRun runner live mode sess meta
+        withIdle runner live $ \sess meta ->
+            agentNodeFor runner meta >>= \case
+                Left err -> pure (Left err)
+                Right node ->
+                    prepareParams runner live node supplied >>= \case
+                        Left err -> pure (Left err)
+                        Right overlay ->
+                            sessionAgent runner live meta >>= \case
+                                Left err -> pure (Left err)
+                                Right agent -> case missingRequiredParams node agent overlay of
+                                    missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                    [] -> startRun runner live mode overlay sess meta
 
 -- | Load a session without an active run (call under its lock).
 withIdle ::
@@ -574,14 +720,23 @@ Without an active run, the result is applied and stored at once, and with
 auto-resume a run starts when the session can progress. During a run the
 result is checked and queued; the run applies it before its next step.
 -}
-completeCall :: SessionRunner -> ContinuationToken -> UserToolResponse -> Bool -> IO (Either RunnerError SessionMeta)
-completeCall runner token result autoResume = do
+completeCall :: SessionRunner -> ContinuationToken -> UserToolResponse -> Bool -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+completeCall runner token result autoResume supplied = do
     let host = runner.srHost
     findSessionForToken (Just host.hostContinuations) host.hostBackend token >>= \case
         Nothing -> pure $ Left $ UnknownToken token
-        Just sid -> withLive runner sid $ \live -> do
-            active <- readTVarIO live.lsRun
-            if isJust active then enqueue live else applyNow live
+        Just sid -> withLive runner sid $ \live ->
+            host.hostBackend.sbLoadMeta sid >>= \case
+                Nothing -> pure $ Left $ UnknownSession sid
+                Just (_, meta) ->
+                    agentNodeFor runner meta >>= \case
+                        Left err -> pure (Left err)
+                        Right node ->
+                            prepareParams runner live node supplied >>= \case
+                                Left err -> pure (Left err)
+                                Right overlay -> do
+                                    active <- readTVarIO live.lsRun
+                                    if isJust active then enqueue live else applyNow live overlay node
   where
     enqueue live = do
         (sess, meta) <- latestOrThrow live
@@ -591,7 +746,7 @@ completeCall runner token result autoResume = do
             atomically $ modifyTVar' live.lsInbox (<> [(token, result)])
             pure (Right meta)
 
-    applyNow live =
+    applyNow live overlay node =
         loadLatest runner live >>= \case
             Nothing -> pure $ Left $ UnknownSession live.lsSessionId
             Just (sess, meta) -> do
@@ -602,7 +757,12 @@ completeCall runner token result autoResume = do
                     store runner live meta woken status Nothing >>= \case
                         Left conflict -> pure (Left (Conflict conflict))
                         Right meta'
-                            | autoResume && status == StatusReady -> startRun runner live UntilBlocked woken meta'
+                            | autoResume && status == StatusReady ->
+                                sessionAgent runner live meta' >>= \case
+                                    Left err -> pure (Left err)
+                                    Right agent -> case missingRequiredParams node agent overlay of
+                                        missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                        [] -> startRun runner live UntilBlocked overlay woken meta'
                             | otherwise -> pure (Right meta')
 
     classify :: WakeOutcome -> Bool -> IO (Either RunnerError SessionMeta) -> IO (Either RunnerError SessionMeta)

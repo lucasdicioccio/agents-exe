@@ -152,6 +152,10 @@ sessionMigrations =
             , "CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)"
             , "CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner, updated_at)"
             ]
+    , PgMigration 2 $
+        statements
+            [ "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS params TEXT NOT NULL DEFAULT '{}'"
+            ]
     ]
 
 continuationMigrations :: [PgMigration]
@@ -209,12 +213,12 @@ nowMicros = do
     pure t{utctDayTime = fromInteger (floor (utctDayTime t * 1000000)) / 1000000}
 
 metaColumns :: Query
-metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at"
+metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at, params"
 
-type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime)
+type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime, Text)
 
 metaFromRow :: MetaRow -> Maybe SessionMeta
-metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated)) = do
+metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated, params)) = do
     uuid <- UUID.fromText sid
     pure
         SessionMeta
@@ -227,6 +231,7 @@ metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, u
             , smVersion = version
             , smCreatedAt = created
             , smUpdatedAt = updated
+            , smParams = fromMaybe mempty (decodeJson params)
             }
 
 storeLabelled :: Connection -> SessionLabels -> SessionId -> Session -> IO ()
@@ -266,15 +271,15 @@ compareAndStore conn meta sess = do
     let sid = sessionIdText meta.smSessionId
         columns =
             (now, encodeJson sess, meta.smAgent, sessionIdText <$> meta.smParent)
-                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail)
+                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail, encodeJson meta.smParams)
     rows <-
         if meta.smVersion == 0
             then
                 query
                     conn
                     "INSERT INTO sessions\
-                    \ (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version)\
-                    \ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)\
+                    \ (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version, params)\
+                    \ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)\
                     \ ON CONFLICT (session_id) DO UPDATE SET\
                     \ updated_at = excluded.updated_at,\
                     \ json = excluded.json,\
@@ -283,7 +288,8 @@ compareAndStore conn meta sess = do
                     \ owner = excluded.owner,\
                     \ status = excluded.status,\
                     \ status_detail = excluded.status_detail,\
-                    \ version = sessions.version + 1\
+                    \ version = sessions.version + 1,\
+                    \ params = excluded.params\
                     \ WHERE sessions.version = 0\
                     \ RETURNING version, created_at"
                     ((sid, now) :. columns)
@@ -292,7 +298,7 @@ compareAndStore conn meta sess = do
                     conn
                     "UPDATE sessions SET\
                     \ updated_at = ?, json = ?, agent_slug = ?, parent_session_id = ?,\
-                    \ owner = ?, status = ?, status_detail = ?, version = version + 1\
+                    \ owner = ?, status = ?, status_detail = ?, version = version + 1, params = ?\
                     \ WHERE session_id = ? AND version = ?\
                     \ RETURNING version, created_at"
                     (columns :. (sid, meta.smVersion))

@@ -75,14 +75,14 @@ deferredFlowTest = do
         (blocked.smStatus, active) @?= (StatusWaitingExternal, False)
         token <- singleToken runner sid
         next <- subscribe runner sid
-        _ <- expectRight =<< completeCall runner token (TextResponse "42") True
+        _ <- expectRight =<< completeCall runner token (TextResponse "42") True Map.empty
         kinds <- eventsUntilStopped next
         assertBool ("events: " <> show kinds) (take 1 kinds == ["session.updated"] && "run.started" `elem` kinds && last kinds == "run.stopped")
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
         sess <- currentSession runner sid
         assertBool "tool result delivered" ("42" `elem` responseTexts sess)
-        again <- completeCall runner token (TextResponse "43") True
+        again <- completeCall runner token (TextResponse "43") True Map.empty
         again @?= Left (TokenAlreadyCompleted token)
 
 concurrentCompletionsTest :: Assertion
@@ -97,8 +97,8 @@ concurrentCompletionsTest = do
         [t1, t2] <- pure [t | v <- pendingDeferredCalls sess0, Just t <- [v.dcvToken]]
         (r1, r2) <-
             concurrently
-                (completeCall runner t1 (TextResponse "first") True)
-                (completeCall runner t2 (TextResponse "second") True)
+                (completeCall runner t1 (TextResponse "first") True Map.empty)
+                (completeCall runner t2 (TextResponse "second") True Map.empty)
         _ <- expectRight r1
         _ <- expectRight r2
         waitUntil $ (== StatusIdle) . (.smStatus) . fst <$> (expectRight =<< awaitRun runner sid 5)
@@ -114,17 +114,17 @@ postMessageTest = do
     withSessionRunner host $ \runner -> do
         meta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
         let sid = meta.smSessionId
-        refused <- postMessage runner sid (message "too early") (Just UntilBlocked)
+        refused <- postMessage runner sid (message "too early") (Just UntilBlocked) Map.empty
         refused @?= Left (RunInProgress sid)
         putMVar gate ()
         (idle, _) <- expectRight =<< awaitRun runner sid 5
         idle.smStatus @?= StatusIdle
-        _ <- expectRight =<< postMessage runner sid (message "and again") (Just UntilBlocked)
+        _ <- expectRight =<< postMessage runner sid (message "and again") (Just UntilBlocked) Map.empty
         (idle2, _) <- expectRight =<< awaitRun runner sid 5
         idle2.smStatus @?= StatusIdle
         sess <- currentSession runner sid
         length [() | LlmTurn{} <- sess.turns] @?= 2
-        stillIdle <- postMessage runner sid (message "fine") Nothing
+        stillIdle <- postMessage runner sid (message "fine") Nothing Map.empty
         fmap (.smStatus) stillIdle @?= Right StatusReady
 
 engineKeptTest :: Assertion
@@ -138,13 +138,13 @@ engineKeptTest = do
         let sid = meta.smSessionId
         _ <- expectRight =<< awaitRun runner sid 5
         -- Second step: starts the background call, then yields while it runs.
-        _ <- expectRight =<< resume runner sid StepOnce
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
         _ <- expectRight =<< awaitRun runner sid 5
         running <- currentSession runner sid
         assertBool "a call runs in the background" (hasRunningCall running)
         putMVar gate ()
         threadDelay 100_000
-        _ <- expectRight =<< resume runner sid UntilBlocked
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
         sess <- currentSession runner sid
@@ -172,7 +172,7 @@ cancelTest = do
         again <- cancelRun runner sid
         again @?= Left (NoActiveRun sid)
         -- The next run delivers the cancellation to the LLM.
-        _ <- expectRight =<< resume runner sid UntilBlocked
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
         sess <- currentSession runner sid
@@ -197,7 +197,7 @@ recoveryTest = do
         recovered @?= [sid]
         Just (_, meta) <- getSession runner sid
         meta.smStatus @?= StatusReady
-        _ <- expectRight =<< resume runner sid StepOnce
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
         _ <- expectRight =<< awaitRun runner sid 5
         resumed <- currentSession runner sid
         assertBool ("orphaned: " <> show (responseTexts resumed)) (any ("orphaned" `Text.isInfixOf`) (responseTexts resumed))
@@ -234,7 +234,7 @@ deleteTest = do
     agentId <- AgentId <$> nextRandom
     atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId]
     withSessionRunner host $ \runner -> do
-        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (message "delegate") (Just UntilBlocked)
+        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (message "delegate") (Just UntilBlocked) Map.empty
         let sid = meta.smSessionId
             children = map (.smSessionId) <$> host.hostBackend.sbQuery allSessionsQuery{sqParent = Just sid}
         waitUntil $ not . null <$> children
@@ -272,7 +272,7 @@ evictionTest = do
         let sid = meta.smSessionId
         (.rsLiveSessions) <$> runnerStats runner >>= (@?= 1)
         waitUntil $ (== 0) . (.rsLiveSessions) <$> runnerStats runner
-        _ <- expectRight =<< resume runner sid UntilBlocked
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
         (idle, _) <- expectRight =<< awaitRun runner sid 5
         idle.smStatus @?= StatusIdle
 
@@ -307,9 +307,9 @@ subscribeFilterTest = do
         b <- expectRight =<< createSession runner "test-agent" (message "second") Nothing
         next <- subscribe runner b.smSessionId
         -- Session a's events come first in the stream.
-        _ <- expectRight =<< resume runner a.smSessionId UntilBlocked
+        _ <- expectRight =<< resume runner a.smSessionId UntilBlocked Map.empty
         _ <- expectRight =<< awaitRun runner a.smSessionId 5
-        _ <- expectRight =<< resume runner b.smSessionId UntilBlocked
+        _ <- expectRight =<< resume runner b.smSessionId UntilBlocked Map.empty
         kinds <- eventsUntilStopped next
         assertBool ("events of b: " <> show kinds) ("run.started" `elem` kinds)
 

@@ -140,7 +140,7 @@ callTool ctx params = case Aeson.parseMaybe parseCall params of
     Just (name, prompt) -> case [slug | slug <- Map.keys ctx.mcAgents, toolNameFor slug == name] of
         [] -> pure $ Left (-32602, "unknown tool: " <> name)
         (slug : _) ->
-            createSessionAs ctx.mcRunner ctx.mcOwner slug (NewMessage prompt []) (Just UntilBlocked) >>= \case
+            createSessionAs ctx.mcRunner ctx.mcOwner slug (NewMessage prompt []) (Just UntilBlocked) Map.empty >>= \case
                 Left err -> pure $ Right $ toolResult True Nothing [Text.pack (show err)]
                 Right meta -> do
                     let sid = meta.smSessionId

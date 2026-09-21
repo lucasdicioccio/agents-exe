@@ -350,6 +350,7 @@ test-suite agents-postgres-tests
                       aeson,
                       async,
                       bytestring,
+                      containers,
                       directory,
                       filepath,
                       network,

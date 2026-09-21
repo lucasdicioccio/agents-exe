@@ -97,6 +97,8 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.List (foldl', isInfixOf, isPrefixOf, sortOn)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
@@ -121,6 +123,7 @@ import System.Agents.Session.Types (
     sessionStatusOf,
     sessionStatusText,
  )
+import System.Agents.Tools.Params.Types (ParamName)
 
 -------------------------------------------------------------------------------
 -- Session Backend Interface
@@ -201,6 +204,12 @@ data SessionMeta = SessionMeta
     -- ^ Incremented on every write; 0 for a session never stored.
     , smCreatedAt :: UTCTime
     , smUpdatedAt :: UTCTime
+    , smParams :: Map ParamName Aeson.Value
+    {- ^ Non-secret session-scope parameter values
+    (@todos/tool-partial-application.md@, Phase 4). Secret values never
+    reach this field; they live only in the caller's in-memory session
+    state.
+    -}
     }
     deriving (Show, Eq)
 
@@ -216,6 +225,7 @@ instance Aeson.ToJSON SessionMeta where
             , "version" Aeson..= m.smVersion
             , "created_at" Aeson..= m.smCreatedAt
             , "updated_at" Aeson..= m.smUpdatedAt
+            , "params" Aeson..= m.smParams
             ]
 
 instance Aeson.FromJSON SessionMeta where
@@ -230,6 +240,7 @@ instance Aeson.FromJSON SessionMeta where
             <*> v Aeson..: "version"
             <*> v Aeson..: "created_at"
             <*> v Aeson..: "updated_at"
+            <*> (fromMaybe Map.empty <$> v Aeson..:? "params")
 
 -- | Metadata for a session that was never stored (version 0).
 freshSessionMeta :: SessionId -> UTCTime -> SessionMeta
@@ -244,6 +255,7 @@ freshSessionMeta sid now =
         , smVersion = 0
         , smCreatedAt = now
         , smUpdatedAt = now
+        , smParams = Map.empty
         }
 
 {- | The metadata an unconditional store ('sbStoreLabelled') writes, given the
@@ -473,6 +485,8 @@ sessionMigrations =
                     (sessionStatusText (sessionStatusOf sess), sid)
     , Migration 3 $ \conn ->
         execute_ conn [sql| CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner, updated_at) |]
+    , Migration 4 $ \conn ->
+        execute_ conn [sql| ALTER TABLE sessions ADD COLUMN params TEXT NOT NULL DEFAULT '{}' |]
     ]
 
 -- | Create or migrate the SQLite session schema.
@@ -513,12 +527,12 @@ encodeSession = TextEnc.decodeUtf8 . LByteString.toStrict . Aeson.encode
 
 -- | Columns read into a 'SessionMeta', in 'MetaRow' order.
 metaColumns :: Text
-metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at"
+metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at, params"
 
-type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime)
+type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime, Text)
 
 metaFromRow :: MetaRow -> Maybe SessionMeta
-metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated)) = do
+metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated, params)) = do
     uuid <- UUID.fromText sid
     pure
         SessionMeta
@@ -531,7 +545,12 @@ metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, u
             , smVersion = version
             , smCreatedAt = created
             , smUpdatedAt = updated
+            , smParams = fromMaybe Map.empty (Aeson.decodeStrict' (TextEnc.encodeUtf8 params))
             }
+
+-- | JSON-encode a map of session parameters for the @params@ column.
+encodeParams :: Map ParamName Aeson.Value -> Text
+encodeParams = TextEnc.decodeUtf8 . LByteString.toStrict . Aeson.encode
 
 sqliteStoreSession :: Connection -> SessionLabels -> SessionId -> Session -> IO ()
 sqliteStoreSession conn labels sid sess = do
@@ -572,15 +591,15 @@ sqliteCompareAndStore conn meta sess = do
     let sid = sessionIdText meta.smSessionId
         columns =
             (now, encodeSession sess, meta.smAgent, sessionIdText <$> meta.smParent)
-                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail)
+                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail, encodeParams meta.smParams)
     rows <-
         if meta.smVersion == 0
             then
                 query
                     conn
                     [sql| INSERT INTO sessions
-                            (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                            (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version, params)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                           ON CONFLICT(session_id) DO UPDATE SET
                             updated_at = excluded.updated_at,
                             json = excluded.json,
@@ -589,7 +608,8 @@ sqliteCompareAndStore conn meta sess = do
                             owner = excluded.owner,
                             status = excluded.status,
                             status_detail = excluded.status_detail,
-                            version = sessions.version + 1
+                            version = sessions.version + 1,
+                            params = excluded.params
                           WHERE sessions.version = 0
                           RETURNING version, created_at |]
                     ((sid, now) :. columns)
@@ -598,7 +618,7 @@ sqliteCompareAndStore conn meta sess = do
                     conn
                     [sql| UPDATE sessions SET
                             updated_at = ?, json = ?, agent_slug = ?, parent_session_id = ?,
-                            owner = ?, status = ?, status_detail = ?, version = version + 1
+                            owner = ?, status = ?, status_detail = ?, version = version + 1, params = ?
                           WHERE session_id = ? AND version = ?
                           RETURNING version, created_at |]
                     (columns :. (sid, meta.smVersion))

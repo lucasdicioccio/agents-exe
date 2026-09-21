@@ -6,10 +6,33 @@ except the tool-cache key (G8) and MCP server `env` (G4) (`03783fb`,
 just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`,
 process-scope resolution, secret-argv-mode load-time guard (G7).
 Phase 3 done (`8a41cd8`): OpenAPI/PostgREST argument bindings via the
-generic combinator, `ParamSource` secrets resolved per request. Not
-started: Phase 4 (session-level parameters in agents-server, `seal`,
-session tokens, fork), Phase 5 (sub-agent `with`, MCP-over-HTTP), Phase
-6 (narrowing helpers down the call chain), Phase 7 (`Expose`).
+generic combinator, `ParamSource` secrets resolved per request.
+
+Phase 4 (session-level parameters in `agents-server`) done for the core
+mechanics, live-verified end to end against a real LLM: `params` on
+`POST /v1/sessions`, `/messages`, `/resume` and `POST /v1/continuations/:token`;
+the validation table (`422 unknown_params`, `403 forbidden_params`,
+`422 invalid_params`, `422 params_required`); a `params` column and
+migration on both the SQLite and Postgres session backends (`SessionMeta.
+smParams`, non-secret only); secret session values kept only in the
+in-memory `LiveSession` (`Host/Runner.hs`'s new `lsParams`), never
+persisted; message-scope values applied for one run only, never stored;
+`agentView`'s `"parameters"` self-description (`bound`/`pinned`, never a
+value); `agents-server --set`/`--set-json`/`--pin`/`--pin-json` (mirroring
+`agents-exe`) so an operator can lock a container to one tenant. Not done
+from Phase 4: `seal`, session tokens, `PUT /v1/sessions/:id/params`,
+`409 params_required` on an already-running session whose params lapsed,
+`fork`, the chat page's parameter form, and the generated OpenAPI
+document's request/response schemas (`AgentsServer/Types.hs`/`Routes.hs`
+are a separate hand-maintained layer used only for `/openapi.json` and
+were not updated with the new fields — the real handlers in `Api.hs` are
+fully wired and correct; this is a documentation-only gap).
+`recoverOnStartup` also does not yet mark a running call as failed when
+it needed a secret parameter that a restart lost (§5's documented
+recovery behaviour).
+
+Not started: Phase 5 (sub-agent `with`, MCP-over-HTTP), Phase 6
+(narrowing helpers down the call chain), Phase 7 (`Expose`).
 
 ## Goal
 

@@ -57,6 +57,7 @@ import qualified System.Agents.Base as Base
 import System.Agents.Session.Async (ContinuationStore, mkSqliteContinuationStore)
 import System.Agents.Session.Types (SessionId)
 import System.Agents.SessionStore (SessionBackend, backendCatalog, mkSqliteSessionStore)
+import System.Agents.Tools.Params.Types (ProcessParams)
 
 -- | Loaded agents and the stores sessions live in.
 data Host = Host
@@ -77,6 +78,11 @@ data Host = Host
     {- ^ How long an idle session keeps its in-memory agent (and the
     background calls it runs) before the runner evicts it.
     -}
+    , hostProcessParams :: ProcessParams
+    {- ^ Operator-supplied parameter values (@--set@ / @--pin@ / ...), shared
+    by every agent this host loaded. A 'pinned' one cannot be overridden by
+    a session or message value (@todos/tool-partial-application.md@, Phase 4).
+    -}
     }
 
 data HostConfig = HostConfig
@@ -90,6 +96,8 @@ data HostConfig = HostConfig
     , hcLiveSessionTtl :: NominalDiffTime
     , hcStreamTokens :: Bool
     -- ^ Stream root agents' LLM answers (see 'hostStreamTokens').
+    , hcProcessParams :: ProcessParams
+    -- ^ See 'hostProcessParams'.
     }
 
 -- | A configuration with the default idle time of 15 minutes.
@@ -102,6 +110,7 @@ defaultHostConfig files keysFile dbPath =
         , hcCompletion = Nothing
         , hcLiveSessionTtl = 15 * 60
         , hcStreamTokens = False
+        , hcProcessParams = mempty
         }
 
 data HostTrace
@@ -168,7 +177,7 @@ withHostStores cfg stores tracer action = do
                 , interactiveTracer = contramap HostTreeTrace tracer
                 , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap HostSubAgentTrace tracer) subDeps
                 , sessionCatalog = backendCatalog backend
-                , processParams = mempty
+                , processParams = cfg.hcProcessParams
                 }
         loadAll [] k = k []
         loadAll (file : rest) k =
@@ -206,6 +215,7 @@ withHostStores cfg stores tracer action = do
                 , hostTracer = tracer
                 , hostStreamTokens = cfg.hcStreamTokens
                 , hostLiveSessionTtl = cfg.hcLiveSessionTtl
+                , hostProcessParams = cfg.hcProcessParams
                 }
   where
     indexBySlug :: [OSAgentNode] -> IO (Map Text OSAgentNode)

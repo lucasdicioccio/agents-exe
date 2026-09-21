@@ -22,6 +22,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString.Lazy as LByteString
 import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
 import Data.String (fromString)
 import Data.Text (Text)
@@ -92,7 +93,7 @@ migrationsTest baseUrl = withDatabase baseUrl $ \url -> do
     withPostgresStores url $ \_ -> pure ()
     bracket (connectPostgreSQL url) close $ \conn -> do
         rows <- query_ conn "SELECT component, version FROM schema_migrations ORDER BY component, version" :: IO [(Text, Int)]
-        rows @?= [("agents", 1), ("continuations", 1), ("sessions", 1)]
+        rows @?= [("agents", 1), ("continuations", 1), ("sessions", 1), ("sessions", 2)]
 
 casTest :: String -> Assertion
 casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
@@ -182,7 +183,7 @@ runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "age
     withPostgresStores url $ \stores ->
         withHostStores cfg stores silent $ \host ->
             withSessionRunner host $ \runner -> do
-                meta <- expectRight =<< createSessionAs runner (Just "alice") "pg-test" (NewMessage "fetch it" []) (Just UntilBlocked)
+                meta <- expectRight =<< createSessionAs runner (Just "alice") "pg-test" (NewMessage "fetch it" []) (Just UntilBlocked) Map.empty
                 let sid = meta.smSessionId
                 (blocked, _) <- expectRight =<< awaitRun runner sid 5
                 blocked.smStatus @?= StatusWaitingExternal
@@ -191,10 +192,10 @@ runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "age
                     [t] -> pure t
                     other -> assertFailure ("expected one token, got " <> show (length other))
                 stores.hsContinuations.csFindSession token >>= (@?= Just sid)
-                _ <- expectRight =<< completeCall runner token (TextResponse "42") True
+                _ <- expectRight =<< completeCall runner token (TextResponse "42") True Map.empty
                 (idle, _) <- expectRight =<< awaitRun runner sid 5
                 idle.smStatus @?= StatusIdle
-                again <- completeCall runner token (TextResponse "43") True
+                again <- completeCall runner token (TextResponse "43") True Map.empty
                 again @?= Left (TokenAlreadyCompleted token)
                 plan <- expectRight =<< deleteSession runner sid DeleteForReal
                 plan @?= DeletionPlan [sid] 1 False
