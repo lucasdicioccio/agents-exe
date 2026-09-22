@@ -2,9 +2,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 {- | The session mailbox: one mechanism through which everything that
-happens *to* a running session reaches it (Phase 1 of
-@todos/session-mailbox.md@, in-memory only — the durable, SQLite-backed
-mailbox is Phase 3).
+happens *to* a running session reaches it. Phase 1 of
+@todos/session-mailbox.md@ built the in-memory 'newInMemoryMailbox'; Phase 3
+adds 'newDurableMailbox', which fronts a 'MailStore' (SQLite or Postgres)
+with the same in-memory shape so 'mbUnread' stays STM.
 
 Transactional means three things, and only these (see the spec, §1):
 
@@ -20,10 +21,13 @@ module System.Agents.Session.Mailbox (
     newInMemoryMailbox,
     awaitMail,
     mailboxMaxUnread,
+    MailStore (..),
+    newDurableMailbox,
 ) where
 
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Monad (when)
-import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, retry, writeTVar)
+import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, retry, writeTVar)
 import qualified Data.Foldable as Foldable
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
@@ -36,6 +40,7 @@ import System.Agents.Session.Types (
     Outgoing (..),
     Receipt (..),
     SendError (..),
+    SessionId,
     newMessageId,
  )
 
@@ -108,6 +113,74 @@ sendImpl envelopesVar nextSeqVar outgoing = do
                                     }
                         writeTVar envelopesVar (es Seq.|> envelope)
                         pure $ Right $ Receipt mid n False
+
+{- | A durable backend for one session's mail (Phase 3): SQLite or Postgres,
+behind a table shaped @(session_id, seq, id UNIQUE, from_json, priority,
+hops, body_json, accepted_at)@ per the spec.
+
+'msAppend' persists one already-sequenced envelope (idempotent on 'envId',
+mirroring 'sendImpl' — a backend can implement this with an upsert keyed on
+@(session_id, id)@ that does nothing on conflict); 'msLoad' returns a
+session's envelopes in ascending 'envSeq' order, to hydrate the in-memory
+front on session load.
+-}
+data MailStore = MailStore
+    { msAppend :: SessionId -> Envelope -> IO ()
+    , msLoad :: SessionId -> IO [Envelope]
+    }
+
+{- | A durable mailbox (Phase 3): 'msLoad's a session's mail once to seed an
+in-memory 'TVar', then writes through 'msAppend' on every 'mbSend' so
+'mbUnread' \/ 'awaitMail' stay plain STM, per §1's "fronted by the same
+'TVar'".
+
+Writes are serialised by an 'MVar' rather than folded into the STM
+transaction, since persisting is 'IO'. The spec's "second writers are
+detected" already assumes one writer per session at a time, so this does
+not add a new race: a concurrent 'mbSend' merely waits for the lock instead
+of racing a transaction.
+-}
+newDurableMailbox :: MailStore -> SessionId -> IO Mailbox
+newDurableMailbox store sid = do
+    persisted <- store.msLoad sid
+    envelopesVar <- newTVarIO (Seq.fromList persisted)
+    let nextSeq = 1 + Foldable.foldl' (\acc e -> max acc e.envSeq) 0 persisted
+    nextSeqVar <- newTVarIO nextSeq
+    lock <- newMVar ()
+    pure
+        Mailbox
+            { mbSend = durableSendImpl lock store sid envelopesVar nextSeqVar
+            , mbUnread = unreadImpl envelopesVar
+            , mbTrim = trimImpl envelopesVar
+            }
+
+durableSendImpl :: MVar () -> MailStore -> SessionId -> TVar (Seq Envelope) -> TVar Int -> Outgoing -> IO (Either SendError Receipt)
+durableSendImpl lock store sid envelopesVar nextSeqVar outgoing = withMVar lock $ \() -> do
+    mid <- maybe newMessageId pure outgoing.outId
+    now <- getCurrentTime
+    es <- readTVarIO envelopesVar
+    case Foldable.find ((== mid) . envId) es of
+        Just existing -> pure $ Right $ Receipt mid existing.envSeq True
+        Nothing -> do
+            n <- readTVarIO nextSeqVar
+            if Seq.length es >= mailboxMaxUnread && not (exemptFromBound outgoing.outBody)
+                then pure $ Left MailboxFull
+                else do
+                    let envelope =
+                            Envelope
+                                { envId = mid
+                                , envSeq = n
+                                , envFrom = outgoing.outFrom
+                                , envPriority = outgoing.outPriority
+                                , envHops = outgoing.outHops
+                                , envSentAt = now
+                                , envBody = outgoing.outBody
+                                }
+                    store.msAppend sid envelope
+                    atomically $ do
+                        writeTVar nextSeqVar (n + 1)
+                        writeTVar envelopesVar (es Seq.|> envelope)
+                    pure $ Right $ Receipt mid n False
 
 unreadImpl :: TVar (Seq Envelope) -> Cursor -> STM [Envelope]
 unreadImpl envelopesVar cur = do

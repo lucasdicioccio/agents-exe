@@ -55,6 +55,8 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.AgentTree.Trace (TreeTrace)
 import qualified System.Agents.Base as Base
 import System.Agents.Session.Async (ContinuationStore, mkSqliteContinuationStore)
+import System.Agents.Session.Mailbox (MailStore)
+import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.Session.Types (SessionId)
 import System.Agents.SessionStore (SessionBackend, backendCatalog, mkSqliteSessionStore)
 import System.Agents.Tools.Params.Types (ProcessParams)
@@ -71,6 +73,9 @@ data Host = Host
     -- ^ For sub-agents: they store their own sessions in 'hostBackend'.
     , hostBackend :: SessionBackend
     , hostContinuations :: ContinuationStore
+    , hostMail :: MailStore
+    -- ^ Durable mail (@todos/session-mailbox.md@, Phase 3), one row per
+    -- envelope ever accepted by any session this host runs.
     , hostTracer :: Tracer IO HostTrace
     , hostStreamTokens :: Bool
     -- ^ Whether the runner streams LLM answers as text deltas.
@@ -135,6 +140,7 @@ instance Exception HostError
 data HostStores = HostStores
     { hsSessions :: SessionBackend
     , hsContinuations :: ContinuationStore
+    , hsMail :: MailStore
     , hsAgents :: Maybe AgentStore
     -- ^ 'Nothing': agents come from files only.
     }
@@ -152,8 +158,9 @@ withHost cfg tracer action =
         _ <- query_ conn "PRAGMA busy_timeout = 5000" :: IO [Only Int]
         backend <- mkSqliteSessionStore conn
         store <- mkSqliteContinuationStore conn
+        mail <- mkSqliteMailStore conn
         agents <- mkSqliteAgentStore conn
-        withHostStores cfg (HostStores backend store (Just agents)) tracer action
+        withHostStores cfg (HostStores backend store mail (Just agents)) tracer action
 
 {- | Like 'withHost', with stores the caller opened (e.g. on Postgres, with
 @agents-postgres@).
@@ -212,6 +219,7 @@ withHostStores cfg stores tracer action = do
                 , hostSubAgentDeps = subDeps
                 , hostBackend = backend
                 , hostContinuations = store
+                , hostMail = stores.hsMail
                 , hostTracer = tracer
                 , hostStreamTokens = cfg.hcStreamTokens
                 , hostLiveSessionTtl = cfg.hcLiveSessionTtl

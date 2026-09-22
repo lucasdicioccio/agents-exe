@@ -170,6 +170,7 @@ library agents-lib
                     , System.Agents.Session.Base
                     , System.Agents.Session.Durable
                     , System.Agents.Session.Mailbox
+                    , System.Agents.Session.MailStore
                     , System.Agents.Session.Isolation
                     , System.Agents.Session.Async
                     , System.Agents.Session.Async.Engine
@@ -358,6 +359,7 @@ test-suite agents-postgres-tests
                       postgresql-simple,
                       process,
                       prodapi,
+                      stm,
                       tasty,
                       tasty-hunit,
                       temporary,

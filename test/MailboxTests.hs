@@ -20,7 +20,11 @@ import System.Timeout (timeout)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Database.SQLite.Simple (open)
+
 import System.Agents.Session.Base
+import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.Session.Types (ToolCallId (..))
 
 tests :: TestTree
@@ -36,6 +40,9 @@ tests =
         , mailboxFullRejectsNormalMailTest
         , mailboxFullExemptsControlAndToolCallFinishedTest
         , trimRemovesAtOrBelowCursorTest
+        , durableMailboxHydratesFromStoreTest
+        , durableMailboxWritesThroughTest
+        , sqliteMailStoreRoundTripsTest
         ]
 
 -------------------------------------------------------------------------------
@@ -227,3 +234,60 @@ trimRemovesAtOrBelowCursorTest =
         mb.mbTrim (seqs !! 1)
         remaining <- atomically (mb.mbUnread 0)
         map envSeq remaining @?= [seqs !! 2]
+
+-------------------------------------------------------------------------------
+-- Durable mailbox (Phase 3): fronts a 'MailStore', writes through
+-------------------------------------------------------------------------------
+
+testSessionId :: SessionId
+testSessionId = SessionId nil
+
+-- | An in-memory 'MailStore' fake, for tests that don't need real SQLite.
+newFakeMailStore :: IO MailStore
+newFakeMailStore = do
+    ref <- newIORef []
+    pure
+        MailStore
+            { msAppend = \_sid envelope -> atomicModifyIORef' ref (\es -> (es ++ [envelope], ()))
+            , msLoad = \_sid -> readIORef ref
+            }
+
+durableMailboxHydratesFromStoreTest :: TestTree
+durableMailboxHydratesFromStoreTest =
+    testCase "a durable mailbox is seeded from what the store already has" $ do
+        store <- newFakeMailStore
+        seedMb <- newDurableMailbox store testSessionId
+        _ <- expectRight =<< seedMb.mbSend userOutgoing
+        -- A second mailbox over the same store picks up what the first wrote.
+        mb <- newDurableMailbox store testSessionId
+        unread <- atomically (mb.mbUnread 0)
+        length unread @?= 1
+        -- And keeps assigning fresh seqs on top of the hydrated ones.
+        r2 <- expectRight =<< mb.mbSend userOutgoing
+        r2.rcptSeq @?= 2
+
+durableMailboxWritesThroughTest :: TestTree
+durableMailboxWritesThroughTest =
+    testCase "a durable mailbox persists every accepted envelope to its store" $ do
+        store <- newFakeMailStore
+        mb <- newDurableMailbox store testSessionId
+        _ <- expectRight =<< mb.mbSend userOutgoing
+        _ <- expectRight =<< mb.mbSend userOutgoing
+        persisted <- store.msLoad testSessionId
+        length persisted @?= 2
+
+-- | The real SQLite-backed 'MailStore', round-tripping through a fresh
+-- durable mailbox (mirrors how the runner hydrates on session load).
+sqliteMailStoreRoundTripsTest :: TestTree
+sqliteMailStoreRoundTripsTest =
+    testCase "the SQLite mail store round-trips envelopes across mailboxes" $ do
+        conn <- open ":memory:"
+        store <- mkSqliteMailStore conn
+        mb1 <- newDurableMailbox store testSessionId
+        _ <- expectRight =<< mb1.mbSend userOutgoing
+        _ <- expectRight =<< mb1.mbSend userOutgoing{outBody = UserMessage (UserQuery "second" [])}
+        -- Simulate the session being reloaded: a fresh mailbox over the store.
+        mb2 <- newDurableMailbox store testSessionId
+        unread <- atomically (mb2.mbUnread 0)
+        length unread @?= 2
+        map envSeq unread @?= [1, 2]

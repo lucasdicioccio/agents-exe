@@ -137,6 +137,8 @@ data RunnerError
       InvalidParams [ParamName]
     | -- | Required parameters still unbound once caller-supplied values are merged in.
       MissingRequiredParams [ParamName]
+    | -- | The session's mailbox refused the message (full, per 'mailboxMaxUnread').
+      MailboxRejected SessionId
     deriving (Show, Eq)
 
 -- | What happened to a session, in the order it happened.
@@ -446,7 +448,11 @@ newAgent runner live node = do
             | otherwise = host.hostDeps
         deps = deps0{adLiveParams = readTVarIO live.lsParams}
     agent <- buildAgent (contramap HostAgentTrace host.hostTracer) deps RootAgent (sessionIdToConversationId sid) node
-    pure $ withExecutionMode Asynchronous agent
+    -- Phase 3 (@todos/session-mailbox.md@): every server-run session has a
+    -- durable mailbox, hydrated from 'hostMail', so 'postMessage' can always
+    -- accept mail (G2) and R1/R2 fold it into the session's turns.
+    mailbox <- newDurableMailbox host.hostMail sid
+    pure $ withMailbox mailbox $ withExecutionMode Asynchronous agent
 
 -------------------------------------------------------------------------------
 -- Session-level parameters (todos/tool-partial-application.md, Phase 4)
@@ -575,8 +581,15 @@ runLoop runner live mode agent0 = do
     go agent steps finished = do
         next <- withMVar live.lsLock $ \_ -> do
             (sess, meta) <- applyInbox runner live
+            -- Phase 3 (@todos/session-mailbox.md@): 'Control' 'StopRun' mail
+            -- stops the run early, today's 'cancelRun' now reachable by mail.
+            -- Left unconsumed: the next receive point (this run's own next
+            -- R1, or a later run's) folds it in and advances past it like
+            -- any other 'Control' envelope, per §2.
+            stopRequested <- checkStopRequested agent sess
             let stop =
                     finished
+                        || stopRequested
                         || (mode == StepOnce && steps >= 1)
                         || isBlockedOnDeferredCalls sess
             if stop
@@ -600,6 +613,17 @@ runLoop runner live mode agent0 = do
                 (_, meta) <- latestOrThrow live
                 void $ storeOrThrow runner live meta sess' StatusRunning
             go agent' (steps + 1) done
+
+    -- | Whether an unread 'Control' 'StopRun' envelope is waiting.
+    checkStopRequested :: RunnerAgent -> Session -> IO Bool
+    checkStopRequested agent sess = case agent.ctxMailbox of
+        Nothing -> pure False
+        Just mb -> any isStopRun <$> atomically (mbUnread mb sess.mailCursor)
+      where
+        isStopRun :: Envelope -> Bool
+        isStopRun e = case e.envBody of
+            Control StopRun -> True
+            _ -> False
 
 -- | Apply the queued external results to the latest version (under the lock).
 applyInbox :: SessionRunner -> LiveSession -> IO (Session, SessionMeta)
@@ -661,33 +685,68 @@ createSessionAs runner owner slug message mode supplied =
                                         Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
 
 -- | Add a user message to an idle session, and start a run unless the mode is 'Nothing'.
+{- | Add a user message to a session.
+
+Per @todos/session-mailbox.md@ (Phase 3, closing G2), a message is always
+accepted: an idle session gets it as a new turn (unchanged from before) and
+starts a run unless the mode is 'Nothing'; a busy session gets it posted as
+'UserMessage' mail on its durable mailbox instead of being refused — the
+run already in progress folds it in at its next R1\/R2 receive point (see
+"System.Agents.Session.Step").
+-}
 postMessage :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 postMessage runner sid message mode supplied =
-    withLive runner sid $ \live ->
-        withIdle runner live $ \sess meta -> do
-            let status = sessionStatusOf sess
-            if status /= StatusIdle
-                then pure $ Left $ NotAcceptingMessages sid status
-                else
-                    agentNodeFor runner meta >>= \case
-                        Left err -> pure (Left err)
-                        Right node ->
-                            prepareParams runner live node supplied >>= \case
+    withLive runner sid $ \live -> do
+        active <- readTVarIO live.lsRun
+        if isJust active
+            then acceptAsMail live
+            else
+                withIdle runner live $ \sess meta -> do
+                    let status = sessionStatusOf sess
+                    if status /= StatusIdle
+                        then pure $ Left $ NotAcceptingMessages sid status
+                        else
+                            agentNodeFor runner meta >>= \case
                                 Left err -> pure (Left err)
-                                Right overlay ->
-                                    sessionAgent runner live meta >>= \case
+                                Right node ->
+                                    prepareParams runner live node supplied >>= \case
                                         Left err -> pure (Left err)
-                                        Right agent -> case missingRequiredParams node agent overlay of
-                                            missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
-                                            [] -> do
-                                                sPrompt <- agent.sysPrompt
-                                                sTools <- agent.sysTools
-                                                tid <- newTurnId
-                                                let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) [] []) Nothing
-                                                    sess' = sess{turns = turn : sess.turns, turnId = tid}
-                                                store runner live meta sess' StatusReady Nothing >>= \case
-                                                    Left conflict -> pure (Left (Conflict conflict))
-                                                    Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
+                                        Right overlay ->
+                                            sessionAgent runner live meta >>= \case
+                                                Left err -> pure (Left err)
+                                                Right agent -> case missingRequiredParams node agent overlay of
+                                                    missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                                    [] -> do
+                                                        sPrompt <- agent.sysPrompt
+                                                        sTools <- agent.sysTools
+                                                        tid <- newTurnId
+                                                        let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) [] []) Nothing
+                                                            sess' = sess{turns = turn : sess.turns, turnId = tid}
+                                                        store runner live meta sess' StatusReady Nothing >>= \case
+                                                            Left conflict -> pure (Left (Conflict conflict))
+                                                            Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
+  where
+    acceptAsMail live =
+        loadLatest runner live >>= \case
+            Nothing -> pure $ Left $ UnknownSession sid
+            Just (_, meta) ->
+                sessionAgent runner live meta >>= \case
+                    Left err -> pure (Left err)
+                    Right agent -> case agent.ctxMailbox of
+                        -- Every runner agent gets one in 'newAgent'; this
+                        -- would only trip if that invariant broke.
+                        Nothing -> pure $ Left $ MailboxRejected sid
+                        Just mb -> do
+                            sent <-
+                                mb.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = Normal
+                                        , outHops = 0
+                                        , outBody = UserMessage (UserQuery message.nmText message.nmMedia)
+                                        }
+                            pure $ either (const (Left (MailboxRejected sid))) (const (Right meta)) sent
 
 -- | Start a run on a session that has none.
 resume :: SessionRunner -> SessionId -> RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)

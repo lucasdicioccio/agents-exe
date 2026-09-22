@@ -71,6 +71,8 @@ module System.Agents.Session.Base (
     newInMemoryMailbox,
     awaitMail,
     mailboxMaxUnread,
+    MailStore (..),
+    newDurableMailbox,
 
     -- * Byte usage tracking
     StepByteUsage (..),
@@ -184,8 +186,10 @@ import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Mailbox (
     Mailbox (..),
+    MailStore (..),
     awaitMail,
     mailboxMaxUnread,
+    newDurableMailbox,
     newInMemoryMailbox,
  )
 import System.Agents.Session.Durable (

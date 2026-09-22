@@ -38,6 +38,7 @@ import System.Agents.Host
 import System.Agents.Host.Runner
 import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuationStore)
 import System.Agents.Session.Base hiding (SessionProgress (..))
+import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.SessionStore
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
 import qualified System.Agents.Tools.IO as IOTools
@@ -114,8 +115,11 @@ postMessageTest = do
     withSessionRunner host $ \runner -> do
         meta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
         let sid = meta.smSessionId
-        refused <- postMessage runner sid (message "too early") (Just UntilBlocked) Map.empty
-        refused @?= Left (RunInProgress sid)
+        -- Phase 3 (@todos/session-mailbox.md@, G2): a busy session now
+        -- accepts mail instead of refusing it; it is folded in at the run's
+        -- next receive point rather than added as a turn right away.
+        accepted <- postMessage runner sid (message "too early") (Just UntilBlocked) Map.empty
+        either (\e -> assertFailure ("expected mail to be accepted, got " <> show e)) (const (pure ())) accepted
         putMVar gate ()
         (idle, _) <- expectRight =<< awaitRun runner sid 5
         idle.smStatus @?= StatusIdle
@@ -376,6 +380,7 @@ testHost nodes complete = do
     conn <- open ":memory:"
     backend <- mkSqliteSessionStore conn
     store <- mkSqliteContinuationStore conn
+    mail <- mkSqliteMailStore conn
     let deps = (defaultAgentDeps []){adContinuationStore = Just store, adCompletion = Just complete}
     stored <- noStoredAgents
     pure
@@ -386,6 +391,7 @@ testHost nodes complete = do
             , hostSubAgentDeps = deps{adSessionSink = SinkBackend backend}
             , hostBackend = backend
             , hostContinuations = store
+            , hostMail = mail
             , hostTracer = silent
             , hostStreamTokens = False
             , hostLiveSessionTtl = 15 * 60
