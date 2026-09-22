@@ -289,6 +289,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -323,6 +324,7 @@ mkSimpleAgent =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

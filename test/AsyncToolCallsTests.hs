@@ -977,4 +977,5 @@ mkAgent world strategy tool =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }

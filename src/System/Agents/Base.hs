@@ -1752,6 +1752,13 @@ data Agent
     explicit 'Control' 'Resume') is enough for 'postMessage' to accept a
     message into a paused session and run again. Default 'False'.
     -}
+    , interruptCompletions :: Maybe Bool
+    {- ^ @todos/session-mailbox.md@ R4/D5: whether an 'Interrupt'-priority
+    envelope arriving while this agent's 'complete' is in flight cancels
+    that completion and amends the head turn with the mail instead of
+    waiting for it to finish. Opt-in: default 'False' leaves an in-flight
+    completion running and the mail is picked up at the next R1\/R2.
+    -}
     }
     deriving (Show, Eq, Generic)
 

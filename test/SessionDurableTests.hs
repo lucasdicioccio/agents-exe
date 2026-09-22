@@ -14,6 +14,9 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.STM (atomically)
+import Control.Monad (void)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -113,6 +116,7 @@ mkAsyncAgent policy =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -217,6 +221,125 @@ sessionMailboxTests =
                 other -> assertFailure $ "expected a user turn, got " <> show other
         ]
 
+-- | A session whose head turn is a plain 'UserTurn' ready for a completion
+-- (so 'naiveTilNoToolCallStep' returns 'AskLlmCompletion' immediately).
+mkPendingCompletionSession :: Text -> Session
+mkPendingCompletionSession queryText =
+    Session
+        { turns =
+            [ UserTurn
+                (UserTurnContent (SystemPrompt "test") [] (Just (UserQuery queryText [])) [] [])
+                Nothing
+            ]
+        , sessionId = testSessionId
+        , forkedFromSessionId = Nothing
+        , turnId = TurnId nil
+        , sessionVersion = Just 2
+        , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
+        }
+
+-- | An 'Outgoing' envelope at a given priority, for R4's interrupt tests.
+priorityOutgoing :: Priority -> Text -> Outgoing
+priorityOutgoing priority txt =
+    Outgoing
+        { outId = Nothing
+        , outFrom = FromUser Nothing
+        , outPriority = priority
+        , outHops = 0
+        , outBody = UserMessage (UserQuery txt [])
+        }
+
+{- | R4 (@todos/session-mailbox.md@ §2, D5): an 'Interrupt' envelope arriving
+while 'complete' is in flight cancels it and amends the head turn, but only
+when 'ctxInterruptCompletions' is set, and only for 'Interrupt' priority.
+-}
+interruptCompletionsTests :: TestTree
+interruptCompletionsTests =
+    testGroup
+        "R4 (interruptCompletions)"
+        [ testCase "an Interrupt envelope cancels the completion and amends the head turn" $ do
+            mb <- newInMemoryMailbox
+            (agent, callCount) <- mkSlowOnFirstCallAgent mb True
+            _ <- forkIO $ threadDelay (100 * 1000) >> void (mb.mbSend (priorityOutgoing Interrupt "urgent"))
+            result <-
+                timeout (5 * 1000 * 1000) $
+                    runStepMAsync testConvId agent (mkPendingCompletionSession "hi")
+            session <- case result of
+                Nothing -> assertFailure "runStepMAsync never returned" >> fail "unreachable"
+                Just (_agent', Right s) -> pure s
+                Just (_agent', Left _) -> assertFailure "expected a yielded session" >> fail "unreachable"
+            readIORef callCount >>= (@?= 2)
+            case session.turns of
+                (LlmTurn llmContent _ : UserTurn userContent _ : _) -> do
+                    llmContent.llmResponse.responseText @?= Just "fast"
+                    length userContent.userMail @?= 1
+                    case userContent.userQuery of
+                        Just q -> do
+                            assertBool "query keeps the original text" ("hi" `Text.isInfixOf` q.queryText)
+                            assertBool "query includes the interrupting mail" ("urgent" `Text.isInfixOf` q.queryText)
+                        Nothing -> assertFailure "expected a user query"
+                    session.mailCursor @?= maximum (map envSeq userContent.userMail)
+                other -> assertFailure $ "expected [LlmTurn, UserTurn, ...], got " <> show other
+        , testCase "without interruptCompletions, an Interrupt envelope waits for the next R1/R2" $ do
+            mb <- newInMemoryMailbox
+            (agent, callCount) <- mkSlowOnFirstCallAgent mb False
+            _ <- forkIO $ threadDelay (100 * 1000) >> void (mb.mbSend (priorityOutgoing Interrupt "urgent"))
+            result <-
+                timeout (5 * 1000 * 1000) $
+                    runStepMAsync testConvId agent (mkPendingCompletionSession "hi")
+            session <- case result of
+                Nothing -> assertFailure "runStepMAsync never returned" >> fail "unreachable"
+                Just (_agent', Right s) -> pure s
+                Just (_agent', Left _) -> assertFailure "expected a yielded session" >> fail "unreachable"
+            readIORef callCount >>= (@?= 1)
+            case session.turns of
+                (LlmTurn llmContent _ : UserTurn userContent _ : _) -> do
+                    llmContent.llmResponse.responseText @?= Just "slow"
+                    userContent.userMail @?= []
+                other -> assertFailure $ "expected [LlmTurn, UserTurn, ...], got " <> show other
+            session.mailCursor @?= 0
+            unread <- atomically (mbUnread mb session.mailCursor)
+            length unread @?= 1
+        , testCase "a Normal-priority envelope never interrupts, even with interruptCompletions on" $ do
+            mb <- newInMemoryMailbox
+            (agent, callCount) <- mkSlowOnFirstCallAgent mb True
+            _ <- forkIO $ threadDelay (100 * 1000) >> void (mb.mbSend (priorityOutgoing Normal "not urgent"))
+            result <-
+                timeout (5 * 1000 * 1000) $
+                    runStepMAsync testConvId agent (mkPendingCompletionSession "hi")
+            session <- case result of
+                Nothing -> assertFailure "runStepMAsync never returned" >> fail "unreachable"
+                Just (_agent', Right s) -> pure s
+                Just (_agent', Left _) -> assertFailure "expected a yielded session" >> fail "unreachable"
+            readIORef callCount >>= (@?= 1)
+            case session.turns of
+                (LlmTurn llmContent _ : UserTurn userContent _ : _) -> do
+                    llmContent.llmResponse.responseText @?= Just "slow"
+                    userContent.userMail @?= []
+                other -> assertFailure $ "expected [LlmTurn, UserTurn, ...], got " <> show other
+        ]
+  where
+    -- | An agent whose 'complete' sleeps 300ms on its first call (long enough
+    -- for the concurrently-sent mail to arrive first) and returns "slow", but
+    -- answers immediately with "fast" on any later call (a retry after R4
+    -- amends the head turn should never need to wait again).
+    mkSlowOnFirstCallAgent :: Mailbox -> Bool -> IO (Agent (LlmTurnContent, Session), IORef Int)
+    mkSlowOnFirstCallAgent mb interruptOn = do
+        callCount <- newIORef (0 :: Int)
+        let fakeComplete _completion = do
+                n <- atomicModifyIORef' callCount (\k -> (k + 1, k + 1))
+                if n == 1
+                    then threadDelay (300 * 1000) >> pure (LlmResponse (Just "slow") Nothing Aeson.Null Nothing, [])
+                    else pure (LlmResponse (Just "fast") Nothing Aeson.Null Nothing, [])
+        let agent =
+                (mkAsyncAgent defaultToolCallPolicy)
+                    { complete = fakeComplete
+                    , ctxMailbox = Just mb
+                    , ctxInterruptCompletions = interruptOn
+                    }
+        pure (agent, callCount)
+
 -- | Test suite entry point.
 tests :: TestTree
 tests =
@@ -231,6 +354,7 @@ tests =
         , isolatedCallExtractionTests
         , pendingCompleteIntegrationTest
         , sessionMailboxTests
+        , interruptCompletionsTests
         ]
 
 -- | Continuation token formatting/parsing tests.
@@ -421,6 +545,7 @@ minimalBaseAgent =
         , Base.parameters = Nothing
         , Base.pauseCancelsCalls = Nothing
         , Base.resumeOnAnyMail = Nothing
+        , Base.interruptCompletions = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.

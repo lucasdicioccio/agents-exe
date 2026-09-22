@@ -215,6 +215,7 @@ buildAgent tracer deps role convId node = do
                 , ctxSpawnSession = Nothing
                 , ctxWatchSession = Nothing
                 , ctxUnwatchSession = Nothing
+                , ctxInterruptCompletions = False
                 }
     disclosed <-
         agentEvaluateActiveTools

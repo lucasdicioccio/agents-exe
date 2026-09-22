@@ -137,6 +137,7 @@ defaultOpenAIAgent =
         , parameters = Nothing
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
         }
 
 -- | Mistral AI agent configuration
@@ -172,6 +173,7 @@ mistralAgent =
         , parameters = Nothing
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
         }
 
 -- | Ollama local LLM agent configuration
@@ -207,6 +209,7 @@ ollamaAgent =
         , parameters = Nothing
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
         }
 
 -- | Orchestrator agent that can delegate to other agents
@@ -251,6 +254,7 @@ orchestratorAgent =
         , parameters = Nothing
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
         }
 
 -- | Ensure the config directory structure exists with default files

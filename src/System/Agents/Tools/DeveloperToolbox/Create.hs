@@ -183,6 +183,7 @@ agentFromOverrides overrides =
         , parameters = Nothing
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -214,6 +215,7 @@ mergeAgentWithOverrides ref overrides =
         , parameters = Nothing
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
         }
 
 -------------------------------------------------------------------------------

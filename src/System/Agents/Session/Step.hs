@@ -101,11 +101,17 @@ runStepMSync convId agent sess =
                 sess1 <- addTurn sessMail (UserTurn (UserTurnContent{userPrompt = sPrompt, userTools = sTools, userQuery = uQuery, userToolResponses = uToolResponses, userMail = mailEnvelopes}) (Just byteUsage))
                 pure (agent0', Right sess1)
             AskLlmCompletion completion -> do
-                (llmRsp, llmTool) <- agent0'.complete completion
-                -- Calculate byte usage for this LLM turn, including token usage
-                let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
-                sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
-                pure (agent0', Right sess1)
+                outcome <- askForCompletionOrInterrupt agent0' sess0 completion
+                case outcome of
+                    Left (llmRsp, llmTool) -> do
+                        -- Calculate byte usage for this LLM turn, including token usage
+                        let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
+                        sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
+                        pure (agent0', Right sess1)
+                    Right envelopes ->
+                        -- R4: the completion was cancelled by an 'Interrupt'
+                        -- envelope; amend the head turn and ask again.
+                        go agent0' (amendHeadTurnWithMail envelopes sess0)
 
 -------------------------------------------------------------------------------
 -- Asynchronous Step Execution
@@ -176,10 +182,16 @@ runStepMAsync convId agent sess =
                         (uQuery, blockForLate) <- askUserQuery (buildContext agent0' sessR convId) agent0' missing sessR
                         startNewAsyncTurn convId agent0' sessR sPrompt sTools uQuery blockForLate missing.missingToolCalls
             AskLlmCompletion completion -> do
-                (llmRsp, llmTool) <- agent0'.complete completion
-                let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
-                sess1 <- addTurn sessR (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
-                pure (agent0', Right sess1)
+                outcome <- askForCompletionOrInterrupt agent0' sessR completion
+                case outcome of
+                    Left (llmRsp, llmTool) -> do
+                        let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
+                        sess1 <- addTurn sessR (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
+                        pure (agent0', Right sess1)
+                    Right envelopes ->
+                        -- R4: the completion was cancelled by an 'Interrupt'
+                        -- envelope; amend the head turn and ask again.
+                        go agent0' (amendHeadTurnWithMail envelopes sessR)
 
 {- | Get the most recent partial turn from a session, if any.
 
@@ -931,6 +943,79 @@ mailMedia e = case e.envBody of
     ContinuationResult _ (MediaResponse m) -> [m]
     ContinuationResult _ (MixedResponse parts) -> [m | MediaPart m <- parts]
     _ -> []
+
+{- | R4 (@todos/session-mailbox.md@ §2, D5): ask for a completion, or, when
+'ctxInterruptCompletions' is set and the agent has a mailbox, let an
+'Interrupt'-priority envelope arriving first cancel it instead.
+
+A genuine 'race' (thread cancellation), per the spec's own note that this
+is one of only two places that need one. On the mail side winning, nothing
+about the completion is kept -- there is no partial 'LlmTurn' to record --
+and the caller is expected to fold the returned envelopes into the head
+turn ('amendHeadTurnWithMail') and ask again, rather than treat this as a
+normal completion result.
+
+With 'ctxInterruptCompletions' off (the default) or no mailbox, this is
+exactly @'Left' \<$\> agent.complete completion@: no behaviour change.
+-}
+askForCompletionOrInterrupt ::
+    Agent r ->
+    Session ->
+    LlmCompletion ->
+    IO (Either (LlmResponse, [LlmToolCall]) [Envelope])
+askForCompletionOrInterrupt agent sess completion =
+    case (agent.ctxInterruptCompletions, agent.ctxMailbox) of
+        (True, Just mb) -> do
+            outcome <-
+                race
+                    (agent.complete completion)
+                    (atomically (awaitMail mb sess.mailCursor isInterruptMail))
+            pure outcome
+        _ -> Left <$> agent.complete completion
+
+-- | Whether an envelope is 'Interrupt' priority (R3a\/R4's trigger).
+isInterruptMail :: Envelope -> Bool
+isInterruptMail e = e.envPriority == Interrupt
+
+{- | Fold newly-arrived mail into the session's head turn in place (R4, D5):
+the turn that was about to be answered is amended, not stacked under a
+second 'UserTurn' or left behind a truncated 'LlmTurn'. Advances
+'mailCursor' past the folded-in envelopes.
+
+A no-op if there is no mail, or if the head turn is not a 'UserTurn' \/
+'PartialUserTurn' (an 'LlmTurn' can't be the head at the point 'AskLlmCompletion'
+is asked, so this is only a defensive fallback).
+-}
+amendHeadTurnWithMail :: [Envelope] -> Session -> Session
+amendHeadTurnWithMail [] sess = sess
+amendHeadTurnWithMail envelopes sess = case sess.turns of
+    (UserTurn content byteUsage : rest) ->
+        sess
+            { turns =
+                UserTurn
+                    content
+                        { userQuery = mergeUserQueries content.userQuery (mailQuery envelopes)
+                        , userMail = content.userMail ++ envelopes
+                        }
+                    byteUsage
+                    : rest
+            , mailCursor = newCursor
+            }
+    (PartialUserTurn content byteUsage : rest) ->
+        sess
+            { turns =
+                PartialUserTurn
+                    content
+                        { pUserQuery = mergeUserQueries content.pUserQuery (mailQuery envelopes)
+                        , pUserMail = content.pUserMail ++ envelopes
+                        }
+                    byteUsage
+                    : rest
+            , mailCursor = newCursor
+            }
+    _ -> sess
+  where
+    newCursor = max sess.mailCursor (maximum (map (.envSeq) envelopes))
 
 {- | Process a single tracked call according to the agent's policy.
 

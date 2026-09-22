@@ -949,6 +949,7 @@ mkAgentWithWorld world mode policy =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -------------------------------------------------------------------------------

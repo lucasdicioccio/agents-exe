@@ -184,6 +184,7 @@ module System.Agents.Session.Base (
     withMailRouter,
     withSpawnSession,
     withWatchSession,
+    withInterruptCompletions,
     SpawnSession,
 ) where
 
@@ -449,6 +450,13 @@ data Agent r = Agent
     -- down to sub-agents the same way.
     , ctxUnwatchSession :: Maybe UnwatchSession
     -- ^ Optional @unwatch-session@ hook (Phase 6, §7), paired with 'ctxWatchSession'.
+    , ctxInterruptCompletions :: Bool
+    {- ^ @todos/session-mailbox.md@ R4/D5: whether an 'Interrupt'-priority
+    envelope arriving while 'complete' is in flight cancels it and amends
+    the head turn with the mail instead of leaving it for the next R1\/R2.
+    Opt-in; 'False' (the default every existing 'Agent' gets) leaves R4
+    unused and every other receive point's behaviour unaffected.
+    -}
     }
     deriving (Functor)
 
@@ -502,6 +510,12 @@ withSpawnSession spawn agent = agent{ctxSpawnSession = Just spawn}
 -}
 withWatchSession :: WatchSession -> UnwatchSession -> Agent r -> Agent r
 withWatchSession watch unwatch agent = agent{ctxWatchSession = Just watch, ctxUnwatchSession = Just unwatch}
+
+{- | Set whether an 'Interrupt'-priority envelope may cancel an in-flight
+LLM completion (@todos/session-mailbox.md@, R4/D5).
+-}
+withInterruptCompletions :: Bool -> Agent r -> Agent r
+withInterruptCompletions enabled agent = agent{ctxInterruptCompletions = enabled}
 
 {- | Set the execution mode for an agent.
 

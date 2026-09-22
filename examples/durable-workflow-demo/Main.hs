@@ -169,6 +169,7 @@ mkDemoAgent convId = do
             , ctxSpawnSession = Nothing
             , ctxWatchSession = Nothing
             , ctxUnwatchSession = Nothing
+            , ctxInterruptCompletions = False
             }
 
 -------------------------------------------------------------------------------
